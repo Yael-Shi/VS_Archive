@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Poetry
+.poetry/
+
+# Virtualenvs
+.venv/
+venv/
+myenv/
+
+# Django
+*.log
+local_settings.py
+staticfiles/
+media/
+
+# Environment variables
+.env
+.env.*
+
+# Docker
+*.pid
+
+# AWS / CDK
+cdk.out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+
+# Node (CDK uses node under the hood)
+node_modules/
+
+# Coverage / tests
+.coverage
+htmlcov/
+
+# Build artifacts
+dist/
+build/
+
+# Temporary files
+*.tmp
+*.swp
+git 

@@ -1,0 +1,8 @@
+{
+  "app": "poetry run python app.py",
+  "context": {
+    "project": "vs-archive",
+    "env": "dev",
+    "region": "eu-central-1"
+  }
+}
