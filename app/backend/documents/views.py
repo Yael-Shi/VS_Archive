@@ -297,3 +297,10 @@ def document_detail_page(request, doc_id: int):
     }
     return render(request, "documents/detail.html", context)
 
+
+@login_required
+def upload_page(request):
+    # Minimal V1 upload UI page (Desktop).
+    # The actual upload flow is executed in the browser using existing API endpoints:
+    # create_upload -> presigned PUT -> upload_complete
+    return render(request, "documents/upload.html")
