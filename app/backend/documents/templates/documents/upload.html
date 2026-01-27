@@ -23,7 +23,7 @@
     <a href="/api/ui/documents/">← Back to list</a>
   </div>
 
-  <h1>Upload (V1.4)</h1>
+  <h1>Upload (V1.4 / V1.5)</h1>
 
   <p class="hint">
     This page uses the existing upload flow: create → presigned PUT → complete.
@@ -32,8 +32,17 @@
   <div id="msg" class=""></div>
 
   <form id="uploadForm">
-    <label for="file">File (PDF or Image) *</label>
+    <label for="file">File *</label>
+    <!--
+      V1.5 (precise):
+      - If doc_type=IMAGE: allow image/* and enable camera capture on mobile.
+      - If doc_type=PDF: allow application/pdf and disable capture.
+      The input is updated dynamically by JS (keeps PDF support intact).
+    -->
     <input id="file" name="file" type="file" required />
+    <div class="hint">
+      Mobile: choose an image from gallery or take a photo (when doc_type=IMAGE).
+    </div>
 
     <label for="title">Title *</label>
     <input id="title" name="title" type="text" required />
@@ -67,7 +76,7 @@
           <option value="PDF">PDF</option>
           <option value="IMAGE">IMAGE</option>
         </select>
-        <div class="hint">V1: chosen manually (no auto-detect).</div>
+        <div class="hint">V1: chosen manually (auto-suggested from file type when possible).</div>
       </div>
     </div>
 
@@ -97,6 +106,9 @@
   const form = document.getElementById("uploadForm");
   const msgEl = document.getElementById("msg");
   const submitBtn = document.getElementById("submitBtn");
+
+  const fileEl = document.getElementById("file");
+  const docTypeEl = document.getElementById("doc_type");
 
   function setMessage(kind, text) {
     msgEl.className = kind;
@@ -137,11 +149,45 @@
     return data;
   }
 
+  function isMobileBrowser() {
+    // Heuristic: enough for V1.
+    const ua = navigator.userAgent || "";
+    return /Android|iPhone|iPad|iPod/i.test(ua);
+  }
+
+  function applyFileInputMode() {
+    // V1.5 precise behavior:
+    // - IMAGE: accept images, enable capture on mobile
+    // - PDF: accept pdf only, disable capture
+    const dt = docTypeEl.value;
+
+    if (dt === "IMAGE") {
+      fileEl.setAttribute("accept", "image/*");
+      if (isMobileBrowser()) {
+        // Best-effort: ask for back camera on mobile browsers that support it.
+        fileEl.setAttribute("capture", "environment");
+      } else {
+        fileEl.removeAttribute("capture");
+      }
+    } else if (dt === "PDF") {
+      fileEl.setAttribute("accept", "application/pdf");
+      fileEl.removeAttribute("capture");
+    } else {
+      // Unknown/empty: allow both, no capture.
+      fileEl.setAttribute("accept", "application/pdf,image/*");
+      fileEl.removeAttribute("capture");
+    }
+  }
+
+  // Initialize and update when doc_type changes
+  applyFileInputMode();
+  docTypeEl.addEventListener("change", () => applyFileInputMode());
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     setMessage("", "");
 
-    const file = document.getElementById("file").files[0];
+    const file = fileEl.files[0];
     if (!file) {
       setMessage("error", "File is required.");
       return;
@@ -151,7 +197,7 @@
     const date_start = document.getElementById("date_start").value;
     const date_end = document.getElementById("date_end").value;
     const language = document.getElementById("language").value;
-    const doc_type = document.getElementById("doc_type").value;
+    const doc_type = docTypeEl.value;
     const category_event = document.getElementById("category_event").value.trim();
     const tagsRaw = document.getElementById("tags").value;
     const visibility = document.getElementById("visibility").value || "private";
@@ -254,15 +300,17 @@
   });
 
   // Optional usability: if user selects a file and doc_type is empty, auto-suggest without enforcing.
-  document.getElementById("file").addEventListener("change", (e) => {
+  fileEl.addEventListener("change", (e) => {
     const f = e.target.files[0];
     if (!f) return;
-    const docTypeEl = document.getElementById("doc_type");
     if (docTypeEl.value) return;
 
     const mt = (f.type || "").toLowerCase();
     if (mt === "application/pdf") docTypeEl.value = "PDF";
     else if (mt.startsWith("image/")) docTypeEl.value = "IMAGE";
+
+    // Ensure accept/capture matches the chosen doc_type
+    applyFileInputMode();
   });
 </script>
 

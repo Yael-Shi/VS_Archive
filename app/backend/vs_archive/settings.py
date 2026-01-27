@@ -121,3 +121,7 @@ LOGIN_REDIRECT_URL = "/api/ui/documents/"
 
 # Where to redirect after logout (optional but recommended)
 LOGOUT_REDIRECT_URL = "/accounts/login/"
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://*.ngrok-free.dev",
+]
