@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>{{ doc.title }}</title>
+  <style>
+    body { font-family: sans-serif; margin: 24px; }
+    .meta { margin-bottom: 16px; }
+    .viewer { margin-top: 16px; }
+    img { max-width: 100%; height: auto; border: 1px solid #ccc; }
+    iframe { width: 100%; height: 80vh; border: 1px solid #ccc; }
+    .actions a { margin-right: 12px; }
+    code { background: #f5f5f5; padding: 2px 4px; }
+  </style>
+</head>
+<body>
+
+  <div class="actions">
+    <a href="/api/ui/documents/">← Back to list</a>
+  </div>
+
+  <h1>{{ doc.title }}</h1>
+
+  <div class="meta">
+    <div><strong>ID:</strong> {{ doc.id }}</div>
+    <div><strong>Date range:</strong> {{ doc.date_start }} – {{ doc.date_end }}</div>
+    <div><strong>Language:</strong> {{ doc.language }}</div>
+    <div><strong>Doc type:</strong> {{ doc.doc_type }}</div>
+    <div><strong>Status:</strong> {{ doc.upload_status }}</div>
+    <div><strong>Original filename:</strong> {{ doc.file_original_name }}</div>
+    {% if doc.upload_error %}
+      <div><strong>Error:</strong> {{ doc.upload_error }}</div>
+    {% endif %}
+  </div>
+
+  {% if not content_url %}
+    <p>
+      No file is available for viewing yet.
+      {% if not doc.file_s3_key %}
+        (Missing <code>file_s3_key</code>)
+      {% endif %}
+    </p>
+  {% else %}
+    <div class="actions">
+      <!-- Open in new tab (still inline), user can download from the browser UI if needed -->
+      <a href="{{ content_url }}" target="_blank" rel="noopener noreferrer">Open in new tab</a>
+    </div>
+
+    <div class="viewer">
+      {% if doc.doc_type == "IMAGE" %}
+        <img src="{{ content_url }}" alt="{{ doc.title }}" />
+      {% elif doc.doc_type == "PDF" %}
+        <iframe src="{{ content_url }}"></iframe>
+      {% else %}
+        <p>Unsupported doc_type: {{ doc.doc_type }}</p>
+      {% endif %}
+    </div>
+  {% endif %}
+
+</body>
+</html>

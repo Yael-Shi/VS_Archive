@@ -11,7 +11,7 @@ from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 
 from .models import Document
-from .s3 import create_presigned_put
+from .s3 import create_presigned_put, create_presigned_get
 
 logger = logging.getLogger(__name__)
 
@@ -275,3 +275,25 @@ def documents_list_page(request):
         "next_offset": (offset + limit) if (offset + limit) < total else None,
     }
     return render(request, "documents/list.html", context)
+
+@login_required
+def document_detail_page(request, doc_id: int):
+    # Minimal V1 document viewer (inline): PDF in iframe, IMAGE in img
+    try:
+        doc = Document.objects.get(id=doc_id)
+    except Document.DoesNotExist:
+        return JsonResponse({"error": "not found"}, status=404)
+
+    bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
+    content_url = None
+
+    # If file_s3_key exists, create a presigned URL for inline viewing
+    if bucket and doc.file_s3_key:
+        content_url = create_presigned_get(bucket=bucket, key=doc.file_s3_key, expires_in=3600)
+
+    context = {
+        "doc": doc,
+        "content_url": content_url,
+    }
+    return render(request, "documents/detail.html", context)
+

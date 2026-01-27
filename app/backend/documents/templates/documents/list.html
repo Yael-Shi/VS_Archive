@@ -97,7 +97,7 @@
         {% for d in docs %}
             <tr>
                 <td>{{ d.id }}</td>
-                <td>{{ d.title }}</td>
+                <td><a href="/api/ui/documents/{{ d.id }}/">{{ d.title }}</a></td>
                 <td>{{ d.date_start }} – {{ d.date_end }}</td>
                 <td>{{ d.language }}</td>
                 <td>{{ d.doc_type }}</td>
