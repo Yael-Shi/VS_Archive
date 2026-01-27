@@ -21,7 +21,7 @@ class VsArchiveAppStack(Stack):
         vpc: ec2.Vpc,
         sg_alb: ec2.SecurityGroup,
         sg_web: ec2.SecurityGroup,
-        sg_pg: ec2.SecurityGroup,   # <-- חדש: SG ייעודי ל-Postgres ECS
+        sg_pg: ec2.SecurityGroup,
         bucket: s3.Bucket,
         queue: sqs.Queue,
         db_secret: secretsmanager.ISecret,
@@ -141,7 +141,7 @@ class VsArchiveAppStack(Stack):
             image=ecs.ContainerImage.from_ecr_repository(web_repo, tag="dev"),
             logging=ecs.LogDrivers.aws_logs(stream_prefix=f"{cfg.prefix}-web"),
             environment={
-                "S3_BUCKET": bucket.bucket_name,
+                "UPLOADS_BUCKET_NAME": bucket.bucket_name,
                 "SQS_QUEUE_URL": queue.queue_url,
                 "AWS_REGION": cfg.region,
                 "DB_HOST": db_host,
@@ -188,7 +188,7 @@ class VsArchiveAppStack(Stack):
             logging=ecs.LogDrivers.aws_logs(stream_prefix=f"{cfg.prefix}-worker"),
             environment={
                 "SQS_QUEUE_URL": queue.queue_url,
-                "S3_BUCKET": bucket.bucket_name,
+                "UPLOADS_BUCKET_NAME": bucket.bucket_name,
                 "AWS_REGION": cfg.region,
                 "DB_HOST": db_host,
                 "DB_PORT": "5432",
