@@ -23,6 +23,13 @@ build-backend = "poetry.core.masonry.api"
 exclude = [
   "cdk.out/**",
   "**/__pycache__/**",
+  "**/.venv",
+  "**/venv",
+  "**/myenv",
+  "**/.pytest_cache",
+  "**/.mypy_cache",
+  "**/.ruff_cache",
+  "**/site-packages"
 ]
 
 [tool.pyright]
