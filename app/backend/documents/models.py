@@ -30,7 +30,7 @@ class Document(models.Model):
     language = models.CharField(max_length=16, null=True, blank=True)  # he/en/ar/fr
     category_event = models.CharField(max_length=255, null=True, blank=True)
 
-    tags = models.JSONField(default=list)      # list[str]
+    tags = models.JSONField(default=list)  # list[str]
     metadata = models.JSONField(default=dict)  # flexible metadata
 
     # Metadata completion status
@@ -62,8 +62,8 @@ class Document(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    def __str__(self):
-        return self.title
+    def __str__(self) -> str:
+        return str(self.title)
 
 
 class CorrectionRequest(models.Model):
@@ -82,15 +82,17 @@ class CorrectionRequest(models.Model):
         related_name="corrections",
     )
 
-    status = models.CharField(max_length=16, choices=Status.choices, default=Status.OPEN)
+    status = models.CharField(
+        max_length=16, choices=Status.choices, default=Status.OPEN
+    )
     scope = models.CharField(max_length=16, choices=Scope.choices)
 
-    # אופציונלי: מצביע לשדה (title / metadata.source / etc)
+    # Optional: points to a specific field path (e.g., "title", "metadata.source", etc.)
     field_path = models.CharField(max_length=512, null=True, blank=True)
 
     message = models.TextField()
 
-    # אופציונלי לציבור
+    # option for public
     requester_name = models.CharField(max_length=255, null=True, blank=True)
     requester_email = models.EmailField(null=True, blank=True)
 

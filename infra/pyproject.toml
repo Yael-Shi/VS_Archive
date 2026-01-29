@@ -12,9 +12,22 @@ constructs = "^10.0.0"
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.0.0"
-ruff = "^0.6.0"
+ruff = "0.14.14"
 mypy = "^1.10.0"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+exclude = [
+  "cdk.out/**",
+  "**/__pycache__/**",
+]
+
+[tool.pyright]
+typeCheckingMode = "standard"
+exclude = [
+  "cdk.out/**",
+  "**/__pycache__/**",
+]

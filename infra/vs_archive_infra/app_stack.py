@@ -8,7 +8,7 @@ from aws_cdk import aws_iam as iam
 from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_sqs as sqs
 from aws_cdk import aws_secretsmanager as secretsmanager
-from aws_cdk import aws_servicediscovery as servicediscovery
+from typing import cast
 from .config import EnvConfig
 
 
@@ -36,13 +36,13 @@ class VsArchiveAppStack(Stack):
             cluster_name=f"{cfg.prefix}-cluster",
         )
 
-        # Private DNS namespace for service discovery inside VPC
-        namespace = servicediscovery.PrivateDnsNamespace(
-            self,
-            f"{cfg.prefix}-ns",
-            name=f"{cfg.prefix}.local",
-            vpc=vpc,
-        )
+        # # Private DNS namespace for service discovery inside VPC
+        # namespace = servicediscovery.PrivateDnsNamespace(
+        #     self,
+        #     f"{cfg.prefix}-ns",
+        #     name=f"{cfg.prefix}.local",
+        #     vpc=vpc,
+        # )
 
         # === Postgres (DEV) as ECS Service ===
         pg_task = ecs.FargateTaskDefinition(
@@ -63,24 +63,26 @@ class VsArchiveAppStack(Stack):
                 "POSTGRES_USER": "vsarchive",
             },
             secrets={
-                "POSTGRES_PASSWORD": ecs.Secret.from_secrets_manager(db_secret, field="password"),
+                "POSTGRES_PASSWORD": ecs.Secret.from_secrets_manager(
+                    db_secret, field="password"
+                ),
             },
         )
         pg_container.add_port_mappings(ecs.PortMapping(container_port=5432))
 
-        pg_svc = ecs.FargateService(
-            self,
-            f"{cfg.prefix}-pg-svc",
-            cluster=cluster,
-            task_definition=pg_task,
-            desired_count=1,
-            security_groups=[sg_pg],          # <-- חשוב: לא sg_db
-            assign_public_ip=False,
-            cloud_map_options=ecs.CloudMapOptions(
-                name="postgres",
-                cloud_map_namespace=namespace,
-            ),
-        )
+        # pg_svc = ecs.FargateService(
+        #     self,
+        #     f"{cfg.prefix}-pg-svc",
+        #     cluster=cluster,
+        #     task_definition=pg_task,
+        #     desired_count=1,
+        #     security_groups=[sg_pg],  # <-- important: not sg_db
+        #     assign_public_ip=False,
+        #     cloud_map_options=ecs.CloudMapOptions(
+        #         name="postgres",
+        #         cloud_map_namespace=namespace,
+        #     ),
+        # )
 
         # === ALB ===
         alb = elbv2.ApplicationLoadBalancer(
@@ -93,29 +95,41 @@ class VsArchiveAppStack(Stack):
         listener = alb.add_listener(f"{cfg.prefix}-http", port=80, open=True)
 
         # IAM roles for ECS tasks (web/worker)
-        task_role = iam.Role(
-            self,
-            f"{cfg.prefix}-task-role",
-            assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+        assumed_by = cast(
+            iam.IPrincipal, iam.ServicePrincipal("ecs-tasks.amazonaws.com")
+        )
+
+        task_role = cast(
+            iam.IRole,
+            iam.Role(
+                self,
+                f"{cfg.prefix}-task-role",
+                assumed_by=assumed_by,
+            ),
         )
         bucket.grant_read_write(task_role)
         queue.grant_consume_messages(task_role)
         db_secret.grant_read(task_role)
 
-        task_role.add_to_policy(
+        task_role.add_to_principal_policy(
             iam.PolicyStatement(
                 actions=["bedrock:InvokeModel", "translate:TranslateText"],
                 resources=["*"],
             )
         )
 
-        exec_role = iam.Role(
-            self,
-            f"{cfg.prefix}-exec-role",
-            assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+        exec_role = cast(
+            iam.IRole,
+            iam.Role(
+                self,
+                f"{cfg.prefix}-exec-role",
+                assumed_by=assumed_by,
+            ),
         )
         exec_role.add_managed_policy(
-            iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AmazonECSTaskExecutionRolePolicy")
+            iam.ManagedPolicy.from_aws_managed_policy_name(
+                "service-role/AmazonECSTaskExecutionRolePolicy"
+            )
         )
 
         db_host = f"postgres.{cfg.prefix}.local"
@@ -150,7 +164,9 @@ class VsArchiveAppStack(Stack):
                 "DB_USER": "vsarchive",
             },
             secrets={
-                "DB_PASSWORD": ecs.Secret.from_secrets_manager(db_secret, field="password"),
+                "DB_PASSWORD": ecs.Secret.from_secrets_manager(
+                    db_secret, field="password"
+                ),
             },
         )
         web_container.add_port_mappings(ecs.PortMapping(container_port=8000))
@@ -169,7 +185,9 @@ class VsArchiveAppStack(Stack):
             f"{cfg.prefix}-tg",
             port=8000,
             targets=[web_svc],
-            health_check=elbv2.HealthCheck(path="/health/", interval=Duration.seconds(30)),
+            health_check=elbv2.HealthCheck(
+                path="/health/", interval=Duration.seconds(30)
+            ),
         )
 
         # === Worker (placeholder) ===
@@ -184,7 +202,9 @@ class VsArchiveAppStack(Stack):
 
         worker_task.add_container(
             f"{cfg.prefix}-worker",
-            image=ecs.ContainerImage.from_registry("public.ecr.aws/docker/library/python:3.11-slim"),
+            image=ecs.ContainerImage.from_registry(
+                "public.ecr.aws/docker/library/python:3.11-slim"
+            ),
             logging=ecs.LogDrivers.aws_logs(stream_prefix=f"{cfg.prefix}-worker"),
             environment={
                 "SQS_QUEUE_URL": queue.queue_url,
@@ -196,7 +216,9 @@ class VsArchiveAppStack(Stack):
                 "DB_USER": "vsarchive",
             },
             secrets={
-                "DB_PASSWORD": ecs.Secret.from_secrets_manager(db_secret, field="password"),
+                "DB_PASSWORD": ecs.Secret.from_secrets_manager(
+                    db_secret, field="password"
+                ),
             },
         )
 

@@ -48,7 +48,9 @@ def _parse_date_optional(value: Optional[str], field_name: str):
 
 
 def _is_admin(user):
-    return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
+    return bool(
+        getattr(user, "is_staff", False) or getattr(user, "is_superuser", False)
+    )
 
 
 def _base_queryset(
@@ -143,7 +145,11 @@ def create_upload(request):
     metadata = payload.get("metadata", None)
 
     # File info
-    mime_type = (payload.get("mime_type") or payload.get("content_type") or "application/octet-stream").strip()
+    mime_type = (
+        payload.get("mime_type")
+        or payload.get("content_type")
+        or "application/octet-stream"
+    ).strip()
     original_name = (payload.get("original_name") or "").strip()
     size_bytes = payload.get("size_bytes")
 
@@ -244,7 +250,9 @@ def upload_complete(request, doc_id: int):
             doc.size_bytes = payload["file_size"]
         if isinstance(payload.get("file_mime"), str):
             doc.mime_type = payload["file_mime"]
-        doc.save(update_fields=["upload_status", "upload_error", "size_bytes", "mime_type"])
+        doc.save(
+            update_fields=["upload_status", "upload_error", "size_bytes", "mime_type"]
+        )
     else:
         doc.upload_status = Document.UploadStatus.FAILED
         doc.upload_error = (payload.get("error") or "upload failed").strip()
@@ -291,7 +299,9 @@ def documents_list_api(request):
         len(items),
     )
 
-    return JsonResponse({"count": total, "limit": limit, "offset": offset, "items": items})
+    return JsonResponse(
+        {"count": total, "limit": limit, "offset": offset, "items": items}
+    )
 
 
 @login_required
@@ -329,7 +339,9 @@ def documents_list_page(request):
         "prev_offset": max(0, offset - limit),
         "next_offset": (offset + limit) if (offset + limit) < total else None,
         "doc_type_choices": Document.DocType.choices,
-        "metadata_status_choices": getattr(Document, "MetadataStatus", None).choices if hasattr(Document, "MetadataStatus") else [],
+        "metadata_status_choices": getattr(Document, "MetadataStatus", None).choices
+        if hasattr(Document, "MetadataStatus")
+        else [],
     }
     logger.info(
         "documents_list_page user=%s q=%r upload_status=%r visibility=%r doc_type=%r metadata_status=%r offset=%s limit=%s total=%s returned=%s",
@@ -394,7 +406,9 @@ def document_detail_page(request, doc_id: int):
 
     # If file_s3_key exists, create a presigned URL for inline viewing
     if bucket and doc.file_s3_key:
-        content_url = create_presigned_get(bucket=bucket, key=doc.file_s3_key, expires_in=3600)
+        content_url = create_presigned_get(
+            bucket=bucket, key=doc.file_s3_key, expires_in=3600
+        )
 
     context = {
         "doc": doc,
@@ -416,6 +430,10 @@ def upload_page(request):
     # Minimal V1 upload UI page (Desktop).
     # The actual upload flow is executed in the browser using existing API endpoints:
     # create_upload -> presigned PUT -> upload_complete
-    return render(request, "documents/upload.html", context={
-        "doc_type_choices": Document.DocType.choices,
-    })
+    return render(
+        request,
+        "documents/upload.html",
+        context={
+            "doc_type_choices": Document.DocType.choices,
+        },
+    )

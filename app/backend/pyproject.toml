@@ -17,3 +17,47 @@ dependencies = [
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+# Ignore generated / noisy dirs
+exclude = [
+  "**/migrations/**",
+  "**/__pycache__/**",
+]
+
+[tool.ruff.format]
+# keep default aggressive formatting (ruff formatter)
+# nothing needed here unless you want to tune later
+
+[tool.pyright]
+# Medium now, tighten later
+typeCheckingMode = "standard"
+exclude = [
+  "**/migrations/**",
+  "**/__pycache__/**",
+  "**/.venv",
+  "**/venv",
+  "**/myenv",
+  "**/__pycache__",
+  "**/.pytest_cache",
+  "**/.mypy_cache",
+  "**/.ruff_cache",
+  "**/site-packages"
+]
+# Pyright is not Django-ORM aware; mypy+django-stubs is the source of truth for ORM typing.
+reportAttributeAccessIssue = "none"
+reportOptionalMemberAccess = "none"
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "vs_archive.settings"
+python_files = ["test_*.py", "*_test.py", "tests.py"]
+
+[dependency-groups]
+dev = [
+    "ruff (==0.14.14)",
+    "pyright (>=1.1.408,<2.0.0)",
+    "pytest (>=9.0.2,<10.0.0)",
+    "pytest-django (>=4.11.1,<5.0.0)",
+    "mypy (>=1.19.1,<2.0.0)",
+    "django-stubs (>=5.2.9,<6.0.0)"
+]
