@@ -10,11 +10,7 @@ SECRET_KEY = "django-insecure-!5*72sfq!20ubj(3&k48o_##@+_+%5t%ph@*66@&1x)yxzydz&
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-UPLOADS_BUCKET_NAME = (
-    os.getenv("UPLOADS_BUCKET_NAME")
-    or os.getenv("S3_BUCKET")
-    or ""
-)
+UPLOADS_BUCKET_NAME = os.getenv("UPLOADS_BUCKET_NAME") or os.getenv("S3_BUCKET") or ""
 AWS_REGION = os.environ.get("AWS_REGION", "eu-central-1")
 
 ALLOWED_HOSTS = ["*"]  # dev only
@@ -77,7 +73,6 @@ DATABASES = {
         "PORT": os.getenv("DB_PORT", "5432"),
     }
 }
-
 
 
 # Password validation

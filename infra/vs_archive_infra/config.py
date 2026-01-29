@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+
 @dataclass(frozen=True)
 class EnvConfig:
     project: str
@@ -9,6 +10,7 @@ class EnvConfig:
     @property
     def prefix(self) -> str:
         return f"{self.project}-{self.env_name}"
+
 
 def load_env_config(app) -> EnvConfig:
     project = app.node.try_get_context("project") or "vs-archive"

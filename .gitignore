@@ -23,11 +23,18 @@ media/
 .env
 .env.*
 
+# Linters / typecheck / test caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.cache/
+
 # Docker
 *.pid
 
 # AWS / CDK
-cdk.out/
+infra/cdk.out/
 
 # OS
 .DS_Store
@@ -52,4 +59,6 @@ build/
 *.tmp
 *.swp
 
+# Local SQLite DB (do not commit)
+*.sqlite3
 app/backend/db.sqlite3

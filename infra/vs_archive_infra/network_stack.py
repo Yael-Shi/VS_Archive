@@ -15,9 +15,15 @@ class VsArchiveNetworkStack(Stack):
             max_azs=2,
             nat_gateways=1,
             subnet_configuration=[
-                ec2.SubnetConfiguration(name="public", subnet_type=ec2.SubnetType.PUBLIC),
-                ec2.SubnetConfiguration(name="private", subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
-                ec2.SubnetConfiguration(name="isolated", subnet_type=ec2.SubnetType.PRIVATE_ISOLATED),
+                ec2.SubnetConfiguration(
+                    name="public", subnet_type=ec2.SubnetType.PUBLIC
+                ),
+                ec2.SubnetConfiguration(
+                    name="private", subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
+                ),
+                ec2.SubnetConfiguration(
+                    name="isolated", subnet_type=ec2.SubnetType.PRIVATE_ISOLATED
+                ),
             ],
         )
 
