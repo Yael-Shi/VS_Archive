@@ -1,9 +1,10 @@
 import json
 import logging
 from datetime import datetime
+from typing import Optional
 
 from django.conf import settings
-from django.contrib.auth.decorators import login_required
+from django.contrib.auth.decorators import login_required, user_passes_test
 from django.db.models import Q, TextField
 from django.db.models.functions import Cast
 from django.http import HttpResponseBadRequest, JsonResponse
@@ -33,14 +34,43 @@ def _parse_int(value, default, min_value=None, max_value=None):
     return n
 
 
-def _base_queryset(q: str, status: str, visibility: str):
+def _parse_date_optional(value: Optional[str], field_name: str):
+    # Parse YYYY-MM-DD if provided; otherwise return None.
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except ValueError:
+        raise ValueError(f"invalid {field_name} format, expected YYYY-MM-DD")
+
+
+def _is_admin(user):
+    return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
+
+
+def _base_queryset(
+    q: str,
+    upload_status: str,
+    visibility: str,
+    doc_type: str,
+    metadata_status: str,
+):
     qs = Document.objects.all().order_by("-created_at")
 
-    if status:
-        qs = qs.filter(upload_status=status)
+    if upload_status:
+        qs = qs.filter(upload_status=upload_status)
 
     if visibility:
         qs = qs.filter(visibility=visibility)
+
+    if doc_type:
+        qs = qs.filter(doc_type=doc_type)
+
+    if metadata_status:
+        qs = qs.filter(metadata_status=metadata_status)
 
     q = (q or "").strip()
     if q:
@@ -70,6 +100,7 @@ def _serialize_doc(d: Document) -> dict:
         "category_event": d.category_event,
         "tags": d.tags,
         "metadata": d.metadata,
+        "metadata_status": getattr(d, "metadata_status", None),
         "visibility": d.visibility,
         "upload_status": d.upload_status,
         "file_s3_key": d.file_s3_key,
@@ -92,49 +123,52 @@ def create_upload(request):
     except Exception:
         return _bad("invalid json")
 
-    # Required by the SoT
+    # Required for V1: title + doc_type
     title = (payload.get("title") or "").strip()
     if not title:
         return _bad("title required")
 
-    date_start = payload.get("date_start")
-    date_end = payload.get("date_end")
-    language = (payload.get("language") or "").strip()
     doc_type = (payload.get("doc_type") or "").strip()  # PDF / IMAGE
-    category_event = (payload.get("category_event") or "").strip()
-    tags = payload.get("tags")
-    metadata = payload.get("metadata")
+    if doc_type not in ("PDF", "IMAGE"):
+        return _bad("doc_type must be PDF or IMAGE")
+
+    # Optional metadata
+    date_start_raw = payload.get("date_start")
+    date_end_raw = payload.get("date_end")
+    language = (payload.get("language") or "").strip() or None
+    category_event = (payload.get("category_event") or "").strip() or None
     visibility = (payload.get("visibility") or "private").strip()
+
+    tags = payload.get("tags", None)
+    metadata = payload.get("metadata", None)
 
     # File info
     mime_type = (payload.get("mime_type") or payload.get("content_type") or "application/octet-stream").strip()
     original_name = (payload.get("original_name") or "").strip()
     size_bytes = payload.get("size_bytes")
 
-    # Basic validation
-    if not date_start or not date_end:
-        return _bad("date_start and date_end required (YYYY-MM-DD)")
+    # Optional date parsing
     try:
-        ds = datetime.strptime(date_start, "%Y-%m-%d").date()
-        de = datetime.strptime(date_end, "%Y-%m-%d").date()
-    except ValueError:
-        return _bad("invalid date format, expected YYYY-MM-DD")
+        ds = _parse_date_optional(date_start_raw, "date_start")
+        de = _parse_date_optional(date_end_raw, "date_end")
+    except ValueError as e:
+        return _bad(str(e))
 
-    if not language:
-        return _bad("language required")
-    if doc_type not in ("PDF", "IMAGE"):
-        return _bad("doc_type must be PDF or IMAGE")
-    if not category_event:
-        return _bad("category_event required")
+    # Optional fields validation (only if provided)
+    if tags is None:
+        tags = []
     if not isinstance(tags, list):
         return _bad("tags must be a list")
+
+    if metadata is None:
+        metadata = {}
     if not isinstance(metadata, dict):
         return _bad("metadata must be an object")
+
     if visibility not in ("private", "public"):
         return _bad("visibility must be private or public")
 
     bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
-
     if not bucket:
         return JsonResponse(
             {"error": "Bucket not configured (set UPLOADS_BUCKET_NAME or S3_BUCKET)"},
@@ -144,10 +178,10 @@ def create_upload(request):
     # Create Document in UPLOADING state
     doc = Document.objects.create(
         title=title,
+        doc_type=doc_type,
         date_start=ds,
         date_end=de,
         language=language,
-        doc_type=doc_type,
         category_event=category_event,
         tags=tags,
         metadata=metadata,
@@ -156,6 +190,7 @@ def create_upload(request):
         file_original_name=original_name,
         mime_type=mime_type,
         size_bytes=size_bytes if isinstance(size_bytes, int) else None,
+        # metadata_status default should be NEEDS_COMPLETION in the model
     )
 
     # Create a stable key
@@ -222,24 +257,34 @@ def upload_complete(request, doc_id: int):
 def documents_list_api(request):
     # Additive V1 endpoint: list documents with free-text search over metadata.
     q = request.GET.get("q", "") or ""
-    status = (request.GET.get("status") or "").strip()
+    upload_status = (request.GET.get("upload_status") or "").strip()
     visibility = (request.GET.get("visibility") or "").strip()
+    doc_type = (request.GET.get("doc_type") or "").strip()
+    metadata_status = (request.GET.get("metadata_status") or "").strip()
 
     limit = _parse_int(request.GET.get("limit"), default=50, min_value=1, max_value=200)
     offset = _parse_int(request.GET.get("offset"), default=0, min_value=0)
 
-    qs = _base_queryset(q=q, status=status, visibility=visibility)
+    qs = _base_queryset(
+        q=q,
+        upload_status=upload_status,
+        visibility=visibility,
+        doc_type=doc_type,
+        metadata_status=metadata_status,
+    )
     total = qs.count()
 
     docs = list(qs[offset : offset + limit])
     items = [_serialize_doc(d) for d in docs]
 
     logger.info(
-        "documents_list_api user=%s q=%r status=%r visibility=%r limit=%s offset=%s total=%s returned=%s",
+        "documents_list_api user=%s q=%r upload_status=%r visibility=%r doc_type=%r metadata_status=%r limit=%s offset=%s total=%s returned=%s",
         getattr(request.user, "username", None),
         q,
-        status,
+        upload_status,
         visibility,
+        doc_type,
+        metadata_status,
         limit,
         offset,
         total,
@@ -253,28 +298,88 @@ def documents_list_api(request):
 def documents_list_page(request):
     # Minimal V1 UI (server-rendered) behind login.
     q = request.GET.get("q", "") or ""
-    status = (request.GET.get("status") or "").strip()
+    upload_status = (request.GET.get("upload_status") or "").strip()
     visibility = (request.GET.get("visibility") or "").strip()
+    doc_type = (request.GET.get("doc_type") or "").strip()
+    metadata_status = (request.GET.get("metadata_status") or "").strip()
 
     limit = 50
     offset = _parse_int(request.GET.get("offset"), default=0, min_value=0)
 
-    qs = _base_queryset(q=q, status=status, visibility=visibility)
+    qs = _base_queryset(
+        q=q,
+        upload_status=upload_status,
+        visibility=visibility,
+        doc_type=doc_type,
+        metadata_status=metadata_status,
+    )
     total = qs.count()
     docs = list(qs[offset : offset + limit])
 
     context = {
         "docs": docs,
         "q": q,
-        "status": status,
+        "upload_status": upload_status,
         "visibility": visibility,
+        "doc_type": doc_type,
+        "metadata_status": metadata_status,
+        "offset": offset,
+        "limit": limit,
+        "total": total,
+        "prev_offset": max(0, offset - limit),
+        "next_offset": (offset + limit) if (offset + limit) < total else None,
+        "doc_type_choices": Document.DocType.choices,
+        "metadata_status_choices": getattr(Document, "MetadataStatus", None).choices if hasattr(Document, "MetadataStatus") else [],
+    }
+    logger.info(
+        "documents_list_page user=%s q=%r upload_status=%r visibility=%r doc_type=%r metadata_status=%r offset=%s limit=%s total=%s returned=%s",
+        getattr(request.user, "username", None),
+        q,
+        upload_status,
+        visibility,
+        doc_type,
+        metadata_status,
+        offset,
+        limit,
+        total,
+        len(docs),
+    )
+    return render(request, "documents/list.html", context)
+
+
+@login_required
+@user_passes_test(_is_admin)
+def admin_backlog_page(request):
+    # Admin-only backlog: documents with incomplete metadata.
+    limit = 50
+    offset = _parse_int(request.GET.get("offset"), default=0, min_value=0)
+
+    qs = Document.objects.filter(
+        metadata_status=Document.MetadataStatus.NEEDS_COMPLETION
+    ).order_by("-created_at")
+
+    total = qs.count()
+    docs = list(qs[offset : offset + limit])
+
+    context = {
+        "docs": docs,
         "offset": offset,
         "limit": limit,
         "total": total,
         "prev_offset": max(0, offset - limit),
         "next_offset": (offset + limit) if (offset + limit) < total else None,
     }
-    return render(request, "documents/list.html", context)
+
+    logger.info(
+        "admin_backlog_page user=%s offset=%s limit=%s total=%s returned=%s",
+        getattr(request.user, "username", None),
+        offset,
+        limit,
+        total,
+        len(docs),
+    )
+    return render(request, "documents/backlog.html", context)
+
 
 @login_required
 def document_detail_page(request, doc_id: int):
@@ -295,6 +400,14 @@ def document_detail_page(request, doc_id: int):
         "doc": doc,
         "content_url": content_url,
     }
+    logger.info(
+        "document_detail_page user=%s doc_id=%s has_content_url=%s mime_type=%r",
+        getattr(request.user, "username", None),
+        doc.id,
+        bool(content_url),
+        doc.mime_type,
+    )
+
     return render(request, "documents/detail.html", context)
 
 
@@ -303,4 +416,6 @@ def upload_page(request):
     # Minimal V1 upload UI page (Desktop).
     # The actual upload flow is executed in the browser using existing API endpoints:
     # create_upload -> presigned PUT -> upload_complete
-    return render(request, "documents/upload.html")
+    return render(request, "documents/upload.html", context={
+        "doc_type_choices": Document.DocType.choices,
+    })

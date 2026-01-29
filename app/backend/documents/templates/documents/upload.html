@@ -23,7 +23,7 @@
     <a href="/api/ui/documents/">← Back to list</a>
   </div>
 
-  <h1>Upload (V1.4 / V1.5)</h1>
+  <h1>Upload (V1)</h1>
 
   <p class="hint">
     This page uses the existing upload flow: create → presigned PUT → complete.
@@ -34,10 +34,10 @@
   <form id="uploadForm">
     <label for="file">File *</label>
     <!--
-      V1.5 (precise):
+      V1.5 behavior:
       - If doc_type=IMAGE: allow image/* and enable camera capture on mobile.
       - If doc_type=PDF: allow application/pdf and disable capture.
-      The input is updated dynamically by JS (keeps PDF support intact).
+      The input is updated dynamically by JS.
     -->
     <input id="file" name="file" type="file" required />
     <div class="hint">
@@ -47,22 +47,31 @@
     <label for="title">Title *</label>
     <input id="title" name="title" type="text" required />
 
+    <label for="doc_type">Doc type *</label>
+    <select id="doc_type" name="doc_type" required>
+      <option value="" selected disabled>Select…</option>
+      {% for v, label in doc_type_choices %}
+        <option value="{{ v }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+    <div class="hint">Required. Other metadata can be completed later by admins.</div>
+
     <div class="row">
       <div>
-        <label for="date_start">Date start (YYYY-MM-DD) *</label>
-        <input id="date_start" name="date_start" type="date" required />
+        <label for="date_start">Date start (YYYY-MM-DD)</label>
+        <input id="date_start" name="date_start" type="date" />
       </div>
       <div>
-        <label for="date_end">Date end (YYYY-MM-DD) *</label>
-        <input id="date_end" name="date_end" type="date" required />
+        <label for="date_end">Date end (YYYY-MM-DD)</label>
+        <input id="date_end" name="date_end" type="date" />
       </div>
     </div>
 
     <div class="row">
       <div>
-        <label for="language">Language *</label>
-        <select id="language" name="language" required>
-          <option value="" selected disabled>Select…</option>
+        <label for="language">Language</label>
+        <select id="language" name="language">
+          <option value="" selected>(unknown)</option>
           <option value="he">he</option>
           <option value="en">en</option>
           <option value="ar">ar</option>
@@ -70,39 +79,30 @@
         </select>
       </div>
       <div>
-        <label for="doc_type">Doc type *</label>
-        <select id="doc_type" name="doc_type" required>
-          <option value="" selected disabled>Select…</option>
-          <option value="PDF">PDF</option>
-          <option value="IMAGE">IMAGE</option>
+        <label for="visibility">Visibility</label>
+        <select id="visibility" name="visibility">
+          <option value="private" selected>private</option>
+          <option value="public">public</option>
         </select>
-        <div class="hint">V1: chosen manually (auto-suggested from file type when possible).</div>
       </div>
     </div>
 
-    <label for="category_event">Category / Event *</label>
-    <input id="category_event" name="category_event" type="text" required />
+    <label for="category_event">Category / Event</label>
+    <input id="category_event" name="category_event" type="text" />
 
-    <label for="tags">Tags (comma-separated) *</label>
-    <input id="tags" name="tags" type="text" placeholder="e.g. family, jerusalem, 1948" required />
-    <div class="hint">Will be converted to a list of strings.</div>
+    <label for="tags">Tags (comma-separated)</label>
+    <input id="tags" name="tags" type="text" placeholder="e.g. family, jerusalem, 1948" />
+    <div class="hint">Optional. Will be converted to a list of strings.</div>
 
-    <label for="metadata">Metadata (JSON) *</label>
-    <textarea id="metadata" name="metadata" required
+    <label for="metadata">Metadata (JSON)</label>
+    <textarea id="metadata" name="metadata"
       placeholder='{"source":"manual","note":"..."}'></textarea>
-    <div class="hint">Must be valid JSON object (dictionary).</div>
-
-    <label for="visibility">Visibility</label>
-    <select id="visibility" name="visibility">
-      <option value="private" selected>private</option>
-      <option value="public">public</option>
-    </select>
+    <div class="hint">Optional. If empty, an empty object will be sent.</div>
 
     <button id="submitBtn" type="submit">Upload</button>
   </form>
 
 <script>
-  // Keep values on error: we do not reload the page; errors are shown inline.
   const form = document.getElementById("uploadForm");
   const msgEl = document.getElementById("msg");
   const submitBtn = document.getElementById("submitBtn");
@@ -123,10 +123,12 @@
       .filter(Boolean);
   }
 
-  function safeJsonParseObject(text) {
+  function safeJsonParseObjectOrEmpty(text) {
+    const trimmed = (text || "").trim();
+    if (!trimmed) return {};
     let obj;
     try {
-      obj = JSON.parse(text);
+      obj = JSON.parse(trimmed);
     } catch (e) {
       throw new Error("metadata must be valid JSON");
     }
@@ -142,7 +144,6 @@
     let data = null;
     try { data = JSON.parse(text); } catch (_) {}
     if (!res.ok) {
-      // Prefer server-provided JSON error, fallback to text
       const err = (data && (data.error || data.detail)) ? (data.error || data.detail) : text;
       throw new Error(`HTTP ${res.status}: ${err}`);
     }
@@ -156,7 +157,7 @@
   }
 
   function applyFileInputMode() {
-    // V1.5 precise behavior:
+    // V1.5 behavior:
     // - IMAGE: accept images, enable capture on mobile
     // - PDF: accept pdf only, disable capture
     const dt = docTypeEl.value;
@@ -179,7 +180,6 @@
     }
   }
 
-  // Initialize and update when doc_type changes
   applyFileInputMode();
   docTypeEl.addEventListener("change", () => applyFileInputMode());
 
@@ -194,56 +194,54 @@
     }
 
     const title = document.getElementById("title").value.trim();
-    const date_start = document.getElementById("date_start").value;
-    const date_end = document.getElementById("date_end").value;
-    const language = document.getElementById("language").value;
     const doc_type = docTypeEl.value;
-    const category_event = document.getElementById("category_event").value.trim();
-    const tagsRaw = document.getElementById("tags").value;
+
+    const date_start = document.getElementById("date_start").value || null;
+    const date_end = document.getElementById("date_end").value || null;
+    const language = document.getElementById("language").value || "";
+    const category_event = document.getElementById("category_event").value.trim() || "";
     const visibility = document.getElementById("visibility").value || "private";
+
+    const tagsRaw = document.getElementById("tags").value;
     const metadataText = document.getElementById("metadata").value;
 
-    if (!title || !date_start || !date_end || !language || !doc_type || !category_event) {
-      setMessage("error", "Please fill all required fields.");
+    if (!title || !doc_type) {
+      setMessage("error", "Please fill all required fields (title, doc_type).");
       return;
     }
 
     let metadata;
     try {
-      metadata = safeJsonParseObject(metadataText);
+      metadata = safeJsonParseObjectOrEmpty(metadataText);
     } catch (err) {
       setMessage("error", err.message);
       return;
     }
 
     const tags = parseTags(tagsRaw);
-    if (tags.length === 0) {
-      setMessage("error", "tags must contain at least one value.");
-      return;
-    }
 
-    // Disable the button to prevent double submits
     submitBtn.disabled = true;
     submitBtn.classList.add("disabled");
 
     try {
       setMessage("ok", "Creating upload…");
 
-      // Step 1: create_upload (existing endpoint)
       const createPayload = {
         title,
-        date_start,
-        date_end,
-        language,
         doc_type,
-        category_event,
+        visibility,
         tags,
         metadata,
-        visibility,
         original_name: file.name,
         mime_type: file.type || "application/octet-stream",
         size_bytes: file.size
       };
+
+      // Optional fields: only send if present
+      if (date_start) createPayload.date_start = date_start;
+      if (date_end) createPayload.date_end = date_end;
+      if (language) createPayload.language = language;
+      if (category_event) createPayload.category_event = category_event;
 
       const created = await jsonFetch("/api/uploads/create/", {
         method: "POST",
@@ -260,7 +258,6 @@
 
       setMessage("ok", `Uploading to S3… (document_id=${documentId})`);
 
-      // Step 2: presigned PUT to S3
       const putRes = await fetch(uploadUrl, {
         method: "PUT",
         headers: {"Content-Type": createPayload.mime_type},
@@ -274,7 +271,6 @@
 
       setMessage("ok", "Finalizing upload…");
 
-      // Step 3: upload_complete (existing endpoint)
       await jsonFetch(`/api/uploads/${documentId}/complete/`, {
         method: "POST",
         headers: {"Content-Type": "application/json"},
@@ -286,20 +282,15 @@
       });
 
       setMessage("ok", "Done. Redirecting…");
-
-      // Redirect to document detail page (inline view)
       window.location.href = `/api/ui/documents/${documentId}/`;
 
     } catch (err) {
-      // Keep values on the page; show error.
       setMessage("error", String(err && err.message ? err.message : err));
       submitBtn.disabled = false;
       submitBtn.classList.remove("disabled");
-      return;
     }
   });
 
-  // Optional usability: if user selects a file and doc_type is empty, auto-suggest without enforcing.
   fileEl.addEventListener("change", (e) => {
     const f = e.target.files[0];
     if (!f) return;
@@ -309,7 +300,6 @@
     if (mt === "application/pdf") docTypeEl.value = "PDF";
     else if (mt.startsWith("image/")) docTypeEl.value = "IMAGE";
 
-    // Ensure accept/capture matches the chosen doc_type
     applyFileInputMode();
   });
 </script>

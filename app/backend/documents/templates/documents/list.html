@@ -28,10 +28,16 @@
 
         form {
             margin-bottom: 16px;
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr 1fr 1fr auto;
+            gap: 8px;
+            align-items: end;
         }
 
-        input {
-            margin-right: 8px;
+        input, select {
+            padding: 6px 8px;
+            width: 100%;
+            box-sizing: border-box;
         }
 
         .pagination {
@@ -41,6 +47,14 @@
         .pagination a {
             margin-right: 12px;
         }
+
+        .actions {
+            margin-top: 16px;
+        }
+
+        .actions a {
+            margin-right: 12px;
+        }
     </style>
 </head>
 <body>
@@ -48,31 +62,59 @@
 <h1>Documents</h1>
 
 <form method="get">
-    <!-- Free text search -->
-    <input
-        type="text"
-        name="q"
-        placeholder="Search (title, metadata, tags...)"
-        value="{{ q }}"
-        size="40"
-    />
+    <div>
+        <label>Search</label>
+        <input
+            type="text"
+            name="q"
+            placeholder="Search (title, metadata, tags...)"
+            value="{{ q }}"
+        />
+    </div>
 
-    <!-- Optional filters -->
-    <input
-        type="text"
-        name="status"
-        placeholder="status (UPLOADED / FAILED / ...)"
-        value="{{ status }}"
-    />
+    <div>
+        <label>Upload status</label>
+        <input
+            type="text"
+            name="upload_status"
+            placeholder="UPLOADED / FAILED / ..."
+            value="{{ upload_status }}"
+        />
+    </div>
 
-    <input
-        type="text"
-        name="visibility"
-        placeholder="visibility (private / public)"
-        value="{{ visibility }}"
-    />
+    <div>
+        <label>Visibility</label>
+        <input
+            type="text"
+            name="visibility"
+            placeholder="private / public"
+            value="{{ visibility }}"
+        />
+    </div>
 
-    <button type="submit">Search</button>
+    <div>
+        <label>Doc type</label>
+        <select name="doc_type">
+            <option value="">All</option>
+            {% for v, label in doc_type_choices %}
+                <option value="{{ v }}" {% if doc_type == v %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div>
+        <label>Metadata status</label>
+        <select name="metadata_status">
+            <option value="">All</option>
+            {% for v, label in metadata_status_choices %}
+                <option value="{{ v }}" {% if metadata_status == v %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div>
+        <button type="submit">Search</button>
+    </div>
 </form>
 
 <p>
@@ -87,7 +129,8 @@
             <th>Date range</th>
             <th>Language</th>
             <th>Type</th>
-            <th>Status</th>
+            <th>Metadata status</th>
+            <th>Upload status</th>
             <th>Visibility</th>
             <th>Original filename</th>
             <th>Created at</th>
@@ -101,6 +144,7 @@
                 <td>{{ d.date_start }} – {{ d.date_end }}</td>
                 <td>{{ d.language }}</td>
                 <td>{{ d.doc_type }}</td>
+                <td>{{ d.metadata_status }}</td>
                 <td>{{ d.upload_status }}</td>
                 <td>{{ d.visibility }}</td>
                 <td>{{ d.file_original_name }}</td>
@@ -108,7 +152,7 @@
             </tr>
         {% empty %}
             <tr>
-                <td colspan="9">No documents found</td>
+                <td colspan="10">No documents found</td>
             </tr>
         {% endfor %}
     </tbody>
@@ -116,17 +160,20 @@
 
 <div class="actions">
   <a href="/api/ui/upload/">Upload new document</a>
+  {% if user.is_staff or user.is_superuser %}
+    <a href="/api/ui/admin/backlog/">Admin backlog</a>
+  {% endif %}
 </div>
 
 <div class="pagination">
     {% if offset > 0 %}
-        <a href="?q={{ q|urlencode }}&status={{ status|urlencode }}&visibility={{ visibility|urlencode }}&offset={{ prev_offset }}">
+        <a href="?q={{ q|urlencode }}&upload_status={{ upload_status|urlencode }}&visibility={{ visibility|urlencode }}&doc_type={{ doc_type|urlencode }}&metadata_status={{ metadata_status|urlencode }}&offset={{ prev_offset }}">
             ← Previous
         </a>
     {% endif %}
 
     {% if next_offset is not None %}
-        <a href="?q={{ q|urlencode }}&status={{ status|urlencode }}&visibility={{ visibility|urlencode }}&offset={{ next_offset }}">
+        <a href="?q={{ q|urlencode }}&upload_status={{ upload_status|urlencode }}&visibility={{ visibility|urlencode }}&doc_type={{ doc_type|urlencode }}&metadata_status={{ metadata_status|urlencode }}&offset={{ next_offset }}">
             Next →
         </a>
     {% endif %}

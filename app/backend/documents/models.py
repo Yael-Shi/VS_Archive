@@ -15,18 +15,30 @@ class Document(models.Model):
         PDF = "PDF", "PDF"
         IMAGE = "IMAGE", "Image"
 
-    # חובה לפי ה-SoT
+    class MetadataStatus(models.TextChoices):
+        NEEDS_COMPLETION = "NEEDS_COMPLETION", "Needs completion"
+        COMPLETED = "COMPLETED", "Completed"
+
+    # Required for V1
     title = models.CharField(max_length=255)
-
-    date_start = models.DateField()
-    date_end = models.DateField()
-
-    language = models.CharField(max_length=16)  # he/en/ar/fr
     doc_type = models.CharField(max_length=16, choices=DocType.choices)
-    category_event = models.CharField(max_length=255)
+
+    # Optional metadata (often unknown at upload time)
+    date_start = models.DateField(null=True, blank=True)
+    date_end = models.DateField(null=True, blank=True)
+
+    language = models.CharField(max_length=16, null=True, blank=True)  # he/en/ar/fr
+    category_event = models.CharField(max_length=255, null=True, blank=True)
 
     tags = models.JSONField(default=list)      # list[str]
-    metadata = models.JSONField(default=dict)  # dict (גמיש)
+    metadata = models.JSONField(default=dict)  # flexible metadata
+
+    # Metadata completion status
+    metadata_status = models.CharField(
+        max_length=32,
+        choices=MetadataStatus.choices,
+        default=MetadataStatus.NEEDS_COMPLETION,
+    )
 
     visibility = models.CharField(
         max_length=16,
@@ -40,7 +52,7 @@ class Document(models.Model):
         default=UploadStatus.UPLOADING,
     )
 
-    # קובץ ב-S3 + דיווח סטטוס
+    # S3 file data
     file_s3_key = models.CharField(max_length=1024, blank=True, default="")
     file_original_name = models.CharField(max_length=512, blank=True, default="")
     mime_type = models.CharField(max_length=128, blank=True, default="")

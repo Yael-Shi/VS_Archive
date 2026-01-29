@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>Admin Backlog</title>
+    <style>
+        body { font-family: sans-serif; margin: 24px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 16px; }
+        th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
+        th { background-color: #f5f5f5; }
+        .pagination { margin-top: 16px; }
+        .pagination a { margin-right: 12px; }
+        .actions { margin-top: 16px; }
+    </style>
+</head>
+<body>
+
+<h1>Admin backlog: Needs completion</h1>
+
+<div class="actions">
+  <a href="/api/ui/documents/">← Back to list</a>
+</div>
+
+<p>
+    Showing {{ docs|length }} of {{ total }} documents
+</p>
+
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Title</th>
+            <th>Type</th>
+            <th>Created at</th>
+            <th>Edit</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for d in docs %}
+            <tr>
+                <td>{{ d.id }}</td>
+                <td><a href="/api/ui/documents/{{ d.id }}/">{{ d.title }}</a></td>
+                <td>{{ d.doc_type }}</td>
+                <td>{{ d.created_at }}</td>
+                <td><a href="/admin/documents/document/{{ d.id }}/change/">Edit in Django admin</a></td>
+            </tr>
+        {% empty %}
+            <tr>
+                <td colspan="5">No backlog items 🎉</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<div class="pagination">
+    {% if offset > 0 %}
+        <a href="?offset={{ prev_offset }}">← Previous</a>
+    {% endif %}
+    {% if next_offset is not None %}
+        <a href="?offset={{ next_offset }}">Next →</a>
+    {% endif %}
+</div>
+
+</body>
+</html>
