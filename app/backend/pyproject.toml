@@ -35,6 +35,14 @@ typeCheckingMode = "standard"
 exclude = [
   "**/migrations/**",
   "**/__pycache__/**",
+  "**/.venv",
+  "**/venv",
+  "**/myenv",
+  "**/__pycache__",
+  "**/.pytest_cache",
+  "**/.mypy_cache",
+  "**/.ruff_cache",
+  "**/site-packages"
 ]
 # Pyright is not Django-ORM aware; mypy+django-stubs is the source of truth for ORM typing.
 reportAttributeAccessIssue = "none"
