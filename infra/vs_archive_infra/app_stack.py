@@ -8,6 +8,7 @@ from aws_cdk import aws_iam as iam
 from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_sqs as sqs
 from aws_cdk import aws_secretsmanager as secretsmanager
+from aws_cdk import aws_servicediscovery as servicediscovery
 from typing import cast
 from .config import EnvConfig
 
@@ -35,13 +36,13 @@ class VsArchiveAppStack(Stack):
             cluster_name=f"{cfg.prefix}-cluster",
         )
 
-        # # Private DNS namespace for service discovery inside VPC
-        # namespace = servicediscovery.PrivateDnsNamespace(
-        #     self,
-        #     f"{cfg.prefix}-ns",
-        #     name=f"{cfg.prefix}.local",
-        #     vpc=vpc,
-        # )
+        # Private DNS namespace for service discovery inside VPC
+        namespace = servicediscovery.PrivateDnsNamespace(
+            self,
+            f"{cfg.prefix}-ns",
+            name=f"{cfg.prefix}.local",
+            vpc=vpc,
+        )
 
         # === Postgres (DEV) as ECS Service ===
         pg_task = ecs.FargateTaskDefinition(
@@ -69,19 +70,19 @@ class VsArchiveAppStack(Stack):
         )
         pg_container.add_port_mappings(ecs.PortMapping(container_port=5432))
 
-        # pg_svc = ecs.FargateService(
-        #     self,
-        #     f"{cfg.prefix}-pg-svc",
-        #     cluster=cluster,
-        #     task_definition=pg_task,
-        #     desired_count=1,
-        #     security_groups=[sg_pg],  # <-- important: not sg_db
-        #     assign_public_ip=False,
-        #     cloud_map_options=ecs.CloudMapOptions(
-        #         name="postgres",
-        #         cloud_map_namespace=namespace,
-        #     ),
-        # )
+        pg_svc = ecs.FargateService(
+            self,
+            f"{cfg.prefix}-pg-svc",
+            cluster=cluster,
+            task_definition=pg_task,
+            desired_count=1,
+            security_groups=[sg_pg],  # <-- important: not sg_db
+            assign_public_ip=False,
+            cloud_map_options=ecs.CloudMapOptions(
+                name="postgres",
+                cloud_map_namespace=namespace,
+            ),
+        )
 
         # === ALB ===
         alb = elbv2.ApplicationLoadBalancer(

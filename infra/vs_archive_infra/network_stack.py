@@ -71,10 +71,10 @@ class VsArchiveNetworkStack(Stack):
             description="HTTP from Internet to ALB",
         )
 
-        # ALB -> Web tasks (nginx on 80 for now)
+        # ALB -> Web tasks (nginx on 8000 for now)
         self.sg_web.add_ingress_rule(
             peer=self.sg_alb,
-            connection=ec2.Port.tcp(80),
+            connection=ec2.Port.tcp(8000),
             description="ALB to Web tasks",
         )
 
