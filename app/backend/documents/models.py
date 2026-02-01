@@ -52,6 +52,19 @@ class Document(models.Model):
         default=UploadStatus.UPLOADING,
     )
 
+    class ProcessingState(models.TextChoices):
+        PROCESSING = "PROCESSING", "Processing"
+        READY = "READY", "Ready"
+        PARTIAL = "PARTIAL", "Partial"
+        ACTION_REQUIRED = "ACTION_REQUIRED", "Action required"
+        FAILED = "FAILED", "Failed"
+
+    processing_state_user = models.CharField(
+        max_length=32,
+        choices=ProcessingState.choices,
+        default=ProcessingState.PROCESSING,
+    )
+
     # S3 file data
     file_s3_key = models.CharField(max_length=1024, blank=True, default="")
     file_original_name = models.CharField(max_length=512, blank=True, default="")
@@ -64,6 +77,50 @@ class Document(models.Model):
 
     def __str__(self) -> str:
         return str(self.title)
+
+
+class DocumentTextResult(models.Model):
+    class ResultType(models.TextChoices):
+        SOURCE_TEXT = "SOURCE_TEXT", "Source text"
+        HEBREW_TEXT = "HEBREW_TEXT", "Hebrew text"
+
+    class Status(models.TextChoices):
+        SUCCEEDED = "SUCCEEDED", "Succeeded"
+        FAILED = "FAILED", "Failed"
+        NEEDS_REVIEW = "NEEDS_REVIEW", "Needs review"
+
+    class VerificationStatus(models.TextChoices):
+        UNVERIFIED = "UNVERIFIED", "Unverified"
+        VERIFIED = "VERIFIED", "Verified"
+        REJECTED = "REJECTED", "Rejected"
+
+    document = models.ForeignKey(
+        Document, on_delete=models.CASCADE, related_name="text_results"
+    )
+
+    result_type = models.CharField(max_length=32, choices=ResultType.choices)
+    engine = models.CharField(max_length=64, default="engine_v1")
+
+    status = models.CharField(max_length=32, choices=Status.choices)
+    verification_status = models.CharField(
+        max_length=32,
+        choices=VerificationStatus.choices,
+        default=VerificationStatus.UNVERIFIED,
+    )
+
+    text = models.TextField(null=True, blank=True)
+
+    error_code = models.CharField(max_length=64, null=True, blank=True)
+    error_details = models.TextField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["document", "result_type", "engine"]),
+            models.Index(fields=["status", "verification_status"]),
+        ]
 
 
 class CorrectionRequest(models.Model):
