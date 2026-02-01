@@ -30,6 +30,7 @@ VsArchiveAppStack(
     vpc=network.vpc,
     sg_alb=network.sg_alb,
     sg_web=network.sg_web,
+    sg_pg=network.sg_pg,
     bucket=data.bucket,
     queue=data.jobs_queue,
     db_secret=data.db_secret,
