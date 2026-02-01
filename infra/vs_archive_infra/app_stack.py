@@ -22,6 +22,7 @@ class VsArchiveAppStack(Stack):
         vpc: ec2.Vpc,
         sg_alb: ec2.SecurityGroup,
         sg_web: ec2.SecurityGroup,
+        sg_pg: ec2.SecurityGroup,
         bucket: s3.Bucket,
         queue: sqs.Queue,
         db_secret: secretsmanager.ISecret,
