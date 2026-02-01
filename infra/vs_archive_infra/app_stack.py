@@ -153,6 +153,7 @@ class VsArchiveAppStack(Stack):
         web_container = web_task.add_container(
             f"{cfg.prefix}-web",
             image=ecs.ContainerImage.from_ecr_repository(web_repo, tag="dev"),
+            command=["python", "manage.py", "run_worker"],
             logging=ecs.LogDrivers.aws_logs(stream_prefix=f"{cfg.prefix}-web"),
             environment={
                 "UPLOADS_BUCKET_NAME": bucket.bucket_name,
@@ -202,9 +203,7 @@ class VsArchiveAppStack(Stack):
 
         worker_task.add_container(
             f"{cfg.prefix}-worker",
-            image=ecs.ContainerImage.from_registry(
-                "public.ecr.aws/docker/library/python:3.11-slim"
-            ),
+            image=ecs.ContainerImage.from_ecr_repository(web_repo, tag="dev"),
             logging=ecs.LogDrivers.aws_logs(stream_prefix=f"{cfg.prefix}-worker"),
             environment={
                 "SQS_QUEUE_URL": queue.queue_url,
