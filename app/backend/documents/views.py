@@ -273,6 +273,10 @@ def upload_complete(request, doc_id: int):
             try:
                 send_process_document_message(document_id=doc.id)
             except Exception as e:
+                logger.exception(
+                    "enqueue failed in upload_complete",
+                    extra={"document_id": doc.id},
+                )
                 # If enqueue fails, reflect it clearly in user state
                 doc.processing_state_user = Document.ProcessingState.FAILED
                 doc.upload_error = f"enqueue failed: {e}"
