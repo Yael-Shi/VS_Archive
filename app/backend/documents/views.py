@@ -12,6 +12,7 @@ from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 
 from .models import Document
+from documents.services.sqs import send_process_document_message
 from .s3 import create_presigned_put, create_presigned_get
 
 logger = logging.getLogger(__name__)
@@ -244,22 +245,60 @@ def upload_complete(request, doc_id: int):
         return JsonResponse({"error": "not found"}, status=404)
 
     if success:
+        # Prevent double-enqueue if the client calls complete twice
+        already_uploaded = doc.upload_status == Document.UploadStatus.UPLOADED
+
         doc.upload_status = Document.UploadStatus.UPLOADED
         doc.upload_error = None
+
         if isinstance(payload.get("file_size"), int):
             doc.size_bytes = payload["file_size"]
         if isinstance(payload.get("file_mime"), str):
             doc.mime_type = payload["file_mime"]
-        doc.save(
-            update_fields=["upload_status", "upload_error", "size_bytes", "mime_type"]
-        )
+
+        # user-facing processing begins now
+        doc.processing_state_user = Document.ProcessingState.PROCESSING
+
+        update_fields = [
+            "upload_status",
+            "upload_error",
+            "size_bytes",
+            "mime_type",
+            "processing_state_user",
+        ]
+        doc.save(update_fields=update_fields)
+
+        # Enqueue exactly once
+        if not already_uploaded:
+            try:
+                send_process_document_message(document_id=doc.id)
+            except Exception as e:
+                logger.exception(
+                    "enqueue failed in upload_complete",
+                    extra={"document_id": doc.id},
+                )
+                # If enqueue fails, reflect it clearly in user state
+                doc.processing_state_user = Document.ProcessingState.FAILED
+                doc.upload_error = f"enqueue failed: {e}"
+                doc.save(update_fields=["processing_state_user", "upload_error"])
+                return JsonResponse(
+                    {"error": "enqueue failed", "details": str(e)},
+                    status=500,
+                )
+
     else:
         doc.upload_status = Document.UploadStatus.FAILED
         doc.upload_error = (payload.get("error") or "upload failed").strip()
-        doc.save(update_fields=["upload_status", "upload_error"])
+        doc.processing_state_user = Document.ProcessingState.FAILED
+        doc.save(update_fields=["upload_status", "upload_error", "processing_state_user"])
 
-    return JsonResponse({"document_id": doc.id, "upload_status": doc.upload_status})
-
+    return JsonResponse(
+        {
+            "document_id": doc.id,
+            "upload_status": doc.upload_status,
+            "processing_state_user": doc.processing_state_user,
+        }
+    )
 
 @login_required
 def documents_list_api(request):
