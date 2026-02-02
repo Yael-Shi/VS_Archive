@@ -10,12 +10,29 @@ class DocumentAdmin(admin.ModelAdmin):
         "doc_type",
         "metadata_status",
         "upload_status",
+        "processing_state_user",
         "visibility",
         "created_at",
+        "updated_at",
     )
-    list_filter = ("doc_type", "metadata_status", "upload_status", "visibility")
-    search_fields = ("title",)
+    list_filter = (
+        "doc_type",
+        "metadata_status",
+        "upload_status",
+        "processing_state_user",
+        "visibility",
+    )
+    search_fields = ("title", "category_event", "language")
     ordering = ("-created_at",)
+
+    fieldsets = (
+        ("Core", {"fields": ("title", "doc_type")}),
+        ("Status", {"fields": ("metadata_status", "upload_status", "processing_state_user", "visibility")}),
+        ("Optional metadata", {"fields": ("date_start", "date_end", "language", "category_event", "tags", "metadata")}),
+        ("File (S3)", {"fields": ("file_s3_key", "file_original_name", "mime_type", "size_bytes", "upload_error")}),
+        ("Timestamps", {"fields": ("created_at", "updated_at")}),
+    )
+    readonly_fields = ("created_at", "updated_at")
 
 
 @admin.register(CorrectionRequest)
@@ -24,6 +41,7 @@ class CorrectionRequestAdmin(admin.ModelAdmin):
     list_filter = ("status", "scope")
     search_fields = ("document__title", "message")
     ordering = ("-created_at",)
+
 
 @admin.register(DocumentTextResult)
 class DocumentTextResultAdmin(admin.ModelAdmin):
@@ -35,6 +53,29 @@ class DocumentTextResultAdmin(admin.ModelAdmin):
         "status",
         "verification_status",
         "created_at",
+        "updated_at",
     )
     list_filter = ("result_type", "engine", "status", "verification_status")
     search_fields = ("document__id", "document__title")
+    ordering = ("-created_at",)
+
+    # Read-only right now (v2). In the future will add edit option.
+    readonly_fields = (
+        "document",
+        "result_type",
+        "engine",
+        "status",
+        "text",
+        "error_code",
+        "error_details",
+        "created_at",
+        "updated_at",
+    )
+
+    fieldsets = (
+        ("Identity", {"fields": ("document", "result_type", "engine")}),
+        ("Processing", {"fields": ("status", "error_code", "error_details")}),
+        ("Text (read-only)", {"fields": ("text",)}),
+        ("Verification", {"fields": ("verification_status",)}),
+        ("Timestamps", {"fields": ("created_at", "updated_at")}),
+    )
