@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Document, CorrectionRequest
+from .models import Document, CorrectionRequest, DocumentTextResult
 
 
 @admin.register(Document)
