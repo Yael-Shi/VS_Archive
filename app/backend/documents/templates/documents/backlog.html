@@ -131,19 +131,27 @@
     </thead>
     <tbody>
         {% for d in docs %}
-            <tr class="{% if not d.tags_m2m.exists or (d.admin_meta and not d.admin_meta.donor and not d.admin_meta.collection and not d.admin_meta.original_location and not d.admin_meta.notes) %}needs-attention{% endif %}">
+
+            {% if not d.tags_m2m.exists %}
+                <tr class="needs-attention">
+            {% elif d.admin_meta and not d.admin_meta.donor and not d.admin_meta.collection and not d.admin_meta.original_location and not d.admin_meta.notes %}
+                <tr class="needs-attention">
+            {% else %}
+                <tr>
+            {% endif %}
+
                 <td>{{ d.id }}</td>
                 <td><a href="/api/ui/documents/{{ d.id }}/">{{ d.title }}</a></td>
                 <td>{{ d.doc_type }}</td>
 
                 <td>
-                  {% if d.tags_m2m.exists %}
+                {% if d.tags_m2m.exists %}
                     {% for t in d.tags_m2m.all %}
-                      {{ t.name }}{% if not forloop.last %}, {% endif %}
+                    {{ t.name }}{% if not forloop.last %}, {% endif %}
                     {% endfor %}
-                  {% else %}
+                {% else %}
                     <span class="badge warn">NO TAGS</span>
-                  {% endif %}
+                {% endif %}
                 </td>
 
                 <td>
@@ -176,6 +184,7 @@
                     </a>
                 </td>
             </tr>
+
         {% empty %}
             <tr>
                 <td colspan="7">No backlog items 🎉</td>
