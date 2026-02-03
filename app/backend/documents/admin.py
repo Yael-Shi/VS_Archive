@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Document, CorrectionRequest, DocumentTextResult, Tag
+from .models import Document, CorrectionRequest, DocumentTextResult, Tag, DocumentMetadata
 
 
 @admin.register(Tag)
@@ -9,8 +9,18 @@ class TagAdmin(admin.ModelAdmin):
     ordering = ("name",)
 
 
+class DocumentMetadataInline(admin.StackedInline):
+    model = DocumentMetadata
+    extra = 0
+    can_delete = False
+    fields = ("notes", "donor", "collection", "original_location", "created_at", "updated_at")
+    readonly_fields = ("created_at", "updated_at")
+
+
 @admin.register(Document)
 class DocumentAdmin(admin.ModelAdmin):
+    inlines = (DocumentMetadataInline,)
+
     list_display = (
         "id",
         "title",
@@ -44,7 +54,7 @@ class DocumentAdmin(admin.ModelAdmin):
         (
             "Optional metadata",
             {
-                "fields": ("date_start", "date_end", "language", "category_event", "tags_m2m", "metadata")
+                "fields": ("date_start", "date_end", "language", "category_event", "tags_m2m")
             },
         ),
         (

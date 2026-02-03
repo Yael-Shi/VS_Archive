@@ -31,7 +31,6 @@ class Document(models.Model):
     category_event = models.CharField(max_length=255, null=True, blank=True)
 
     tags_m2m = models.ManyToManyField("Tag", blank=True, related_name="documents")
-    metadata = models.JSONField(default=dict)  # flexible metadata
 
     # Metadata completion status
     metadata_status = models.CharField(
@@ -170,3 +169,27 @@ class Tag(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+
+class DocumentMetadata(models.Model):
+    document = models.OneToOneField(
+        Document, on_delete=models.CASCADE, related_name="admin_meta"
+    )
+
+    notes = models.TextField(blank=True, default="")
+    donor = models.CharField(max_length=255, blank=True, default="")
+    collection = models.CharField(max_length=255, blank=True, default="")
+    original_location = models.CharField(max_length=255, blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["donor"]),
+            models.Index(fields=["collection"]),
+            models.Index(fields=["original_location"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"DocumentMetadata(document_id={self.document_id})"
