@@ -118,7 +118,7 @@ def _serialize_doc(d: Document) -> dict:
         "language": d.language,
         "doc_type": d.doc_type,
         "category_event": d.category_event,
-        "tags": list(d.tags_m2m.values_list("name", flat=True)),
+        "tags": [t.name for t in d.tags_m2m.all()],
         "admin_meta": admin_meta,
         "metadata_status": getattr(d, "metadata_status", None),
         "visibility": d.visibility,
@@ -440,9 +440,13 @@ def admin_backlog_page(request):
     limit = 50
     offset = _parse_int(request.GET.get("offset"), default=0, min_value=0)
 
-    qs = Document.objects.filter(
-        metadata_status=Document.MetadataStatus.NEEDS_COMPLETION
-    ).order_by("-created_at")
+    qs = (
+        Document.objects
+        .select_related("admin_meta")
+        .prefetch_related("tags_m2m")
+        .filter(metadata_status=Document.MetadataStatus.NEEDS_COMPLETION)
+        .order_by("-created_at")
+    )
 
     total = qs.count()
     docs = list(qs[offset : offset + limit])
@@ -469,9 +473,9 @@ def admin_backlog_page(request):
 
 @login_required
 def document_detail_page(request, doc_id: int):
-    # Minimal V1 document viewer (inline): PDF in iframe, IMAGE in img
     try:
-        doc = Document.objects.get(id=doc_id)
+        doc = Document.objects.select_related("admin_meta").get(id=doc_id)
+        admin_meta = getattr(doc, "admin_meta", None)
     except Document.DoesNotExist:
         return JsonResponse({"error": "not found"}, status=404)
 
@@ -487,6 +491,7 @@ def document_detail_page(request, doc_id: int):
     context = {
         "doc": doc,
         "content_url": content_url,
+        "admin_meta": admin_meta,
     }
     logger.info(
         "document_detail_page user=%s doc_id=%s has_content_url=%s mime_type=%r",

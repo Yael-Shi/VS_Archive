@@ -33,12 +33,6 @@
 
   <form id="uploadForm">
     <label for="file">File *</label>
-    <!--
-      V1.5 behavior:
-      - If doc_type=IMAGE: allow image/* and enable camera capture on mobile.
-      - If doc_type=PDF: allow application/pdf and disable capture.
-      The input is updated dynamically by JS.
-    -->
     <input id="file" name="file" type="file" required />
     <div class="hint">
       Mobile: choose an image from gallery or take a photo (when doc_type=IMAGE).
@@ -94,10 +88,24 @@
     <input id="tags" name="tags" type="text" placeholder="e.g. family, jerusalem, 1948" />
     <div class="hint">Optional. Will be converted to a list of strings.</div>
 
-    <label for="metadata">Metadata (JSON)</label>
-    <textarea id="metadata" name="metadata"
-      placeholder='{"source":"manual","note":"..."}'></textarea>
-    <div class="hint">Optional. If empty, an empty object will be sent.</div>
+    <h3 style="margin-top: 18px;">Admin metadata (optional)</h3>
+
+    <div class="row">
+      <div>
+        <label for="donor">Donor</label>
+        <input id="donor" name="donor" type="text" placeholder="e.g. Yael Shifman" />
+      </div>
+      <div>
+        <label for="collection">Collection</label>
+        <input id="collection" name="collection" type="text" placeholder="e.g. Family archive" />
+      </div>
+    </div>
+
+    <label for="original_location">Original location</label>
+    <input id="original_location" name="original_location" type="text" placeholder="e.g. Jerusalem" />
+
+    <label for="notes">Notes</label>
+    <textarea id="notes" name="notes" placeholder="Optional admin notes..."></textarea>
 
     <button id="submitBtn" type="submit">Upload</button>
   </form>
@@ -123,21 +131,6 @@
       .filter(Boolean);
   }
 
-  function safeJsonParseObjectOrEmpty(text) {
-    const trimmed = (text || "").trim();
-    if (!trimmed) return {};
-    let obj;
-    try {
-      obj = JSON.parse(trimmed);
-    } catch (e) {
-      throw new Error("metadata must be valid JSON");
-    }
-    if (obj === null || Array.isArray(obj) || typeof obj !== "object") {
-      throw new Error("metadata must be a JSON object (dictionary)");
-    }
-    return obj;
-  }
-
   async function jsonFetch(url, options) {
     const res = await fetch(url, options);
     const text = await res.text();
@@ -151,21 +144,16 @@
   }
 
   function isMobileBrowser() {
-    // Heuristic: enough for V1.
     const ua = navigator.userAgent || "";
     return /Android|iPhone|iPad|iPod/i.test(ua);
   }
 
   function applyFileInputMode() {
-    // V1.5 behavior:
-    // - IMAGE: accept images, enable capture on mobile
-    // - PDF: accept pdf only, disable capture
     const dt = docTypeEl.value;
 
     if (dt === "IMAGE") {
       fileEl.setAttribute("accept", "image/*");
       if (isMobileBrowser()) {
-        // Best-effort: ask for back camera on mobile browsers that support it.
         fileEl.setAttribute("capture", "environment");
       } else {
         fileEl.removeAttribute("capture");
@@ -174,7 +162,6 @@
       fileEl.setAttribute("accept", "application/pdf");
       fileEl.removeAttribute("capture");
     } else {
-      // Unknown/empty: allow both, no capture.
       fileEl.setAttribute("accept", "application/pdf,image/*");
       fileEl.removeAttribute("capture");
     }
@@ -203,22 +190,25 @@
     const visibility = document.getElementById("visibility").value || "private";
 
     const tagsRaw = document.getElementById("tags").value;
-    const metadataText = document.getElementById("metadata").value;
+
+    const donor = document.getElementById("donor").value.trim();
+    const collection = document.getElementById("collection").value.trim();
+    const original_location = document.getElementById("original_location").value.trim();
+    const notes = document.getElementById("notes").value.trim();
 
     if (!title || !doc_type) {
       setMessage("error", "Please fill all required fields (title, doc_type).");
       return;
     }
 
-    let metadata;
-    try {
-      metadata = safeJsonParseObjectOrEmpty(metadataText);
-    } catch (err) {
-      setMessage("error", err.message);
-      return;
-    }
-
     const tags = parseTags(tagsRaw);
+
+    const admin_meta = {
+      donor,
+      collection,
+      original_location,
+      notes
+    };
 
     submitBtn.disabled = true;
     submitBtn.classList.add("disabled");
@@ -231,13 +221,12 @@
         doc_type,
         visibility,
         tags,
-        metadata,
+        admin_meta,
         original_name: file.name,
         mime_type: file.type || "application/octet-stream",
         size_bytes: file.size
       };
 
-      // Optional fields: only send if present
       if (date_start) createPayload.date_start = date_start;
       if (date_end) createPayload.date_end = date_end;
       if (language) createPayload.language = language;
