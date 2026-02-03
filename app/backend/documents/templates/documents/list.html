@@ -55,6 +55,12 @@
         .actions a {
             margin-right: 12px;
         }
+
+        .muted {
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 2px;
+        }
     </style>
 </head>
 <body>
@@ -67,7 +73,7 @@
         <input
             type="text"
             name="q"
-            placeholder="Search (title, metadata, tags...)"
+            placeholder="Search (title, tags, admin notes, donor...)"
             value="{{ q }}"
         />
     </div>
@@ -129,6 +135,7 @@
             <th>Date range</th>
             <th>Language</th>
             <th>Type</th>
+            <th>Admin metadata</th>
             <th>Metadata status</th>
             <th>Upload status</th>
             <th>Visibility</th>
@@ -144,6 +151,26 @@
                 <td>{{ d.date_start }} – {{ d.date_end }}</td>
                 <td>{{ d.language }}</td>
                 <td>{{ d.doc_type }}</td>
+
+                <td>
+                    {% if d.admin_meta %}
+                        {% if d.admin_meta.donor %}
+                            <div><strong>Donor:</strong> {{ d.admin_meta.donor }}</div>
+                        {% endif %}
+                        {% if d.admin_meta.collection %}
+                            <div><strong>Collection:</strong> {{ d.admin_meta.collection }}</div>
+                        {% endif %}
+                        {% if d.admin_meta.original_location %}
+                            <div><strong>Location:</strong> {{ d.admin_meta.original_location }}</div>
+                        {% endif %}
+                        {% if not d.admin_meta.donor and not d.admin_meta.collection and not d.admin_meta.original_location %}
+                            <div class="muted">—</div>
+                        {% endif %}
+                    {% else %}
+                        <div class="muted">—</div>
+                    {% endif %}
+                </td>
+
                 <td>{{ d.metadata_status }}</td>
                 <td>{{ d.upload_status }}</td>
                 <td>{{ d.visibility }}</td>
@@ -152,7 +179,7 @@
             </tr>
         {% empty %}
             <tr>
-                <td colspan="10">No documents found</td>
+                <td colspan="11">No documents found</td>
             </tr>
         {% endfor %}
     </tbody>

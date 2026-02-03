@@ -222,7 +222,6 @@ class VsArchiveAppStack(Stack):
             },
         )
 
-
         ecs.FargateService(
             self,
             f"{cfg.prefix}-worker-svc",

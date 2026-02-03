@@ -5,13 +5,12 @@ from typing import Optional
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required, user_passes_test
-from django.db.models import Q, TextField
-from django.db.models.functions import Cast
+from django.db.models import Q
 from django.http import HttpResponseBadRequest, JsonResponse
 from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 
-from .models import Document
+from .models import Document, Tag, DocumentMetadata
 from documents.services.sqs import send_process_document_message
 from .s3 import create_presigned_put, create_presigned_get
 
@@ -61,7 +60,13 @@ def _base_queryset(
     doc_type: str,
     metadata_status: str,
 ):
-    qs = Document.objects.all().order_by("-created_at")
+    # admin_meta is a OneToOne relation; tags_m2m is ManyToMany.
+    qs = (
+        Document.objects.all()
+        .select_related("admin_meta")
+        .prefetch_related("tags_m2m")
+        .order_by("-created_at")
+    )
 
     if upload_status:
         qs = qs.filter(upload_status=upload_status)
@@ -77,22 +82,34 @@ def _base_queryset(
 
     q = (q or "").strip()
     if q:
-        # For V1 simplicity: cast JSON fields to text and do an icontains search.
-        qs = qs.annotate(
-            metadata_text=Cast("metadata", output_field=TextField()),
-            tags_text=Cast("tags", output_field=TextField()),
-        ).filter(
+        qs = qs.filter(
             Q(title__icontains=q)
             | Q(category_event__icontains=q)
             | Q(file_original_name__icontains=q)
-            | Q(metadata_text__icontains=q)
-            | Q(tags_text__icontains=q)
-        )
+            | Q(tags_m2m__name__icontains=q)
+            | Q(admin_meta__notes__icontains=q)
+            | Q(admin_meta__donor__icontains=q)
+            | Q(admin_meta__collection__icontains=q)
+            | Q(admin_meta__original_location__icontains=q)
+        ).distinct()
 
     return qs
 
 
 def _serialize_doc(d: Document) -> dict:
+    admin_meta = None
+    # select_related("admin_meta") ensures this is not an extra query.
+    if getattr(d, "admin_meta", None) is not None:
+        m = d.admin_meta
+        admin_meta = {
+            "notes": m.notes,
+            "donor": m.donor,
+            "collection": m.collection,
+            "original_location": m.original_location,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+            "updated_at": m.updated_at.isoformat() if m.updated_at else None,
+        }
+
     return {
         "id": d.id,
         "title": d.title,
@@ -101,11 +118,12 @@ def _serialize_doc(d: Document) -> dict:
         "language": d.language,
         "doc_type": d.doc_type,
         "category_event": d.category_event,
-        "tags": d.tags,
-        "metadata": d.metadata,
+        "tags": [t.name for t in d.tags_m2m.all()],
+        "admin_meta": admin_meta,
         "metadata_status": getattr(d, "metadata_status", None),
         "visibility": d.visibility,
         "upload_status": d.upload_status,
+        "processing_state_user": d.processing_state_user,
         "file_s3_key": d.file_s3_key,
         "file_original_name": d.file_original_name,
         "mime_type": d.mime_type,
@@ -143,7 +161,8 @@ def create_upload(request):
     visibility = (payload.get("visibility") or "private").strip()
 
     tags = payload.get("tags", None)
-    metadata = payload.get("metadata", None)
+
+    admin_meta = payload.get("admin_meta", None)
 
     # File info
     mime_type = (
@@ -167,10 +186,10 @@ def create_upload(request):
     if not isinstance(tags, list):
         return _bad("tags must be a list")
 
-    if metadata is None:
-        metadata = {}
-    if not isinstance(metadata, dict):
-        return _bad("metadata must be an object")
+    if admin_meta is None:
+        admin_meta = {}
+    if not isinstance(admin_meta, dict):
+        return _bad("admin_meta must be an object")
 
     if visibility not in ("private", "public"):
         return _bad("visibility must be private or public")
@@ -190,15 +209,30 @@ def create_upload(request):
         date_end=de,
         language=language,
         category_event=category_event,
-        tags=tags,
-        metadata=metadata,
         visibility=visibility,
         upload_status=Document.UploadStatus.UPLOADING,
         file_original_name=original_name,
         mime_type=mime_type,
         size_bytes=size_bytes if isinstance(size_bytes, int) else None,
-        # metadata_status default should be NEEDS_COMPLETION in the model
     )
+
+    DocumentMetadata.objects.create(
+        document=doc,
+        notes=str(admin_meta.get("notes") or ""),
+        donor=str(admin_meta.get("donor") or ""),
+        collection=str(admin_meta.get("collection") or ""),
+        original_location=str(admin_meta.get("original_location") or ""),
+    )
+
+    # Add tags via M2M
+    for raw in tags:
+        if raw is None:
+            continue
+        name = str(raw).strip()
+        if not name:
+            continue
+        tag_obj, _ = Tag.objects.get_or_create(name=name)
+        doc.tags_m2m.add(tag_obj)
 
     # Create a stable key
     ext = "bin"
@@ -290,7 +324,9 @@ def upload_complete(request, doc_id: int):
         doc.upload_status = Document.UploadStatus.FAILED
         doc.upload_error = (payload.get("error") or "upload failed").strip()
         doc.processing_state_user = Document.ProcessingState.FAILED
-        doc.save(update_fields=["upload_status", "upload_error", "processing_state_user"])
+        doc.save(
+            update_fields=["upload_status", "upload_error", "processing_state_user"]
+        )
 
     return JsonResponse(
         {
@@ -300,9 +336,10 @@ def upload_complete(request, doc_id: int):
         }
     )
 
+
 @login_required
 def documents_list_api(request):
-    # Additive V1 endpoint: list documents with free-text search over metadata.
+    # List documents with free-text search over core fields + admin_meta + tags.
     q = request.GET.get("q", "") or ""
     upload_status = (request.GET.get("upload_status") or "").strip()
     visibility = (request.GET.get("visibility") or "").strip()
@@ -405,9 +442,12 @@ def admin_backlog_page(request):
     limit = 50
     offset = _parse_int(request.GET.get("offset"), default=0, min_value=0)
 
-    qs = Document.objects.filter(
-        metadata_status=Document.MetadataStatus.NEEDS_COMPLETION
-    ).order_by("-created_at")
+    qs = (
+        Document.objects.select_related("admin_meta")
+        .prefetch_related("tags_m2m")
+        .filter(metadata_status=Document.MetadataStatus.NEEDS_COMPLETION)
+        .order_by("-created_at")
+    )
 
     total = qs.count()
     docs = list(qs[offset : offset + limit])
@@ -434,9 +474,9 @@ def admin_backlog_page(request):
 
 @login_required
 def document_detail_page(request, doc_id: int):
-    # Minimal V1 document viewer (inline): PDF in iframe, IMAGE in img
     try:
-        doc = Document.objects.get(id=doc_id)
+        doc = Document.objects.select_related("admin_meta").get(id=doc_id)
+        admin_meta = getattr(doc, "admin_meta", None)
     except Document.DoesNotExist:
         return JsonResponse({"error": "not found"}, status=404)
 
@@ -452,6 +492,7 @@ def document_detail_page(request, doc_id: int):
     context = {
         "doc": doc,
         "content_url": content_url,
+        "admin_meta": admin_meta,
     }
     logger.info(
         "document_detail_page user=%s doc_id=%s has_content_url=%s mime_type=%r",

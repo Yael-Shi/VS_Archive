@@ -11,6 +11,7 @@
     iframe { width: 100%; height: 80vh; border: 1px solid #ccc; }
     .actions a { margin-right: 12px; }
     code { background: #f5f5f5; padding: 2px 4px; }
+    .section { margin-top: 18px; }
   </style>
 </head>
 <body>
@@ -23,7 +24,13 @@
 
   <div class="meta">
     <div><strong>ID:</strong> {{ doc.id }}</div>
-    <div><strong>Date range:</strong> {{ doc.date_start }} – {{ doc.date_end }}</div>
+    <div><strong>Date range:</strong>
+      {% if doc.date_start or doc.date_end %}
+        {{ doc.date_start }} – {{ doc.date_end }}
+      {% else %}
+        -
+      {% endif %}
+    </div>
     <div><strong>Language:</strong> {{ doc.language }}</div>
     <div><strong>Doc type:</strong> {{ doc.doc_type }}</div>
     <div><strong>Status:</strong> {{ doc.upload_status }}</div>
@@ -32,6 +39,16 @@
       <div><strong>Error:</strong> {{ doc.upload_error }}</div>
     {% endif %}
   </div>
+
+  {% if admin_meta %}
+    <div class="section">
+      <h3>Admin metadata</h3>
+      {% if admin_meta.donor %}<div><strong>Donor:</strong> {{ admin_meta.donor }}</div>{% endif %}
+      {% if admin_meta.collection %}<div><strong>Collection:</strong> {{ admin_meta.collection }}</div>{% endif %}
+      {% if admin_meta.original_location %}<div><strong>Original location:</strong> {{ admin_meta.original_location }}</div>{% endif %}
+      {% if admin_meta.notes %}<div><strong>Notes:</strong> {{ admin_meta.notes }}</div>{% endif %}
+    </div>
+  {% endif %}
 
   {% if not content_url %}
     <p>
@@ -42,7 +59,6 @@
     </p>
   {% else %}
     <div class="actions">
-      <!-- Open in new tab (still inline), user can download from the browser UI if needed -->
       <a href="{{ content_url }}" target="_blank" rel="noopener noreferrer">Open in new tab</a>
     </div>
 

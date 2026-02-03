@@ -30,8 +30,7 @@ class Document(models.Model):
     language = models.CharField(max_length=16, null=True, blank=True)  # he/en/ar/fr
     category_event = models.CharField(max_length=255, null=True, blank=True)
 
-    tags = models.JSONField(default=list)  # list[str]
-    metadata = models.JSONField(default=dict)  # flexible metadata
+    tags_m2m = models.ManyToManyField("Tag", blank=True, related_name="documents")
 
     # Metadata completion status
     metadata_status = models.CharField(
@@ -155,3 +154,42 @@ class CorrectionRequest(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class Tag(models.Model):
+    name = models.CharField(max_length=64, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        indexes = [
+            models.Index(fields=["name"]),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class DocumentMetadata(models.Model):
+    document = models.OneToOneField(
+        Document, on_delete=models.CASCADE, related_name="admin_meta"
+    )
+
+    notes = models.TextField(blank=True, default="")
+    donor = models.CharField(max_length=255, blank=True, default="")
+    collection = models.CharField(max_length=255, blank=True, default="")
+    original_location = models.CharField(max_length=255, blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["donor"]),
+            models.Index(fields=["collection"]),
+            models.Index(fields=["original_location"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"DocumentMetadata(document_id={self.document_id})"

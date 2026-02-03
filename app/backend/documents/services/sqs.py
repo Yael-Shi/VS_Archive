@@ -14,7 +14,9 @@ def _required_env(name: str) -> str:
 
 def send_process_document_message(document_id: int) -> None:
     queue_url = _required_env("SQS_QUEUE_URL")
-    region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "eu-central-1"
+    region = (
+        os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "eu-central-1"
+    )
 
     sqs = boto3.client("sqs", region_name=region)
     payload: Dict[str, Any] = {"type": "PROCESS_DOCUMENT", "document_id": document_id}
