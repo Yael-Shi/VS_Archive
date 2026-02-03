@@ -23,6 +23,11 @@ def _env(name: str) -> str:
     return value
 
 
+def _is_hebrew_language(language: Optional[str]) -> bool:
+    lang = (language or "").strip().lower()
+    return lang in ("he", "heb", "hebrew")
+
+
 class Command(BaseCommand):
     help = "Run the async worker: poll SQS and process document jobs."
 
@@ -88,15 +93,9 @@ class Command(BaseCommand):
             ok = self._process_message(msg)
             if ok:
                 self._delete_message(sqs, queue_url, msg)
-            else:
-                # Do not delete; let SQS visibility timeout expire and retry.
-                # (Later we can add a DLQ policy / max receives.)
-                pass
 
             if once:
-                self.stdout.write(
-                    "[run_worker] processed one message; exiting (--once)."
-                )
+                self.stdout.write("[run_worker] processed one message; exiting (--once).")
                 return
 
     def _receive_one(
@@ -147,11 +146,8 @@ class Command(BaseCommand):
             )
             return False
 
-        job_type = payload.get("type")
-        if job_type != "PROCESS_DOCUMENT":
-            self.stderr.write(
-                self.style.ERROR(f"[run_worker] unknown job type: {job_type!r}")
-            )
+        if payload.get("type") != "PROCESS_DOCUMENT":
+            self.stderr.write(self.style.ERROR(f"[run_worker] unknown job type: {payload.get('type')!r}"))
             return False
 
         document_id = payload.get("document_id")
@@ -163,8 +159,6 @@ class Command(BaseCommand):
 
         self.stdout.write(f"[run_worker] processing document_id={document_id}")
 
-        # Slice 1 behavior: dummy processing.
-        # We mark the doc as READY (or FAILED) and persist a simple marker.
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
@@ -177,32 +171,73 @@ class Command(BaseCommand):
                     )
                     return True  # delete message; nothing to do
 
-                # mark processing → ready (dummy slice 1)
+                # mark as processing
                 doc.processing_state_user = Document.ProcessingState.PROCESSING
                 doc.save(update_fields=["processing_state_user"])
 
-                DocumentTextResult.objects.create(
-                    document=doc,
-                    result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
-                    engine="engine_v1",
-                    status=DocumentTextResult.Status.SUCCEEDED,
-                    verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
-                    text=f"dummy source text for document_id={doc.id}",
-                )
+                is_he = _is_hebrew_language(doc.language)
 
-                doc.processing_state_user = Document.ProcessingState.READY
+                # Produce text results (dummy for now, but correct ResultTypes and rules)
+                if is_he:
+                    # Hebrew doc => only HEBREW_TEXT (clean transcription)
+                    DocumentTextResult.objects.create(
+                        document=doc,
+                        result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+                        engine="engine_v1",
+                        status=DocumentTextResult.Status.SUCCEEDED,
+                        verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+                        text=f"dummy hebrew transcription for document_id={doc.id}",
+                    )
+                else:
+                    # Non-Hebrew doc => SOURCE_TEXT + HEBREW_TEXT
+                    DocumentTextResult.objects.create(
+                        document=doc,
+                        result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+                        engine="engine_v1",
+                        status=DocumentTextResult.Status.SUCCEEDED,
+                        verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+                        text=f"dummy source text for document_id={doc.id}",
+                    )
+                    DocumentTextResult.objects.create(
+                        document=doc,
+                        result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+                        engine="engine_v1",
+                        status=DocumentTextResult.Status.SUCCEEDED,
+                        verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+                        text=f"dummy hebrew translation for document_id={doc.id}",
+                    )
+
+                # Decide user-visible processing state based on expected outputs
+                if is_he:
+                    has_hebrew = doc.text_results.filter(
+                        result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+                        status=DocumentTextResult.Status.SUCCEEDED,
+                    ).exists()
+                    missing_expected = not has_hebrew
+                else:
+                    has_source = doc.text_results.filter(
+                        result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+                        status=DocumentTextResult.Status.SUCCEEDED,
+                    ).exists()
+                    has_hebrew = doc.text_results.filter(
+                        result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+                        status=DocumentTextResult.Status.SUCCEEDED,
+                    ).exists()
+                    missing_expected = (not has_source) or (not has_hebrew)
+
+                if missing_expected:
+                    doc.processing_state_user = Document.ProcessingState.PARTIAL
+                else:
+                    doc.processing_state_user = Document.ProcessingState.READY
+
                 doc.save(update_fields=["processing_state_user"])
 
         except Document.DoesNotExist:
-            self.stderr.write(
-                self.style.ERROR(f"[run_worker] Document {document_id} not found")
-            )
+            self.stderr.write(self.style.ERROR(f"[run_worker] Document {document_id} not found"))
             return True  # delete message; job is stale
         except Exception as e:
             self.stderr.write(self.style.ERROR(f"[run_worker] processing failed: {e}"))
             return False
 
-        self.stdout.write(
-            self.style.SUCCESS(f"[run_worker] document {document_id} marked READY")
-        )
+        self.stdout.write(self.style.SUCCESS(f"[run_worker] document {document_id} processed; state={doc.processing_state_user}"))
         return True

@@ -12,6 +12,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from .models import Document, Tag, DocumentMetadata
 from documents.services.sqs import send_process_document_message
+from documents.services.text_presentation import get_text_presentation_for_document
 from .s3 import create_presigned_put, create_presigned_get
 
 logger = logging.getLogger(__name__)
@@ -519,7 +520,7 @@ def document_detail_page(request, doc_id: int):
     try:
         doc = (
             Document.objects.select_related("admin_meta")
-            .prefetch_related("tags_m2m")
+            .prefetch_related("tags_m2m", "text_results")
             .get(id=doc_id)
         )
         admin_meta = getattr(doc, "admin_meta", None)
@@ -535,17 +536,21 @@ def document_detail_page(request, doc_id: int):
             bucket=bucket, key=doc.file_s3_key, expires_in=3600
         )
 
+    text_presentation = get_text_presentation_for_document(doc)
+
     context = {
         "doc": doc,
         "content_url": content_url,
         "admin_meta": admin_meta,
+        "text_presentation": text_presentation,
     }
     logger.info(
-        "document_detail_page user=%s doc_id=%s has_content_url=%s mime_type=%r",
+        "document_detail_page user=%s doc_id=%s has_content_url=%s mime_type=%r missing_text=%s",
         getattr(request.user, "username", None),
         doc.id,
         bool(content_url),
         doc.mime_type,
+        text_presentation.missing,
     )
 
     return render(request, "documents/detail.html", context)
