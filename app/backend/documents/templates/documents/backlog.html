@@ -78,31 +78,6 @@
   </a>
 </div>
 
-<!-- Checkbox filters (optional, more flexible) -->
-<form method="get" class="section">
-  <!-- when applying filters, reset pagination -->
-  <input type="hidden" name="offset" value="0" />
-
-  <label>
-    <input type="checkbox" name="only_missing_tags" value="1"
-           {% if only_missing_tags %}checked{% endif %}>
-    Show only documents without tags
-  </label>
-
-  <br/>
-
-  <label>
-    <input type="checkbox" name="only_missing_admin_meta" value="1"
-           {% if only_missing_admin_meta %}checked{% endif %}>
-    Show only documents with empty admin metadata
-  </label>
-
-  <div class="actions">
-    <button type="submit">Apply filters</button>
-    <a href="/api/ui/admin/backlog/" style="margin-left: 12px;">Clear</a>
-  </div>
-</form>
-
 <!-- Summary -->
 <div class="section">
   <p>
