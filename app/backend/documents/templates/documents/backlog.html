@@ -11,7 +11,24 @@
         .pagination { margin-top: 16px; }
         .pagination a { margin-right: 12px; }
         .actions { margin-top: 16px; }
+        .section { margin-top: 14px; }
+        button { padding: 6px 10px; }
         .muted { color: #666; font-size: 0.9em; }
+        .badge {
+            display: inline-block;
+            padding: 2px 6px;
+            font-size: 0.8em;
+            border-radius: 4px;
+            background-color: #eee;
+            color: #333;
+        }
+        .badge.warn {
+            background-color: #ffe5e5;
+            color: #a40000;
+        }
+        tr.needs-attention {
+            background-color: #fff9f0;
+        }
     </style>
 </head>
 <body>
@@ -22,9 +39,42 @@
   <a href="/api/ui/documents/">← Back to list</a>
 </div>
 
-<p>
-    Showing {{ docs|length }} of {{ total }} documents
-</p>
+<form method="get" class="section">
+  <!-- keep pagination sane: when filters change, reset offset -->
+  <input type="hidden" name="offset" value="0" />
+
+  <label>
+    <input type="checkbox" name="only_missing_tags" value="1"
+           {% if only_missing_tags %}checked{% endif %}>
+    Show only documents without tags
+  </label>
+
+  <br/>
+
+  <label>
+    <input type="checkbox" name="only_missing_admin_meta" value="1"
+           {% if only_missing_admin_meta %}checked{% endif %}>
+    Show only documents with empty admin metadata
+  </label>
+
+  <div class="actions">
+    <button type="submit">Apply filters</button>
+    <a href="/api/ui/admin/backlog/" style="margin-left: 12px;">Clear</a>
+  </div>
+</form>
+
+<div class="section">
+  <p>
+    <strong>Backlog summary:</strong>
+    Total needing completion: <strong>{{ total_backlog }}</strong> |
+    Without tags: <strong>{{ missing_tags_count }}</strong> |
+    With empty admin metadata: <strong>{{ missing_admin_meta_count }}</strong>
+  </p>
+
+  <p class="muted">
+    Showing {{ docs|length }} of {{ total }} documents (after filters)
+  </p>
+</div>
 
 <table>
     <thead>
@@ -40,18 +90,18 @@
     </thead>
     <tbody>
         {% for d in docs %}
-            <tr>
+            <tr class="{% if not d.tags_m2m.exists %}needs-attention{% endif %}"></tr>
                 <td>{{ d.id }}</td>
                 <td><a href="/api/ui/documents/{{ d.id }}/">{{ d.title }}</a></td>
                 <td>{{ d.doc_type }}</td>
 
                 <td>
-                    {% if d.tags_m2m.all %}
+                    {% if d.tags_m2m.exists %}
                         {% for t in d.tags_m2m.all %}
-                            {{ t.name }}{% if not forloop.last %}, {% endif %}
+                        {{ t.name }}{% if not forloop.last %}, {% endif %}
                         {% endfor %}
                     {% else %}
-                        <span class="muted">—</span>
+                        <span class="badge warn">NO TAGS</span>
                     {% endif %}
                 </td>
 
@@ -66,11 +116,11 @@
                         {% if d.admin_meta.original_location %}
                             <div><strong>Location:</strong> {{ d.admin_meta.original_location }}</div>
                         {% endif %}
-                        {% if not d.admin_meta.donor and not d.admin_meta.collection and not d.admin_meta.original_location %}
-                            <span class="muted">—</span>
+                        {% if not d.admin_meta.donor and not d.admin_meta.collection and not d.admin_meta.original_location and not d.admin_meta.notes %}
+                            <span class="badge warn">EMPTY META</span>
                         {% endif %}
                     {% else %}
-                        <span class="muted">—</span>
+                        <span class="muted">-</span>
                     {% endif %}
                 </td>
 
