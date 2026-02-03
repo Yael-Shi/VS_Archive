@@ -1,5 +1,11 @@
 from django.contrib import admin
-from .models import Document, CorrectionRequest, DocumentTextResult, Tag, DocumentMetadata
+from .models import (
+    Document,
+    CorrectionRequest,
+    DocumentTextResult,
+    Tag,
+    DocumentMetadata,
+)
 
 
 @admin.register(Tag)
@@ -13,7 +19,14 @@ class DocumentMetadataInline(admin.StackedInline):
     model = DocumentMetadata
     extra = 0
     can_delete = False
-    fields = ("notes", "donor", "collection", "original_location", "created_at", "updated_at")
+    fields = (
+        "notes",
+        "donor",
+        "collection",
+        "original_location",
+        "created_at",
+        "updated_at",
+    )
     readonly_fields = ("created_at", "updated_at")
 
 
@@ -49,17 +62,38 @@ class DocumentAdmin(admin.ModelAdmin):
         ("Core", {"fields": ("title", "doc_type")}),
         (
             "Status",
-            {"fields": ("metadata_status", "upload_status", "processing_state_user", "visibility")},
+            {
+                "fields": (
+                    "metadata_status",
+                    "upload_status",
+                    "processing_state_user",
+                    "visibility",
+                )
+            },
         ),
         (
             "Optional metadata",
             {
-                "fields": ("date_start", "date_end", "language", "category_event", "tags_m2m")
+                "fields": (
+                    "date_start",
+                    "date_end",
+                    "language",
+                    "category_event",
+                    "tags_m2m",
+                )
             },
         ),
         (
             "File (S3)",
-            {"fields": ("file_s3_key", "file_original_name", "mime_type", "size_bytes", "upload_error")},
+            {
+                "fields": (
+                    "file_s3_key",
+                    "file_original_name",
+                    "mime_type",
+                    "size_bytes",
+                    "upload_error",
+                )
+            },
         ),
         ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )

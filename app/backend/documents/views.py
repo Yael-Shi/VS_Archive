@@ -324,7 +324,9 @@ def upload_complete(request, doc_id: int):
         doc.upload_status = Document.UploadStatus.FAILED
         doc.upload_error = (payload.get("error") or "upload failed").strip()
         doc.processing_state_user = Document.ProcessingState.FAILED
-        doc.save(update_fields=["upload_status", "upload_error", "processing_state_user"])
+        doc.save(
+            update_fields=["upload_status", "upload_error", "processing_state_user"]
+        )
 
     return JsonResponse(
         {
@@ -441,8 +443,7 @@ def admin_backlog_page(request):
     offset = _parse_int(request.GET.get("offset"), default=0, min_value=0)
 
     qs = (
-        Document.objects
-        .select_related("admin_meta")
+        Document.objects.select_related("admin_meta")
         .prefetch_related("tags_m2m")
         .filter(metadata_status=Document.MetadataStatus.NEEDS_COMPLETION)
         .order_by("-created_at")

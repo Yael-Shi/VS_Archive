@@ -8,7 +8,6 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
-from django.utils import timezone
 
 from documents.models import Document, DocumentTextResult
 
@@ -54,7 +53,9 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         queue_url = _env("SQS_QUEUE_URL")
-        region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "eu-central-1"
+        region = (
+            os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "eu-central-1"
+        )
 
         once: bool = options["once"]
         sleep_seconds: int = options["sleep_seconds"]
@@ -93,7 +94,9 @@ class Command(BaseCommand):
                 pass
 
             if once:
-                self.stdout.write("[run_worker] processed one message; exiting (--once).")
+                self.stdout.write(
+                    "[run_worker] processed one message; exiting (--once)."
+                )
                 return
 
     def _receive_one(
@@ -122,11 +125,15 @@ class Command(BaseCommand):
     def _delete_message(self, sqs, queue_url: str, msg: Dict[str, Any]) -> None:
         receipt = msg.get("ReceiptHandle")
         if not receipt:
-            self.stderr.write(self.style.ERROR("[run_worker] missing ReceiptHandle; cannot delete"))
+            self.stderr.write(
+                self.style.ERROR("[run_worker] missing ReceiptHandle; cannot delete")
+            )
             return
         try:
             sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt)
-            self.stdout.write(self.style.SUCCESS("[run_worker] deleted message from SQS"))
+            self.stdout.write(
+                self.style.SUCCESS("[run_worker] deleted message from SQS")
+            )
         except (BotoCoreError, ClientError) as e:
             self.stderr.write(self.style.ERROR(f"[run_worker] SQS delete failed: {e}"))
 
@@ -135,17 +142,23 @@ class Command(BaseCommand):
         try:
             payload = json.loads(body)
         except Exception:
-            self.stderr.write(self.style.ERROR(f"[run_worker] invalid JSON body: {body!r}"))
+            self.stderr.write(
+                self.style.ERROR(f"[run_worker] invalid JSON body: {body!r}")
+            )
             return False
 
         job_type = payload.get("type")
         if job_type != "PROCESS_DOCUMENT":
-            self.stderr.write(self.style.ERROR(f"[run_worker] unknown job type: {job_type!r}"))
+            self.stderr.write(
+                self.style.ERROR(f"[run_worker] unknown job type: {job_type!r}")
+            )
             return False
 
         document_id = payload.get("document_id")
         if not isinstance(document_id, int):
-            self.stderr.write(self.style.ERROR("[run_worker] missing/invalid document_id"))
+            self.stderr.write(
+                self.style.ERROR("[run_worker] missing/invalid document_id")
+            )
             return False
 
         self.stdout.write(f"[run_worker] processing document_id={document_id}")
@@ -181,11 +194,15 @@ class Command(BaseCommand):
                 doc.save(update_fields=["processing_state_user"])
 
         except Document.DoesNotExist:
-            self.stderr.write(self.style.ERROR(f"[run_worker] Document {document_id} not found"))
+            self.stderr.write(
+                self.style.ERROR(f"[run_worker] Document {document_id} not found")
+            )
             return True  # delete message; job is stale
         except Exception as e:
             self.stderr.write(self.style.ERROR(f"[run_worker] processing failed: {e}"))
             return False
 
-        self.stdout.write(self.style.SUCCESS(f"[run_worker] document {document_id} marked READY"))
+        self.stdout.write(
+            self.style.SUCCESS(f"[run_worker] document {document_id} marked READY")
+        )
         return True
