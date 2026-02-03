@@ -30,7 +30,7 @@ class Document(models.Model):
     language = models.CharField(max_length=16, null=True, blank=True)  # he/en/ar/fr
     category_event = models.CharField(max_length=255, null=True, blank=True)
 
-    tags = models.JSONField(default=list)  # list[str]
+    tags_m2m = models.ManyToManyField("Tag", blank=True, related_name="documents")
     metadata = models.JSONField(default=dict)  # flexible metadata
 
     # Metadata completion status
@@ -155,3 +155,18 @@ class CorrectionRequest(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class Tag(models.Model):
+    name = models.CharField(max_length=64, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        indexes = [
+            models.Index(fields=["name"]),
+        ]
+
+    def __str__(self) -> str:
+        return self.name

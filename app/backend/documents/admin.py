@@ -1,5 +1,12 @@
 from django.contrib import admin
-from .models import Document, CorrectionRequest, DocumentTextResult
+from .models import Document, CorrectionRequest, DocumentTextResult, Tag
+
+
+@admin.register(Tag)
+class TagAdmin(admin.ModelAdmin):
+    list_display = ("id", "name", "created_at", "updated_at")
+    search_fields = ("name",)
+    ordering = ("name",)
 
 
 @admin.register(Document)
@@ -21,15 +28,29 @@ class DocumentAdmin(admin.ModelAdmin):
         "upload_status",
         "processing_state_user",
         "visibility",
+        "tags_m2m",
     )
-    search_fields = ("title", "category_event", "language")
+    search_fields = ("title", "category_event", "language", "tags_m2m__name")
     ordering = ("-created_at",)
+
+    filter_horizontal = ("tags_m2m",)
 
     fieldsets = (
         ("Core", {"fields": ("title", "doc_type")}),
-        ("Status", {"fields": ("metadata_status", "upload_status", "processing_state_user", "visibility")}),
-        ("Optional metadata", {"fields": ("date_start", "date_end", "language", "category_event", "tags", "metadata")}),
-        ("File (S3)", {"fields": ("file_s3_key", "file_original_name", "mime_type", "size_bytes", "upload_error")}),
+        (
+            "Status",
+            {"fields": ("metadata_status", "upload_status", "processing_state_user", "visibility")},
+        ),
+        (
+            "Optional metadata",
+            {
+                "fields": ("date_start", "date_end", "language", "category_event", "tags_m2m", "metadata")
+            },
+        ),
+        (
+            "File (S3)",
+            {"fields": ("file_s3_key", "file_original_name", "mime_type", "size_bytes", "upload_error")},
+        ),
         ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )
     readonly_fields = ("created_at", "updated_at")
@@ -59,7 +80,7 @@ class DocumentTextResultAdmin(admin.ModelAdmin):
     search_fields = ("document__id", "document__title")
     ordering = ("-created_at",)
 
-    # Read-only right now (v2). In the future will add edit option.
+    # Read-only right now (v2). In the future will add an edit option.
     readonly_fields = (
         "document",
         "result_type",

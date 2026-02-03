@@ -11,7 +11,7 @@ from django.http import HttpResponseBadRequest, JsonResponse
 from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 
-from .models import Document
+from .models import Document, Tag
 from documents.services.sqs import send_process_document_message
 from .s3 import create_presigned_put, create_presigned_get
 
@@ -61,7 +61,7 @@ def _base_queryset(
     doc_type: str,
     metadata_status: str,
 ):
-    qs = Document.objects.all().order_by("-created_at")
+    qs = Document.objects.all().prefetch_related("tags_m2m").order_by("-created_at")
 
     if upload_status:
         qs = qs.filter(upload_status=upload_status)
@@ -77,18 +77,16 @@ def _base_queryset(
 
     q = (q or "").strip()
     if q:
-        # For V1 simplicity: cast JSON fields to text and do an icontains search.
+        # For V2+: search tags via M2M relation, and keep JSON metadata search as-is.
         qs = qs.annotate(
             metadata_text=Cast("metadata", output_field=TextField()),
-            tags_text=Cast("tags", output_field=TextField()),
-        ).filter(
-            Q(title__icontains=q)
-            | Q(category_event__icontains=q)
-            | Q(file_original_name__icontains=q)
-            | Q(metadata_text__icontains=q)
-            | Q(tags_text__icontains=q)
-        )
-
+            ).filter(
+                Q(title__icontains=q)
+                | Q(category_event__icontains=q)
+                | Q(file_original_name__icontains=q)
+                | Q(metadata_text__icontains=q)
+                | Q(tags_m2m__name__icontains=q)
+                ).distinct()
     return qs
 
 
@@ -101,7 +99,7 @@ def _serialize_doc(d: Document) -> dict:
         "language": d.language,
         "doc_type": d.doc_type,
         "category_event": d.category_event,
-        "tags": d.tags,
+        "tags": list(d.tags_m2m.values_list("name", flat=True)),
         "metadata": d.metadata,
         "metadata_status": getattr(d, "metadata_status", None),
         "visibility": d.visibility,
@@ -190,7 +188,6 @@ def create_upload(request):
         date_end=de,
         language=language,
         category_event=category_event,
-        tags=tags,
         metadata=metadata,
         visibility=visibility,
         upload_status=Document.UploadStatus.UPLOADING,
@@ -199,6 +196,16 @@ def create_upload(request):
         size_bytes=size_bytes if isinstance(size_bytes, int) else None,
         # metadata_status default should be NEEDS_COMPLETION in the model
     )
+
+    # Add tags via M2M
+    for raw in tags:
+        if raw is None:
+            continue
+        name = str(raw).strip()
+        if not name:
+            continue
+        tag_obj, _ = Tag.objects.get_or_create(name=name)
+        doc.tags_m2m.add(tag_obj)
 
     # Create a stable key
     ext = "bin"
