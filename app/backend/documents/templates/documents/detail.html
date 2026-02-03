@@ -33,6 +33,15 @@
     </div>
     <div><strong>Language:</strong> {{ doc.language }}</div>
     <div><strong>Doc type:</strong> {{ doc.doc_type }}</div>
+    <div><strong>Tags:</strong>
+      {% if doc.tags_m2m.exists %}
+        {% for t in doc.tags_m2m.all %}
+          <span>{{ t.name }}</span>{% if not forloop.last %}, {% endif %}
+        {% endfor %}
+      {% else %}
+        -
+      {% endif %}
+    </div>
     <div><strong>Status:</strong> {{ doc.upload_status }}</div>
     <div><strong>Original filename:</strong> {{ doc.file_original_name }}</div>
     {% if doc.upload_error %}

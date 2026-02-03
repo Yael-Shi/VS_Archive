@@ -475,7 +475,11 @@ def admin_backlog_page(request):
 @login_required
 def document_detail_page(request, doc_id: int):
     try:
-        doc = Document.objects.select_related("admin_meta").get(id=doc_id)
+        doc = (
+            Document.objects.select_related("admin_meta")
+            .prefetch_related("tags_m2m")
+            .get(id=doc_id)
+        )
         admin_meta = getattr(doc, "admin_meta", None)
     except Document.DoesNotExist:
         return JsonResponse({"error": "not found"}, status=404)
