@@ -8,8 +8,13 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.conf import settings
 
 from documents.models import Document, DocumentTextResult
+from documents.s3 import get_object_bytes
+from documents.services.page_extraction import extract_pages
+from documents.services.htr_engine import HtrNotImplementedError, transcribe_pages
+
 
 # NOTE:
 # This command is meant to run inside the ECS "worker" container.
@@ -177,58 +182,138 @@ class Command(BaseCommand):
 
                 is_he = _is_hebrew_language(doc.language)
 
-                # Produce text results (dummy for now, but correct ResultTypes and rules)
-                if is_he:
-                    # Hebrew doc => only HEBREW_TEXT (clean transcription)
-                    DocumentTextResult.objects.create(
+                                # --- V2: Fetch file bytes from S3 ---
+                bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
+                if not bucket:
+                    raise RuntimeError("UPLOADS_BUCKET_NAME is not configured")
+
+                if not doc.file_s3_key:
+                    raise RuntimeError(f"Document {doc.id} missing file_s3_key")
+
+                file_bytes, s3_content_type = get_object_bytes(bucket=bucket, key=doc.file_s3_key)
+                effective_mime = (doc.mime_type or s3_content_type or "").strip()
+
+                # --- V2: Extract per-page images (PDF -> pages, IMAGE -> single page) ---
+                pages = extract_pages(file_bytes=file_bytes, mime_type=effective_mime)
+
+                # --- V2: Run HTR/OCR engine (placeholder for now) ---
+                # In V2 MVP we explicitly fail until the engine adapter is implemented,
+                # so we can evolve states correctly (FAILED / ACTION_REQUIRED) without dummy data.
+                engine_name = "htr_placeholder_v1"
+
+                def _create_result(result_type: str, status: str, text: str | None, error_code: str | None = None, error_details: str | None = None):
+                    return DocumentTextResult.objects.create(
                         document=doc,
-                        result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
-                        engine="engine_v1",
-                        status=DocumentTextResult.Status.SUCCEEDED,
+                        result_type=result_type,
+                        engine=engine_name,
+                        status=status,
                         verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
-                        text=f"dummy hebrew transcription for document_id={doc.id}",
+                        text=text,
+                        error_code=error_code,
+                        error_details=error_details,
                     )
-                else:
-                    # Non-Hebrew doc => SOURCE_TEXT + HEBREW_TEXT
-                    DocumentTextResult.objects.create(
-                        document=doc,
-                        result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
-                        engine="engine_v1",
-                        status=DocumentTextResult.Status.SUCCEEDED,
-                        verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
-                        text=f"dummy source text for document_id={doc.id}",
-                    )
-                    DocumentTextResult.objects.create(
-                        document=doc,
-                        result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
-                        engine="engine_v1",
-                        status=DocumentTextResult.Status.SUCCEEDED,
-                        verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
-                        text=f"dummy hebrew translation for document_id={doc.id}",
-                    )
+
+                # We treat Hebrew docs as "HEBREW_TEXT transcription".
+                # Non-Hebrew docs: "SOURCE_TEXT transcription" + (future) "HEBREW_TEXT translation".
+                try:
+                    if is_he:
+                        htr = transcribe_pages(pages=pages, language_hint=doc.language)
+                        status = (
+                            DocumentTextResult.Status.NEEDS_REVIEW
+                            if htr.needs_review
+                            else DocumentTextResult.Status.SUCCEEDED
+                        )
+                        _create_result(
+                            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+                            status=status,
+                            text=htr.text,
+                        )
+                    else:
+                        htr = transcribe_pages(pages=pages, language_hint=doc.language)
+                        status = (
+                            DocumentTextResult.Status.NEEDS_REVIEW
+                            if htr.needs_review
+                            else DocumentTextResult.Status.SUCCEEDED
+                        )
+                        _create_result(
+                            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+                            status=status,
+                            text=htr.text,
+                        )
+
+                        # Translation is a separate engine/result in SOT.
+                        # For step-1 we DO NOT implement translation yet.
+                        # We create a FAILED placeholder so states become PARTIAL (not READY),
+                        # making the missing translation explicit.
+                        _create_result(
+                            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+                            status=DocumentTextResult.Status.FAILED,
+                            text=None,
+                            error_code="TRANSLATION_NOT_IMPLEMENTED",
+                            error_details="Translation engine is not implemented yet (V2 step-2).",
+                        )
+
+                except HtrNotImplementedError as e:
+                    # Explicitly mark expected outputs as FAILED until engine exists.
+                    if is_he:
+                        _create_result(
+                            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+                            status=DocumentTextResult.Status.FAILED,
+                            text=None,
+                            error_code="HTR_NOT_IMPLEMENTED",
+                            error_details=str(e),
+                        )
+                    else:
+                        _create_result(
+                            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+                            status=DocumentTextResult.Status.FAILED,
+                            text=None,
+                            error_code="HTR_NOT_IMPLEMENTED",
+                            error_details=str(e),
+                        )
+                        _create_result(
+                            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+                            status=DocumentTextResult.Status.FAILED,
+                            text=None,
+                            error_code="TRANSLATION_NOT_IMPLEMENTED",
+                            error_details="Translation engine is not implemented yet (V2 step-2).",
+                        )
 
                 # Decide user-visible processing state based on expected outputs
-                if is_he:
-                    has_hebrew = doc.text_results.filter(
-                        result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
-                        status=DocumentTextResult.Status.SUCCEEDED,
-                    ).exists()
-                    missing_expected = not has_hebrew
-                else:
-                    has_source = doc.text_results.filter(
-                        result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
-                        status=DocumentTextResult.Status.SUCCEEDED,
-                    ).exists()
-                    has_hebrew = doc.text_results.filter(
-                        result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
-                        status=DocumentTextResult.Status.SUCCEEDED,
-                    ).exists()
-                    missing_expected = (not has_source) or (not has_hebrew)
+                                expected_types = (
+                    [DocumentTextResult.ResultType.HEBREW_TEXT]
+                    if is_he
+                    else [
+                        DocumentTextResult.ResultType.SOURCE_TEXT,
+                        DocumentTextResult.ResultType.HEBREW_TEXT,
+                    ]
+                )
 
-                if missing_expected:
-                    doc.processing_state_user = Document.ProcessingState.PARTIAL
+                # If any expected result is NEEDS_REVIEW -> ACTION_REQUIRED
+                any_needs_review = doc.text_results.filter(
+                    result_type__in=expected_types,
+                    status=DocumentTextResult.Status.NEEDS_REVIEW,
+                ).exists()
+
+                if any_needs_review:
+                    doc.processing_state_user = Document.ProcessingState.ACTION_REQUIRED
                 else:
-                    doc.processing_state_user = Document.ProcessingState.READY
+                    # Count succeeded/failed across expected outputs
+                    succeeded = doc.text_results.filter(
+                        result_type__in=expected_types,
+                        status=DocumentTextResult.Status.SUCCEEDED,
+                    ).count()
+                    failed = doc.text_results.filter(
+                        result_type__in=expected_types,
+                        status=DocumentTextResult.Status.FAILED,
+                    ).count()
+
+                    if succeeded == len(expected_types):
+                        doc.processing_state_user = Document.ProcessingState.READY
+                    elif failed == len(expected_types):
+                        doc.processing_state_user = Document.ProcessingState.FAILED
+                    else:
+                        doc.processing_state_user = Document.ProcessingState.PARTIAL
 
                 doc.save(update_fields=["processing_state_user"])
 

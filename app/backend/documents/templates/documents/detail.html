@@ -72,6 +72,12 @@
       </p>
     {% endif %}
 
+    {# Robust rule:
+       Hebrew docs => expected=["HEBREW_TEXT"] (no SOURCE_TEXT)
+       Non-Hebrew => expected includes SOURCE_TEXT + HEBREW_TEXT
+       So can decide based on expected, not on doc.language string equality.
+    #}
+
     {% if "SOURCE_TEXT" not in text_presentation.expected %}
       <h4>Hebrew transcription</h4>
       {% if text_presentation.hebrew %}
