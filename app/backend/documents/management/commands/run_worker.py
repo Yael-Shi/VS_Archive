@@ -280,7 +280,7 @@ class Command(BaseCommand):
                         )
 
                 # Decide user-visible processing state based on expected outputs
-                                expected_types = (
+                    expected_types = (
                     [DocumentTextResult.ResultType.HEBREW_TEXT]
                     if is_he
                     else [
