@@ -12,6 +12,9 @@
     .actions a { margin-right: 12px; }
     code { background: #f5f5f5; padding: 2px 4px; }
     .section { margin-top: 18px; }
+    pre { background: #fafafa; border: 1px solid #ddd; padding: 12px; white-space: pre-wrap; }
+    .badge { display: inline-block; padding: 2px 6px; border: 1px solid #999; border-radius: 6px; font-size: 12px; margin-right: 6px; }
+    .muted { color: #666; }
   </style>
 </head>
 <body>
@@ -33,7 +36,17 @@
     </div>
     <div><strong>Language:</strong> {{ doc.language }}</div>
     <div><strong>Doc type:</strong> {{ doc.doc_type }}</div>
+    <div><strong>Tags:</strong>
+      {% if doc.tags_m2m.exists %}
+        {% for t in doc.tags_m2m.all %}
+          <span>{{ t.name }}</span>{% if not forloop.last %}, {% endif %}
+        {% endfor %}
+      {% else %}
+        -
+      {% endif %}
+    </div>
     <div><strong>Status:</strong> {{ doc.upload_status }}</div>
+    <div><strong>Processing:</strong> {{ doc.processing_state_user }}</div>
     <div><strong>Original filename:</strong> {{ doc.file_original_name }}</div>
     {% if doc.upload_error %}
       <div><strong>Error:</strong> {{ doc.upload_error }}</div>
@@ -49,6 +62,60 @@
       {% if admin_meta.notes %}<div><strong>Notes:</strong> {{ admin_meta.notes }}</div>{% endif %}
     </div>
   {% endif %}
+
+  <div class="section">
+    <h3>Extracted text</h3>
+
+    {% if text_presentation.missing %}
+      <p class="muted">
+        Processing… missing: <code>{{ text_presentation.missing|join:", " }}</code>
+      </p>
+    {% endif %}
+
+    {# Robust rule:
+       Hebrew docs => expected=["HEBREW_TEXT"] (no SOURCE_TEXT)
+       Non-Hebrew => expected includes SOURCE_TEXT + HEBREW_TEXT
+       So can decide based on expected, not on doc.language string equality.
+    #}
+
+    {% if "SOURCE_TEXT" not in text_presentation.expected %}
+      <h4>Hebrew transcription</h4>
+      {% if text_presentation.hebrew %}
+        <div class="muted">
+          <span class="badge">{{ text_presentation.hebrew.status }}</span>
+          <span class="badge">{{ text_presentation.hebrew.verification_status }}</span>
+          <span class="muted">{{ text_presentation.hebrew.created_at }}</span>
+        </div>
+        <pre>{{ text_presentation.hebrew.text }}</pre>
+      {% else %}
+        <p class="muted">No Hebrew transcription available yet.</p>
+      {% endif %}
+    {% else %}
+      <h4>Source transcription</h4>
+      {% if text_presentation.source %}
+        <div class="muted">
+          <span class="badge">{{ text_presentation.source.status }}</span>
+          <span class="badge">{{ text_presentation.source.verification_status }}</span>
+          <span class="muted">{{ text_presentation.source.created_at }}</span>
+        </div>
+        <pre>{{ text_presentation.source.text }}</pre>
+      {% else %}
+        <p class="muted">No source transcription available yet.</p>
+      {% endif %}
+
+      <h4>Hebrew translation</h4>
+      {% if text_presentation.hebrew %}
+        <div class="muted">
+          <span class="badge">{{ text_presentation.hebrew.status }}</span>
+          <span class="badge">{{ text_presentation.hebrew.verification_status }}</span>
+          <span class="muted">{{ text_presentation.hebrew.created_at }}</span>
+        </div>
+        <pre>{{ text_presentation.hebrew.text }}</pre>
+      {% else %}
+        <p class="muted">No Hebrew translation available yet.</p>
+      {% endif %}
+    {% endif %}
+  </div>
 
   {% if not content_url %}
     <p>

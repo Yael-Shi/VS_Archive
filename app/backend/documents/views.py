@@ -12,6 +12,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from .models import Document, Tag, DocumentMetadata
 from documents.services.sqs import send_process_document_message
+from documents.services.text_presentation import get_text_presentation_for_document
 from .s3 import create_presigned_put, create_presigned_get
 
 logger = logging.getLogger(__name__)
@@ -442,31 +443,73 @@ def admin_backlog_page(request):
     limit = 50
     offset = _parse_int(request.GET.get("offset"), default=0, min_value=0)
 
-    qs = (
+    # Lightweight filters (UI-only; no new models)
+    only_missing_tags = (request.GET.get("only_missing_tags") or "").strip() == "1"
+    only_missing_admin_meta = (
+        (request.GET.get("only_missing_admin_meta") or "").strip() == "1"
+    )
+
+    base_qs = (
         Document.objects.select_related("admin_meta")
         .prefetch_related("tags_m2m")
         .filter(metadata_status=Document.MetadataStatus.NEEDS_COMPLETION)
         .order_by("-created_at")
+        .distinct()
     )
 
-    total = qs.count()
+    # Summary counts (computed on the base backlog set, before applying UI filters)
+    total_backlog = base_qs.count()
+    missing_tags_count = base_qs.filter(tags_m2m__isnull=True).distinct().count()
+
+    # "Missing admin meta content" means: admin_meta exists but all key fields are empty.
+    # In your create_upload flow you always create DocumentMetadata, so this is typically
+    # about "empty fields", not "missing row".
+    missing_admin_meta_count = base_qs.filter(
+        Q(admin_meta__donor="") &
+        Q(admin_meta__collection="") &
+        Q(admin_meta__original_location="") &
+        Q(admin_meta__notes="")
+    ).count()
+
+    qs = base_qs
+
+    if only_missing_tags:
+        qs = qs.filter(tags_m2m__isnull=True).distinct()
+
+    if only_missing_admin_meta:
+        qs = qs.filter(
+            Q(admin_meta__donor="") &
+            Q(admin_meta__collection="") &
+            Q(admin_meta__original_location="") &
+            Q(admin_meta__notes="")
+        )
+
+    total_filtered = qs.count()
     docs = list(qs[offset : offset + limit])
 
     context = {
         "docs": docs,
         "offset": offset,
         "limit": limit,
-        "total": total,
+        "total": total_filtered,  # total shown for current filter set
+        "total_backlog": total_backlog,
+        "missing_tags_count": missing_tags_count,
+        "missing_admin_meta_count": missing_admin_meta_count,
+        "only_missing_tags": only_missing_tags,
+        "only_missing_admin_meta": only_missing_admin_meta,
         "prev_offset": max(0, offset - limit),
-        "next_offset": (offset + limit) if (offset + limit) < total else None,
+        "next_offset": (offset + limit) if (offset + limit) < total_filtered else None,
     }
 
     logger.info(
-        "admin_backlog_page user=%s offset=%s limit=%s total=%s returned=%s",
+        "admin_backlog_page user=%s offset=%s limit=%s total_backlog=%s total_filtered=%s only_missing_tags=%s only_missing_admin_meta=%s returned=%s",
         getattr(request.user, "username", None),
         offset,
         limit,
-        total,
+        total_backlog,
+        total_filtered,
+        only_missing_tags,
+        only_missing_admin_meta,
         len(docs),
     )
     return render(request, "documents/backlog.html", context)
@@ -475,7 +518,11 @@ def admin_backlog_page(request):
 @login_required
 def document_detail_page(request, doc_id: int):
     try:
-        doc = Document.objects.select_related("admin_meta").get(id=doc_id)
+        doc = (
+            Document.objects.select_related("admin_meta")
+            .prefetch_related("tags_m2m", "text_results")
+            .get(id=doc_id)
+        )
         admin_meta = getattr(doc, "admin_meta", None)
     except Document.DoesNotExist:
         return JsonResponse({"error": "not found"}, status=404)
@@ -489,17 +536,21 @@ def document_detail_page(request, doc_id: int):
             bucket=bucket, key=doc.file_s3_key, expires_in=3600
         )
 
+    text_presentation = get_text_presentation_for_document(doc)
+
     context = {
         "doc": doc,
         "content_url": content_url,
         "admin_meta": admin_meta,
+        "text_presentation": text_presentation,
     }
     logger.info(
-        "document_detail_page user=%s doc_id=%s has_content_url=%s mime_type=%r",
+        "document_detail_page user=%s doc_id=%s has_content_url=%s mime_type=%r missing_text=%s",
         getattr(request.user, "username", None),
         doc.id,
         bool(content_url),
         doc.mime_type,
+        text_presentation.missing,
     )
 
     return render(request, "documents/detail.html", context)

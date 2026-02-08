@@ -1,5 +1,6 @@
 import boto3
 from django.conf import settings
+from typing import Tuple, Optional
 
 
 def get_s3_client():
@@ -42,3 +43,14 @@ def create_presigned_get(
         },
         ExpiresIn=expires_in,
     )
+
+
+def get_object_bytes(bucket: str, key: str) -> Tuple[bytes, Optional[str]]:
+    """
+    Download an object from S3 and return (bytes, content_type).
+    """
+    s3 = get_s3_client()
+    resp = s3.get_object(Bucket=bucket, Key=key)
+    body = resp["Body"].read()
+    content_type = resp.get("ContentType")
+    return body, content_type

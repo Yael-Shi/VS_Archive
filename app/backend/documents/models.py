@@ -19,6 +19,12 @@ class Document(models.Model):
         NEEDS_COMPLETION = "NEEDS_COMPLETION", "Needs completion"
         COMPLETED = "COMPLETED", "Completed"
 
+    class Language(models.TextChoices):
+        HEBREW = "he", "Hebrew"
+        ENGLISH = "en", "English"
+        FRENCH = "fr", "French"
+        ARABIC = "ar", "Arabic"
+
     # Required for V1
     title = models.CharField(max_length=255)
     doc_type = models.CharField(max_length=16, choices=DocType.choices)
@@ -27,12 +33,17 @@ class Document(models.Model):
     date_start = models.DateField(null=True, blank=True)
     date_end = models.DateField(null=True, blank=True)
 
-    language = models.CharField(max_length=16, null=True, blank=True)  # he/en/ar/fr
+    language = models.CharField(
+        max_length=8,
+        choices=Language.choices,
+        null=True,
+        blank=True,
+    )
+
     category_event = models.CharField(max_length=255, null=True, blank=True)
 
     tags_m2m = models.ManyToManyField("Tag", blank=True, related_name="documents")
 
-    # Metadata completion status
     metadata_status = models.CharField(
         max_length=32,
         choices=MetadataStatus.choices,
@@ -143,12 +154,9 @@ class CorrectionRequest(models.Model):
     )
     scope = models.CharField(max_length=16, choices=Scope.choices)
 
-    # Optional: points to a specific field path (e.g., "title", "metadata.source", etc.)
     field_path = models.CharField(max_length=512, null=True, blank=True)
-
     message = models.TextField()
 
-    # option for public
     requester_name = models.CharField(max_length=255, null=True, blank=True)
     requester_email = models.EmailField(null=True, blank=True)
 

@@ -12,6 +12,42 @@
         .pagination a { margin-right: 12px; }
         .actions { margin-top: 16px; }
         .muted { color: #666; font-size: 0.9em; }
+
+        /* Added for backlog filters UI */
+        .section { margin-top: 14px; }
+
+        /* Visual indicators */
+        .badge {
+            display: inline-block;
+            padding: 2px 6px;
+            font-size: 0.8em;
+            border-radius: 4px;
+            background-color: #eee;
+            color: #333;
+        }
+        .badge.warn {
+            background-color: #ffe5e5;
+            color: #a40000;
+        }
+        tr.needs-attention {
+            background-color: #fff9f0;
+        }
+
+        /* Quick filter pills */
+        .pill {
+            display: inline-block;
+            padding: 4px 10px;
+            border: 1px solid #ccc;
+            border-radius: 999px;
+            text-decoration: none;
+            margin-right: 6px;
+            color: inherit;
+        }
+
+        .pill.active {
+            background-color: #f0f0f0;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -22,9 +58,38 @@
   <a href="/api/ui/documents/">← Back to list</a>
 </div>
 
-<p>
-    Showing {{ docs|length }} of {{ total }} documents
-</p>
+<!-- Quick filters (one click) -->
+<div class="actions">
+  <strong>Quick filters:</strong>
+
+  <a class="pill {% if not only_missing_tags and not only_missing_admin_meta %}active{% endif %}"
+     href="/api/ui/admin/backlog/">All</a>
+
+  <a class="pill {% if only_missing_tags and not only_missing_admin_meta %}active{% endif %}"
+     href="/api/ui/admin/backlog/?only_missing_tags=1">No tags</a>
+
+  <a class="pill {% if not only_missing_tags and only_missing_admin_meta %}active{% endif %}"
+     href="/api/ui/admin/backlog/?only_missing_admin_meta=1">Empty meta</a>
+
+  <a class="pill {% if only_missing_tags and only_missing_admin_meta %}active{% endif %}"
+     href="/api/ui/admin/backlog/?only_missing_tags=1&amp;only_missing_admin_meta=1">
+     No tags + Empty meta
+  </a>
+</div>
+
+<!-- Summary -->
+<div class="section">
+  <p>
+    <strong>Backlog summary:</strong>
+    Total needing completion: <strong>{{ total_backlog }}</strong> |
+    Without tags: <strong>{{ missing_tags_count }}</strong> |
+    With empty admin metadata: <strong>{{ missing_admin_meta_count }}</strong>
+  </p>
+
+  <p class="muted">
+    Showing {{ docs|length }} of {{ total }} documents (after filters)
+  </p>
+</div>
 
 <table>
     <thead>
@@ -40,19 +105,27 @@
     </thead>
     <tbody>
         {% for d in docs %}
-            <tr>
+
+            {% if not d.tags_m2m.exists %}
+                <tr class="needs-attention">
+            {% elif d.admin_meta and not d.admin_meta.donor and not d.admin_meta.collection and not d.admin_meta.original_location and not d.admin_meta.notes %}
+                <tr class="needs-attention">
+            {% else %}
+                <tr>
+            {% endif %}
+
                 <td>{{ d.id }}</td>
                 <td><a href="/api/ui/documents/{{ d.id }}/">{{ d.title }}</a></td>
                 <td>{{ d.doc_type }}</td>
 
                 <td>
-                    {% if d.tags_m2m.all %}
-                        {% for t in d.tags_m2m.all %}
-                            {{ t.name }}{% if not forloop.last %}, {% endif %}
-                        {% endfor %}
-                    {% else %}
-                        <span class="muted">—</span>
-                    {% endif %}
+                {% if d.tags_m2m.exists %}
+                    {% for t in d.tags_m2m.all %}
+                    {{ t.name }}{% if not forloop.last %}, {% endif %}
+                    {% endfor %}
+                {% else %}
+                    <span class="badge warn">NO TAGS</span>
+                {% endif %}
                 </td>
 
                 <td>
@@ -66,11 +139,15 @@
                         {% if d.admin_meta.original_location %}
                             <div><strong>Location:</strong> {{ d.admin_meta.original_location }}</div>
                         {% endif %}
-                        {% if not d.admin_meta.donor and not d.admin_meta.collection and not d.admin_meta.original_location %}
-                            <span class="muted">—</span>
+                        {% if d.admin_meta.notes %}
+                            <div><strong>Notes:</strong> {{ d.admin_meta.notes }}</div>
+                        {% endif %}
+
+                        {% if not d.admin_meta.donor and not d.admin_meta.collection and not d.admin_meta.original_location and not d.admin_meta.notes %}
+                            <span class="badge warn">EMPTY META</span>
                         {% endif %}
                     {% else %}
-                        <span class="muted">—</span>
+                        <span class="badge warn">EMPTY META</span>
                     {% endif %}
                 </td>
 
@@ -81,6 +158,7 @@
                     </a>
                 </td>
             </tr>
+
         {% empty %}
             <tr>
                 <td colspan="7">No backlog items 🎉</td>
@@ -91,10 +169,10 @@
 
 <div class="pagination">
     {% if offset > 0 %}
-        <a href="?offset={{ prev_offset }}">← Previous</a>
+        <a href="?offset={{ prev_offset }}{% if only_missing_tags %}&amp;only_missing_tags=1{% endif %}{% if only_missing_admin_meta %}&amp;only_missing_admin_meta=1{% endif %}">← Previous</a>
     {% endif %}
     {% if next_offset is not None %}
-        <a href="?offset={{ next_offset }}">Next →</a>
+        <a href="?offset={{ next_offset }}{% if only_missing_tags %}&amp;only_missing_tags=1{% endif %}{% if only_missing_admin_meta %}&amp;only_missing_admin_meta=1{% endif %}">Next →</a>
     {% endif %}
 </div>
 

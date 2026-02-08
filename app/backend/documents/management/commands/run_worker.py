@@ -8,8 +8,13 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.conf import settings
 
 from documents.models import Document, DocumentTextResult
+from documents.s3 import get_object_bytes
+from documents.services.page_extraction import extract_pages
+from documents.services.htr_engine import HtrNotImplementedError, transcribe_pages
+
 
 # NOTE:
 # This command is meant to run inside the ECS "worker" container.
@@ -21,6 +26,11 @@ def _env(name: str) -> str:
     if not value:
         raise RuntimeError(f"Missing required env var: {name}")
     return value
+
+
+def _is_hebrew_language(language: Optional[str]) -> bool:
+    lang = (language or "").strip().lower()
+    return lang in ("he", "heb", "hebrew")
 
 
 class Command(BaseCommand):
@@ -88,15 +98,9 @@ class Command(BaseCommand):
             ok = self._process_message(msg)
             if ok:
                 self._delete_message(sqs, queue_url, msg)
-            else:
-                # Do not delete; let SQS visibility timeout expire and retry.
-                # (Later we can add a DLQ policy / max receives.)
-                pass
 
             if once:
-                self.stdout.write(
-                    "[run_worker] processed one message; exiting (--once)."
-                )
+                self.stdout.write("[run_worker] processed one message; exiting (--once).")
                 return
 
     def _receive_one(
@@ -147,11 +151,8 @@ class Command(BaseCommand):
             )
             return False
 
-        job_type = payload.get("type")
-        if job_type != "PROCESS_DOCUMENT":
-            self.stderr.write(
-                self.style.ERROR(f"[run_worker] unknown job type: {job_type!r}")
-            )
+        if payload.get("type") != "PROCESS_DOCUMENT":
+            self.stderr.write(self.style.ERROR(f"[run_worker] unknown job type: {payload.get('type')!r}"))
             return False
 
         document_id = payload.get("document_id")
@@ -163,8 +164,6 @@ class Command(BaseCommand):
 
         self.stdout.write(f"[run_worker] processing document_id={document_id}")
 
-        # Slice 1 behavior: dummy processing.
-        # We mark the doc as READY (or FAILED) and persist a simple marker.
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
@@ -177,32 +176,153 @@ class Command(BaseCommand):
                     )
                     return True  # delete message; nothing to do
 
-                # mark processing → ready (dummy slice 1)
+                # mark as processing
                 doc.processing_state_user = Document.ProcessingState.PROCESSING
                 doc.save(update_fields=["processing_state_user"])
 
-                DocumentTextResult.objects.create(
-                    document=doc,
-                    result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
-                    engine="engine_v1",
-                    status=DocumentTextResult.Status.SUCCEEDED,
-                    verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
-                    text=f"dummy source text for document_id={doc.id}",
+                is_he = _is_hebrew_language(doc.language)
+
+                                # --- V2: Fetch file bytes from S3 ---
+                bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
+                if not bucket:
+                    raise RuntimeError("UPLOADS_BUCKET_NAME is not configured")
+
+                if not doc.file_s3_key:
+                    raise RuntimeError(f"Document {doc.id} missing file_s3_key")
+
+                file_bytes, s3_content_type = get_object_bytes(bucket=bucket, key=doc.file_s3_key)
+                effective_mime = (doc.mime_type or s3_content_type or "").strip()
+
+                # --- V2: Extract per-page images (PDF -> pages, IMAGE -> single page) ---
+                pages = extract_pages(file_bytes=file_bytes, mime_type=effective_mime)
+
+                # --- V2: Run HTR/OCR engine (placeholder for now) ---
+                # In V2 MVP we explicitly fail until the engine adapter is implemented,
+                # so we can evolve states correctly (FAILED / ACTION_REQUIRED) without dummy data.
+                engine_name = "htr_placeholder_v1"
+
+                def _create_result(result_type: str, status: str, text: str | None, error_code: str | None = None, error_details: str | None = None):
+                    return DocumentTextResult.objects.create(
+                        document=doc,
+                        result_type=result_type,
+                        engine=engine_name,
+                        status=status,
+                        verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+                        text=text,
+                        error_code=error_code,
+                        error_details=error_details,
+                    )
+
+                # We treat Hebrew docs as "HEBREW_TEXT transcription".
+                # Non-Hebrew docs: "SOURCE_TEXT transcription" + (future) "HEBREW_TEXT translation".
+                try:
+                    if is_he:
+                        htr = transcribe_pages(pages=pages, language_hint=doc.language)
+                        status = (
+                            DocumentTextResult.Status.NEEDS_REVIEW
+                            if htr.needs_review
+                            else DocumentTextResult.Status.SUCCEEDED
+                        )
+                        _create_result(
+                            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+                            status=status,
+                            text=htr.text,
+                        )
+                    else:
+                        htr = transcribe_pages(pages=pages, language_hint=doc.language)
+                        status = (
+                            DocumentTextResult.Status.NEEDS_REVIEW
+                            if htr.needs_review
+                            else DocumentTextResult.Status.SUCCEEDED
+                        )
+                        _create_result(
+                            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+                            status=status,
+                            text=htr.text,
+                        )
+
+                        # Translation is a separate engine/result in SOT.
+                        # For step-1 we DO NOT implement translation yet.
+                        # We create a FAILED placeholder so states become PARTIAL (not READY),
+                        # making the missing translation explicit.
+                        _create_result(
+                            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+                            status=DocumentTextResult.Status.FAILED,
+                            text=None,
+                            error_code="TRANSLATION_NOT_IMPLEMENTED",
+                            error_details="Translation engine is not implemented yet (V2 step-2).",
+                        )
+
+                except HtrNotImplementedError as e:
+                    # Explicitly mark expected outputs as FAILED until engine exists.
+                    if is_he:
+                        _create_result(
+                            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+                            status=DocumentTextResult.Status.FAILED,
+                            text=None,
+                            error_code="HTR_NOT_IMPLEMENTED",
+                            error_details=str(e),
+                        )
+                    else:
+                        _create_result(
+                            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+                            status=DocumentTextResult.Status.FAILED,
+                            text=None,
+                            error_code="HTR_NOT_IMPLEMENTED",
+                            error_details=str(e),
+                        )
+                        _create_result(
+                            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+                            status=DocumentTextResult.Status.FAILED,
+                            text=None,
+                            error_code="TRANSLATION_NOT_IMPLEMENTED",
+                            error_details="Translation engine is not implemented yet (V2 step-2).",
+                        )
+
+                # Decide user-visible processing state based on expected outputs
+                    expected_types = (
+                    [DocumentTextResult.ResultType.HEBREW_TEXT]
+                    if is_he
+                    else [
+                        DocumentTextResult.ResultType.SOURCE_TEXT,
+                        DocumentTextResult.ResultType.HEBREW_TEXT,
+                    ]
                 )
 
-                doc.processing_state_user = Document.ProcessingState.READY
+                # If any expected result is NEEDS_REVIEW -> ACTION_REQUIRED
+                any_needs_review = doc.text_results.filter(
+                    result_type__in=expected_types,
+                    status=DocumentTextResult.Status.NEEDS_REVIEW,
+                ).exists()
+
+                if any_needs_review:
+                    doc.processing_state_user = Document.ProcessingState.ACTION_REQUIRED
+                else:
+                    # Count succeeded/failed across expected outputs
+                    succeeded = doc.text_results.filter(
+                        result_type__in=expected_types,
+                        status=DocumentTextResult.Status.SUCCEEDED,
+                    ).count()
+                    failed = doc.text_results.filter(
+                        result_type__in=expected_types,
+                        status=DocumentTextResult.Status.FAILED,
+                    ).count()
+
+                    if succeeded == len(expected_types):
+                        doc.processing_state_user = Document.ProcessingState.READY
+                    elif failed == len(expected_types):
+                        doc.processing_state_user = Document.ProcessingState.FAILED
+                    else:
+                        doc.processing_state_user = Document.ProcessingState.PARTIAL
+
                 doc.save(update_fields=["processing_state_user"])
 
         except Document.DoesNotExist:
-            self.stderr.write(
-                self.style.ERROR(f"[run_worker] Document {document_id} not found")
-            )
+            self.stderr.write(self.style.ERROR(f"[run_worker] Document {document_id} not found"))
             return True  # delete message; job is stale
         except Exception as e:
             self.stderr.write(self.style.ERROR(f"[run_worker] processing failed: {e}"))
             return False
 
-        self.stdout.write(
-            self.style.SUCCESS(f"[run_worker] document {document_id} marked READY")
-        )
+        self.stdout.write(self.style.SUCCESS(f"[run_worker] document {document_id} processed; state={doc.processing_state_user}"))
         return True
