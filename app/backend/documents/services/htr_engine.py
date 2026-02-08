@@ -15,6 +15,7 @@ class HtrResult:
     """
     Represents an HTR (handwriting recognition) result for the entire document.
     """
+
     text: str
     # In V2 MVP we don't have confidence. We still keep a hook for review signaling.
     needs_review: bool = False

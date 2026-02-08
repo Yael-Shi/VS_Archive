@@ -131,6 +131,12 @@ class DocumentTextResult(models.Model):
             models.Index(fields=["document", "result_type", "engine"]),
             models.Index(fields=["status", "verification_status"]),
         ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["document", "result_type", "engine"],
+                name="uniq_document_resulttype_engine",
+            )
+        ]
 
 
 class CorrectionRequest(models.Model):
