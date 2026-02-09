@@ -72,6 +72,10 @@ class Command(BaseCommand):
                 f"[run_worker] starting | region={region} | queue={queue_url} | once={once}"
             )
         )
+        gcp_json = os.environ.get("GCP_SA_JSON")
+        self.stdout.write(
+            f"[run_worker] gcp_sa_json_present={bool(gcp_json)} gcp_sa_json_len={len(gcp_json) if gcp_json else 0}"
+        )
 
         sqs = boto3.client("sqs", region_name=region)
 
