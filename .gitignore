@@ -63,5 +63,6 @@ build/
 *.sqlite3
 app/backend/db.sqlite3
 
-# Google Cloud
-vs-archive-48*
+# --- Security: Google Cloud Service Account Keys ---
+# Block any JSON file that looks like a Google service account key
+vs-archive-*.json
