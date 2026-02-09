@@ -1,22 +1,35 @@
-<nav style="display:flex; gap:12px; align-items:center; padding:12px 0;">
-  <a href="/" style="text-decoration:none;">Home</a>
-  <a href="/about/" style="text-decoration:none;">About</a>
+<div class="card" style="padding: 12px 14px; border-radius: 18px; box-shadow: var(--shadow2);">
+  <div style="display:flex; align-items:center; gap:12px;">
+    <div style="font-weight: 900; letter-spacing: -0.3px;">
+      <a href="/" style="color: var(--text); text-decoration:none;">VSArchive</a>
+    </div>
 
-  <span style="flex:1;"></span>
+    <div style="display:flex; gap:10px; align-items:center; margin-inline-start: 12px;">
+      <a class="btn btn-link" href="/">דף הבית</a>
+      <a class="btn btn-link" href="/about/">אודות</a>
+    </div>
 
-  {% if user.is_authenticated %}
-    <a href="/api/ui/documents/" style="text-decoration:none;">Documents</a>
-    <a href="/api/ui/upload/" style="text-decoration:none;">Upload</a>
-    <form action="/accounts/logout/" method="post" style="display:inline; margin:0; padding:0;">
+    <div style="flex:1;"></div>
+
+    {% if user.is_authenticated %}
+      <a class="btn btn-link" href="/api/ui/documents/">מסמכים</a>
+      <a class="btn btn-link" href="/api/ui/upload/">העלאה</a>
+
+      <span class="muted" style="font-size: 13px;">
+        היי, {{ user.username }}
+      </span>
+
+      <form action="/accounts/logout/" method="post" style="display:inline; margin:0;">
         {% csrf_token %}
-        <button type="submit"
-                style="background:none; color:#0000EE; border:none; padding:0; margin:0; cursor:pointer; text-decoration:underline; font: inherit;">
-            Logout
+        <button type="submit" class="btn btn-link" style="color: var(--danger);">
+          התנתקות
         </button>
-</form>
-  {% else %}
-    <a href="/api/ui/documents/" style="text-decoration:none;">Documents</a>
-    <a href="/accounts/login/" style="text-decoration:none;">Login</a>
-  {% endif %}
-</nav>
-<hr />
+      </form>
+    {% else %}
+      <a class="btn btn-link" href="/api/ui/documents/">מסמכים</a>
+      <a class="btn btn-link" href="/accounts/login/">התחברות</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="spacer"></div>

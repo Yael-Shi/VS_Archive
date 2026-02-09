@@ -1,212 +1,141 @@
-<!doctype html>
-<html lang="en">
-<head>
-    <meta charset="utf-8" />
-    <title>Documents</title>
-    <style>
-        body {
-            font-family: sans-serif;
-            margin: 24px;
-        }
+{% extends "base.html" %}
+{% block title %}VSArchive – מסמכים{% endblock %}
 
-        table {
-            border-collapse: collapse;
-            width: 100%;
-            margin-top: 16px;
-        }
+{% block content %}
+  <div class="card" style="padding: 20px;">
+    <h1 class="page-title">מסמכים</h1>
+    <p class="page-subtitle">
+      מציג {{ docs|length }} מתוך {{ total }} מסמכים
+    </p>
 
-        th, td {
-            border: 1px solid #ccc;
-            padding: 6px 8px;
-            text-align: left;
-            vertical-align: top;
-        }
+    <form method="get" class="toolbar">
+      <div class="field" style="min-width: 280px;">
+        <label>חיפוש</label>
+        <input type="text" name="q" placeholder="כותרת, תגיות, הערות מנהל, תורם..." value="{{ q }}">
+      </div>
 
-        th {
-            background-color: #f5f5f5;
-        }
-
-        form {
-            margin-bottom: 16px;
-            display: grid;
-            grid-template-columns: 2fr 1fr 1fr 1fr 1fr auto;
-            gap: 8px;
-            align-items: end;
-        }
-
-        input, select {
-            padding: 6px 8px;
-            width: 100%;
-            box-sizing: border-box;
-        }
-
-        .pagination {
-            margin-top: 16px;
-        }
-
-        .pagination a {
-            margin-right: 12px;
-        }
-
-        .actions {
-            margin-top: 16px;
-        }
-
-        .actions a {
-            margin-right: 12px;
-        }
-
-        .muted {
-            color: #666;
-            font-size: 0.9em;
-            margin-top: 2px;
-        }
-    </style>
-</head>
-<body>
-
-{% include "partials/nav.html" %}
-
-<h1>Documents</h1>
-
-<form method="get">
-    <div>
-        <label>Search</label>
-        <input
-            type="text"
-            name="q"
-            placeholder="Search (title, tags, admin notes, donor...)"
-            value="{{ q }}"
-        />
-    </div>
-
-    <div>
-        <label>Upload status</label>
-        <input
-            type="text"
-            name="upload_status"
-            placeholder="UPLOADED / FAILED / ..."
-            value="{{ upload_status }}"
-        />
-    </div>
-
-    <div>
-        <label>Visibility</label>
-        <input
-            type="text"
-            name="visibility"
-            placeholder="private / public"
-            value="{{ visibility }}"
-        />
-    </div>
-
-    <div>
-        <label>Doc type</label>
+      <div class="field">
+        <label>סוג</label>
         <select name="doc_type">
-            <option value="">All</option>
-            {% for v, label in doc_type_choices %}
-                <option value="{{ v }}" {% if doc_type == v %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
+          <option value="">הכל</option>
+          {% for v, label in doc_type_choices %}
+            <option value="{{ v }}" {% if doc_type == v %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
         </select>
-    </div>
+      </div>
 
-    <div>
-        <label>Metadata status</label>
+      <div class="field">
+        <label>סטטוס מטא־דאטה</label>
         <select name="metadata_status">
-            <option value="">All</option>
-            {% for v, label in metadata_status_choices %}
-                <option value="{{ v }}" {% if metadata_status == v %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
+          <option value="">הכל</option>
+          {% for v, label in metadata_status_choices %}
+            <option value="{{ v }}" {% if metadata_status == v %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
         </select>
-    </div>
+      </div>
 
-    <div>
-        <button type="submit">Search</button>
-    </div>
-</form>
+      <div class="field">
+        <label>נראות</label>
+        <input type="text" name="visibility" placeholder="private / public" value="{{ visibility }}">
+      </div>
 
-<p>
-    Showing {{ docs|length }} of {{ total }} documents
-</p>
+      <div class="field">
+        <label>סטטוס העלאה</label>
+        <input type="text" name="upload_status" placeholder="UPLOADED / FAILED / ..." value="{{ upload_status }}">
+      </div>
 
-<table>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary" type="submit">החלה</button>
+        <a class="btn" href="/api/ui/documents/">ניקוי</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="spacer"></div>
+
+  <table class="table">
     <thead>
-        <tr>
-            <th>ID</th>
-            <th>Title</th>
-            <th>Date range</th>
-            <th>Language</th>
-            <th>Type</th>
-            <th>Admin metadata</th>
-            <th>Metadata status</th>
-            <th>Upload status</th>
-            <th>Visibility</th>
-            <th>Original filename</th>
-            <th>Created at</th>
-        </tr>
+      <tr>
+        <th style="width: 55%;">כותרת</th>
+        <th style="width: 15%;">שפה</th>
+        <th style="width: 10%;">סוג</th>
+        <th style="width: 10%;">סטטוס</th>
+        <th style="width: 10%;">נראות</th>
+      </tr>
     </thead>
     <tbody>
-        {% for d in docs %}
-            <tr>
-                <td>{{ d.id }}</td>
-                <td><a href="/api/ui/documents/{{ d.id }}/">{{ d.title }}</a></td>
-                <td>{{ d.date_start }} – {{ d.date_end }}</td>
-                <td>{{ d.language }}</td>
-                <td>{{ d.doc_type }}</td>
+      {% for d in docs %}
+        <tr>
+          <td>
+            <div style="font-weight: 800;">
+              <a href="/api/ui/documents/{{ d.id }}/">{{ d.title }}</a>
+            </div>
+            <div class="muted" style="font-size: 13px;">
+              {% if d.date_start or d.date_end %}
+                {{ d.date_start }} – {{ d.date_end }}
+              {% else %}
+                ללא טווח תאריכים
+              {% endif %}
+              · #{{ d.id }}
+              {% if d.file_original_name %} · {{ d.file_original_name }}{% endif %}
+            </div>
+          </td>
 
-                <td>
-                    {% if d.admin_meta %}
-                        {% if d.admin_meta.donor %}
-                            <div><strong>Donor:</strong> {{ d.admin_meta.donor }}</div>
-                        {% endif %}
-                        {% if d.admin_meta.collection %}
-                            <div><strong>Collection:</strong> {{ d.admin_meta.collection }}</div>
-                        {% endif %}
-                        {% if d.admin_meta.original_location %}
-                            <div><strong>Location:</strong> {{ d.admin_meta.original_location }}</div>
-                        {% endif %}
-                        {% if not d.admin_meta.donor and not d.admin_meta.collection and not d.admin_meta.original_location %}
-                            <div class="muted">-</div>
-                        {% endif %}
-                    {% else %}
-                        <div class="muted">-</div>
-                    {% endif %}
-                </td>
+          <td>
+            {% if d.language %}{{ d.language }}{% else %}<span class="muted">לא ידוע</span>{% endif %}
+          </td>
 
-                <td>{{ d.metadata_status }}</td>
-                <td>{{ d.upload_status }}</td>
-                <td>{{ d.visibility }}</td>
-                <td>{{ d.file_original_name }}</td>
-                <td>{{ d.created_at }}</td>
-            </tr>
-        {% empty %}
-            <tr>
-                <td colspan="11">No documents found</td>
-            </tr>
-        {% endfor %}
+          <td>{{ d.doc_type }}</td>
+
+          <td>
+            {% if d.processing_state_user == "READY" %}
+              <span class="badge badge-ok">מוכן</span>
+            {% elif d.processing_state_user == "PROCESSING" %}
+              <span class="badge badge-warn">בעיבוד</span>
+            {% elif d.processing_state_user == "FAILED" %}
+              <span class="badge badge-bad">נכשל</span>
+            {% else %}
+              <span class="badge">{{ d.processing_state_user }}</span>
+            {% endif %}
+          </td>
+
+          <td>
+            {% if d.visibility == "public" %}
+              <span class="badge badge-ok">ציבורי</span>
+            {% else %}
+              <span class="badge">פרטי</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr>
+          <td colspan="5">לא נמצאו מסמכים</td>
+        </tr>
+      {% endfor %}
     </tbody>
-</table>
+  </table>
 
-<div class="actions">
-  <a href="/api/ui/upload/">Upload new document</a>
-  {% if user.is_staff or user.is_superuser %}
-    <a href="/api/ui/admin/backlog/">Admin backlog</a>
-  {% endif %}
-</div>
+  <div class="spacer"></div>
 
-<div class="pagination">
-    {% if offset > 0 %}
-        <a href="?q={{ q|urlencode }}&upload_status={{ upload_status|urlencode }}&visibility={{ visibility|urlencode }}&doc_type={{ doc_type|urlencode }}&metadata_status={{ metadata_status|urlencode }}&offset={{ prev_offset }}">
-            ← Previous
-        </a>
+  <div style="display:flex; gap:10px; flex-wrap: wrap; align-items:center;">
+    {% if user.is_staff or user.is_superuser %}
+      <a class="btn btn-primary" href="/api/ui/upload/">העלאת מסמך חדש</a>
+      <a class="btn" href="/api/ui/admin/backlog/">Backlog מנהלים</a>
     {% endif %}
 
-    {% if next_offset is not None %}
-        <a href="?q={{ q|urlencode }}&upload_status={{ upload_status|urlencode }}&visibility={{ visibility|urlencode }}&doc_type={{ doc_type|urlencode }}&metadata_status={{ metadata_status|urlencode }}&offset={{ next_offset }}">
-            Next →
-        </a>
-    {% endif %}
-</div>
+    <div style="flex:1;"></div>
 
-</body>
-</html>
+    <div style="display:flex; gap:10px;">
+      {% if offset > 0 %}
+        <a class="btn" href="?q={{ q|urlencode }}&upload_status={{ upload_status|urlencode }}&visibility={{ visibility|urlencode }}&doc_type={{ doc_type|urlencode }}&metadata_status={{ metadata_status|urlencode }}&offset={{ prev_offset }}">
+          הקודם
+        </a>
+      {% endif %}
+      {% if next_offset is not None %}
+        <a class="btn" href="?q={{ q|urlencode }}&upload_status={{ upload_status|urlencode }}&visibility={{ visibility|urlencode }}&doc_type={{ doc_type|urlencode }}&metadata_status={{ metadata_status|urlencode }}&offset={{ next_offset }}">
+          הבא
+        </a>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}

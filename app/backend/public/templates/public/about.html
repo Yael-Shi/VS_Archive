@@ -1,22 +1,16 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>About – VSArchive</title>
-  <style>
-    body { font-family: sans-serif; margin: 24px; max-width: 980px; }
-    .muted { color: #666; }
-  </style>
-</head>
-<body>
+{% extends "base.html" %}
+{% block title %}VSArchive – אודות{% endblock %}
 
-  {% include "partials/nav.html" %}
+{% block content %}
+  <div class="card" style="padding: 20px;">
+    <h1 class="page-title">אודות</h1>
+    <p class="page-subtitle">
+      VSArchive הוא פרויקט אישי לשימור מסמכים היסטוריים משפחתיים: העלאה, עיבוד א־סינכרוני,
+      תעתוק/זיהוי כתב, תרגום, ותצוגת טקסט שחולץ לצד המסמך המקורי.
+    </p>
 
-  <h1>About</h1>
-  <p class="muted">
-    VSArchive is a personal project for preserving and browsing historical family documents.
-    The system supports upload, asynchronous processing, OCR/HTR, and displaying extracted text.
-  </p>
-
-</body>
-</html>
+    <div class="muted">
+      כרגע האתר מוצג בעברית. בעתיד תתווסף גם גרסה באנגלית.
+    </div>
+  </div>
+{% endblock %}

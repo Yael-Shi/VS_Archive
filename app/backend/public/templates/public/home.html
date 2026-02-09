@@ -1,33 +1,33 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>VSArchive</title>
-  <style>
-    body { font-family: sans-serif; margin: 24px; max-width: 980px; }
-    .hero { padding: 16px 0; }
-    .muted { color: #666; }
-    .cta a {
-      display: inline-block; margin-right: 12px; padding: 10px 14px;
-      border: 1px solid #ccc; border-radius: 8px; text-decoration: none;
-    }
-  </style>
-</head>
-<body>
+{% extends "base.html" %}
+{% block title %}VSArchive – דף הבית{% endblock %}
 
-  {% include "partials/nav.html" %}
-
-  <div class="hero">
-    <h1>VSArchive</h1>
-    <p class="muted">
-      A family historical archive for scanned documents. Browse, upload, and view extracted text.
+{% block content %}
+  <div class="card" style="padding: 20px;">
+    <h1 class="page-title">ברוכים הבאים לארכיון</h1>
+    <p class="page-subtitle">
+      מערכת לשימור, ארגון וחיפוש במסמכים היסטוריים משפחתיים — העלאה, עיבוד אוטומטי ותצוגה של טקסט שחולץ.
     </p>
 
-    <div class="cta" style="margin-top: 14px;">
-      <a href="/api/ui/documents/">Enter archive</a>
-      <a href="/about/">About</a>
+    <div style="display:flex; gap:10px; flex-wrap: wrap; margin-top: 12px;">
+      <a class="btn btn-primary" href="/api/ui/documents/">כניסה לארכיון</a>
+      <a class="btn" href="/about/">לקרוא עוד</a>
     </div>
   </div>
 
-</body>
-</html>
+  <div class="spacer"></div>
+
+  <div class="grid-3">
+    <div class="card">
+      <div class="section-title">העלאת מסמכים</div>
+      <div class="muted">מעלים PDF או תמונה. אפשר להשלים מטא־דאטה בהמשך.</div>
+    </div>
+    <div class="card">
+      <div class="section-title">עיבוד אוטומטי</div>
+      <div class="muted">OCR/HTR + תרגום, ועדכון סטטוסים כדי לדעת מה מוכן ומה עדיין בעיבוד.</div>
+    </div>
+    <div class="card">
+      <div class="section-title">חיפוש ודפדוף</div>
+      <div class="muted">רשימת מסמכים, פתיחת מסמך, וצפייה בטקסט שחולץ לצד המקור.</div>
+    </div>
+  </div>
+{% endblock %}
