@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import boto3
@@ -76,6 +77,15 @@ class Command(BaseCommand):
         self.stdout.write(
             f"[run_worker] gcp_sa_json_present={bool(gcp_json)} gcp_sa_json_len={len(gcp_json) if gcp_json else 0}"
         )
+
+        gcp_json = os.environ.get("GCP_SA_JSON")
+        if gcp_json:
+            creds_path = Path("/tmp/gcp-sa.json")
+            creds_path.write_text(gcp_json, encoding="utf-8")
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
+            self.stdout.write(f"[run_worker] wrote_gcp_creds_file={creds_path} size={creds_path.stat().st_size}")
+        else:
+            self.stdout.write("[run_worker] no GCP_SA_JSON; Google Vision will not work")
 
         sqs = boto3.client("sqs", region_name=region)
 
