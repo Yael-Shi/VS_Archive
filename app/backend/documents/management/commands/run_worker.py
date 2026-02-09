@@ -213,8 +213,8 @@ class Command(BaseCommand):
                 # --- Extract pages ---
                 pages = extract_pages(file_bytes=file_bytes, mime_type=effective_mime)
 
-                # --- Run HTR/OCR engine (placeholder for now) ---
-                engine_name = "htr_placeholder_v1"
+                # --- Run HTR/OCR engine ---
+                engine_name = "google_vision_v1"
 
                 def _upsert_result(
                     *,
@@ -238,8 +238,6 @@ class Command(BaseCommand):
                     )
                     return obj
 
-                # Step-1 (V1.5): create ONLY transcription result.
-                # Translation to Hebrew is NOT created yet (no dummy FAILED).
                 try:
                     htr = transcribe_pages(pages=pages, language_hint=doc.language)
                     status = (
@@ -254,6 +252,12 @@ class Command(BaseCommand):
                             status=status,
                             text=htr.text,
                         )
+                        # MVP decision: when text is Hebrew, also mirror into SOURCE_TEXT
+                        _upsert_result(
+                            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+                            status=status,
+                            text=htr.text,
+                        )
                     else:
                         _upsert_result(
                             result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
@@ -261,24 +265,25 @@ class Command(BaseCommand):
                             text=htr.text,
                         )
 
-                except HtrNotImplementedError as e:
-                    placeholder = (
-                        f"[PLACEHOLDER] Engine not implemented yet. "
-                        f"document_id={doc.id} | doc_type={doc.doc_type} | mime={effective_mime} | "
-                        f"reason={str(e)}"
-                    )
+                except Exception as e:
+                    # OCR/HTR failed: record FAILED result (no placeholder)
                     if is_he:
                         _upsert_result(
                             result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
-                            status=DocumentTextResult.Status.SUCCEEDED,
-                            text=placeholder,
+                            status=DocumentTextResult.Status.FAILED,
+                            text=None,
+                            error_code="OCR_FAILED",
+                            error_details=str(e),
                         )
                     else:
                         _upsert_result(
                             result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
-                            status=DocumentTextResult.Status.SUCCEEDED,
-                            text=placeholder,
+                            status=DocumentTextResult.Status.FAILED,
+                            text=None,
+                            error_code="OCR_FAILED",
+                            error_details=str(e),
                         )
+                    raise
 
                 # --- Decide user-visible processing state ---
                 expected_types = (
