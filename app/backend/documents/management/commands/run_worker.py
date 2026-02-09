@@ -13,7 +13,7 @@ from django.db import transaction
 
 from documents.models import Document, DocumentTextResult
 from documents.s3 import get_object_bytes
-from documents.services.htr_engine import HtrNotImplementedError, transcribe_pages
+from documents.services.htr_engine import transcribe_pages
 from documents.services.page_extraction import extract_pages
 
 
@@ -83,9 +83,13 @@ class Command(BaseCommand):
             creds_path = Path("/tmp/gcp-sa.json")
             creds_path.write_text(gcp_json, encoding="utf-8")
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
-            self.stdout.write(f"[run_worker] wrote_gcp_creds_file={creds_path} size={creds_path.stat().st_size}")
+            self.stdout.write(
+                f"[run_worker] wrote_gcp_creds_file={creds_path} size={creds_path.stat().st_size}"
+            )
         else:
-            self.stdout.write("[run_worker] no GCP_SA_JSON; Google Vision will not work")
+            self.stdout.write(
+                "[run_worker] no GCP_SA_JSON; Google Vision will not work"
+            )
 
         sqs = boto3.client("sqs", region_name=region)
 

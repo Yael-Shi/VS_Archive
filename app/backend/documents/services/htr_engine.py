@@ -43,7 +43,9 @@ def transcribe_pages(
         resp = client.document_text_detection(image=image)
 
         if resp.error and resp.error.message:
-            raise RuntimeError(f"Google Vision error on page {p.page_index}: {resp.error.message}")
+            raise RuntimeError(
+                f"Google Vision error on page {p.page_index}: {resp.error.message}"
+            )
 
         page_text = (resp.full_text_annotation.text or "").strip()
         texts.append(page_text)
