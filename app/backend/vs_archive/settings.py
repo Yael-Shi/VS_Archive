@@ -28,6 +28,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "documents",
+    "public.apps.PublicConfig",
 ]
 
 MIDDLEWARE = [
@@ -112,10 +113,9 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 # Where to redirect after successful login
+LOGIN_URL = "/accounts/login/"
 LOGIN_REDIRECT_URL = "/api/ui/documents/"
-
-# Where to redirect after logout (optional but recommended)
-LOGOUT_REDIRECT_URL = "/accounts/login/"
+LOGOUT_REDIRECT_URL = "/"
 
 CSRF_TRUSTED_ORIGINS = [
     "https://*.ngrok-free.dev",

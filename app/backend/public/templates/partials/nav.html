@@ -1,0 +1,16 @@
+<nav style="display:flex; gap:12px; align-items:center; padding:12px 0;">
+  <a href="/" style="text-decoration:none;">Home</a>
+  <a href="/about/" style="text-decoration:none;">About</a>
+
+  <span style="flex:1;"></span>
+
+  {% if user.is_authenticated %}
+    <a href="/api/ui/documents/" style="text-decoration:none;">Documents</a>
+    <a href="/api/ui/upload/" style="text-decoration:none;">Upload</a>
+    <a href="/accounts/logout/" style="text-decoration:none;">Logout</a>
+  {% else %}
+    <a href="/api/ui/documents/" style="text-decoration:none;">Documents</a>
+    <a href="/accounts/login/" style="text-decoration:none;">Login</a>
+  {% endif %}
+</nav>
+<hr />

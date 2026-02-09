@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>VSArchive</title>
+  <style>
+    body { font-family: sans-serif; margin: 24px; max-width: 980px; }
+    .hero { padding: 16px 0; }
+    .muted { color: #666; }
+    .cta a {
+      display: inline-block; margin-right: 12px; padding: 10px 14px;
+      border: 1px solid #ccc; border-radius: 8px; text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+
+  {% include "partials/nav.html" %}
+
+  <div class="hero">
+    <h1>VSArchive</h1>
+    <p class="muted">
+      A family historical archive for scanned documents. Browse, upload, and view extracted text.
+    </p>
+
+    <div class="cta" style="margin-top: 14px;">
+      <a href="/api/ui/documents/">Enter archive</a>
+      <a href="/about/">About</a>
+    </div>
+  </div>
+
+</body>
+</html>
