@@ -446,8 +446,8 @@ def admin_backlog_page(request):
     # Lightweight filters (UI-only; no new models)
     only_missing_tags = (request.GET.get("only_missing_tags") or "").strip() == "1"
     only_missing_admin_meta = (
-        (request.GET.get("only_missing_admin_meta") or "").strip() == "1"
-    )
+        request.GET.get("only_missing_admin_meta") or ""
+    ).strip() == "1"
 
     base_qs = (
         Document.objects.select_related("admin_meta")
@@ -465,10 +465,10 @@ def admin_backlog_page(request):
     # In your create_upload flow you always create DocumentMetadata, so this is typically
     # about "empty fields", not "missing row".
     missing_admin_meta_count = base_qs.filter(
-        Q(admin_meta__donor="") &
-        Q(admin_meta__collection="") &
-        Q(admin_meta__original_location="") &
-        Q(admin_meta__notes="")
+        Q(admin_meta__donor="")
+        & Q(admin_meta__collection="")
+        & Q(admin_meta__original_location="")
+        & Q(admin_meta__notes="")
     ).count()
 
     qs = base_qs
@@ -478,10 +478,10 @@ def admin_backlog_page(request):
 
     if only_missing_admin_meta:
         qs = qs.filter(
-            Q(admin_meta__donor="") &
-            Q(admin_meta__collection="") &
-            Q(admin_meta__original_location="") &
-            Q(admin_meta__notes="")
+            Q(admin_meta__donor="")
+            & Q(admin_meta__collection="")
+            & Q(admin_meta__original_location="")
+            & Q(admin_meta__notes="")
         )
 
     total_filtered = qs.count()

@@ -67,16 +67,16 @@
     <h3>Extracted text</h3>
 
     {% if text_presentation.missing %}
-      <p class="muted">
-        Processing… missing: <code>{{ text_presentation.missing|join:", " }}</code>
-      </p>
+      {% if doc.processing_state_user == "PROCESSING" %}
+        <p class="muted">
+          Processing… missing: <code>{{ text_presentation.missing|join:", " }}</code>
+        </p>
+      {% else %}
+        <p class="muted">
+          Missing outputs: <code>{{ text_presentation.missing|join:", " }}</code>
+        </p>
+      {% endif %}
     {% endif %}
-
-    {# Robust rule:
-       Hebrew docs => expected=["HEBREW_TEXT"] (no SOURCE_TEXT)
-       Non-Hebrew => expected includes SOURCE_TEXT + HEBREW_TEXT
-       So can decide based on expected, not on doc.language string equality.
-    #}
 
     {% if "SOURCE_TEXT" not in text_presentation.expected %}
       <h4>Hebrew transcription</h4>
@@ -84,9 +84,22 @@
         <div class="muted">
           <span class="badge">{{ text_presentation.hebrew.status }}</span>
           <span class="badge">{{ text_presentation.hebrew.verification_status }}</span>
+          <span class="badge">{{ text_presentation.hebrew.engine }}</span>
           <span class="muted">{{ text_presentation.hebrew.created_at }}</span>
         </div>
-        <pre>{{ text_presentation.hebrew.text }}</pre>
+
+        {% if text_presentation.hebrew.status == "FAILED" %}
+          <p class="muted">
+            <strong>error_code:</strong> <code>{{ text_presentation.hebrew.error_code }}</code><br/>
+            <strong>details:</strong> {{ text_presentation.hebrew.error_details }}
+          </p>
+        {% endif %}
+
+        {% if text_presentation.hebrew.text %}
+          <pre>{{ text_presentation.hebrew.text }}</pre>
+        {% else %}
+          <p class="muted">No Hebrew transcription text to display.</p>
+        {% endif %}
       {% else %}
         <p class="muted">No Hebrew transcription available yet.</p>
       {% endif %}
@@ -96,9 +109,22 @@
         <div class="muted">
           <span class="badge">{{ text_presentation.source.status }}</span>
           <span class="badge">{{ text_presentation.source.verification_status }}</span>
+          <span class="badge">{{ text_presentation.source.engine }}</span>
           <span class="muted">{{ text_presentation.source.created_at }}</span>
         </div>
-        <pre>{{ text_presentation.source.text }}</pre>
+
+        {% if text_presentation.source.status == "FAILED" %}
+          <p class="muted">
+            <strong>error_code:</strong> <code>{{ text_presentation.source.error_code }}</code><br/>
+            <strong>details:</strong> {{ text_presentation.source.error_details }}
+          </p>
+        {% endif %}
+
+        {% if text_presentation.source.text %}
+          <pre>{{ text_presentation.source.text }}</pre>
+        {% else %}
+          <p class="muted">No source transcription text to display.</p>
+        {% endif %}
       {% else %}
         <p class="muted">No source transcription available yet.</p>
       {% endif %}
@@ -108,9 +134,22 @@
         <div class="muted">
           <span class="badge">{{ text_presentation.hebrew.status }}</span>
           <span class="badge">{{ text_presentation.hebrew.verification_status }}</span>
+          <span class="badge">{{ text_presentation.hebrew.engine }}</span>
           <span class="muted">{{ text_presentation.hebrew.created_at }}</span>
         </div>
-        <pre>{{ text_presentation.hebrew.text }}</pre>
+
+        {% if text_presentation.hebrew.status == "FAILED" %}
+          <p class="muted">
+            <strong>error_code:</strong> <code>{{ text_presentation.hebrew.error_code }}</code><br/>
+            <strong>details:</strong> {{ text_presentation.hebrew.error_details }}
+          </p>
+        {% endif %}
+
+        {% if text_presentation.hebrew.text %}
+          <pre>{{ text_presentation.hebrew.text }}</pre>
+        {% else %}
+          <p class="muted">No Hebrew translation text to display.</p>
+        {% endif %}
       {% else %}
         <p class="muted">No Hebrew translation available yet.</p>
       {% endif %}

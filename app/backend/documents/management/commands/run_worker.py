@@ -1,24 +1,20 @@
 import json
 import os
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
-from django.conf import settings
 
 from documents.models import Document, DocumentTextResult
 from documents.s3 import get_object_bytes
+from documents.services.htr_engine import transcribe_pages
 from documents.services.page_extraction import extract_pages
-from documents.services.htr_engine import HtrNotImplementedError, transcribe_pages
-
-
-# NOTE:
-# This command is meant to run inside the ECS "worker" container.
-# It long-polls SQS for jobs and processes them one by one.
 
 
 def _env(name: str) -> str:
@@ -77,6 +73,23 @@ class Command(BaseCommand):
                 f"[run_worker] starting | region={region} | queue={queue_url} | once={once}"
             )
         )
+        gcp_json = os.environ.get("GCP_SA_JSON")
+        self.stdout.write(
+            f"[run_worker] gcp_sa_json_present={bool(gcp_json)} gcp_sa_json_len={len(gcp_json) if gcp_json else 0}"
+        )
+
+        gcp_json = os.environ.get("GCP_SA_JSON")
+        if gcp_json:
+            creds_path = Path("/tmp/gcp-sa.json")
+            creds_path.write_text(gcp_json, encoding="utf-8")
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
+            self.stdout.write(
+                f"[run_worker] wrote_gcp_creds_file={creds_path} size={creds_path.stat().st_size}"
+            )
+        else:
+            self.stdout.write(
+                "[run_worker] no GCP_SA_JSON; Google Vision will not work"
+            )
 
         sqs = boto3.client("sqs", region_name=region)
 
@@ -100,7 +113,9 @@ class Command(BaseCommand):
                 self._delete_message(sqs, queue_url, msg)
 
             if once:
-                self.stdout.write("[run_worker] processed one message; exiting (--once).")
+                self.stdout.write(
+                    "[run_worker] processed one message; exiting (--once)."
+                )
                 return
 
     def _receive_one(
@@ -115,7 +130,7 @@ class Command(BaseCommand):
                 QueueUrl=queue_url,
                 MaxNumberOfMessages=max(1, min(max_messages, 10)),
                 WaitTimeSeconds=max(0, min(wait_seconds, 20)),
-                VisibilityTimeout=60,  # seconds; keep short for now
+                VisibilityTimeout=60,
             )
         except (BotoCoreError, ClientError) as e:
             self.stderr.write(self.style.ERROR(f"[run_worker] SQS receive failed: {e}"))
@@ -152,7 +167,11 @@ class Command(BaseCommand):
             return False
 
         if payload.get("type") != "PROCESS_DOCUMENT":
-            self.stderr.write(self.style.ERROR(f"[run_worker] unknown job type: {payload.get('type')!r}"))
+            self.stderr.write(
+                self.style.ERROR(
+                    f"[run_worker] unknown job type: {payload.get('type')!r}"
+                )
+            )
             return False
 
         document_id = payload.get("document_id")
@@ -174,7 +193,7 @@ class Command(BaseCommand):
                             f"[run_worker] doc {doc.id} upload_status={doc.upload_status}; skipping"
                         )
                     )
-                    return True  # delete message; nothing to do
+                    return True  # delete message
 
                 # mark as processing
                 doc.processing_state_user = Document.ProcessingState.PROCESSING
@@ -182,7 +201,7 @@ class Command(BaseCommand):
 
                 is_he = _is_hebrew_language(doc.language)
 
-                                # --- V2: Fetch file bytes from S3 ---
+                # --- Fetch file bytes from S3 ---
                 bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
                 if not bucket:
                     raise RuntimeError("UPLOADS_BUCKET_NAME is not configured")
@@ -190,97 +209,88 @@ class Command(BaseCommand):
                 if not doc.file_s3_key:
                     raise RuntimeError(f"Document {doc.id} missing file_s3_key")
 
-                file_bytes, s3_content_type = get_object_bytes(bucket=bucket, key=doc.file_s3_key)
+                file_bytes, s3_content_type = get_object_bytes(
+                    bucket=bucket, key=doc.file_s3_key
+                )
                 effective_mime = (doc.mime_type or s3_content_type or "").strip()
 
-                # --- V2: Extract per-page images (PDF -> pages, IMAGE -> single page) ---
+                # --- Extract pages ---
                 pages = extract_pages(file_bytes=file_bytes, mime_type=effective_mime)
 
-                # --- V2: Run HTR/OCR engine (placeholder for now) ---
-                # In V2 MVP we explicitly fail until the engine adapter is implemented,
-                # so we can evolve states correctly (FAILED / ACTION_REQUIRED) without dummy data.
-                engine_name = "htr_placeholder_v1"
+                # --- Run HTR/OCR engine ---
+                engine_name = "google_vision_v1"
 
-                def _create_result(result_type: str, status: str, text: str | None, error_code: str | None = None, error_details: str | None = None):
-                    return DocumentTextResult.objects.create(
+                def _upsert_result(
+                    *,
+                    result_type: str,
+                    status: str,
+                    text: str | None,
+                    error_code: str | None = None,
+                    error_details: str | None = None,
+                ) -> DocumentTextResult:
+                    obj, _created = DocumentTextResult.objects.update_or_create(
                         document=doc,
                         result_type=result_type,
                         engine=engine_name,
-                        status=status,
-                        verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
-                        text=text,
-                        error_code=error_code,
-                        error_details=error_details,
+                        defaults={
+                            "status": status,
+                            "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
+                            "text": text,
+                            "error_code": error_code,
+                            "error_details": error_details,
+                        },
+                    )
+                    return obj
+
+                try:
+                    htr = transcribe_pages(pages=pages, language_hint=doc.language)
+                    status = (
+                        DocumentTextResult.Status.NEEDS_REVIEW
+                        if htr.needs_review
+                        else DocumentTextResult.Status.SUCCEEDED
                     )
 
-                # We treat Hebrew docs as "HEBREW_TEXT transcription".
-                # Non-Hebrew docs: "SOURCE_TEXT transcription" + (future) "HEBREW_TEXT translation".
-                try:
                     if is_he:
-                        htr = transcribe_pages(pages=pages, language_hint=doc.language)
-                        status = (
-                            DocumentTextResult.Status.NEEDS_REVIEW
-                            if htr.needs_review
-                            else DocumentTextResult.Status.SUCCEEDED
-                        )
-                        _create_result(
+                        _upsert_result(
                             result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
                             status=status,
                             text=htr.text,
                         )
-                    else:
-                        htr = transcribe_pages(pages=pages, language_hint=doc.language)
-                        status = (
-                            DocumentTextResult.Status.NEEDS_REVIEW
-                            if htr.needs_review
-                            else DocumentTextResult.Status.SUCCEEDED
+                        # MVP decision: when text is Hebrew, also mirror into SOURCE_TEXT
+                        _upsert_result(
+                            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+                            status=status,
+                            text=htr.text,
                         )
-                        _create_result(
+                    else:
+                        _upsert_result(
                             result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
                             status=status,
                             text=htr.text,
                         )
 
-                        # Translation is a separate engine/result in SOT.
-                        # For step-1 we DO NOT implement translation yet.
-                        # We create a FAILED placeholder so states become PARTIAL (not READY),
-                        # making the missing translation explicit.
-                        _create_result(
-                            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
-                            status=DocumentTextResult.Status.FAILED,
-                            text=None,
-                            error_code="TRANSLATION_NOT_IMPLEMENTED",
-                            error_details="Translation engine is not implemented yet (V2 step-2).",
-                        )
-
-                except HtrNotImplementedError as e:
-                    # Explicitly mark expected outputs as FAILED until engine exists.
+                except Exception as e:
+                    # OCR/HTR failed: record FAILED result (no placeholder)
                     if is_he:
-                        _create_result(
+                        _upsert_result(
                             result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
                             status=DocumentTextResult.Status.FAILED,
                             text=None,
-                            error_code="HTR_NOT_IMPLEMENTED",
+                            error_code="OCR_FAILED",
                             error_details=str(e),
                         )
                     else:
-                        _create_result(
+                        _upsert_result(
                             result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
                             status=DocumentTextResult.Status.FAILED,
                             text=None,
-                            error_code="HTR_NOT_IMPLEMENTED",
+                            error_code="OCR_FAILED",
                             error_details=str(e),
                         )
-                        _create_result(
-                            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
-                            status=DocumentTextResult.Status.FAILED,
-                            text=None,
-                            error_code="TRANSLATION_NOT_IMPLEMENTED",
-                            error_details="Translation engine is not implemented yet (V2 step-2).",
-                        )
+                    raise
 
-                # Decide user-visible processing state based on expected outputs
-                    expected_types = (
+                # --- Decide user-visible processing state ---
+                expected_types = (
                     [DocumentTextResult.ResultType.HEBREW_TEXT]
                     if is_he
                     else [
@@ -289,40 +299,48 @@ class Command(BaseCommand):
                     ]
                 )
 
-                # If any expected result is NEEDS_REVIEW -> ACTION_REQUIRED
-                any_needs_review = doc.text_results.filter(
+                # Look at latest results per expected type/engine (we upsert so 1 row per type+engine)
+                qs = doc.text_results.filter(
                     result_type__in=expected_types,
-                    status=DocumentTextResult.Status.NEEDS_REVIEW,
+                    engine=engine_name,
+                )
+
+                any_needs_review = qs.filter(
+                    status=DocumentTextResult.Status.NEEDS_REVIEW
                 ).exists()
 
                 if any_needs_review:
                     doc.processing_state_user = Document.ProcessingState.ACTION_REQUIRED
                 else:
-                    # Count succeeded/failed across expected outputs
-                    succeeded = doc.text_results.filter(
-                        result_type__in=expected_types,
-                        status=DocumentTextResult.Status.SUCCEEDED,
+                    existing_count = qs.count()
+                    succeeded = qs.filter(
+                        status=DocumentTextResult.Status.SUCCEEDED
                     ).count()
-                    failed = doc.text_results.filter(
-                        result_type__in=expected_types,
-                        status=DocumentTextResult.Status.FAILED,
-                    ).count()
+                    failed = qs.filter(status=DocumentTextResult.Status.FAILED).count()
+                    missing = len(expected_types) - existing_count
 
-                    if succeeded == len(expected_types):
+                    if missing == 0 and succeeded == len(expected_types):
                         doc.processing_state_user = Document.ProcessingState.READY
-                    elif failed == len(expected_types):
+                    elif missing == 0 and failed == len(expected_types):
                         doc.processing_state_user = Document.ProcessingState.FAILED
                     else:
+                        # Any mix of missing/succeeded/failed => PARTIAL
                         doc.processing_state_user = Document.ProcessingState.PARTIAL
 
                 doc.save(update_fields=["processing_state_user"])
 
         except Document.DoesNotExist:
-            self.stderr.write(self.style.ERROR(f"[run_worker] Document {document_id} not found"))
-            return True  # delete message; job is stale
+            self.stderr.write(
+                self.style.ERROR(f"[run_worker] Document {document_id} not found")
+            )
+            return True  # delete message; stale job
         except Exception as e:
             self.stderr.write(self.style.ERROR(f"[run_worker] processing failed: {e}"))
             return False
 
-        self.stdout.write(self.style.SUCCESS(f"[run_worker] document {document_id} processed; state={doc.processing_state_user}"))
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"[run_worker] document {document_id} processed; state={doc.processing_state_user}"
+            )
+        )
         return True
