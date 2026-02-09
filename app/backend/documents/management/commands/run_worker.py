@@ -41,9 +41,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         queue_url = _env("SQS_QUEUE_URL")
         region = (
-            os.getenv("AWS_REGION")
-            or os.getenv("AWS_DEFAULT_REGION")
-            or "eu-central-1"
+            os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "eu-central-1"
         )
 
         # --- Google credentials (MVP) ---
@@ -120,9 +118,7 @@ class Command(BaseCommand):
             return True  # poison message → delete
 
         if payload.get("type") != "PROCESS_DOCUMENT":
-            self.stderr.write(
-                f"[run_worker] unknown job type: {payload.get('type')!r}"
-            )
+            self.stderr.write(f"[run_worker] unknown job type: {payload.get('type')!r}")
             return True  # delete
 
         document_id = payload.get("document_id")
@@ -133,17 +129,12 @@ class Command(BaseCommand):
         # --- Phase 1: mark PROCESSING (short transaction) ---
         try:
             with transaction.atomic():
-                doc = (
-                    Document.objects.select_for_update()
-                    .get(id=document_id)
-                )
+                doc = Document.objects.select_for_update().get(id=document_id)
 
                 if doc.upload_status != Document.UploadStatus.UPLOADED:
                     return True  # stale job
 
-                doc.processing_state_user = (
-                    Document.ProcessingState.PROCESSING
-                )
+                doc.processing_state_user = Document.ProcessingState.PROCESSING
                 doc.save(update_fields=["processing_state_user"])
         except Document.DoesNotExist:
             return True
@@ -185,10 +176,7 @@ class Command(BaseCommand):
         # --- Phase 3: save results + final state (short transaction) ---
         try:
             with transaction.atomic():
-                doc = (
-                    Document.objects.select_for_update()
-                    .get(id=document_id)
-                )
+                doc = Document.objects.select_for_update().get(id=document_id)
 
                 engine = "google_vision_v1"
                 is_he = _is_hebrew_language(doc.language)
@@ -290,21 +278,13 @@ class Command(BaseCommand):
             result_type__in=expected_types,
         )
 
-        if qs.filter(
-            status=DocumentTextResult.Status.NEEDS_REVIEW
-        ).exists():
-            doc.processing_state_user = (
-                Document.ProcessingState.ACTION_REQUIRED
-            )
+        if qs.filter(status=DocumentTextResult.Status.NEEDS_REVIEW).exists():
+            doc.processing_state_user = Document.ProcessingState.ACTION_REQUIRED
             return
 
         existing = qs.count()
-        succeeded = qs.filter(
-            status=DocumentTextResult.Status.SUCCEEDED
-        ).count()
-        failed = qs.filter(
-            status=DocumentTextResult.Status.FAILED
-        ).count()
+        succeeded = qs.filter(status=DocumentTextResult.Status.SUCCEEDED).count()
+        failed = qs.filter(status=DocumentTextResult.Status.FAILED).count()
 
         missing = len(expected_types) - existing
 
