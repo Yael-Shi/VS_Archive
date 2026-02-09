@@ -1,7 +1,6 @@
 from pathlib import Path
 import os
 
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
@@ -16,9 +15,6 @@ AWS_REGION = os.environ.get("AWS_REGION", "eu-central-1")
 ALLOWED_HOSTS = ["*"]  # dev only
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", SECRET_KEY)
 DEBUG = os.getenv("DJANGO_DEBUG", "1") == "1"
-
-
-# Application definition
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -112,11 +108,20 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
-# Where to redirect after successful login
+# Auth redirects
 LOGIN_URL = "/accounts/login/"
 LOGIN_REDIRECT_URL = "/api/ui/documents/"
 LOGOUT_REDIRECT_URL = "/"
 
 CSRF_TRUSTED_ORIGINS = [
     "https://*.ngrok-free.dev",
+    "http://vs-arc-vsarc-arz8x1qh0dhg-1038935491.eu-central-1.elb.amazonaws.com",
 ]
+
+CSRF_TRUSTED_ORIGINS = os.getenv(
+    "CSRF_TRUSTED_ORIGINS",
+    " ".join(CSRF_TRUSTED_ORIGINS)
+).split()
+
+
+CSRF_TRUSTED_ORIGINS = [s.strip() for s in CSRF_TRUSTED_ORIGINS if s.strip()]

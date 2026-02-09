@@ -1,0 +1,81 @@
+{
+  "containerDefinitions": [
+    {
+      "name": "vs-archive-dev-web",
+      "image": "185990503355.dkr.ecr.eu-central-1.amazonaws.com/vs-archive-web:202602092054",
+      "cpu": 0,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "hostPort": 8000,
+          "protocol": "tcp",
+          "name": "vs-archive-dev-web-8000-tcp"
+        }
+      ],
+      "essential": true,
+      "environment": [
+        {
+          "name": "AWS_REGION",
+          "value": "eu-central-1"
+        },
+        {
+          "name": "SQS_QUEUE_URL",
+          "value": "https://sqs.eu-central-1.amazonaws.com/185990503355/vs-archive-dev-jobs"
+        },
+        {
+          "name": "DB_PORT",
+          "value": "5432"
+        },
+        {
+          "name": "DB_USER",
+          "value": "vsarchive"
+        },
+        {
+          "name": "DB_NAME",
+          "value": "vsarchive"
+        },
+        {
+          "name": "UPLOADS_BUCKET_NAME",
+          "value": "vs-archive-dev-data-vsarchivedevbucketb1320d62-1owdhfkvoxr3"
+        },
+        {
+          "name": "DB_HOST",
+          "value": "postgres.vs-archive-dev.local"
+        }
+      ],
+      "environmentFiles": [],
+      "mountPoints": [],
+      "volumesFrom": [],
+      "secrets": [
+        {
+          "name": "DB_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:eu-central-1:185990503355:secret:vs-archive-dev/postgres-FRU80t:password::"
+        }
+      ],
+      "dockerSecurityOptions": [],
+      "ulimits": [],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "vs-archive-dev-app-vsarchivedevwebtdvsarchivedevwebLogGroupC04A5E18-xtpn5JJHUWiC",
+          "awslogs-region": "eu-central-1",
+          "awslogs-stream-prefix": "vs-archive-dev-web"
+        },
+        "secretOptions": []
+      },
+      "systemControls": [],
+      "credentialSpecs": []
+    }
+  ],
+  "family": "vsarchivedevappvsarchivedevwebtdF353FABA",
+  "taskRoleArn": "arn:aws:iam::185990503355:role/vs-archive-dev-app-vsarchivedevtaskroleC7976322-MPVo4Hbt0llE",
+  "executionRoleArn": "arn:aws:iam::185990503355:role/vs-archive-dev-app-vsarchivedevexecroleC88C2603-Wqsn49mwKuSe",
+  "networkMode": "awsvpc",
+  "volumes": [],
+  "placementConstraints": [],
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "256",
+  "memory": "512"
+}
