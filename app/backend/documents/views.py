@@ -4,9 +4,9 @@ from datetime import datetime
 from typing import Optional
 
 from django.conf import settings
-from django.contrib.auth.decorators import login_required, user_passes_test
+from django.contrib.auth.decorators import login_required
 from django.db.models import Q
-from django.http import HttpResponseBadRequest, JsonResponse
+from django.http import HttpResponseBadRequest, JsonResponse, HttpResponseForbidden
 from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 
@@ -52,6 +52,12 @@ def _is_admin(user):
     return bool(
         getattr(user, "is_staff", False) or getattr(user, "is_superuser", False)
     )
+
+
+def _require_admin(request):
+    if not _is_admin(request.user):
+        return HttpResponseForbidden("Admins only")
+    return None
 
 
 def _base_queryset(
@@ -137,10 +143,12 @@ def _serialize_doc(d: Document) -> dict:
 
 @csrf_exempt
 @login_required
-@user_passes_test(_is_admin)
 def create_upload(request):
     if request.method != "POST":
         return _bad("POST only")
+    deny = _require_admin(request)
+    if deny:
+        return deny
 
     try:
         payload = json.loads(request.body.decode("utf-8"))
@@ -264,8 +272,10 @@ def create_upload(request):
 
 @csrf_exempt
 @login_required
-@user_passes_test(_is_admin)
 def upload_complete(request, doc_id: int):
+    deny = _require_admin(request)
+    if deny:
+        return deny
     if request.method != "POST":
         return HttpResponseBadRequest("POST only")
 
@@ -441,9 +451,10 @@ def documents_list_page(request):
 
 
 @login_required
-@user_passes_test(_is_admin)
 def admin_backlog_page(request):
-    # Admin-only backlog: documents with incomplete metadata.
+    deny = _require_admin(request)
+    if deny:
+        return deny
     limit = 50
     offset = _parse_int(request.GET.get("offset"), default=0, min_value=0)
 
@@ -561,10 +572,12 @@ def document_detail_page(request, doc_id: int):
 
 
 @login_required
-@user_passes_test(_is_admin)
 def upload_page(request):
     # The actual upload flow is executed in the browser using existing API endpoints:
     # create_upload -> presigned PUT -> upload_complete
+    deny = _require_admin(request)
+    if deny:
+        return deny
     return render(
         request,
         "documents/upload.html",
