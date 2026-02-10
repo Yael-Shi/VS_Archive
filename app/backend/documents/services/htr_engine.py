@@ -53,7 +53,6 @@ def transcribe_pages(
 
     full_text = "\n\n".join([t for t in texts if t])
 
-    # אם יצא ריק לגמרי – זה לא הצליח מבחינת MVP “טקסט אמיתי”
     if not full_text.strip():
         raise RuntimeError("Google Vision returned empty text")
 

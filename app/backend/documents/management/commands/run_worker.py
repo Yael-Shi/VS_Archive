@@ -44,7 +44,7 @@ class Command(BaseCommand):
             os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "eu-central-1"
         )
 
-        # --- Google credentials (MVP) ---
+        # Google credentials (MVP)
         gcp_json = os.environ.get("GCP_SA_JSON")
         if gcp_json:
             creds_path = Path("/tmp/gcp-sa.json")
@@ -110,7 +110,7 @@ class Command(BaseCommand):
     # ------------------------------------------------------------------ CORE
 
     def _process_message(self, msg: Dict[str, Any]) -> bool:
-        # --- Parse payload ---
+        # Parse payload
         try:
             payload = json.loads(msg.get("Body", "{}"))
         except Exception:
@@ -119,14 +119,14 @@ class Command(BaseCommand):
 
         if payload.get("type") != "PROCESS_DOCUMENT":
             self.stderr.write(f"[run_worker] unknown job type: {payload.get('type')!r}")
-            return True  # delete
+            return True
 
         document_id = payload.get("document_id")
         if not isinstance(document_id, int):
             self.stderr.write("[run_worker] invalid document_id")
-            return True  # delete
+            return True
 
-        # --- Phase 1: mark PROCESSING (short transaction) ---
+        # Phase 1: mark PROCESSING (short transaction)
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
@@ -139,7 +139,7 @@ class Command(BaseCommand):
         except Document.DoesNotExist:
             return True
 
-        # --- Phase 2: heavy work (no DB locks) ---
+        # Phase 2: heavy work (no DB locks)
         error: Optional[str] = None
         htr_result = None
 
@@ -147,6 +147,9 @@ class Command(BaseCommand):
             bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
             if not bucket:
                 raise RuntimeError("UPLOADS_BUCKET_NAME is not configured")
+
+            if not (doc.file_s3_key or "").strip():
+                raise RuntimeError("Document file_s3_key is missing")
 
             file_bytes, s3_mime = get_object_bytes(
                 bucket=bucket,
@@ -173,7 +176,7 @@ class Command(BaseCommand):
                 )
             )
 
-        # --- Phase 3: save results + final state (short transaction) ---
+        # Phase 3: save results + final state (short transaction)
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
@@ -186,48 +189,45 @@ class Command(BaseCommand):
                 else:
                     self._save_htr_results(doc, engine, is_he, htr_result)
 
-                # --- Final user-visible state (Option A) ---
                 self._update_processing_state(doc, engine, is_he)
-
                 doc.save(update_fields=["processing_state_user"])
 
         except Document.DoesNotExist:
             return True
 
-        return True  # handled → delete message
+        return True
 
     # ------------------------------------------------------------------ HELPERS
 
-    def _save_htr_results(self, doc, engine, is_he, htr):
+    def _save_htr_results(self, doc: Document, engine: str, is_he: bool, htr):
         status = (
             DocumentTextResult.Status.NEEDS_REVIEW
-            if htr.needs_review
+            if getattr(htr, "needs_review", False)
             else DocumentTextResult.Status.SUCCEEDED
         )
 
-        # SOURCE_TEXT always
         DocumentTextResult.objects.update_or_create(
             document=doc,
             result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
             engine=engine,
             defaults={
                 "status": status,
-                "text": htr.text,
+                "text": getattr(htr, "text", None),
                 "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
                 "error_code": None,
                 "error_details": None,
             },
         )
 
-        # Hebrew mirror
         if is_he:
+            # Hebrew docs: only HEBREW_TEXT is expected.
             DocumentTextResult.objects.update_or_create(
                 document=doc,
                 result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
                 engine=engine,
                 defaults={
                     "status": status,
-                    "text": htr.text,
+                    "text": getattr(htr, "text", None),
                     "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
                     "error_code": None,
                     "error_details": None,
@@ -235,7 +235,7 @@ class Command(BaseCommand):
             )
 
     def _save_ocr_failure(self, doc, engine, is_he, details):
-        # FAILED = real OCR failure only
+        # Non-Hebrew: only SOURCE_TEXT in current MVP (Hebrew translation is a separate step).
         DocumentTextResult.objects.update_or_create(
             document=doc,
             result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
@@ -273,13 +273,11 @@ class Command(BaseCommand):
             ]
         )
 
-        qs = doc.text_results.filter(
-            engine=engine,
-            result_type__in=expected_types,
-        )
+        qs = doc.text_results.filter(engine=engine, result_type__in=expected_types)
 
+        # We do not expose ACTION_REQUIRED to non-admin users; NEEDS_REVIEW maps to PARTIAL.
         if qs.filter(status=DocumentTextResult.Status.NEEDS_REVIEW).exists():
-            doc.processing_state_user = Document.ProcessingState.ACTION_REQUIRED
+            doc.processing_state_user = Document.ProcessingState.PARTIAL
             return
 
         existing = qs.count()

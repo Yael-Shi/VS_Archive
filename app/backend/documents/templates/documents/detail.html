@@ -20,28 +20,30 @@
 
     <div class="muted" style="margin-top: 6px; font-size: 13px;">
       מסמך #{{ doc.id }}
-      {% if doc.file_original_name %} · {{ doc.file_original_name }}{% endif %}
+      {% if user.is_staff or user.is_superuser %}
+        {% if doc.file_original_name %} · {{ doc.file_original_name }}{% endif %}
+      {% endif %}
       {% if doc.date_start or doc.date_end %} · {{ doc.date_start }} - {{ doc.date_end }}{% endif %}
     </div>
 
     <div class="spacer"></div>
 
-    {# ===== Status row ===== #}
     <div style="display:flex; gap:10px; flex-wrap: wrap; align-items:center;">
+      {# User-facing processing badge; ACTION_REQUIRED is treated as PARTIAL for non-admin #}
       {% if doc.processing_state_user == "READY" %}
         <span class="badge badge-ok">מוכן</span>
       {% elif doc.processing_state_user == "PROCESSING" %}
         <span class="badge badge-warn">בעיבוד</span>
       {% elif doc.processing_state_user == "FAILED" %}
         <span class="badge badge-bad">נכשל</span>
+      {% elif doc.processing_state_user == "ACTION_REQUIRED" %}
+        {% if user.is_staff or user.is_superuser %}
+          <span class="badge badge-warn">Action required</span>
+        {% else %}
+          <span class="badge badge-warn">חלקי</span>
+        {% endif %}
       {% else %}
         <span class="badge">{{ doc.processing_state_user }}</span>
-      {% endif %}
-
-      {% if doc.visibility == "public" %}
-        <span class="badge badge-ok">ציבורי</span>
-      {% else %}
-        <span class="badge">פרטי</span>
       {% endif %}
 
       <span class="badge">{{ doc.doc_type }}</span>
@@ -51,9 +53,22 @@
       {% else %}
         <span class="badge">שפה: לא ידוע</span>
       {% endif %}
+
+      {# visibility is admin-only #}
+      {% if user.is_staff or user.is_superuser %}
+        {% if doc.visibility == "public" %}
+          <span class="badge badge-ok">ציבורי</span>
+        {% else %}
+          <span class="badge">פרטי</span>
+        {% endif %}
+      {% endif %}
+
+      {# Upload state: show a clear user-facing indicator when file is missing/failed #}
+      {% if doc.upload_status != "UPLOADED" %}
+        <span class="badge badge-bad">העלאה לא הושלמה</span>
+      {% endif %}
     </div>
 
-    {# ===== Tags preview (nice UX) ===== #}
     <div class="spacer"></div>
     <div style="display:flex; gap:8px; flex-wrap: wrap; align-items:center;">
       <div class="muted" style="font-size: 13px; font-weight: 700;">תגיות:</div>
@@ -66,10 +81,11 @@
       {% endif %}
     </div>
 
-    {% if doc.upload_error %}
+    {# upload_error is admin-only #}
+    {% if (user.is_staff or user.is_superuser) and doc.upload_error %}
       <div class="spacer"></div>
       <div class="card" style="padding: 12px; border: 1px solid rgba(180,35,24,0.25);">
-        <div style="font-weight: 800; color: var(--danger);">שגיאה</div>
+        <div style="font-weight: 800; color: var(--danger);">Upload error (admin)</div>
         <div style="margin-top: 6px;">{{ doc.upload_error }}</div>
       </div>
     {% endif %}
@@ -78,7 +94,6 @@
   <div class="spacer"></div>
 
   <div class="two-col">
-    {# ===== Left: Text output ===== #}
     <div class="card" style="padding: 16px;">
       <div class="section-title">טקסט שחולץ</div>
 
@@ -93,7 +108,6 @@
         <div class="spacer"></div>
       {% endif %}
 
-      {# Case A: Hebrew-only transcription (no SOURCE_TEXT expected) #}
       {% if "SOURCE_TEXT" not in text_presentation.expected %}
         <div style="font-weight: 800; margin-top: 4px;">תמלול לעברית</div>
 
@@ -105,7 +119,7 @@
             <span class="muted">{{ text_presentation.hebrew.created_at }}</span>
           </div>
 
-          {% if text_presentation.hebrew.status == "FAILED" %}
+          {% if text_presentation.hebrew.status == "FAILED" and (user.is_staff or user.is_superuser) %}
             <div class="spacer"></div>
             <div class="muted" style="font-size: 13px;">
               <strong>error_code:</strong> <code>{{ text_presentation.hebrew.error_code }}</code><br/>
@@ -123,8 +137,6 @@
         {% else %}
           <div class="muted" style="margin-top: 8px;">אין תמלול לעברית עדיין.</div>
         {% endif %}
-
-      {# Case B: Source transcription + Hebrew translation #}
       {% else %}
         <div style="font-weight: 800; margin-top: 4px;">תמלול מקור</div>
 
@@ -136,7 +148,7 @@
             <span class="muted">{{ text_presentation.source.created_at }}</span>
           </div>
 
-          {% if text_presentation.source.status == "FAILED" %}
+          {% if text_presentation.source.status == "FAILED" and (user.is_staff or user.is_superuser) %}
             <div class="spacer"></div>
             <div class="muted" style="font-size: 13px;">
               <strong>error_code:</strong> <code>{{ text_presentation.source.error_code }}</code><br/>
@@ -165,7 +177,7 @@
             <span class="muted">{{ text_presentation.hebrew.created_at }}</span>
           </div>
 
-          {% if text_presentation.hebrew.status == "FAILED" %}
+          {% if text_presentation.hebrew.status == "FAILED" and (user.is_staff or user.is_superuser) %}
             <div class="spacer"></div>
             <div class="muted" style="font-size: 13px;">
               <strong>error_code:</strong> <code>{{ text_presentation.hebrew.error_code }}</code><br/>
@@ -185,15 +197,14 @@
       {% endif %}
     </div>
 
-    {# ===== Right: File viewer + admin metadata ===== #}
     <div class="card" style="padding: 16px;">
       <div class="section-title">קובץ מקור</div>
 
       {% if not content_url %}
         <div class="muted">
           אין קובץ לצפייה עדיין.
-          {% if not doc.file_s3_key %}
-            (חסר <code>file_s3_key</code>)
+          {% if user.is_staff or user.is_superuser %}
+            {% if not doc.file_s3_key %}(חסר <code>file_s3_key</code>){% endif %}
           {% endif %}
         </div>
       {% else %}

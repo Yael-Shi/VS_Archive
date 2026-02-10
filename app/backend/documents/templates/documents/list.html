@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}VSArchive – מסמכים{% endblock %}
+{% block title %}VSArchive - מסמכים{% endblock %}
 
 {% block content %}
   <div class="card" style="padding: 20px;">
@@ -11,7 +11,11 @@
     <form method="get" class="toolbar">
       <div class="field" style="min-width: 280px;">
         <label>חיפוש</label>
-        <input type="text" name="q" placeholder="כותרת, תגיות, הערות מנהל, תורם..." value="{{ q }}">
+        {% if is_admin %}
+          <input type="text" name="q" placeholder="כותרת, תגיות, הערות מנהל, תורם..." value="{{ q }}">
+        {% else %}
+          <input type="text" name="q" placeholder="כותרת, תגיות, קטגוריה..." value="{{ q }}">
+        {% endif %}
       </div>
 
       <div class="field">
@@ -34,15 +38,17 @@
         </select>
       </div>
 
-      <div class="field">
-        <label>נראות</label>
-        <input type="text" name="visibility" placeholder="private / public" value="{{ visibility }}">
-      </div>
+      {% if is_admin %}
+        <div class="field">
+          <label>נראות</label>
+          <input type="text" name="visibility" placeholder="private / public" value="{{ visibility }}">
+        </div>
 
-      <div class="field">
-        <label>סטטוס העלאה</label>
-        <input type="text" name="upload_status" placeholder="UPLOADED / FAILED / ..." value="{{ upload_status }}">
-      </div>
+        <div class="field">
+          <label>סטטוס העלאה</label>
+          <input type="text" name="upload_status" placeholder="UPLOADED / FAILED / ..." value="{{ upload_status }}">
+        </div>
+      {% endif %}
 
       <div style="display:flex; gap:10px;">
         <button class="btn btn-primary" type="submit">החלה</button>
@@ -60,7 +66,9 @@
         <th style="width: 15%;">שפה</th>
         <th style="width: 10%;">סוג</th>
         <th style="width: 10%;">סטטוס</th>
-        <th style="width: 10%;">נראות</th>
+        {% if is_admin %}
+          <th style="width: 10%;">נראות</th>
+        {% endif %}
       </tr>
     </thead>
     <tbody>
@@ -72,12 +80,12 @@
             </div>
             <div class="muted" style="font-size: 13px;">
               {% if d.date_start or d.date_end %}
-                {{ d.date_start }} – {{ d.date_end }}
+                {{ d.date_start }} - {{ d.date_end }}
               {% else %}
                 ללא טווח תאריכים
               {% endif %}
               · #{{ d.id }}
-              {% if d.file_original_name %} · {{ d.file_original_name }}{% endif %}
+              {% if is_admin and d.file_original_name %} · {{ d.file_original_name }}{% endif %}
             </div>
           </td>
 
@@ -94,22 +102,30 @@
               <span class="badge badge-warn">בעיבוד</span>
             {% elif d.processing_state_user == "FAILED" %}
               <span class="badge badge-bad">נכשל</span>
+            {% elif d.processing_state_user == "ACTION_REQUIRED" %}
+              {% if is_admin %}
+                <span class="badge badge-warn">Action required</span>
+              {% else %}
+                <span class="badge badge-warn">חלקי</span>
+              {% endif %}
             {% else %}
               <span class="badge">{{ d.processing_state_user }}</span>
             {% endif %}
           </td>
 
-          <td>
-            {% if d.visibility == "public" %}
-              <span class="badge badge-ok">ציבורי</span>
-            {% else %}
-              <span class="badge">פרטי</span>
-            {% endif %}
-          </td>
+          {% if is_admin %}
+            <td>
+              {% if d.visibility == "public" %}
+                <span class="badge badge-ok">ציבורי</span>
+              {% else %}
+                <span class="badge">פרטי</span>
+              {% endif %}
+            </td>
+          {% endif %}
         </tr>
       {% empty %}
         <tr>
-          <td colspan="5">לא נמצאו מסמכים</td>
+          <td colspan="{% if is_admin %}5{% else %}4{% endif %}">לא נמצאו מסמכים</td>
         </tr>
       {% endfor %}
     </tbody>

@@ -29,15 +29,7 @@ class TextPresentation:
     expected: list[ResultTypeStr]
 
 
-def _latest_displayable(
-    doc: Document, result_type: ResultTypeStr
-) -> Optional[DocumentTextResult]:
-    """
-    Choose the newest *displayable* candidate:
-    - Prefer SUCCEEDED
-    - Fallback to NEEDS_REVIEW
-    - Ignore FAILED (usually no text to show)
-    """
+def _latest_displayable(doc: Document, result_type: ResultTypeStr) -> Optional[DocumentTextResult]:
     qs = (
         doc.text_results.filter(result_type=result_type)
         .exclude(text__isnull=True)
@@ -56,26 +48,18 @@ def _latest_displayable(
     return None
 
 
-def _latest_failed(
-    doc: Document, result_type: ResultTypeStr
-) -> Optional[DocumentTextResult]:
-    """
-    Latest FAILED result (even if text is empty), for debug display.
-    """
+def _latest_failed(doc: Document, result_type: ResultTypeStr) -> Optional[DocumentTextResult]:
     return (
-        doc.text_results.filter(
-            result_type=result_type, status=DocumentTextResult.Status.FAILED
-        )
+        doc.text_results.filter(result_type=result_type, status=DocumentTextResult.Status.FAILED)
         .order_by("-created_at")
         .first()
     )
 
 
 def get_text_presentation_for_document(doc: Document) -> TextPresentation:
-    # Expected outputs based on language rule:
-    # - Hebrew doc: only HEBREW_TEXT
-    # - Non-Hebrew doc: SOURCE_TEXT + HEBREW_TEXT
-    if (doc.language or "").lower() in ("he", "heb", "hebrew"):
+    lang = (doc.language or "").strip().lower()
+
+    if lang in ("he", "heb", "hebrew"):
         expected: list[ResultTypeStr] = ["HEBREW_TEXT"]
     else:
         expected = ["SOURCE_TEXT", "HEBREW_TEXT"]
@@ -83,7 +67,6 @@ def get_text_presentation_for_document(doc: Document) -> TextPresentation:
     source_obj = _latest_displayable(doc, "SOURCE_TEXT")
     hebrew_obj = _latest_displayable(doc, "HEBREW_TEXT")
 
-    # If not displayable, we may still want to show FAILED reason.
     source_failed = None if source_obj else _latest_failed(doc, "SOURCE_TEXT")
     hebrew_failed = None if hebrew_obj else _latest_failed(doc, "HEBREW_TEXT")
 
@@ -137,11 +120,9 @@ def get_text_presentation_for_document(doc: Document) -> TextPresentation:
 
     missing: list[ResultTypeStr] = []
     for rt in expected:
-        if rt == "SOURCE_TEXT" and (source_obj is None):
+        if rt == "SOURCE_TEXT" and source_obj is None:
             missing.append("SOURCE_TEXT")
-        if rt == "HEBREW_TEXT" and (hebrew_obj is None):
+        if rt == "HEBREW_TEXT" and hebrew_obj is None:
             missing.append("HEBREW_TEXT")
 
-    return TextPresentation(
-        source=source, hebrew=hebrew, missing=missing, expected=expected
-    )
+    return TextPresentation(source=source, hebrew=hebrew, missing=missing, expected=expected)
