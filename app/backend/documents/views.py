@@ -141,6 +141,15 @@ def _serialize_doc(d: Document) -> dict:
     }
 
 
+def _require_admin_page(request):
+    if not _is_admin(request.user):
+        return render(request, "public/forbidden.html", status=403)
+    return None
+
+def _require_admin_api():
+    return JsonResponse({"error": "Admins only"}, status=403)
+
+
 @csrf_exempt
 @login_required
 def create_upload(request):
@@ -272,83 +281,130 @@ def create_upload(request):
 
 @csrf_exempt
 @login_required
-def upload_complete(request, doc_id: int):
+def create_upload(request):
     deny = _require_admin(request)
     if deny:
         return deny
+
     if request.method != "POST":
-        return HttpResponseBadRequest("POST only")
+        return _bad("POST only")
 
     try:
         payload = json.loads(request.body.decode("utf-8"))
     except Exception:
-        return HttpResponseBadRequest("invalid json")
+        return _bad("invalid json")
 
-    success = payload.get("success")
-    if success not in (True, False):
-        return HttpResponseBadRequest("success must be true|false")
+    # Required for V1: title + doc_type
+    title = (payload.get("title") or "").strip()
+    if not title:
+        return _bad("title required")
 
+    doc_type = (payload.get("doc_type") or "").strip()  # PDF / IMAGE
+    if doc_type not in ("PDF", "IMAGE"):
+        return _bad("doc_type must be PDF or IMAGE")
+
+    # Optional metadata
+    date_start_raw = payload.get("date_start")
+    date_end_raw = payload.get("date_end")
+    language = (payload.get("language") or "").strip() or None
+    category_event = (payload.get("category_event") or "").strip() or None
+    visibility = (payload.get("visibility") or "private").strip()
+
+    tags = payload.get("tags", None)
+    admin_meta = payload.get("admin_meta", None)
+
+    # File info
+    mime_type = (
+        payload.get("mime_type")
+        or payload.get("content_type")
+        or "application/octet-stream"
+    ).strip()
+    original_name = (payload.get("original_name") or "").strip()
+    size_bytes = payload.get("size_bytes")
+
+    # Optional date parsing
     try:
-        doc = Document.objects.get(id=doc_id)
-    except Document.DoesNotExist:
-        return JsonResponse({"error": "not found"}, status=404)
+        ds = _parse_date_optional(date_start_raw, "date_start")
+        de = _parse_date_optional(date_end_raw, "date_end")
+    except ValueError as e:
+        return _bad(str(e))
 
-    if success:
-        # Prevent double-enqueue if the client calls complete twice
-        already_uploaded = doc.upload_status == Document.UploadStatus.UPLOADED
+    # Optional fields validation (only if provided)
+    if tags is None:
+        tags = []
+    if not isinstance(tags, list):
+        return _bad("tags must be a list")
 
-        doc.upload_status = Document.UploadStatus.UPLOADED
-        doc.upload_error = None
+    if admin_meta is None:
+        admin_meta = {}
+    if not isinstance(admin_meta, dict):
+        return _bad("admin_meta must be an object")
 
-        if isinstance(payload.get("file_size"), int):
-            doc.size_bytes = payload["file_size"]
-        if isinstance(payload.get("file_mime"), str):
-            doc.mime_type = payload["file_mime"]
+    if visibility not in ("private", "public"):
+        return _bad("visibility must be private or public")
 
-        # user-facing processing begins now
-        doc.processing_state_user = Document.ProcessingState.PROCESSING
-
-        update_fields = [
-            "upload_status",
-            "upload_error",
-            "size_bytes",
-            "mime_type",
-            "processing_state_user",
-        ]
-        doc.save(update_fields=update_fields)
-
-        # Enqueue exactly once
-        if not already_uploaded:
-            try:
-                send_process_document_message(document_id=doc.id)
-            except Exception as e:
-                logger.exception(
-                    "enqueue failed in upload_complete",
-                    extra={"document_id": doc.id},
-                )
-                # If enqueue fails, reflect it clearly in user state
-                doc.processing_state_user = Document.ProcessingState.FAILED
-                doc.upload_error = f"enqueue failed: {e}"
-                doc.save(update_fields=["processing_state_user", "upload_error"])
-                return JsonResponse(
-                    {"error": "enqueue failed", "details": str(e)},
-                    status=500,
-                )
-
-    else:
-        doc.upload_status = Document.UploadStatus.FAILED
-        doc.upload_error = (payload.get("error") or "upload failed").strip()
-        doc.processing_state_user = Document.ProcessingState.FAILED
-        doc.save(
-            update_fields=["upload_status", "upload_error", "processing_state_user"]
+    bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
+    if not bucket:
+        return JsonResponse(
+            {"error": "Bucket not configured (set UPLOADS_BUCKET_NAME or S3_BUCKET)"},
+            status=500,
         )
+
+    # Create Document in UPLOADING state
+    doc = Document.objects.create(
+        title=title,
+        doc_type=doc_type,
+        date_start=ds,
+        date_end=de,
+        language=language,
+        category_event=category_event,
+        visibility=visibility,
+        upload_status=Document.UploadStatus.UPLOADING,
+        file_original_name=original_name,
+        mime_type=mime_type,
+        size_bytes=size_bytes if isinstance(size_bytes, int) else None,
+    )
+
+    DocumentMetadata.objects.create(
+        document=doc,
+        notes=str(admin_meta.get("notes") or ""),
+        donor=str(admin_meta.get("donor") or ""),
+        collection=str(admin_meta.get("collection") or ""),
+        original_location=str(admin_meta.get("original_location") or ""),
+    )
+
+    # Add tags via M2M
+    for raw in tags:
+        if raw is None:
+            continue
+        name = str(raw).strip()
+        if not name:
+            continue
+        tag_obj, _ = Tag.objects.get_or_create(name=name)
+        doc.tags_m2m.add(tag_obj)
+
+    # Create a stable key
+    ext = "bin"
+    if mime_type == "application/pdf":
+        ext = "pdf"
+    elif mime_type.startswith("image/"):
+        ext = mime_type.split("/", 1)[1] or "img"
+
+    key = f"documents/{doc.id}/original.{ext}"
+    doc.file_s3_key = key
+    doc.save(update_fields=["file_s3_key"])
+
+    # Presigned PUT
+    upload_url = create_presigned_put(bucket=bucket, key=key, content_type=mime_type)
 
     return JsonResponse(
         {
             "document_id": doc.id,
             "upload_status": doc.upload_status,
-            "processing_state_user": doc.processing_state_user,
-        }
+            "s3_key": key,
+            "upload_url": upload_url,
+        },
+        status=201,
     )
 
 
@@ -452,11 +508,9 @@ def documents_list_page(request):
 
 @login_required
 def admin_backlog_page(request):
-    deny = _require_admin(request)
+    deny = _require_admin_page(request)
     if deny:
         return deny
-    limit = 50
-    offset = _parse_int(request.GET.get("offset"), default=0, min_value=0)
 
     # Lightweight filters (UI-only; no new models)
     only_missing_tags = (request.GET.get("only_missing_tags") or "").strip() == "1"
@@ -575,7 +629,7 @@ def document_detail_page(request, doc_id: int):
 def upload_page(request):
     # The actual upload flow is executed in the browser using existing API endpoints:
     # create_upload -> presigned PUT -> upload_complete
-    deny = _require_admin(request)
+    deny = _require_admin_page(request)
     if deny:
         return deny
     return render(

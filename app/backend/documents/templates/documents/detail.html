@@ -10,12 +10,14 @@
 
       {% if user.is_staff or user.is_superuser %}
         <a class="btn" href="/api/ui/admin/backlog/">Backlog מנהלים</a>
+        <a class="btn" href="/admin/documents/document/{{ doc.id }}/change/">עריכה (Django Admin)</a>
       {% endif %}
     </div>
 
     <div class="spacer"></div>
 
     <h1 class="page-title" style="margin: 0;">{{ doc.title }}</h1>
+
     <div class="muted" style="margin-top: 6px; font-size: 13px;">
       מסמך #{{ doc.id }}
       {% if doc.file_original_name %} · {{ doc.file_original_name }}{% endif %}
@@ -24,8 +26,8 @@
 
     <div class="spacer"></div>
 
-    <div style="display:flex; gap:10px; flex-wrap: wrap;">
-      {# Processing badge #}
+    {# ===== Status row ===== #}
+    <div style="display:flex; gap:10px; flex-wrap: wrap; align-items:center;">
       {% if doc.processing_state_user == "READY" %}
         <span class="badge badge-ok">מוכן</span>
       {% elif doc.processing_state_user == "PROCESSING" %}
@@ -36,7 +38,6 @@
         <span class="badge">{{ doc.processing_state_user }}</span>
       {% endif %}
 
-      {# Visibility badge #}
       {% if doc.visibility == "public" %}
         <span class="badge badge-ok">ציבורי</span>
       {% else %}
@@ -49,6 +50,19 @@
         <span class="badge">{{ doc.language }}</span>
       {% else %}
         <span class="badge">שפה: לא ידוע</span>
+      {% endif %}
+    </div>
+
+    {# ===== Tags preview (nice UX) ===== #}
+    <div class="spacer"></div>
+    <div style="display:flex; gap:8px; flex-wrap: wrap; align-items:center;">
+      <div class="muted" style="font-size: 13px; font-weight: 700;">תגיות:</div>
+      {% if doc.tags_m2m.exists %}
+        {% for t in doc.tags_m2m.all %}
+          <span class="badge">{{ t.name }}</span>
+        {% endfor %}
+      {% else %}
+        <span class="muted" style="font-size: 13px;">—</span>
       {% endif %}
     </div>
 
@@ -198,18 +212,23 @@
         {% endif %}
       {% endif %}
 
-      {% if admin_meta %}
-        <div class="spacer"></div>
-        <div class="section-title">מטא־דאטה למנהלים</div>
+      {% if user.is_staff or user.is_superuser %}
+        <div class="section">
+          <h3>מטא־דאטה למנהלים</h3>
 
-        {% if admin_meta.donor %}<div><strong>תורם:</strong> {{ admin_meta.donor }}</div>{% endif %}
-        {% if admin_meta.collection %}<div><strong>אוסף:</strong> {{ admin_meta.collection }}</div>{% endif %}
-        {% if admin_meta.original_location %}<div><strong>מיקום מקור:</strong> {{ admin_meta.original_location }}</div>{% endif %}
-        {% if admin_meta.notes %}<div><strong>הערות:</strong> {{ admin_meta.notes }}</div>{% endif %}
+          {% if admin_meta %}
+            {% if admin_meta.donor %}<div><strong>תורם:</strong> {{ admin_meta.donor }}</div>{% endif %}
+            {% if admin_meta.collection %}<div><strong>אוסף:</strong> {{ admin_meta.collection }}</div>{% endif %}
+            {% if admin_meta.original_location %}<div><strong>מיקום מקור:</strong> {{ admin_meta.original_location }}</div>{% endif %}
+            {% if admin_meta.notes %}<div><strong>הערות:</strong> {{ admin_meta.notes }}</div>{% endif %}
 
-        {% if not admin_meta.donor and not admin_meta.collection and not admin_meta.original_location and not admin_meta.notes %}
-          <div class="muted">אין מידע מנהלים עדיין.</div>
-        {% endif %}
+            {% if not admin_meta.donor and not admin_meta.collection and not admin_meta.original_location and not admin_meta.notes %}
+              <p class="muted">אין מידע מנהלים עדיין.</p>
+            {% endif %}
+          {% else %}
+            <p class="muted">אין מידע מנהלים עדיין.</p>
+          {% endif %}
+        </div>
       {% endif %}
     </div>
   </div>

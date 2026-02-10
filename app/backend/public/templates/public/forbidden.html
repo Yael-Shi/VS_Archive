@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}VSArchive – גישה חסומה{% endblock %}
+
+{% block content %}
+  <div class="card" style="padding: 22px;">
+    <h1 class="page-title">גישה חסומה</h1>
+
+    <p class="page-subtitle" style="margin-top: 8px;">
+      העמוד הזה זמין למנהלים בלבד.
+    </p>
+
+    <div class="spacer"></div>
+
+    <div class="card" style="padding: 14px; border: 1px solid rgba(180, 35, 24, 0.25);">
+      <div style="font-weight: 800; color: var(--danger); margin-bottom: 6px;">
+        403 · Admins only
+      </div>
+      <div class="muted">
+        אם את חושבת שזו טעות — בקשי ממנהל לתת לך הרשאות (is_staff / is_superuser).
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div style="display:flex; gap:10px; flex-wrap: wrap;">
+      <a class="btn" href="/">חזרה לעמוד הראשי</a>
+      <a class="btn btn-primary" href="/api/ui/documents/">חזרה לרשימת המסמכים</a>
+    </div>
+  </div>
+{% endblock %}
