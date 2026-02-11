@@ -96,12 +96,20 @@
               <div class="muted" style="font-size: 13px;">
                 #{{ d.id }}
                 {% if d.created_at %} · {{ d.created_at }}{% endif %}
-                {% if d.file_original_name %} · {{ d.file_original_name }}{% endif %}
+                {% if (user.is_staff or user.is_superuser) and d.file_original_name %} · {{ d.file_original_name }}{% endif %}
               </div>
 
               <div class="spacer" style="height:8px;"></div>
 
               <div style="display:flex; gap:8px; flex-wrap: wrap; align-items:center;">
+                {% if d.upload_status == "FAILED" %}
+                  <span class="badge badge-bad">העלאה נכשלה</span>
+                {% elif d.upload_status == "UPLOADING" %}
+                  <span class="badge badge-warn">בהעלאה</span>
+                {% elif d.upload_status == "UPLOADED" %}
+                  <span class="badge badge-ok">הועלה</span>
+                {% endif %}
+
                 {% if not d.tags_m2m.exists %}
                   <span class="badge badge-bad">חסרות תגיות</span>
                 {% endif %}
@@ -132,7 +140,7 @@
                   <span class="badge">{{ t.name }}</span>
                 {% endfor %}
               {% else %}
-                <span class="muted">-</span>
+                <span class="muted">—</span>
               {% endif %}
             </td>
 
@@ -143,14 +151,10 @@
                 <span class="badge badge-warn">בעיבוד</span>
               {% elif d.processing_state_user == "FAILED" %}
                 <span class="badge badge-bad">נכשל</span>
-              {% elif d.processing_state_user == "ACTION_REQUIRED" %}
-                <span class="badge badge-warn">נדרש טיפול אדמין</span>
+              {% elif d.processing_state_user == "PARTIAL" %}
+                <span class="badge">חלקי</span>
               {% else %}
                 <span class="badge">{{ d.processing_state_user }}</span>
-              {% endif %}
-
-              {% if d.upload_status == "FAILED" %}
-                <span class="badge badge-bad">כשל בהעלאה</span>
               {% endif %}
             </td>
 

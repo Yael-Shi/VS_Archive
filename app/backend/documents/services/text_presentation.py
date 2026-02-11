@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Optional, Literal
 
 from documents.models import Document, DocumentTextResult
+from documents.services.expected_outputs import expected_result_types_for_document
 
 
 ResultTypeStr = Literal["SOURCE_TEXT", "HEBREW_TEXT"]
@@ -57,12 +58,7 @@ def _latest_failed(doc: Document, result_type: ResultTypeStr) -> Optional[Docume
 
 
 def get_text_presentation_for_document(doc: Document) -> TextPresentation:
-    lang = (doc.language or "").strip().lower()
-
-    if lang in ("he", "heb", "hebrew"):
-        expected: list[ResultTypeStr] = ["HEBREW_TEXT"]
-    else:
-        expected = ["SOURCE_TEXT", "HEBREW_TEXT"]
+    expected = expected_result_types_for_document(doc)
 
     source_obj = _latest_displayable(doc, "SOURCE_TEXT")
     hebrew_obj = _latest_displayable(doc, "HEBREW_TEXT")

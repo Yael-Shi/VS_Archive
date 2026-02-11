@@ -312,18 +312,16 @@ def upload_complete(request, doc_id: int):
         return JsonResponse({"error": "not found"}, status=404)
 
     if success:
-        # Require a stable S3 key as the marker of a valid "completed upload"
-        if not (doc.file_s3_key or "").strip():
+        if not doc.file_s3_key:
             doc.upload_status = Document.UploadStatus.FAILED
+            doc.upload_error = "upload complete called but file_s3_key is missing"
             doc.processing_state_user = Document.ProcessingState.FAILED
-            doc.upload_error = "upload_complete called but file_s3_key is missing"
-            doc.save(update_fields=["upload_status", "processing_state_user", "upload_error"])
+            doc.save(update_fields=["upload_status", "upload_error", "processing_state_user"])
             return JsonResponse(
-                {"error": "upload invalid", "details": "missing file_s3_key"},
+                {"error": "file_s3_key missing", "document_id": doc.id},
                 status=400,
             )
 
-        # Prevent double-enqueue if the client calls complete twice
         already_uploaded = doc.upload_status == Document.UploadStatus.UPLOADED
 
         doc.upload_status = Document.UploadStatus.UPLOADED
@@ -334,9 +332,7 @@ def upload_complete(request, doc_id: int):
         if isinstance(payload.get("file_mime"), str):
             doc.mime_type = payload["file_mime"]
 
-        # User-facing processing begins now
         doc.processing_state_user = Document.ProcessingState.PROCESSING
-
         doc.save(
             update_fields=[
                 "upload_status",
@@ -347,7 +343,6 @@ def upload_complete(request, doc_id: int):
             ]
         )
 
-        # Enqueue exactly once
         if not already_uploaded:
             try:
                 send_process_document_message(document_id=doc.id)
@@ -356,7 +351,6 @@ def upload_complete(request, doc_id: int):
                     "enqueue failed in upload_complete",
                     extra={"document_id": doc.id},
                 )
-                # Keep upload as UPLOADED (file exists), but processing failed to start.
                 doc.processing_state_user = Document.ProcessingState.FAILED
                 doc.upload_error = f"enqueue failed: {e}"
                 doc.save(update_fields=["processing_state_user", "upload_error"])
@@ -364,11 +358,15 @@ def upload_complete(request, doc_id: int):
                     {"error": "enqueue failed", "details": str(e)},
                     status=500,
                 )
+
     else:
+        raw_err = (payload.get("error") or "upload failed")
+        err = str(raw_err).strip() or "upload failed"
+
         doc.upload_status = Document.UploadStatus.FAILED
+        doc.upload_error = err
         doc.processing_state_user = Document.ProcessingState.FAILED
-        doc.upload_error = (payload.get("error") or "upload failed").strip()[:4000]
-        doc.save(update_fields=["upload_status", "processing_state_user", "upload_error"])
+        doc.save(update_fields=["upload_status", "upload_error", "processing_state_user"])
 
     return JsonResponse(
         {

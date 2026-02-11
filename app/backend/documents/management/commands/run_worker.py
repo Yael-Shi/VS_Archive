@@ -13,6 +13,7 @@ from django.db import transaction
 
 from documents.models import Document, DocumentTextResult
 from documents.s3 import get_object_bytes
+from documents.services.expected_outputs import expected_result_types_for_document
 from documents.services.htr_engine import transcribe_pages
 from documents.services.page_extraction import extract_pages
 
@@ -148,9 +149,6 @@ class Command(BaseCommand):
             if not bucket:
                 raise RuntimeError("UPLOADS_BUCKET_NAME is not configured")
 
-            if not (doc.file_s3_key or "").strip():
-                raise RuntimeError("Document file_s3_key is missing")
-
             file_bytes, s3_mime = get_object_bytes(
                 bucket=bucket,
                 key=doc.file_s3_key,
@@ -189,7 +187,7 @@ class Command(BaseCommand):
                 else:
                     self._save_htr_results(doc, engine, is_he, htr_result)
 
-                self._update_processing_state(doc, engine, is_he)
+                self._update_processing_state(doc, engine)
                 doc.save(update_fields=["processing_state_user"])
 
         except Document.DoesNotExist:
@@ -202,7 +200,7 @@ class Command(BaseCommand):
     def _save_htr_results(self, doc: Document, engine: str, is_he: bool, htr):
         status = (
             DocumentTextResult.Status.NEEDS_REVIEW
-            if getattr(htr, "needs_review", False)
+            if htr.needs_review
             else DocumentTextResult.Status.SUCCEEDED
         )
 
@@ -212,7 +210,7 @@ class Command(BaseCommand):
             engine=engine,
             defaults={
                 "status": status,
-                "text": getattr(htr, "text", None),
+                "text": htr.text,
                 "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
                 "error_code": None,
                 "error_details": None,
@@ -220,14 +218,13 @@ class Command(BaseCommand):
         )
 
         if is_he:
-            # Hebrew docs: only HEBREW_TEXT is expected.
             DocumentTextResult.objects.update_or_create(
                 document=doc,
                 result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
                 engine=engine,
                 defaults={
                     "status": status,
-                    "text": getattr(htr, "text", None),
+                    "text": htr.text,
                     "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
                     "error_code": None,
                     "error_details": None,
@@ -235,7 +232,6 @@ class Command(BaseCommand):
             )
 
     def _save_ocr_failure(self, doc, engine, is_he, details):
-        # Non-Hebrew: only SOURCE_TEXT in current MVP (Hebrew translation is a separate step).
         DocumentTextResult.objects.update_or_create(
             document=doc,
             result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
@@ -263,19 +259,14 @@ class Command(BaseCommand):
                 },
             )
 
-    def _update_processing_state(self, doc, engine, is_he):
-        expected_types = (
-            [DocumentTextResult.ResultType.HEBREW_TEXT]
-            if is_he
-            else [
-                DocumentTextResult.ResultType.SOURCE_TEXT,
-                DocumentTextResult.ResultType.HEBREW_TEXT,
-            ]
+    def _update_processing_state(self, doc, engine):
+        expected_types = expected_result_types_for_document(doc)
+
+        qs = doc.text_results.filter(
+            engine=engine,
+            result_type__in=expected_types,
         )
 
-        qs = doc.text_results.filter(engine=engine, result_type__in=expected_types)
-
-        # We do not expose ACTION_REQUIRED to non-admin users; NEEDS_REVIEW maps to PARTIAL.
         if qs.filter(status=DocumentTextResult.Status.NEEDS_REVIEW).exists():
             doc.processing_state_user = Document.ProcessingState.PARTIAL
             return

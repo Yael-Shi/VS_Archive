@@ -11,11 +11,7 @@
     <form method="get" class="toolbar">
       <div class="field" style="min-width: 280px;">
         <label>חיפוש</label>
-        {% if is_admin %}
-          <input type="text" name="q" placeholder="כותרת, תגיות, הערות מנהל, תורם..." value="{{ q }}">
-        {% else %}
-          <input type="text" name="q" placeholder="כותרת, תגיות, קטגוריה..." value="{{ q }}">
-        {% endif %}
+        <input type="text" name="q" placeholder="כותרת / תגיות / קטגוריה" value="{{ q }}">
       </div>
 
       <div class="field">
@@ -38,15 +34,15 @@
         </select>
       </div>
 
+      <div class="field">
+        <label>סטטוס העלאה</label>
+        <input type="text" name="upload_status" placeholder="UPLOADED / FAILED / UPLOADING" value="{{ upload_status }}">
+      </div>
+
       {% if is_admin %}
         <div class="field">
           <label>נראות</label>
           <input type="text" name="visibility" placeholder="private / public" value="{{ visibility }}">
-        </div>
-
-        <div class="field">
-          <label>סטטוס העלאה</label>
-          <input type="text" name="upload_status" placeholder="UPLOADED / FAILED / ..." value="{{ upload_status }}">
         </div>
       {% endif %}
 
@@ -78,6 +74,7 @@
             <div style="font-weight: 800;">
               <a href="/api/ui/documents/{{ d.id }}/">{{ d.title }}</a>
             </div>
+
             <div class="muted" style="font-size: 13px;">
               {% if d.date_start or d.date_end %}
                 {{ d.date_start }} - {{ d.date_end }}
@@ -86,6 +83,30 @@
               {% endif %}
               · #{{ d.id }}
               {% if is_admin and d.file_original_name %} · {{ d.file_original_name }}{% endif %}
+            </div>
+
+            <div class="spacer" style="height:8px;"></div>
+
+            <div style="display:flex; gap:8px; flex-wrap: wrap; align-items:center;">
+              {% if d.upload_status == "FAILED" %}
+                <span class="badge badge-bad">העלאה נכשלה</span>
+              {% elif d.upload_status == "UPLOADING" %}
+                <span class="badge badge-warn">בהעלאה</span>
+              {% elif d.upload_status == "UPLOADED" %}
+                <span class="badge badge-ok">הועלה</span>
+              {% endif %}
+
+              {% if d.processing_state_user == "READY" %}
+                <span class="badge badge-ok">מוכן</span>
+              {% elif d.processing_state_user == "PROCESSING" %}
+                <span class="badge badge-warn">בעיבוד</span>
+              {% elif d.processing_state_user == "FAILED" %}
+                <span class="badge badge-bad">עיבוד נכשל</span>
+              {% elif d.processing_state_user == "PARTIAL" %}
+                <span class="badge">חלקי</span>
+              {% else %}
+                <span class="badge">{{ d.processing_state_user }}</span>
+              {% endif %}
             </div>
           </td>
 
@@ -96,20 +117,10 @@
           <td>{{ d.doc_type }}</td>
 
           <td>
-            {% if d.processing_state_user == "READY" %}
-              <span class="badge badge-ok">מוכן</span>
-            {% elif d.processing_state_user == "PROCESSING" %}
-              <span class="badge badge-warn">בעיבוד</span>
-            {% elif d.processing_state_user == "FAILED" %}
-              <span class="badge badge-bad">נכשל</span>
-            {% elif d.processing_state_user == "ACTION_REQUIRED" %}
-              {% if is_admin %}
-                <span class="badge badge-warn">Action required</span>
-              {% else %}
-                <span class="badge badge-warn">חלקי</span>
-              {% endif %}
+            {% if d.metadata_status == "COMPLETED" %}
+              <span class="badge badge-ok">מטא־דאטה הושלמה</span>
             {% else %}
-              <span class="badge">{{ d.processing_state_user }}</span>
+              <span class="badge">Needs completion</span>
             {% endif %}
           </td>
 
@@ -134,7 +145,7 @@
   <div class="spacer"></div>
 
   <div style="display:flex; gap:10px; flex-wrap: wrap; align-items:center;">
-    {% if user.is_staff or user.is_superuser %}
+    {% if is_admin %}
       <a class="btn btn-primary" href="/api/ui/upload/">העלאת מסמך חדש</a>
       <a class="btn" href="/api/ui/admin/backlog/">Backlog מנהלים</a>
     {% endif %}
