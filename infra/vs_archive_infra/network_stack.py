@@ -13,74 +13,54 @@ class VsArchiveNetworkStack(Stack):
             f"{cfg.prefix}-vpc",
             vpc_name=f"{cfg.prefix}-vpc",
             max_azs=2,
-            nat_gateways=1,
+            nat_gateways=0, # Cost saving: removed NAT Gateway
             subnet_configuration=[
                 ec2.SubnetConfiguration(
-                    name="public", subnet_type=ec2.SubnetType.PUBLIC
+                    name="public", 
+                    subnet_type=ec2.SubnetType.PUBLIC,
+                    cidr_mask=24
                 ),
                 ec2.SubnetConfiguration(
-                    name="private", subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
-                ),
-                ec2.SubnetConfiguration(
-                    name="isolated", subnet_type=ec2.SubnetType.PRIVATE_ISOLATED
+                    name="isolated", 
+                    subnet_type=ec2.SubnetType.PRIVATE_ISOLATED,
+                    cidr_mask=24
                 ),
             ],
         )
 
         # Security Groups
-        # ALB: internet-facing, lives in public subnets
         self.sg_alb = ec2.SecurityGroup(
-            self,
-            f"{cfg.prefix}-sg-alb",
+            self, f"{cfg.prefix}-sg-alb",
             vpc=self.vpc,
             allow_all_outbound=True,
-            description="Security group for the Application Load Balancer",
+            description="ALB Security Group",
         )
 
-        # Web/Worker: ECS tasks in private subnets
         self.sg_web = ec2.SecurityGroup(
-            self,
-            f"{cfg.prefix}-sg-web",
+            self, f"{cfg.prefix}-sg-web",
             vpc=self.vpc,
             allow_all_outbound=True,
-            description="Security group for ECS tasks (web + worker)",
+            description="ECS Web/Worker Security Group",
         )
 
-        # DB (reserved for future RDS): keep outbound blocked
-        self.sg_db = ec2.SecurityGroup(
-            self,
-            f"{cfg.prefix}-sg-db",
-            vpc=self.vpc,
-            allow_all_outbound=False,
-            description="Security group for future RDS Postgres (not used for ECS Postgres)",
-        )
-
-        # Postgres as ECS task (DEV): must have outbound open (pull image, logs, secrets, DNS, etc.)
         self.sg_pg = ec2.SecurityGroup(
-            self,
-            f"{cfg.prefix}-sg-pg",
+            self, f"{cfg.prefix}-sg-pg",
             vpc=self.vpc,
             allow_all_outbound=True,
-            description="Security group for Postgres running as ECS task (dev)",
+            description="Postgres ECS Security Group",
         )
 
-        # Internet -> ALB (HTTP for now)
         self.sg_alb.add_ingress_rule(
             peer=ec2.Peer.any_ipv4(),
             connection=ec2.Port.tcp(80),
-            description="HTTP from Internet to ALB",
         )
 
-        # ALB -> Web tasks (nginx on 8000 for now)
         self.sg_web.add_ingress_rule(
             peer=self.sg_alb,
             connection=ec2.Port.tcp(8000),
-            description="ALB to Web tasks",
         )
 
-        # Web/Worker -> Postgres task (dev)
         self.sg_pg.add_ingress_rule(
             peer=self.sg_web,
             connection=ec2.Port.tcp(5432),
-            description="Web/Worker to Postgres task",
         )

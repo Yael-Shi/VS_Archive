@@ -16,45 +16,39 @@ class VsArchiveDataStack(Stack):
             f"{cfg.prefix}-bucket",
             versioned=True,
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
-            removal_policy=RemovalPolicy.DESTROY
-            if cfg.env_name == "dev"
-            else RemovalPolicy.RETAIN,
+            removal_policy=RemovalPolicy.DESTROY if cfg.env_name == "dev" else RemovalPolicy.RETAIN,
             auto_delete_objects=True if cfg.env_name == "dev" else False,
+            # Cost saving: S3 Lifecycle rules
+            lifecycle_rules=[
+                s3.LifecycleRule(
+                    enabled=True,
+                    noncurrent_version_expiration=Duration.days(14), # Bi-weekly cleanup
+                    expiration=Duration.days(90) # Quarterly cleanup
+                )
+            ],
             cors=[
                 s3.CorsRule(
-                    allowed_methods=[
-                        s3.HttpMethods.PUT,
-                        s3.HttpMethods.POST,
-                        s3.HttpMethods.GET,
-                        s3.HttpMethods.HEAD,
-                    ],
-                    allowed_origins=["*"],  # tighten later
+                    allowed_methods=[s3.HttpMethods.PUT, s3.HttpMethods.POST, s3.HttpMethods.GET, s3.HttpMethods.HEAD],
+                    allowed_origins=["*"],
                     allowed_headers=["*"],
-                    max_age=3000,
                 )
             ],
         )
 
         self.jobs_queue = sqs.Queue(
-            self,
-            f"{cfg.prefix}-jobs",
-            queue_name=f"{cfg.prefix}-jobs",
+            self, f"{cfg.prefix}-jobs",
             visibility_timeout=Duration.minutes(10),
             retention_period=Duration.days(4),
         )
 
-        # Secret for Postgres (used by ECS Postgres container + Django)
-        # Contains fields: username, password, dbname
         self.db_secret = cast(
             secretsmanager.ISecret,
             secretsmanager.Secret(
-                self,
-                f"{cfg.prefix}-pg-secret",
-                secret_name=f"{cfg.prefix}/postgres",
+                self, f"{cfg.prefix}-pg-secret",
+                removal_policy=RemovalPolicy.DESTROY if cfg.env_name == "dev" else RemovalPolicy.RETAIN,
                 generate_secret_string=secretsmanager.SecretStringGenerator(
                     secret_string_template='{"username":"vsarchive","dbname":"vsarchive"}',
                     generate_string_key="password",
-                    exclude_punctuation=True,
                 ),
             ),
         )
