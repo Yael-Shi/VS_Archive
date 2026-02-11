@@ -27,18 +27,16 @@ class VsArchiveAppStack(Stack):
             self, f"{cfg.prefix}-ns", name=f"{cfg.prefix}.local", vpc=vpc
         )
 
-        def get_log_driver(scope, name):
-            log_group = logs.LogGroup(
-                scope, f"{name}-lg",
-                log_group_name=f"/ecs/{name}",
+        def get_log_driver(name_suffix):
+            lg = logs.LogGroup(
+                self, f"LogGroup-{name_suffix}",
                 retention=logs.RetentionDays.ONE_WEEK,
                 removal_policy=RemovalPolicy.DESTROY
             )
             return ecs.LogDrivers.aws_logs(
-                stream_prefix=name,
-                log_group=log_group
+                stream_prefix=name_suffix,
+                log_group=lg
             )
-
         # --- Postgres Task ---
         pg_task = ecs.FargateTaskDefinition(self, f"{cfg.prefix}-pg-td", cpu=256, memory_limit_mib=512)
         pg_task.add_container(f"{cfg.prefix}-pg", 
