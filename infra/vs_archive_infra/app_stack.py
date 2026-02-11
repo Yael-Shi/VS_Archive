@@ -27,16 +27,23 @@ class VsArchiveAppStack(Stack):
             self, f"{cfg.prefix}-ns", name=f"{cfg.prefix}.local", vpc=vpc
         )
 
-        # Common Log Retention (Cost Saving)
-        log_driver_config = lambda name: ecs.LogDrivers.aws_logs(
-            stream_prefix=name, retention=logs.RetentionDays.ONE_WEEK
-        )
+        def get_log_driver(scope, name):
+            log_group = logs.LogGroup(
+                scope, f"{name}-lg",
+                log_group_name=f"/ecs/{name}",
+                retention=logs.RetentionDays.ONE_WEEK,
+                removal_policy=RemovalPolicy.DESTROY
+            )
+            return ecs.LogDrivers.aws_logs(
+                stream_prefix=name,
+                log_group=log_group
+            )
 
         # --- Postgres Task ---
         pg_task = ecs.FargateTaskDefinition(self, f"{cfg.prefix}-pg-td", cpu=256, memory_limit_mib=512)
         pg_task.add_container(f"{cfg.prefix}-pg", 
             image=ecs.ContainerImage.from_registry("postgres:16-alpine"),
-            logging=log_driver_config(f"{cfg.prefix}-pg"),
+            logging=get_log_driver("pg"),
             environment={"POSTGRES_DB": "vsarchive", "POSTGRES_USER": "vsarchive"},
             secrets={"POSTGRES_PASSWORD": ecs.Secret.from_secrets_manager(db_secret, "password")}
         ).add_port_mappings(ecs.PortMapping(container_port=5432))
@@ -62,7 +69,7 @@ class VsArchiveAppStack(Stack):
         web_repo = ecr.Repository.from_repository_name(self, f"{cfg.prefix}-web-repo", "vs-archive-web")
         web_task.add_container(f"{cfg.prefix}-web",
             image=ecs.ContainerImage.from_ecr_repository(web_repo, tag="dev"),
-            logging=log_driver_config(f"{cfg.prefix}-web"),
+            logging=get_log_driver("web"),
             environment={"UPLOADS_BUCKET_NAME": bucket.bucket_name, "SQS_QUEUE_URL": queue.queue_url, "DB_HOST": f"postgres.{cfg.prefix}.local", "DB_NAME": "vsarchive", "DB_USER": "vsarchive"},
             secrets={"DB_PASSWORD": ecs.Secret.from_secrets_manager(db_secret, "password")}
         ).add_port_mappings(ecs.PortMapping(container_port=8000))
@@ -74,7 +81,7 @@ class VsArchiveAppStack(Stack):
         worker_task.add_container(f"{cfg.prefix}-worker",
             image=ecs.ContainerImage.from_ecr_repository(web_repo, tag="dev"),
             command=["bash", "-lc", "python manage.py run_worker"],
-            logging=log_driver_config(f"{cfg.prefix}-worker"),
+            logging=get_log_driver("worker"),
             environment={"SQS_QUEUE_URL": queue.queue_url, "UPLOADS_BUCKET_NAME": bucket.bucket_name, "DB_HOST": f"postgres.{cfg.prefix}.local", "DB_NAME": "vsarchive", "DB_USER": "vsarchive"},
             secrets={"DB_PASSWORD": ecs.Secret.from_secrets_manager(db_secret, "password")}
         )
