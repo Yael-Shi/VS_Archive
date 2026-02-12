@@ -10,10 +10,17 @@ from .config import EnvConfig
 
 
 class VsArchiveDataStack(Stack):
-    def __init__(self, scope: Construct, construct_id: str, cfg: EnvConfig, vpc: ec2.IVpc, sg_efs: ec2.ISecurityGroup, **kwargs):
+    def __init__(
+        self,
+        scope: Construct,
+        construct_id: str,
+        cfg: EnvConfig,
+        vpc: ec2.IVpc,
+        sg_efs: ec2.ISecurityGroup,
+        **kwargs,
+    ):
         super().__init__(scope, construct_id, **kwargs)
 
-        # S3 Bucket
         self.bucket = s3.Bucket(
             self,
             f"{cfg.prefix}-bucket",
@@ -21,12 +28,11 @@ class VsArchiveDataStack(Stack):
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
             removal_policy=RemovalPolicy.RETAIN,
             auto_delete_objects=False,
-            # Cost saving: S3 Lifecycle rules
             lifecycle_rules=[
                 s3.LifecycleRule(
                     enabled=True,
                     noncurrent_version_expiration=Duration.days(14),
-                    expiration=Duration.days(90)
+                    expiration=Duration.days(90),
                 )
             ],
             cors=[
@@ -38,31 +44,30 @@ class VsArchiveDataStack(Stack):
             ],
         )
 
-        # EFS File System - This is your persistent drive
         self.file_system = efs.FileSystem(
-            self, f"{cfg.prefix}-efs",
+            self,
+            f"{cfg.prefix}-efs",
             vpc=vpc,
             security_group=sg_efs,
-            removal_policy=RemovalPolicy.RETAIN, # Critical: Data stays if stack is deleted
-            lifecycle_policy=efs.LifecyclePolicy.AFTER_14_DAYS, # Cost saving: move old data to IA
+            removal_policy=RemovalPolicy.RETAIN,
+            lifecycle_policy=efs.LifecyclePolicy.AFTER_14_DAYS,
             performance_mode=efs.PerformanceMode.GENERAL_PURPOSE,
             out_of_infrequent_access_policy=efs.OutOfInfrequentAccessPolicy.AFTER_1_ACCESS,
-            # Ensure it's placed in the isolated subnets we confirmed
-            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED)
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED),
         )
 
-        # SQS Queue
         self.jobs_queue = sqs.Queue(
-            self, f"{cfg.prefix}-jobs",
+            self,
+            f"{cfg.prefix}-jobs",
             visibility_timeout=Duration.minutes(10),
             retention_period=Duration.days(4),
         )
 
-        # Database Secret
         self.db_secret = cast(
             secretsmanager.ISecret,
             secretsmanager.Secret(
-                self, f"{cfg.prefix}-pg-secret",
+                self,
+                f"{cfg.prefix}-pg-secret",
                 removal_policy=RemovalPolicy.RETAIN,
                 generate_secret_string=secretsmanager.SecretStringGenerator(
                     secret_string_template='{"username":"vsarchive","dbname":"vsarchive"}',

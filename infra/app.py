@@ -14,20 +14,17 @@ env = cdk.Environment(
     region=cfg.region,
 )
 
-# 1. Network Stack - provides VPC and Security Groups
 network = VsArchiveNetworkStack(app, f"{cfg.prefix}-network-v2", cfg=cfg, env=env)
 
-# 2. Data Stack - Now receives the VPC and EFS Security Group to create the drive
 data = VsArchiveDataStack(
     app,
     f"{cfg.prefix}-data-v2",
     cfg=cfg,
-    vpc=network.vpc,          # VPC reference
-    sg_efs=network.sg_efs,    # Security Group for EFS
+    vpc=network.vpc,
+    sg_efs=network.sg_efs,
     env=env,
 )
 
-# 3. App Stack - receives the file_system to mount it to Postgres
 VsArchiveAppStack(
     app,
     f"{cfg.prefix}-app-v2",
@@ -39,7 +36,7 @@ VsArchiveAppStack(
     bucket=data.bucket,
     queue=data.jobs_queue,
     db_secret=data.db_secret,
-    file_system=data.file_system, # The actual EFS drive
+    file_system=data.file_system,
     env=env,
 )
 
