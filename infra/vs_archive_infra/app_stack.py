@@ -51,6 +51,11 @@ class VsArchiveAppStack(Stack):
 
         public_subnets = ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC)
 
+        # --- Google Vision Secret ---
+        google_secret = secretsmanager.Secret.from_secret_name_v2(
+            self, "GoogleVisionSecret", "vs-archive/google-vision-key"
+        )
+
         # --- Postgres Task with EFS Storage ---
         pg_task = ecs.FargateTaskDefinition(
             self, f"{cfg.prefix}-pg-td", cpu=256, memory_limit_mib=512
@@ -102,6 +107,8 @@ class VsArchiveAppStack(Stack):
         bucket.grant_read_write(task_role)
         queue.grant_consume_messages(task_role)
         db_secret.grant_read(task_role)
+        google_secret.grant_read(task_role)
+        
         task_role.add_to_principal_policy(
             iam.PolicyStatement(
                 actions=["bedrock:InvokeModel", "translate:TranslateText"],
@@ -115,6 +122,7 @@ class VsArchiveAppStack(Stack):
                 "service-role/AmazonECSTaskExecutionRolePolicy"
             )
         )
+        google_secret.grant_read(exec_role)
 
         # --- Web Task ---
         web_task = ecs.FargateTaskDefinition(
@@ -142,7 +150,10 @@ class VsArchiveAppStack(Stack):
                 "DB_NAME": "vsarchive",
                 "DB_USER": "vsarchive",
             },
-            secrets={"DB_PASSWORD": ecs.Secret.from_secrets_manager(db_secret, "password")},
+            secrets={
+                "DB_PASSWORD": ecs.Secret.from_secrets_manager(db_secret, "password"),
+                "GOOGLE_APPLICATION_CREDENTIALS_JSON": ecs.Secret.from_secrets_manager(google_secret)
+            },
         ).add_port_mappings(ecs.PortMapping(container_port=8000))
 
         web_svc = ecs.FargateService(
@@ -153,6 +164,7 @@ class VsArchiveAppStack(Stack):
             assign_public_ip=True,
             vpc_subnets=public_subnets,
             security_groups=[sg_web],
+            enable_execute_command=True,
         )
 
         # --- Worker Task (Spot Cost Saving) ---
@@ -178,7 +190,10 @@ class VsArchiveAppStack(Stack):
                 "DB_NAME": "vsarchive",
                 "DB_USER": "vsarchive",
             },
-            secrets={"DB_PASSWORD": ecs.Secret.from_secrets_manager(db_secret, "password")},
+            secrets={
+                "DB_PASSWORD": ecs.Secret.from_secrets_manager(db_secret, "password"),
+                "GOOGLE_APPLICATION_CREDENTIALS_JSON": ecs.Secret.from_secrets_manager(google_secret)
+            },
         )
 
         worker_svc = ecs.FargateService(
@@ -189,6 +204,7 @@ class VsArchiveAppStack(Stack):
             assign_public_ip=True,
             vpc_subnets=public_subnets,
             security_groups=[sg_web],
+            enable_execute_command=True,
             capacity_provider_strategies=[
                 ecs.CapacityProviderStrategy(capacity_provider="FARGATE_SPOT", weight=1)
             ],

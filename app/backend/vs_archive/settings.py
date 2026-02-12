@@ -1,7 +1,16 @@
 from pathlib import Path
 import os
+import tempfile
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+google_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+if google_json:
+    tfile = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
+    tfile.write(google_json.encode("utf-8"))
+    tfile.close()
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = tfile.name
+# --------------------------------------------------------
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = "django-insecure-!5*72sfq!20ubj(3&k48o_##@+_+%5t%ph@*66@&1x)yxzydz&"
