@@ -11,6 +11,7 @@ from aws_cdk import aws_secretsmanager as secretsmanager
 from aws_cdk import aws_servicediscovery as servicediscovery
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_applicationautoscaling as scaling
+from aws_cdk import aws_efs as efs
 from typing import cast
 from .config import EnvConfig
 
@@ -18,7 +19,9 @@ from .config import EnvConfig
 class VsArchiveAppStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, cfg: EnvConfig, vpc: ec2.Vpc, 
                  sg_alb: ec2.SecurityGroup, sg_web: ec2.SecurityGroup, sg_pg: ec2.SecurityGroup, 
-                 bucket: s3.Bucket, queue: sqs.Queue, db_secret: secretsmanager.ISecret, **kwargs):
+                 bucket: s3.Bucket, queue: sqs.Queue, db_secret: secretsmanager.ISecret,
+                 file_system: efs.FileSystem,
+                 **kwargs):
         super().__init__(scope, construct_id, **kwargs)
 
         cluster = ecs.Cluster(self, f"{cfg.prefix}-cluster", vpc=vpc)
@@ -30,25 +33,46 @@ class VsArchiveAppStack(Stack):
         def get_log_driver(name_suffix):
             lg = logs.LogGroup(
                 self, f"LogGroup-{name_suffix}",
-                retention=logs.RetentionDays.ONE_WEEK,
-                removal_policy=RemovalPolicy.DESTROY
+                retention=logs.RetentionDays.ONE_MONTH,
+                removal_policy=RemovalPolicy.RETAIN
             )
             return ecs.LogDrivers.aws_logs(
                 stream_prefix=name_suffix,
                 log_group=lg
             )
-        # --- Postgres Task ---
+
+        # --- Postgres Task with EFS Storage ---
         pg_task = ecs.FargateTaskDefinition(self, f"{cfg.prefix}-pg-td", cpu=256, memory_limit_mib=512)
-        pg_task.add_container(f"{cfg.prefix}-pg", 
+        
+        # Define the Volume (connection to EFS)
+        pg_task.add_volume(
+            name="postgres_data",
+            efs_volume_configuration=ecs.EfsVolumeConfiguration(
+                file_system_id=file_system.file_system_id
+            )
+        )
+
+        pg_container = pg_task.add_container(f"{cfg.prefix}-pg", 
             image=ecs.ContainerImage.from_registry("postgres:16-alpine"),
             logging=get_log_driver("pg"),
             environment={"POSTGRES_DB": "vsarchive", "POSTGRES_USER": "vsarchive"},
             secrets={"POSTGRES_PASSWORD": ecs.Secret.from_secrets_manager(db_secret, "password")}
-        ).add_port_mappings(ecs.PortMapping(container_port=5432))
+        )
+        
+        # Mount the Volume to the standard Postgres data directory
+        pg_container.add_mount_points(
+            ecs.MountPoint(
+                container_path="/var/lib/postgresql/data",
+                source_volume="postgres_data",
+                read_only=False
+            )
+        )
+        
+        pg_container.add_port_mappings(ecs.PortMapping(container_port=5432))
 
         pg_svc = ecs.FargateService(self, f"{cfg.prefix}-pg-svc",
             cluster=cluster, task_definition=pg_task,
-            security_groups=[sg_pg], assign_public_ip=True, # Required since no NAT
+            security_groups=[sg_pg], assign_public_ip=True,
             cloud_map_options=ecs.CloudMapOptions(name="postgres", cloud_map_namespace=namespace)
         )
 

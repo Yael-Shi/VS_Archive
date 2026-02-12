@@ -50,6 +50,14 @@ class VsArchiveNetworkStack(Stack):
             description="Postgres ECS Security Group",
         )
 
+        # Security Group for EFS
+        self.sg_efs = ec2.SecurityGroup(
+            self, f"{cfg.prefix}-sg-efs",
+            vpc=self.vpc,
+            allow_all_outbound=True,
+            description="EFS Security Group",
+        )
+
         self.sg_alb.add_ingress_rule(
             peer=ec2.Peer.any_ipv4(),
             connection=ec2.Port.tcp(80),
@@ -63,4 +71,10 @@ class VsArchiveNetworkStack(Stack):
         self.sg_pg.add_ingress_rule(
             peer=self.sg_web,
             connection=ec2.Port.tcp(5432),
+        )
+
+        # Allow Postgres to connect to EFS
+        self.sg_efs.add_ingress_rule(
+            peer=self.sg_pg,
+            connection=ec2.Port.tcp(2049), # NFS port for EFS
         )

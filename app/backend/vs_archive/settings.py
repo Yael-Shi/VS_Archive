@@ -125,3 +125,5 @@ CSRF_TRUSTED_ORIGINS = os.getenv(
 
 
 CSRF_TRUSTED_ORIGINS = [s.strip() for s in CSRF_TRUSTED_ORIGINS if s.strip()]
+
+# build v2.2
