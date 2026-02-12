@@ -25,6 +25,7 @@ def health(request):
 
 
 urlpatterns = [
+    path("", include("public.urls")),
     path("admin/", admin.site.urls),
     path("health/", health),
     path("accounts/", include("django.contrib.auth.urls")),

@@ -1,0 +1,35 @@
+<div class="card" style="padding: 12px 14px; border-radius: 18px; box-shadow: var(--shadow2);">
+  <div style="display:flex; align-items:center; gap:12px;">
+    <div style="font-weight: 900; letter-spacing: -0.3px;">
+      <a href="/" style="color: var(--text); text-decoration:none;">VSArchive</a>
+    </div>
+
+    <div style="display:flex; gap:10px; align-items:center; margin-inline-start: 12px;">
+      <a class="btn btn-link" href="/">דף הבית</a>
+      <a class="btn btn-link" href="/about/">אודות</a>
+    </div>
+
+    <div style="flex:1;"></div>
+
+    {% if user.is_authenticated %}
+      <a class="btn btn-link" href="/api/ui/documents/">מסמכים</a>
+      <a class="btn btn-link" href="/api/ui/upload/">העלאה</a>
+
+      <span class="muted" style="font-size: 13px;">
+        היי, {{ user.username }}
+      </span>
+
+      <form action="/accounts/logout/" method="post" style="display:inline; margin:0;">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-link" style="color: var(--danger);">
+          התנתקות
+        </button>
+      </form>
+    {% else %}
+      <a class="btn btn-link" href="/api/ui/documents/">מסמכים</a>
+      <a class="btn btn-link" href="/accounts/login/">התחברות</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="spacer"></div>

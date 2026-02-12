@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}VSArchive – התחברות{% endblock %}
+
+{% block content %}
+  <div class="card" style="padding: 20px; max-width: 520px; margin: 0 auto;">
+    <h1 class="page-title">התחברות</h1>
+    <p class="page-subtitle">כדי לצפות בתוכן, יש להתחבר.</p>
+
+    <form method="post" action="">
+      {% csrf_token %}
+      {{ form.as_p }}
+      <div style="display:flex; gap:10px; margin-top: 12px; flex-wrap: wrap;">
+        <button class="btn btn-primary" type="submit">התחברות</button>
+        <a class="btn" href="/">חזרה לדף הבית</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}

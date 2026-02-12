@@ -136,6 +136,8 @@ def _serialize_doc(d: Document) -> dict:
 
 
 @csrf_exempt
+@login_required
+@user_passes_test(_is_admin)
 def create_upload(request):
     if request.method != "POST":
         return _bad("POST only")
@@ -261,6 +263,8 @@ def create_upload(request):
 
 
 @csrf_exempt
+@login_required
+@user_passes_test(_is_admin)
 def upload_complete(request, doc_id: int):
     if request.method != "POST":
         return HttpResponseBadRequest("POST only")
@@ -557,8 +561,8 @@ def document_detail_page(request, doc_id: int):
 
 
 @login_required
+@user_passes_test(_is_admin)
 def upload_page(request):
-    # Minimal V1 upload UI page (Desktop).
     # The actual upload flow is executed in the browser using existing API endpoints:
     # create_upload -> presigned PUT -> upload_complete
     return render(

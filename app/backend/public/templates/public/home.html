@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}VSArchive – דף הבית{% endblock %}
+
+{% block content %}
+  <div class="card" style="padding: 20px;">
+    <h1 class="page-title">ברוכים הבאים לארכיון</h1>
+    <p class="page-subtitle">
+      מערכת לשימור, ארגון וחיפוש במסמכים היסטוריים משפחתיים — העלאה, עיבוד אוטומטי ותצוגה של טקסט שחולץ.
+    </p>
+
+    <div style="display:flex; gap:10px; flex-wrap: wrap; margin-top: 12px;">
+      <a class="btn btn-primary" href="/api/ui/documents/">כניסה לארכיון</a>
+      <a class="btn" href="/about/">לקרוא עוד</a>
+    </div>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="grid-3">
+    <div class="card">
+      <div class="section-title">העלאת מסמכים</div>
+      <div class="muted">מעלים PDF או תמונה. אפשר להשלים מטא־דאטה בהמשך.</div>
+    </div>
+    <div class="card">
+      <div class="section-title">עיבוד אוטומטי</div>
+      <div class="muted">OCR/HTR + תרגום, ועדכון סטטוסים כדי לדעת מה מוכן ומה עדיין בעיבוד.</div>
+    </div>
+    <div class="card">
+      <div class="section-title">חיפוש ודפדוף</div>
+      <div class="muted">רשימת מסמכים, פתיחת מסמך, וצפייה בטקסט שחולץ לצד המקור.</div>
+    </div>
+  </div>
+{% endblock %}

@@ -1,183 +1,213 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>{{ doc.title }}</title>
-  <style>
-    body { font-family: sans-serif; margin: 24px; }
-    .meta { margin-bottom: 16px; }
-    .viewer { margin-top: 16px; }
-    img { max-width: 100%; height: auto; border: 1px solid #ccc; }
-    iframe { width: 100%; height: 80vh; border: 1px solid #ccc; }
-    .actions a { margin-right: 12px; }
-    code { background: #f5f5f5; padding: 2px 4px; }
-    .section { margin-top: 18px; }
-    pre { background: #fafafa; border: 1px solid #ddd; padding: 12px; white-space: pre-wrap; }
-    .badge { display: inline-block; padding: 2px 6px; border: 1px solid #999; border-radius: 6px; font-size: 12px; margin-right: 6px; }
-    .muted { color: #666; }
-  </style>
-</head>
-<body>
+{% extends "base.html" %}
+{% block title %}VSArchive – {{ doc.title }}{% endblock %}
 
-  <div class="actions">
-    <a href="/api/ui/documents/">← Back to list</a>
-  </div>
+{% block content %}
+  <div class="card" style="padding: 18px;">
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap: wrap;">
+      <a class="btn" href="/api/ui/documents/">חזרה לרשימה</a>
+      <div style="flex:1;"></div>
 
-  <h1>{{ doc.title }}</h1>
-
-  <div class="meta">
-    <div><strong>ID:</strong> {{ doc.id }}</div>
-    <div><strong>Date range:</strong>
-      {% if doc.date_start or doc.date_end %}
-        {{ doc.date_start }} – {{ doc.date_end }}
-      {% else %}
-        -
+      {% if content_url %}
+        <a class="btn" href="{{ content_url }}" target="_blank" rel="noopener noreferrer">פתיחה בטאב חדש</a>
       {% endif %}
     </div>
-    <div><strong>Language:</strong> {{ doc.language }}</div>
-    <div><strong>Doc type:</strong> {{ doc.doc_type }}</div>
-    <div><strong>Tags:</strong>
-      {% if doc.tags_m2m.exists %}
-        {% for t in doc.tags_m2m.all %}
-          <span>{{ t.name }}</span>{% if not forloop.last %}, {% endif %}
-        {% endfor %}
-      {% else %}
-        -
-      {% endif %}
-    </div>
-    <div><strong>Status:</strong> {{ doc.upload_status }}</div>
-    <div><strong>Processing:</strong> {{ doc.processing_state_user }}</div>
-    <div><strong>Original filename:</strong> {{ doc.file_original_name }}</div>
-    {% if doc.upload_error %}
-      <div><strong>Error:</strong> {{ doc.upload_error }}</div>
-    {% endif %}
-  </div>
 
-  {% if admin_meta %}
-    <div class="section">
-      <h3>Admin metadata</h3>
-      {% if admin_meta.donor %}<div><strong>Donor:</strong> {{ admin_meta.donor }}</div>{% endif %}
-      {% if admin_meta.collection %}<div><strong>Collection:</strong> {{ admin_meta.collection }}</div>{% endif %}
-      {% if admin_meta.original_location %}<div><strong>Original location:</strong> {{ admin_meta.original_location }}</div>{% endif %}
-      {% if admin_meta.notes %}<div><strong>Notes:</strong> {{ admin_meta.notes }}</div>{% endif %}
-    </div>
-  {% endif %}
-
-  <div class="section">
-    <h3>Extracted text</h3>
-
-    {% if text_presentation.missing %}
-      {% if doc.processing_state_user == "PROCESSING" %}
-        <p class="muted">
-          Processing… missing: <code>{{ text_presentation.missing|join:", " }}</code>
-        </p>
-      {% else %}
-        <p class="muted">
-          Missing outputs: <code>{{ text_presentation.missing|join:", " }}</code>
-        </p>
-      {% endif %}
-    {% endif %}
-
-    {% if "SOURCE_TEXT" not in text_presentation.expected %}
-      <h4>Hebrew transcription</h4>
-      {% if text_presentation.hebrew %}
-        <div class="muted">
-          <span class="badge">{{ text_presentation.hebrew.status }}</span>
-          <span class="badge">{{ text_presentation.hebrew.verification_status }}</span>
-          <span class="badge">{{ text_presentation.hebrew.engine }}</span>
-          <span class="muted">{{ text_presentation.hebrew.created_at }}</span>
-        </div>
-
-        {% if text_presentation.hebrew.status == "FAILED" %}
-          <p class="muted">
-            <strong>error_code:</strong> <code>{{ text_presentation.hebrew.error_code }}</code><br/>
-            <strong>details:</strong> {{ text_presentation.hebrew.error_details }}
-          </p>
-        {% endif %}
-
-        {% if text_presentation.hebrew.text %}
-          <pre>{{ text_presentation.hebrew.text }}</pre>
-        {% else %}
-          <p class="muted">No Hebrew transcription text to display.</p>
-        {% endif %}
-      {% else %}
-        <p class="muted">No Hebrew transcription available yet.</p>
-      {% endif %}
-    {% else %}
-      <h4>Source transcription</h4>
-      {% if text_presentation.source %}
-        <div class="muted">
-          <span class="badge">{{ text_presentation.source.status }}</span>
-          <span class="badge">{{ text_presentation.source.verification_status }}</span>
-          <span class="badge">{{ text_presentation.source.engine }}</span>
-          <span class="muted">{{ text_presentation.source.created_at }}</span>
-        </div>
-
-        {% if text_presentation.source.status == "FAILED" %}
-          <p class="muted">
-            <strong>error_code:</strong> <code>{{ text_presentation.source.error_code }}</code><br/>
-            <strong>details:</strong> {{ text_presentation.source.error_details }}
-          </p>
-        {% endif %}
-
-        {% if text_presentation.source.text %}
-          <pre>{{ text_presentation.source.text }}</pre>
-        {% else %}
-          <p class="muted">No source transcription text to display.</p>
-        {% endif %}
-      {% else %}
-        <p class="muted">No source transcription available yet.</p>
-      {% endif %}
-
-      <h4>Hebrew translation</h4>
-      {% if text_presentation.hebrew %}
-        <div class="muted">
-          <span class="badge">{{ text_presentation.hebrew.status }}</span>
-          <span class="badge">{{ text_presentation.hebrew.verification_status }}</span>
-          <span class="badge">{{ text_presentation.hebrew.engine }}</span>
-          <span class="muted">{{ text_presentation.hebrew.created_at }}</span>
-        </div>
-
-        {% if text_presentation.hebrew.status == "FAILED" %}
-          <p class="muted">
-            <strong>error_code:</strong> <code>{{ text_presentation.hebrew.error_code }}</code><br/>
-            <strong>details:</strong> {{ text_presentation.hebrew.error_details }}
-          </p>
-        {% endif %}
-
-        {% if text_presentation.hebrew.text %}
-          <pre>{{ text_presentation.hebrew.text }}</pre>
-        {% else %}
-          <p class="muted">No Hebrew translation text to display.</p>
-        {% endif %}
-      {% else %}
-        <p class="muted">No Hebrew translation available yet.</p>
-      {% endif %}
-    {% endif %}
-  </div>
-
-  {% if not content_url %}
-    <p>
-      No file is available for viewing yet.
-      {% if not doc.file_s3_key %}
-        (Missing <code>file_s3_key</code>)
-      {% endif %}
+    <h1 class="page-title" style="margin-top: 12px;">{{ doc.title }}</h1>
+    <p class="page-subtitle">
+      מסמך #{{ doc.id }} · {{ doc.doc_type }} ·
+      {% if doc.language %}{{ doc.language }}{% else %}שפה לא ידועה{% endif %}
     </p>
-  {% else %}
-    <div class="actions">
-      <a href="{{ content_url }}" target="_blank" rel="noopener noreferrer">Open in new tab</a>
+
+    <div class="meta-grid">
+      <div class="meta-item">
+        <div class="k">טווח תאריכים</div>
+        <div class="v">
+          {% if doc.date_start or doc.date_end %}
+            {{ doc.date_start }} – {{ doc.date_end }}
+          {% else %}
+            <span class="muted">לא צוין</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="meta-item">
+        <div class="k">סטטוס</div>
+        <div class="v">
+          <span class="badge">{{ doc.upload_status }}</span>
+          {% if doc.processing_state_user == "READY" %}
+            <span class="badge badge-ok">מוכן</span>
+          {% elif doc.processing_state_user == "PROCESSING" %}
+            <span class="badge badge-warn">בעיבוד</span>
+          {% elif doc.processing_state_user == "FAILED" %}
+            <span class="badge badge-bad">נכשל</span>
+          {% else %}
+            <span class="badge">{{ doc.processing_state_user }}</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="meta-item">
+        <div class="k">תגיות</div>
+        <div class="v">
+          {% if doc.tags_m2m.exists %}
+            {% for t in doc.tags_m2m.all %}
+              <span class="badge">{{ t.name }}</span>
+            {% endfor %}
+          {% else %}
+            <span class="muted">אין</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="meta-item">
+        <div class="k">קובץ מקור</div>
+        <div class="v">
+          {% if doc.file_original_name %}
+            {{ doc.file_original_name }}
+          {% else %}
+            <span class="muted">לא צוין</span>
+          {% endif %}
+        </div>
+      </div>
     </div>
 
-    <div class="viewer">
-      {% if doc.doc_type == "IMAGE" %}
-        <img src="{{ content_url }}" alt="{{ doc.title }}" />
-      {% elif doc.doc_type == "PDF" %}
-        <iframe src="{{ content_url }}"></iframe>
+    {% if doc.upload_error %}
+      <div class="spacer"></div>
+      <div class="card" style="border-color:#fecdca; background:#fef3f2;">
+        <div style="font-weight:800; color: var(--danger);">שגיאה</div>
+        <div class="muted" style="color:#7a271a;">{{ doc.upload_error }}</div>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="two-col">
+    <div class="card viewer">
+      <div class="section-title">המסמך</div>
+
+      {% if not content_url %}
+        <div class="muted">
+          אין קובץ להצגה כרגע.
+          {% if not doc.file_s3_key %}
+            (חסר <code>file_s3_key</code>)
+          {% endif %}
+        </div>
       {% else %}
-        <p>Unsupported doc_type: {{ doc.doc_type }}</p>
+        {% if doc.doc_type == "IMAGE" %}
+          <img src="{{ content_url }}" alt="{{ doc.title }}" />
+        {% elif doc.doc_type == "PDF" %}
+          <iframe src="{{ content_url }}"></iframe>
+        {% else %}
+          <div class="muted">doc_type לא נתמך: {{ doc.doc_type }}</div>
+        {% endif %}
+      {% endif %}
+
+      {% if admin_meta %}
+        <div class="spacer"></div>
+        <div class="section-title">מטא־דאטה (מנהל)</div>
+        <div class="muted" style="font-size: 13px;">
+          {% if admin_meta.donor %}<div><strong>תורם:</strong> {{ admin_meta.donor }}</div>{% endif %}
+          {% if admin_meta.collection %}<div><strong>אוסף:</strong> {{ admin_meta.collection }}</div>{% endif %}
+          {% if admin_meta.original_location %}<div><strong>מיקום מקור:</strong> {{ admin_meta.original_location }}</div>{% endif %}
+          {% if admin_meta.notes %}<div><strong>הערות:</strong> {{ admin_meta.notes }}</div>{% endif %}
+          {% if not admin_meta.donor and not admin_meta.collection and not admin_meta.original_location and not admin_meta.notes %}
+            <div class="muted">אין נתוני מנהל</div>
+          {% endif %}
+        </div>
       {% endif %}
     </div>
-  {% endif %}
 
-</body>
-</html>
+    <div class="card">
+      <div class="section-title">טקסט שחולץ</div>
+
+      {% if text_presentation.missing %}
+        {% if doc.processing_state_user == "PROCESSING" %}
+          <p class="muted">
+            בעיבוד… חסר: <code>{{ text_presentation.missing|join:", " }}</code>
+          </p>
+        {% else %}
+          <p class="muted">
+            חסרים פלטים: <code>{{ text_presentation.missing|join:", " }}</code>
+          </p>
+        {% endif %}
+      {% endif %}
+
+      {% if "SOURCE_TEXT" not in text_presentation.expected %}
+        <div class="muted" style="margin-bottom: 8px;">תעתיק בעברית</div>
+        {% if text_presentation.hebrew %}
+          <div style="display:flex; gap:8px; flex-wrap: wrap; margin-bottom: 10px;">
+            <span class="badge">{{ text_presentation.hebrew.status }}</span>
+            <span class="badge">{{ text_presentation.hebrew.verification_status }}</span>
+            <span class="badge">{{ text_presentation.hebrew.engine }}</span>
+          </div>
+
+          {% if text_presentation.hebrew.status == "FAILED" %}
+            <div class="muted" style="margin-bottom: 10px;">
+              <strong>error_code:</strong> <code>{{ text_presentation.hebrew.error_code }}</code><br/>
+              <strong>details:</strong> {{ text_presentation.hebrew.error_details }}
+            </div>
+          {% endif %}
+
+          {% if text_presentation.hebrew.text %}
+            <pre>{{ text_presentation.hebrew.text }}</pre>
+          {% else %}
+            <div class="muted">אין טקסט להצגה.</div>
+          {% endif %}
+        {% else %}
+          <div class="muted">עדיין אין תעתיק בעברית.</div>
+        {% endif %}
+      {% else %}
+        <div class="muted" style="margin-bottom: 8px;">תעתיק מקור</div>
+        {% if text_presentation.source %}
+          <div style="display:flex; gap:8px; flex-wrap: wrap; margin-bottom: 10px;">
+            <span class="badge">{{ text_presentation.source.status }}</span>
+            <span class="badge">{{ text_presentation.source.verification_status }}</span>
+            <span class="badge">{{ text_presentation.source.engine }}</span>
+          </div>
+
+          {% if text_presentation.source.status == "FAILED" %}
+            <div class="muted" style="margin-bottom: 10px;">
+              <strong>error_code:</strong> <code>{{ text_presentation.source.error_code }}</code><br/>
+              <strong>details:</strong> {{ text_presentation.source.error_details }}
+            </div>
+          {% endif %}
+
+          {% if text_presentation.source.text %}
+            <pre>{{ text_presentation.source.text }}</pre>
+          {% else %}
+            <div class="muted">אין טקסט להצגה.</div>
+          {% endif %}
+        {% else %}
+          <div class="muted">עדיין אין תעתיק מקור.</div>
+        {% endif %}
+
+        <div class="spacer"></div>
+
+        <div class="muted" style="margin-bottom: 8px;">תרגום לעברית</div>
+        {% if text_presentation.hebrew %}
+          <div style="display:flex; gap:8px; flex-wrap: wrap; margin-bottom: 10px;">
+            <span class="badge">{{ text_presentation.hebrew.status }}</span>
+            <span class="badge">{{ text_presentation.hebrew.verification_status }}</span>
+            <span class="badge">{{ text_presentation.hebrew.engine }}</span>
+          </div>
+
+          {% if text_presentation.hebrew.status == "FAILED" %}
+            <div class="muted" style="margin-bottom: 10px;">
+              <strong>error_code:</strong> <code>{{ text_presentation.hebrew.error_code }}</code><br/>
+              <strong>details:</strong> {{ text_presentation.hebrew.error_details }}
+            </div>
+          {% endif %}
+
+          {% if text_presentation.hebrew.text %}
+            <pre>{{ text_presentation.hebrew.text }}</pre>
+          {% else %}
+            <div class="muted">אין טקסט להצגה.</div>
+          {% endif %}
+        {% else %}
+          <div class="muted">עדיין אין תרגום לעברית.</div>
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}

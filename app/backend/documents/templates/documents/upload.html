@@ -1,114 +1,125 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>Upload</title>
-  <style>
-    body { font-family: sans-serif; margin: 24px; max-width: 900px; }
-    label { display: block; margin-top: 12px; font-weight: 600; }
-    input, select, textarea { width: 100%; padding: 8px; margin-top: 6px; box-sizing: border-box; }
-    textarea { min-height: 120px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    button { margin-top: 16px; padding: 10px 14px; }
-    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .hint { color: #555; font-size: 0.9em; margin-top: 6px; }
-    .error { color: #b00020; margin-top: 12px; white-space: pre-wrap; }
-    .ok { color: #0a7a0a; margin-top: 12px; white-space: pre-wrap; }
-    .actions a { margin-right: 12px; }
-    .disabled { opacity: 0.6; pointer-events: none; }
-  </style>
-</head>
-<body>
+{% extends "base.html" %}
+{% block title %}VSArchive – העלאת מסמך{% endblock %}
 
-  <div class="actions">
-    <a href="/api/ui/documents/">← Back to list</a>
+{% block content %}
+  <div class="card" style="padding: 20px;">
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap: wrap;">
+      <a class="btn" href="/api/ui/documents/">חזרה לרשימה</a>
+    </div>
+
+    <h1 class="page-title" style="margin-top: 12px;">העלאת מסמך</h1>
+    <p class="page-subtitle">
+      העלאה מתבצעת בתהליך: create → presigned PUT → complete
+    </p>
+
+    <div id="msg" class=""></div>
+
+    <div class="two-col">
+      <div class="card" style="padding: 16px;">
+        <div class="section-title">קובץ + פרטים בסיסיים</div>
+
+        <form id="uploadForm">
+          <div class="field">
+            <label for="file">קובץ *</label>
+            <input id="file" name="file" type="file" required />
+            <div class="muted" style="font-size: 13px;">
+              בנייד: ניתן לבחור תמונה מהגלריה או לצלם (כאשר doc_type=IMAGE).
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="title">כותרת *</label>
+            <input id="title" name="title" type="text" required />
+          </div>
+
+          <div class="field">
+            <label for="doc_type">סוג מסמך *</label>
+            <select id="doc_type" name="doc_type" required>
+              <option value="" selected disabled>בחרי…</option>
+              {% for v, label in doc_type_choices %}
+                <option value="{{ v }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+            <div class="muted" style="font-size: 13px;">שאר המטא־דאטה ניתן להשלים בהמשך.</div>
+          </div>
+
+          <div class="meta-grid">
+            <div class="field">
+              <label for="date_start">תאריך התחלה</label>
+              <input id="date_start" name="date_start" type="date" />
+            </div>
+            <div class="field">
+              <label for="date_end">תאריך סיום</label>
+              <input id="date_end" name="date_end" type="date" />
+            </div>
+          </div>
+
+          <div class="meta-grid">
+            <div class="field">
+              <label for="language">שפה</label>
+              <select id="language" name="language">
+                <option value="" selected>(לא ידוע)</option>
+                <option value="he">עברית (he)</option>
+                <option value="en">אנגלית (en)</option>
+                <option value="fr">צרפתית (fr)</option>
+                <option value="ar">ערבית (ar)</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="visibility">נראות</label>
+              <select id="visibility" name="visibility">
+                <option value="private" selected>פרטי (private)</option>
+                <option value="public">ציבורי (public)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="category_event">קטגוריה / אירוע</label>
+            <input id="category_event" name="category_event" type="text" />
+          </div>
+
+          <div class="field">
+            <label for="tags">תגיות (מופרדות בפסיקים)</label>
+            <input id="tags" name="tags" type="text" placeholder="למשל: משפחה, ירושלים, 1948" />
+          </div>
+
+          <div style="display:flex; gap:10px; margin-top: 12px; flex-wrap: wrap;">
+            <button id="submitBtn" class="btn btn-primary" type="submit">העלאה</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card" style="padding: 16px;">
+        <div class="section-title">מטא־דאטה למנהלים (אופציונלי)</div>
+
+        <div class="field">
+          <label for="donor">תורם</label>
+          <input id="donor" name="donor" type="text" placeholder="למשל: יעל שיפמן" />
+        </div>
+
+        <div class="field">
+          <label for="collection">אוסף</label>
+          <input id="collection" name="collection" type="text" placeholder="למשל: ארכיון משפחתי" />
+        </div>
+
+        <div class="field">
+          <label for="original_location">מיקום מקור</label>
+          <input id="original_location" name="original_location" type="text" placeholder="למשל: ירושלים" />
+        </div>
+
+        <div class="field">
+          <label for="notes">הערות</label>
+          <textarea id="notes" name="notes" placeholder="הערות פנימיות..."></textarea>
+        </div>
+
+        <div class="muted" style="font-size: 13px;">
+          הערה: גם אם תשאירי ריק, אפשר להשלים אחר־כך.
+        </div>
+      </div>
+    </div>
   </div>
-
-  <h1>Upload (V1)</h1>
-
-  <p class="hint">
-    This page uses the existing upload flow: create → presigned PUT → complete.
-  </p>
-
-  <div id="msg" class=""></div>
-
-  <form id="uploadForm">
-    <label for="file">File *</label>
-    <input id="file" name="file" type="file" required />
-    <div class="hint">
-      Mobile: choose an image from gallery or take a photo (when doc_type=IMAGE).
-    </div>
-
-    <label for="title">Title *</label>
-    <input id="title" name="title" type="text" required />
-
-    <label for="doc_type">Doc type *</label>
-    <select id="doc_type" name="doc_type" required>
-      <option value="" selected disabled>Select…</option>
-      {% for v, label in doc_type_choices %}
-        <option value="{{ v }}">{{ label }}</option>
-      {% endfor %}
-    </select>
-    <div class="hint">Required. Other metadata can be completed later by admins.</div>
-
-    <div class="row">
-      <div>
-        <label for="date_start">Date start (YYYY-MM-DD)</label>
-        <input id="date_start" name="date_start" type="date" />
-      </div>
-      <div>
-        <label for="date_end">Date end (YYYY-MM-DD)</label>
-        <input id="date_end" name="date_end" type="date" />
-      </div>
-    </div>
-
-    <div class="row">
-      <div>
-        <label for="language">Language</label>
-        <select id="language" name="language">
-          <option value="" selected>(unknown)</option>
-          <option value="he">Hebrew (he)</option>
-          <option value="en">English (en)</option>
-          <option value="fr">French (fr)</option>
-          <option value="ar">Arabic (ar)</option>
-        </select>
-      </div>
-      <div>
-        <label for="visibility">Visibility</label>
-        <select id="visibility" name="visibility">
-          <option value="private" selected>private</option>
-          <option value="public">public</option>
-        </select>
-      </div>
-    </div>
-
-    <label for="category_event">Category / Event</label>
-    <input id="category_event" name="category_event" type="text" />
-
-    <label for="tags">Tags (comma-separated)</label>
-    <input id="tags" name="tags" type="text" placeholder="e.g. family, jerusalem, 1948" />
-    <div class="hint">Optional. Will be converted to a list of strings.</div>
-
-    <h3 style="margin-top: 18px;">Admin metadata (optional)</h3>
-
-    <div class="row">
-      <div>
-        <label for="donor">Donor</label>
-        <input id="donor" name="donor" type="text" placeholder="e.g. Yael Shifman" />
-      </div>
-      <div>
-        <label for="collection">Collection</label>
-        <input id="collection" name="collection" type="text" placeholder="e.g. Family archive" />
-      </div>
-    </div>
-
-    <label for="original_location">Original location</label>
-    <input id="original_location" name="original_location" type="text" placeholder="e.g. Jerusalem" />
-
-    <label for="notes">Notes</label>
-    <textarea id="notes" name="notes" placeholder="Optional admin notes..."></textarea>
-
-    <button id="submitBtn" type="submit">Upload</button>
-  </form>
 
 <script>
   const form = document.getElementById("uploadForm");
@@ -121,10 +132,12 @@
   function setMessage(kind, text) {
     msgEl.className = kind;
     msgEl.textContent = text || "";
+    msgEl.style.marginTop = text ? "10px" : "0";
+    msgEl.style.color = (kind === "error") ? "#b42318" : (kind === "ok" ? "#067647" : "#101828");
+    msgEl.style.whiteSpace = "pre-wrap";
   }
 
   function parseTags(raw) {
-    // Convert "a, b, c" -> ["a","b","c"]
     return (raw || "")
       .split(",")
       .map(s => s.trim())
@@ -153,11 +166,8 @@
 
     if (dt === "IMAGE") {
       fileEl.setAttribute("accept", "image/*");
-      if (isMobileBrowser()) {
-        fileEl.setAttribute("capture", "environment");
-      } else {
-        fileEl.removeAttribute("capture");
-      }
+      if (isMobileBrowser()) fileEl.setAttribute("capture", "environment");
+      else fileEl.removeAttribute("capture");
     } else if (dt === "PDF") {
       fileEl.setAttribute("accept", "application/pdf");
       fileEl.removeAttribute("capture");
@@ -176,7 +186,7 @@
 
     const file = fileEl.files[0];
     if (!file) {
-      setMessage("error", "File is required.");
+      setMessage("error", "חובה לבחור קובץ.");
       return;
     }
 
@@ -197,24 +207,19 @@
     const notes = document.getElementById("notes").value.trim();
 
     if (!title || !doc_type) {
-      setMessage("error", "Please fill all required fields (title, doc_type).");
+      setMessage("error", "נא למלא שדות חובה: כותרת + סוג מסמך.");
       return;
     }
 
     const tags = parseTags(tagsRaw);
 
-    const admin_meta = {
-      donor,
-      collection,
-      original_location,
-      notes
-    };
+    const admin_meta = { donor, collection, original_location, notes };
 
     submitBtn.disabled = true;
-    submitBtn.classList.add("disabled");
+    submitBtn.style.opacity = "0.7";
 
     try {
-      setMessage("ok", "Creating upload…");
+      setMessage("ok", "יוצרת העלאה…");
 
       const createPayload = {
         title,
@@ -245,7 +250,7 @@
         throw new Error("Create response missing document_id or upload_url");
       }
 
-      setMessage("ok", `Uploading to S3… (document_id=${documentId})`);
+      setMessage("ok", `מעלה ל-S3… (מסמך #${documentId})`);
 
       const putRes = await fetch(uploadUrl, {
         method: "PUT",
@@ -258,7 +263,7 @@
         throw new Error(`S3 PUT failed: HTTP ${putRes.status} ${putText}`);
       }
 
-      setMessage("ok", "Finalizing upload…");
+      setMessage("ok", "מסיימת העלאה…");
 
       await jsonFetch(`/api/uploads/${documentId}/complete/`, {
         method: "POST",
@@ -270,13 +275,13 @@
         })
       });
 
-      setMessage("ok", "Done. Redirecting…");
+      setMessage("ok", "בוצע. מעבירה לעמוד המסמך…");
       window.location.href = `/api/ui/documents/${documentId}/`;
 
     } catch (err) {
       setMessage("error", String(err && err.message ? err.message : err));
       submitBtn.disabled = false;
-      submitBtn.classList.remove("disabled");
+      submitBtn.style.opacity = "1";
     }
   });
 
@@ -292,6 +297,4 @@
     applyFileInputMode();
   });
 </script>
-
-</body>
-</html>
+{% endblock %}
