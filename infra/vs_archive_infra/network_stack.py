@@ -29,24 +29,21 @@ class VsArchiveNetworkStack(Stack):
         )
 
         self.sg_alb = ec2.SecurityGroup(
-            self,
-            f"{cfg.prefix}-sg-alb",
+            self, f"{cfg.prefix}-sg-alb",
             vpc=self.vpc,
             allow_all_outbound=True,
             description="ALB Security Group",
         )
 
         self.sg_web = ec2.SecurityGroup(
-            self,
-            f"{cfg.prefix}-sg-web",
+            self, f"{cfg.prefix}-sg-web",
             vpc=self.vpc,
             allow_all_outbound=True,
             description="ECS Web/Worker Security Group",
         )
 
         self.sg_pg = ec2.SecurityGroup(
-            self,
-            f"{cfg.prefix}-sg-pg",
+            self, f"{cfg.prefix}-sg-pg",
             vpc=self.vpc,
             allow_all_outbound=True,
             description="Postgres ECS Security Group",
