@@ -7,13 +7,21 @@
     <div style="display:flex; gap:10px; align-items:center; margin-inline-start: 12px;">
       <a class="btn btn-link" href="/">דף הבית</a>
       <a class="btn btn-link" href="/about/">אודות</a>
+
+      {# "מסמכים" אמור להיות רק למשתמשים מחוברים (כרגע אין צפייה לאנונימיים) #}
+      {% if user.is_authenticated %}
+        <a class="btn btn-link" href="/api/ui/documents/">מסמכים</a>
+      {% endif %}
     </div>
 
     <div style="flex:1;"></div>
 
     {% if user.is_authenticated %}
-      <a class="btn btn-link" href="/api/ui/documents/">מסמכים</a>
-      <a class="btn btn-link" href="/api/ui/upload/">העלאה</a>
+      {# קישורי Admin בלבד #}
+      {% if user.is_staff or user.is_superuser %}
+        <a class="btn btn-link" href="/api/ui/upload/">העלאה</a>
+        <a class="btn btn-link" href="/api/ui/admin/backlog/">Backlog מנהלים</a>
+      {% endif %}
 
       <span class="muted" style="font-size: 13px;">
         היי, {{ user.username }}
@@ -26,7 +34,6 @@
         </button>
       </form>
     {% else %}
-      <a class="btn btn-link" href="/api/ui/documents/">מסמכים</a>
       <a class="btn btn-link" href="/accounts/login/">התחברות</a>
     {% endif %}
   </div>

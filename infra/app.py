@@ -14,18 +14,20 @@ env = cdk.Environment(
     region=cfg.region,
 )
 
-network = VsArchiveNetworkStack(app, f"{cfg.prefix}-network", cfg=cfg, env=env)
+network = VsArchiveNetworkStack(app, f"{cfg.prefix}-network-v2", cfg=cfg, env=env)
 
 data = VsArchiveDataStack(
     app,
-    f"{cfg.prefix}-data",
+    f"{cfg.prefix}-data-v2",
     cfg=cfg,
+    vpc=network.vpc,
+    sg_efs=network.sg_efs,
     env=env,
 )
 
 VsArchiveAppStack(
     app,
-    f"{cfg.prefix}-app",
+    f"{cfg.prefix}-app-v2",
     cfg=cfg,
     vpc=network.vpc,
     sg_alb=network.sg_alb,
@@ -34,6 +36,7 @@ VsArchiveAppStack(
     bucket=data.bucket,
     queue=data.jobs_queue,
     db_secret=data.db_secret,
+    file_system=data.file_system,
     env=env,
 )
 

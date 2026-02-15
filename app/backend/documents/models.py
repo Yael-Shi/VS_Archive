@@ -66,7 +66,6 @@ class Document(models.Model):
         PROCESSING = "PROCESSING", "Processing"
         READY = "READY", "Ready"
         PARTIAL = "PARTIAL", "Partial"
-        ACTION_REQUIRED = "ACTION_REQUIRED", "Action required"
         FAILED = "FAILED", "Failed"
 
     processing_state_user = models.CharField(

@@ -13,6 +13,7 @@ from django.db import transaction
 
 from documents.models import Document, DocumentTextResult
 from documents.s3 import get_object_bytes
+from documents.services.expected_outputs import expected_result_types_for_document
 from documents.services.htr_engine import transcribe_pages
 from documents.services.page_extraction import extract_pages
 
@@ -44,7 +45,7 @@ class Command(BaseCommand):
             os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "eu-central-1"
         )
 
-        # --- Google credentials (MVP) ---
+        # Google credentials (MVP)
         gcp_json = os.environ.get("GCP_SA_JSON")
         if gcp_json:
             creds_path = Path("/tmp/gcp-sa.json")
@@ -110,7 +111,7 @@ class Command(BaseCommand):
     # ------------------------------------------------------------------ CORE
 
     def _process_message(self, msg: Dict[str, Any]) -> bool:
-        # --- Parse payload ---
+        # Parse payload
         try:
             payload = json.loads(msg.get("Body", "{}"))
         except Exception:
@@ -119,14 +120,14 @@ class Command(BaseCommand):
 
         if payload.get("type") != "PROCESS_DOCUMENT":
             self.stderr.write(f"[run_worker] unknown job type: {payload.get('type')!r}")
-            return True  # delete
+            return True
 
         document_id = payload.get("document_id")
         if not isinstance(document_id, int):
             self.stderr.write("[run_worker] invalid document_id")
-            return True  # delete
+            return True
 
-        # --- Phase 1: mark PROCESSING (short transaction) ---
+        # Phase 1: mark PROCESSING (short transaction)
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
@@ -139,7 +140,7 @@ class Command(BaseCommand):
         except Document.DoesNotExist:
             return True
 
-        # --- Phase 2: heavy work (no DB locks) ---
+        # Phase 2: heavy work (no DB locks)
         error: Optional[str] = None
         htr_result = None
 
@@ -173,7 +174,7 @@ class Command(BaseCommand):
                 )
             )
 
-        # --- Phase 3: save results + final state (short transaction) ---
+        # Phase 3: save results + final state (short transaction)
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
@@ -186,26 +187,23 @@ class Command(BaseCommand):
                 else:
                     self._save_htr_results(doc, engine, is_he, htr_result)
 
-                # --- Final user-visible state (Option A) ---
-                self._update_processing_state(doc, engine, is_he)
-
+                self._update_processing_state(doc, engine)
                 doc.save(update_fields=["processing_state_user"])
 
         except Document.DoesNotExist:
             return True
 
-        return True  # handled → delete message
+        return True
 
     # ------------------------------------------------------------------ HELPERS
 
-    def _save_htr_results(self, doc, engine, is_he, htr):
+    def _save_htr_results(self, doc: Document, engine: str, is_he: bool, htr):
         status = (
             DocumentTextResult.Status.NEEDS_REVIEW
             if htr.needs_review
             else DocumentTextResult.Status.SUCCEEDED
         )
 
-        # SOURCE_TEXT always
         DocumentTextResult.objects.update_or_create(
             document=doc,
             result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
@@ -219,7 +217,6 @@ class Command(BaseCommand):
             },
         )
 
-        # Hebrew mirror
         if is_he:
             DocumentTextResult.objects.update_or_create(
                 document=doc,
@@ -235,7 +232,6 @@ class Command(BaseCommand):
             )
 
     def _save_ocr_failure(self, doc, engine, is_he, details):
-        # FAILED = real OCR failure only
         DocumentTextResult.objects.update_or_create(
             document=doc,
             result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
@@ -263,15 +259,8 @@ class Command(BaseCommand):
                 },
             )
 
-    def _update_processing_state(self, doc, engine, is_he):
-        expected_types = (
-            [DocumentTextResult.ResultType.HEBREW_TEXT]
-            if is_he
-            else [
-                DocumentTextResult.ResultType.SOURCE_TEXT,
-                DocumentTextResult.ResultType.HEBREW_TEXT,
-            ]
-        )
+    def _update_processing_state(self, doc, engine):
+        expected_types = expected_result_types_for_document(doc)
 
         qs = doc.text_results.filter(
             engine=engine,
@@ -279,7 +268,7 @@ class Command(BaseCommand):
         )
 
         if qs.filter(status=DocumentTextResult.Status.NEEDS_REVIEW).exists():
-            doc.processing_state_user = Document.ProcessingState.ACTION_REQUIRED
+            doc.processing_state_user = Document.ProcessingState.PARTIAL
             return
 
         existing = qs.count()
