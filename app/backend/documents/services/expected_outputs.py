@@ -12,9 +12,13 @@ def expected_result_types_for_document(doc: Document) -> list[ResultTypeStr]:
     """
     V2.0 expected outputs policy:
     - Hebrew doc: HEBREW_TEXT
-    - Non-Hebrew doc: SOURCE_TEXT (no Hebrew translation in V2.0)
+    - Non-Hebrew doc: SOURCE_TEXT + HEBREW_TEXT (translation expected)
     """
     lang = (doc.language or "").strip().lower()
+
     if lang in ("he", "heb", "hebrew"):
         return ["HEBREW_TEXT"]
-    return ["SOURCE_TEXT"]
+
+    # Non-Hebrew: expect both source OCR and Hebrew translation
+    return ["SOURCE_TEXT", "HEBREW_TEXT"]
+
