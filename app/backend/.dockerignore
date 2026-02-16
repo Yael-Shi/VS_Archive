@@ -1,0 +1,21 @@
+# Never bake local secrets into the image
+.env.local
+.env
+.env.*
+*.local
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Venvs
+.venv/
+venv/
+
+# Editor/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

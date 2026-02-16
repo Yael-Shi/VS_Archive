@@ -66,3 +66,7 @@ app/backend/db.sqlite3
 # --- Security: Google Cloud Service Account Keys ---
 # Block any JSON file that looks like a Google service account key
 vs-archive-*.json
+
+# Environment files (real secrets)
+app/backend/.env.local
+infra/.env.local

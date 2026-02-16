@@ -1,3 +1,4 @@
+import uuid
 from django.db import models
 
 
@@ -136,6 +137,91 @@ class DocumentTextResult(models.Model):
                 name="uniq_document_resulttype_engine",
             )
         ]
+
+
+class ProcessingMetric(models.Model):
+    """
+    Metrics/time measurements for processing pipeline steps.
+
+    Design goals:
+    - Multiple metrics per Document
+    - Multiple attempts per step
+    - Supports duration tracking (started_at/finished_at) + numeric values
+    - Easy to query "last 24h" / "per stage" / "per engine"
+    """
+
+    class Stage(models.TextChoices):
+        UPLOAD = "UPLOAD", "Upload"
+        PAGE_EXTRACTION = "PAGE_EXTRACTION", "Page extraction"
+        OCR_HTR = "OCR_HTR", "OCR/HTR"
+        TRANSLATION = "TRANSLATION", "Translation"
+        POSTPROCESS = "POSTPROCESS", "Postprocess"
+        PIPELINE = "PIPELINE", "Pipeline total"
+
+    class Status(models.TextChoices):
+        STARTED = "STARTED", "Started"
+        SUCCEEDED = "SUCCEEDED", "Succeeded"
+        FAILED = "FAILED", "Failed"
+
+    class Unit(models.TextChoices):
+        MS = "ms", "Milliseconds"
+        SECONDS = "s", "Seconds"
+        BYTES = "bytes", "Bytes"
+        PAGES = "pages", "Pages"
+        CHARS = "chars", "Characters"
+        TOKENS = "tokens", "Tokens"
+        COUNT = "count", "Count"
+
+    document = models.ForeignKey(
+        "Document",
+        on_delete=models.CASCADE,
+        related_name="processing_metrics",
+    )
+
+    # What are we measuring?
+    stage = models.CharField(max_length=32, choices=Stage.choices)
+    name = models.CharField(
+        max_length=64,
+        help_text="Metric name within stage, e.g. duration, pages, chars, api_calls, etc.",
+    )
+
+    # Optional: which engine / integration produced it (vision/transkribus/gemini/etc.)
+    engine = models.CharField(max_length=64, blank=True, default="")
+
+    # Attempt tracking (helpful when retries exist)
+    attempt_id = models.UUIDField(default=uuid.uuid4, editable=False)
+
+    # Values (use whichever is relevant; often duration is derived from started/finished)
+    unit = models.CharField(max_length=16, choices=Unit.choices, blank=True, default="")
+    value_int = models.BigIntegerField(null=True, blank=True)
+    value_float = models.FloatField(null=True, blank=True)
+
+    # Timing window for the metric
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.STARTED,
+    )
+
+    # Error info (if FAILED)
+    error_code = models.CharField(max_length=64, null=True, blank=True)
+    error_details = models.TextField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["document", "stage", "name"]),
+            models.Index(fields=["stage", "name", "created_at"]),
+            models.Index(fields=["status", "created_at"]),
+            models.Index(fields=["engine", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"ProcessingMetric(doc={self.document_id}, stage={self.stage}, name={self.name}, status={self.status})"
 
 
 class CorrectionRequest(models.Model):
