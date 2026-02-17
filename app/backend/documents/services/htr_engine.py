@@ -28,7 +28,7 @@ def transcribe_pages(
     r = transcribe_pages_with_gemini(
         pages=pages,
         language_hint=language_hint,
-        model_name="gemini-1.5-flash",
+        model_name="gemini-2.5-flash",
     )
     return HtrResult(
         text=r.text,
