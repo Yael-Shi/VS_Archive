@@ -4,9 +4,9 @@ import os
 from dataclasses import dataclass
 from typing import List, Optional
 
-import google.generativeai as genai
+from google import genai
+from google.genai.types import Content, Part
 
-from documents.services.env_validation import EnvConfigError, validate_required_env
 from documents.services.page_extraction import PageImage
 
 
@@ -38,22 +38,14 @@ def transcribe_pages_with_gemini(
     language_hint: Optional[str],
     *,
     model_name: str = "gemini-1.5-flash",
+    min_text_length: int = 30,
 ) -> GeminiResult:
     """
     OCR/HTR via Gemini Vision. Input: list of PNG bytes (one per page).
     Output: a single concatenated text string.
     """
-    try:
-        cfg = validate_required_env()
-    except EnvConfigError as e:
-        raise GeminiError(f"Env config error: {e}") from e
-
-    min_text_length = cfg.min_text_length
-
     api_key = _get_api_key()
-    genai.configure(api_key=api_key)
-
-    model = genai.GenerativeModel(model_name)
+    client = genai.Client(api_key=api_key)
 
     texts: list[str] = []
     any_review = False
@@ -71,19 +63,24 @@ def transcribe_pages_with_gemini(
         )
 
         try:
-            resp = model.generate_content(
-                [
-                    prompt,
-                    {
-                        "mime_type": "image/png",
-                        "data": p.image_bytes,
-                    },
-                ]
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[
+                    Content(
+                        role="user",
+                        parts=[
+                            Part(text=prompt),
+                            Part.from_bytes(p.image_bytes, mime_type="image/png"),
+                        ],
+                    )
+                ],
             )
         except Exception as e:
-            raise GeminiError(f"Gemini request failed on page {p.page_index}: {e}") from e
+            raise GeminiError(
+                f"Gemini request failed on page {p.page_index}: {e}"
+            ) from e
 
-        page_text = (getattr(resp, "text", None) or "").strip()
+        page_text = (response.text or "").strip()
         texts.append(page_text)
         any_review = any_review or _guess_needs_review(
             page_text,
