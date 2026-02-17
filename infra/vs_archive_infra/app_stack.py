@@ -51,10 +51,11 @@ class VsArchiveAppStack(Stack):
 
         public_subnets = ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC)
 
-        # --- Google Vision Secret ---
-        google_secret = secretsmanager.Secret.from_secret_name_v2(
-            self, "GoogleVisionSecret", "vs-archive/google-vision-key"
+        # --- Gemini Secret ---
+        gemini_secret = secretsmanager.Secret.from_secret_name_v2(
+            self, "GeminiApiKeySecret", "vs-archive-dev/gemini_api_key"
         )
+
 
         # --- Postgres Task with EFS Storage ---
         pg_task = ecs.FargateTaskDefinition(
@@ -107,7 +108,7 @@ class VsArchiveAppStack(Stack):
         bucket.grant_read_write(task_role)
         queue.grant_consume_messages(task_role)
         db_secret.grant_read(task_role)
-        google_secret.grant_read(task_role)
+        gemini_secret.grant_read(task_role)
         
         task_role.add_to_principal_policy(
             iam.PolicyStatement(
@@ -122,7 +123,7 @@ class VsArchiveAppStack(Stack):
                 "service-role/AmazonECSTaskExecutionRolePolicy"
             )
         )
-        google_secret.grant_read(exec_role)
+        gemini_secret.grant_read(exec_role)
 
         # --- Web Task ---
         web_task = ecs.FargateTaskDefinition(
@@ -149,10 +150,32 @@ class VsArchiveAppStack(Stack):
                 "DB_HOST": f"postgres.{cfg.prefix}.local",
                 "DB_NAME": "vsarchive",
                 "DB_USER": "vsarchive",
+
+                # Feature flags
+                "ENABLE_HYBRID_HTR": "false",
+                "ENABLE_DAILY_REPORT": "false",
+
+                # Gemini / OCR behavior
+                "GEMINI_CONFIDENCE_THRESHOLD": "0.55",
+                "MIN_TEXT_LENGTH": "30",
+
+                # Retry policy
+                "MAX_RETRIES": "2",
+                "RETRY_DELAY_SECONDS_1": "60",
+                "RETRY_DELAY_SECONDS_2": "300",
+
+                # Reporting (still required by current env_validation, even if ENABLE_DAILY_REPORT=false) 17.2.26
+                "REPORT_WINDOW_START": "07:00",
+                "REPORT_SEND_TIME": "23:00",
+
+                "FREE_TIER_ALERT_PCT": "80",
+                "GEMINI_FREE_DAILY_REQUEST_LIMIT": "200",
+                "GEMINI_FREE_DAILY_IMAGE_LIMIT": "200",
+                "TRANSKRIBUS_FREE_MONTHLY_CREDITS": "50",
             },
             secrets={
                 "DB_PASSWORD": ecs.Secret.from_secrets_manager(db_secret, "password"),
-                "GOOGLE_APPLICATION_CREDENTIALS_JSON": ecs.Secret.from_secrets_manager(google_secret)
+                "GEMINI_API_KEY": ecs.Secret.from_secrets_manager(gemini_secret),
             },
         ).add_port_mappings(ecs.PortMapping(container_port=8000))
 
@@ -192,7 +215,7 @@ class VsArchiveAppStack(Stack):
             },
             secrets={
                 "DB_PASSWORD": ecs.Secret.from_secrets_manager(db_secret, "password"),
-                "GOOGLE_APPLICATION_CREDENTIALS_JSON": ecs.Secret.from_secrets_manager(google_secret)
+                "GEMINI_API_KEY": ecs.Secret.from_secrets_manager(gemini_secret),
             },
         )
 

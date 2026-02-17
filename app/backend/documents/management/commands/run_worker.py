@@ -1,7 +1,6 @@
 import json
 import os
 import time
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 import boto3
@@ -13,6 +12,7 @@ from django.db import transaction
 
 from documents.models import Document, DocumentTextResult
 from documents.s3 import get_object_bytes
+from documents.services.env_validation import EnvConfigError, validate_required_env
 from documents.services.expected_outputs import expected_result_types_for_document
 from documents.services.htr_engine import transcribe_pages
 from documents.services.page_extraction import extract_pages
@@ -40,17 +40,17 @@ class Command(BaseCommand):
         parser.add_argument("--wait-seconds", type=int, default=20)
 
     def handle(self, *args, **options):
+        # Validate env at startup (fail fast)
+        try:
+            validate_required_env()
+        except EnvConfigError as e:
+            self.stderr.write(self.style.ERROR(f"[run_worker] env error: {e}"))
+            raise SystemExit(1)
+
         queue_url = _env("SQS_QUEUE_URL")
         region = (
             os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "eu-central-1"
         )
-
-        # Google credentials (MVP)
-        gcp_json = os.environ.get("GCP_SA_JSON")
-        if gcp_json:
-            creds_path = Path("/tmp/gcp-sa.json")
-            creds_path.write_text(gcp_json, encoding="utf-8")
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
 
         sqs = boto3.client("sqs", region_name=region)
 
@@ -179,7 +179,7 @@ class Command(BaseCommand):
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
 
-                engine = "google_vision_v1"
+                engine = htr_result.engine_name if htr_result else "gemini_2_5_flash"
                 is_he = _is_hebrew_language(doc.language)
 
                 if error:
