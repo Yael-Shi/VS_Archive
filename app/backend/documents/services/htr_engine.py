@@ -15,7 +15,7 @@ class HtrNotImplementedError(RuntimeError):
 class HtrResult:
     text: str
     needs_review: bool = False
-    engine_name: str = "gemini_1_5_flash"
+    engine_name: str = "gemini_2_5_flash"
 
 
 def transcribe_pages(

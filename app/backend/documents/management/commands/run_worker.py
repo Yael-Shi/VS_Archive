@@ -179,7 +179,7 @@ class Command(BaseCommand):
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
 
-                engine = htr_result.engine_name if htr_result else "gemini_1_5_flash"
+                engine = htr_result.engine_name if htr_result else "gemini_2_5_flash"
                 is_he = _is_hebrew_language(doc.language)
 
                 if error:

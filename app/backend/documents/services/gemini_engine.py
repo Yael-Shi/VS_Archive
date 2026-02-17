@@ -18,7 +18,7 @@ class GeminiError(RuntimeError):
 class GeminiResult:
     text: str
     needs_review: bool = False
-    engine_name: str = "gemini_1_5_flash"
+    engine_name: str = "gemini_2_5_flash"
 
 
 def _guess_needs_review(text: str, *, min_len: int) -> bool:
@@ -33,17 +33,25 @@ def _get_api_key() -> str:
     return key
 
 
+def _create_client(api_key: str) -> genai.Client:
+    """
+    Create Gemini client using stable v1 API (not beta).
+    """
+    return genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(api_version="v1"),
+    )
+
+
 def transcribe_pages_with_gemini(
     pages: List[PageImage],
     language_hint: Optional[str],
     *,
-    model_name: str = "gemini-1.5-flash",
+    model_name: str = "gemini-2.5-flash",
     min_text_length: int = 20,
 ) -> GeminiResult:
     api_key = _get_api_key()
-
-    # Gemini Developer API client
-    client = genai.Client(api_key=api_key)
+    client = _create_client(api_key)
 
     texts: list[str] = []
     any_review = False
@@ -65,22 +73,36 @@ def transcribe_pages_with_gemini(
                 model=model_name,
                 contents=[
                     types.Part.from_text(text=prompt),
-                    types.Part.from_bytes(data=p.image_bytes, mime_type="image/png"),
+                    types.Part.from_bytes(
+                        data=p.image_bytes,
+                        mime_type="image/png",
+                    ),
                 ],
             )
         except Exception as e:
-            raise GeminiError(f"Gemini request failed on page {p.page_index}: {e}") from e
+            raise GeminiError(
+                f"Gemini request failed on page {p.page_index}: {e}"
+            ) from e
 
         page_text = (getattr(resp, "text", None) or "").strip()
-        texts.append(page_text)
-        any_review = any_review or _guess_needs_review(page_text, min_len=min_text_length)
 
-    full_text = "\n\n".join([t for t in texts if t]).strip()
+        if not page_text:
+            raise GeminiError(
+                f"Gemini returned empty text on page {p.page_index}"
+            )
+
+        texts.append(page_text)
+        any_review = any_review or _guess_needs_review(
+            page_text, min_len=min_text_length
+        )
+
+    full_text = "\n\n".join(texts).strip()
+
     if not full_text:
         raise GeminiError("Gemini returned empty text")
 
     return GeminiResult(
         text=full_text,
         needs_review=any_review,
-        engine_name="gemini_1_5_flash",
+        engine_name="gemini_2_5_flash",
     )
