@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from google import genai
-from google.genai.types import Content, Part
+from google.genai import types
 
 from documents.services.page_extraction import PageImage
 
@@ -38,13 +38,11 @@ def transcribe_pages_with_gemini(
     language_hint: Optional[str],
     *,
     model_name: str = "gemini-1.5-flash",
-    min_text_length: int = 30,
+    min_text_length: int = 20,
 ) -> GeminiResult:
-    """
-    OCR/HTR via Gemini Vision. Input: list of PNG bytes (one per page).
-    Output: a single concatenated text string.
-    """
     api_key = _get_api_key()
+
+    # Gemini Developer API client
     client = genai.Client(api_key=api_key)
 
     texts: list[str] = []
@@ -63,29 +61,19 @@ def transcribe_pages_with_gemini(
         )
 
         try:
-            response = client.models.generate_content(
+            resp = client.models.generate_content(
                 model=model_name,
                 contents=[
-                    Content(
-                        role="user",
-                        parts=[
-                            Part(text=prompt),
-                            Part.from_bytes(p.image_bytes, mime_type="image/png"),
-                        ],
-                    )
+                    types.Part.from_text(text=prompt),
+                    types.Part.from_bytes(data=p.image_bytes, mime_type="image/png"),
                 ],
             )
         except Exception as e:
-            raise GeminiError(
-                f"Gemini request failed on page {p.page_index}: {e}"
-            ) from e
+            raise GeminiError(f"Gemini request failed on page {p.page_index}: {e}") from e
 
-        page_text = (response.text or "").strip()
+        page_text = (getattr(resp, "text", None) or "").strip()
         texts.append(page_text)
-        any_review = any_review or _guess_needs_review(
-            page_text,
-            min_len=min_text_length,
-        )
+        any_review = any_review or _guess_needs_review(page_text, min_len=min_text_length)
 
     full_text = "\n\n".join([t for t in texts if t]).strip()
     if not full_text:
