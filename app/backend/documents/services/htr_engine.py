@@ -3,8 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional
 
-from google.cloud import vision
-
+from documents.services.gemini_engine import transcribe_pages_with_gemini
 from documents.services.page_extraction import PageImage
 
 
@@ -16,13 +15,7 @@ class HtrNotImplementedError(RuntimeError):
 class HtrResult:
     text: str
     needs_review: bool = False
-    engine_name: str = "google_vision_v1"
-
-
-def _guess_needs_review(text: str) -> bool:
-    # שמרני ל-MVP: אם יצא ממש מעט טקסט, נסמן לבדיקה
-    stripped = (text or "").strip()
-    return len(stripped) < 20
+    engine_name: str = "gemini_1_5_flash"
 
 
 def transcribe_pages(
@@ -30,34 +23,15 @@ def transcribe_pages(
     language_hint: Optional[str],
 ) -> HtrResult:
     """
-    MVP: Use Google Cloud Vision to OCR page images (PNG bytes).
+    V2: Gemini-only OCR/HTR for page images (PNG bytes).
     """
-    client = vision.ImageAnnotatorClient()
-
-    texts: list[str] = []
-    any_review = False
-
-    for p in pages:
-        image = vision.Image(content=p.image_bytes)
-        # document_text_detection לרוב טוב יותר למסמכים מאשר text_detection
-        resp = client.document_text_detection(image=image)
-
-        if resp.error and resp.error.message:
-            raise RuntimeError(
-                f"Google Vision error on page {p.page_index}: {resp.error.message}"
-            )
-
-        page_text = (resp.full_text_annotation.text or "").strip()
-        texts.append(page_text)
-        any_review = any_review or _guess_needs_review(page_text)
-
-    full_text = "\n\n".join([t for t in texts if t])
-
-    if not full_text.strip():
-        raise RuntimeError("Google Vision returned empty text")
-
+    r = transcribe_pages_with_gemini(
+        pages=pages,
+        language_hint=language_hint,
+        model_name="gemini-1.5-flash",
+    )
     return HtrResult(
-        text=full_text,
-        needs_review=any_review,
-        engine_name="google_vision_v1",
+        text=r.text,
+        needs_review=r.needs_review,
+        engine_name=r.engine_name,
     )

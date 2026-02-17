@@ -1,7 +1,6 @@
 import json
 import os
 import time
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 import boto3
@@ -52,13 +51,6 @@ class Command(BaseCommand):
         region = (
             os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "eu-central-1"
         )
-
-        # Google credentials (MVP)
-        gcp_json = os.environ.get("GCP_SA_JSON")
-        if gcp_json:
-            creds_path = Path("/tmp/gcp-sa.json")
-            creds_path.write_text(gcp_json, encoding="utf-8")
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(creds_path)
 
         sqs = boto3.client("sqs", region_name=region)
 
@@ -187,7 +179,7 @@ class Command(BaseCommand):
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
 
-                engine = "google_vision_v1"
+                engine = htr_result.engine_name if htr_result else "gemini_1_5_flash"
                 is_he = _is_hebrew_language(doc.language)
 
                 if error:
