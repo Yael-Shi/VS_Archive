@@ -1,7 +1,7 @@
 import json
 import os
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -12,7 +12,7 @@ from django.db import transaction
 
 from documents.models import Document, DocumentTextResult
 from documents.s3 import get_object_bytes
-from documents.services.env_validation import EnvConfigError, validate_required_env
+from documents.services.env_validation import EnvConfigError, WorkerEnvConfig, validate_required_env
 from documents.services.expected_outputs import expected_result_types_for_document
 from documents.services.htr_engine import transcribe_pages
 from documents.services.page_extraction import extract_pages
@@ -40,9 +40,8 @@ class Command(BaseCommand):
         parser.add_argument("--wait-seconds", type=int, default=20)
 
     def handle(self, *args, **options):
-        # Validate env at startup (fail fast)
         try:
-            validate_required_env()
+            self._cfg: WorkerEnvConfig = validate_required_env()
         except EnvConfigError as e:
             self.stderr.write(self.style.ERROR(f"[run_worker] env error: {e}"))
             raise SystemExit(1)
@@ -111,36 +110,31 @@ class Command(BaseCommand):
     # ------------------------------------------------------------------ CORE
 
     def _process_message(self, msg: Dict[str, Any]) -> bool:
-        # Parse payload
         try:
             payload = json.loads(msg.get("Body", "{}"))
         except Exception:
             self.stderr.write("[run_worker] invalid JSON body")
-            return True  # poison message → delete
+            return True
 
         if payload.get("type") != "PROCESS_DOCUMENT":
-            self.stderr.write(f"[run_worker] unknown job type: {payload.get('type')!r}")
             return True
 
         document_id = payload.get("document_id")
         if not isinstance(document_id, int):
-            self.stderr.write("[run_worker] invalid document_id")
             return True
 
-        # Phase 1: mark PROCESSING (short transaction)
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
 
                 if doc.upload_status != Document.UploadStatus.UPLOADED:
-                    return True  # stale job
+                    return True
 
                 doc.processing_state_user = Document.ProcessingState.PROCESSING
                 doc.save(update_fields=["processing_state_user"])
         except Document.DoesNotExist:
             return True
 
-        # Phase 2: heavy work (no DB locks)
         error: Optional[str] = None
         htr_result = None
 
@@ -174,7 +168,6 @@ class Command(BaseCommand):
                 )
             )
 
-        # Phase 3: save results + final state (short transaction)
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
@@ -197,11 +190,35 @@ class Command(BaseCommand):
 
     # ------------------------------------------------------------------ HELPERS
 
+    def _derive_review_reasons(self, text: str, needs_review: bool) -> List[str]:
+        reasons: List[str] = []
+
+        stripped = (text or "").strip()
+
+        if needs_review:
+            reasons.append("NEEDS_REVIEW_FLAG")
+
+        if len(stripped) < self._cfg.min_text_length:
+            reasons.append("MIN_TEXT_LENGTH")
+
+        if "[UNCLEAR]" in stripped:
+            reasons.append("HAS_UNCLEAR")
+
+        if stripped == "[NO_TEXT]":
+            reasons.append("NO_TEXT_MARKER")
+
+        return reasons
+
     def _save_htr_results(self, doc: Document, engine: str, is_he: bool, htr):
         status = (
             DocumentTextResult.Status.NEEDS_REVIEW
             if htr.needs_review
             else DocumentTextResult.Status.SUCCEEDED
+        )
+
+        review_reasons = self._derive_review_reasons(
+            htr.text,
+            htr.needs_review,
         )
 
         DocumentTextResult.objects.update_or_create(
@@ -214,6 +231,7 @@ class Command(BaseCommand):
                 "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
                 "error_code": None,
                 "error_details": None,
+                "review_reasons": json.dumps(review_reasons),
             },
         )
 
@@ -228,6 +246,7 @@ class Command(BaseCommand):
                     "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
                     "error_code": None,
                     "error_details": None,
+                    "review_reasons": json.dumps(review_reasons),
                 },
             )
 
@@ -242,6 +261,7 @@ class Command(BaseCommand):
                 "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
                 "error_code": "OCR_FAILED",
                 "error_details": details,
+                "review_reasons": "",
             },
         )
 
@@ -256,6 +276,7 @@ class Command(BaseCommand):
                     "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
                     "error_code": "OCR_FAILED",
                     "error_details": details,
+                    "review_reasons": "",
                 },
             )
 

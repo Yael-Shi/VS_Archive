@@ -60,6 +60,50 @@ def _require_float(
     return val
 
 
+def _get_int(
+    name: str,
+    *,
+    default: Optional[int] = None,
+    min_value: Optional[int] = None,
+    max_value: Optional[int] = None,
+) -> Optional[int]:
+    raw = _get(name)
+    if raw is None:
+        return default
+    try:
+        val = int(raw)
+    except ValueError as e:
+        raise EnvConfigError(f"Env var {name} must be an int. Got: {raw!r}") from e
+
+    if min_value is not None and val < min_value:
+        raise EnvConfigError(f"Env var {name} must be >= {min_value}. Got: {val}")
+    if max_value is not None and val > max_value:
+        raise EnvConfigError(f"Env var {name} must be <= {max_value}. Got: {val}")
+    return val
+
+
+def _get_float(
+    name: str,
+    *,
+    default: Optional[float] = None,
+    min_value: Optional[float] = None,
+    max_value: Optional[float] = None,
+) -> Optional[float]:
+    raw = _get(name)
+    if raw is None:
+        return default
+    try:
+        val = float(raw)
+    except ValueError as e:
+        raise EnvConfigError(f"Env var {name} must be a float. Got: {raw!r}") from e
+
+    if min_value is not None and val < min_value:
+        raise EnvConfigError(f"Env var {name} must be >= {min_value}. Got: {val}")
+    if max_value is not None and val > max_value:
+        raise EnvConfigError(f"Env var {name} must be <= {max_value}. Got: {val}")
+    return val
+
+
 def _require_time_hhmm(name: str) -> str:
     v = _require(name)
     if not _TIME_RE.match(v):
@@ -114,18 +158,20 @@ class WorkerEnvConfig:
     default_from_email: Optional[str]
 
     # Transkribus credentials - pick ONE approach
-    # Transkribus - optional unless enable_hybrid_htr=true
     transkribus_api_token: Optional[str]
     transkribus_username: Optional[str]
     transkribus_password: Optional[str]
 
+    # Gemini hardening (optional; defaults used if env vars absent)
+    gemini_temperature: float
+    gemini_top_k: int
+    gemini_top_p: float
+    gemini_max_output_tokens: Optional[int]
+    gemini_double_pass: bool
+    gemini_consistency_min_ratio: float
+
 
 def validate_required_env() -> WorkerEnvConfig:
-    """
-    Call this once at worker startup.
-    Raises EnvConfigError if configuration is missing/invalid.
-    Returns a typed config object for the rest of the worker.
-    """
     enable_hybrid_htr = _get_bool("ENABLE_HYBRID_HTR", default=False)
     enable_daily_report = _get_bool("ENABLE_DAILY_REPORT", default=False)
 
@@ -153,6 +199,16 @@ def validate_required_env() -> WorkerEnvConfig:
         "TRANSKRIBUS_FREE_MONTHLY_CREDITS", min_value=1
     )
 
+    # Gemini hardening (optional envs)
+    gemini_temperature = float(_get_float("GEMINI_TEMPERATURE", default=0.0, min_value=0.0, max_value=2.0) or 0.0)
+    gemini_top_k = int(_get_int("GEMINI_TOP_K", default=1, min_value=1, max_value=64) or 1)
+    gemini_top_p = float(_get_float("GEMINI_TOP_P", default=0.2, min_value=0.0, max_value=1.0) or 0.2)
+    gemini_max_output_tokens = _get_int("GEMINI_MAX_OUTPUT_TOKENS", default=None, min_value=1, max_value=200000)
+    gemini_double_pass = _get_bool("GEMINI_DOUBLE_PASS", default=True)
+    gemini_consistency_min_ratio = float(
+        _get_float("GEMINI_CONSISTENCY_MIN_RATIO", default=0.92, min_value=0.0, max_value=1.0) or 0.92
+    )
+
     smtp_host: Optional[str] = None
     smtp_port: Optional[int] = None
     smtp_username: Optional[str] = None
@@ -166,7 +222,6 @@ def validate_required_env() -> WorkerEnvConfig:
         smtp_password = _require("SMTP_PASSWORD")
         default_from_email = _require("DEFAULT_FROM_EMAIL")
     else:
-        # Not required when daily report is disabled
         smtp_host = _get("SMTP_HOST")
         smtp_port_raw = _get("SMTP_PORT")
         smtp_port = int(smtp_port_raw) if smtp_port_raw and smtp_port_raw.isdigit() else None
@@ -179,12 +234,10 @@ def validate_required_env() -> WorkerEnvConfig:
     transkribus_password: Optional[str] = None
 
     if enable_hybrid_htr:
-        # Transkribus credentials — pick ONE approach
         transkribus_api_token = _get("TRANSKRIBUS_API_TOKEN")
         transkribus_username = _get("TRANSKRIBUS_USERNAME")
         transkribus_password = _get("TRANSKRIBUS_PASSWORD")
 
-        # token OR username+password
         if transkribus_api_token:
             pass
         else:
@@ -217,4 +270,10 @@ def validate_required_env() -> WorkerEnvConfig:
         transkribus_api_token=transkribus_api_token,
         transkribus_username=transkribus_username,
         transkribus_password=transkribus_password,
+        gemini_temperature=gemini_temperature,
+        gemini_top_k=gemini_top_k,
+        gemini_top_p=gemini_top_p,
+        gemini_max_output_tokens=gemini_max_output_tokens,
+        gemini_double_pass=gemini_double_pass,
+        gemini_consistency_min_ratio=gemini_consistency_min_ratio,
     )
