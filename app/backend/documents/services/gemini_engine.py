@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional
@@ -38,6 +39,15 @@ _OCR_STRICT_PROMPT = (
     "\n"
     "OUTPUT FORMAT (MUST be valid JSON ONLY, no markdown, no extra text):\n"
     '{"text": "...", "has_unclear": false, "unclear_count": 0}\n'
+)
+
+# Used only on retry when Gemini returns non-JSON / malformed output
+_OCR_STRICT_REPAIR_PROMPT_SUFFIX = (
+    "\n\nIMPORTANT:\n"
+    "- Return ONLY a JSON object.\n"
+    "- Do NOT wrap in ``` fences.\n"
+    "- Do NOT prefix with the word 'json'.\n"
+    "- The first non-whitespace character MUST be '{' and the last MUST be '}'.\n"
 )
 
 _REQUIRED_KEYS = ("text", "has_unclear", "unclear_count")
@@ -76,10 +86,36 @@ def _build_generation_config(
     return cfg
 
 
+def _strip_leading_json_label(raw: str) -> str:
+    """
+    Gemini sometimes returns:
+        json\\n{...}
+    without code fences. This is NOT JSON and breaks json.loads.
+    We remove a single leading 'json' label line if present.
+    """
+    s = (raw or "").lstrip()
+    if not s:
+        return s
+
+    first_line, sep, rest = s.partition("\n")
+    fl = first_line.strip().lower()
+
+    # Accept common variants like 'json' or 'json:' (but only if the remainder looks like JSON)
+    if fl in ("json", "json:"):
+        candidate = rest.lstrip()
+        if candidate.startswith("{"):
+            return candidate
+
+    return (raw or "").strip()
+
+
 def _parse_page_json_strict(raw: str, *, page_index: int) -> Dict[str, Any]:
     raw = (raw or "").strip()
     if not raw:
         raise GeminiError(f"Gemini returned empty response on page {page_index}")
+
+    # Handle "json\n{...}" without code fences
+    raw = _strip_leading_json_label(raw)
 
     had_fence = False
 
@@ -92,19 +128,33 @@ def _parse_page_json_strict(raw: str, *, page_index: int) -> Dict[str, Any]:
         else:
             raw = raw.strip("`").strip()
 
-    # Extract first JSON object if there is extra text around it
+        # After stripping fences, also strip possible leading 'json' label
+        raw = _strip_leading_json_label(raw)
+
     raw = raw.strip()
+
+    # Extract first JSON object if there is extra text around it
     if not raw.startswith("{"):
         start = raw.find("{")
         end = raw.rfind("}")
         if start != -1 and end != -1 and end > start:
             raw = raw[start : end + 1].strip()
+        elif start != -1 and end == -1:
+            # Looks like it started JSON but got truncated before closing brace
+            raise GeminiError(
+                f"Gemini returned truncated JSON on page {page_index}. "
+                f"Raw_len={len(raw)} Raw_prefix={raw[:200]!r}"
+            )
 
     try:
         data = json.loads(raw)
     except Exception as e:
+        # Add suffix too — helps detect truncation / fence leakage quickly
+        prefix = raw[:200]
+        suffix = raw[-200:] if len(raw) > 200 else raw
         raise GeminiError(
-            f"Gemini returned non-JSON on page {page_index}: {e}. Raw (prefix): {raw[:200]!r}"
+            f"Gemini returned non-JSON on page {page_index}: {e}. "
+            f"Raw_len={len(raw)} Raw_prefix={prefix!r} Raw_suffix={suffix!r}"
         ) from e
 
     if not isinstance(data, dict):
@@ -163,6 +213,10 @@ def transcribe_pages_with_gemini(
     top_k: int = 1,
     top_p: float = 0.2,
     max_output_tokens: Optional[int] = None,
+    # NEW: format/JSON retries (uses env-driven worker config)
+    max_retries: int = 0,
+    retry_delay_seconds_1: int = 0,
+    retry_delay_seconds_2: int = 0,
 ) -> GeminiResult:
     api_key = _get_api_key()
     client = _create_client(api_key)
@@ -173,33 +227,76 @@ def transcribe_pages_with_gemini(
     # engine-level reasons we want to surface to admin backlog
     engine_reasons: List[str] = []
     had_fence_any = False
+    had_format_retry_any = False
 
-    for page in pages:
+    def _sleep_for_retry(attempt_index: int) -> None:
+        # attempt_index is 1-based: 1 => first retry
+        if attempt_index <= 0:
+            return
+        if attempt_index == 1:
+            delay = max(0, int(retry_delay_seconds_1))
+        else:
+            delay = max(0, int(retry_delay_seconds_2))
+        if delay > 0:
+            time.sleep(delay)
+
+    def _run_once(page: PageImage, *, repair_mode: bool) -> Dict[str, Any]:
         prompt = _OCR_STRICT_PROMPT
         if language_hint:
             prompt += f"\nLanguage hint: {language_hint}."
+        if repair_mode:
+            prompt += _OCR_STRICT_REPAIR_PROMPT_SUFFIX
 
-        def _run_once() -> Dict[str, Any]:
-            resp = client.models.generate_content(
-                model=model_name,
-                contents=[
-                    types.Part.from_text(text=prompt),
-                    types.Part.from_bytes(
-                        data=page.image_bytes,
-                        mime_type=page.mime_type or "image/png",
-                    ),
-                ],
-                config=_build_generation_config(
-                    temperature=temperature,
-                    top_k=top_k,
-                    top_p=top_p,
-                    max_output_tokens=max_output_tokens,
+        resp = client.models.generate_content(
+            model=model_name,
+            contents=[
+                types.Part.from_text(text=prompt),
+                types.Part.from_bytes(
+                    data=page.image_bytes,
+                    mime_type=page.mime_type or "image/png",
                 ),
-            )
-            raw = (getattr(resp, "text", None) or "").strip()
-            return _parse_page_json_strict(raw, page_index=page.page_index)
+            ],
+            config=_build_generation_config(
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                max_output_tokens=max_output_tokens,
+            ),
+        )
+        raw = (getattr(resp, "text", None) or "").strip()
+        return _parse_page_json_strict(raw, page_index=page.page_index)
 
-        data1 = _run_once()
+    def _run_with_format_retries(page: PageImage) -> Dict[str, Any]:
+        nonlocal had_format_retry_any
+
+        last_err: Optional[Exception] = None
+
+        # attempt 0 = normal prompt
+        # attempts 1..max_retries = repair prompt + optional sleep
+        for attempt in range(0, max(0, int(max_retries)) + 1):
+            repair_mode = attempt > 0
+            if attempt > 0:
+                had_format_retry_any = True
+                _sleep_for_retry(attempt)
+
+            try:
+                return _run_once(page, repair_mode=repair_mode)
+            except GeminiError as e:
+                last_err = e
+                # Only retry on protocol/format issues (which surface here as GeminiError)
+                # If we've exhausted retries, re-raise.
+                if attempt >= max(0, int(max_retries)):
+                    raise
+                continue
+            except Exception as e:
+                # Non-protocol errors: do not mask with retries
+                raise
+
+        # Should never reach here
+        raise GeminiError(f"Gemini failed with retries on page {page.page_index}: {last_err}")
+
+    for page in pages:
+        data1 = _run_with_format_retries(page)
         text1 = data1["text"].strip()
 
         if not text1:
@@ -225,7 +322,7 @@ def transcribe_pages_with_gemini(
             had_fence_any = True
 
         if double_pass:
-            data2 = _run_once()
+            data2 = _run_with_format_retries(page)
             text2 = data2["text"].strip()
 
             if not text2:
@@ -250,6 +347,9 @@ def transcribe_pages_with_gemini(
 
     if had_fence_any:
         engine_reasons.append("HAD_FENCE")
+
+    if had_format_retry_any:
+        engine_reasons.append("FORMAT_RETRY")
 
     return GeminiResult(
         text=full_text,

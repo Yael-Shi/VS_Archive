@@ -156,6 +156,10 @@ class Command(BaseCommand):
                 top_k=cfg.gemini_top_k,
                 top_p=cfg.gemini_top_p,
                 max_output_tokens=cfg.gemini_max_output_tokens,
+                # ✅ NEW: retries for malformed / non-JSON Gemini responses
+                max_retries=cfg.max_retries,
+                retry_delay_seconds_1=cfg.retry_delay_seconds_1,
+                retry_delay_seconds_2=cfg.retry_delay_seconds_2,
             )
 
         except Exception as e:
@@ -202,7 +206,7 @@ class Command(BaseCommand):
         if stripped == "[NO_TEXT]":
             reasons.append("NO_TEXT_MARKER")
 
-        # ✅ Add engine-originated reasons (e.g. HAD_FENCE)
+        # ✅ Add engine-originated reasons (e.g. HAD_FENCE, FORMAT_RETRY)
         if engine_reasons:
             for r in engine_reasons:
                 if r and r not in reasons:

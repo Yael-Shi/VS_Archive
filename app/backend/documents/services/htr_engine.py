@@ -31,6 +31,10 @@ def transcribe_pages(
     top_k: int = 1,
     top_p: float = 0.2,
     max_output_tokens: Optional[int] = None,
+    # NEW: protocol/format retries (env-driven)
+    max_retries: int = 0,
+    retry_delay_seconds_1: int = 0,
+    retry_delay_seconds_2: int = 0,
 ) -> HtrResult:
     """
     V2: Gemini-only OCR/HTR for page images (PNG bytes).
@@ -49,6 +53,9 @@ def transcribe_pages(
         top_k=top_k,
         top_p=top_p,
         max_output_tokens=max_output_tokens,
+        max_retries=max_retries,
+        retry_delay_seconds_1=retry_delay_seconds_1,
+        retry_delay_seconds_2=retry_delay_seconds_2,
     )
     return HtrResult(
         text=r.text,
