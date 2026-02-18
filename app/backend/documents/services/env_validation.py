@@ -199,16 +199,54 @@ def validate_required_env() -> WorkerEnvConfig:
         "TRANSKRIBUS_FREE_MONTHLY_CREDITS", min_value=1
     )
 
-    # Gemini hardening (optional envs)
-    gemini_temperature = float(_get_float("GEMINI_TEMPERATURE", default=0.0, min_value=0.0, max_value=2.0) or 0.0)
-    gemini_top_k = int(_get_int("GEMINI_TOP_K", default=1, min_value=1, max_value=64) or 1)
-    gemini_top_p = float(_get_float("GEMINI_TOP_P", default=0.2, min_value=0.0, max_value=1.0) or 0.2)
-    gemini_max_output_tokens = _get_int("GEMINI_MAX_OUTPUT_TOKENS", default=None, min_value=1, max_value=200000)
-    gemini_double_pass = _get_bool("GEMINI_DOUBLE_PASS", default=True)
-    gemini_consistency_min_ratio = float(
-        _get_float("GEMINI_CONSISTENCY_MIN_RATIO", default=0.92, min_value=0.0, max_value=1.0) or 0.92
+    # ------------------------------------------------------------------ Gemini hardening (optional envs)
+    # Defaults here MUST match safe defaults in gemini_engine / htr_engine.
+    gemini_temperature = _get_float(
+        "GEMINI_TEMPERATURE",
+        default=0.0,
+        min_value=0.0,
+        max_value=2.0,
+    )
+    if gemini_temperature is None:
+        gemini_temperature = 0.0
+
+    gemini_top_k = _get_int(
+        "GEMINI_TOP_K",
+        default=1,
+        min_value=1,
+        max_value=64,
+    )
+    if gemini_top_k is None:
+        gemini_top_k = 1
+
+    gemini_top_p = _get_float(
+        "GEMINI_TOP_P",
+        default=0.2,
+        min_value=0.0,
+        max_value=1.0,
+    )
+    if gemini_top_p is None:
+        gemini_top_p = 0.2
+
+    gemini_max_output_tokens = _get_int(
+        "GEMINI_MAX_OUTPUT_TOKENS",
+        default=None,
+        min_value=1,
+        max_value=200000,
     )
 
+    gemini_double_pass = _get_bool("GEMINI_DOUBLE_PASS", default=True)
+
+    gemini_consistency_min_ratio = _get_float(
+        "GEMINI_CONSISTENCY_MIN_RATIO",
+        default=0.92,
+        min_value=0.0,
+        max_value=1.0,
+    )
+    if gemini_consistency_min_ratio is None:
+        gemini_consistency_min_ratio = 0.92
+
+    # ------------------------------------------------------------------ Email (daily report)
     smtp_host: Optional[str] = None
     smtp_port: Optional[int] = None
     smtp_username: Optional[str] = None
@@ -229,6 +267,7 @@ def validate_required_env() -> WorkerEnvConfig:
         smtp_password = _get("SMTP_PASSWORD")
         default_from_email = _get("DEFAULT_FROM_EMAIL")
 
+    # ------------------------------------------------------------------ Transkribus (optional unless enable_hybrid_htr=true)
     transkribus_api_token: Optional[str] = None
     transkribus_username: Optional[str] = None
     transkribus_password: Optional[str] = None
@@ -270,10 +309,10 @@ def validate_required_env() -> WorkerEnvConfig:
         transkribus_api_token=transkribus_api_token,
         transkribus_username=transkribus_username,
         transkribus_password=transkribus_password,
-        gemini_temperature=gemini_temperature,
-        gemini_top_k=gemini_top_k,
-        gemini_top_p=gemini_top_p,
+        gemini_temperature=float(gemini_temperature),
+        gemini_top_k=int(gemini_top_k),
+        gemini_top_p=float(gemini_top_p),
         gemini_max_output_tokens=gemini_max_output_tokens,
         gemini_double_pass=gemini_double_pass,
-        gemini_consistency_min_ratio=gemini_consistency_min_ratio,
+        gemini_consistency_min_ratio=float(gemini_consistency_min_ratio),
     )

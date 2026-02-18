@@ -155,9 +155,20 @@ class Command(BaseCommand):
                 mime_type=effective_mime,
             )
 
+            cfg = self._cfg
+
+            # ✅ Pass env-driven hardening params through the orchestrator (htr_engine)
             htr_result = transcribe_pages(
                 pages=pages,
                 language_hint=doc.language,
+                model_name="gemini-2.5-flash",
+                min_text_length=cfg.min_text_length,
+                double_pass=cfg.gemini_double_pass,
+                consistency_min_ratio=cfg.gemini_consistency_min_ratio,
+                temperature=cfg.gemini_temperature,
+                top_k=cfg.gemini_top_k,
+                top_p=cfg.gemini_top_p,
+                max_output_tokens=cfg.gemini_max_output_tokens,
             )
 
         except Exception as e:
