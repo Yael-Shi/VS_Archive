@@ -148,7 +148,7 @@ class Command(BaseCommand):
             htr_result = transcribe_pages(
                 pages=pages,
                 language_hint=doc.language,
-                model_name="gemini-2.5-flash",
+                model_name="gemini-2.0-flash",
                 min_text_length=cfg.min_text_length,
                 double_pass=cfg.gemini_double_pass,
                 consistency_min_ratio=cfg.gemini_consistency_min_ratio,
@@ -156,10 +156,6 @@ class Command(BaseCommand):
                 top_k=cfg.gemini_top_k,
                 top_p=cfg.gemini_top_p,
                 max_output_tokens=cfg.gemini_max_output_tokens,
-                # ✅ NEW: retries for malformed / non-JSON Gemini responses
-                max_retries=cfg.max_retries,
-                retry_delay_seconds_1=cfg.retry_delay_seconds_1,
-                retry_delay_seconds_2=cfg.retry_delay_seconds_2,
             )
 
         except Exception as e:
@@ -173,7 +169,7 @@ class Command(BaseCommand):
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
 
-                engine = htr_result.engine_name if htr_result else "gemini_2_5_flash"
+                engine = htr_result.engine_name if htr_result else "gemini-2.0-flash"
                 is_he = _is_hebrew_language(doc.language)
 
                 if error:
@@ -206,7 +202,6 @@ class Command(BaseCommand):
         if stripped == "[NO_TEXT]":
             reasons.append("NO_TEXT_MARKER")
 
-        # ✅ Add engine-originated reasons (e.g. HAD_FENCE, FORMAT_RETRY)
         if engine_reasons:
             for r in engine_reasons:
                 if r and r not in reasons:
