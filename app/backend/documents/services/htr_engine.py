@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional
 
 from documents.services.gemini_engine import transcribe_pages_with_gemini
@@ -16,6 +16,7 @@ class HtrResult:
     text: str
     needs_review: bool = False
     engine_name: str = "gemini_2_5_flash"
+    review_reasons: List[str] = field(default_factory=list)
 
 
 def transcribe_pages(
@@ -53,4 +54,5 @@ def transcribe_pages(
         text=r.text,
         needs_review=r.needs_review,
         engine_name=r.engine_name,
+        review_reasons=list(r.review_reasons or []),
     )

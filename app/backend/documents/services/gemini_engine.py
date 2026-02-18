@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional
 
@@ -22,6 +22,8 @@ class GeminiResult:
     text: str
     needs_review: bool = False
     engine_name: str = "gemini_2_5_flash"
+    # Reasons coming from the engine itself (protocol/format/guards)
+    review_reasons: List[str] = field(default_factory=list)
 
 
 _OCR_STRICT_PROMPT = (
@@ -69,10 +71,8 @@ def _build_generation_config(
         top_k=top_k,
         top_p=top_p,
     )
-
     if max_output_tokens is not None:
         cfg.max_output_tokens = max_output_tokens
-
     return cfg
 
 
@@ -81,40 +81,63 @@ def _parse_page_json_strict(raw: str, *, page_index: int) -> Dict[str, Any]:
     if not raw:
         raise GeminiError(f"Gemini returned empty response on page {page_index}")
 
+    had_fence = False
+
+    # If the model wrapped JSON in markdown fences (``` or ```json), unwrap it safely.
     if raw.startswith("```"):
-        raise GeminiError(
-            f"Gemini returned fenced code instead of raw JSON on page {page_index}"
-        )
+        had_fence = True
+        lines = raw.splitlines()
+        if len(lines) >= 3 and lines[0].strip().startswith("```") and lines[-1].strip() == "```":
+            raw = "\n".join(lines[1:-1]).strip()
+        else:
+            raw = raw.strip("`").strip()
+
+    # Extract first JSON object if there is extra text around it
+    raw = raw.strip()
+    if not raw.startswith("{"):
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            raw = raw[start : end + 1].strip()
 
     try:
         data = json.loads(raw)
     except Exception as e:
         raise GeminiError(
-            f"Gemini returned non-JSON on page {page_index}: {e}. Raw: {raw[:200]!r}"
+            f"Gemini returned non-JSON on page {page_index}: {e}. Raw (prefix): {raw[:200]!r}"
         ) from e
 
     if not isinstance(data, dict):
-        raise GeminiError(f"Gemini JSON is not object on page {page_index}")
+        raise GeminiError(f"Gemini JSON is not an object on page {page_index}: {data!r}")
 
     for k in _REQUIRED_KEYS:
         if k not in data:
-            raise GeminiError(f"Gemini JSON missing '{k}' on page {page_index}")
+            raise GeminiError(f"Gemini JSON missing '{k}' on page {page_index}: {data!r}")
 
     if not isinstance(data["text"], str):
-        raise GeminiError(f"'text' not string on page {page_index}")
-
+        raise GeminiError(f"Gemini JSON 'text' not string on page {page_index}: {data!r}")
     if not isinstance(data["has_unclear"], bool):
-        raise GeminiError(f"'has_unclear' not bool on page {page_index}")
-
+        raise GeminiError(f"Gemini JSON 'has_unclear' not bool on page {page_index}: {data!r}")
     if not isinstance(data["unclear_count"], int):
-        raise GeminiError(f"'unclear_count' not int on page {page_index}")
+        raise GeminiError(f"Gemini JSON 'unclear_count' not int on page {page_index}: {data!r}")
 
     computed_unclear = data["text"].count("[UNCLEAR]")
-    data["_unclear_mismatch"] = abs(computed_unclear - data["unclear_count"]) > 2
+    data["_computed_unclear"] = computed_unclear
+    data["_unclear_count_mismatch"] = abs(computed_unclear - data["unclear_count"]) > 2
 
-    if computed_unclear > 0 and not data["has_unclear"]:
+    if computed_unclear > 0 and data["has_unclear"] is False:
         data["has_unclear"] = True
+        data["_has_unclear_fixed"] = True
+    else:
+        data["_has_unclear_fixed"] = False
 
+    if data["unclear_count"] < 0:
+        data["unclear_count"] = 0
+        data["_unclear_count_clamped"] = True
+    else:
+        data["_unclear_count_clamped"] = False
+
+    data["_had_fence"] = had_fence
     return data
 
 
@@ -141,19 +164,22 @@ def transcribe_pages_with_gemini(
     top_p: float = 0.2,
     max_output_tokens: Optional[int] = None,
 ) -> GeminiResult:
-
     api_key = _get_api_key()
     client = _create_client(api_key)
 
     texts: List[str] = []
     any_review = False
 
+    # engine-level reasons we want to surface to admin backlog
+    engine_reasons: List[str] = []
+    had_fence_any = False
+
     for page in pages:
         prompt = _OCR_STRICT_PROMPT
         if language_hint:
             prompt += f"\nLanguage hint: {language_hint}."
 
-        def _run_once():
+        def _run_once() -> Dict[str, Any]:
             resp = client.models.generate_content(
                 model=model_name,
                 contents=[
@@ -187,11 +213,16 @@ def transcribe_pages_with_gemini(
         if data1.get("has_unclear"):
             page_review = True
 
-        if data1.get("_unclear_mismatch"):
+        if data1.get("_unclear_count_mismatch"):
             page_review = True
 
         if text1 == "[NO_TEXT]":
             page_review = True
+
+        # Policy B: accept OCR but mark review if fenced JSON detected
+        if data1.get("_had_fence"):
+            page_review = True
+            had_fence_any = True
 
         if double_pass:
             data2 = _run_once()
@@ -206,16 +237,23 @@ def transcribe_pages_with_gemini(
                     if data2.get("unclear_count", 0) > data1.get("unclear_count", 0):
                         text1 = text2
 
+                # If 2nd pass also had fence, count it
+                if data2.get("_had_fence"):
+                    had_fence_any = True
+
         texts.append(text1)
         any_review = any_review or page_review
 
     full_text = "\n\n".join(texts).strip()
-
     if not full_text:
         raise GeminiError("Gemini returned empty full text")
+
+    if had_fence_any:
+        engine_reasons.append("HAD_FENCE")
 
     return GeminiResult(
         text=full_text,
         needs_review=any_review,
         engine_name="gemini_2_5_flash",
+        review_reasons=engine_reasons,
     )

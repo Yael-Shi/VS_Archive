@@ -47,16 +47,11 @@ class Command(BaseCommand):
             raise SystemExit(1)
 
         queue_url = _env("SQS_QUEUE_URL")
-        region = (
-            os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "eu-central-1"
-        )
-
+        region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "eu-central-1"
         sqs = boto3.client("sqs", region_name=region)
 
         self.stdout.write(
-            self.style.SUCCESS(
-                f"[run_worker] starting | region={region} | queue={queue_url}"
-            )
+            self.style.SUCCESS(f"[run_worker] starting | region={region} | queue={queue_url}")
         )
 
         while True:
@@ -123,18 +118,18 @@ class Command(BaseCommand):
         if not isinstance(document_id, int):
             return True
 
+        # Phase 1: mark PROCESSING
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
-
                 if doc.upload_status != Document.UploadStatus.UPLOADED:
                     return True
-
                 doc.processing_state_user = Document.ProcessingState.PROCESSING
                 doc.save(update_fields=["processing_state_user"])
         except Document.DoesNotExist:
             return True
 
+        # Phase 2: heavy work
         error: Optional[str] = None
         htr_result = None
 
@@ -143,21 +138,13 @@ class Command(BaseCommand):
             if not bucket:
                 raise RuntimeError("UPLOADS_BUCKET_NAME is not configured")
 
-            file_bytes, s3_mime = get_object_bytes(
-                bucket=bucket,
-                key=doc.file_s3_key,
-            )
-
+            file_bytes, s3_mime = get_object_bytes(bucket=bucket, key=doc.file_s3_key)
             effective_mime = (doc.mime_type or s3_mime or "").strip()
 
-            pages = extract_pages(
-                file_bytes=file_bytes,
-                mime_type=effective_mime,
-            )
+            pages = extract_pages(file_bytes=file_bytes, mime_type=effective_mime)
 
             cfg = self._cfg
 
-            # ✅ Pass env-driven hardening params through the orchestrator (htr_engine)
             htr_result = transcribe_pages(
                 pages=pages,
                 language_hint=doc.language,
@@ -174,11 +161,10 @@ class Command(BaseCommand):
         except Exception as e:
             error = str(e)
             self.stderr.write(
-                self.style.ERROR(
-                    f"[run_worker] processing error for doc {document_id}: {e}"
-                )
+                self.style.ERROR(f"[run_worker] processing error for doc {document_id}: {e}")
             )
 
+        # Phase 3: save results + final state
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
@@ -193,7 +179,6 @@ class Command(BaseCommand):
 
                 self._update_processing_state(doc, engine)
                 doc.save(update_fields=["processing_state_user"])
-
         except Document.DoesNotExist:
             return True
 
@@ -201,9 +186,8 @@ class Command(BaseCommand):
 
     # ------------------------------------------------------------------ HELPERS
 
-    def _derive_review_reasons(self, text: str, needs_review: bool) -> List[str]:
+    def _derive_review_reasons(self, text: str, needs_review: bool, engine_reasons: Optional[List[str]]) -> List[str]:
         reasons: List[str] = []
-
         stripped = (text or "").strip()
 
         if needs_review:
@@ -218,6 +202,12 @@ class Command(BaseCommand):
         if stripped == "[NO_TEXT]":
             reasons.append("NO_TEXT_MARKER")
 
+        # ✅ Add engine-originated reasons (e.g. HAD_FENCE)
+        if engine_reasons:
+            for r in engine_reasons:
+                if r and r not in reasons:
+                    reasons.append(r)
+
         return reasons
 
     def _save_htr_results(self, doc: Document, engine: str, is_he: bool, htr):
@@ -230,6 +220,7 @@ class Command(BaseCommand):
         review_reasons = self._derive_review_reasons(
             htr.text,
             htr.needs_review,
+            getattr(htr, "review_reasons", None),
         )
 
         DocumentTextResult.objects.update_or_create(
