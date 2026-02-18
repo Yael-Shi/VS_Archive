@@ -1,6 +1,7 @@
 import json
 import os
 import time
+import logging
 from typing import Any, Dict, Optional, List
 
 import boto3
@@ -17,6 +18,7 @@ from documents.services.expected_outputs import expected_result_types_for_docume
 from documents.services.htr_engine import transcribe_pages
 from documents.services.page_extraction import extract_pages
 
+logger = logging.getLogger(__name__)
 
 def _env(name: str) -> str:
     value = os.getenv(name)
@@ -24,11 +26,9 @@ def _env(name: str) -> str:
         raise RuntimeError(f"Missing required env var: {name}")
     return value
 
-
 def _is_hebrew_language(language: Optional[str]) -> bool:
     lang = (language or "").strip().lower()
     return lang in ("he", "heb", "hebrew")
-
 
 class Command(BaseCommand):
     help = "Run the async worker: poll SQS and process document jobs with Model Fallback."
@@ -47,11 +47,11 @@ class Command(BaseCommand):
             raise SystemExit(1)
 
         queue_url = _env("SQS_QUEUE_URL")
-        region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "eu-central-1"
+        region = os.getenv("AWS_REGION") or "eu-central-1"
         sqs = boto3.client("sqs", region_name=region)
 
         self.stdout.write(
-            self.style.SUCCESS(f"[run_worker] starting | region={region} | queue={queue_url}")
+            self.style.SUCCESS(f"[run_worker] starting | queue={queue_url}")
         )
 
         while True:
@@ -76,7 +76,7 @@ class Command(BaseCommand):
             if options["once"]:
                 return
 
-    # ------------------------------------------------------------------ SQS
+    # ------------------------------------------------------------------ SQS Helpers
 
     def _receive_one(self, sqs, queue_url, max_msgs, wait):
         try:
@@ -94,21 +94,16 @@ class Command(BaseCommand):
 
     def _delete_message(self, sqs, queue_url, msg):
         try:
-            sqs.delete_message(
-                QueueUrl=queue_url,
-                ReceiptHandle=msg["ReceiptHandle"],
-            )
-            self.stdout.write("[run_worker] deleted message from SQS")
+            sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=msg["ReceiptHandle"])
         except Exception as e:
             self.stderr.write(f"SQS delete error: {e}")
 
-    # ------------------------------------------------------------------ CORE
+    # ------------------------------------------------------------------ Core Logic
 
     def _process_message(self, msg: Dict[str, Any]) -> bool:
         try:
             payload = json.loads(msg.get("Body", "{}"))
         except Exception:
-            self.stderr.write("[run_worker] invalid JSON body")
             return True
 
         if payload.get("type") != "PROCESS_DOCUMENT":
@@ -118,7 +113,7 @@ class Command(BaseCommand):
         if not isinstance(document_id, int):
             return True
 
-        # Phase 1: mark PROCESSING
+        # Phase 1: Mark PROCESSING
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
@@ -129,19 +124,15 @@ class Command(BaseCommand):
         except Document.DoesNotExist:
             return True
 
-        # Phase 2: heavy work (With Model Fallback)
+        # Phase 2: Heavy work with Fallback
         error: Optional[str] = None
         htr_result = None
         models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash"]
 
         try:
             bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
-            if not bucket:
-                raise RuntimeError("UPLOADS_BUCKET_NAME is not configured")
-
             file_bytes, s3_mime = get_object_bytes(bucket=bucket, key=doc.file_s3_key)
             effective_mime = (doc.mime_type or s3_mime or "").strip()
-
             pages = extract_pages(file_bytes=file_bytes, mime_type=effective_mime)
 
             for model in models_to_try:
@@ -157,29 +148,27 @@ class Command(BaseCommand):
                         temperature=self._cfg.gemini_temperature,
                         top_k=self._cfg.gemini_top_k,
                         top_p=self._cfg.gemini_top_p,
-                        max_output_tokens=self._cfg.gemini_max_output_tokens,
+                        max_output_tokens=8192,
                     )
-                    break  # Success!
+                    break
                 except Exception as e:
-                    last_err = str(e)
-                    if "429" in last_err or "RESOURCE_EXHAUSTED" in last_err:
-                        self.stdout.write(self.style.WARNING(f"Model {model} exhausted. Trying next..."))
+                    last_err = str(e).upper()
+                    if any(x in last_err for x in ["429", "RESOURCE_EXHAUSTED", "QUOTA_EXHAUSTED"]):
+                        self.stdout.write(self.style.WARNING(f"Model {model} exhausted. Trying fallback..."))
                         continue
-                    raise e  # Other errors should stop the process
+                    raise e
 
             if not htr_result:
-                raise RuntimeError("All HTR models failed or were exhausted.")
+                raise RuntimeError("All models failed or were exhausted.")
 
         except Exception as e:
             error = str(e)
-            self.stderr.write(self.style.ERROR(f"[run_worker] processing error for doc {document_id}: {e}"))
+            self.stderr.write(self.style.ERROR(f"Processing error for doc {document_id}: {e}"))
 
-        # Phase 3: save results + final state
+        # Phase 3: Save results
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
-                
-                # Determine which engine actually finished the job
                 final_engine = htr_result.engine_name if htr_result else "gemini-fallback"
                 is_he = _is_hebrew_language(doc.language)
 
@@ -191,11 +180,11 @@ class Command(BaseCommand):
                 self._update_processing_state(doc, final_engine)
                 doc.save(update_fields=["processing_state_user"])
         except Document.DoesNotExist:
-            return True
+            pass
 
         return True
 
-    # ------------------------------------------------------------------ HELPERS
+    # ------------------------------------------------------------------ DB Helpers
 
     def _derive_review_reasons(self, text: str, needs_review: bool, engine_reasons: Optional[List[str]]) -> List[str]:
         reasons: List[str] = []
@@ -207,9 +196,7 @@ class Command(BaseCommand):
             reasons.append("MIN_TEXT_LENGTH")
         if "[UNCLEAR]" in stripped:
             reasons.append("HAS_UNCLEAR")
-        if stripped == "[NO_TEXT]":
-            reasons.append("NO_TEXT_MARKER")
-
+        
         if engine_reasons:
             for r in engine_reasons:
                 if r and r not in reasons:
@@ -251,7 +238,6 @@ class Command(BaseCommand):
         target_types = [DocumentTextResult.ResultType.SOURCE_TEXT]
         if is_he:
             target_types.append(DocumentTextResult.ResultType.HEBREW_TEXT)
-
         for r_type in target_types:
             DocumentTextResult.objects.update_or_create(
                 document=doc,
@@ -278,7 +264,6 @@ class Command(BaseCommand):
         existing = qs.count()
         succeeded = qs.filter(status=DocumentTextResult.Status.SUCCEEDED).count()
         failed = qs.filter(status=DocumentTextResult.Status.FAILED).count()
-
         missing = len(expected_types) - existing
 
         if missing == 0 and succeeded == len(expected_types):

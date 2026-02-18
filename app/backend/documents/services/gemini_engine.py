@@ -71,31 +71,35 @@ def _parse_page_json_strict(raw: str, *, page_index: int) -> Dict[str, Any]:
     if not raw:
         raise GeminiError(f"Gemini returned empty response on page {page_index}")
 
-    had_fence = False
     if "```" in raw:
-        had_fence = True
-        match = re.search(r"```(?:json)?\s*(.*?)\s*```", raw, re.DOTALL)
+        match = re.search(r"```(?:json)?\s*(.*?)\s*(?:```|$)", raw, re.DOTALL)
         if match:
             raw = match.group(1).strip()
         else:
             raw = raw.replace("```json", "").replace("```", "").strip()
 
-    start = raw.find("{")
-    end = raw.rfind("}")
-    if start != -1 and end != -1:
-        raw = raw[start : end + 1]
+    if raw.startswith("{") and not raw.endswith("}"):
+        logger.warning(f"Detected truncated JSON on page {page_index}, attempting to close it.")
+        current = raw.rstrip()
+        if not current.endswith('"'):
+            current += '"'
+        if not current.endswith('}'):
+            current += '}'
+        raw = current
 
     try:
-        data = json.loads(raw)
+        data = json.loads(raw, strict=False)
     except Exception as e:
+        logger.error(f"JSON Parse Error on page {page_index}: {e}. Raw: {raw[:100]}...")
         raise GeminiError(f"JSON Parse Error on page {page_index}: {e}")
 
     # Validation and defaults
     for k in _REQUIRED_KEYS:
         if k not in data:
-            data[k] = "" if k == "text" else (False if k == "has_unclear" else 0)
+            if k == "text": data[k] = ""
+            elif k == "has_unclear": data[k] = False
+            else: data[k] = 0
     
-    data["_had_fence"] = had_fence
     return data
 
 
@@ -112,7 +116,7 @@ def transcribe_pages_with_gemini(
     temperature: float = 0.2,
     top_k: int = 40,
     top_p: float = 0.95,
-    max_output_tokens: Optional[int] = None,
+    max_output_tokens: Optional[int] = 8192,
 ) -> GeminiResult:
     api_key = _get_api_key()
     client = _create_client(api_key)
@@ -120,72 +124,52 @@ def transcribe_pages_with_gemini(
     texts: List[str] = []
     any_review = False
     engine_reasons: List[str] = []
-    had_fence_any = False
 
     for page in pages:
         prompt = _HTR_EXPERT_PROMPT
         if language_hint:
             prompt += f"\nLanguage hint: {language_hint}."
 
-        def _run_once():
-            attempts = 0
-            while attempts < 2:
-                try:
-                    resp = client.models.generate_content(
-                        model=model_name,
-                        contents=[
-                            types.Part.from_text(text=prompt),
-                            types.Part.from_bytes(data=page.image_bytes, mime_type=page.mime_type or "image/png"),
-                        ],
-                        config=types.GenerateContentConfig(
-                            temperature=temperature, top_k=top_k, top_p=top_p,
-                            max_output_tokens=max_output_tokens,
-                        ),
-                    )
-                    data1 = _parse_page_json_strict(resp.text, page_index=page.page_index)
-                    success = True
-                    break 
-                except Exception as e:
-                    err_str = str(e).upper()
-                    if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "QUOTA" in err_str:
-                        wait_match = re.search(r"RETRY IN ([\d\.]+)S", err_str)
-                        wait_time = float(wait_match.group(1)) if wait_match else 2
-                        
-                        if "LIMIT: 0" in err_str or "LIMIT: 0.0" in err_str:
-                            raise GeminiError(f"QUOTA_EXHAUSTED: Model {model_name} has zero quota.")
-                        
-                        logger.warning(f"Quota hit for {model_name}. Waiting {wait_time}s...")
-                        time.sleep(wait_time + 1)
-                        attempts += 1
-                    else:
-                        raise GeminiError(f"Gemini API Error: {e}")
-
-            if not success:
-                raise GeminiError(f"QUOTA_EXHAUSTED: Model {model_name} failed after retries.")
-
-        data1 = _run_once()
-        text1 = data1["text"].strip()
+        success = False
+        attempts = 0
         
-        page_review = False
-        if len(text1) < min_text_length or data1.get("has_unclear") or data1.get("_had_fence"):
-            page_review = True
-        
-        if data1.get("_had_fence"):
-            had_fence_any = True
+        while not success and attempts < 2:
+            try:
+                resp = client.models.generate_content(
+                    model=model_name,
+                    contents=[
+                        types.Part.from_text(text=prompt),
+                        types.Part.from_bytes(data=page.image_bytes, mime_type=page.mime_type or "image/png"),
+                    ],
+                    config=types.GenerateContentConfig(
+                        temperature=temperature,
+                        top_k=top_k,
+                        top_p=top_p,
+                        max_output_tokens=max_output_tokens,
+                    ),
+                )
+                data = _parse_page_json_strict(resp.text, page_index=page.page_index)
+                success = True
+            except Exception as e:
+                err_str = str(e).upper()
+                if any(x in err_str for x in ["429", "RESOURCE_EXHAUSTED", "QUOTA"]):
+                    if "LIMIT: 0" in err_str:
+                        raise GeminiError(f"QUOTA_EXHAUSTED: {model_name}")
+                    time.sleep(5)
+                    attempts += 1
+                else:
+                    raise GeminiError(f"Gemini API Error: {e}")
 
-        if double_pass:
-            data2 = _run_once()
-            if _similarity_ratio(text1, data2["text"]) < consistency_min_ratio:
-                page_review = True
+        if not success:
+            raise GeminiError(f"QUOTA_EXHAUSTED: {model_name} after retries")
 
-        texts.append(text1)
-        any_review = any_review or page_review
-
-    full_text = "\n\n".join(texts).strip()
-    if had_fence_any: engine_reasons.append("HAD_FENCE")
+        text = data["text"].strip()
+        texts.append(text)
+        if len(text) < min_text_length or data.get("has_unclear"):
+            any_review = True
 
     return GeminiResult(
-        text=full_text,
+        text="\n\n".join(texts).strip(),
         needs_review=any_review,
         engine_name=model_name,
         review_reasons=engine_reasons,
