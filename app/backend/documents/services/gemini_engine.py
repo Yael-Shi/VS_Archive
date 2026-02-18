@@ -142,18 +142,26 @@ def transcribe_pages_with_gemini(
                             max_output_tokens=max_output_tokens,
                         ),
                     )
-                    return _parse_page_json_strict(resp.text, page_index=page.page_index)
+                    data1 = _parse_page_json_strict(resp.text, page_index=page.page_index)
+                    success = True
+                    break 
                 except Exception as e:
-                    err_str = str(e)
-                    if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-                        wait_match = re.search(r"retry in ([\d\.]+)s", err_str)
-                        wait_time = float(wait_match.group(1)) if wait_match else 30
-                        logger.warning(f"Quota hit. Waiting {wait_time}s...")
+                    err_str = str(e).upper()
+                    if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "QUOTA" in err_str:
+                        wait_match = re.search(r"RETRY IN ([\d\.]+)S", err_str)
+                        wait_time = float(wait_match.group(1)) if wait_match else 2
+                        
+                        if "LIMIT: 0" in err_str or "LIMIT: 0.0" in err_str:
+                            raise GeminiError(f"QUOTA_EXHAUSTED: Model {model_name} has zero quota.")
+                        
+                        logger.warning(f"Quota hit for {model_name}. Waiting {wait_time}s...")
                         time.sleep(wait_time + 1)
                         attempts += 1
                     else:
-                        raise GeminiError(f"API Error: {err_str}")
-            raise GeminiError(f"Quota exceeded for model {model_name} after retries.")
+                        raise GeminiError(f"Gemini API Error: {e}")
+
+            if not success:
+                raise GeminiError(f"QUOTA_EXHAUSTED: Model {model_name} failed after retries.")
 
         data1 = _run_once()
         text1 = data1["text"].strip()
