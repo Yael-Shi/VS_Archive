@@ -31,7 +31,7 @@ def _is_hebrew_language(language: Optional[str]) -> bool:
 
 
 class Command(BaseCommand):
-    help = "Run the async worker: poll SQS and process document jobs."
+    help = "Run the async worker: poll SQS and process document jobs with Model Fallback."
 
     def add_arguments(self, parser):
         parser.add_argument("--once", action="store_true")
@@ -84,7 +84,7 @@ class Command(BaseCommand):
                 QueueUrl=queue_url,
                 MaxNumberOfMessages=max(1, min(max_msgs, 10)),
                 WaitTimeSeconds=max(0, min(wait, 20)),
-                VisibilityTimeout=120,
+                VisibilityTimeout=300,
             )
             msgs = resp.get("Messages") or []
             return msgs[0] if msgs else None
@@ -129,9 +129,10 @@ class Command(BaseCommand):
         except Document.DoesNotExist:
             return True
 
-        # Phase 2: heavy work
+        # Phase 2: heavy work (With Model Fallback)
         error: Optional[str] = None
         htr_result = None
+        models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash"]
 
         try:
             bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
@@ -143,41 +144,51 @@ class Command(BaseCommand):
 
             pages = extract_pages(file_bytes=file_bytes, mime_type=effective_mime)
 
-            cfg = self._cfg
+            for model in models_to_try:
+                try:
+                    self.stdout.write(f"Trying HTR for doc {document_id} with {model}...")
+                    htr_result = transcribe_pages(
+                        pages=pages,
+                        language_hint=doc.language,
+                        model_name=model,
+                        min_text_length=self._cfg.min_text_length,
+                        double_pass=self._cfg.gemini_double_pass,
+                        consistency_min_ratio=self._cfg.gemini_consistency_min_ratio,
+                        temperature=self._cfg.gemini_temperature,
+                        top_k=self._cfg.gemini_top_k,
+                        top_p=self._cfg.gemini_top_p,
+                        max_output_tokens=self._cfg.gemini_max_output_tokens,
+                    )
+                    break  # Success!
+                except Exception as e:
+                    last_err = str(e)
+                    if "429" in last_err or "RESOURCE_EXHAUSTED" in last_err:
+                        self.stdout.write(self.style.WARNING(f"Model {model} exhausted. Trying next..."))
+                        continue
+                    raise e  # Other errors should stop the process
 
-            htr_result = transcribe_pages(
-                pages=pages,
-                language_hint=doc.language,
-                model_name="gemini-2.0-flash",
-                min_text_length=cfg.min_text_length,
-                double_pass=cfg.gemini_double_pass,
-                consistency_min_ratio=cfg.gemini_consistency_min_ratio,
-                temperature=cfg.gemini_temperature,
-                top_k=cfg.gemini_top_k,
-                top_p=cfg.gemini_top_p,
-                max_output_tokens=cfg.gemini_max_output_tokens,
-            )
+            if not htr_result:
+                raise RuntimeError("All HTR models failed or were exhausted.")
 
         except Exception as e:
             error = str(e)
-            self.stderr.write(
-                self.style.ERROR(f"[run_worker] processing error for doc {document_id}: {e}")
-            )
+            self.stderr.write(self.style.ERROR(f"[run_worker] processing error for doc {document_id}: {e}"))
 
         # Phase 3: save results + final state
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
-
-                engine = htr_result.engine_name if htr_result else "gemini-2.0-flash"
+                
+                # Determine which engine actually finished the job
+                final_engine = htr_result.engine_name if htr_result else "gemini-fallback"
                 is_he = _is_hebrew_language(doc.language)
 
                 if error:
-                    self._save_ocr_failure(doc, engine, is_he, error)
+                    self._save_ocr_failure(doc, final_engine, is_he, error)
                 else:
-                    self._save_htr_results(doc, engine, is_he, htr_result)
+                    self._save_htr_results(doc, final_engine, is_he, htr_result)
 
-                self._update_processing_state(doc, engine)
+                self._update_processing_state(doc, final_engine)
                 doc.save(update_fields=["processing_state_user"])
         except Document.DoesNotExist:
             return True
@@ -192,13 +203,10 @@ class Command(BaseCommand):
 
         if needs_review:
             reasons.append("NEEDS_REVIEW_FLAG")
-
         if len(stripped) < self._cfg.min_text_length:
             reasons.append("MIN_TEXT_LENGTH")
-
         if "[UNCLEAR]" in stripped:
             reasons.append("HAS_UNCLEAR")
-
         if stripped == "[NO_TEXT]":
             reasons.append("NO_TEXT_MARKER")
 
@@ -206,7 +214,6 @@ class Command(BaseCommand):
             for r in engine_reasons:
                 if r and r not in reasons:
                     reasons.append(r)
-
         return reasons
 
     def _save_htr_results(self, doc: Document, engine: str, is_he: bool, htr):
@@ -215,31 +222,20 @@ class Command(BaseCommand):
             if htr.needs_review
             else DocumentTextResult.Status.SUCCEEDED
         )
-
         review_reasons = self._derive_review_reasons(
             htr.text,
             htr.needs_review,
             getattr(htr, "review_reasons", None),
         )
 
-        DocumentTextResult.objects.update_or_create(
-            document=doc,
-            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
-            engine=engine,
-            defaults={
-                "status": status,
-                "text": htr.text,
-                "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
-                "error_code": None,
-                "error_details": None,
-                "review_reasons": json.dumps(review_reasons),
-            },
-        )
-
+        target_types = [DocumentTextResult.ResultType.SOURCE_TEXT]
         if is_he:
+            target_types.append(DocumentTextResult.ResultType.HEBREW_TEXT)
+
+        for r_type in target_types:
             DocumentTextResult.objects.update_or_create(
                 document=doc,
-                result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+                result_type=r_type,
                 engine=engine,
                 defaults={
                     "status": status,
@@ -252,24 +248,14 @@ class Command(BaseCommand):
             )
 
     def _save_ocr_failure(self, doc, engine, is_he, details):
-        DocumentTextResult.objects.update_or_create(
-            document=doc,
-            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
-            engine=engine,
-            defaults={
-                "status": DocumentTextResult.Status.FAILED,
-                "text": None,
-                "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
-                "error_code": "OCR_FAILED",
-                "error_details": details,
-                "review_reasons": "",
-            },
-        )
-
+        target_types = [DocumentTextResult.ResultType.SOURCE_TEXT]
         if is_he:
+            target_types.append(DocumentTextResult.ResultType.HEBREW_TEXT)
+
+        for r_type in target_types:
             DocumentTextResult.objects.update_or_create(
                 document=doc,
-                result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+                result_type=r_type,
                 engine=engine,
                 defaults={
                     "status": DocumentTextResult.Status.FAILED,
@@ -283,11 +269,7 @@ class Command(BaseCommand):
 
     def _update_processing_state(self, doc, engine):
         expected_types = expected_result_types_for_document(doc)
-
-        qs = doc.text_results.filter(
-            engine=engine,
-            result_type__in=expected_types,
-        )
+        qs = doc.text_results.filter(engine=engine, result_type__in=expected_types)
 
         if qs.filter(status=DocumentTextResult.Status.NEEDS_REVIEW).exists():
             doc.processing_state_user = Document.ProcessingState.PARTIAL

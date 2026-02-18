@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
+import logging
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional
@@ -12,6 +14,7 @@ from google.genai import types
 
 from documents.services.page_extraction import PageImage
 
+logger = logging.getLogger(__name__)
 
 class GeminiError(RuntimeError):
     pass
@@ -21,7 +24,7 @@ class GeminiError(RuntimeError):
 class GeminiResult:
     text: str
     needs_review: bool = False
-    engine_name: str = "gemini_2_0_flash"
+    engine_name: str = "gemini-2.0-flash"
     review_reasons: List[str] = field(default_factory=list)
 
 
@@ -57,21 +60,11 @@ def _create_client(api_key: str) -> genai.Client:
         http_options=types.HttpOptions(api_version="v1"),
     )
 
+def _normalize(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip())
 
-def _build_generation_config(
-    *,
-    temperature: float,
-    top_k: int,
-    top_p: float,
-    max_output_tokens: Optional[int],
-) -> types.GenerateContentConfig:
-    return types.GenerateContentConfig(
-        temperature=temperature,
-        top_k=top_k,
-        top_p=top_p,
-        max_output_tokens=max_output_tokens,
-    )
-
+def _similarity_ratio(a: str, b: str) -> float:
+    return SequenceMatcher(None, _normalize(a), _normalize(b)).ratio()
 
 def _parse_page_json_strict(raw: str, *, page_index: int) -> Dict[str, Any]:
     raw = (raw or "").strip()
@@ -79,17 +72,14 @@ def _parse_page_json_strict(raw: str, *, page_index: int) -> Dict[str, Any]:
         raise GeminiError(f"Gemini returned empty response on page {page_index}")
 
     had_fence = False
-    # Handle markdown fences
     if "```" in raw:
         had_fence = True
-        # Extract content between fences
         match = re.search(r"```(?:json)?\s*(.*?)\s*```", raw, re.DOTALL)
         if match:
             raw = match.group(1).strip()
         else:
             raw = raw.replace("```json", "").replace("```", "").strip()
 
-    # Find the first { and last } to isolate the JSON object
     start = raw.find("{")
     end = raw.rfind("}")
     if start != -1 and end != -1:
@@ -98,27 +88,15 @@ def _parse_page_json_strict(raw: str, *, page_index: int) -> Dict[str, Any]:
     try:
         data = json.loads(raw)
     except Exception as e:
-        raise GeminiError(
-            f"Gemini returned non-JSON on page {page_index}: {e}. Raw: {raw[:100]}..."
-        ) from e
+        raise GeminiError(f"JSON Parse Error on page {page_index}: {e}")
 
     # Validation and defaults
     for k in _REQUIRED_KEYS:
         if k not in data:
-            if k == "text": data[k] = ""
-            elif k == "has_unclear": data[k] = False
-            elif k == "unclear_count": data[k] = 0
-
+            data[k] = "" if k == "text" else (False if k == "has_unclear" else 0)
+    
     data["_had_fence"] = had_fence
     return data
-
-
-def _normalize(text: str) -> str:
-    return re.sub(r"\s+", " ", (text or "").strip())
-
-
-def _similarity_ratio(a: str, b: str) -> float:
-    return SequenceMatcher(None, _normalize(a), _normalize(b)).ratio()
 
 
 # ------------------------------------------------------------------ main
@@ -150,23 +128,32 @@ def transcribe_pages_with_gemini(
             prompt += f"\nLanguage hint: {language_hint}."
 
         def _run_once():
-            resp = client.models.generate_content(
-                model=model_name,
-                contents=[
-                    types.Part.from_text(text=prompt),
-                    types.Part.from_bytes(
-                        data=page.image_bytes,
-                        mime_type=page.mime_type or "image/png",
-                    ),
-                ],
-                config=_build_generation_config(
-                    temperature=temperature,
-                    top_k=top_k,
-                    top_p=top_p,
-                    max_output_tokens=max_output_tokens,
-                ),
-            )
-            return _parse_page_json_strict(resp.text, page_index=page.page_index)
+            attempts = 0
+            while attempts < 2:
+                try:
+                    resp = client.models.generate_content(
+                        model=model_name,
+                        contents=[
+                            types.Part.from_text(text=prompt),
+                            types.Part.from_bytes(data=page.image_bytes, mime_type=page.mime_type or "image/png"),
+                        ],
+                        config=types.GenerateContentConfig(
+                            temperature=temperature, top_k=top_k, top_p=top_p,
+                            max_output_tokens=max_output_tokens,
+                        ),
+                    )
+                    return _parse_page_json_strict(resp.text, page_index=page.page_index)
+                except Exception as e:
+                    err_str = str(e)
+                    if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                        wait_match = re.search(r"retry in ([\d\.]+)s", err_str)
+                        wait_time = float(wait_match.group(1)) if wait_match else 30
+                        logger.warning(f"Quota hit. Waiting {wait_time}s...")
+                        time.sleep(wait_time + 1)
+                        attempts += 1
+                    else:
+                        raise GeminiError(f"API Error: {err_str}")
+            raise GeminiError(f"Quota exceeded for model {model_name} after retries.")
 
         data1 = _run_once()
         text1 = data1["text"].strip()
