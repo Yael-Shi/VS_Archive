@@ -17,11 +17,12 @@ STREAMS="${STREAMS:-50}"
 
 echo "==> Reading log configuration from task definition: WORKER_TD=$WORKER_TD"
 
+# התיקון כאן: הוספת \" סביב המפתחות עם המקפים
 LOG_GROUP="$(
   aws ecs describe-task-definition \
     --region "$AWS_REGION" \
     --task-definition "$WORKER_TD" \
-    --query "taskDefinition.containerDefinitions[0].logConfiguration.options.awslogs-group" \
+    --query "taskDefinition.containerDefinitions[0].logConfiguration.options.\"awslogs-group\"" \
     --output text
 )"
 
@@ -29,7 +30,7 @@ LOG_PREFIX="$(
   aws ecs describe-task-definition \
     --region "$AWS_REGION" \
     --task-definition "$WORKER_TD" \
-    --query "taskDefinition.containerDefinitions[0].logConfiguration.options.awslogs-stream-prefix" \
+    --query "taskDefinition.containerDefinitions[0].logConfiguration.options.\"awslogs-stream-prefix\"" \
     --output text
 )"
 
@@ -49,8 +50,6 @@ echo
 
 echo "==> Finding newest log stream (with events) in group..."
 
-# We can't use --order-by LastEventTime together with --log-stream-name-prefix,
-# so we list streams and pick the one with the max lastEventTimestamp.
 LOG_STREAM="$(
   aws logs describe-log-streams \
     --region "$AWS_REGION" \
