@@ -26,6 +26,10 @@ class Document(models.Model):
         FRENCH = "fr", "French"
         ARABIC = "ar", "Arabic"
 
+    class TextInputType(models.TextChoices):
+        HANDWRITTEN = "HANDWRITTEN", "Handwritten"
+        PRINTED = "PRINTED", "Printed"
+
     # Required for V1
     title = models.CharField(max_length=255)
     doc_type = models.CharField(max_length=16, choices=DocType.choices)
@@ -39,6 +43,10 @@ class Document(models.Model):
         choices=Language.choices,
         null=True,
         blank=True,
+    )
+    text_input_type = models.CharField(
+        max_length=16,
+        choices=TextInputType.choices,
     )
 
     category_event = models.CharField(max_length=255, null=True, blank=True)

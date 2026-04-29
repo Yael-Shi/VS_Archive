@@ -42,6 +42,24 @@ _HTR_EXPERT_PROMPT = (
     '{"text": "...", "has_unclear": false, "unclear_count": 0}\n'
 )
 
+_PRINTED_TEXT_PROMPT = (
+    "You are an OCR assistant for printed historical documents.\n"
+    "TASK: Extract the printed text from the image as accurately as possible.\n"
+    "RULES:\n"
+    "- Preserve line breaks and original structure.\n"
+    "- Keep punctuation and spelling exactly as seen.\n"
+    "- If text is unreadable, output the token [UNCLEAR].\n"
+    "- Do NOT summarize, explain, or fix grammar. Output ONLY the extraction.\n"
+    "\n"
+    "OUTPUT FORMAT (MUST be valid JSON):\n"
+    '{"text": "...", "has_unclear": false, "unclear_count": 0}\n'
+)
+
+_PROMPT_BY_VARIANT = {
+    "handwritten": _HTR_EXPERT_PROMPT,
+    "printed": _PRINTED_TEXT_PROMPT,
+}
+
 _REQUIRED_KEYS = ("text", "has_unclear", "unclear_count")
 
 
@@ -109,6 +127,7 @@ def transcribe_pages_with_gemini(
     pages: List[PageImage],
     language_hint: Optional[str],
     *,
+    prompt_variant: str,
     model_name: str = "gemini-2.0-flash",
     min_text_length: int = 20,
     double_pass: bool = False,
@@ -118,6 +137,10 @@ def transcribe_pages_with_gemini(
     top_p: float = 0.95,
     max_output_tokens: Optional[int] = 8192,
 ) -> GeminiResult:
+    prompt_base = _PROMPT_BY_VARIANT.get(prompt_variant)
+    if prompt_base is None:
+        raise GeminiError(f"Unsupported Gemini prompt_variant: {prompt_variant!r}")
+
     api_key = _get_api_key()
     client = _create_client(api_key)
 
@@ -126,7 +149,7 @@ def transcribe_pages_with_gemini(
     engine_reasons: List[str] = []
 
     for page in pages:
-        prompt = _HTR_EXPERT_PROMPT
+        prompt = prompt_base
         if language_hint:
             prompt += f"\nLanguage hint: {language_hint}."
 

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from documents.services.gemini_engine import transcribe_pages_with_gemini
+from documents.services.ocr_routing import select_ocr_route
 from documents.services.page_extraction import PageImage
 
 
@@ -18,14 +19,20 @@ class HtrResult:
 def transcribe_pages(
     pages: List[PageImage],
     language_hint: Optional[str],
+    text_input_type: Optional[str],
     **kwargs
 ) -> HtrResult:
     """
     HTR entry point. kwargs allows flexible parameter passing from worker/env.
     """
+    route = select_ocr_route(language_hint, text_input_type)
+    if route.engine_key != "GEMINI":
+        raise RuntimeError(f"OCR engine is not implemented yet: {route.engine_key}")
+
     r = transcribe_pages_with_gemini(
         pages=pages,
         language_hint=language_hint,
+        prompt_variant=route.prompt_variant,
         **kwargs
     )
     return HtrResult(

@@ -38,6 +38,7 @@ class DocumentAdmin(admin.ModelAdmin):
         "id",
         "title",
         "doc_type",
+        "text_input_type",
         "metadata_status",
         "upload_status",
         "processing_state_user",
@@ -47,19 +48,20 @@ class DocumentAdmin(admin.ModelAdmin):
     )
     list_filter = (
         "doc_type",
+        "text_input_type",
         "metadata_status",
         "upload_status",
         "processing_state_user",
         "visibility",
         "tags_m2m",
     )
-    search_fields = ("title", "category_event", "language", "tags_m2m__name")
+    search_fields = ("title", "category_event", "language", "text_input_type", "tags_m2m__name")
     ordering = ("-created_at",)
 
     filter_horizontal = ("tags_m2m",)
 
     fieldsets = (
-        ("Core", {"fields": ("title", "doc_type")}),
+        ("Core", {"fields": ("title", "doc_type", "text_input_type")}),
         (
             "Status",
             {

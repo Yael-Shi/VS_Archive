@@ -141,6 +141,7 @@ class Command(BaseCommand):
                     htr_result = transcribe_pages(
                         pages=pages,
                         language_hint=doc.language,
+                        text_input_type=doc.text_input_type,
                         model_name=model,
                         min_text_length=self._cfg.min_text_length,
                         double_pass=self._cfg.gemini_double_pass,
