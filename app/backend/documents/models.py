@@ -26,6 +26,10 @@ class Document(models.Model):
         FRENCH = "fr", "French"
         ARABIC = "ar", "Arabic"
 
+    class TextInputType(models.TextChoices):
+        HANDWRITTEN = "HANDWRITTEN", "Handwritten"
+        PRINTED = "PRINTED", "Printed"
+
     # Required for V1
     title = models.CharField(max_length=255)
     doc_type = models.CharField(max_length=16, choices=DocType.choices)
@@ -39,6 +43,10 @@ class Document(models.Model):
         choices=Language.choices,
         null=True,
         blank=True,
+    )
+    text_input_type = models.CharField(
+        max_length=16,
+        choices=TextInputType.choices,
     )
 
     category_event = models.CharField(max_length=255, null=True, blank=True)
@@ -123,6 +131,10 @@ class DocumentTextResult(models.Model):
     error_code = models.CharField(max_length=64, null=True, blank=True)
     error_details = models.TextField(null=True, blank=True)
 
+    # NEW: why this result was marked as NEEDS_REVIEW.
+    # Store as a JSON string (e.g. ["HAS_UNCLEAR","CONSISTENCY_MISMATCH"]) or plain text.
+    review_reasons = models.TextField(blank=True, default="")
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -178,25 +190,20 @@ class ProcessingMetric(models.Model):
         related_name="processing_metrics",
     )
 
-    # What are we measuring?
     stage = models.CharField(max_length=32, choices=Stage.choices)
     name = models.CharField(
         max_length=64,
         help_text="Metric name within stage, e.g. duration, pages, chars, api_calls, etc.",
     )
 
-    # Optional: which engine / integration produced it (vision/transkribus/gemini/etc.)
     engine = models.CharField(max_length=64, blank=True, default="")
 
-    # Attempt tracking (helpful when retries exist)
     attempt_id = models.UUIDField(default=uuid.uuid4, editable=False)
 
-    # Values (use whichever is relevant; often duration is derived from started/finished)
     unit = models.CharField(max_length=16, choices=Unit.choices, blank=True, default="")
     value_int = models.BigIntegerField(null=True, blank=True)
     value_float = models.FloatField(null=True, blank=True)
 
-    # Timing window for the metric
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
 
@@ -206,7 +213,6 @@ class ProcessingMetric(models.Model):
         default=Status.STARTED,
     )
 
-    # Error info (if FAILED)
     error_code = models.CharField(max_length=64, null=True, blank=True)
     error_details = models.TextField(null=True, blank=True)
 
@@ -221,7 +227,10 @@ class ProcessingMetric(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"ProcessingMetric(doc={self.document_id}, stage={self.stage}, name={self.name}, status={self.status})"
+        return (
+            f"ProcessingMetric(doc={self.document_id}, stage={self.stage}, "
+            f"name={self.name}, status={self.status})"
+        )
 
 
 class CorrectionRequest(models.Model):

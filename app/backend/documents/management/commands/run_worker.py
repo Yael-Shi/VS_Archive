@@ -1,7 +1,8 @@
 import json
 import os
 import time
-from typing import Any, Dict, Optional
+import logging
+from typing import Any, Dict, Optional, List
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -12,11 +13,12 @@ from django.db import transaction
 
 from documents.models import Document, DocumentTextResult
 from documents.s3 import get_object_bytes
-from documents.services.env_validation import EnvConfigError, validate_required_env
+from documents.services.env_validation import EnvConfigError, WorkerEnvConfig, validate_required_env
 from documents.services.expected_outputs import expected_result_types_for_document
 from documents.services.htr_engine import transcribe_pages
 from documents.services.page_extraction import extract_pages
 
+logger = logging.getLogger(__name__)
 
 def _env(name: str) -> str:
     value = os.getenv(name)
@@ -24,14 +26,12 @@ def _env(name: str) -> str:
         raise RuntimeError(f"Missing required env var: {name}")
     return value
 
-
 def _is_hebrew_language(language: Optional[str]) -> bool:
     lang = (language or "").strip().lower()
     return lang in ("he", "heb", "hebrew")
 
-
 class Command(BaseCommand):
-    help = "Run the async worker: poll SQS and process document jobs."
+    help = "Run the async worker: poll SQS and process document jobs with Model Fallback."
 
     def add_arguments(self, parser):
         parser.add_argument("--once", action="store_true")
@@ -40,24 +40,18 @@ class Command(BaseCommand):
         parser.add_argument("--wait-seconds", type=int, default=20)
 
     def handle(self, *args, **options):
-        # Validate env at startup (fail fast)
         try:
-            validate_required_env()
+            self._cfg: WorkerEnvConfig = validate_required_env()
         except EnvConfigError as e:
             self.stderr.write(self.style.ERROR(f"[run_worker] env error: {e}"))
             raise SystemExit(1)
 
         queue_url = _env("SQS_QUEUE_URL")
-        region = (
-            os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "eu-central-1"
-        )
-
+        region = os.getenv("AWS_REGION") or "eu-central-1"
         sqs = boto3.client("sqs", region_name=region)
 
         self.stdout.write(
-            self.style.SUCCESS(
-                f"[run_worker] starting | region={region} | queue={queue_url}"
-            )
+            self.style.SUCCESS(f"[run_worker] starting | queue={queue_url}")
         )
 
         while True:
@@ -82,7 +76,7 @@ class Command(BaseCommand):
             if options["once"]:
                 return
 
-    # ------------------------------------------------------------------ SQS
+    # ------------------------------------------------------------------ SQS Helpers
 
     def _receive_one(self, sqs, queue_url, max_msgs, wait):
         try:
@@ -90,7 +84,7 @@ class Command(BaseCommand):
                 QueueUrl=queue_url,
                 MaxNumberOfMessages=max(1, min(max_msgs, 10)),
                 WaitTimeSeconds=max(0, min(wait, 20)),
-                VisibilityTimeout=120,
+                VisibilityTimeout=300,
             )
             msgs = resp.get("Messages") or []
             return msgs[0] if msgs else None
@@ -100,102 +94,115 @@ class Command(BaseCommand):
 
     def _delete_message(self, sqs, queue_url, msg):
         try:
-            sqs.delete_message(
-                QueueUrl=queue_url,
-                ReceiptHandle=msg["ReceiptHandle"],
-            )
-            self.stdout.write("[run_worker] deleted message from SQS")
+            sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=msg["ReceiptHandle"])
         except Exception as e:
             self.stderr.write(f"SQS delete error: {e}")
 
-    # ------------------------------------------------------------------ CORE
+    # ------------------------------------------------------------------ Core Logic
 
     def _process_message(self, msg: Dict[str, Any]) -> bool:
-        # Parse payload
         try:
             payload = json.loads(msg.get("Body", "{}"))
         except Exception:
-            self.stderr.write("[run_worker] invalid JSON body")
-            return True  # poison message → delete
+            return True
 
         if payload.get("type") != "PROCESS_DOCUMENT":
-            self.stderr.write(f"[run_worker] unknown job type: {payload.get('type')!r}")
             return True
 
         document_id = payload.get("document_id")
         if not isinstance(document_id, int):
-            self.stderr.write("[run_worker] invalid document_id")
             return True
 
-        # Phase 1: mark PROCESSING (short transaction)
+        # Phase 1: Mark PROCESSING
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
-
                 if doc.upload_status != Document.UploadStatus.UPLOADED:
-                    return True  # stale job
-
+                    return True
                 doc.processing_state_user = Document.ProcessingState.PROCESSING
                 doc.save(update_fields=["processing_state_user"])
         except Document.DoesNotExist:
             return True
 
-        # Phase 2: heavy work (no DB locks)
+        # Phase 2: Heavy work with Fallback
         error: Optional[str] = None
         htr_result = None
+        models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash"]
 
         try:
             bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
-            if not bucket:
-                raise RuntimeError("UPLOADS_BUCKET_NAME is not configured")
-
-            file_bytes, s3_mime = get_object_bytes(
-                bucket=bucket,
-                key=doc.file_s3_key,
-            )
-
+            file_bytes, s3_mime = get_object_bytes(bucket=bucket, key=doc.file_s3_key)
             effective_mime = (doc.mime_type or s3_mime or "").strip()
+            pages = extract_pages(file_bytes=file_bytes, mime_type=effective_mime)
 
-            pages = extract_pages(
-                file_bytes=file_bytes,
-                mime_type=effective_mime,
-            )
+            for model in models_to_try:
+                try:
+                    self.stdout.write(f"Trying HTR for doc {document_id} with {model}...")
+                    htr_result = transcribe_pages(
+                        pages=pages,
+                        language_hint=doc.language,
+                        text_input_type=doc.text_input_type,
+                        model_name=model,
+                        min_text_length=self._cfg.min_text_length,
+                        double_pass=self._cfg.gemini_double_pass,
+                        consistency_min_ratio=self._cfg.gemini_consistency_min_ratio,
+                        temperature=self._cfg.gemini_temperature,
+                        top_k=self._cfg.gemini_top_k,
+                        top_p=self._cfg.gemini_top_p,
+                        max_output_tokens=8192,
+                    )
+                    break
+                except Exception as e:
+                    last_err = str(e).upper()
+                    if any(x in last_err for x in ["429", "RESOURCE_EXHAUSTED", "QUOTA_EXHAUSTED"]):
+                        self.stdout.write(self.style.WARNING(f"Model {model} exhausted. Trying fallback..."))
+                        continue
+                    raise e
 
-            htr_result = transcribe_pages(
-                pages=pages,
-                language_hint=doc.language,
-            )
+            if not htr_result:
+                raise RuntimeError("All models failed or were exhausted.")
 
         except Exception as e:
             error = str(e)
-            self.stderr.write(
-                self.style.ERROR(
-                    f"[run_worker] processing error for doc {document_id}: {e}"
-                )
-            )
+            self.stderr.write(self.style.ERROR(f"Processing error for doc {document_id}: {e}"))
 
-        # Phase 3: save results + final state (short transaction)
+        # Phase 3: Save results
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
-
-                engine = htr_result.engine_name if htr_result else "gemini_2_5_flash"
+                final_engine = htr_result.engine_name if htr_result else "gemini-fallback"
                 is_he = _is_hebrew_language(doc.language)
 
                 if error:
-                    self._save_ocr_failure(doc, engine, is_he, error)
+                    self._save_ocr_failure(doc, final_engine, is_he, error)
                 else:
-                    self._save_htr_results(doc, engine, is_he, htr_result)
+                    self._save_htr_results(doc, final_engine, is_he, htr_result)
 
-                self._update_processing_state(doc, engine)
+                self._update_processing_state(doc, final_engine)
                 doc.save(update_fields=["processing_state_user"])
-
         except Document.DoesNotExist:
-            return True
+            pass
 
         return True
 
-    # ------------------------------------------------------------------ HELPERS
+    # ------------------------------------------------------------------ DB Helpers
+
+    def _derive_review_reasons(self, text: str, needs_review: bool, engine_reasons: Optional[List[str]]) -> List[str]:
+        reasons: List[str] = []
+        stripped = (text or "").strip()
+
+        if needs_review:
+            reasons.append("NEEDS_REVIEW_FLAG")
+        if len(stripped) < self._cfg.min_text_length:
+            reasons.append("MIN_TEXT_LENGTH")
+        if "[UNCLEAR]" in stripped:
+            reasons.append("HAS_UNCLEAR")
+        
+        if engine_reasons:
+            for r in engine_reasons:
+                if r and r not in reasons:
+                    reasons.append(r)
+        return reasons
 
     def _save_htr_results(self, doc: Document, engine: str, is_he: bool, htr):
         status = (
@@ -203,24 +210,20 @@ class Command(BaseCommand):
             if htr.needs_review
             else DocumentTextResult.Status.SUCCEEDED
         )
-
-        DocumentTextResult.objects.update_or_create(
-            document=doc,
-            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
-            engine=engine,
-            defaults={
-                "status": status,
-                "text": htr.text,
-                "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
-                "error_code": None,
-                "error_details": None,
-            },
+        review_reasons = self._derive_review_reasons(
+            htr.text,
+            htr.needs_review,
+            getattr(htr, "review_reasons", None),
         )
 
+        target_types = [DocumentTextResult.ResultType.SOURCE_TEXT]
         if is_he:
+            target_types.append(DocumentTextResult.ResultType.HEBREW_TEXT)
+
+        for r_type in target_types:
             DocumentTextResult.objects.update_or_create(
                 document=doc,
-                result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+                result_type=r_type,
                 engine=engine,
                 defaults={
                     "status": status,
@@ -228,27 +231,18 @@ class Command(BaseCommand):
                     "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
                     "error_code": None,
                     "error_details": None,
+                    "review_reasons": json.dumps(review_reasons),
                 },
             )
 
     def _save_ocr_failure(self, doc, engine, is_he, details):
-        DocumentTextResult.objects.update_or_create(
-            document=doc,
-            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
-            engine=engine,
-            defaults={
-                "status": DocumentTextResult.Status.FAILED,
-                "text": None,
-                "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
-                "error_code": "OCR_FAILED",
-                "error_details": details,
-            },
-        )
-
+        target_types = [DocumentTextResult.ResultType.SOURCE_TEXT]
         if is_he:
+            target_types.append(DocumentTextResult.ResultType.HEBREW_TEXT)
+        for r_type in target_types:
             DocumentTextResult.objects.update_or_create(
                 document=doc,
-                result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+                result_type=r_type,
                 engine=engine,
                 defaults={
                     "status": DocumentTextResult.Status.FAILED,
@@ -256,16 +250,13 @@ class Command(BaseCommand):
                     "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
                     "error_code": "OCR_FAILED",
                     "error_details": details,
+                    "review_reasons": "",
                 },
             )
 
     def _update_processing_state(self, doc, engine):
         expected_types = expected_result_types_for_document(doc)
-
-        qs = doc.text_results.filter(
-            engine=engine,
-            result_type__in=expected_types,
-        )
+        qs = doc.text_results.filter(engine=engine, result_type__in=expected_types)
 
         if qs.filter(status=DocumentTextResult.Status.NEEDS_REVIEW).exists():
             doc.processing_state_user = Document.ProcessingState.PARTIAL
@@ -274,7 +265,6 @@ class Command(BaseCommand):
         existing = qs.count()
         succeeded = qs.filter(status=DocumentTextResult.Status.SUCCEEDED).count()
         failed = qs.filter(status=DocumentTextResult.Status.FAILED).count()
-
         missing = len(expected_types) - existing
 
         if missing == 0 and succeeded == len(expected_types):

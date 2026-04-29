@@ -47,6 +47,17 @@ def _parse_date_optional(value: Optional[str], field_name: str):
         raise ValueError(f"invalid {field_name} format, expected YYYY-MM-DD")
 
 
+def _parse_text_input_type(raw_value: Optional[str]) -> str:
+    value = (raw_value or "").strip().upper()
+    valid = {
+        Document.TextInputType.HANDWRITTEN,
+        Document.TextInputType.PRINTED,
+    }
+    if value not in valid:
+        raise ValueError("text_input_type must be HANDWRITTEN or PRINTED")
+    return value
+
+
 def _is_admin(user) -> bool:
     return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
 
@@ -135,6 +146,7 @@ def _serialize_doc(d: Document, *, is_admin: bool) -> dict:
         "date_start": d.date_start.isoformat() if d.date_start else None,
         "date_end": d.date_end.isoformat() if d.date_end else None,
         "language": d.language,
+        "text_input_type": d.text_input_type,
         "doc_type": d.doc_type,
         "category_event": d.category_event,
         "tags": [t.name for t in d.tags_m2m.all()],
@@ -188,6 +200,7 @@ def create_upload(request):
     date_start_raw = payload.get("date_start")
     date_end_raw = payload.get("date_end")
     language = (payload.get("language") or "").strip() or None
+    text_input_type_raw = payload.get("text_input_type")
     category_event = (payload.get("category_event") or "").strip() or None
 
     # visibility exists but is admin-only operational; create_upload is admin-only anyway.
@@ -210,6 +223,7 @@ def create_upload(request):
     try:
         ds = _parse_date_optional(date_start_raw, "date_start")
         de = _parse_date_optional(date_end_raw, "date_end")
+        text_input_type = _parse_text_input_type(text_input_type_raw)
     except ValueError as e:
         return _bad(str(e))
 
@@ -239,6 +253,7 @@ def create_upload(request):
         date_start=ds,
         date_end=de,
         language=language,
+        text_input_type=text_input_type,
         category_event=category_event,
         visibility=visibility,
         upload_status=Document.UploadStatus.UPLOADING,
@@ -602,5 +617,8 @@ def upload_page(request):
     return render(
         request,
         "documents/upload.html",
-        context={"doc_type_choices": Document.DocType.choices},
+        context={
+            "doc_type_choices": Document.DocType.choices,
+            "text_input_type_choices": Document.TextInputType.choices,
+        },
     )
