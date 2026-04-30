@@ -17,9 +17,12 @@ from documents.services.env_validation import EnvConfigError, WorkerEnvConfig, v
 from documents.services.expected_outputs import expected_result_types_for_document
 from documents.services.htr_adapters.base import UnsupportedEngineError
 from documents.services.htr_engine import transcribe_pages
+from documents.services.ocr_routing import select_ocr_route
 from documents.services.page_extraction import extract_pages
 
 logger = logging.getLogger(__name__)
+
+UNRESOLVED_ROUTE_METADATA = "UNRESOLVED"
 
 def _env(name: str) -> str:
     value = os.getenv(name)
@@ -222,6 +225,8 @@ class Command(BaseCommand):
                 defaults={
                     "status": status,
                     "text": htr.text,
+                    "engine_key": htr.engine_key,
+                    "prompt_variant": htr.prompt_variant,
                     "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
                     "error_code": None,
                     "error_details": None,
@@ -230,6 +235,17 @@ class Command(BaseCommand):
             )
 
     def _save_ocr_failure(self, doc, engine, is_he, details):
+        route_metadata = self._route_metadata_for_failure(doc)
+        has_valid_route = route_metadata is not None
+        if has_valid_route:
+            engine_key, prompt_variant = route_metadata
+            error_code = "OCR_FAILED"
+        else:
+            # Keep failure persistence explicit when routing metadata is invalid.
+            # Avoid misleading fallback metadata such as GEMINI/handwritten.
+            engine_key = UNRESOLVED_ROUTE_METADATA
+            prompt_variant = UNRESOLVED_ROUTE_METADATA
+            error_code = "OCR_ROUTING_INVALID"
         target_types = [DocumentTextResult.ResultType.SOURCE_TEXT]
         if is_he:
             target_types.append(DocumentTextResult.ResultType.HEBREW_TEXT)
@@ -241,12 +257,25 @@ class Command(BaseCommand):
                 defaults={
                     "status": DocumentTextResult.Status.FAILED,
                     "text": None,
+                    "engine_key": engine_key,
+                    "prompt_variant": prompt_variant,
                     "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
-                    "error_code": "OCR_FAILED",
+                    "error_code": error_code,
                     "error_details": details,
                     "review_reasons": "",
                 },
             )
+
+    def _route_metadata_for_failure(self, doc: Document):
+        """
+        Re-select route when HTR did not return HtrResult (failure path).
+        See decision-log: propagate route through the flow in a future refactor.
+        """
+        try:
+            route = select_ocr_route(doc.language, doc.text_input_type)
+            return route.engine_key, route.prompt_variant
+        except ValueError:
+            return None
 
     def _update_processing_state(self, doc, engine):
         expected_types = expected_result_types_for_document(doc)

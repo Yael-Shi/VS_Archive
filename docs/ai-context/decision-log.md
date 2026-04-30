@@ -32,7 +32,7 @@ The upload form should not allow submission without choosing whether the documen
 Validation strategy:
 - Enforce `text_input_type` at upload/create time.
 - Also validate defensively during processing/routing.
-- If metadata needed for routing is missing or invalid at processing time, fail with a clear error (no silent fallback).
+- If metadata needed for routing is missing or invalid at processing time, persist an explicit failure (`OCR_ROUTING_INVALID`) and do not silently fallback to `GEMINI/handwritten`.
 
 ### Admin editing
 Admins must be able to edit `text_input_type` in the existing admin/metadata edit flow.
