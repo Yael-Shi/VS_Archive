@@ -15,6 +15,7 @@ from documents.models import Document, DocumentTextResult
 from documents.s3 import get_object_bytes
 from documents.services.env_validation import EnvConfigError, WorkerEnvConfig, validate_required_env
 from documents.services.expected_outputs import expected_result_types_for_document
+from documents.services.htr_adapters.base import UnsupportedEngineError
 from documents.services.htr_engine import transcribe_pages
 from documents.services.ocr_routing import select_ocr_route
 from documents.services.page_extraction import extract_pages
@@ -34,7 +35,7 @@ def _is_hebrew_language(language: Optional[str]) -> bool:
     return lang in ("he", "heb", "hebrew")
 
 class Command(BaseCommand):
-    help = "Run the async worker: poll SQS and process document jobs with Model Fallback."
+    help = "Run the async worker: poll SQS and process document jobs."
 
     def add_arguments(self, parser):
         parser.add_argument("--once", action="store_true")
@@ -127,10 +128,10 @@ class Command(BaseCommand):
         except Document.DoesNotExist:
             return True
 
-        # Phase 2: Heavy work with Fallback
+        # Phase 2: Heavy work
         error: Optional[str] = None
         htr_result = None
-        models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash"]
+        processing_exc: Optional[Exception] = None
 
         try:
             bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
@@ -138,34 +139,22 @@ class Command(BaseCommand):
             effective_mime = (doc.mime_type or s3_mime or "").strip()
             pages = extract_pages(file_bytes=file_bytes, mime_type=effective_mime)
 
-            for model in models_to_try:
-                try:
-                    self.stdout.write(f"Trying HTR for doc {document_id} with {model}...")
-                    htr_result = transcribe_pages(
-                        pages=pages,
-                        language_hint=doc.language,
-                        text_input_type=doc.text_input_type,
-                        model_name=model,
-                        min_text_length=self._cfg.min_text_length,
-                        double_pass=self._cfg.gemini_double_pass,
-                        consistency_min_ratio=self._cfg.gemini_consistency_min_ratio,
-                        temperature=self._cfg.gemini_temperature,
-                        top_k=self._cfg.gemini_top_k,
-                        top_p=self._cfg.gemini_top_p,
-                        max_output_tokens=8192,
-                    )
-                    break
-                except Exception as e:
-                    last_err = str(e).upper()
-                    if any(x in last_err for x in ["429", "RESOURCE_EXHAUSTED", "QUOTA_EXHAUSTED"]):
-                        self.stdout.write(self.style.WARNING(f"Model {model} exhausted. Trying fallback..."))
-                        continue
-                    raise e
-
-            if not htr_result:
-                raise RuntimeError("All models failed or were exhausted.")
+            htr_result = transcribe_pages(
+                pages=pages,
+                language_hint=doc.language,
+                text_input_type=doc.text_input_type,
+                model_candidates=["gemini-2.0-flash", "gemini-1.5-flash"],
+                min_text_length=self._cfg.min_text_length,
+                double_pass=self._cfg.gemini_double_pass,
+                consistency_min_ratio=self._cfg.gemini_consistency_min_ratio,
+                temperature=self._cfg.gemini_temperature,
+                top_k=self._cfg.gemini_top_k,
+                top_p=self._cfg.gemini_top_p,
+                max_output_tokens=8192,
+            )
 
         except Exception as e:
+            processing_exc = e
             error = str(e)
             self.stderr.write(self.style.ERROR(f"Processing error for doc {document_id}: {e}"))
 
@@ -173,7 +162,12 @@ class Command(BaseCommand):
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
-                final_engine = htr_result.engine_name if htr_result else "gemini-fallback"
+                if htr_result:
+                    final_engine = htr_result.engine_name
+                elif isinstance(processing_exc, UnsupportedEngineError):
+                    final_engine = f"unsupported:{processing_exc.engine_key}"
+                else:
+                    final_engine = "ocr-dispatch"
                 is_he = _is_hebrew_language(doc.language)
 
                 if error:
