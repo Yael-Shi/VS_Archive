@@ -105,5 +105,10 @@ around expected `HEBREW_TEXT` results for non-Hebrew documents.
 
 Do not fix this in the routing PR.
 
+Status update:
+- This policy mismatch remains deferred.
+- It is intentionally out of scope for the pre-Transkribus engine-dispatch refactor PR.
+- Revisit in a dedicated PR before or during Transkribus integration if still applicable.
+
 Future work:
 Investigate and fix non-Hebrew `HEBREW_TEXT` persistence/status behavior separately.
