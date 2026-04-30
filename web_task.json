@@ -2,7 +2,7 @@
   "containerDefinitions": [
     {
       "name": "vs-archive-dev-web",
-      "image": "185990503355.dkr.ecr.eu-central-1.amazonaws.com/vs-archive-web:202604291512",
+      "image": "185990503355.dkr.ecr.eu-central-1.amazonaws.com/vs-archive-web:202604300920",
       "cpu": 0,
       "links": [],
       "portMappings": [
