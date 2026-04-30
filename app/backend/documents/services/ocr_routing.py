@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from documents.models import Document
+from documents.models import Document, DocumentTextResult
 
 
 @dataclass(frozen=True)
@@ -13,28 +13,36 @@ class OcrRouteConfig:
 
 OCR_ROUTES: dict[tuple[str, str], OcrRouteConfig] = {
     ("he", Document.TextInputType.HANDWRITTEN): OcrRouteConfig(
-        engine_key="GEMINI", prompt_variant="handwritten"
+        engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+        prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
     ),
     ("he", Document.TextInputType.PRINTED): OcrRouteConfig(
-        engine_key="GEMINI", prompt_variant="printed"
+        engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+        prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
     ),
     ("en", Document.TextInputType.HANDWRITTEN): OcrRouteConfig(
-        engine_key="GEMINI", prompt_variant="handwritten"
+        engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+        prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
     ),
     ("en", Document.TextInputType.PRINTED): OcrRouteConfig(
-        engine_key="GEMINI", prompt_variant="printed"
+        engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+        prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
     ),
     ("fr", Document.TextInputType.HANDWRITTEN): OcrRouteConfig(
-        engine_key="GEMINI", prompt_variant="handwritten"
+        engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+        prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
     ),
     ("fr", Document.TextInputType.PRINTED): OcrRouteConfig(
-        engine_key="GEMINI", prompt_variant="printed"
+        engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+        prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
     ),
     ("ar", Document.TextInputType.HANDWRITTEN): OcrRouteConfig(
-        engine_key="GEMINI", prompt_variant="handwritten"
+        engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+        prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
     ),
     ("ar", Document.TextInputType.PRINTED): OcrRouteConfig(
-        engine_key="GEMINI", prompt_variant="printed"
+        engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+        prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
     ),
 }
 
