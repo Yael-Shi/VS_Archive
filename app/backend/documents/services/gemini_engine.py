@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from google import genai
 from google.genai import types
 
+from documents.models import DocumentTextResult
 from documents.services.page_extraction import PageImage
 
 logger = logging.getLogger(__name__)
@@ -56,8 +57,8 @@ _PRINTED_TEXT_PROMPT = (
 )
 
 _PROMPT_BY_VARIANT = {
-    "handwritten": _HTR_EXPERT_PROMPT,
-    "printed": _PRINTED_TEXT_PROMPT,
+    DocumentTextResult.OcrPromptVariant.HANDWRITTEN: _HTR_EXPERT_PROMPT,
+    DocumentTextResult.OcrPromptVariant.PRINTED: _PRINTED_TEXT_PROMPT,
 }
 
 _REQUIRED_KEYS = ("text", "has_unclear", "unclear_count")

@@ -98,6 +98,13 @@ class Document(models.Model):
 
 
 class DocumentTextResult(models.Model):
+    class OcrEngineKey(models.TextChoices):
+        GEMINI = "GEMINI", "Gemini"
+
+    class OcrPromptVariant(models.TextChoices):
+        HANDWRITTEN = "handwritten", "Handwritten"
+        PRINTED = "printed", "Printed"
+
     class ResultType(models.TextChoices):
         SOURCE_TEXT = "SOURCE_TEXT", "Source text"
         HEBREW_TEXT = "HEBREW_TEXT", "Hebrew text"
@@ -118,6 +125,9 @@ class DocumentTextResult(models.Model):
 
     result_type = models.CharField(max_length=32, choices=ResultType.choices)
     engine = models.CharField(max_length=64, default="engine_v1")
+
+    engine_key = models.CharField(max_length=32, choices=OcrEngineKey.choices)
+    prompt_variant = models.CharField(max_length=32, choices=OcrPromptVariant.choices)
 
     status = models.CharField(max_length=32, choices=Status.choices)
     verification_status = models.CharField(
