@@ -17,7 +17,7 @@ from documents.services.env_validation import EnvConfigError, WorkerEnvConfig, v
 from documents.services.expected_outputs import expected_result_types_for_document
 from documents.services.htr_adapters.base import UnsupportedEngineError
 from documents.services.htr_engine import transcribe_pages
-from documents.services.ocr_routing import select_ocr_route
+from documents.services.ocr_routing import OcrRouteConfig, select_ocr_route
 from documents.services.page_extraction import extract_pages
 
 logger = logging.getLogger(__name__)
@@ -132,6 +132,7 @@ class Command(BaseCommand):
         error: Optional[str] = None
         htr_result = None
         processing_exc: Optional[Exception] = None
+        route: Optional[OcrRouteConfig] = None
 
         try:
             bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
@@ -139,18 +140,13 @@ class Command(BaseCommand):
             effective_mime = (doc.mime_type or s3_mime or "").strip()
             pages = extract_pages(file_bytes=file_bytes, mime_type=effective_mime)
 
+            route = select_ocr_route(doc.language, doc.text_input_type)
             htr_result = transcribe_pages(
                 pages=pages,
                 language_hint=doc.language,
                 text_input_type=doc.text_input_type,
-                model_candidates=["gemini-2.0-flash", "gemini-1.5-flash"],
-                min_text_length=self._cfg.min_text_length,
-                double_pass=self._cfg.gemini_double_pass,
-                consistency_min_ratio=self._cfg.gemini_consistency_min_ratio,
-                temperature=self._cfg.gemini_temperature,
-                top_k=self._cfg.gemini_top_k,
-                top_p=self._cfg.gemini_top_p,
-                max_output_tokens=8192,
+                route=route,
+                worker_env=self._cfg,
             )
 
         except Exception as e:
@@ -173,7 +169,11 @@ class Command(BaseCommand):
                 if error:
                     self._save_ocr_failure(doc, final_engine, is_he, error)
                 else:
-                    self._save_htr_results(doc, final_engine, is_he, htr_result)
+                    if route is None or htr_result is None:
+                        raise RuntimeError(
+                            "Internal error: OCR success path missing route or HTR result"
+                        )
+                    self._save_htr_results(doc, final_engine, is_he, htr_result, route)
 
                 self._update_processing_state(doc, final_engine)
                 doc.save(update_fields=["processing_state_user"])
@@ -201,7 +201,14 @@ class Command(BaseCommand):
                     reasons.append(r)
         return reasons
 
-    def _save_htr_results(self, doc: Document, engine: str, is_he: bool, htr):
+    def _save_htr_results(
+        self,
+        doc: Document,
+        engine: str,
+        is_he: bool,
+        htr,
+        route: OcrRouteConfig,
+    ):
         status = (
             DocumentTextResult.Status.NEEDS_REVIEW
             if htr.needs_review
@@ -225,8 +232,8 @@ class Command(BaseCommand):
                 defaults={
                     "status": status,
                     "text": htr.text,
-                    "engine_key": htr.engine_key,
-                    "prompt_variant": htr.prompt_variant,
+                    "engine_key": route.engine_key,
+                    "prompt_variant": route.prompt_variant,
                     "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
                     "error_code": None,
                     "error_details": None,
@@ -268,8 +275,8 @@ class Command(BaseCommand):
 
     def _route_metadata_for_failure(self, doc: Document):
         """
-        Re-select route when HTR did not return HtrResult (failure path).
-        See decision-log: propagate route through the flow in a future refactor.
+        Re-select route on failure paths (no successful HtrResult).
+        Success paths use the route selected in Phase 2 and passed into persistence.
         """
         try:
             route = select_ocr_route(doc.language, doc.text_input_type)
