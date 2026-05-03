@@ -54,6 +54,29 @@ class HtrDispatcherTests(SimpleTestCase):
 
     @patch("documents.services.htr_engine.get_htr_adapter")
     @patch("documents.services.htr_engine.select_ocr_route")
+    def test_route_provided_skips_select_ocr_route(self, mock_select_route, mock_get_adapter):
+        route = OcrRouteConfig(engine_key="GEMINI", prompt_variant="handwritten")
+        adapter = Mock()
+        adapter.execute.return_value = HtrResult(text="x", engine_name="gemini-2.0-flash")
+        mock_get_adapter.return_value = adapter
+
+        transcribe_pages(
+            pages=[],
+            language_hint="en",
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            route=route,
+        )
+
+        mock_select_route.assert_not_called()
+        mock_get_adapter.assert_called_once_with("GEMINI")
+        adapter.execute.assert_called_once_with(
+            pages=[],
+            language_hint="en",
+            prompt_variant="handwritten",
+        )
+
+    @patch("documents.services.htr_engine.get_htr_adapter")
+    @patch("documents.services.htr_engine.select_ocr_route")
     def test_raises_on_unsupported_engine(self, mock_select_route, mock_get_adapter):
         mock_select_route.return_value = OcrRouteConfig(
             engine_key="TRANSKRIBUS",
@@ -70,6 +93,57 @@ class HtrDispatcherTests(SimpleTestCase):
 
 
 class GeminiAdapterTests(SimpleTestCase):
+    @patch("documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini")
+    def test_worker_env_applies_gemini_defaults(self, mock_gemini_transcribe):
+        from documents.services.env_validation import WorkerEnvConfig
+
+        mock_gemini_transcribe.return_value = GeminiResult(text="t", engine_name="gemini-2.0-flash")
+        cfg = WorkerEnvConfig(
+            gemini_api_key="k",
+            gemini_confidence_threshold=0.7,
+            min_text_length=42,
+            max_retries=3,
+            retry_delay_seconds_1=30,
+            retry_delay_seconds_2=300,
+            report_window_start="00:00",
+            report_send_time="08:00",
+            free_tier_alert_pct=80,
+            gemini_free_daily_request_limit=1500,
+            gemini_free_daily_image_limit=1000,
+            transkribus_free_monthly_credits=500,
+            enable_hybrid_htr=False,
+            enable_daily_report=False,
+            smtp_host=None,
+            smtp_port=None,
+            smtp_username=None,
+            smtp_password=None,
+            default_from_email=None,
+            transkribus_api_token=None,
+            transkribus_username=None,
+            transkribus_password=None,
+            gemini_temperature=0.11,
+            gemini_top_k=41,
+            gemini_top_p=0.91,
+            gemini_max_output_tokens=2048,
+            gemini_double_pass=True,
+            gemini_consistency_min_ratio=0.88,
+        )
+        adapter = GeminiAdapter()
+        adapter.execute(
+            pages=[],
+            language_hint="en",
+            prompt_variant="printed",
+            worker_env=cfg,
+        )
+        kwargs = mock_gemini_transcribe.call_args.kwargs
+        self.assertEqual(kwargs["min_text_length"], 42)
+        self.assertEqual(kwargs["temperature"], 0.11)
+        self.assertEqual(kwargs["top_k"], 41)
+        self.assertEqual(kwargs["top_p"], 0.91)
+        self.assertTrue(kwargs["double_pass"])
+        self.assertEqual(kwargs["consistency_min_ratio"], 0.88)
+        self.assertEqual(kwargs["max_output_tokens"], 2048)
+
     @patch("documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini")
     def test_success_uses_first_model(self, mock_gemini_transcribe):
         mock_gemini_transcribe.return_value = GeminiResult(
@@ -187,6 +261,20 @@ class RunWorkerBehaviorTests(TestCase):
             engine="gemini-2.0-flash",
         )
         self.assertEqual(result.status, DocumentTextResult.Status.SUCCEEDED)
+        self.assertEqual(result.engine_key, DocumentTextResult.OcrEngineKey.GEMINI)
+        self.assertEqual(
+            result.prompt_variant, DocumentTextResult.OcrPromptVariant.HANDWRITTEN
+        )
+        self.assertIsNone(result.error_code)
+        mock_transcribe.assert_called_once()
+        call_kw = mock_transcribe.call_args.kwargs
+        self.assertIn("route", call_kw)
+        self.assertEqual(call_kw["route"].engine_key, DocumentTextResult.OcrEngineKey.GEMINI)
+        self.assertEqual(
+            call_kw["route"].prompt_variant,
+            DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+        )
+        self.assertIn("worker_env", call_kw)
         self.doc.refresh_from_db()
         self.assertEqual(self.doc.processing_state_user, Document.ProcessingState.PARTIAL)
 
@@ -211,6 +299,11 @@ class RunWorkerBehaviorTests(TestCase):
             engine="unsupported:TRANSKRIBUS",
         )
         self.assertEqual(failure.status, DocumentTextResult.Status.FAILED)
+        self.assertEqual(failure.engine_key, DocumentTextResult.OcrEngineKey.GEMINI)
+        self.assertEqual(
+            failure.prompt_variant, DocumentTextResult.OcrPromptVariant.HANDWRITTEN
+        )
+        self.assertEqual(failure.error_code, "OCR_FAILED")
 
     @patch("documents.management.commands.run_worker.get_object_bytes")
     @patch("documents.management.commands.run_worker.extract_pages")
@@ -233,4 +326,50 @@ class RunWorkerBehaviorTests(TestCase):
             engine="ocr-dispatch",
         )
         self.assertEqual(failure.status, DocumentTextResult.Status.FAILED)
+        self.assertEqual(failure.error_code, "OCR_FAILED")
+        self.assertEqual(failure.engine_key, DocumentTextResult.OcrEngineKey.GEMINI)
+        self.assertEqual(
+            failure.prompt_variant, DocumentTextResult.OcrPromptVariant.HANDWRITTEN
+        )
         self.assertIn("Invalid or missing language for OCR routing", failure.error_details)
+
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    def test_routing_invalid_persists_before_transcribe_and_skips_transcribe(
+        self,
+        mock_get_object_bytes,
+        mock_extract_pages,
+        mock_transcribe,
+    ):
+        doc = Document.objects.create(
+            title="BadLang",
+            doc_type=Document.DocType.PDF,
+            language=None,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADED,
+            file_s3_key="doc.pdf",
+            mime_type="application/pdf",
+        )
+        mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
+        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        cmd = Command()
+        cmd._cfg = SimpleNamespace(
+            min_text_length=5,
+            gemini_double_pass=False,
+            gemini_consistency_min_ratio=0.85,
+            gemini_temperature=0.2,
+            gemini_top_k=40,
+            gemini_top_p=0.95,
+        )
+        msg = {"Body": json.dumps({"type": "PROCESS_DOCUMENT", "document_id": doc.id})}
+        self.assertTrue(cmd._process_message(msg))
+        mock_transcribe.assert_not_called()
+        failure = DocumentTextResult.objects.get(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="ocr-dispatch",
+        )
+        self.assertEqual(failure.error_code, "OCR_ROUTING_INVALID")
+        self.assertEqual(failure.engine_key, "UNRESOLVED")
+        self.assertEqual(failure.prompt_variant, "UNRESOLVED")
