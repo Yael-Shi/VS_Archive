@@ -89,6 +89,13 @@ After routing, execution is layered as follows:
 ### DocumentTextResult.OcrEngineKey schema limitation
 `DocumentTextResult.OcrEngineKey` currently allows **GEMINI** only. Adding a second live engine (e.g. Transkribus) will require **enum and migration expansion** in the first real Transkribus implementation PR. That work is intentionally deferred until Transkribus is actually implemented.
 
+### Deferred: `UNRESOLVED` routing-failure markers vs TextChoices
+When routing metadata cannot be resolved (`OCR_ROUTING_INVALID`), failed rows persist `engine_key` and `prompt_variant` as the literal string **`UNRESOLVED`** so the outcome is explicit and avoids misleading `GEMINI` / `handwritten` fallbacks.
+
+That sentinel is **not** listed on `DocumentTextResult.OcrEngineKey` or `OcrPromptVariant` today. Django persists it without running model validation in the normal `save()` path; forms or admin that assume only declared choices may need care.
+
+**Future work (separate PR):** add first-class choice values, use nullable fields, or otherwise align the schema with the sentinel—out of scope for the pre-Transkribus cleanup PR.
+
 ### Gemini prompt selection
 Gemini should receive a `prompt_variant` key, not arbitrary prompt text.
 
