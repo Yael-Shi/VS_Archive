@@ -1,0 +1,227 @@
+---
+description: VS-Archive architecture rules and system boundaries
+alwaysApply: true
+---
+
+# VS-Archive Architecture Rules
+
+VS-Archive is a Django/AWS archival document processing system for historical and family archive documents.
+
+This file defines architecture boundaries for code changes. It is not a full project overview. For detailed decisions, check:
+
+- `docs/ai-context/decision-log.md`
+- `docs/ai-context/vs-archive-context.md`
+- `docs/ai-context/tasks/engine-selection.md`
+
+If the code conflicts with these docs, report the conflict before editing.
+
+## Core processing flow
+
+The main async document-processing flow is:
+
+1. Upload/create request creates a `Document`.
+2. Original file is uploaded to S3.
+3. Upload completion enqueues `PROCESS_DOCUMENT` to SQS.
+4. `run_worker.py` consumes the job.
+5. Worker downloads the file from S3.
+6. Worker extracts pages/images.
+7. Worker selects OCR/HTR route.
+8. Worker dispatches to an OCR/HTR adapter.
+9. Worker persists `DocumentTextResult`.
+10. Worker updates `Document.processing_state_user`.
+
+Do not move OCR/HTR processing into request/response views.
+
+## Layer boundaries
+
+Keep responsibilities separated:
+
+- Views/API handle request/response behavior.
+- `run_worker.py` orchestrates processing but must stay provider-agnostic.
+- OCR/HTR routing belongs in `documents/services/ocr_routing.py`.
+- Engine dispatch belongs in `documents/services/htr_engine.py`.
+- Adapter lookup belongs in `documents/services/htr_adapters/registry.py`.
+- Provider-specific behavior belongs in `documents/services/htr_adapters/*` and provider engine modules such as `gemini_engine.py`.
+
+Do not add provider-specific `if/else` logic to `run_worker.py`.
+
+## OCR/HTR routing contract
+
+Routing is based on:
+
+- `Document.language`
+- `Document.text_input_type`
+
+Supported languages are currently:
+
+- `he`
+- `en`
+- `fr`
+- `ar`
+
+Supported `text_input_type` values are:
+
+- `HANDWRITTEN`
+- `PRINTED`
+
+There is no `UNKNOWN`.
+
+Routing must be explicit per language and text input type. Do not collapse languages into broad groups such as `LATIN`.
+
+`select_ocr_route` returns configuration only, such as:
+
+- `engine_key`
+- `prompt_variant`
+
+Routing must not call OCR/HTR providers.
+
+Invalid routing metadata must fail explicitly. Do not silently fallback to `GEMINI/handwritten`.
+
+## OCR/HTR execution contract
+
+`transcribe_pages(...)` is the generic OCR/HTR entrypoint.
+
+It should dispatch by `route.engine_key` using the adapter registry.
+
+New OCR/HTR engines must be added through the established path:
+
+1. schema/enum change if required
+2. real provider adapter
+3. registry entry
+4. explicit routing entries
+5. tests for success/failure/persistence
+6. decision-log update
+
+Do not implement fake or placeholder providers.
+
+Use a simple adapter registry. Do not introduce a large plugin framework unless explicitly requested.
+
+## HtrResult contract
+
+`HtrResult` is OCR/HTR result payload only.
+
+It may contain result data such as:
+
+- `text`
+- `needs_review`
+- `engine_name`
+- `review_reasons`
+
+It must not contain:
+
+- `engine_key`
+- `prompt_variant`
+
+Reason: `engine_key` and `prompt_variant` are routing metadata, not OCR result payload.
+
+The worker should select the route once, pass it into `transcribe_pages`, and persist routing metadata from the selected route.
+
+## DocumentTextResult semantics
+
+`DocumentTextResult.engine` means runtime processing identity.
+
+Examples:
+
+- concrete Gemini model id
+- fallback/runtime model marker
+- failure marker such as `ocr-dispatch`
+- unsupported engine marker such as `unsupported:<key>`
+
+Do not repurpose `DocumentTextResult.engine` as a logical provider key.
+
+`DocumentTextResult.engine_key` and `DocumentTextResult.prompt_variant` are routing/observability metadata.
+
+On successful OCR/HTR persistence, these values should come from the worker-held `OcrRouteConfig`, not from `HtrResult`.
+
+## Current provider state
+
+Gemini is currently the only implemented real OCR/HTR provider.
+
+Gemini-specific behavior belongs in:
+
+- `documents/services/htr_adapters/gemini_adapter.py`
+- `documents/services/gemini_engine.py`
+
+Gemini-specific concerns include:
+
+- model candidates
+- fallback between Gemini models
+- quota/exhaustion handling
+- prompt variant resolution
+- temperature/top_k/top_p
+- Gemini JSON output contract
+
+`run_worker.py` must not contain Gemini-specific retry loops, model candidate logic, prompt selection, or quota string matching.
+
+Transkribus is planned but not implemented yet.
+
+Do not add `TRANSKRIBUS` enum values, routes, adapters, or fake behavior unless the task is explicitly the real Transkribus implementation PR.
+
+## Failure behavior
+
+Invalid routing must be explicit.
+
+If route selection fails:
+
+- do not silently fallback
+- persist an OCR failure result
+- use `OCR_ROUTING_INVALID`
+- use unresolved route metadata markers where applicable
+
+Current worker/SQS policy:
+
+- processing and adapter errors are persisted as failed `DocumentTextResult` rows
+- handled failures are acked from SQS
+- retry/backoff/DLQ redesign is deferred
+
+Do not redesign retry, backoff, DLQ, or failure handling opportunistically.
+
+## Processing result policy
+
+Hebrew documents currently expect:
+
+- `HEBREW_TEXT`
+
+Non-Hebrew documents structurally expect:
+
+- `SOURCE_TEXT`
+- `HEBREW_TEXT`
+
+Real Hebrew translation for non-Hebrew documents is not implemented yet.
+
+Therefore non-Hebrew documents may intentionally remain `PARTIAL`.
+
+Known deferred issue:
+
+- mismatch may exist around non-Hebrew `HEBREW_TEXT` expected output / persistence behavior
+
+Do not fix this opportunistically during routing, adapter, or cleanup work.
+
+## Reprocessing policy
+
+Changing metadata such as `text_input_type` must not automatically trigger OCR/HTR reprocessing.
+
+Future reprocessing must be explicit and separately designed.
+
+Do not overwrite `VERIFIED` OCR/HTR results without explicit approval.
+
+## Architecture change rules
+
+Before editing architecture-sensitive code:
+
+- inspect relevant files first
+- summarize current behavior
+- list files you plan to change
+- keep the diff small and reviewable
+
+Stop and ask before editing if a change would:
+
+- move provider-specific logic into `run_worker.py`
+- change `DocumentTextResult.engine` semantics
+- add fake external integrations
+- broaden PR scope
+- redesign schema beyond the requested task
+- change processing-state semantics
+- conflict with `docs/ai-context/decision-log.md`
+
+Prefer explicit contracts and small scoped PRs over broad rewrites.
