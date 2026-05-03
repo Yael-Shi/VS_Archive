@@ -1,0 +1,270 @@
+---
+description: Documentation and decision-log maintenance rules for VS-Archive
+alwaysApply: false
+---
+
+# Documentation Rules — VS-Archive
+
+VS-Archive relies on documentation as working engineering context, not decoration.
+
+Treat documentation as part of the codebase contract.
+
+## Purpose
+
+Documentation preserves:
+
+- architecture decisions
+- processing behavior
+- deferred work
+- policy decisions
+- known limitations
+- current implemented system behavior
+- AI/coding context for future work
+
+When behavior changes and docs are not updated, future work becomes unsafe.
+
+## When docs must be updated
+
+Update documentation when a change affects:
+
+- architecture
+- domain or policy behavior
+- OCR/HTR routing or engine selection
+- worker or processing behavior
+- expected outputs
+- persistence semantics
+- processing-state logic
+- database schema / model semantics
+- environment variables
+- external integrations
+- deployment/runtime assumptions
+- retry/error-handling policy
+- admin/user-visible behavior
+- deferred work / known limitations
+- non-obvious tradeoffs
+
+If a change is purely mechanical/internal and does not affect behavior or decisions, docs may not need updates.
+
+When in doubt, mention whether docs should be updated instead of silently skipping it.
+
+## Which docs to update
+
+### `docs/ai-context/decision-log.md`
+
+Use for:
+
+- architecture decisions
+- policy decisions
+- non-obvious tradeoffs
+- deferred work
+- intentional gaps / limitations
+- surprising current behavior
+- explicit “do not do X yet” decisions
+- cases where behavior may look like a bug but is intentional
+
+Examples:
+
+- non-Hebrew translation gap
+- `DocumentTextResult.engine` semantics
+- reprocessing deferred
+- retry/DLQ redesign deferred
+- Transkribus planned but not implemented
+
+Do not use the decision log as a generic changelog.
+
+Do not delete historical decision-log entries unless explicitly requested.
+
+Prefer appending, superseding, or marking outdated decisions clearly.
+
+### `docs/ai-context/vs-archive-context.md`
+
+Use for:
+
+- broad current-state project/system context
+- major implemented capabilities
+- major system flow / architecture updates
+- important implemented contracts or components
+
+Do not put every tiny implementation detail here.
+
+### `docs/ai-context/tasks/`
+
+Use for:
+
+- feature/task-specific planning
+- implementation notes
+- temporary design docs
+- migration plans
+- scoped work breakdowns
+
+When task work is completed, promote durable final decisions to:
+
+- `decision-log.md`
+- current-state docs
+
+### `.cursor/rules/*.mdc`
+
+Use for:
+
+- stable Cursor operating rules
+- coding/testing/architecture/documentation conventions
+
+Update only when durable working rules change.
+
+Do not put short-lived task notes in rule files.
+
+## Accuracy rules
+
+Docs must describe current implemented behavior unless clearly marked otherwise.
+
+Use explicit labels when relevant:
+
+- `Current behavior`
+- `Decision`
+- `Deferred`
+- `Future work`
+- `Known limitation`
+- `Intentional gap`
+- `Open question`
+- `Out of scope`
+
+Do not document unimplemented features as existing.
+
+Bad:
+
+- “Transkribus is supported”
+- “Multi-engine OCR is complete”
+- “Fallback to Transkribus works”
+
+When only preparation exists.
+
+Good:
+
+- “Transkribus is planned but not implemented yet.”
+- “Adapter/routing preparation exists, but no live Transkribus integration is implemented.”
+
+Do not let documentation become more ambitious than the code.
+
+## If docs and code conflict
+
+1. Stop.
+2. Report the conflict.
+3. Explain both sides.
+4. Identify which source appears stale.
+5. Ask for direction unless the correct behavior is already obvious.
+
+Do not silently rewrite docs to match code if code may be wrong.
+
+Do not silently change code to match docs if docs may be stale.
+
+## Deferred / known debt documentation
+
+Deferred work must be documented clearly.
+
+A good deferred note includes:
+
+- what is deferred
+- current behavior
+- why it is deferred
+- when/where it should be revisited
+- whether it is blocker or non-blocker
+- what would count as a bug vs intentional current behavior
+
+Do not describe intentional deferred behavior as an accidental bug.
+
+Do not hide real bugs as “deferred” unless explicitly decided.
+
+## Environment / schema / provider documentation
+
+When adding or changing env vars, document:
+
+- variable name
+- required vs optional
+- default behavior
+- which component uses it
+- whether it is secret
+- validation/failure behavior
+
+When schema changes affect behavior/architecture, document:
+
+- what changed
+- why
+- backfill/default behavior
+- limitations / deferred follow-up
+
+When adding a provider/integration, document:
+
+- provider status (planned vs implemented)
+- engine/provider key
+- adapter location
+- routing entries
+- required env vars / credentials
+- failure behavior
+- limitations
+
+## Documentation in PRs / summaries
+
+After making changes, report documentation status.
+
+Mention:
+
+- whether docs were updated
+- which docs were updated
+- what decision/behavior was documented
+- deferred work added/changed
+- if docs were not updated, why not
+
+Do not omit documentation status for architecture/behavior changes.
+
+## Anti-patterns
+
+Do not change behavior without updating relevant docs.
+
+Do not update docs to describe desired future behavior as current behavior.
+
+Do not delete decision-log history casually.
+
+Do not collapse nuanced historical decisions into vague summaries.
+
+Do not silently change docs to make questionable code look intentional.
+
+Do not add fake future integrations to docs as if they exist.
+
+Do not rewrite large documentation sections inside small unrelated PRs.
+
+Do not duplicate the same decision in many places.
+
+Prefer:
+
+- decision-log for durable decisions
+- context doc for current state
+- task docs for active/scoped work
+
+## Style
+
+Documentation should be direct, concrete, and operational.
+
+Prefer:
+
+```md
+Current behavior:
+Non-Hebrew documents may remain PARTIAL because translation is not implemented yet.
+
+Avoid vague/aspirational wording:
+
+The system is designed to eventually support multilingual excellence.
+
+No corporate fluff. No roadmap theater. No lying to future-you.
+
+Before editing docs
+
+Ask:
+
+Is this documenting current behavior, a decision, or future work?
+Which file is the correct home for this information?
+Is the wording clear about implemented vs planned?
+Does this contradict architecture or decision-log?
+Am I deleting useful historical context?
+Would a small targeted update be better than a broad rewrite?
+
+When unsure, prefer a small explicit note over a sweeping rewrite.

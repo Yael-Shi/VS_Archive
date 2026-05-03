@@ -1,0 +1,59 @@
+---
+description: Python/Django backend coding conventions for VS-Archive
+globs: app/backend/**/*.py
+alwaysApply: false
+---
+
+# Python / Django backend (VS-Archive)
+
+How to write and change backend code in `app/backend/`. For **system boundaries**, async document pipeline, OCR/HTR layers, routing vs execution, `DocumentTextResult` semantics, failure/reprocessing policy, and when to stop and ask—see **`.cursor/rules/architecture.mdc`** and **`docs/ai-context/decision-log.md`**. If implementation and those docs disagree, surface the conflict before editing.
+
+Repo-wide guardrails (API shape, secrets/infra, “no invented fields”, workflow): **`.cursor/rules/vs-archive.md`**.
+
+## Environment and tooling
+
+- **Python:** `>=3.12` (see `app/backend/pyproject.toml`).
+- **Format / lint:** Ruff (`[tool.ruff]`); migrations are excluded from Ruff—do not reformat migration files for style-only churn.
+- **Types:** Pyright in `standard` mode for editor/CI signal; **mypy + django-stubs** are the preferred source of truth for Django/ORM typing (`mypy.ini`, `django_settings_module = vs_archive.settings`). Pyright is not ORM-aware—do not “fix” ORM-heavy code only to satisfy Pyright at mypy’s expense.
+- **Tests:** `pytest` + `pytest-django`; `DJANGO_SETTINGS_MODULE = vs_archive.settings` (see `[tool.pytest.ini_options]`). Prefer running tests from `app/backend` with the project’s Poetry/dev setup.
+
+## Style and structure
+
+- Match the **existing module**: imports (stdlib / third-party / Django / local), naming, docstring density, and error style. New code should read as if the same author wrote it.
+- Prefer **small, explicit** functions over sprawling views or management commands. Extract helpers or services when a view, command, or test file grows hard to follow—without drive-by refactors elsewhere.
+- Prefer existing service boundaries over creating new catch-all helper modules. Do not create vague `utils.py`, `helpers.py`, or `common.py` modules for domain logic unless explicitly justified.
+- Use **type hints** on new public functions and non-trivial helpers where it clarifies contracts; do not annotate every trivial local unless the file already does.
+- Avoid **magic strings** for domain concepts when enums, `TextChoices`, or shared constants already exist.
+
+## Django and ORM
+
+- **Models and migrations:** Do not add or change models or create migrations unless the task explicitly asks. If a change seems necessary, explain why first (aligns with repo-wide rules).
+- **Queries:** Use `select_related` / `prefetch_related` when you introduce or extend list paths that would otherwise N+1. Keep queryset scope tight (filter early; avoid fetching large unrelated graphs).
+- **Transactions:** Use `transaction.atomic()` when multiple writes must succeed or fail together; keep transaction blocks as short as possible.
+- **Managers / QuerySet:** Prefer explicit `QuerySet` methods or small manager helpers over raw SQL unless the codebase already uses SQL for that case.
+
+## Services, views, and workers
+
+- Put **domain logic** in `documents/services/` (and similar) rather than bloating views or admin actions. **Orchestration** (SQS handling, step ordering) stays in the appropriate layer—see `architecture.mdc` for what belongs in the worker vs adapters vs routing.
+- Views and serializers: keep **I/O and HTTP concerns** at the boundary; validate input; return consistent error shapes already used in the app.
+
+## Errors and logging
+
+- Do not use **bare** `except:` or silent `pass` on errors. Log with context (document id, job id, request id when available), re-raise, or map to a controlled domain/HTTP response as the surrounding code does.
+- When calling external APIs or adapters, preserve or translate errors in line with existing patterns (failure rows, `error_code`, etc.—see architecture doc for policy, not duplicated here).
+
+## Tests
+
+- Name tests per `pytest.ini_options` (`test_*.py`, `*_test.py`, `tests.py`).
+- Prefer **factories or existing fixtures** over ad-hoc duplicated model setup when those exist.
+- Cover **success and failure** paths for behavior you add or change; for OCR/HTR flows, include persistence and routing edge cases when touching that code (details in `architecture.mdc`).
+- Bug fixes should include regression tests unless explicitly waived.
+- After substantive edits, state **exact** commands you ran or would run (e.g. targeted `pytest` path from `app/backend`).
+
+## PR discipline
+
+- **Inspect** relevant files before editing; summarize current behavior and list **planned files** in the response when the change is non-trivial.
+- Keep **diffs small and reviewable**; avoid opportunistic cleanup, renames, or “while we’re here” schema or policy changes.
+- Do not broaden scope without explicit approval.
+- Do not change **public** URL, request, or response contracts unless explicitly requested.
+- Finish todos you start; do not leave unrelated files half-edited.

@@ -1,0 +1,300 @@
+---
+description: Testing conventions for VS-Archive
+globs: app/backend/**/tests*.py
+alwaysApply: false
+---
+
+# Testing Rules — VS-Archive
+
+Use these rules when adding or changing tests for the Django backend.
+
+For backend coding conventions, see `.cursor/rules/python-backend.mdc`.
+For architecture-sensitive contracts, see `.cursor/rules/architecture.mdc` and `docs/ai-context/decision-log.md`.
+
+## Testing philosophy
+
+Prefer focused behavior tests over broad, fragile integration tests.
+
+Test observable behavior:
+
+- database state
+- returned values
+- raised exceptions
+- persisted failure rows
+- processing state changes
+- calls to external boundaries when that call is the contract
+
+Do not test implementation trivia:
+
+- private helper call order
+- temporary variable names
+- exact internal branching unless it is the behavior under test
+- incidental log text unless the log is part of the contract
+
+Bug fixes should include regression tests.
+
+Architecture-sensitive changes should include tests that pin the intended contract.
+
+Keep tests boring, readable, and specific.
+
+## Required coverage expectations
+
+When changing logic, add or update tests.
+
+Expected coverage by change type:
+
+- Logic change → test the changed behavior.
+- Bug fix → add a regression test that fails before the fix.
+- New branch/path → cover the normal path and at least one meaningful failure/edge path.
+- Model/persistence change → assert database rows explicitly.
+- Worker persistence change → verify `DocumentTextResult` rows and relevant fields.
+- Routing change → verify route output for relevant `language` / `text_input_type` pairs.
+- Processing state change → verify final `Document.processing_state_user`.
+- Error handling change → verify persisted/returned failure behavior, not only raised exceptions.
+
+If a change is deliberately not tested, explain why.
+
+## Mocking rules
+
+Mock external boundaries.
+
+Allowed / expected mocks:
+
+- Gemini / Transkribus / external OCR providers
+- network calls
+- S3 access
+- SQS access
+- email / SMTP
+- filesystem-heavy or image-heavy processing when not under test
+- slow or expensive integrations
+- time-sensitive external behavior when needed
+
+Prefer mocking boundaries, not internals.
+
+Do not mock the unit under test.
+
+Avoid mocking so much that the test only proves mocks were called.
+
+Patch internal helpers only when:
+
+- the helper crosses an external boundary
+- the helper is slow or expensive
+- the test is explicitly about orchestration around that helper
+
+Examples:
+
+- For worker tests, mocking S3/page extraction/OCR provider is acceptable; database persistence should usually be real.
+- For adapter tests, mock provider API calls, not adapter logic.
+- For routing tests, do not mock routing tables; test actual route selection behavior.
+
+## Test structure and naming
+
+Use Arrange / Act / Assert structure.
+
+Preferred shape:
+
+```python
+def test_worker_persists_route_metadata_on_success(self):
+    # Arrange
+    ...
+
+    # Act
+    ...
+
+    # Assert
+    ...
+
+Use descriptive test names.
+
+Good:
+
+test_worker_persists_route_metadata_on_success
+test_routing_invalid_persists_explicit_failure
+test_unsupported_engine_does_not_silently_fallback_to_gemini
+test_non_hebrew_document_with_only_source_text_remains_partial
+
+Bad:
+
+test_worker
+test_success
+test_case_1
+test_htr_engine_mock
+
+Keep one behavioral concern per test.
+
+Avoid giant multi-scenario tests. Use parametrization when multiple scenarios are useful.
+
+Use helper factories/fixtures for repeated setup, but do not introduce a large factory framework unless the project already uses one.
+
+Keep assertions close to the behavior being tested.
+
+High-risk areas requiring strong tests
+
+When touching these areas, tests are expected unless there is a clear reason not to add them.
+
+Worker persistence
+
+File:
+
+app/backend/documents/management/commands/run_worker.py
+
+Verify:
+
+success rows are persisted correctly
+failure rows are persisted correctly
+DocumentTextResult.result_type
+DocumentTextResult.engine
+DocumentTextResult.engine_key
+DocumentTextResult.prompt_variant
+DocumentTextResult.status
+DocumentTextResult.verification_status
+error_code / error_details where relevant
+invalid routing does not silently fallback
+processing state transitions are correct
+OCR/HTR routing
+
+File:
+
+app/backend/documents/services/ocr_routing.py
+
+Verify:
+
+route selection by language + text_input_type
+engine_key
+prompt_variant
+invalid or missing metadata fails explicitly
+no accidental broad language grouping
+no silent fallback to GEMINI/handwritten
+HTR dispatcher and adapters
+
+Files:
+
+app/backend/documents/services/htr_engine.py
+app/backend/documents/services/htr_adapters/
+
+Verify:
+
+dispatcher resolves adapter by engine_key
+unsupported engines fail explicitly
+provider-specific behavior stays inside the provider adapter
+Gemini-specific fallback/quota behavior stays inside GeminiAdapter
+HtrResult remains OCR payload only
+route metadata is not added to HtrResult
+Processing state and expected outputs
+
+Files:
+
+app/backend/documents/services/expected_outputs.py
+app/backend/documents/management/commands/run_worker.py
+
+Verify:
+
+Hebrew expected outputs
+non-Hebrew expected outputs
+READY
+PARTIAL
+FAILED
+NEEDS_REVIEW impact where relevant
+
+Remember:
+
+Hebrew documents require HEBREW_TEXT.
+Non-Hebrew documents structurally require SOURCE_TEXT + HEBREW_TEXT.
+Missing non-Hebrew translation is currently intentional and should usually result in PARTIAL, not READY.
+
+Do not “fix” this casually inside unrelated PRs.
+
+Verification / reprocessing safety
+
+When adding reprocessing or overwrite behavior, verify:
+
+VERIFIED results are not overwritten by default
+explicit --force or equivalent approval is required when that policy applies
+Anti-patterns
+
+Do not add huge brittle end-to-end tests unless explicitly requested.
+
+Do not mock everything.
+
+Do not assert incidental implementation details.
+
+Do not test private helper internals unless the helper contains meaningful standalone logic.
+
+Do not rewrite unrelated tests while touching a feature.
+
+Do not weaken existing assertions just to make tests pass.
+
+Do not delete tests unless the behavior they cover is intentionally removed and documented.
+
+Do not update expected values blindly. First explain why behavior changed.
+
+Do not hide failures behind broad try/except in tests.
+
+Do not make automated tests depend on real Gemini, Transkribus, S3, SQS, SMTP, or AWS access.
+
+Do not use vague assertions when exact values matter.
+
+Avoid:
+
+self.assertTrue(result)
+self.assertIsNotNone(row)
+
+Prefer:
+
+self.assertEqual(row.status, DocumentTextResult.Status.FAILED)
+self.assertEqual(row.error_code, "OCR_ROUTING_INVALID")
+self.assertEqual(row.engine_key, "UNRESOLVED")
+Regression test policy
+
+Every production bug fix should include a regression test unless explicitly waived.
+
+A good regression test:
+
+describes the broken behavior
+fails before the fix
+passes after the fix
+does not overfit to the implementation
+
+For OCR/HTR pipeline bugs, regression tests should usually assert persisted database state.
+
+Example:
+
+Bug: success path tried to read htr.engine_key.
+Regression test: worker success persists engine_key / prompt_variant from the selected route and does not require those fields on HtrResult.
+Test execution and reporting
+
+Run targeted tests relevant to changed code.
+
+Preferred command:
+
+cd app/backend
+poetry run python manage.py test documents
+
+If using pytest directly, run the relevant pytest command instead.
+
+When reporting work, state:
+
+exact test command run
+whether it passed or failed
+which tests were added or updated
+what behavior they cover
+known gaps, if any
+
+Do not claim tests passed if they were not run.
+
+If only partial tests were run, say exactly which ones.
+
+Before adding or changing tests
+
+First identify the behavior being protected.
+
+Then choose the smallest test that proves it.
+
+Ask:
+
+What could break here?
+Is this behavior important to persistence, routing, or failure semantics?
+Can this be asserted through public behavior or database state?
+Am I mocking the boundary or the thing I am trying to test?
+
+If the test would be 300 lines, the scope is probably too broad.
