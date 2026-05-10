@@ -16,6 +16,8 @@ from documents.services.htr_adapters.base import (
     UnsupportedEngineError,
 )
 from documents.services.htr_adapters.gemini_adapter import GeminiAdapter
+from documents.services.htr_adapters.registry import get_htr_adapter
+from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
 from documents.services.htr_engine import transcribe_pages
 from documents.services.ocr_routing import OcrRouteConfig
 
@@ -79,10 +81,10 @@ class HtrDispatcherTests(SimpleTestCase):
     @patch("documents.services.htr_engine.select_ocr_route")
     def test_raises_on_unsupported_engine(self, mock_select_route, mock_get_adapter):
         mock_select_route.return_value = OcrRouteConfig(
-            engine_key="TRANSKRIBUS",
+            engine_key="NOT_A_REGISTERED_ENGINE",
             prompt_variant="handwritten",
         )
-        mock_get_adapter.side_effect = UnsupportedEngineError("TRANSKRIBUS")
+        mock_get_adapter.side_effect = UnsupportedEngineError("NOT_A_REGISTERED_ENGINE")
 
         with self.assertRaises(UnsupportedEngineError):
             transcribe_pages(
@@ -90,6 +92,40 @@ class HtrDispatcherTests(SimpleTestCase):
                 language_hint="en",
                 text_input_type=Document.TextInputType.HANDWRITTEN,
             )
+
+    def test_transkribus_route_dispatches_to_skeleton_adapter(self):
+        route = OcrRouteConfig(
+            engine_key=DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+        )
+        with self.assertRaises(EnginePermanentError) as ctx:
+            transcribe_pages(
+                pages=[],
+                language_hint="en",
+                text_input_type=Document.TextInputType.HANDWRITTEN,
+                route=route,
+            )
+        self.assertIn("not implemented", str(ctx.exception).lower())
+
+
+class HtrRegistryTests(SimpleTestCase):
+    def test_get_htr_adapter_resolves_transkribus(self):
+        adapter = get_htr_adapter("TRANSKRIBUS")
+        self.assertIsInstance(adapter, TranskribusAdapter)
+        self.assertEqual(get_htr_adapter(" transkribus ").engine_key, "TRANSKRIBUS")
+
+
+class TranskribusAdapterSkeletonTests(SimpleTestCase):
+    def test_execute_raises_explicit_not_implemented(self):
+        adapter = TranskribusAdapter()
+        with self.assertRaises(EnginePermanentError) as ctx:
+            adapter.execute(
+                pages=[],
+                language_hint="en",
+                prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            )
+        self.assertIn("Transkribus", str(ctx.exception))
+        self.assertIn("not implemented", str(ctx.exception).lower())
 
 
 class GeminiAdapterTests(SimpleTestCase):
@@ -289,14 +325,14 @@ class RunWorkerBehaviorTests(TestCase):
     ):
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
         mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
-        mock_transcribe.side_effect = UnsupportedEngineError("TRANSKRIBUS")
+        mock_transcribe.side_effect = UnsupportedEngineError("NOT_A_REGISTERED_ENGINE")
 
         self.assertTrue(self.command._process_message(self._message()))
 
         failure = DocumentTextResult.objects.get(
             document=self.doc,
             result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
-            engine="unsupported:TRANSKRIBUS",
+            engine="unsupported:NOT_A_REGISTERED_ENGINE",
         )
         self.assertEqual(failure.status, DocumentTextResult.Status.FAILED)
         self.assertEqual(failure.engine_key, DocumentTextResult.OcrEngineKey.GEMINI)
@@ -304,6 +340,38 @@ class RunWorkerBehaviorTests(TestCase):
             failure.prompt_variant, DocumentTextResult.OcrPromptVariant.HANDWRITTEN
         )
         self.assertEqual(failure.error_code, "OCR_FAILED")
+
+    @patch("documents.management.commands.run_worker.select_ocr_route")
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    def test_transkribus_skeleton_failure_persists_route_metadata(
+        self,
+        mock_extract_pages,
+        mock_get_object_bytes,
+        mock_select_route,
+    ):
+        mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
+        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_select_route.return_value = OcrRouteConfig(
+            engine_key=DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+        )
+
+        self.assertTrue(self.command._process_message(self._message()))
+
+        failure = DocumentTextResult.objects.get(
+            document=self.doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="ocr-dispatch",
+        )
+        self.assertEqual(failure.status, DocumentTextResult.Status.FAILED)
+        self.assertEqual(failure.engine_key, DocumentTextResult.OcrEngineKey.TRANSKRIBUS)
+        self.assertEqual(
+            failure.prompt_variant, DocumentTextResult.OcrPromptVariant.HANDWRITTEN
+        )
+        self.assertEqual(failure.error_code, "OCR_FAILED")
+        self.assertIn("not implemented", (failure.error_details or "").lower())
+        mock_select_route.assert_called()
 
     @patch("documents.management.commands.run_worker.get_object_bytes")
     @patch("documents.management.commands.run_worker.extract_pages")

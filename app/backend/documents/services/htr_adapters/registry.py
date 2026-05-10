@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from documents.services.htr_adapters.base import HtrEngineAdapter, UnsupportedEngineError
 from documents.services.htr_adapters.gemini_adapter import GeminiAdapter
+from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
 
 
 _ADAPTERS: dict[str, HtrEngineAdapter] = {
     GeminiAdapter.engine_key: GeminiAdapter(),
+    TranskribusAdapter.engine_key: TranskribusAdapter(),
 }
 
 
