@@ -136,3 +136,24 @@ Status update:
 
 Future work:
 Investigate and fix non-Hebrew `HEBREW_TEXT` persistence/status behavior separately.
+
+## Transkribus integration — PR #1 (skeleton / stable connection point)
+
+### Decision
+
+The first Transkribus PR establishes only the **plumbing** so a second engine can exist in the same architecture as Gemini, **without** changing production routing or calling Transkribus.
+
+### Current behavior (after PR #1)
+
+- `DocumentTextResult.OcrEngineKey` includes **`TRANSKRIBUS`** (with migration updating the field choices).
+- `TranskribusAdapter` is registered in `documents/services/htr_adapters/registry.py` (`get_htr_adapter`) with `engine_key = "TRANSKRIBUS"`.
+- The adapter’s `execute` raises **`EnginePermanentError`** with an explicit “not implemented yet” message (no HTTP, no multi-page policy).
+- `documents/services/ocr_routing.py` (`OCR_ROUTES`) remains **all GEMINI**; no document is routed to Transkribus until a follow-up PR changes routing.
+
+### Deferred (follow-up PRs)
+
+- A dedicated client module (e.g. `transkribus_engine.py`) for the live API boundary, added when HTTP integration starts.
+- Live Transkribus API (auth, requests, job lifecycle).
+- Routing entries that select `TRANSKRIBUS` for specific `(language, text_input_type)` pairs.
+- Multi-page / `PageImage` list behavior and result mapping to `HtrResult`.
+- Hybrid or fallback between engines (still out of scope unless explicitly requested).

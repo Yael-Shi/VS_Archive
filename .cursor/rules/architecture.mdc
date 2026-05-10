@@ -135,7 +135,9 @@ On successful OCR/HTR persistence, these values should come from the worker-held
 
 ## Current provider state
 
-Gemini is currently the only implemented real OCR/HTR provider.
+Gemini is currently the only **live** OCR/HTR provider (real API + all current `OCR_ROUTES` entries).
+
+A **Transkribus** connection point exists: `DocumentTextResult.OcrEngineKey.TRANSKRIBUS`, `TranskribusAdapter` in `documents/services/htr_adapters/transkribus_adapter.py`, and registry wiring. The adapter is a **skeleton** until follow-up PRs add live API and routing entries. Do not treat Transkribus as production-ready OCR until those land.
 
 Gemini-specific behavior belongs in:
 
@@ -153,9 +155,7 @@ Gemini-specific concerns include:
 
 `run_worker.py` must not contain Gemini-specific retry loops, model candidate logic, prompt selection, or quota string matching.
 
-Transkribus is planned but not implemented yet.
-
-Do not add `TRANSKRIBUS` enum values, routes, adapters, or fake behavior unless the task is explicitly the real Transkribus implementation PR.
+Do not add **fake** Transkribus HTTP behavior or **hybrid/fallback** between providers unless the task explicitly requests it. Live Transkribus API, routing changes, and multi-page policy are follow-up PRs.
 
 ## Failure behavior
 
