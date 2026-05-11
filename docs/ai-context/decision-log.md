@@ -152,8 +152,40 @@ The first Transkribus PR establishes only the **plumbing** so a second engine ca
 
 ### Deferred (follow-up PRs)
 
-- A dedicated client module (e.g. `transkribus_engine.py`) for the live API boundary, added when HTTP integration starts.
-- Live Transkribus API (auth, requests, job lifecycle).
 - Routing entries that select `TRANSKRIBUS` for specific `(language, text_input_type)` pairs.
-- Multi-page / `PageImage` list behavior and result mapping to `HtrResult`.
 - Hybrid or fallback between engines (still out of scope unless explicitly requested).
+
+## Transkribus PR #2 — Legacy TrpServer PyLaia (existing server document only)
+
+### What this is not
+
+- **Not** a full Transkribus integration and **not** the complete VS-Archive path: user upload → Transkribus document creation → recognition → `DocumentTextResult`.
+- **`OCR_ROUTES` unchanged**; production OCR remains **GEMINI** until a later routing PR.
+
+### Scope
+
+- **Legacy TrpServer only** (account has no Metagrapho / processing v2 under current plan).
+- **Session login:** `POST https://transkribus.eu/TrpServer/rest/auth/login` with form fields `user` and `pw` (URL-encoded). PyLaia recognition **POST** uses this session (Bearer alone insufficient for recognition in verified testing).
+- **PyLaia start:** `POST /pylaia/{colId}/{modelId}/recognition` with UI-aligned query parameters; **response body is plain-text job id** (not JSON).
+- **Polling:** `GET /jobs/{jobId}` until success/failure/timeout rules in code.
+- **Polling constants** in `transkribus_engine.py` (`POLL_INTERVAL_SEC`, `POLL_MAX_WAIT_SEC`, default HTTP timeouts) are **dev/demo defaults**. Before **production** Transkribus is selected via **`OCR_ROUTES`**, revisit **SQS visibility timeout vs. worker polling / job duration** (and any related queue behavior) so messages are not released mid-poll or held too long. PR #2 does not change `OCR_ROUTES` or `run_worker.py`.
+- **Page metadata:** `GET /collections/{colId}/{docId}/pages?pages=…` returns a **JSON array** of page objects; transcript choice uses **`jobId` / `modelId`** when present in `tsList.transcripts`, not `transcripts[0]` blindly.
+- **Transcript:** `GET` transcript URL; **Bearer** (`TRANSKRIBUS_API_TOKEN`) for `files.transkribus.eu` in verified testing.
+- **PAGE XML** (`PcGts` namespace) → plain text via `TextLine` / `TextEquiv` / `Unicode`; lines joined with `\n`, pages with `\n\n`.
+
+### Safeguards
+
+- **`TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT`** (default false): if false, **`TranskribusAdapter` raises `EnginePermanentError` before any HTTP** (no silent no-op).
+- **Dev-only document id:** `TRANSKRIBUS_DEV_EXISTING_DOCUMENT_ID` — not a VS-Archive document id; names the pre-existing TrpServer doc for dev/demo.
+- **Dev-only pages query:** `TRANSKRIBUS_DEV_EXISTING_PAGES` supplies the `pages=` query value. **Do not** assume `PageImage.page_index` matches TrpServer page numbers in PR #2; `PageImage[]` is **validation-only** (non-empty).
+- **Config** for collection/model: `TRANSKRIBUS_COLLECTION_ID`, `TRANSKRIBUS_MODEL_ID`. **No** hard-coded account ids in code.
+
+### Explicit non-scope (PR #2)
+
+- **No** upload / create-document on Transkribus (**PR #3** must implement upload + page mapping from VS-Archive bytes/`PageImage[]`).
+- **No** `run_worker.py` changes.
+- **No** `/recognition/atr` or **`htrCITlab`** for this flow (UI used `/pylaia/.../recognition`; `htrCITlab` tied to deprecated HTR+).
+
+### Credentials
+
+- Do **not** log username, password, session cookies, or tokens.
