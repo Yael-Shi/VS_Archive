@@ -241,17 +241,34 @@ def get_job(
 
 
 def _job_terminal_success(job: dict) -> bool:
-    return job.get("success") is True
+    """
+    Terminal **success** for TrpServer GET /jobs/{id}.
+
+    Requires ``success is True`` and either a completed ``state`` (``FINISHED`` for verified
+    UploadImportJob ingest; ``DONE`` / ``COMPLETED`` for other jobs) **or** a missing/blank
+    ``state`` (some TrpServer payloads omit state when done).
+
+    ``success is True`` while ``state`` is ``CREATED`` / ``RUNNING`` / etc. is **not** terminal.
+    """
+    if job.get("success") is not True:
+        return False
+    raw = job.get("state")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return True
+    state = str(raw).strip().upper()
+    return state in {"FINISHED", "DONE", "COMPLETED"}
 
 
 def _job_terminal_failure(job: dict) -> bool:
-    if job.get("success") is True:
-        return False
+    """
+    Terminal **failure**: explicit error/cancel states, or completed state without success.
+
+    ``success=false`` with ``CREATED`` / queue messages is **not** terminal (keep polling).
+    """
     state = (job.get("state") or "").upper()
-    failed_states = {"FAILED", "ERROR", "CANCELLED"}
-    if state in failed_states:
+    if state in {"FAILED", "ERROR", "CANCELLED", "CANCELED"}:
         return True
-    if job.get("success") is False and state in {"DONE", "FINISHED", "COMPLETED"}:
+    if state in {"FINISHED", "DONE", "COMPLETED"} and job.get("success") is not True:
         return True
     errors = job.get("nrOfErrors")
     if isinstance(errors, int) and errors > 0 and state not in {
@@ -259,6 +276,7 @@ def _job_terminal_failure(job: dict) -> bool:
         "CREATED",
         "RUNNING",
         "WAITING",
+        "QUEUED",
     }:
         return True
     return False
@@ -317,8 +335,13 @@ def fetch_pages_metadata(
 # --- Legacy TrpServer /uploads (document ingest) — PR #3 engine helpers only -----------------
 # Contract sources: official upload article (JSON descriptor, uploadId, PUT multipart img/xml,
 # jobId after last PUT, poll GET /jobs/{id}) and WADL resources under /uploads.
-# docId extraction is provisional (see parse_doc_id_from_successful_trp_job) until an
-# authenticated redacted job response confirms the shape for VS-Archive’s TrpServer usage.
+# Verified (real account): successful UploadImportJob has state=FINISHED, success=true,
+# type=Create Document, jobImpl=UploadImportJob, top-level docId.
+
+
+def trp_upload_png_file_name(*, page_index: int) -> str:
+    """Synthetic PNG filename for a PageImage.page_index (must match descriptor + PUT)."""
+    return f"vs_archive_p{int(page_index):06d}.png"
 
 
 def build_document_upload_descriptor_json(
@@ -346,7 +369,7 @@ def build_document_upload_descriptor_json(
                 f"Duplicate PageImage.page_index in upload batch: {pi.page_index}"
             )
         seen.add(pi.page_index)
-        file_name = f"vs_archive_p{pi.page_index:06d}.png"
+        file_name = trp_upload_png_file_name(page_index=pi.page_index)
         page_entries.append({"fileName": file_name, "pageNr": int(pi.page_index)})
     body: dict[str, Any] = {"pageList": {"pages": page_entries}}
     if title is not None and str(title).strip():
@@ -469,13 +492,11 @@ def parse_doc_id_from_successful_trp_job(job: dict[str, Any]) -> str:
     """
     Read TrpServer document id from a **successful** GET /jobs/{jobId} payload.
 
-    **Provisional / narrow:** reads **top-level** ``docId`` only (int or non-empty string).
-    This is a working hypothesis for ingest jobs; it is **not** proven for the project’s
-    Transkribus account or job types until **Yael** supplies an **authenticated redacted**
-    successful job JSON—then either confirm this field or adjust the parser narrowly.
+    **Verified** for VS-Archive’s Transkribus account on successful **UploadImportJob**
+    ingest: ``state`` is ``FINISHED``, ``success`` is true, ``docId`` is top-level.
 
-    Third-party client docs (e.g. TranskribusPyClient ``getJobStatus`` key lists) are hints
-    only, not a guarantee of server behavior for this deployment.
+    Parser remains **narrow:** top-level ``docId`` only (int or non-empty string). Other job
+    types must still pass ``_job_terminal_success`` before reading ``docId``.
     """
     if not _job_terminal_success(job):
         raise _http_permanent(
@@ -484,8 +505,7 @@ def parse_doc_id_from_successful_trp_job(job: dict[str, Any]) -> str:
     raw = job.get("docId")
     if isinstance(raw, bool) or raw is None:
         raise _http_permanent(
-            "Transkribus ingest job JSON missing top-level docId (provisional parser); "
-            "provide a redacted successful job payload to confirm or adjust the field path."
+            "Transkribus job JSON missing top-level docId after terminal success"
         )
     if isinstance(raw, int):
         return str(raw)
@@ -532,6 +552,90 @@ def format_trp_pages_query_from_page_nrs(page_nrs: List[int]) -> str:
     if uniq == list(range(lo, hi + 1)):
         return f"{lo}-{hi}"
     return ",".join(str(p) for p in uniq)
+
+
+@dataclass(frozen=True)
+class TrpUploadOutcome:
+    """Result of Legacy ``/uploads`` ingest through server-reported ``docId`` and page map."""
+
+    collection_id: str
+    doc_id: str
+    upload_id: int
+    ingest_job_id: str
+    pages_query: str
+    page_index_to_page_nr: Dict[int, int]
+
+
+def run_trp_upload_page_images_through_ingest(
+    session: requests.Session,
+    *,
+    collection_id: str,
+    pages: List[PageImage],
+    title: Optional[str] = None,
+    poll_interval_sec: float = POLL_INTERVAL_SEC,
+    max_wait_sec: float = POLL_MAX_WAIT_SEC,
+    timeout_sec: float = DEFAULT_HTTP_TIMEOUT_SEC,
+) -> TrpUploadOutcome:
+    """
+    Engine-only orchestration: descriptor → POST /uploads → PUT each PNG (img-only) → poll
+    ingest job → top-level ``docId`` → GET pages metadata → strict ``page_index`` → ``pageNr`` map.
+
+    Does **not** run PyLaia / recognition (PR #2 path unchanged). Caller must already have a
+    logged-in ``session`` (e.g. ``login_trp_server``).
+    """
+    if not pages:
+        raise _http_permanent("Transkribus upload requires at least one PageImage")
+    descriptor = build_document_upload_descriptor_json(pages, title=title)
+    upload_id = create_trp_upload_doc_structure(
+        session,
+        collection_id=collection_id,
+        descriptor=descriptor,
+        timeout_sec=timeout_sec,
+    )
+    sorted_pages = sorted(pages, key=lambda p: p.page_index)
+    ingest_job_id: Optional[str] = None
+    for pi in sorted_pages:
+        fn = trp_upload_png_file_name(page_index=pi.page_index)
+        jid = put_trp_upload_page_image_only(
+            session,
+            upload_id,
+            file_name=fn,
+            image_bytes=pi.image_bytes,
+            timeout_sec=timeout_sec,
+        )
+        if jid:
+            ingest_job_id = jid
+    if not ingest_job_id:
+        raise _http_permanent(
+            "Transkribus upload finished PUTs but no ingest jobId was returned "
+            "(expected on final PUT response)"
+        )
+    job = poll_job_until_done(
+        session,
+        ingest_job_id,
+        poll_interval_sec=poll_interval_sec,
+        max_wait_sec=max_wait_sec,
+        timeout_sec=timeout_sec,
+    )
+    doc_id = parse_doc_id_from_successful_trp_job(job)
+    page_nrs_for_query = sorted(int(pi.page_index) for pi in sorted_pages)
+    pages_query = format_trp_pages_query_from_page_nrs(page_nrs_for_query)
+    pages_meta = fetch_pages_metadata(
+        session,
+        collection_id=collection_id,
+        document_id=doc_id,
+        pages_query=pages_query,
+        timeout_sec=timeout_sec,
+    )
+    page_index_to_page_nr = strict_map_page_index_to_trp_page_nr(pages, pages_meta)
+    return TrpUploadOutcome(
+        collection_id=str(collection_id).strip(),
+        doc_id=doc_id,
+        upload_id=int(upload_id),
+        ingest_job_id=str(ingest_job_id),
+        pages_query=pages_query,
+        page_index_to_page_nr=dict(page_index_to_page_nr),
+    )
 
 
 def _transcript_newest_rank(t: dict) -> Tuple[int, int]:

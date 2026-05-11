@@ -194,22 +194,22 @@ The first Transkribus PR establishes only the **plumbing** so a second engine ca
 
 ### Decision
 
-- **Engine layer only** in this phase: narrow helpers and parsers in `documents/services/transkribus_engine.py` for the Legacy **`POST /uploads` → `PUT /uploads/{uploadId}` (multipart `img`) → ingest `jobId` → `GET /jobs/{jobId}`** flow documented in the [Transkribus REST upload article](https://www.transkribus.org/blog/transkribus/docu/rest-api/upload) and **`/uploads` resources in** `https://transkribus.eu/TrpServer/rest/application.wadl` (and `?detail=true`).
-- **PR #3 does not implement full upload orchestration** (no single function chaining create → N×PUT → poll → `docId` → pages map in this PR).
+- **Engine layer only:** helpers, parsers, job polling rules, and **`run_trp_upload_page_images_through_ingest`** in `documents/services/transkribus_engine.py` for the Legacy **`POST /uploads` → `PUT /uploads/{uploadId}` (multipart `img`) → ingest `jobId` → `GET /jobs/{jobId}`** flow documented in the [Transkribus REST upload article](https://www.transkribus.org/blog/transkribus/docu/rest-api/upload) and **`/uploads` resources in** `https://transkribus.eu/TrpServer/rest/application.wadl` (and `?detail=true`).
+- **Verified on the real Transkribus account (authenticated trace):** `POST /uploads?collId=…` returns top-level **`uploadId`**; **`PUT …/{uploadId}`** with **img-only** multipart succeeds for PNG pages; the final ingest job is **`GET /jobs/{jobId}`** with **`state=FINISHED`**, **`success=true`**, **`type=Create Document`**, **`jobImpl=UploadImportJob`**, and top-level **`docId`**; **`GET /collections/{collId}/{docId}/pages?pages=…`** returns page metadata including **`pageNr`**, **`imgFileName`** matching the synthetic upload name, and **`tsList.transcripts`** (e.g. status NEW with PAGE XML URL).
 - **PR #3 does not wire the adapter** (`TranskribusAdapter` unchanged).
 - **PR #3 does not add env flags** for Transkribus upload (no new `WorkerEnvConfig` / `validate_required_env` fields for this flow).
 - **No** `OCR_ROUTES`, **`run_worker.py`**, **`HtrResult`**, **`DocumentTextResult.engine`** semantics, or **DB schema** for Transkribus document ids in PR #3.
-- **`docId` parsing is provisional:** code assumes **top-level** **`docId`** on a terminal-success `GET /jobs/{jobId}` JSON object **only until** an **authenticated redacted** successful ingest job response from **Yael** confirms or corrects that shape for this account. It is **not** claimed as proven for this deployment; third-party client key lists are hints only.
-- **No** cleanup/retention in PR #3. **Once orchestration exists in a later PR**, dev uploads may **accumulate** in the target collection and retries may create **duplicate** server-side documents until an explicit retention/dedup policy is designed.
+- **PR #3 does not run recognition** after upload; PR #2 PyLaia / transcript flow remains separate (no duplication inside the upload orchestrator).
+- **`docId`:** **verified** as **top-level** on successful **UploadImportJob** for this account; parser remains **narrow** (top-level `docId` only).
+- **Job polling (shared with PyLaia and other TrpServer jobs):** terminal **success** requires **`success is True`** and either a completed **`state`** (`FINISHED`, `DONE`, or `COMPLETED`) or a **missing/blank** `state` (legacy payloads). Terminal **failure** uses explicit states **`FAILED` / `ERROR` / `CANCELLED` / `CANCELED`**, or completed `state` **without** success. **`success=false` with `CREATED`** (e.g. queue description) is **non-terminal**—keep polling. Do **not** treat **`success=false` alone** as failure while the job is still queued or running. **`nrOfErrors` > 0** is terminal failure **only** when `state` is **not** in the non-terminal set (`''`, `CREATED`, `RUNNING`, `WAITING`, `QUEUED`); while still in those states, polling continues (covers in-progress noise without aborting early).
+- **Production intent (upload path):** one VS-Archive **document upload / processing run** that uses Transkribus upload should create **one new** Transkribus document inside the configured **`TRANSKRIBUS_COLLECTION_ID`** via **`POST /uploads`** (new `docId`). Do **not** append pages to a fixed, pre-existing Transkribus `docId` as part of that design—that remains the separate **existing-server-document** dev path only.
+- **No** cleanup/retention in PR #3. **Once adapter/worker use upload in production**, dev uploads may **accumulate** and retries may create **duplicate** server-side documents until an explicit retention/dedup policy is designed.
 
-### Verified / narrow contracts encoded in code
+### Implemented in code (PR #3)
 
-- **Descriptor JSON:** `md` (optional) + `pageList.pages[]` with **`fileName`** and **`pageNr`** only (no `pageXmlName`), so each page can use **`img`**-only multipart `PUT` per upload docs (“all other fields optional”; `xml` only if `pageXmlName` was set). Page rows are ordered by ascending **`PageImage.page_index`**.
-- **`uploadId`:** parsed only from **top-level** JSON **`uploadId`** on create response (fixture-aligned test).
-- **`jobId` after PUT:** parsed only when the `PUT` response body is non-empty JSON with top-level **`jobId`** (optional until last page).
-- **`docId` after ingest:** see provisional rule above; parser is intentionally narrow pending redacted trace.
+- **`run_trp_upload_page_images_through_ingest`:** descriptor → `POST /uploads` → ordered `PUT` of each PNG → last non-empty **`jobId`** → **`poll_job_until_done`** → **`parse_doc_id_from_successful_trp_job`** → **`fetch_pages_metadata`** → **`strict_map_page_index_to_trp_page_nr`** → **`TrpUploadOutcome`** (includes `pages_query` for follow-on calls).
 
 ### Deferred
 
-- Full **orchestration** helper and PR #2 **recognition** composition after upload (reuse existing PyLaia functions without duplicating their bodies) once the manual trace is archived.
-- **Adapter** wiring (and any new env flag) remains deferred until orchestration is stable.
+- **Adapter / worker** calling upload orchestration then PR #2 recognition in one product path (and any new env flags for that) remains a **follow-up PR**.
+- **Retention/dedup** for Transkribus-side documents.
