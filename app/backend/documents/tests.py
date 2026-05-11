@@ -378,8 +378,31 @@ class TranskribusUploadHelpersTests(SimpleTestCase):
     def test_parse_doc_id_from_successful_trp_job_top_level(self):
         from documents.services.transkribus_engine import parse_doc_id_from_successful_trp_job
 
-        job = {"success": True, "state": "DONE", "docId": 987654}
+        job = {
+            "success": True,
+            "state": "FINISHED",
+            "type": "Create Document",
+            "jobImpl": "UploadImportJob",
+            "docId": 987654,
+        }
         self.assertEqual(parse_doc_id_from_successful_trp_job(job), "987654")
+
+    def test_parse_doc_id_from_successful_trp_job_accepts_done_state(self):
+        from documents.services.transkribus_engine import parse_doc_id_from_successful_trp_job
+
+        job = {"success": True, "state": "DONE", "docId": 1}
+        self.assertEqual(parse_doc_id_from_successful_trp_job(job), "1")
+
+    def test_parse_doc_id_rejects_success_true_while_running(self):
+        from documents.services.transkribus_engine import (
+            TranskribusPermanentError,
+            parse_doc_id_from_successful_trp_job,
+        )
+
+        with self.assertRaises(TranskribusPermanentError):
+            parse_doc_id_from_successful_trp_job(
+                {"success": True, "state": "RUNNING", "docId": 1}
+            )
 
     def test_parse_doc_id_from_job_fails_when_not_success(self):
         from documents.services.transkribus_engine import (
@@ -428,6 +451,297 @@ class TranskribusUploadHelpersTests(SimpleTestCase):
         self.assertEqual(format_trp_pages_query_from_page_nrs([3]), "3")
         self.assertEqual(format_trp_pages_query_from_page_nrs([1, 2, 3]), "1-3")
         self.assertEqual(format_trp_pages_query_from_page_nrs([1, 3]), "1,3")
+
+    @patch("documents.services.transkribus_engine.fetch_pages_metadata")
+    @patch("documents.services.transkribus_engine.poll_job_until_done")
+    @patch("documents.services.transkribus_engine.put_trp_upload_page_image_only")
+    @patch("documents.services.transkribus_engine.create_trp_upload_doc_structure")
+    def test_run_trp_upload_page_images_through_ingest_wires_steps(
+        self, m_create, m_put, m_poll, m_fetch
+    ):
+        from documents.services.page_extraction import PageImage
+        from documents.services.transkribus_engine import (
+            TrpPageMetadata,
+            run_trp_upload_page_images_through_ingest,
+        )
+
+        m_create.return_value = 555
+        m_put.return_value = "ingest-job-1"
+        m_poll.return_value = {
+            "success": True,
+            "state": "FINISHED",
+            "type": "Create Document",
+            "jobImpl": "UploadImportJob",
+            "docId": 999,
+        }
+        m_fetch.return_value = [
+            TrpPageMetadata(1, 10, 999, None, []),
+        ]
+        session = requests.Session()
+        pages = [PageImage(page_index=1, image_bytes=b"\x89PNG", mime_type="image/png")]
+        out = run_trp_upload_page_images_through_ingest(
+            session,
+            collection_id="42",
+            pages=pages,
+            title="t",
+            poll_interval_sec=0.0,
+            max_wait_sec=30.0,
+        )
+        self.assertEqual(out.collection_id, "42")
+        self.assertEqual(out.doc_id, "999")
+        self.assertEqual(out.upload_id, 555)
+        self.assertEqual(out.ingest_job_id, "ingest-job-1")
+        self.assertEqual(out.pages_query, "1")
+        self.assertEqual(out.page_index_to_page_nr, {1: 1})
+        m_create.assert_called_once()
+        m_put.assert_called_once()
+        m_poll.assert_called_once_with(
+            session,
+            "ingest-job-1",
+            poll_interval_sec=0.0,
+            max_wait_sec=30.0,
+            timeout_sec=60,
+        )
+        m_fetch.assert_called_once()
+
+
+class TranskribusJobPollingTests(SimpleTestCase):
+    @patch("documents.services.transkribus_engine.get_job")
+    def test_poll_continues_past_upload_import_created_success_false(
+        self, m_get
+    ):
+        from documents.services.transkribus_engine import poll_job_until_done
+
+        m_get.side_effect = [
+            {
+                "success": False,
+                "state": "CREATED",
+                "nrOfErrors": 0,
+                "description": "1 in Queue",
+            },
+            {
+                "success": True,
+                "state": "FINISHED",
+                "type": "Create Document",
+                "jobImpl": "UploadImportJob",
+                "docId": 1,
+            },
+        ]
+        session = requests.Session()
+        job = poll_job_until_done(
+            session,
+            "j1",
+            poll_interval_sec=0.0,
+            max_wait_sec=10.0,
+        )
+        self.assertEqual(job.get("state"), "FINISHED")
+        self.assertTrue(job.get("success"))
+
+    @patch("documents.services.transkribus_engine.get_job")
+    def test_poll_finished_success_true_single_response(self, m_get):
+        from documents.services.transkribus_engine import poll_job_until_done
+
+        m_get.return_value = {"success": True, "state": "FINISHED", "docId": 9}
+        session = requests.Session()
+        job = poll_job_until_done(
+            session, "jfin", poll_interval_sec=0.0, max_wait_sec=5.0
+        )
+        self.assertTrue(job.get("success"))
+        self.assertEqual(job.get("docId"), 9)
+
+    @patch("documents.services.transkribus_engine.get_job")
+    def test_poll_success_true_while_running_is_not_terminal(self, m_get):
+        from documents.services.transkribus_engine import poll_job_until_done
+
+        m_get.side_effect = [
+            {"success": True, "state": "RUNNING"},
+            {"success": True, "state": "FINISHED", "docId": 99},
+        ]
+        session = requests.Session()
+        job = poll_job_until_done(
+            session,
+            "j2",
+            poll_interval_sec=0.0,
+            max_wait_sec=10.0,
+        )
+        self.assertEqual(job.get("state"), "FINISHED")
+
+    @patch("documents.services.transkribus_engine.get_job")
+    def test_poll_failed_state_raises(self, m_get):
+        from documents.services.transkribus_engine import (
+            TranskribusPermanentError,
+            poll_job_until_done,
+        )
+
+        m_get.return_value = {
+            "success": False,
+            "state": "FAILED",
+            "description": "boom",
+        }
+        session = requests.Session()
+        with self.assertRaises(TranskribusPermanentError) as ctx:
+            poll_job_until_done(session, "j3", poll_interval_sec=0.0, max_wait_sec=5.0)
+        self.assertIn("boom", str(ctx.exception))
+
+    @patch("documents.services.transkribus_engine.get_job")
+    def test_poll_finished_without_success_raises(self, m_get):
+        from documents.services.transkribus_engine import (
+            TranskribusPermanentError,
+            poll_job_until_done,
+        )
+
+        m_get.return_value = {"success": False, "state": "FINISHED"}
+        session = requests.Session()
+        with self.assertRaises(TranskribusPermanentError):
+            poll_job_until_done(session, "j4", poll_interval_sec=0.0, max_wait_sec=5.0)
+
+    @patch("documents.services.transkribus_engine.get_job")
+    def test_poll_queued_success_false_keeps_polling(self, m_get):
+        from documents.services.transkribus_engine import poll_job_until_done
+
+        m_get.side_effect = [
+            {"success": False, "state": "QUEUED", "nrOfErrors": 0},
+            {"success": True, "state": "FINISHED", "docId": 2},
+        ]
+        session = requests.Session()
+        job = poll_job_until_done(
+            session, "jq", poll_interval_sec=0.0, max_wait_sec=10.0
+        )
+        self.assertEqual(job.get("state"), "FINISHED")
+
+    @patch("documents.services.transkribus_engine.get_job")
+    def test_poll_waiting_success_false_keeps_polling(self, m_get):
+        from documents.services.transkribus_engine import poll_job_until_done
+
+        m_get.side_effect = [
+            {"success": False, "state": "WAITING", "nrOfErrors": 0},
+            {"success": True, "state": "FINISHED"},
+        ]
+        session = requests.Session()
+        job = poll_job_until_done(
+            session, "jw", poll_interval_sec=0.0, max_wait_sec=10.0
+        )
+        self.assertTrue(job.get("success"))
+
+    @patch("documents.services.transkribus_engine.get_job")
+    def test_poll_completed_success_true(self, m_get):
+        from documents.services.transkribus_engine import poll_job_until_done
+
+        m_get.return_value = {"success": True, "state": "COMPLETED", "docId": 3}
+        session = requests.Session()
+        job = poll_job_until_done(session, "jc", poll_interval_sec=0.0, max_wait_sec=5.0)
+        self.assertEqual(job.get("state"), "COMPLETED")
+
+    @patch("documents.services.transkribus_engine.get_job")
+    def test_poll_done_success_true_pylaia_style(self, m_get):
+        from documents.services.transkribus_engine import poll_job_until_done
+
+        m_get.return_value = {"success": True, "state": "DONE", "description": "done"}
+        session = requests.Session()
+        job = poll_job_until_done(session, "jd", poll_interval_sec=0.0, max_wait_sec=5.0)
+        self.assertEqual(job.get("state"), "DONE")
+
+    @patch("documents.services.transkribus_engine.get_job")
+    def test_poll_error_state_raises(self, m_get):
+        from documents.services.transkribus_engine import (
+            TranskribusPermanentError,
+            poll_job_until_done,
+        )
+
+        m_get.return_value = {"success": False, "state": "ERROR", "description": "bad"}
+        session = requests.Session()
+        with self.assertRaises(TranskribusPermanentError):
+            poll_job_until_done(session, "je", poll_interval_sec=0.0, max_wait_sec=5.0)
+
+    @patch("documents.services.transkribus_engine.get_job")
+    def test_poll_cancelled_state_raises(self, m_get):
+        from documents.services.transkribus_engine import (
+            TranskribusPermanentError,
+            poll_job_until_done,
+        )
+
+        m_get.return_value = {"success": False, "state": "CANCELLED"}
+        session = requests.Session()
+        with self.assertRaises(TranskribusPermanentError):
+            poll_job_until_done(session, "jcan", poll_interval_sec=0.0, max_wait_sec=5.0)
+
+    @patch("documents.services.transkribus_engine.get_job")
+    def test_poll_canceled_us_spelling_raises(self, m_get):
+        from documents.services.transkribus_engine import (
+            TranskribusPermanentError,
+            poll_job_until_done,
+        )
+
+        m_get.return_value = {"success": False, "state": "CANCELED"}
+        session = requests.Session()
+        with self.assertRaises(TranskribusPermanentError):
+            poll_job_until_done(session, "jus", poll_interval_sec=0.0, max_wait_sec=5.0)
+
+    @patch("documents.services.transkribus_engine.get_job")
+    def test_poll_running_nr_of_errors_positive_keeps_polling_then_success(self, m_get):
+        """nrOfErrors>0 is ignored while state is still RUNNING (non-terminal)."""
+        from documents.services.transkribus_engine import poll_job_until_done
+
+        m_get.side_effect = [
+            {"success": False, "state": "RUNNING", "nrOfErrors": 2},
+            {"success": True, "state": "DONE"},
+        ]
+        session = requests.Session()
+        job = poll_job_until_done(
+            session, "jnr", poll_interval_sec=0.0, max_wait_sec=10.0
+        )
+        self.assertEqual(job.get("state"), "DONE")
+
+    @patch("documents.services.transkribus_engine.fetch_transcript_xml")
+    @patch("documents.services.transkribus_engine.fetch_pages_metadata")
+    @patch("documents.services.transkribus_engine.get_job")
+    @patch("documents.services.transkribus_engine.start_pylaia_recognition")
+    @patch("documents.services.transkribus_engine.login_trp_server")
+    def test_transcribe_existing_server_document_uses_poll_until_pylaia_done(
+        self, m_login, m_start, m_get, m_fetch_pages, m_fetch_xml
+    ):
+        """PR #2 path still completes when poll sees in-progress then DONE + success."""
+        from documents.services.transkribus_engine import (
+            TrpPageMetadata,
+            transcribe_existing_server_document,
+        )
+
+        m_start.return_value = "j99"
+        m_get.side_effect = [
+            {"success": False, "state": "WAITING", "nrOfErrors": 0},
+            {"success": True, "state": "DONE"},
+        ]
+        m_fetch_pages.return_value = [
+            TrpPageMetadata(
+                1,
+                10,
+                1,
+                None,
+                [
+                    {
+                        "jobId": "j99",
+                        "modelId": "42",
+                        "url": "https://example.invalid/transcript",
+                    }
+                ],
+            )
+        ]
+        m_fetch_xml.return_value = b"""<?xml version="1.0" encoding="UTF-8"?>
+        <PcGts xmlns="http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15">
+          <Page><TextLine><TextEquiv><Unicode>hi</Unicode></TextEquiv></TextLine></Page>
+        </PcGts>"""
+        text, reasons = transcribe_existing_server_document(
+            username="dummy",
+            password="dummy",
+            bearer_token="dummy",
+            collection_id="1",
+            model_id="42",
+            dev_document_id="9",
+            dev_pages_query="1",
+        )
+        self.assertEqual(text, "hi")
+        self.assertEqual(reasons, [])
+        self.assertEqual(m_get.call_count, 2)
 
 
 class TranskribusEngineUnitTests(SimpleTestCase):
