@@ -278,6 +278,158 @@ class TranskribusAdapterTests(SimpleTestCase):
             )
 
 
+class TranskribusUploadHelpersTests(SimpleTestCase):
+    """PR #3 Legacy /uploads helpers — no live TrpServer calls."""
+
+    def test_build_document_upload_descriptor_json_img_only_pages(self):
+        from documents.services.page_extraction import PageImage
+        from documents.services.transkribus_engine import build_document_upload_descriptor_json
+
+        pages = [
+            PageImage(page_index=2, image_bytes=b"x", mime_type="image/png"),
+            PageImage(page_index=1, image_bytes=b"y", mime_type="image/png"),
+        ]
+        body = build_document_upload_descriptor_json(pages, title="  Doc A  ")
+        self.assertEqual(
+            body["pageList"]["pages"],
+            [
+                {"fileName": "vs_archive_p000001.png", "pageNr": 1},
+                {"fileName": "vs_archive_p000002.png", "pageNr": 2},
+            ],
+        )
+        self.assertEqual(body["md"]["title"], "Doc A")
+        for p in body["pageList"]["pages"]:
+            self.assertNotIn("pageXmlName", p)
+
+    def test_build_document_upload_descriptor_stable_order_by_page_index(self):
+        """pageList.pages must follow ascending page_index regardless of input list order."""
+        from documents.services.page_extraction import PageImage
+        from documents.services.transkribus_engine import build_document_upload_descriptor_json
+
+        pages = [
+            PageImage(page_index=5, image_bytes=b"e", mime_type="image/png"),
+            PageImage(page_index=1, image_bytes=b"a", mime_type="image/png"),
+            PageImage(page_index=3, image_bytes=b"c", mime_type="image/png"),
+        ]
+        body = build_document_upload_descriptor_json(pages)
+        nrs = [p["pageNr"] for p in body["pageList"]["pages"]]
+        names = [p["fileName"] for p in body["pageList"]["pages"]]
+        self.assertEqual(nrs, [1, 3, 5])
+        self.assertEqual(
+            names,
+            [
+                "vs_archive_p000001.png",
+                "vs_archive_p000003.png",
+                "vs_archive_p000005.png",
+            ],
+        )
+
+    def test_build_document_upload_descriptor_rejects_duplicate_page_index(self):
+        from documents.services.page_extraction import PageImage
+        from documents.services.transkribus_engine import (
+            TranskribusPermanentError,
+            build_document_upload_descriptor_json,
+        )
+
+        pages = [
+            PageImage(page_index=1, image_bytes=b"a", mime_type="image/png"),
+            PageImage(page_index=1, image_bytes=b"b", mime_type="image/png"),
+        ]
+        with self.assertRaises(TranskribusPermanentError) as ctx:
+            build_document_upload_descriptor_json(pages)
+        self.assertIn("Duplicate", str(ctx.exception))
+
+    def test_parse_upload_create_json_upload_id_redacted_fixture(self):
+        # Shape aligned with Transkribus REST upload article (redacted / minimal).
+        from documents.services.transkribus_engine import parse_upload_create_json_upload_id
+
+        payload = {
+            "uploadId": 1234567,
+            "pageList": {
+                "pages": [
+                    {"fileName": "vs_archive_p000001.png", "pageNr": 1},
+                ]
+            },
+        }
+        self.assertEqual(parse_upload_create_json_upload_id(payload), 1234567)
+        self.assertEqual(parse_upload_create_json_upload_id({"uploadId": "42"}), 42)
+
+    def test_parse_upload_put_json_job_id_if_present(self):
+        from documents.services.transkribus_engine import parse_upload_put_json_job_id_if_present
+
+        r_ok = requests.Response()
+        r_ok.status_code = 200
+        r_ok._content = b'{"jobId": "ingest-7"}'
+        r_ok.encoding = "utf-8"
+        self.assertEqual(parse_upload_put_json_job_id_if_present(r_ok), "ingest-7")
+
+        r_empty = requests.Response()
+        r_empty.status_code = 200
+        r_empty._content = b""
+        r_empty.encoding = "utf-8"
+        self.assertIsNone(parse_upload_put_json_job_id_if_present(r_empty))
+
+        r_no_job = requests.Response()
+        r_no_job.status_code = 200
+        r_no_job._content = b'{"status":"ok"}'
+        r_no_job.encoding = "utf-8"
+        self.assertIsNone(parse_upload_put_json_job_id_if_present(r_no_job))
+
+    def test_parse_doc_id_from_successful_trp_job_top_level(self):
+        from documents.services.transkribus_engine import parse_doc_id_from_successful_trp_job
+
+        job = {"success": True, "state": "DONE", "docId": 987654}
+        self.assertEqual(parse_doc_id_from_successful_trp_job(job), "987654")
+
+    def test_parse_doc_id_from_job_fails_when_not_success(self):
+        from documents.services.transkribus_engine import (
+            TranskribusPermanentError,
+            parse_doc_id_from_successful_trp_job,
+        )
+
+        with self.assertRaises(TranskribusPermanentError):
+            parse_doc_id_from_successful_trp_job({"success": False, "docId": 1})
+
+    def test_strict_map_page_index_to_trp_page_nr_orders_by_sort(self):
+        from documents.services.page_extraction import PageImage
+        from documents.services.transkribus_engine import (
+            TrpPageMetadata,
+            strict_map_page_index_to_trp_page_nr,
+        )
+
+        imgs = [
+            PageImage(page_index=2, image_bytes=b"x", mime_type="image/png"),
+            PageImage(page_index=1, image_bytes=b"y", mime_type="image/png"),
+        ]
+        meta = [
+            TrpPageMetadata(1, 10, 100, None, []),
+            TrpPageMetadata(2, 20, 100, None, []),
+        ]
+        m = strict_map_page_index_to_trp_page_nr(imgs, meta)
+        self.assertEqual(m, {1: 1, 2: 2})
+
+    def test_strict_map_rejects_count_mismatch(self):
+        from documents.services.page_extraction import PageImage
+        from documents.services.transkribus_engine import (
+            TrpPageMetadata,
+            TranskribusPermanentError,
+            strict_map_page_index_to_trp_page_nr,
+        )
+
+        imgs = [PageImage(page_index=1, image_bytes=b"x", mime_type="image/png")]
+        meta: list = []
+        with self.assertRaises(TranskribusPermanentError) as ctx:
+            strict_map_page_index_to_trp_page_nr(imgs, meta)
+        self.assertIn("mismatch", str(ctx.exception).lower())
+
+    def test_format_trp_pages_query_from_page_nrs(self):
+        from documents.services.transkribus_engine import format_trp_pages_query_from_page_nrs
+
+        self.assertEqual(format_trp_pages_query_from_page_nrs([3]), "3")
+        self.assertEqual(format_trp_pages_query_from_page_nrs([1, 2, 3]), "1-3")
+        self.assertEqual(format_trp_pages_query_from_page_nrs([1, 3]), "1,3")
+
+
 class TranskribusEngineUnitTests(SimpleTestCase):
     def test_parse_page_xml_extracts_unicode_lines(self):
         from documents.services.transkribus_engine import parse_page_xml_to_text
