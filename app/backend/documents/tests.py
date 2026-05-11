@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import requests
 from django.test import SimpleTestCase, TestCase
 
 from documents.management.commands.run_worker import Command
@@ -93,19 +94,19 @@ class HtrDispatcherTests(SimpleTestCase):
                 text_input_type=Document.TextInputType.HANDWRITTEN,
             )
 
-    def test_transkribus_route_dispatches_to_skeleton_adapter(self):
+    def test_transkribus_route_requires_worker_env(self):
         route = OcrRouteConfig(
             engine_key=DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
             prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
         )
         with self.assertRaises(EnginePermanentError) as ctx:
             transcribe_pages(
-                pages=[],
+                pages=[SimpleNamespace(page_index=1)],
                 language_hint="en",
                 text_input_type=Document.TextInputType.HANDWRITTEN,
                 route=route,
             )
-        self.assertIn("not implemented", str(ctx.exception).lower())
+        self.assertIn("worker_env", str(ctx.exception).lower())
 
 
 class HtrRegistryTests(SimpleTestCase):
@@ -115,17 +116,316 @@ class HtrRegistryTests(SimpleTestCase):
         self.assertEqual(get_htr_adapter(" transkribus ").engine_key, "TRANSKRIBUS")
 
 
-class TranskribusAdapterSkeletonTests(SimpleTestCase):
-    def test_execute_raises_explicit_not_implemented(self):
+class TranskribusAdapterTests(SimpleTestCase):
+    def test_execute_requires_worker_env(self):
         adapter = TranskribusAdapter()
         with self.assertRaises(EnginePermanentError) as ctx:
             adapter.execute(
-                pages=[],
+                pages=[SimpleNamespace(page_index=1)],
                 language_hint="en",
                 prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
             )
-        self.assertIn("Transkribus", str(ctx.exception))
-        self.assertIn("not implemented", str(ctx.exception).lower())
+        self.assertIn("worker_env", str(ctx.exception).lower())
+
+    def test_execute_fails_fast_when_existing_doc_gate_disabled(self):
+        from documents.services.env_validation import WorkerEnvConfig
+
+        adapter = TranskribusAdapter()
+        cfg = WorkerEnvConfig(
+            gemini_api_key="k",
+            gemini_confidence_threshold=0.7,
+            min_text_length=20,
+            max_retries=3,
+            retry_delay_seconds_1=30,
+            retry_delay_seconds_2=300,
+            report_window_start="00:00",
+            report_send_time="08:00",
+            free_tier_alert_pct=80,
+            gemini_free_daily_request_limit=1500,
+            gemini_free_daily_image_limit=1000,
+            transkribus_free_monthly_credits=500,
+            enable_hybrid_htr=False,
+            enable_daily_report=False,
+            smtp_host=None,
+            smtp_port=None,
+            smtp_username=None,
+            smtp_password=None,
+            default_from_email=None,
+            transkribus_api_token=None,
+            transkribus_username=None,
+            transkribus_password=None,
+            gemini_temperature=0.2,
+            gemini_top_k=40,
+            gemini_top_p=0.95,
+            gemini_max_output_tokens=2048,
+            gemini_double_pass=False,
+            gemini_consistency_min_ratio=0.7,
+        )
+        with self.assertRaises(EnginePermanentError) as ctx:
+            adapter.execute(
+                pages=[SimpleNamespace(page_index=1)],
+                language_hint="en",
+                prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+                worker_env=cfg,
+            )
+        msg = str(ctx.exception).lower()
+        self.assertIn("existing-server-document", msg.replace("_", "-"))
+
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.transcribe_existing_server_document")
+    def test_execute_success_maps_htr_result(self, mock_tr):
+        from documents.services.env_validation import WorkerEnvConfig
+
+        mock_tr.return_value = ("line one\nline two", [])
+        adapter = TranskribusAdapter()
+        cfg = WorkerEnvConfig(
+            gemini_api_key="k",
+            gemini_confidence_threshold=0.7,
+            min_text_length=20,
+            max_retries=3,
+            retry_delay_seconds_1=30,
+            retry_delay_seconds_2=300,
+            report_window_start="00:00",
+            report_send_time="08:00",
+            free_tier_alert_pct=80,
+            gemini_free_daily_request_limit=1500,
+            gemini_free_daily_image_limit=1000,
+            transkribus_free_monthly_credits=500,
+            enable_hybrid_htr=False,
+            enable_daily_report=False,
+            smtp_host=None,
+            smtp_port=None,
+            smtp_username=None,
+            smtp_password=None,
+            default_from_email=None,
+            transkribus_api_token="token",
+            transkribus_username="u",
+            transkribus_password="p",
+            gemini_temperature=0.2,
+            gemini_top_k=40,
+            gemini_top_p=0.95,
+            gemini_max_output_tokens=2048,
+            gemini_double_pass=False,
+            gemini_consistency_min_ratio=0.7,
+            transkribus_use_existing_server_document=True,
+            transkribus_dev_existing_document_id="99",
+            transkribus_collection_id="1",
+            transkribus_model_id="42",
+            transkribus_dev_existing_pages="1",
+        )
+        from documents.services.page_extraction import PageImage
+
+        result = adapter.execute(
+            pages=[PageImage(page_index=1, image_bytes=b"x", mime_type="image/png")],
+            language_hint="en",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            worker_env=cfg,
+        )
+        self.assertEqual(result.text, "line one\nline two")
+        self.assertFalse(result.needs_review)
+        self.assertEqual(result.engine_name, "transkribus-pylaia:42")
+        mock_tr.assert_called_once()
+
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.transcribe_existing_server_document")
+    def test_execute_maps_retryable_engine_error(self, mock_tr):
+        from documents.services.env_validation import WorkerEnvConfig
+        from documents.services.transkribus_engine import TranskribusRetryableError
+
+        mock_tr.side_effect = TranskribusRetryableError("slow")
+        adapter = TranskribusAdapter()
+        cfg = WorkerEnvConfig(
+            gemini_api_key="k",
+            gemini_confidence_threshold=0.7,
+            min_text_length=20,
+            max_retries=3,
+            retry_delay_seconds_1=30,
+            retry_delay_seconds_2=300,
+            report_window_start="00:00",
+            report_send_time="08:00",
+            free_tier_alert_pct=80,
+            gemini_free_daily_request_limit=1500,
+            gemini_free_daily_image_limit=1000,
+            transkribus_free_monthly_credits=500,
+            enable_hybrid_htr=False,
+            enable_daily_report=False,
+            smtp_host=None,
+            smtp_port=None,
+            smtp_username=None,
+            smtp_password=None,
+            default_from_email=None,
+            transkribus_api_token="t",
+            transkribus_username="u",
+            transkribus_password="p",
+            gemini_temperature=0.2,
+            gemini_top_k=40,
+            gemini_top_p=0.95,
+            gemini_max_output_tokens=2048,
+            gemini_double_pass=False,
+            gemini_consistency_min_ratio=0.7,
+            transkribus_use_existing_server_document=True,
+            transkribus_dev_existing_document_id="1",
+            transkribus_collection_id="2",
+            transkribus_model_id="3",
+            transkribus_dev_existing_pages="1",
+        )
+        from documents.services.page_extraction import PageImage
+
+        with self.assertRaises(EngineRetryableError):
+            adapter.execute(
+                pages=[PageImage(page_index=1, image_bytes=b"x", mime_type="image/png")],
+                language_hint="en",
+                prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+                worker_env=cfg,
+            )
+
+
+class TranskribusEngineUnitTests(SimpleTestCase):
+    def test_parse_page_xml_extracts_unicode_lines(self):
+        from documents.services.transkribus_engine import parse_page_xml_to_text
+
+        xml = b"""<?xml version="1.0" encoding="UTF-8"?>
+        <PcGts xmlns="http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15">
+          <Page>
+            <TextLine><TextEquiv><Unicode>alpha</Unicode></TextEquiv></TextLine>
+            <TextLine><TextEquiv><Unicode>beta</Unicode></TextEquiv></TextLine>
+            <TextLine><TextEquiv><Unicode></Unicode></TextEquiv></TextLine>
+          </Page>
+        </PcGts>"""
+        text = parse_page_xml_to_text(xml)
+        self.assertEqual(text, "alpha\nbeta")
+
+    def test_parse_page_xml_skips_missing_unicode_in_namespace(self):
+        from documents.services.transkribus_engine import parse_page_xml_to_text
+
+        xml = b"""<?xml version="1.0" encoding="UTF-8"?>
+        <PcGts xmlns="http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15">
+          <Page>
+            <TextLine><TextEquiv xmlns="http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15"></TextEquiv></TextLine>
+            <TextLine><TextEquiv><Unicode>only</Unicode></TextEquiv></TextLine>
+          </Page>
+        </PcGts>"""
+        text = parse_page_xml_to_text(xml)
+        self.assertEqual(text, "only")
+
+    def test_pick_transcript_prefers_job_and_model(self):
+        from documents.services.transkribus_engine import pick_transcript
+
+        transcripts = [
+            {"tsId": "1", "jobId": "9", "modelId": "8", "url": "http://wrong"},
+            {"tsId": "2", "jobId": "10", "modelId": "20", "url": "http://ok"},
+        ]
+        chosen = pick_transcript(transcripts, job_id="10", model_id="20")
+        self.assertEqual(chosen["url"], "http://ok")
+
+    def test_pick_transcript_newest_by_timestamp_then_ts_id(self):
+        from documents.services.transkribus_engine import pick_transcript
+
+        transcripts = [
+            {
+                "tsId": "1",
+                "jobId": "10",
+                "modelId": "20",
+                "url": "http://old",
+                "timestamp": 100,
+            },
+            {
+                "tsId": "2",
+                "jobId": "10",
+                "modelId": "20",
+                "url": "http://new",
+                "timestamp": 200,
+            },
+        ]
+        chosen = pick_transcript(transcripts, job_id="10", model_id="20")
+        self.assertEqual(chosen["url"], "http://new")
+
+        tie = [
+            {
+                "tsId": "5",
+                "jobId": "10",
+                "modelId": "20",
+                "url": "http://a",
+                "timestamp": 300,
+            },
+            {
+                "tsId": "9",
+                "jobId": "10",
+                "modelId": "20",
+                "url": "http://b",
+                "timestamp": 300,
+            },
+        ]
+        chosen_tie = pick_transcript(tie, job_id="10", model_id="20")
+        self.assertEqual(chosen_tie["url"], "http://b")
+
+    def test_get_job_maps_timeout_to_retryable(self):
+        from documents.services.transkribus_engine import TranskribusRetryableError, get_job
+
+        session = requests.Session()
+        with patch.object(session, "request", side_effect=requests.Timeout):
+            with self.assertRaises(TranskribusRetryableError) as ctx:
+                get_job(session, "99")
+        self.assertIn("timed out", str(ctx.exception).lower())
+
+    def test_get_job_maps_connection_error_to_retryable(self):
+        from documents.services.transkribus_engine import TranskribusRetryableError, get_job
+
+        session = requests.Session()
+        with patch.object(
+            session,
+            "request",
+            side_effect=requests.ConnectionError("refused"),
+        ):
+            with self.assertRaises(TranskribusRetryableError) as ctx:
+                get_job(session, "99")
+        self.assertIn("connection", str(ctx.exception).lower())
+
+    def test_login_fails_when_no_session_cookie_or_session_id(self):
+        from documents.services.transkribus_engine import (
+            TranskribusPermanentError,
+            login_trp_server,
+        )
+
+        session = requests.Session()
+        resp = requests.Response()
+        resp.status_code = 200
+        resp._content = b"<user><id>1</id></user>"
+        resp.encoding = "utf-8"
+
+        with patch.object(session, "request", return_value=resp):
+            with self.assertRaises(TranskribusPermanentError) as ctx:
+                login_trp_server(session, username="u", password="p")
+        self.assertIn("usable session", str(ctx.exception).lower())
+
+    def test_login_accepts_session_id_in_xml_without_cookie(self):
+        from documents.services.transkribus_engine import login_trp_server
+
+        session = requests.Session()
+        resp = requests.Response()
+        resp.status_code = 200
+        resp._content = b"<trp><sessionId>sess-token-value</sessionId></trp>"
+        resp.encoding = "utf-8"
+
+        with patch.object(session, "request", return_value=resp):
+            login_trp_server(session, username="u", password="p")
+
+        jsession_values = [
+            c.value for c in session.cookies if c.name == "JSESSIONID"
+        ]
+        self.assertEqual(jsession_values, ["sess-token-value"])
+
+    def test_fetch_pages_metadata_parses_json_array(self):
+        from documents.services.transkribus_engine import TrpPageMetadata
+
+        item = {
+            "pageNr": 5,
+            "pageId": 50,
+            "docId": 500,
+            "url": "http://page",
+            "tsList": {"transcripts": [{"jobId": "1", "modelId": "2", "url": "http://t"}]},
+        }
+        meta = TrpPageMetadata.from_item(item)
+        self.assertEqual(meta.page_nr, 5)
+        self.assertEqual(len(meta.transcripts), 1)
 
 
 class GeminiAdapterTests(SimpleTestCase):
@@ -370,7 +670,10 @@ class RunWorkerBehaviorTests(TestCase):
             failure.prompt_variant, DocumentTextResult.OcrPromptVariant.HANDWRITTEN
         )
         self.assertEqual(failure.error_code, "OCR_FAILED")
-        self.assertIn("not implemented", (failure.error_details or "").lower())
+        self.assertIn(
+            "existing-server-document",
+            (failure.error_details or "").lower().replace("_", "-"),
+        )
         mock_select_route.assert_called()
 
     @patch("documents.management.commands.run_worker.get_object_bytes")

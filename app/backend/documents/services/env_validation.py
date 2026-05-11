@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -170,6 +170,13 @@ class WorkerEnvConfig:
     gemini_double_pass: bool
     gemini_consistency_min_ratio: float
 
+    # Transkribus PR #2 (optional; validated in TranskribusAdapter when gate is on)
+    transkribus_use_existing_server_document: bool = field(default=False)
+    transkribus_dev_existing_document_id: Optional[str] = field(default=None)
+    transkribus_collection_id: Optional[str] = field(default=None)
+    transkribus_model_id: Optional[str] = field(default=None)
+    transkribus_dev_existing_pages: Optional[str] = field(default=None)
+
 
 def validate_required_env() -> WorkerEnvConfig:
     enable_hybrid_htr = _get_bool("ENABLE_HYBRID_HTR", default=False)
@@ -220,6 +227,14 @@ def validate_required_env() -> WorkerEnvConfig:
     transkribus_username = _get("TRANSKRIBUS_USERNAME")
     transkribus_password = _get("TRANSKRIBUS_PASSWORD")
 
+    transkribus_use_existing_server_document = _get_bool(
+        "TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT", default=False
+    )
+    transkribus_dev_existing_document_id = _get("TRANSKRIBUS_DEV_EXISTING_DOCUMENT_ID")
+    transkribus_collection_id = _get("TRANSKRIBUS_COLLECTION_ID")
+    transkribus_model_id = _get("TRANSKRIBUS_MODEL_ID")
+    transkribus_dev_existing_pages = _get("TRANSKRIBUS_DEV_EXISTING_PAGES")
+
     if enable_hybrid_htr and not (transkribus_api_token or (transkribus_username and transkribus_password)):
         raise EnvConfigError("ENABLE_HYBRID_HTR is true but Transkribus credentials missing.")
 
@@ -252,4 +267,9 @@ def validate_required_env() -> WorkerEnvConfig:
         gemini_max_output_tokens=gemini_max_output_tokens,
         gemini_double_pass=gemini_double_pass,
         gemini_consistency_min_ratio=float(gemini_consistency_min_ratio),
+        transkribus_use_existing_server_document=transkribus_use_existing_server_document,
+        transkribus_dev_existing_document_id=transkribus_dev_existing_document_id,
+        transkribus_collection_id=transkribus_collection_id,
+        transkribus_model_id=transkribus_model_id,
+        transkribus_dev_existing_pages=transkribus_dev_existing_pages,
     )
