@@ -4,10 +4,13 @@ import json
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from typing import Any, List, Optional, Tuple
+from io import BytesIO
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
+
+from documents.services.page_extraction import PageImage
 
 TRP_REST_BASE = "https://transkribus.eu/TrpServer/rest"
 _TRP_SESSION_COOKIE_DOMAIN = urlparse(TRP_REST_BASE).hostname or "transkribus.eu"
@@ -309,6 +312,226 @@ def fetch_pages_metadata(
     if not isinstance(data, list):
         raise _http_permanent("Transkribus pages JSON is not an array")
     return [TrpPageMetadata.from_item(item) for item in data if isinstance(item, dict)]
+
+
+# --- Legacy TrpServer /uploads (document ingest) — PR #3 engine helpers only -----------------
+# Contract sources: official upload article (JSON descriptor, uploadId, PUT multipart img/xml,
+# jobId after last PUT, poll GET /jobs/{id}) and WADL resources under /uploads.
+# docId extraction is provisional (see parse_doc_id_from_successful_trp_job) until an
+# authenticated redacted job response confirms the shape for VS-Archive’s TrpServer usage.
+
+
+def build_document_upload_descriptor_json(
+    pages: List[PageImage],
+    *,
+    title: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    Build the JSON body for POST /uploads?collId=… (createUploadDocStructure).
+
+    Pages are emitted in **stable ascending order by PageImage.page_index** (sorted copy;
+    input list order is ignored).
+
+    Omits pageXmlName and checksum fields so each page can be satisfied with an **img**-only
+    multipart PUT (per Transkribus REST upload documentation).
+    """
+    if not pages:
+        raise _http_permanent("Transkribus upload descriptor requires at least one PageImage")
+    sorted_pages = sorted(pages, key=lambda p: p.page_index)
+    seen: set[int] = set()
+    page_entries: List[dict[str, Any]] = []
+    for pi in sorted_pages:
+        if pi.page_index in seen:
+            raise _http_permanent(
+                f"Duplicate PageImage.page_index in upload batch: {pi.page_index}"
+            )
+        seen.add(pi.page_index)
+        file_name = f"vs_archive_p{pi.page_index:06d}.png"
+        page_entries.append({"fileName": file_name, "pageNr": int(pi.page_index)})
+    body: dict[str, Any] = {"pageList": {"pages": page_entries}}
+    if title is not None and str(title).strip():
+        body["md"] = {"title": str(title).strip()}
+    return body
+
+
+def parse_upload_create_json_upload_id(payload: dict[str, Any]) -> int:
+    """Parse uploadId from POST /uploads JSON response (narrow: top-level int only)."""
+    raw = payload.get("uploadId")
+    if isinstance(raw, bool) or raw is None:
+        raise _http_permanent("Transkribus upload create response missing uploadId")
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str) and raw.strip().isdigit():
+        return int(raw.strip())
+    raise _http_permanent("Transkribus upload create response has non-integer uploadId")
+
+
+def create_trp_upload_doc_structure(
+    session: requests.Session,
+    *,
+    collection_id: str,
+    descriptor: Mapping[str, Any],
+    timeout_sec: float = DEFAULT_HTTP_TIMEOUT_SEC,
+) -> int:
+    """
+    POST /uploads?collId=… with application/json body; returns uploadId.
+    """
+    try:
+        coll_int = int(str(collection_id).strip())
+    except ValueError as exc:
+        raise _http_permanent(
+            f"Transkribus upload requires numeric collId, got {collection_id!r}"
+        ) from exc
+    url = f"{TRP_REST_BASE}/uploads"
+    resp = _session_request(
+        session,
+        "POST",
+        url,
+        context="Transkribus upload create structure",
+        params={"collId": coll_int},
+        json=dict(descriptor),
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        timeout=timeout_sec,
+    )
+    try:
+        data = resp.json()
+    except json.JSONDecodeError as exc:
+        raise _http_permanent(
+            "Transkribus upload create response is not JSON (expected application/json)"
+        ) from exc
+    if not isinstance(data, dict):
+        raise _http_permanent("Transkribus upload create JSON is not an object")
+    return parse_upload_create_json_upload_id(data)
+
+
+def put_trp_upload_page_image_only(
+    session: requests.Session,
+    upload_id: int,
+    *,
+    file_name: str,
+    image_bytes: bytes,
+    timeout_sec: float = DEFAULT_HTTP_TIMEOUT_SEC,
+) -> Optional[str]:
+    """
+    PUT /uploads/{uploadId} with multipart form: single part **img** (image/png octet-stream).
+
+    Per REST upload docs, **xml** is required only when pageXmlName was set on that page in
+    the descriptor; this helper is for img-only pages.
+
+    Returns **jobId** string when the JSON body includes it (typically the final page’s PUT
+    after ingest starts); otherwise None.
+
+    Callers and future edits must **not** log image bytes, caller-supplied filenames that may
+    carry sensitive metadata, cookies, session ids, tokens, usernames, or passwords. This
+    implementation performs no logging of request bodies or auth material.
+    """
+    url = f"{TRP_REST_BASE}/uploads/{int(upload_id)}"
+    files = {
+        "img": (
+            file_name,
+            BytesIO(image_bytes),
+            "application/octet-stream",
+        ),
+    }
+    resp = _session_request(
+        session,
+        "PUT",
+        url,
+        context="Transkribus upload PUT page",
+        files=files,
+        timeout=timeout_sec,
+    )
+    return parse_upload_put_json_job_id_if_present(resp)
+
+
+def parse_upload_put_json_job_id_if_present(resp: requests.Response) -> Optional[str]:
+    """If PUT body is non-empty JSON object with jobId, return it as str; else None."""
+    text = (resp.text or "").strip()
+    if not text:
+        return None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        raise _http_permanent("Transkribus upload PUT returned non-JSON body")
+    if not isinstance(data, dict):
+        raise _http_permanent("Transkribus upload PUT JSON is not an object")
+    jid = data.get("jobId")
+    if jid is None:
+        return None
+    s = str(jid).strip()
+    return s if s else None
+
+
+def parse_doc_id_from_successful_trp_job(job: dict[str, Any]) -> str:
+    """
+    Read TrpServer document id from a **successful** GET /jobs/{jobId} payload.
+
+    **Provisional / narrow:** reads **top-level** ``docId`` only (int or non-empty string).
+    This is a working hypothesis for ingest jobs; it is **not** proven for the project’s
+    Transkribus account or job types until **Yael** supplies an **authenticated redacted**
+    successful job JSON—then either confirm this field or adjust the parser narrowly.
+
+    Third-party client docs (e.g. TranskribusPyClient ``getJobStatus`` key lists) are hints
+    only, not a guarantee of server behavior for this deployment.
+    """
+    if not _job_terminal_success(job):
+        raise _http_permanent(
+            "Transkribus job is not in terminal success state; cannot read docId"
+        )
+    raw = job.get("docId")
+    if isinstance(raw, bool) or raw is None:
+        raise _http_permanent(
+            "Transkribus ingest job JSON missing top-level docId (provisional parser); "
+            "provide a redacted successful job payload to confirm or adjust the field path."
+        )
+    if isinstance(raw, int):
+        return str(raw)
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    raise _http_permanent("Transkribus job docId is not a usable int or string")
+
+
+def strict_map_page_index_to_trp_page_nr(
+    page_images: List[PageImage],
+    pages_meta: List[TrpPageMetadata],
+) -> Dict[int, int]:
+    """
+    Pair VS-Archive pages with TrpServer page metadata by **sorted order** (page_index vs pageNr).
+
+    Does not require page_index == pageNr; use when counts match and ordering is stable.
+    """
+    sorted_imgs = sorted(page_images, key=lambda p: p.page_index)
+    sorted_meta = sorted(
+        pages_meta,
+        key=lambda m: (m.page_nr is None, m.page_nr if m.page_nr is not None else 0),
+    )
+    if len(sorted_imgs) != len(sorted_meta):
+        raise _http_permanent(
+            f"Transkribus page count mismatch: {len(sorted_imgs)} PageImage vs "
+            f"{len(sorted_meta)} server pages"
+        )
+    out: Dict[int, int] = {}
+    for img, meta in zip(sorted_imgs, sorted_meta, strict=True):
+        if meta.page_nr is None:
+            raise _http_permanent("Transkribus page metadata missing pageNr for mapping")
+        out[img.page_index] = int(meta.page_nr)
+    return out
+
+
+def format_trp_pages_query_from_page_nrs(page_nrs: List[int]) -> str:
+    """Build `pages=` query value for GET …/pages or PyLaia from a list of Transkribus pageNr."""
+    uniq = sorted({int(p) for p in page_nrs})
+    if not uniq:
+        raise _http_permanent("Cannot format empty Transkribus pages query")
+    if len(uniq) == 1:
+        return str(uniq[0])
+    lo, hi = uniq[0], uniq[-1]
+    if uniq == list(range(lo, hi + 1)):
+        return f"{lo}-{hi}"
+    return ",".join(str(p) for p in uniq)
 
 
 def _transcript_newest_rank(t: dict) -> Tuple[int, int]:

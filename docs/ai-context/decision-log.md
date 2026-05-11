@@ -189,3 +189,27 @@ The first Transkribus PR establishes only the **plumbing** so a second engine ca
 ### Credentials
 
 - Do **not** log username, password, session cookies, or tokens.
+
+## Transkribus PR #3 — Legacy `/uploads` ingest (engine-only; no adapter wiring yet)
+
+### Decision
+
+- **Engine layer only** in this phase: narrow helpers and parsers in `documents/services/transkribus_engine.py` for the Legacy **`POST /uploads` → `PUT /uploads/{uploadId}` (multipart `img`) → ingest `jobId` → `GET /jobs/{jobId}`** flow documented in the [Transkribus REST upload article](https://www.transkribus.org/blog/transkribus/docu/rest-api/upload) and **`/uploads` resources in** `https://transkribus.eu/TrpServer/rest/application.wadl` (and `?detail=true`).
+- **PR #3 does not implement full upload orchestration** (no single function chaining create → N×PUT → poll → `docId` → pages map in this PR).
+- **PR #3 does not wire the adapter** (`TranskribusAdapter` unchanged).
+- **PR #3 does not add env flags** for Transkribus upload (no new `WorkerEnvConfig` / `validate_required_env` fields for this flow).
+- **No** `OCR_ROUTES`, **`run_worker.py`**, **`HtrResult`**, **`DocumentTextResult.engine`** semantics, or **DB schema** for Transkribus document ids in PR #3.
+- **`docId` parsing is provisional:** code assumes **top-level** **`docId`** on a terminal-success `GET /jobs/{jobId}` JSON object **only until** an **authenticated redacted** successful ingest job response from **Yael** confirms or corrects that shape for this account. It is **not** claimed as proven for this deployment; third-party client key lists are hints only.
+- **No** cleanup/retention in PR #3. **Once orchestration exists in a later PR**, dev uploads may **accumulate** in the target collection and retries may create **duplicate** server-side documents until an explicit retention/dedup policy is designed.
+
+### Verified / narrow contracts encoded in code
+
+- **Descriptor JSON:** `md` (optional) + `pageList.pages[]` with **`fileName`** and **`pageNr`** only (no `pageXmlName`), so each page can use **`img`**-only multipart `PUT` per upload docs (“all other fields optional”; `xml` only if `pageXmlName` was set). Page rows are ordered by ascending **`PageImage.page_index`**.
+- **`uploadId`:** parsed only from **top-level** JSON **`uploadId`** on create response (fixture-aligned test).
+- **`jobId` after PUT:** parsed only when the `PUT` response body is non-empty JSON with top-level **`jobId`** (optional until last page).
+- **`docId` after ingest:** see provisional rule above; parser is intentionally narrow pending redacted trace.
+
+### Deferred
+
+- Full **orchestration** helper and PR #2 **recognition** composition after upload (reuse existing PyLaia functions without duplicating their bodies) once the manual trace is archived.
+- **Adapter** wiring (and any new env flag) remains deferred until orchestration is stable.
