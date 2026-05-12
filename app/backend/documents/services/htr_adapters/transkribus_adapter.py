@@ -10,19 +10,32 @@ from documents.services.htr_adapters.base import (
 )
 from documents.services.page_extraction import PageImage
 
-_EXISTING_DOC_GATE_MESSAGE = (
-    "Transkribus existing-server-document mode is disabled. "
-    "Set TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT=true for dev/demo only. "
-    "VS-Archive upload to Transkribus and production routing are deferred (PR #3+)."
+_BOTH_DEV_MODES_MESSAGE = (
+    "Transkribus dev modes are mutually exclusive: do not enable both "
+    "TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT and TRANSKRIBUS_DEV_UPLOAD_MODE."
+)
+
+_NO_DEV_MODE_MESSAGE = (
+    "Transkribus adapter is disabled. Enable exactly one dev mode: "
+    "TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT=true for dev/demo against a "
+    "pre-existing TrpServer document, or TRANSKRIBUS_DEV_UPLOAD_MODE=true to "
+    "upload PageImage[] into a new Transkribus document then run PyLaia. "
+    "Production routing and VS-Archive-wide upload defaults remain deferred."
 )
 
 
 class TranskribusAdapter:
     """
-    Transkribus Legacy TrpServer / PyLaia adapter (PR #2).
+    Transkribus Legacy TrpServer / PyLaia adapter.
 
-    When ``TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT`` is false (default), fails fast
-    before any HTTP. Full upload from ``PageImage[]`` is not implemented in this PR.
+    Unless a **dev-only** env gate is enabled, fails fast before any HTTP.
+
+    Modes (mutually exclusive):
+
+    - ``TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT``: PyLaia on a fixed server
+      document id / pages query (PR #2 path).
+    - ``TRANSKRIBUS_DEV_UPLOAD_MODE``: upload ``PageImage[]`` to a new TrpServer
+      document, then PyLaia (engine composition; still not production routing).
     """
 
     engine_key = "TRANSKRIBUS"
@@ -43,16 +56,29 @@ class TranskribusAdapter:
         use_existing = getattr(
             worker_env, "transkribus_use_existing_server_document", False
         )
-        if not use_existing:
-            raise EnginePermanentError(_EXISTING_DOC_GATE_MESSAGE)
+        dev_upload = getattr(worker_env, "transkribus_dev_upload_mode", False)
+
+        if use_existing and dev_upload:
+            raise EnginePermanentError(_BOTH_DEV_MODES_MESSAGE)
+
+        if not use_existing and not dev_upload:
+            raise EnginePermanentError(_NO_DEV_MODE_MESSAGE)
 
         if not pages:
             raise EnginePermanentError(
-                "TranskribusAdapter requires at least one PageImage for validation. "
-                "Server-side page numbers for PyLaia come from TRANSKRIBUS_DEV_EXISTING_PAGES, "
-                "not from PageImage.page_index (PR #2)."
+                "TranskribusAdapter requires at least one PageImage. "
+                "For existing-server-document mode, pages are validation-only; "
+                "for dev upload mode, image bytes are uploaded to TrpServer."
             )
 
+        if use_existing:
+            return self._execute_existing_server_document(worker_env, pages)
+
+        return self._execute_dev_upload(worker_env, pages)
+
+    def _execute_existing_server_document(
+        self, worker_env: object, pages: List[PageImage]
+    ) -> HtrResult:
         self._validate_existing_document_config(worker_env)
 
         username = getattr(worker_env, "transkribus_username", None) or ""
@@ -86,6 +112,31 @@ class TranskribusAdapter:
             review_reasons=list(review_reasons),
         )
 
+    def _execute_dev_upload(
+        self, worker_env: object, pages: List[PageImage]
+    ) -> HtrResult:
+        self._validate_upload_dev_config(worker_env)
+
+        username = getattr(worker_env, "transkribus_username", None) or ""
+        password = getattr(worker_env, "transkribus_password", None) or ""
+        bearer = getattr(worker_env, "transkribus_api_token", None) or ""
+        collection_id = getattr(worker_env, "transkribus_collection_id", None) or ""
+        model_id = getattr(worker_env, "transkribus_model_id", None) or ""
+
+        try:
+            return tr.upload_then_transcribe_page_images_with_pylaia(
+                username=username,
+                password=password,
+                bearer_token=bearer,
+                collection_id=collection_id,
+                model_id=model_id,
+                pages=pages,
+            )
+        except tr.TranskribusRetryableError as exc:
+            raise EngineRetryableError(str(exc)) from exc
+        except tr.TranskribusPermanentError as exc:
+            raise EnginePermanentError(str(exc)) from exc
+
     @staticmethod
     def _validate_existing_document_config(worker_env: object) -> None:
         missing: list[str] = []
@@ -106,5 +157,24 @@ class TranskribusAdapter:
         if missing:
             raise EnginePermanentError(
                 "Transkribus dev/demo configuration incomplete: "
+                + ", ".join(missing)
+            )
+
+    @staticmethod
+    def _validate_upload_dev_config(worker_env: object) -> None:
+        missing: list[str] = []
+        if not (getattr(worker_env, "transkribus_username", None) and getattr(
+            worker_env, "transkribus_password", None
+        )):
+            missing.append("TRANSKRIBUS_USERNAME and TRANSKRIBUS_PASSWORD")
+        if not getattr(worker_env, "transkribus_api_token", None):
+            missing.append("TRANSKRIBUS_API_TOKEN")
+        if not getattr(worker_env, "transkribus_collection_id", None):
+            missing.append("TRANSKRIBUS_COLLECTION_ID")
+        if not getattr(worker_env, "transkribus_model_id", None):
+            missing.append("TRANSKRIBUS_MODEL_ID")
+        if missing:
+            raise EnginePermanentError(
+                "Transkribus dev upload mode configuration incomplete: "
                 + ", ".join(missing)
             )
