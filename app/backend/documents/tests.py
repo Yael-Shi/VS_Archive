@@ -723,6 +723,26 @@ class TranskribusUploadHelpersTests(SimpleTestCase):
         r_no_job.encoding = "utf-8"
         self.assertIsNone(parse_upload_put_json_job_id_if_present(r_no_job))
 
+        r_non_json = requests.Response()
+        r_non_json.status_code = 200
+        r_non_json._content = b"OK"
+        r_non_json.encoding = "utf-8"
+        self.assertIsNone(parse_upload_put_json_job_id_if_present(r_non_json))
+
+    def test_parse_upload_put_json_non_object_still_raises(self):
+        from documents.services.transkribus_engine import (
+            TranskribusPermanentError,
+            parse_upload_put_json_job_id_if_present,
+        )
+
+        r = requests.Response()
+        r.status_code = 200
+        r._content = b'["jobId"]'
+        r.encoding = "utf-8"
+        with self.assertRaises(TranskribusPermanentError) as ctx:
+            parse_upload_put_json_job_id_if_present(r)
+        self.assertIn("not an object", str(ctx.exception).lower())
+
     def test_parse_doc_id_from_successful_trp_job_top_level(self):
         from documents.services.transkribus_engine import parse_doc_id_from_successful_trp_job
 
@@ -799,6 +819,44 @@ class TranskribusUploadHelpersTests(SimpleTestCase):
         self.assertEqual(format_trp_pages_query_from_page_nrs([3]), "3")
         self.assertEqual(format_trp_pages_query_from_page_nrs([1, 2, 3]), "1-3")
         self.assertEqual(format_trp_pages_query_from_page_nrs([1, 3]), "1,3")
+
+    @patch("documents.services.transkribus_engine.fetch_pages_metadata")
+    @patch("documents.services.transkribus_engine.poll_job_until_done")
+    @patch("documents.services.transkribus_engine.get_trp_upload_resource_json_job_id")
+    @patch("documents.services.transkribus_engine.put_trp_upload_page_image_only")
+    @patch("documents.services.transkribus_engine.create_trp_upload_doc_structure")
+    def test_run_trp_upload_page_images_through_ingest_falls_back_to_get_when_put_has_no_job(
+        self, m_create, m_put, m_get_upload, m_poll, m_fetch
+    ):
+        from documents.services.page_extraction import PageImage
+        from documents.services.transkribus_engine import (
+            TrpPageMetadata,
+            run_trp_upload_page_images_through_ingest,
+        )
+
+        m_create.return_value = 555
+        m_put.return_value = None
+        m_get_upload.return_value = "ingest-from-get"
+        m_poll.return_value = {
+            "success": True,
+            "state": "FINISHED",
+            "type": "Create Document",
+            "jobImpl": "UploadImportJob",
+            "docId": 1001,
+        }
+        m_fetch.return_value = [TrpPageMetadata(1, 10, 1001, None, [])]
+        session = requests.Session()
+        pages = [PageImage(page_index=1, image_bytes=b"\x89PNG", mime_type="image/png")]
+        out = run_trp_upload_page_images_through_ingest(
+            session,
+            collection_id="42",
+            pages=pages,
+            title="t",
+            poll_interval_sec=0.0,
+            max_wait_sec=30.0,
+        )
+        self.assertEqual(out.ingest_job_id, "ingest-from-get")
+        m_get_upload.assert_called_once()
 
     @patch("documents.services.transkribus_engine.fetch_pages_metadata")
     @patch("documents.services.transkribus_engine.poll_job_until_done")
@@ -1160,6 +1218,71 @@ class TranskribusJobPollingTests(SimpleTestCase):
         self.assertEqual(pkw["document_id"], "999")
         self.assertEqual(pkw["pages_query"], "1")
         self.assertIs(m_upload.call_args[0][0], m_pylaia.call_args[0][0])
+
+
+class StartPylaiaRecognitionTests(SimpleTestCase):
+    """
+    Legacy TrpServer PyLaia ``/pylaia/.../recognition`` POST auth (real account probe):
+
+    Session after login **with** ``Authorization: Bearer`` → HTTP 401. Bearer-only → 401.
+    **Session cookies only** (no Bearer on this POST) → HTTP 200 and plain-text job id.
+    Transcript fetches still use Bearer elsewhere in ``transkribus_engine`` — not this call.
+    """
+
+    @patch("documents.services.transkribus_engine._session_request")
+    def test_start_pylaia_post_uses_session_auth_accept_only_no_body(self, m_req):
+        from documents.services.transkribus_engine import start_pylaia_recognition
+
+        m_resp = Mock()
+        m_resp.text = "  job-from-server  \n"
+        m_req.return_value = m_resp
+        session = requests.Session()
+        jid = start_pylaia_recognition(
+            session,
+            collection_id="10",
+            model_id="20",
+            document_id="1001",
+            pages_query="1",
+        )
+        self.assertEqual(jid, "job-from-server")
+        m_req.assert_called_once()
+        args, kwargs = m_req.call_args
+        self.assertIs(args[0], session)
+        self.assertEqual(args[1], "POST")
+        self.assertTrue(args[2].endswith("/pylaia/10/20/recognition"))
+        self.assertEqual(kwargs["params"]["id"], "1001")
+        self.assertEqual(kwargs["params"]["pages"], "1")
+        self.assertEqual(kwargs["params"]["credits"], "USER_ONLY")
+        self.assertEqual(kwargs["params"]["writeKwsIndex"], "false")
+        self.assertEqual(kwargs["params"]["clearLines"], "false")
+        self.assertEqual(kwargs["params"]["doWordSeg"], "false")
+        self.assertEqual(kwargs["params"]["useExistingLinePolygons"], "false")
+        self.assertEqual(kwargs["params"]["doLinePolygonSimplification"], "true")
+        self.assertEqual(kwargs["params"]["languageModel"], "")
+        self.assertNotIn("data", kwargs)
+        self.assertNotIn("json", kwargs)
+        hdrs = kwargs["headers"]
+        self.assertEqual(hdrs["Accept"], "application/json, text/plain, */*")
+        self.assertEqual({k.lower() for k in hdrs}, {"accept"})
+        self.assertNotIn("authorization", {k.lower() for k in hdrs})
+        self.assertNotIn("content-type", {k.lower() for k in hdrs})
+
+    @patch("documents.services.transkribus_engine._session_request")
+    def test_start_pylaia_accepts_plain_text_job_id_not_json(self, m_req):
+        from documents.services.transkribus_engine import start_pylaia_recognition
+
+        m_resp = Mock()
+        m_resp.text = "plain-text-job-id-only"
+        m_req.return_value = m_resp
+        session = requests.Session()
+        jid = start_pylaia_recognition(
+            session,
+            collection_id="1",
+            model_id="2",
+            document_id="3",
+            pages_query="1-2",
+        )
+        self.assertEqual(jid, "plain-text-job-id-only")
 
 
 class TranskribusEngineUnitTests(SimpleTestCase):
