@@ -300,3 +300,22 @@ This deferred work is **separate from OCR/HTR model quality**: we are **not** cl
 - **No** changes to **`OCR_ROUTES`**, **`run_worker.py`**, **`htr_engine.py`** behavior, or production routing.
 - **No** Gemini→Transkribus fallback, hybrid routing, **DB schema**, or persistence of Transkribus **`docId`**.
 - **No** cleanup/retention for server-side documents created when the command is run manually against real TrpServer.
+
+## Transkribus — dev/staging env-gated OCR routing (`select_ocr_route`)
+
+### Decision
+
+- **`documents/services/ocr_routing.py`** may return **`engine_key=TRANSKRIBUS`** only when **all** of the following hold (read from **`os.environ`** in **`select_ocr_route`**, so **`run_worker.py`** and **`htr_engine.py`** stay unchanged):
+  - **`TRANSKRIBUS_DEV_OCR_ROUTE=true`** (new flag; default **false** / unset → behavior identical to pre-change routing).
+  - **`TRANSKRIBUS_DEV_UPLOAD_MODE=true`** so routing matches the **TranskribusAdapter** dev **upload** path.
+  - **`TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT=false`** — existing-server-document dev mode is **not** supported for this routing override; if the existing-doc flag is true while dev OCR routing is enabled, **`select_ocr_route`** raises **`ValueError`** with an explicit message.
+  - Document metadata is **`language=he`** and **`text_input_type=HANDWRITTEN`** only (narrow allowlist). Any other valid pair still returns the **normal Gemini** route from **`OCR_ROUTES`**.
+- If **`TRANSKRIBUS_DEV_OCR_ROUTE=true`** but **`TRANSKRIBUS_DEV_UPLOAD_MODE`** is not true, **`select_ocr_route`** raises **`ValueError`** (clear configuration message) for **`he` + HANDWRITTEN** — no silent fallback to Gemini on that pair.
+- **`OCR_ROUTES`** remains **static and Gemini-only**; production default with all dev flags unset is unchanged (**Gemini-only**).
+- **No** Gemini→Transkribus fallback, **no** hybrid routing, **no** **`run_worker.py`** edits, **no** **`TranskribusAdapter`** changes, **no** models/migrations for this step.
+
+This routing gate still does not add cleanup/retention for Transkribus-side documents; retries may create duplicate Trp documents and cleanup remains deferred.
+
+### Operational note
+
+Enabling **`TRANSKRIBUS_DEV_OCR_ROUTE`** on a worker that consumes real **SQS** jobs will route **Hebrew handwritten** documents through Transkribus when upload mode is on. Treat as **dev/staging-only** until an explicit production routing decision.

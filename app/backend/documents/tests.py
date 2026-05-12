@@ -27,7 +27,7 @@ from documents.services.htr_adapters.gemini_adapter import GeminiAdapter
 from documents.services.htr_adapters.registry import get_htr_adapter
 from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
 from documents.services.htr_engine import transcribe_pages
-from documents.services.ocr_routing import OcrRouteConfig
+from documents.services.ocr_routing import OcrRouteConfig, OCR_ROUTES, select_ocr_route
 
 
 class HtrDispatcherTests(SimpleTestCase):
@@ -1925,3 +1925,98 @@ class DevTranskribusTranscribeCommandTests(SimpleTestCase):
         src = inspect.getsource(mod)
         self.assertNotIn("select_ocr_route", src)
         self.assertNotIn("from documents.management.commands.run_worker", src)
+
+
+class OcrRoutingDevEnvGateTests(SimpleTestCase):
+    """TRANSKRIBUS_DEV_OCR_ROUTE gating in select_ocr_route; no live Transkribus."""
+
+    def test_ocr_routes_table_remains_gemini_only(self):
+        for cfg in OCR_ROUTES.values():
+            self.assertEqual(cfg.engine_key, DocumentTextResult.OcrEngineKey.GEMINI)
+
+    def test_flag_off_returns_gemini_route(self):
+        with patch.dict(
+            os.environ,
+            {
+                "TRANSKRIBUS_DEV_OCR_ROUTE": "false",
+                "TRANSKRIBUS_DEV_UPLOAD_MODE": "true",
+                "TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT": "false",
+            },
+            clear=False,
+        ):
+            route = select_ocr_route("he", Document.TextInputType.HANDWRITTEN)
+        self.assertEqual(route.engine_key, DocumentTextResult.OcrEngineKey.GEMINI)
+        self.assertEqual(
+            route.prompt_variant, DocumentTextResult.OcrPromptVariant.HANDWRITTEN
+        )
+
+    def test_flag_on_upload_on_he_handwritten_returns_transkribus(self):
+        with patch.dict(
+            os.environ,
+            {
+                "TRANSKRIBUS_DEV_OCR_ROUTE": "true",
+                "TRANSKRIBUS_DEV_UPLOAD_MODE": "true",
+                "TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT": "false",
+            },
+            clear=False,
+        ):
+            route = select_ocr_route("he", Document.TextInputType.HANDWRITTEN)
+        self.assertEqual(route.engine_key, DocumentTextResult.OcrEngineKey.TRANSKRIBUS)
+        self.assertEqual(
+            route.prompt_variant, DocumentTextResult.OcrPromptVariant.HANDWRITTEN
+        )
+
+    def test_flag_on_upload_off_raises(self):
+        with patch.dict(
+            os.environ,
+            {
+                "TRANSKRIBUS_DEV_OCR_ROUTE": "true",
+                "TRANSKRIBUS_DEV_UPLOAD_MODE": "false",
+                "TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT": "false",
+            },
+            clear=False,
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                select_ocr_route("he", Document.TextInputType.HANDWRITTEN)
+        self.assertIn("TRANSKRIBUS_DEV_UPLOAD_MODE", str(ctx.exception))
+
+    def test_flag_on_existing_doc_mode_raises(self):
+        with patch.dict(
+            os.environ,
+            {
+                "TRANSKRIBUS_DEV_OCR_ROUTE": "true",
+                "TRANSKRIBUS_DEV_UPLOAD_MODE": "true",
+                "TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT": "true",
+            },
+            clear=False,
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                select_ocr_route("he", Document.TextInputType.HANDWRITTEN)
+        self.assertIn("TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT", str(ctx.exception))
+
+    def test_flag_on_non_he_route_returns_gemini(self):
+        with patch.dict(
+            os.environ,
+            {
+                "TRANSKRIBUS_DEV_OCR_ROUTE": "true",
+                "TRANSKRIBUS_DEV_UPLOAD_MODE": "true",
+                "TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT": "false",
+            },
+            clear=False,
+        ):
+            route = select_ocr_route("en", Document.TextInputType.HANDWRITTEN)
+        self.assertEqual(route.engine_key, DocumentTextResult.OcrEngineKey.GEMINI)
+
+    def test_invalid_language_unchanged_before_dev_gate(self):
+        with patch.dict(
+            os.environ,
+            {
+                "TRANSKRIBUS_DEV_OCR_ROUTE": "true",
+                "TRANSKRIBUS_DEV_UPLOAD_MODE": "true",
+                "TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT": "false",
+            },
+            clear=False,
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                select_ocr_route(None, Document.TextInputType.HANDWRITTEN)
+        self.assertIn("language", str(ctx.exception).lower())
