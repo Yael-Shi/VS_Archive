@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import inspect
 import json
+import os
+import tempfile
+from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import requests
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import SimpleTestCase, TestCase
+from PIL import Image
 
 from documents.management.commands.run_worker import Command
 from documents.models import Document, DocumentTextResult
@@ -1751,3 +1758,170 @@ class RunWorkerBehaviorTests(TestCase):
         self.assertEqual(failure.error_code, "OCR_ROUTING_INVALID")
         self.assertEqual(failure.engine_key, "UNRESOLVED")
         self.assertEqual(failure.prompt_variant, "UNRESOLVED")
+
+
+def _worker_env_for_dev_transkribus_upload_command(**overrides):
+    from documents.services.env_validation import WorkerEnvConfig
+
+    base = dict(
+        gemini_api_key="k",
+        gemini_confidence_threshold=0.7,
+        min_text_length=20,
+        max_retries=3,
+        retry_delay_seconds_1=30,
+        retry_delay_seconds_2=300,
+        report_window_start="00:00",
+        report_send_time="08:00",
+        free_tier_alert_pct=80,
+        gemini_free_daily_request_limit=1500,
+        gemini_free_daily_image_limit=1000,
+        transkribus_free_monthly_credits=500,
+        enable_hybrid_htr=False,
+        enable_daily_report=False,
+        smtp_host=None,
+        smtp_port=None,
+        smtp_username=None,
+        smtp_password=None,
+        default_from_email=None,
+        transkribus_api_token="tok",
+        transkribus_username="u",
+        transkribus_password="p",
+        gemini_temperature=0.2,
+        gemini_top_k=40,
+        gemini_top_p=0.95,
+        gemini_max_output_tokens=2048,
+        gemini_double_pass=False,
+        gemini_consistency_min_ratio=0.7,
+        transkribus_use_existing_server_document=False,
+        transkribus_dev_upload_mode=True,
+        transkribus_dev_existing_document_id=None,
+        transkribus_collection_id="col",
+        transkribus_model_id="42",
+        transkribus_dev_existing_pages=None,
+    )
+    base.update(overrides)
+    return WorkerEnvConfig(**base)
+
+
+class DevTranskribusTranscribeCommandTests(SimpleTestCase):
+    @patch("documents.management.commands.dev_transkribus_transcribe.transcribe_pages")
+    @patch("documents.management.commands.dev_transkribus_transcribe.validate_required_env")
+    def test_missing_confirm_fails_before_transcribe_pages(
+        self, mock_validate_env, mock_transcribe
+    ):
+        with self.assertRaises(CommandError) as ctx:
+            call_command("dev_transkribus_transcribe", "/nonexistent/path.png")
+        self.assertIn("clean it up", str(ctx.exception).lower())
+        mock_transcribe.assert_not_called()
+        mock_validate_env.assert_not_called()
+
+    @patch("documents.management.commands.dev_transkribus_transcribe.transcribe_pages")
+    @patch("documents.management.commands.dev_transkribus_transcribe.validate_required_env")
+    def test_confirm_calls_transcribe_pages_with_transkribus_route_and_worker_env(
+        self, mock_validate_env, mock_transcribe
+    ):
+        cfg = _worker_env_for_dev_transkribus_upload_command()
+        mock_validate_env.return_value = cfg
+        mock_transcribe.return_value = HtrResult(
+            text="hello" * 200,
+            needs_review=True,
+            engine_name="transkribus-pylaia:42",
+            review_reasons=["x"],
+        )
+
+        buf = BytesIO()
+        Image.new("RGB", (2, 2), color="white").save(buf, format="PNG")
+        png_bytes = buf.getvalue()
+        fd, path = tempfile.mkstemp(suffix=".png")
+        try:
+            os.write(fd, png_bytes)
+            os.close(fd)
+            call_command(
+                "dev_transkribus_transcribe",
+                path,
+                confirm_create_transkribus_doc=True,
+                text_preview_limit=10,
+            )
+        finally:
+            os.unlink(path)
+
+        mock_transcribe.assert_called_once()
+        call_kw = mock_transcribe.call_args.kwargs
+        self.assertEqual(
+            call_kw["route"].engine_key, DocumentTextResult.OcrEngineKey.TRANSKRIBUS
+        )
+        self.assertEqual(
+            call_kw["route"].prompt_variant,
+            DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+        )
+        self.assertIs(call_kw["worker_env"], cfg)
+        self.assertEqual(call_kw["language_hint"], "he")
+        self.assertEqual(call_kw["text_input_type"], "HANDWRITTEN")
+        self.assertEqual(len(call_kw["pages"]), 1)
+
+    @patch("documents.management.commands.dev_transkribus_transcribe.transcribe_pages")
+    @patch("documents.management.commands.dev_transkribus_transcribe.validate_required_env")
+    def test_transkribus_dev_upload_mode_required_before_transcribe(
+        self, mock_validate_env, mock_transcribe
+    ):
+        cfg = _worker_env_for_dev_transkribus_upload_command(
+            transkribus_dev_upload_mode=False
+        )
+        mock_validate_env.return_value = cfg
+
+        buf = BytesIO()
+        Image.new("RGB", (2, 2), color="white").save(buf, format="PNG")
+        fd, path = tempfile.mkstemp(suffix=".png")
+        try:
+            os.write(fd, buf.getvalue())
+            os.close(fd)
+            with self.assertRaises(CommandError) as ctx:
+                call_command(
+                    "dev_transkribus_transcribe",
+                    path,
+                    confirm_create_transkribus_doc=True,
+                )
+        finally:
+            os.unlink(path)
+
+        self.assertIn("TRANSKRIBUS_DEV_UPLOAD_MODE", str(ctx.exception))
+        mock_transcribe.assert_not_called()
+
+    @patch("documents.management.commands.dev_transkribus_transcribe.transcribe_pages")
+    @patch("documents.management.commands.dev_transkribus_transcribe.validate_required_env")
+    def test_ocr_routes_unchanged_after_command(self, mock_validate_env, mock_transcribe):
+        import documents.services.ocr_routing as ocr_routing
+
+        before = {k: (v.engine_key, v.prompt_variant) for k, v in ocr_routing.OCR_ROUTES.items()}
+        cfg = _worker_env_for_dev_transkribus_upload_command()
+        mock_validate_env.return_value = cfg
+        mock_transcribe.return_value = HtrResult(text="ok", engine_name="transkribus-pylaia:1")
+
+        buf = BytesIO()
+        Image.new("RGB", (2, 2), color="white").save(buf, format="PNG")
+        fd, path = tempfile.mkstemp(suffix=".png")
+        try:
+            os.write(fd, buf.getvalue())
+            os.close(fd)
+            call_command(
+                "dev_transkribus_transcribe",
+                path,
+                confirm_create_transkribus_doc=True,
+                prompt_variant="PRINTED",
+            )
+        finally:
+            os.unlink(path)
+
+        after = {k: (v.engine_key, v.prompt_variant) for k, v in ocr_routing.OCR_ROUTES.items()}
+        self.assertEqual(before, after)
+        self.assertEqual(
+            mock_transcribe.call_args.kwargs["route"].prompt_variant,
+            DocumentTextResult.OcrPromptVariant.PRINTED,
+        )
+
+    def test_dev_command_source_does_not_import_worker_routing_selector(self):
+        import documents.management.commands.dev_transkribus_transcribe as mod
+
+        src = inspect.getsource(mod)
+        self.assertNotIn("select_ocr_route", src)
+        self.assertNotIn("from documents.management.commands.run_worker", src)
