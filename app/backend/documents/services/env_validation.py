@@ -172,6 +172,7 @@ class WorkerEnvConfig:
 
     # Transkribus PR #2 (optional; validated in TranskribusAdapter when gate is on)
     transkribus_use_existing_server_document: bool = field(default=False)
+    transkribus_dev_upload_mode: bool = field(default=False)
     transkribus_dev_existing_document_id: Optional[str] = field(default=None)
     transkribus_collection_id: Optional[str] = field(default=None)
     transkribus_model_id: Optional[str] = field(default=None)
@@ -230,6 +231,7 @@ def validate_required_env() -> WorkerEnvConfig:
     transkribus_use_existing_server_document = _get_bool(
         "TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT", default=False
     )
+    transkribus_dev_upload_mode = _get_bool("TRANSKRIBUS_DEV_UPLOAD_MODE", default=False)
     transkribus_dev_existing_document_id = _get("TRANSKRIBUS_DEV_EXISTING_DOCUMENT_ID")
     transkribus_collection_id = _get("TRANSKRIBUS_COLLECTION_ID")
     transkribus_model_id = _get("TRANSKRIBUS_MODEL_ID")
@@ -268,6 +270,7 @@ def validate_required_env() -> WorkerEnvConfig:
         gemini_double_pass=gemini_double_pass,
         gemini_consistency_min_ratio=float(gemini_consistency_min_ratio),
         transkribus_use_existing_server_document=transkribus_use_existing_server_document,
+        transkribus_dev_upload_mode=transkribus_dev_upload_mode,
         transkribus_dev_existing_document_id=transkribus_dev_existing_document_id,
         transkribus_collection_id=transkribus_collection_id,
         transkribus_model_id=transkribus_model_id,

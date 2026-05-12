@@ -127,7 +127,7 @@ class TranskribusAdapterTests(SimpleTestCase):
             )
         self.assertIn("worker_env", str(ctx.exception).lower())
 
-    def test_execute_fails_fast_when_existing_doc_gate_disabled(self):
+    def test_execute_fails_fast_when_no_dev_mode_enabled(self):
         from documents.services.env_validation import WorkerEnvConfig
 
         adapter = TranskribusAdapter()
@@ -168,8 +168,68 @@ class TranskribusAdapterTests(SimpleTestCase):
                 prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
                 worker_env=cfg,
             )
-        msg = str(ctx.exception).lower()
-        self.assertIn("existing-server-document", msg.replace("_", "-"))
+        msg = str(ctx.exception)
+        self.assertIn("TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT", msg)
+        self.assertIn("TRANSKRIBUS_DEV_UPLOAD_MODE", msg)
+
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.upload_then_transcribe_page_images_with_pylaia"
+    )
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.transcribe_existing_server_document")
+    def test_execute_mutually_exclusive_dev_modes_raises_without_engine_calls(
+        self, mock_existing, mock_upload
+    ):
+        from documents.services.env_validation import WorkerEnvConfig
+        from documents.services.page_extraction import PageImage
+
+        adapter = TranskribusAdapter()
+        cfg = WorkerEnvConfig(
+            gemini_api_key="k",
+            gemini_confidence_threshold=0.7,
+            min_text_length=20,
+            max_retries=3,
+            retry_delay_seconds_1=30,
+            retry_delay_seconds_2=300,
+            report_window_start="00:00",
+            report_send_time="08:00",
+            free_tier_alert_pct=80,
+            gemini_free_daily_request_limit=1500,
+            gemini_free_daily_image_limit=1000,
+            transkribus_free_monthly_credits=500,
+            enable_hybrid_htr=False,
+            enable_daily_report=False,
+            smtp_host=None,
+            smtp_port=None,
+            smtp_username=None,
+            smtp_password=None,
+            default_from_email=None,
+            transkribus_api_token="t",
+            transkribus_username="u",
+            transkribus_password="p",
+            gemini_temperature=0.2,
+            gemini_top_k=40,
+            gemini_top_p=0.95,
+            gemini_max_output_tokens=2048,
+            gemini_double_pass=False,
+            gemini_consistency_min_ratio=0.7,
+            transkribus_use_existing_server_document=True,
+            transkribus_dev_upload_mode=True,
+            transkribus_dev_existing_document_id="1",
+            transkribus_collection_id="2",
+            transkribus_model_id="3",
+            transkribus_dev_existing_pages="1",
+        )
+        pages = [PageImage(page_index=1, image_bytes=b"x", mime_type="image/png")]
+        with self.assertRaises(EnginePermanentError) as ctx:
+            adapter.execute(
+                pages=pages,
+                language_hint="en",
+                prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+                worker_env=cfg,
+            )
+        self.assertIn("mutually exclusive", str(ctx.exception).lower())
+        mock_existing.assert_not_called()
+        mock_upload.assert_not_called()
 
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.transcribe_existing_server_document")
     def test_execute_success_maps_htr_result(self, mock_tr):
@@ -276,6 +336,294 @@ class TranskribusAdapterTests(SimpleTestCase):
                 prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
                 worker_env=cfg,
             )
+
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.upload_then_transcribe_page_images_with_pylaia"
+    )
+    def test_execute_dev_upload_mode_calls_upload_then_transcribe(self, mock_upload):
+        from documents.services.env_validation import WorkerEnvConfig
+        from documents.services.htr_adapters.base import HtrResult
+        from documents.services.page_extraction import PageImage
+
+        mock_upload.return_value = HtrResult(
+            text="uploaded",
+            needs_review=False,
+            engine_name="transkribus-pylaia:42",
+            review_reasons=[],
+        )
+        adapter = TranskribusAdapter()
+        cfg = WorkerEnvConfig(
+            gemini_api_key="k",
+            gemini_confidence_threshold=0.7,
+            min_text_length=20,
+            max_retries=3,
+            retry_delay_seconds_1=30,
+            retry_delay_seconds_2=300,
+            report_window_start="00:00",
+            report_send_time="08:00",
+            free_tier_alert_pct=80,
+            gemini_free_daily_request_limit=1500,
+            gemini_free_daily_image_limit=1000,
+            transkribus_free_monthly_credits=500,
+            enable_hybrid_htr=False,
+            enable_daily_report=False,
+            smtp_host=None,
+            smtp_port=None,
+            smtp_username=None,
+            smtp_password=None,
+            default_from_email=None,
+            transkribus_api_token="tok",
+            transkribus_username="u",
+            transkribus_password="p",
+            gemini_temperature=0.2,
+            gemini_top_k=40,
+            gemini_top_p=0.95,
+            gemini_max_output_tokens=2048,
+            gemini_double_pass=False,
+            gemini_consistency_min_ratio=0.7,
+            transkribus_dev_upload_mode=True,
+            transkribus_collection_id="col",
+            transkribus_model_id="42",
+        )
+        pages = [
+            PageImage(page_index=2, image_bytes=b"a", mime_type="image/png"),
+            PageImage(page_index=1, image_bytes=b"b", mime_type="image/png"),
+        ]
+        result = adapter.execute(
+            pages=pages,
+            language_hint="en",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            worker_env=cfg,
+        )
+        self.assertEqual(result.text, "uploaded")
+        mock_upload.assert_called_once()
+        kwargs = mock_upload.call_args.kwargs
+        self.assertEqual(kwargs["username"], "u")
+        self.assertEqual(kwargs["password"], "p")
+        self.assertEqual(kwargs["bearer_token"], "tok")
+        self.assertEqual(kwargs["collection_id"], "col")
+        self.assertEqual(kwargs["model_id"], "42")
+        self.assertEqual(kwargs["pages"], pages)
+
+    def test_execute_dev_upload_mode_missing_required_env_raises(self):
+        from documents.services.env_validation import WorkerEnvConfig
+        from documents.services.page_extraction import PageImage
+
+        adapter = TranskribusAdapter()
+        pages = [PageImage(page_index=1, image_bytes=b"x", mime_type="image/png")]
+
+        def base_cfg(**kwargs):
+            defaults = dict(
+                gemini_api_key="k",
+                gemini_confidence_threshold=0.7,
+                min_text_length=20,
+                max_retries=3,
+                retry_delay_seconds_1=30,
+                retry_delay_seconds_2=300,
+                report_window_start="00:00",
+                report_send_time="08:00",
+                free_tier_alert_pct=80,
+                gemini_free_daily_request_limit=1500,
+                gemini_free_daily_image_limit=1000,
+                transkribus_free_monthly_credits=500,
+                enable_hybrid_htr=False,
+                enable_daily_report=False,
+                smtp_host=None,
+                smtp_port=None,
+                smtp_username=None,
+                smtp_password=None,
+                default_from_email=None,
+                transkribus_api_token="t",
+                transkribus_username="u",
+                transkribus_password="p",
+                gemini_temperature=0.2,
+                gemini_top_k=40,
+                gemini_top_p=0.95,
+                gemini_max_output_tokens=2048,
+                gemini_double_pass=False,
+                gemini_consistency_min_ratio=0.7,
+                transkribus_dev_upload_mode=True,
+                transkribus_collection_id="c",
+                transkribus_model_id="m",
+            )
+            defaults.update(kwargs)
+            return WorkerEnvConfig(**defaults)
+
+        cases = [
+            ("username", dict(transkribus_username=None)),
+            ("password", dict(transkribus_password=None)),
+            ("api token", dict(transkribus_api_token=None)),
+            ("collection", dict(transkribus_collection_id=None)),
+            ("model", dict(transkribus_model_id=None)),
+        ]
+        for label, override in cases:
+            with self.subTest(missing=label):
+                with self.assertRaises(EnginePermanentError) as ctx:
+                    adapter.execute(
+                        pages=pages,
+                        language_hint="en",
+                        prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+                        worker_env=base_cfg(**override),
+                    )
+                self.assertIn("dev upload mode configuration incomplete", str(ctx.exception).lower())
+
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.upload_then_transcribe_page_images_with_pylaia"
+    )
+    def test_execute_dev_upload_mode_does_not_require_dev_existing_document_env(
+        self, mock_upload
+    ):
+        from documents.services.env_validation import WorkerEnvConfig
+        from documents.services.htr_adapters.base import HtrResult
+        from documents.services.page_extraction import PageImage
+
+        mock_upload.return_value = HtrResult(
+            text="ok",
+            needs_review=False,
+            engine_name="transkribus-pylaia:9",
+            review_reasons=[],
+        )
+        adapter = TranskribusAdapter()
+        cfg = WorkerEnvConfig(
+            gemini_api_key="k",
+            gemini_confidence_threshold=0.7,
+            min_text_length=20,
+            max_retries=3,
+            retry_delay_seconds_1=30,
+            retry_delay_seconds_2=300,
+            report_window_start="00:00",
+            report_send_time="08:00",
+            free_tier_alert_pct=80,
+            gemini_free_daily_request_limit=1500,
+            gemini_free_daily_image_limit=1000,
+            transkribus_free_monthly_credits=500,
+            enable_hybrid_htr=False,
+            enable_daily_report=False,
+            smtp_host=None,
+            smtp_port=None,
+            smtp_username=None,
+            smtp_password=None,
+            default_from_email=None,
+            transkribus_api_token="t",
+            transkribus_username="u",
+            transkribus_password="p",
+            gemini_temperature=0.2,
+            gemini_top_k=40,
+            gemini_top_p=0.95,
+            gemini_max_output_tokens=2048,
+            gemini_double_pass=False,
+            gemini_consistency_min_ratio=0.7,
+            transkribus_dev_upload_mode=True,
+            transkribus_collection_id="c",
+            transkribus_model_id="9",
+            transkribus_dev_existing_document_id=None,
+            transkribus_dev_existing_pages=None,
+        )
+        adapter.execute(
+            pages=[PageImage(page_index=1, image_bytes=b"x", mime_type="image/png")],
+            language_hint="en",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            worker_env=cfg,
+        )
+        mock_upload.assert_called_once()
+
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.transcribe_existing_server_document")
+    def test_execute_existing_mode_still_requires_dev_document_and_pages(self, mock_tr):
+        from documents.services.env_validation import WorkerEnvConfig
+        from documents.services.page_extraction import PageImage
+
+        mock_tr.return_value = ("x", [])
+        adapter = TranskribusAdapter()
+
+        cfg_no_doc = WorkerEnvConfig(
+            gemini_api_key="k",
+            gemini_confidence_threshold=0.7,
+            min_text_length=20,
+            max_retries=3,
+            retry_delay_seconds_1=30,
+            retry_delay_seconds_2=300,
+            report_window_start="00:00",
+            report_send_time="08:00",
+            free_tier_alert_pct=80,
+            gemini_free_daily_request_limit=1500,
+            gemini_free_daily_image_limit=1000,
+            transkribus_free_monthly_credits=500,
+            enable_hybrid_htr=False,
+            enable_daily_report=False,
+            smtp_host=None,
+            smtp_port=None,
+            smtp_username=None,
+            smtp_password=None,
+            default_from_email=None,
+            transkribus_api_token="t",
+            transkribus_username="u",
+            transkribus_password="p",
+            gemini_temperature=0.2,
+            gemini_top_k=40,
+            gemini_top_p=0.95,
+            gemini_max_output_tokens=2048,
+            gemini_double_pass=False,
+            gemini_consistency_min_ratio=0.7,
+            transkribus_use_existing_server_document=True,
+            transkribus_collection_id="1",
+            transkribus_model_id="2",
+            transkribus_dev_existing_pages="1",
+            transkribus_dev_existing_document_id=None,
+        )
+        pages = [PageImage(page_index=1, image_bytes=b"x", mime_type="image/png")]
+        with self.assertRaises(EnginePermanentError) as ctx:
+            adapter.execute(
+                pages=pages,
+                language_hint="en",
+                prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+                worker_env=cfg_no_doc,
+            )
+        self.assertIn("TRANSKRIBUS_DEV_EXISTING_DOCUMENT_ID", str(ctx.exception))
+        mock_tr.assert_not_called()
+
+        cfg_no_pages = WorkerEnvConfig(
+            gemini_api_key="k",
+            gemini_confidence_threshold=0.7,
+            min_text_length=20,
+            max_retries=3,
+            retry_delay_seconds_1=30,
+            retry_delay_seconds_2=300,
+            report_window_start="00:00",
+            report_send_time="08:00",
+            free_tier_alert_pct=80,
+            gemini_free_daily_request_limit=1500,
+            gemini_free_daily_image_limit=1000,
+            transkribus_free_monthly_credits=500,
+            enable_hybrid_htr=False,
+            enable_daily_report=False,
+            smtp_host=None,
+            smtp_port=None,
+            smtp_username=None,
+            smtp_password=None,
+            default_from_email=None,
+            transkribus_api_token="t",
+            transkribus_username="u",
+            transkribus_password="p",
+            gemini_temperature=0.2,
+            gemini_top_k=40,
+            gemini_top_p=0.95,
+            gemini_max_output_tokens=2048,
+            gemini_double_pass=False,
+            gemini_consistency_min_ratio=0.7,
+            transkribus_use_existing_server_document=True,
+            transkribus_collection_id="1",
+            transkribus_model_id="2",
+            transkribus_dev_existing_document_id="9",
+            transkribus_dev_existing_pages=None,
+        )
+        with self.assertRaises(EnginePermanentError) as ctx2:
+            adapter.execute(
+                pages=pages,
+                language_hint="en",
+                prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+                worker_env=cfg_no_pages,
+            )
+        self.assertIn("TRANSKRIBUS_DEV_EXISTING_PAGES", str(ctx2.exception))
 
 
 class TranskribusUploadHelpersTests(SimpleTestCase):
