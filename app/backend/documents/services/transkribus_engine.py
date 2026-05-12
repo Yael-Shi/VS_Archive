@@ -187,6 +187,19 @@ def start_pylaia_recognition(
     pages_query: str,
     timeout_sec: float = DEFAULT_HTTP_TIMEOUT_SEC,
 ) -> str:
+    """
+    POST ``/pylaia/{colId}/{modelId}/recognition`` using the **logged-in** Legacy TrpServer
+    session only (``JSESSIONID`` / cookies from ``login_trp_server``).
+
+    Verified against real TrpServer: adding ``Authorization: Bearer`` caused **HTTP 401**;
+    **session cookies only** returns **HTTP 200** and a plain-text job id. This endpoint does
+    not match transcript fetches on ``files.transkribus.eu``, which still use Bearer.
+
+    Sends ``Accept: application/json, text/plain, */*`` only — **no** ``Content-Type``,
+    **no** ``Authorization``, and **no** request body. Query params match the UI/curl shape.
+
+    Response body is **plain text** (job id or a server message), not JSON.
+    """
     url = f"{TRP_REST_BASE}/pylaia/{collection_id}/{model_id}/recognition"
     params: dict[str, Any] = {
         "id": document_id,
@@ -205,9 +218,7 @@ def start_pylaia_recognition(
         url,
         context="Transkribus PyLaia recognition start",
         params=params,
-        data="",
         headers={
-            "Content-Type": "text/plain; charset=UTF-8",
             "Accept": "application/json, text/plain, */*",
         },
         timeout=timeout_sec,
@@ -472,16 +483,65 @@ def put_trp_upload_page_image_only(
 
 
 def parse_upload_put_json_job_id_if_present(resp: requests.Response) -> Optional[str]:
-    """If PUT body is non-empty JSON object with jobId, return it as str; else None."""
+    """
+    If PUT body is a JSON **object** with ``jobId``, return it as str; else None.
+
+    TrpServer may respond to a successful PUT with an **empty** or **non-JSON** body (HTTP 2xx
+    without a JSON job envelope). In that case this returns ``None`` so callers can recover
+    ``jobId`` via ``GET /uploads/{uploadId}`` (documented upload flow).
+    """
     text = (resp.text or "").strip()
     if not text:
         return None
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        raise _http_permanent("Transkribus upload PUT returned non-JSON body")
+        return None
     if not isinstance(data, dict):
         raise _http_permanent("Transkribus upload PUT JSON is not an object")
+    jid = data.get("jobId")
+    if jid is None:
+        return None
+    s = str(jid).strip()
+    return s if s else None
+
+
+def get_trp_upload_resource_json_job_id(
+    session: requests.Session,
+    upload_id: int,
+    *,
+    timeout_sec: float = DEFAULT_HTTP_TIMEOUT_SEC,
+) -> Optional[str]:
+    """
+    ``GET /uploads/{uploadId}`` — same path as PUT; used to read upload/ingest status.
+
+    Official upload docs describe GET on this resource while the upload is in progress.
+    After the last page is accepted, the resource may expose ``jobId`` for the ingest job.
+
+    Returns top-level ``jobId`` when the JSON object includes it; ``None`` when the body is
+    empty or JSON object without ``jobId``. Raises on HTTP failure or on **non-empty** body
+    that is not a JSON object (strict).
+    """
+    url = f"{TRP_REST_BASE}/uploads/{int(upload_id)}"
+    resp = _session_request(
+        session,
+        "GET",
+        url,
+        context="Transkribus upload GET status",
+        headers={"Accept": "application/json"},
+        timeout=timeout_sec,
+    )
+    text = (resp.text or "").strip()
+    if not text:
+        return None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise _http_permanent(
+            "Transkribus upload GET status response is not JSON (cannot recover ingest jobId)"
+        ) from exc
+    if not isinstance(data, dict):
+        raise _http_permanent("Transkribus upload GET status JSON is not an object")
     jid = data.get("jobId")
     if jid is None:
         return None
@@ -578,8 +638,9 @@ def run_trp_upload_page_images_through_ingest(
     timeout_sec: float = DEFAULT_HTTP_TIMEOUT_SEC,
 ) -> TrpUploadOutcome:
     """
-    Engine-only orchestration: descriptor → POST /uploads → PUT each PNG (img-only) → poll
-    ingest job → top-level ``docId`` → GET pages metadata → strict ``page_index`` → ``pageNr`` map.
+    Engine-only orchestration: descriptor → POST /uploads → PUT each PNG (img-only) → resolve
+    ingest ``jobId`` from the final PUT **or** ``GET /uploads/{uploadId}`` → poll ingest job →
+    top-level ``docId`` → GET pages metadata → strict ``page_index`` → ``pageNr`` map.
 
     Does **not** run PyLaia / recognition (PR #2 path unchanged). Caller must already have a
     logged-in ``session`` (e.g. ``login_trp_server``).
@@ -607,9 +668,13 @@ def run_trp_upload_page_images_through_ingest(
         if jid:
             ingest_job_id = jid
     if not ingest_job_id:
+        ingest_job_id = get_trp_upload_resource_json_job_id(
+            session, upload_id, timeout_sec=timeout_sec
+        )
+    if not ingest_job_id:
         raise _http_permanent(
-            "Transkribus upload finished PUTs but no ingest jobId was returned "
-            "(expected on final PUT response)"
+            "Transkribus upload finished PUTs but no ingest jobId was found on the final PUT "
+            "response or on GET /uploads/{uploadId}"
         )
     job = poll_job_until_done(
         session,

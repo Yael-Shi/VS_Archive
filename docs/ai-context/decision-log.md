@@ -239,3 +239,43 @@ The first Transkribus PR establishes only the **plumbing** so a second engine ca
 - **Default:** if **neither** flag is true, **`TranskribusAdapter`** still fails fast before HTTP (message names both env toggles).
 - **Upload dev mode** requires **`TRANSKRIBUS_USERNAME`**, **`TRANSKRIBUS_PASSWORD`**, **`TRANSKRIBUS_API_TOKEN`**, **`TRANSKRIBUS_COLLECTION_ID`**, **`TRANSKRIBUS_MODEL_ID`** only; it does **not** require **`TRANSKRIBUS_DEV_EXISTING_DOCUMENT_ID`** or **`TRANSKRIBUS_DEV_EXISTING_PAGES`** (those remain for the separate existing-document dev path).
 - **Retention / duplicate Transkribus documents** on retries and **production route selection** for Transkribus remain **deferred**.
+
+## Transkribus — adapter dev upload smoke verification & PyLaia auth (recorded findings)
+
+This section records **local smoke-test results against real Legacy TrpServer**. It does **not** mean Transkribus is production-enabled: **`OCR_ROUTES`** still do not select Transkribus for production documents, and **`run_worker.py`** was not changed for this path.
+
+### End-to-end adapter dev upload mode (verified)
+
+With **`TRANSKRIBUS_DEV_UPLOAD_MODE=true`** and a **`TranskribusAdapter.execute([PageImage], …)`** call against a real account, the following chain was observed to complete successfully:
+
+**`PageImage[]` → `TranskribusAdapter` → upload new document into `TRANSKRIBUS_COLLECTION_ID` → `UploadImportJob` yields top-level `docId` → `GET …/pages` metadata (`pageNr`) → PyLaia recognition start → poll → transcript XML fetch → PAGE XML → plain text → `HtrResult`.**
+
+Smoke output (technical check only): **`engine_name`** `transkribus-pylaia:564149`, **`needs_review`** false, **`review_reasons`** empty, **`text_length`** 6, short/low-quality text preview from a **synthetic** PNG. That outcome **validates wiring** (adapter → upload → recognition → transcript → parse → `HtrResult`); it is **not** archival OCR quality validation.
+
+### PyLaia `POST /pylaia/{colId}/{modelId}/recognition` — media type and auth
+
+**Working request shape on real Legacy TrpServer:**
+
+- **Session:** logged-in **`login_trp_server`** session cookie (same flow as upload/create).
+- **Headers:** `Accept: application/json, text/plain, */*` only.
+- **No** `Authorization` header on this POST.
+- **No** `Content-Type` and **no** request body (`json` / `data` omitted).
+
+**Diagnostics (same account):**
+
+- Sending **`Content-Type`** / a **body** on PyLaia start produced **HTTP 415**.
+- Sending **`Authorization: Bearer`** (with or without an existing session cookie) produced **HTTP 401**.
+- **Session cookie only** (no Bearer on this POST) returned **HTTP 200** and a **plain-text job id** in the response body.
+
+**Auth split (unchanged intent in code):**
+
+- **Upload / create-document / PyLaia start / Trp `GET` jobs & pages:** Legacy **session** after **`login_trp_server`**.
+- **Transcript XML fetch** (`files.transkribus.eu` / transcript URLs): **Bearer** token, as already implemented in **`fetch_transcript_xml`**.
+
+### Still deferred / not implied by the smoke test
+
+- **No** production **`OCR_ROUTES`** entry selecting Transkribus; **no** production “Transkribus is the default engine” claim.
+- **No** **`run_worker.py`** changes for this integration step.
+- **No** cleanup / retention policy for Transkribus-side documents created by dev upload or retries.
+- **No** DB persistence of Transkribus **`docId`** on the VS-Archive `Document` row.
+- **No** quality evaluation on real archival handwriting; **no** layout / line-polygon policy decision for production documents beyond what the current PyLaia path already does.
