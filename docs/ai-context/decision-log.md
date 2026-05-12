@@ -285,3 +285,18 @@ This deferred work is **separate from OCR/HTR model quality**: we are **not** cl
 - **No** cleanup / retention policy for Transkribus-side documents created by dev upload or retries.
 - **No** DB persistence of Transkribus **`docId`** on the VS-Archive `Document` row.
 - **No** quality evaluation on real archival handwriting; **no** layout / line-polygon policy decision for production documents beyond what the current PyLaia path already does.
+
+## Transkribus PR — dev-only dispatch smoke command (`dev_transkribus_transcribe`)
+
+### Decision
+
+- Add **`documents/management/commands/dev_transkribus_transcribe.py`**: a **dev/staging-only** Django management command that reads a **local** image or PDF path, runs **`extract_pages`** (same helper as the worker), builds an **explicit** **`OcrRouteConfig`** with **`engine_key=TRANSKRIBUS`** and a **`prompt_variant`** from CLI (default **handwritten**), loads **`WorkerEnvConfig`** via **`validate_required_env()`**, and calls **`htr_engine.transcribe_pages(..., route=…, worker_env=cfg)`** so the normal **dispatcher + registry + adapter** path runs **without** going through **`select_ocr_route`** or **`OCR_ROUTES`**.
+- **Safety guard:** the command refuses to run unless **`--confirm-create-transkribus-doc`** is passed, with a clear message that it **creates a real Transkribus document** and **does not clean up**.
+- **Env:** requires **`TRANSKRIBUS_DEV_UPLOAD_MODE=true`** and the same **upload-mode** credential/collection/model vars as **`TranskribusAdapter`** dev upload mode (**username/password**, **API token**, **collection id**, **model id**). **`GEMINI_API_KEY`** and other worker vars still load via **`validate_required_env`** (unchanged global worker env contract).
+- **Automated tests** mock **`transcribe_pages`** / env loading at the command boundary; **no live Transkribus** calls in CI.
+
+### Explicit non-scope
+
+- **No** changes to **`OCR_ROUTES`**, **`run_worker.py`**, **`htr_engine.py`** behavior, or production routing.
+- **No** Gemini→Transkribus fallback, hybrid routing, **DB schema**, or persistence of Transkribus **`docId`**.
+- **No** cleanup/retention for server-side documents created when the command is run manually against real TrpServer.
