@@ -743,6 +743,76 @@ class TranskribusJobPollingTests(SimpleTestCase):
         self.assertEqual(reasons, [])
         self.assertEqual(m_get.call_count, 2)
 
+    @patch("documents.services.transkribus_engine.pylaia_transcribe_document_with_session")
+    @patch("documents.services.transkribus_engine.login_trp_server")
+    def test_transcribe_existing_server_document_delegates_to_shared_pylaia_helper(
+        self, m_login, m_pylaia
+    ):
+        from documents.services import transkribus_engine as tr
+
+        m_pylaia.return_value = ("plain", [])
+        text, reasons = tr.transcribe_existing_server_document(
+            username="a",
+            password="b",
+            bearer_token="c",
+            collection_id="1",
+            model_id="7",
+            dev_document_id="88",
+            dev_pages_query="1-3",
+        )
+        self.assertEqual(text, "plain")
+        self.assertEqual(reasons, [])
+        m_pylaia.assert_called_once()
+        kw = m_pylaia.call_args.kwargs
+        self.assertEqual(kw["document_id"], "88")
+        self.assertEqual(kw["pages_query"], "1-3")
+        self.assertEqual(kw["model_id"], "7")
+        self.assertEqual(kw["collection_id"], "1")
+
+    @patch("documents.services.transkribus_engine.pylaia_transcribe_document_with_session")
+    @patch("documents.services.transkribus_engine.run_trp_upload_page_images_through_ingest")
+    @patch("documents.services.transkribus_engine.login_trp_server")
+    def test_upload_then_transcribe_wires_upload_outcome_into_pylaia_and_htr_result(
+        self, m_login, m_upload, m_pylaia
+    ):
+        from documents.services.page_extraction import PageImage
+        from documents.services.transkribus_engine import (
+            TrpUploadOutcome,
+            upload_then_transcribe_page_images_with_pylaia,
+        )
+
+        m_upload.return_value = TrpUploadOutcome(
+            collection_id="1",
+            doc_id="999",
+            upload_id=1,
+            ingest_job_id="j",
+            pages_query="1",
+            page_index_to_page_nr={1: 1},
+        )
+        m_pylaia.return_value = ("hello", ["EMPTY_TRANSCRIPT_PAGE"])
+        pages = [PageImage(page_index=1, image_bytes=b"x", mime_type="image/png")]
+        htr = upload_then_transcribe_page_images_with_pylaia(
+            username="u",
+            password="p",
+            bearer_token="t",
+            collection_id="1",
+            model_id="42",
+            pages=pages,
+            upload_title="doc",
+            poll_interval_sec=0.0,
+        )
+        self.assertEqual(htr.text, "hello")
+        self.assertTrue(htr.needs_review)
+        self.assertEqual(htr.engine_name, "transkribus-pylaia:42")
+        self.assertEqual(htr.review_reasons, ["EMPTY_TRANSCRIPT_PAGE"])
+        m_upload.assert_called_once()
+        self.assertEqual(m_upload.call_args.kwargs["pages"], pages)
+        m_pylaia.assert_called_once()
+        pkw = m_pylaia.call_args.kwargs
+        self.assertEqual(pkw["document_id"], "999")
+        self.assertEqual(pkw["pages_query"], "1")
+        self.assertIs(m_upload.call_args[0][0], m_pylaia.call_args[0][0])
+
 
 class TranskribusEngineUnitTests(SimpleTestCase):
     def test_parse_page_xml_extracts_unicode_lines(self):

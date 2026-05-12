@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 import requests
 
+from documents.services.htr_adapters.base import HtrResult
 from documents.services.page_extraction import PageImage
 
 TRP_REST_BASE = "https://transkribus.eu/TrpServer/rest"
@@ -758,6 +759,59 @@ def parse_page_xml_to_text(page_xml: bytes) -> str:
     return "\n".join(lines)
 
 
+def pylaia_transcribe_document_with_session(
+    session: requests.Session,
+    *,
+    collection_id: str,
+    model_id: str,
+    document_id: str,
+    pages_query: str,
+    bearer_token: str,
+    timeout_sec: float = DEFAULT_HTTP_TIMEOUT_SEC,
+) -> Tuple[str, List[str]]:
+    """
+    PyLaia recognition → poll → page metadata → transcripts → PAGE XML text.
+
+    Caller must already have a logged-in ``session``. Shared by
+    ``transcribe_existing_server_document`` and ``upload_then_transcribe_page_images_with_pylaia``.
+    """
+    job_id = start_pylaia_recognition(
+        session,
+        collection_id=collection_id,
+        model_id=model_id,
+        document_id=document_id,
+        pages_query=pages_query,
+        timeout_sec=timeout_sec,
+    )
+    poll_job_until_done(session, job_id, timeout_sec=timeout_sec)
+    pages_meta = fetch_pages_metadata(
+        session,
+        collection_id=collection_id,
+        document_id=document_id,
+        pages_query=pages_query,
+        timeout_sec=timeout_sec,
+    )
+    if not pages_meta:
+        raise _http_permanent("Transkribus pages metadata returned empty list")
+
+    pairs = ordered_transcript_urls(
+        pages_meta,
+        job_id=job_id,
+        model_id=model_id,
+    )
+    page_texts: List[str] = []
+    review_reasons: List[str] = []
+    for _page_nr, t_url in pairs:
+        xml_bytes = fetch_transcript_xml(t_url, bearer_token=bearer_token, timeout_sec=timeout_sec)
+        text = parse_page_xml_to_text(xml_bytes)
+        if not text.strip():
+            review_reasons.append("EMPTY_TRANSCRIPT_PAGE")
+        page_texts.append(text)
+
+    full_text = "\n\n".join(page_texts)
+    return full_text, review_reasons
+
+
 def transcribe_existing_server_document(
     *,
     username: str,
@@ -775,36 +829,61 @@ def transcribe_existing_server_document(
     """
     session = requests.Session()
     login_trp_server(session, username=username, password=password)
-    job_id = start_pylaia_recognition(
+    return pylaia_transcribe_document_with_session(
         session,
         collection_id=collection_id,
         model_id=model_id,
         document_id=dev_document_id,
         pages_query=dev_pages_query,
+        bearer_token=bearer_token,
+        timeout_sec=DEFAULT_HTTP_TIMEOUT_SEC,
     )
-    poll_job_until_done(session, job_id)
-    pages_meta = fetch_pages_metadata(
+
+
+def upload_then_transcribe_page_images_with_pylaia(
+    *,
+    username: str,
+    password: str,
+    bearer_token: str,
+    collection_id: str,
+    model_id: str,
+    pages: List[PageImage],
+    upload_title: Optional[str] = None,
+    poll_interval_sec: float = POLL_INTERVAL_SEC,
+    max_wait_sec: float = POLL_MAX_WAIT_SEC,
+    timeout_sec: float = DEFAULT_HTTP_TIMEOUT_SEC,
+) -> HtrResult:
+    """
+    Upload ``PageImage[]`` to a **new** TrpServer document, then run the same PyLaia /
+    transcript / PAGE-XML pipeline as the existing-server-document path.
+
+    Engine-only: does not persist results or touch the adapter. Returns ``HtrResult`` using the
+    same ``engine_name`` pattern as ``TranskribusAdapter`` (``transkribus-pylaia:{model_id}``).
+    """
+    session = requests.Session()
+    login_trp_server(session, username=username, password=password, timeout_sec=timeout_sec)
+    upload_out = run_trp_upload_page_images_through_ingest(
         session,
         collection_id=collection_id,
-        document_id=dev_document_id,
-        pages_query=dev_pages_query,
+        pages=pages,
+        title=upload_title,
+        poll_interval_sec=poll_interval_sec,
+        max_wait_sec=max_wait_sec,
+        timeout_sec=timeout_sec,
     )
-    if not pages_meta:
-        raise _http_permanent("Transkribus pages metadata returned empty list")
-
-    pairs = ordered_transcript_urls(
-        pages_meta,
-        job_id=job_id,
+    text, review_reasons = pylaia_transcribe_document_with_session(
+        session,
+        collection_id=collection_id,
         model_id=model_id,
+        document_id=upload_out.doc_id,
+        pages_query=upload_out.pages_query,
+        bearer_token=bearer_token,
+        timeout_sec=timeout_sec,
     )
-    page_texts: List[str] = []
-    review_reasons: List[str] = []
-    for _page_nr, t_url in pairs:
-        xml_bytes = fetch_transcript_xml(t_url, bearer_token=bearer_token)
-        text = parse_page_xml_to_text(xml_bytes)
-        if not text.strip():
-            review_reasons.append("EMPTY_TRANSCRIPT_PAGE")
-        page_texts.append(text)
-
-    full_text = "\n\n".join(page_texts)
-    return full_text, review_reasons
+    needs_review = bool(review_reasons)
+    return HtrResult(
+        text=text,
+        needs_review=needs_review,
+        engine_name=f"transkribus-pylaia:{model_id}",
+        review_reasons=list(review_reasons),
+    )
