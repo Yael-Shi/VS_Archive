@@ -319,3 +319,51 @@ This routing gate still does not add cleanup/retention for Transkribus-side docu
 ### Operational note
 
 Enabling **`TRANSKRIBUS_DEV_OCR_ROUTE`** on a worker that consumes real **SQS** jobs will route **Hebrew handwritten** documents through Transkribus when upload mode is on. Treat as **dev/staging-only** until an explicit production routing decision.
+
+## Transkribus — manual dev/staging SQS worker smoke (verified)
+
+### Record (manual confirmation)
+
+A **full real** dev/staging path was exercised end-to-end (no mocks): **SQS** → **`run_worker`** → **S3** download → **`extract_pages`** → **`select_ocr_route`** (env-gated **TRANSKRIBUS**) → **`transcribe_pages`** → **TranskribusAdapter** dev **upload** mode → **Legacy TrpServer** → **`DocumentTextResult`** persistence.
+
+**Document (example run):**
+
+- **`id=9`**
+- **`title`:** `ניסיון נוסף מהסלולרי`
+- **`upload_status=UPLOADED`**
+- **`language=he`**
+- **`text_input_type=HANDWRITTEN`**
+- **`mime_type=image/jpeg`**
+- **`file_s3_key=documents/9/original.jpeg`**
+
+**Environment:**
+
+- **`TRANSKRIBUS_DEV_OCR_ROUTE=true`**
+- **`TRANSKRIBUS_DEV_UPLOAD_MODE=true`**
+- **`TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT`** unset / **false**
+- **Dev** SQS queue and **dev** S3 object (object existed at **`file_s3_key`**)
+
+**SQS queue attributes:**
+
+- **Before worker:** **`ApproximateNumberOfMessages=1`**, **`ApproximateNumberOfMessagesNotVisible=0`**
+- **Worker command:** `poetry run python manage.py run_worker --once --max-messages 1 --wait-seconds 20`
+- **After worker:** **`ApproximateNumberOfMessages=0`**, **`ApproximateNumberOfMessagesNotVisible=0`**
+
+**Persistence:**
+
+- **`Document.processing_state_user=READY`**
+- **`DocumentTextResult`** rows for **`SOURCE_TEXT`** and **`HEBREW_TEXT`**
+- For **both** rows: **`engine=transkribus-pylaia:564149`**, **`engine_key=TRANSKRIBUS`**, **`prompt_variant=handwritten`**, **`status=SUCCEEDED`**, **`verification_status=UNVERIFIED`**, **`error_code` None**, **`text` length 1205**
+
+### Meaning
+
+This run **validates wiring and operability** of the **dev/staging** worker pipeline with **real** SQS, S3, DB, and **Legacy TrpServer** for the gated **Hebrew handwritten** route. It is **not** a claim about production readiness, default routing, or OCR quality.
+
+### Limitations (unchanged policy)
+
+- Still **dev/staging gated** only (**env flags**); **no** production-default Transkribus routing.
+- **`OCR_ROUTES`** static table remains **Gemini-only**; production behavior with flags **off** is unchanged.
+- **No** cleanup/retention for Transkribus-side documents; retries may create **duplicate** Trp documents.
+- **No** Transkribus **`docId`** persisted on the VS-Archive **`Document`**.
+- **No** transcript **quality** or **fidelity** validation is implied by this smoke.
+- **No** Gemini→Transkribus **hybrid** or **fallback** is implemented.
