@@ -1759,6 +1759,86 @@ class RunWorkerBehaviorTests(TestCase):
         self.assertEqual(failure.engine_key, "UNRESOLVED")
         self.assertEqual(failure.prompt_variant, "UNRESOLVED")
 
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    def test_env_gated_transkribus_route_used_and_persisted_by_worker(
+        self,
+        mock_transcribe,
+        mock_extract_pages,
+        mock_get_object_bytes,
+    ):
+        """
+        Real select_ocr_route + worker persistence; Transkribus engine mocked (no HTTP).
+        """
+        mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
+        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        engine_runtime = "transkribus-pylaia:999"
+        mock_transcribe.return_value = HtrResult(
+            text="mock trp text",
+            needs_review=False,
+            engine_name=engine_runtime,
+            review_reasons=[],
+        )
+
+        he_doc = Document.objects.create(
+            title="Hebrew HTR",
+            doc_type=Document.DocType.PDF,
+            language=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADED,
+            file_s3_key="he-doc.pdf",
+            mime_type="application/pdf",
+        )
+        msg = {
+            "Body": json.dumps(
+                {"type": "PROCESS_DOCUMENT", "document_id": he_doc.id}
+            )
+        }
+
+        with patch.dict(
+            os.environ,
+            {
+                "TRANSKRIBUS_DEV_OCR_ROUTE": "true",
+                "TRANSKRIBUS_DEV_UPLOAD_MODE": "true",
+                "TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT": "false",
+            },
+            clear=False,
+        ):
+            self.assertTrue(self.command._process_message(msg))
+
+        mock_transcribe.assert_called_once()
+        call_kw = mock_transcribe.call_args.kwargs
+        self.assertEqual(
+            call_kw["route"].engine_key,
+            DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
+        )
+        self.assertEqual(
+            call_kw["route"].prompt_variant,
+            DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+        )
+        self.assertIn("worker_env", call_kw)
+
+        for r_type in (
+            DocumentTextResult.ResultType.SOURCE_TEXT,
+            DocumentTextResult.ResultType.HEBREW_TEXT,
+        ):
+            with self.subTest(result_type=r_type):
+                row = DocumentTextResult.objects.get(
+                    document=he_doc,
+                    result_type=r_type,
+                    engine=engine_runtime,
+                )
+                self.assertEqual(row.status, DocumentTextResult.Status.SUCCEEDED)
+                self.assertEqual(
+                    row.engine_key, DocumentTextResult.OcrEngineKey.TRANSKRIBUS
+                )
+                self.assertEqual(
+                    row.prompt_variant,
+                    DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+                )
+                self.assertIsNone(row.error_code)
+
 
 def _worker_env_for_dev_transkribus_upload_command(**overrides):
     from documents.services.env_validation import WorkerEnvConfig
