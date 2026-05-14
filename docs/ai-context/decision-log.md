@@ -367,3 +367,49 @@ This run **validates wiring and operability** of the **dev/staging** worker pipe
 - **No** Transkribus **`docId`** persisted on the VS-Archive **`Document`**.
 - **No** transcript **quality** or **fidelity** validation is implied by this smoke.
 - **No** Gemini→Transkribus **hybrid** or **fallback** is implemented.
+
+## Transkribus — operational safety (dev/staging routing)
+
+This section records **operational risks and semantics** for env-gated **Transkribus** routing and **upload** mode. It does **not** change product behavior; it informs **broader dev/staging use** and future schema/tooling work.
+
+### Server-side documents and VS-Archive state
+
+1. **Every** Transkribus **upload-mode** run that reaches Legacy TrpServer **creates a new server-side Transkribus document** (new **`docId`** on the Trp side for that upload path).
+
+2. VS-Archive **does not** currently persist the Transkribus **`docId`** anywhere in the database.
+
+3. **Reprocessing** the same VS-Archive **`Document`** (e.g. another **`PROCESS_DOCUMENT`** message for the same **`document_id`**) can therefore create **additional** Transkribus documents—**duplicates on Trp** are possible even when VS-Archive still represents “one” archive document.
+
+### How VS-Archive rows interact with Trp duplicates
+
+4. **`DocumentTextResult`** persistence uses **`update_or_create`** keyed by **`(document, result_type, engine)`** (see model **`UniqueConstraint`** / worker **`_save_htr_results`**). **`engine`** is the **runtime** identity (e.g. **`transkribus-pylaia:{model_id}`**). So:
+   - If a **second** run produces the **same** **`engine`** string, the **same** result row(s) may be **updated in place** (new text, same key)—while Trp may still have received a **new** upload document on the second run.
+   - If **`engine`** differs between runs (e.g. different model id in **`engine_name`**), **additional** rows can appear for the same **`result_type`** under different **`engine`** values.
+
+### Cleanup and retention
+
+5. **Cleanup / retention** for Transkribus-side documents is **not implemented** in the product. **Manual** deletion or archival in the **Transkribus UI** (or future external scripts) remains the **only** supported option today.
+
+### Where not to stash `docId` (until an approved schema PR)
+
+6. Do **not** store Transkribus **`docId`** in **`DocumentTextResult.error_details`** or **`review_reasons`**—those fields have **failure** / **review-reason** semantics and are a poor fit for external identifiers.
+
+   If/when we **persist** **`docId`**, prefer **either**:
+   - **Explicit nullable field(s) on `Document`**, **or**
+   - **A dedicated link / history model** (one row per Trp document / run),
+
+   **Both require a separate, explicitly approved schema / migration PR** (out of scope for doc-only updates).
+
+### Status and verification semantics
+
+7. **`status=SUCCEEDED`** means the **OCR/HTR pipeline completed without** treating the outcome as a pipeline failure (subject to existing worker rules such as **`needs_review`** → **`NEEDS_REVIEW`**). **`verification_status=UNVERIFIED`** means **human verification** in VS-Archive has **not** been completed. A successful dev smoke **does not** imply **OCR quality**, **transcript fidelity**, or agreement with the Transkribus UI.
+
+### Decisions still required before broader use
+
+8. Before expanding dev/staging volume or moving toward production routing, we still need explicit decisions on:
+   - **Whether** (and **where**) to **persist Transkribus `docId`** for audit, dedupe, and cleanup.
+   - **Whether** to **allow reprocessing** the same **`Document`** through Transkribus upload mode (and under what guards, e.g. **`VERIFIED`** results, file changed, explicit admin action).
+   - **Whether** to add **cleanup tooling** (e.g. management command calling Trp APIs) once **`docId`** is stored.
+   - **Whether** Transkribus outputs should **default** to **`NEEDS_REVIEW`** (or carry structured review reasons) even when the adapter returns **`needs_review=False`**.
+
+None of the above are decided by this documentation-only update.
