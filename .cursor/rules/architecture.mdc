@@ -135,9 +135,17 @@ On successful OCR/HTR persistence, these values should come from the worker-held
 
 ## Current provider state
 
-Gemini is currently the only **live** OCR/HTR provider (real API + all current `OCR_ROUTES` entries).
+**Gemini** is the **production/default** OCR/HTR provider: real API and all static `OCR_ROUTES` entries point to `GEMINI`.
 
-A **Transkribus** connection point exists: `DocumentTextResult.OcrEngineKey.TRANSKRIBUS`, `TranskribusAdapter` in `documents/services/htr_adapters/transkribus_adapter.py`, and registry wiring. The adapter is a **skeleton** until follow-up PRs add live API and routing entries. Do not treat Transkribus as production-ready OCR until those land.
+**Transkribus** is a **real** Legacy TrpServer / PyLaia integration (not a skeleton): `TranskribusAdapter`, `transkribus_engine.py`, registry wiring, and `DocumentTextResult.OcrEngineKey.TRANSKRIBUS`. It is **not** broad production-default routing. It runs only when explicit **dev/staging env gates** are enabled (see `docs/ai-context/decision-log.md` — Transkribus sections).
+
+**Intended routing policy (current):**
+
+- Static `OCR_ROUTES` remains **Gemini-only** unless explicitly changed later.
+- `language=he` + `text_input_type=HANDWRITTEN` may route to **Transkribus** only when **`TRANSKRIBUS_DEV_OCR_ROUTE=true`**, **`TRANSKRIBUS_DEV_UPLOAD_MODE=true`**, and **`TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT=false`** (see `select_ocr_route`).
+- All other `(language, text_input_type)` pairs remain **Gemini**.
+- **No** Gemini→Transkribus fallback. **No** hybrid OCR routing in code.
+- **`ENABLE_HYBRID_HTR`** only validates Transkribus credentials in `validate_required_env`; it does **not** enable hybrid engine routing.
 
 Gemini-specific behavior belongs in:
 
@@ -147,15 +155,40 @@ Gemini-specific behavior belongs in:
 Gemini-specific concerns include:
 
 - model candidates
-- fallback between Gemini models
+- fallback between Gemini models (within Gemini only)
 - quota/exhaustion handling
 - prompt variant resolution
 - temperature/top_k/top_p
 - Gemini JSON output contract
 
-`run_worker.py` must not contain Gemini-specific retry loops, model candidate logic, prompt selection, or quota string matching.
+Transkribus-specific behavior belongs in:
 
-Do not add **fake** Transkribus HTTP behavior or **hybrid/fallback** between providers unless the task explicitly requests it. Live Transkribus API, routing changes, and multi-page policy are follow-up PRs.
+- `documents/services/htr_adapters/transkribus_adapter.py`
+- `documents/services/transkribus_engine.py`
+
+`run_worker.py` must not contain Gemini- or Transkribus-specific retry loops, model logic, prompt selection, or provider HTTP.
+
+Do not add **fake** Transkribus HTTP behavior or **hybrid/fallback between providers** unless the task explicitly requests it.
+
+## DocumentTextResult status semantics
+
+- **`DocumentTextResult.status=SUCCEEDED`** means the **technical OCR/HTR pipeline completed** without treating the outcome as a pipeline failure (subject to existing worker rules). It does **not** mean the text is archivally correct or human-approved.
+- **`DocumentTextResult.status=NEEDS_REVIEW`** means the pipeline produced text but flagged it for review (e.g. adapter `needs_review`, short text, `[UNCLEAR]`). It is **not** the same as `FAILED`.
+- **`verification_status`** (`UNVERIFIED`, `VERIFIED`, `REJECTED`) is the **human review / quality approval** path. Successful OCR with `SUCCEEDED` and `verification_status=UNVERIFIED` is normal until a human verifies.
+
+**Transkribus — intended near-term policy (not implemented yet):** Transkribus-produced outputs should **default to `NEEDS_REVIEW`** even when the adapter returns `needs_review=False`, meaning “pipeline succeeded; do not trust this provider output without human review.” Implement in a **small follow-up behavior PR** after docs/rules sync; do not document or imply this is live until that PR lands.
+
+## Current operational boundary (Transkribus)
+
+Broader Transkribus use (beyond controlled dev/staging) should **not** proceed until explicit decisions (and follow-up PRs) on:
+
+- **where/how to persist** Transkribus remote document identity (`docId`) on the VS-Archive side
+- **reprocess** policy and duplicate prevention (upload mode creates a **new** Trp document per run today; VS-Archive does **not** persist `docId`)
+- **cleanup/retention** (operational runbook first; no cleanup automation before identity + reprocess policy)
+
+Do **not** expand production `OCR_ROUTES` to Transkribus before those are decided or explicitly deferred in writing.
+
+Technical smoke success (SQS/S3/DB/Transkribus/persistence) validates **wiring only**, not OCR quality or transcript fidelity. Fidelity validation is out of scope for the docs/rules sync PR.
 
 ## Failure behavior
 
@@ -178,24 +211,26 @@ Do not redesign retry, backoff, DLQ, or failure handling opportunistically.
 
 ## Processing result policy
 
-Hebrew documents currently expect:
+### Hebrew documents — persistence vs rollup (current accepted behavior)
 
-- `HEBREW_TEXT`
-
-Non-Hebrew documents structurally expect:
+**Worker persistence** (`run_worker._save_htr_results`): for Hebrew language documents, the worker writes **both**:
 
 - `SOURCE_TEXT`
 - `HEBREW_TEXT`
 
-Real Hebrew translation for non-Hebrew documents is not implemented yet.
+(same transcribed `text` and same `status` for both rows on a given successful run, keyed by runtime `engine`.)
 
-Therefore non-Hebrew documents may intentionally remain `PARTIAL`.
+**Processing-state rollup** (`expected_outputs.expected_result_types_for_document`): for Hebrew, only **`HEBREW_TEXT`** is required for `processing_state_user` to reach `READY`. `SOURCE_TEXT` rows are persisted but **not** counted in that rollup.
 
-Known deferred issue:
+This is **current accepted behavior**. Whether Hebrew should permanently keep both result types is an **open product/architecture decision** for a future PR; do not change persistence in unrelated work.
 
-- mismatch may exist around non-Hebrew `HEBREW_TEXT` expected output / persistence behavior
+### Non-Hebrew documents — intentional `PARTIAL`
 
-Do not fix this opportunistically during routing, adapter, or cleanup work.
+**Worker persistence:** non-Hebrew success paths persist **`SOURCE_TEXT` only** (no real Hebrew translation yet).
+
+**Rollup expectation:** `expected_outputs` still expects **`SOURCE_TEXT` + `HEBREW_TEXT`**. Missing `HEBREW_TEXT` means the document should remain **`PARTIAL`** — this is **intentional current behavior**, not an OCR failure.
+
+Do not “fix” non-Hebrew `PARTIAL` opportunistically during routing, adapter, or Transkribus work unless explicitly requested.
 
 ## Reprocessing policy
 

@@ -1,6 +1,56 @@
 # VS-Archive Decision Log
 
+## Current state — OCR/HTR and Transkribus (read this first)
+
+**Last aligned:** docs/rules sync PR (Transkribus no longer “skeleton-only”).
+
+### Routing (implemented)
+
+- Static **`OCR_ROUTES`** is **Gemini-only** for all `(language, text_input_type)` pairs unless explicitly changed later.
+- **Dev/staging Transkribus override** in `select_ocr_route`: `language=he` + `HANDWRITTEN` → `engine_key=TRANSKRIBUS` only when **`TRANSKRIBUS_DEV_OCR_ROUTE=true`**, **`TRANSKRIBUS_DEV_UPLOAD_MODE=true`**, and **`TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT=false`**. Misconfiguration raises `ValueError` (no silent fallback to Gemini on that pair).
+- All other valid pairs → **Gemini** from `OCR_ROUTES`.
+- **No** Gemini→Transkribus fallback. **No** hybrid OCR routing. **`ENABLE_HYBRID_HTR`** only gates credential validation in env loading, not engine selection.
+
+### Transkribus (implemented, gated)
+
+- **Real** Legacy TrpServer / PyLaia: upload ingest, existing-server-document dev mode, adapter + `transkribus_engine.py`, registry, `OcrEngineKey.TRANSKRIBUS`.
+- **Not** production-default. Technical smoke proves **wiring**, not archival OCR quality or UI fidelity.
+- Upload mode creates a **new** Trp document per run; VS-Archive does **not** persist Trp **`docId`** yet.
+
+### Result status semantics
+
+- **`SUCCEEDED`** = technical pipeline completed successfully (not human quality approval).
+- **`verification_status`** = human review (`UNVERIFIED` until verified).
+- **Intended near-term (not in code yet):** Transkribus-produced rows should default to **`NEEDS_REVIEW`** even when `HtrResult.needs_review` is false. **Next follow-up behavior PR** after this docs sync; do not treat as implemented until merged.
+
+### Hebrew `DocumentTextResult` types (current accepted behavior)
+
+- **Worker** (`_save_htr_results`): Hebrew documents persist **both** `SOURCE_TEXT` and `HEBREW_TEXT` (same text/status per run).
+- **Rollup** (`expected_outputs`): Hebrew `READY` requires **`HEBREW_TEXT` only**; `SOURCE_TEXT` is not part of that expectation list.
+- **Open decision (future):** whether to keep both rows long-term — document only; no behavior change in docs PR.
+
+### Non-Hebrew `PARTIAL` (intentional)
+
+- Worker persists **`SOURCE_TEXT` only**; `expected_outputs` expects **`SOURCE_TEXT` + `HEBREW_TEXT`**. Missing translation → **`PARTIAL`**, not OCR failure. Do not fix opportunistically.
+
+### Blockers before broader Transkribus use
+
+Decide (then implement in focused PRs): persist Trp **`docId`** / remote identity; reprocess and duplicate prevention; cleanup/retention runbook. **No** production `OCR_ROUTES` expansion until decided or explicitly deferred.
+
+### Near-term PR sequence
+
+1. Docs/rules sync.
+2. Transkribus default **`NEEDS_REVIEW`** (behavior PR).
+3. Trp identity persistence design + migration.
+4. Reprocess / duplicate policy.
+5. Cleanup runbook (automation later).
+6. Broader production routing only if explicitly approved.
+
+---
+
 ## OCR/HTR routing by language and text input type
+
+> **Historical / partially superseded.** Core routing **decisions** below remain valid. Facts that are **obsolete** are marked inline; for **current** Transkribus and execution-layer state, see **“Current state — OCR/HTR and Transkribus”** above and Transkribus PR sections below.
 
 ### Decision
 OCR/HTR processing will be routed by two explicit document metadata fields:
@@ -76,7 +126,7 @@ After routing, execution is layered as follows:
 
 3. **Adapter registry** (`documents/services/htr_adapters/registry.py`): static map from `engine_key` to adapter implementation. Unknown keys raise `UnsupportedEngineError`.
 
-4. **Provider adapters** (e.g. `documents/services/htr_adapters/gemini_adapter.py`): own provider-specific execution (model fallback list, quota / exhaustion handling, error mapping). **Transkribus is not implemented yet**; no Transkribus adapter or route entries exist at this time.
+4. **Provider adapters** (e.g. `documents/services/htr_adapters/gemini_adapter.py`, `transkribus_adapter.py`): own provider-specific execution. **Superseded:** “Transkribus is not implemented yet” — Transkribus is implemented behind dev/staging gates; static `OCR_ROUTES` remain Gemini-only unless changed.
 
 ### Route metadata vs OCR result payload
 `engine_key` and `prompt_variant` are **routing metadata**. They are selected by the routing layer and carried through the worker for persistence on `DocumentTextResult`. They are **not** part of the minimal OCR result payload (`HtrResult`: text, review flags, runtime engine name, etc.).
@@ -87,7 +137,7 @@ After routing, execution is layered as follows:
 - **`engine_key` / `prompt_variant`**: stored on `DocumentTextResult` for auditability and reproducibility. Values come from the **selected route** on success (worker-held `OcrRouteConfig`) and from route re-selection or explicit unresolved markers on failure paths.
 
 ### DocumentTextResult.OcrEngineKey schema limitation
-`DocumentTextResult.OcrEngineKey` currently allows **GEMINI** only. Adding a second live engine (e.g. Transkribus) will require **enum and migration expansion** in the first real Transkribus implementation PR. That work is intentionally deferred until Transkribus is actually implemented.
+**Superseded:** `OcrEngineKey` now includes **`TRANSKRIBUS`** (migration landed in Transkribus PR #1). Historical note: first engine addition required enum + migration.
 
 ### Deferred: `UNRESOLVED` routing-failure markers vs TextChoices
 When routing metadata cannot be resolved (`OCR_ROUTING_INVALID`), failed rows persist `engine_key` and `prompt_variant` as the literal string **`UNRESOLVED`** so the outcome is explicit and avoids misleading `GEMINI` / `handwritten` fallbacks.
@@ -119,41 +169,34 @@ Changing `Document.text_input_type` after a document has already been processed 
 Future work:
 Design an explicit reprocessing workflow.
 
-### Deferred issue: non-Hebrew Hebrew translation result
-There may be a mismatch between:
+### Non-Hebrew Hebrew translation — intentional `PARTIAL` (current behavior)
+**Current behavior (accepted):**
 
-- `expected_outputs.py`
-- `run_worker.py::_save_htr_results`
+- `run_worker._save_htr_results` persists **`SOURCE_TEXT` only** for non-Hebrew documents.
+- `expected_outputs.expected_result_types_for_document` expects **`SOURCE_TEXT` + `HEBREW_TEXT`**.
+- Until real Hebrew translation exists, documents stay **`PARTIAL`** — **not** an OCR failure.
 
-around expected `HEBREW_TEXT` results for non-Hebrew documents.
-
-Do not fix this in the routing PR.
-
-Status update:
-- This policy mismatch remains deferred.
-- It is intentionally out of scope for the pre-Transkribus engine-dispatch refactor PR.
-- Revisit in a dedicated PR before or during Transkribus integration if still applicable.
-
-Future work:
-Investigate and fix non-Hebrew `HEBREW_TEXT` persistence/status behavior separately.
+Do not fix this opportunistically unless explicitly requested (translation feature).
 
 ## Transkribus integration — PR #1 (skeleton / stable connection point)
 
-### Decision
+> **Historical.** PR #1 landed enum + registry + fail-fast adapter. Later PRs added live TrpServer integration, dev upload mode, and env-gated `select_ocr_route`. See **“Current state — OCR/HTR and Transkribus”** at the top of this file.
+
+### Decision (historical)
 
 The first Transkribus PR establishes only the **plumbing** so a second engine can exist in the same architecture as Gemini, **without** changing production routing or calling Transkribus.
 
-### Current behavior (after PR #1)
+### Behavior after PR #1 only (superseded)
 
 - `DocumentTextResult.OcrEngineKey` includes **`TRANSKRIBUS`** (with migration updating the field choices).
-- `TranskribusAdapter` is registered in `documents/services/htr_adapters/registry.py` (`get_htr_adapter`) with `engine_key = "TRANSKRIBUS"`.
-- The adapter’s `execute` raises **`EnginePermanentError`** with an explicit “not implemented yet” message (no HTTP, no multi-page policy).
-- `documents/services/ocr_routing.py` (`OCR_ROUTES`) remains **all GEMINI**; no document is routed to Transkribus until a follow-up PR changes routing.
+- `TranskribusAdapter` registered with `engine_key = "TRANSKRIBUS"`.
+- At PR #1: adapter raised **`EnginePermanentError`** (“not implemented yet”). **Superseded:** adapter now runs real HTTP when dev env gates are on.
+- At PR #1: `OCR_ROUTES` all **GEMINI**. **Still true** for static table; dev routing override added later (env-gated, not static table entries).
 
-### Deferred (follow-up PRs)
+### Deferred (still in force unless explicitly requested)
 
-- Routing entries that select `TRANSKRIBUS` for specific `(language, text_input_type)` pairs.
-- Hybrid or fallback between engines (still out of scope unless explicitly requested).
+- Static production `OCR_ROUTES` entries for Transkribus (separate approval).
+- Hybrid or fallback between engines.
 
 ## Transkribus PR #2 — Legacy TrpServer PyLaia (existing server document only)
 
@@ -410,6 +453,6 @@ This section records **operational risks and semantics** for env-gated **Transkr
    - **Whether** (and **where**) to **persist Transkribus `docId`** for audit, dedupe, and cleanup.
    - **Whether** to **allow reprocessing** the same **`Document`** through Transkribus upload mode (and under what guards, e.g. **`VERIFIED`** results, file changed, explicit admin action).
    - **Whether** to add **cleanup tooling** (e.g. management command calling Trp APIs) once **`docId`** is stored.
-   - **Whether** Transkribus outputs should **default** to **`NEEDS_REVIEW`** (or carry structured review reasons) even when the adapter returns **`needs_review=False`**.
+   - **Transkribus default `NEEDS_REVIEW`:** **Intended near-term policy** (documented in “Current state” above): Transkribus-produced rows should default to **`NEEDS_REVIEW`** even when the adapter returns **`needs_review=False`**. **Not implemented in code yet** — implement in the **next behavior PR** after docs/rules sync, not in the docs-only PR.
 
-None of the above are decided by this documentation-only update.
+**`docId` persistence / reprocess / cleanup automation** remain undecided and unimplemented.

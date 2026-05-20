@@ -68,7 +68,8 @@ Examples:
 - `DocumentTextResult.engine` semantics
 - reprocessing deferred
 - retry/DLQ redesign deferred
-- Transkribus planned but not implemented
+- Transkribus dev/staging gates vs production-default Gemini
+- Transkribus `NEEDS_REVIEW` intended policy vs current code
 
 Do not use the decision log as a generic changelog.
 
@@ -132,16 +133,18 @@ Do not document unimplemented features as existing.
 
 Bad:
 
-- “Transkribus is supported”
-- “Multi-engine OCR is complete”
+- “Transkribus is production-default OCR” (unless explicitly true after approval)
+- “Multi-engine OCR routing is complete for all languages”
 - “Fallback to Transkribus works”
-
-When only preparation exists.
+- “`ENABLE_HYBRID_HTR` enables hybrid OCR routing”
+- “Transkribus outputs always save as `NEEDS_REVIEW`” (not implemented yet)
+- “Transkribus `docId` is persisted on `Document`” (not implemented yet)
 
 Good:
 
-- “Transkribus is planned but not implemented yet.”
-- “Adapter/routing preparation exists, but no live Transkribus integration is implemented.”
+- “Transkribus is implemented behind dev/staging env gates; static `OCR_ROUTES` remain Gemini-only.”
+- “Hebrew handwritten may route to Transkribus only when `TRANSKRIBUS_DEV_OCR_ROUTE` and upload mode flags are set.”
+- “Intended near-term: Transkribus results should default to `NEEDS_REVIEW`; follow-up behavior PR not merged yet.”
 
 Do not let documentation become more ambitious than the code.
 
