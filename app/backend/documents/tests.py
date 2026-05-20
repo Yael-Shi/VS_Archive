@@ -1588,7 +1588,7 @@ class RunWorkerBehaviorTests(TestCase):
     @patch("documents.management.commands.run_worker.get_object_bytes")
     @patch("documents.management.commands.run_worker.extract_pages")
     @patch("documents.management.commands.run_worker.transcribe_pages")
-    def test_success_persistence_semantics_remain_unchanged(
+    def test_gemini_success_persists_needs_review_policy_non_hebrew_stays_partial(
         self,
         mock_transcribe,
         mock_extract_pages,
@@ -1610,7 +1610,14 @@ class RunWorkerBehaviorTests(TestCase):
             result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
             engine="gemini-2.0-flash",
         )
-        self.assertEqual(result.status, DocumentTextResult.Status.SUCCEEDED)
+        self.assertEqual(result.status, DocumentTextResult.Status.NEEDS_REVIEW)
+        self.assertEqual(
+            result.verification_status, DocumentTextResult.VerificationStatus.UNVERIFIED
+        )
+        self.assertEqual(result.text, "recognized text")
+        reasons = json.loads(result.review_reasons or "[]")
+        self.assertIn("AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW", reasons)
+        self.assertNotIn("NEEDS_REVIEW_FLAG", reasons)
         self.assertEqual(result.engine_key, DocumentTextResult.OcrEngineKey.GEMINI)
         self.assertEqual(
             result.prompt_variant, DocumentTextResult.OcrPromptVariant.HANDWRITTEN
@@ -1627,6 +1634,146 @@ class RunWorkerBehaviorTests(TestCase):
         self.assertIn("worker_env", call_kw)
         self.doc.refresh_from_db()
         self.assertEqual(self.doc.processing_state_user, Document.ProcessingState.PARTIAL)
+
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    def test_gemini_success_adapter_needs_review_adds_needs_review_flag(
+        self,
+        mock_transcribe,
+        mock_extract_pages,
+        mock_get_object_bytes,
+    ):
+        mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
+        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_transcribe.return_value = HtrResult(
+            text="recognized text long enough for min length",
+            needs_review=True,
+            engine_name="gemini-2.0-flash",
+            review_reasons=["ENGINE_SUPPLIED_REASON"],
+        )
+
+        self.assertTrue(self.command._process_message(self._message()))
+
+        result = DocumentTextResult.objects.get(
+            document=self.doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="gemini-2.0-flash",
+        )
+        self.assertEqual(result.status, DocumentTextResult.Status.NEEDS_REVIEW)
+        reasons = json.loads(result.review_reasons or "[]")
+        self.assertIn("AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW", reasons)
+        self.assertIn("NEEDS_REVIEW_FLAG", reasons)
+        self.assertIn("ENGINE_SUPPLIED_REASON", reasons)
+        self.assertNotIn("MIN_TEXT_LENGTH", reasons)
+
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    def test_gemini_success_review_reasons_include_min_text_length_when_short(
+        self,
+        mock_transcribe,
+        mock_extract_pages,
+        mock_get_object_bytes,
+    ):
+        mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
+        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_transcribe.return_value = HtrResult(
+            text="hi",
+            needs_review=False,
+            engine_name="gemini-2.0-flash",
+            review_reasons=[],
+        )
+
+        self.assertTrue(self.command._process_message(self._message()))
+
+        result = DocumentTextResult.objects.get(
+            document=self.doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="gemini-2.0-flash",
+        )
+        reasons = json.loads(result.review_reasons or "[]")
+        self.assertIn("AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW", reasons)
+        self.assertIn("MIN_TEXT_LENGTH", reasons)
+        self.assertNotIn("NEEDS_REVIEW_FLAG", reasons)
+
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    def test_gemini_success_review_reasons_include_has_unclear_when_marker_present(
+        self,
+        mock_transcribe,
+        mock_extract_pages,
+        mock_get_object_bytes,
+    ):
+        mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
+        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_transcribe.return_value = HtrResult(
+            text="plain text long enough then [UNCLEAR] end",
+            needs_review=False,
+            engine_name="gemini-2.0-flash",
+            review_reasons=[],
+        )
+
+        self.assertTrue(self.command._process_message(self._message()))
+
+        result = DocumentTextResult.objects.get(
+            document=self.doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="gemini-2.0-flash",
+        )
+        reasons = json.loads(result.review_reasons or "[]")
+        self.assertIn("AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW", reasons)
+        self.assertIn("HAS_UNCLEAR", reasons)
+        self.assertNotIn("NEEDS_REVIEW_FLAG", reasons)
+
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    def test_hebrew_gemini_success_ready_when_hebrew_text_usable_needs_review(
+        self,
+        mock_transcribe,
+        mock_extract_pages,
+        mock_get_object_bytes,
+    ):
+        he_doc = Document.objects.create(
+            title="Hebrew doc",
+            doc_type=Document.DocType.PDF,
+            language=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADED,
+            file_s3_key="he.pdf",
+            mime_type="application/pdf",
+        )
+        mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
+        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_transcribe.return_value = HtrResult(
+            text="Hebrew transcript body long enough",
+            needs_review=False,
+            engine_name="gemini-2.0-flash",
+            review_reasons=[],
+        )
+
+        msg = {
+            "Body": json.dumps({"type": "PROCESS_DOCUMENT", "document_id": he_doc.id})
+        }
+        self.assertTrue(self.command._process_message(msg))
+
+        he_doc.refresh_from_db()
+        self.assertEqual(he_doc.processing_state_user, Document.ProcessingState.READY)
+
+        hb = DocumentTextResult.objects.get(
+            document=he_doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="gemini-2.0-flash",
+        )
+        self.assertEqual(hb.status, DocumentTextResult.Status.NEEDS_REVIEW)
+        self.assertEqual(
+            hb.verification_status, DocumentTextResult.VerificationStatus.UNVERIFIED
+        )
+        reasons = json.loads(hb.review_reasons or "[]")
+        self.assertIn("AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW", reasons)
+        self.assertNotIn("NEEDS_REVIEW_FLAG", reasons)
 
     @patch("documents.management.commands.run_worker.get_object_bytes")
     @patch("documents.management.commands.run_worker.extract_pages")
@@ -1819,6 +1966,9 @@ class RunWorkerBehaviorTests(TestCase):
         )
         self.assertIn("worker_env", call_kw)
 
+        he_doc.refresh_from_db()
+        self.assertEqual(he_doc.processing_state_user, Document.ProcessingState.READY)
+
         for r_type in (
             DocumentTextResult.ResultType.SOURCE_TEXT,
             DocumentTextResult.ResultType.HEBREW_TEXT,
@@ -1829,7 +1979,15 @@ class RunWorkerBehaviorTests(TestCase):
                     result_type=r_type,
                     engine=engine_runtime,
                 )
-                self.assertEqual(row.status, DocumentTextResult.Status.SUCCEEDED)
+                self.assertEqual(row.status, DocumentTextResult.Status.NEEDS_REVIEW)
+                self.assertEqual(
+                    row.verification_status,
+                    DocumentTextResult.VerificationStatus.UNVERIFIED,
+                )
+                reasons = json.loads(row.review_reasons or "[]")
+                self.assertIn("AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW", reasons)
+                self.assertNotIn("NEEDS_REVIEW_FLAG", reasons)
+                self.assertEqual(row.text, "mock trp text")
                 self.assertEqual(
                     row.engine_key, DocumentTextResult.OcrEngineKey.TRANSKRIBUS
                 )

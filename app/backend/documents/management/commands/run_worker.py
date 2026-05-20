@@ -23,6 +23,18 @@ from documents.services.page_extraction import extract_pages
 logger = logging.getLogger(__name__)
 
 UNRESOLVED_ROUTE_METADATA = "UNRESOLVED"
+AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW = "AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW"
+
+
+def _dedupe_strings_preserve_order(items: List[str]) -> List[str]:
+    seen: set[str] = set()
+    out: List[str] = []
+    for item in items:
+        if item and item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
+
 
 def _env(name: str) -> str:
     value = os.getenv(name)
@@ -184,22 +196,32 @@ class Command(BaseCommand):
 
     # ------------------------------------------------------------------ DB Helpers
 
-    def _derive_review_reasons(self, text: str, needs_review: bool, engine_reasons: Optional[List[str]]) -> List[str]:
+    def _derive_review_reasons(
+        self,
+        text: str,
+        adapter_needs_review: bool,
+        engine_reasons: Optional[List[str]],
+        *,
+        include_automatic_policy: bool,
+    ) -> List[str]:
         reasons: List[str] = []
-        stripped = (text or "").strip()
-
-        if needs_review:
+        if include_automatic_policy:
+            reasons.append(AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW)
+        if adapter_needs_review:
             reasons.append("NEEDS_REVIEW_FLAG")
+
+        stripped = (text or "").strip()
         if len(stripped) < self._cfg.min_text_length:
             reasons.append("MIN_TEXT_LENGTH")
         if "[UNCLEAR]" in stripped:
             reasons.append("HAS_UNCLEAR")
-        
+
         if engine_reasons:
             for r in engine_reasons:
-                if r and r not in reasons:
+                if r:
                     reasons.append(r)
-        return reasons
+
+        return _dedupe_strings_preserve_order(reasons)
 
     def _save_htr_results(
         self,
@@ -209,15 +231,12 @@ class Command(BaseCommand):
         htr,
         route: OcrRouteConfig,
     ):
-        status = (
-            DocumentTextResult.Status.NEEDS_REVIEW
-            if htr.needs_review
-            else DocumentTextResult.Status.SUCCEEDED
-        )
+        status = DocumentTextResult.Status.NEEDS_REVIEW
         review_reasons = self._derive_review_reasons(
             htr.text,
             htr.needs_review,
             getattr(htr, "review_reasons", None),
+            include_automatic_policy=True,
         )
 
         target_types = [DocumentTextResult.ResultType.SOURCE_TEXT]
@@ -288,18 +307,33 @@ class Command(BaseCommand):
         expected_types = expected_result_types_for_document(doc)
         qs = doc.text_results.filter(engine=engine, result_type__in=expected_types)
 
-        if qs.filter(status=DocumentTextResult.Status.NEEDS_REVIEW).exists():
-            doc.processing_state_user = Document.ProcessingState.PARTIAL
+        rows_by_type: dict[str, Optional[DocumentTextResult]] = {}
+        for rt in expected_types:
+            rows_by_type[rt] = qs.filter(result_type=rt).first()
+
+        all_rows: list[DocumentTextResult] = []
+        for rt in expected_types:
+            row = rows_by_type[rt]
+            if row is None:
+                doc.processing_state_user = Document.ProcessingState.PARTIAL
+                return
+            all_rows.append(row)
+
+        def _row_usable(row: DocumentTextResult) -> bool:
+            if row.status not in (
+                DocumentTextResult.Status.SUCCEEDED,
+                DocumentTextResult.Status.NEEDS_REVIEW,
+            ):
+                return False
+            return bool((row.text or "").strip())
+
+        all_failed = all(r.status == DocumentTextResult.Status.FAILED for r in all_rows)
+        if all_failed:
+            doc.processing_state_user = Document.ProcessingState.FAILED
             return
 
-        existing = qs.count()
-        succeeded = qs.filter(status=DocumentTextResult.Status.SUCCEEDED).count()
-        failed = qs.filter(status=DocumentTextResult.Status.FAILED).count()
-        missing = len(expected_types) - existing
-
-        if missing == 0 and succeeded == len(expected_types):
+        if all(_row_usable(r) for r in all_rows):
             doc.processing_state_user = Document.ProcessingState.READY
-        elif missing == 0 and failed == len(expected_types):
-            doc.processing_state_user = Document.ProcessingState.FAILED
-        else:
-            doc.processing_state_user = Document.ProcessingState.PARTIAL
+            return
+
+        doc.processing_state_user = Document.ProcessingState.PARTIAL
