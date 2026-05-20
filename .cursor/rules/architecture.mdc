@@ -170,13 +170,60 @@ Transkribus-specific behavior belongs in:
 
 Do not add **fake** Transkribus HTTP behavior or **hybrid/fallback between providers** unless the task explicitly requests it.
 
-## DocumentTextResult status semantics
+## OCR review lifecycle (current)
 
-- **`DocumentTextResult.status=SUCCEEDED`** means the **technical OCR/HTR pipeline completed** without treating the outcome as a pipeline failure (subject to existing worker rules). It does **not** mean the text is archivally correct or human-approved.
-- **`DocumentTextResult.status=NEEDS_REVIEW`** means the pipeline produced text but flagged it for review (e.g. adapter `needs_review`, short text, `[UNCLEAR]`). It is **not** the same as `FAILED`.
-- **`verification_status`** (`UNVERIFIED`, `VERIFIED`, `REJECTED`) is the **human review / quality approval** path. Successful OCR with `SUCCEEDED` and `verification_status=UNVERIFIED` is normal until a human verifies.
+### Automatic OCR/HTR success (`run_worker._save_htr_results`)
 
-**Transkribus — intended near-term policy (not implemented yet):** Transkribus-produced outputs should **default to `NEEDS_REVIEW`** even when the adapter returns `needs_review=False`, meaning “pipeline succeeded; do not trust this provider output without human review.” Implement in a **small follow-up behavior PR** after docs/rules sync; do not document or imply this is live until that PR lands.
+All successful automatic OCR/HTR outputs persisted by the worker use:
+
+- **`DocumentTextResult.status=NEEDS_REVIEW`**
+- **`DocumentTextResult.verification_status=UNVERIFIED`**
+
+This applies to **Gemini**, **Transkribus**, and any route persisted through the worker success path.
+
+- **`NEEDS_REVIEW`** means the pipeline produced **usable/displayable text** that still requires human review before it is treated as ground truth. It is **not** a technical failure and is **not** the same as **`FAILED`**.
+- **`FAILED`** is used for actual OCR/HTR pipeline, dispatch, and routing failures (`_save_ocr_failure`).
+
+**`SUCCEEDED`** remains a valid enum value for future trusted/imported/no-review-required processing paths, but **current automatic worker persistence normally uses `NEEDS_REVIEW`**, not `SUCCEEDED`.
+
+### Human verification layer
+
+- **`verification_status=UNVERIFIED`** — default after automatic OCR/HTR; text may be shown but is not human-approved ground truth.
+- **`verification_status=VERIFIED`** — human-approved ground truth layer (separate from row `status`).
+- **`verification_status=REJECTED`** — human rejected the result.
+
+Do not treat **`READY`** on the parent document as human-verified.
+
+### Review reasons (worker vocabulary)
+
+On successful automatic persistence, the worker adds policy and content/engine signals (deduplicated, meaningful order preserved):
+
+- **`AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW`** — policy-level reason: all automatic OCR/HTR outputs require human review before ground-truth use.
+- **`NEEDS_REVIEW_FLAG`** — only when **`HtrResult.needs_review=True`** (adapter/engine uncertainty). **Not** the generic policy reason.
+- **`MIN_TEXT_LENGTH`**, **`HAS_UNCLEAR`** — content signals from worker checks on persisted text.
+- Engine-provided **`review_reasons`** from **`HtrResult`** — preserved when present.
+
+### `Document.processing_state_user` rollup (`_update_processing_state`)
+
+An expected **`DocumentTextResult`** row counts as **usable/displayable** for rollup when:
+
+- **`status`** is **`SUCCEEDED`** or **`NEEDS_REVIEW`**
+- **`text`** is non-empty after **`.strip()`**
+
+**`FAILED`** rows and blank/whitespace-only text are **not** usable.
+
+Rollup rules:
+
+- **Missing** any expected output row for the runtime **`engine`** → **`PARTIAL`**
+- All expected rows exist and **all `FAILED`** → **`FAILED`**
+- All expected rows exist, each usable (status + non-empty text as above) → **`READY`**
+- Otherwise → **`PARTIAL`**
+
+**`READY`** means expected outputs exist and are usable/displayable for workflow/UI. It does **not** mean human-verified, archivally approved, or ground truth.
+
+A document may validly be **`processing_state_user=READY`** while text results are **`status=NEEDS_REVIEW`** and **`verification_status=UNVERIFIED`**.
+
+**`PARTIAL`** primarily means expected outputs are **missing**, **incomplete**, **failed**, or **unusable** — not merely “review pending.” **`NEEDS_REVIEW` alone does not force `PARTIAL`** when expected usable rows exist.
 
 ## Current operational boundary (Transkribus)
 
@@ -218,7 +265,7 @@ Do not redesign retry, backoff, DLQ, or failure handling opportunistically.
 - `SOURCE_TEXT`
 - `HEBREW_TEXT`
 
-(same transcribed `text` and same `status` for both rows on a given successful run, keyed by runtime `engine`.)
+(same transcribed `text` and same `status` — normally **`NEEDS_REVIEW`** on automatic success — for both rows on a given successful run, keyed by runtime `engine`.)
 
 **Processing-state rollup** (`expected_outputs.expected_result_types_for_document`): for Hebrew, only **`HEBREW_TEXT`** is required for `processing_state_user` to reach `READY`. `SOURCE_TEXT` rows are persisted but **not** counted in that rollup.
 
