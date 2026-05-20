@@ -69,7 +69,7 @@ Examples:
 - reprocessing deferred
 - retry/DLQ redesign deferred
 - Transkribus dev/staging gates vs production-default Gemini
-- Transkribus `NEEDS_REVIEW` intended policy vs current code
+- automatic OCR review lifecycle / `processing_state_user` rollup semantics
 
 Do not use the decision log as a generic changelog.
 
@@ -137,14 +137,16 @@ Bad:
 - “Multi-engine OCR routing is complete for all languages”
 - “Fallback to Transkribus works”
 - “`ENABLE_HYBRID_HTR` enables hybrid OCR routing”
-- “Transkribus outputs always save as `NEEDS_REVIEW`” (not implemented yet)
+- “Automatic OCR success normally persists `SUCCEEDED`” (current worker uses `NEEDS_REVIEW`)
+- “`READY` means human-verified” or “`NEEDS_REVIEW` forces parent `PARTIAL`”
+- “`NEEDS_REVIEW_FLAG` is the generic policy reason” (use `AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW`)
 - “Transkribus `docId` is persisted on `Document`” (not implemented yet)
 
 Good:
 
 - “Transkribus is implemented behind dev/staging env gates; static `OCR_ROUTES` remain Gemini-only.”
 - “Hebrew handwritten may route to Transkribus only when `TRANSKRIBUS_DEV_OCR_ROUTE` and upload mode flags are set.”
-- “Intended near-term: Transkribus results should default to `NEEDS_REVIEW`; follow-up behavior PR not merged yet.”
+- “Automatic OCR/HTR worker success persists `NEEDS_REVIEW` + `UNVERIFIED`; policy reason `AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW`; `NEEDS_REVIEW_FLAG` only when `HtrResult.needs_review=True`.”
 
 Do not let documentation become more ambitious than the code.
 

@@ -2,7 +2,7 @@
 
 ## Current state — OCR/HTR and Transkribus (read this first)
 
-**Last aligned:** docs/rules sync PR (Transkribus no longer “skeleton-only”).
+**Last aligned:** OCR/HTR review lifecycle behavior + docs/rules sync (automatic success → `NEEDS_REVIEW`, rollup semantics).
 
 ### Routing (implemented)
 
@@ -17,17 +17,35 @@
 - **Not** production-default. Technical smoke proves **wiring**, not archival OCR quality or UI fidelity.
 - Upload mode creates a **new** Trp document per run; VS-Archive does **not** persist Trp **`docId`** yet.
 
-### Result status semantics
+### OCR review lifecycle (implemented)
 
-- **`SUCCEEDED`** = technical pipeline completed successfully (not human quality approval).
-- **`verification_status`** = human review (`UNVERIFIED` until verified).
-- **Intended near-term (not in code yet):** Transkribus-produced rows should default to **`NEEDS_REVIEW`** even when `HtrResult.needs_review` is false. **Next follow-up behavior PR** after this docs sync; do not treat as implemented until merged.
+**Automatic success** (`run_worker._save_htr_results`):
+
+- **`DocumentTextResult.status=NEEDS_REVIEW`** for all successful automatic OCR/HTR persistence (Gemini, Transkribus, any worker success path).
+- **`verification_status=UNVERIFIED`** on that path.
+- **`NEEDS_REVIEW`** = usable/displayable text requiring human review before ground-truth use; **not** a technical failure (distinct from **`FAILED`**).
+- **`FAILED`** remains for pipeline/dispatch/routing failures.
+
+**Human ground truth:** **`verification_status=VERIFIED`** is the human-approved layer. **`SUCCEEDED`** remains a valid enum for future trusted/manual paths; **current automatic worker persistence normally uses `NEEDS_REVIEW`**.
+
+**Review reasons (worker):**
+
+- **`AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW`** — policy-level on every automatic success.
+- **`NEEDS_REVIEW_FLAG`** — only when **`HtrResult.needs_review=True`** (not the generic policy reason).
+- **`MIN_TEXT_LENGTH`**, **`HAS_UNCLEAR`**, engine-provided reasons — content/engine signals; deduplicated with order preserved.
+
+**`Document.processing_state_user` rollup:**
+
+- **Usable/displayable** row: **`status`** in **`SUCCEEDED`** or **`NEEDS_REVIEW`**, non-empty stripped **`text`**.
+- **`READY`** = all expected outputs exist and are usable — **not** human-verified. Valid: parent **`READY`** with child rows **`NEEDS_REVIEW`** + **`UNVERIFIED`**.
+- **`PARTIAL`** = missing, incomplete, failed, or unusable expected outputs — **not** merely review pending. **`NEEDS_REVIEW` alone does not force `PARTIAL`** when expected usable rows exist.
+- **`FAILED`** when all expected rows exist and all are **`FAILED`**.
 
 ### Hebrew `DocumentTextResult` types (current accepted behavior)
 
-- **Worker** (`_save_htr_results`): Hebrew documents persist **both** `SOURCE_TEXT` and `HEBREW_TEXT` (same text/status per run).
-- **Rollup** (`expected_outputs`): Hebrew `READY` requires **`HEBREW_TEXT` only**; `SOURCE_TEXT` is not part of that expectation list.
-- **Open decision (future):** whether to keep both rows long-term — document only; no behavior change in docs PR.
+- **Worker** (`_save_htr_results`): Hebrew documents persist **both** `SOURCE_TEXT` and `HEBREW_TEXT` (same text/status per run; status normally **`NEEDS_REVIEW`** on automatic success).
+- **Rollup** (`expected_outputs`): Hebrew **`READY`** requires **`HEBREW_TEXT` only** (usable per rollup rules); `SOURCE_TEXT` is not part of that expectation list.
+- **Open decision (future):** whether to keep both rows long-term — document only; no behavior change in unrelated work.
 
 ### Non-Hebrew `PARTIAL` (intentional)
 
@@ -39,12 +57,10 @@ Decide (then implement in focused PRs): persist Trp **`docId`** / remote identit
 
 ### Near-term PR sequence
 
-1. Docs/rules sync.
-2. Transkribus default **`NEEDS_REVIEW`** (behavior PR).
-3. Trp identity persistence design + migration.
-4. Reprocess / duplicate policy.
-5. Cleanup runbook (automation later).
-6. Broader production routing only if explicitly approved.
+1. Trp identity persistence design + migration.
+2. Reprocess / duplicate policy.
+3. Cleanup runbook (automation later).
+4. Broader production routing only if explicitly approved.
 
 ---
 
@@ -398,6 +414,8 @@ A **full real** dev/staging path was exercised end-to-end (no mocks): **SQS** �
 - **`DocumentTextResult`** rows for **`SOURCE_TEXT`** and **`HEBREW_TEXT`**
 - For **both** rows: **`engine=transkribus-pylaia:564149`**, **`engine_key=TRANSKRIBUS`**, **`prompt_variant=handwritten`**, **`status=SUCCEEDED`**, **`verification_status=UNVERIFIED`**, **`error_code` None**, **`text` length 1205**
 
+  > **Historical smoke snapshot.** Observed **`status=SUCCEEDED`** at the time of this run. **Current worker policy** persists automatic OCR/HTR success as **`NEEDS_REVIEW`** (see “Current state — OCR review lifecycle” above).
+
 ### Meaning
 
 This run **validates wiring and operability** of the **dev/staging** worker pipeline with **real** SQS, S3, DB, and **Legacy TrpServer** for the gated **Hebrew handwritten** route. It is **not** a claim about production readiness, default routing, or OCR quality.
@@ -445,7 +463,9 @@ This section records **operational risks and semantics** for env-gated **Transkr
 
 ### Status and verification semantics
 
-7. **`status=SUCCEEDED`** means the **OCR/HTR pipeline completed without** treating the outcome as a pipeline failure (subject to existing worker rules such as **`needs_review`** → **`NEEDS_REVIEW`**). **`verification_status=UNVERIFIED`** means **human verification** in VS-Archive has **not** been completed. A successful dev smoke **does not** imply **OCR quality**, **transcript fidelity**, or agreement with the Transkribus UI.
+7. **`verification_status=UNVERIFIED`** means **human verification** in VS-Archive has **not** been completed. A successful dev smoke **does not** imply **OCR quality**, **transcript fidelity**, or agreement with the Transkribus UI.
+
+   **Current worker policy:** automatic OCR/HTR success persists **`status=NEEDS_REVIEW`** (not a technical failure). **`SUCCEEDED`** remains valid in the schema; older smoke notes that record **`SUCCEEDED`** are **historical snapshots** of behavior at run time.
 
 ### Decisions still required before broader use
 
@@ -453,6 +473,6 @@ This section records **operational risks and semantics** for env-gated **Transkr
    - **Whether** (and **where**) to **persist Transkribus `docId`** for audit, dedupe, and cleanup.
    - **Whether** to **allow reprocessing** the same **`Document`** through Transkribus upload mode (and under what guards, e.g. **`VERIFIED`** results, file changed, explicit admin action).
    - **Whether** to add **cleanup tooling** (e.g. management command calling Trp APIs) once **`docId`** is stored.
-   - **Transkribus default `NEEDS_REVIEW`:** **Intended near-term policy** (documented in “Current state” above): Transkribus-produced rows should default to **`NEEDS_REVIEW`** even when the adapter returns **`needs_review=False`**. **Not implemented in code yet** — implement in the **next behavior PR** after docs/rules sync, not in the docs-only PR.
+   - **Automatic OCR review lifecycle:** implemented in worker — see **“OCR review lifecycle (implemented)”** in Current state above (worker-wide **`NEEDS_REVIEW`**, not Transkribus-only).
 
 **`docId` persistence / reprocess / cleanup automation** remain undecided and unimplemented.
