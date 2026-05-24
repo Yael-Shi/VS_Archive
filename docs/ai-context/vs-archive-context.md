@@ -22,9 +22,11 @@ VS-Archive is a Django backend project for managing historical family documents.
 - Worker routing to Transkribus: `language=he` + `HANDWRITTEN` when `TRANSKRIBUS_DEV_OCR_ROUTE` + `TRANSKRIBUS_DEV_UPLOAD_MODE` are set (see decision log).
 - Manual smoke: `python manage.py dev_transkribus_transcribe <file> --confirm-create-transkribus-doc`.
 
-**Not implemented:** Gemini→Transkribus fallback, hybrid OCR routing, production-default Transkribus in `OCR_ROUTES`, duplicate prevention, reprocess guards, cleanup automation.
+**Not implemented:** Gemini→Transkribus fallback, hybrid OCR routing, production-default Transkribus in `OCR_ROUTES`, reuse of existing Trp `docId`, product reprocess guards, cleanup automation.
 
 **TranskribusRun persistence:** dev/staging Transkribus adapter paths persist one row per attempt (remote ids, job ids, attempt status). Worker passes generic `document_id` only.
+
+**Duplicate upload guard (PR3):** dev upload mode blocks a second Trp upload for the same `(document_id, UPLOAD_CREATED, collection_id, model_id)` when a prior blocking run exists. Override with `TRANSKRIBUS_FORCE_REPROCESS=true` (dev/staging only; may orphan prior Trp documents). See `decision-log.md` — Transkribus duplicate upload guard.
 
 ## Routing layer (done)
 
@@ -68,8 +70,8 @@ Non-Hebrew documents may remain **`PARTIAL`** because `HEBREW_TEXT` (translation
 ## Near-term roadmap
 
 1. ~~Transkribus remote identity schema + persistence wiring~~ → **done (PR1 + PR2)**.
-2. Reprocess / duplicate-prevention policy.
-3. Cleanup / retention runbook (no automation before reprocess/duplicate policy is decided).
+2. ~~Duplicate upload guard (dev upload mode)~~ → **done (PR3)**.
+3. Cleanup / retention runbook (no automation before reuse/reprocess policy is decided).
 4. Broader Transkribus production routing only with explicit approval.
 
 OCR quality/fidelity validation against the Transkribus UI is important but **not** the current docs/rules task.

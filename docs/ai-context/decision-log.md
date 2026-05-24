@@ -55,12 +55,12 @@
 
 **Schema + wiring (PR1–PR2, done):** **`TranskribusRun`** records one Transkribus processing attempt per VS-Archive document. **`TranskribusAdapter`** (dev/staging paths) creates/updates rows through **`transkribus_run_persistence`**. **`run_worker`** passes generic **`document_id`** into **`transcribe_pages`**; no provider branches in the worker.
 
-Still decide (then implement in focused PRs): reprocess and duplicate prevention; cleanup/retention runbook. **No** production `OCR_ROUTES` expansion until decided or explicitly deferred.
+Still decide (then implement in focused PRs): recognition-only retry / reuse of existing Trp `docId`; cleanup/retention runbook. **No** production `OCR_ROUTES` expansion until decided or explicitly deferred.
 
 ### Near-term PR sequence
 
 1. ~~Trp identity schema + persistence wiring~~ → **done (PR1 + PR2)**.
-2. Reprocess / duplicate policy.
+2. ~~Duplicate upload guard (dev upload mode)~~ → **done (PR3)**.
 3. Cleanup runbook (automation later).
 4. Broader production routing only if explicitly approved.
 
@@ -107,8 +107,58 @@ Do **not** store Trp remote ids or job ids in **`review_reasons`**.
 
 ### Deferred (post-PR2)
 
-- Duplicate prevention, reprocess guards, cleanup/retention.
+- Recognition-only retry / reuse of existing `remote_doc_id`, product reprocess guards, cleanup/retention.
 - Production **`OCR_ROUTES`** expansion.
+
+---
+
+## Transkribus — duplicate upload guard (PR3)
+
+**Decision:** In dev **upload-created** mode, block a second Trp upload for the same VS-Archive document unless an explicit dev env override is set. **Guard only** — no reuse of existing `remote_doc_id`, no cleanup, no routing changes.
+
+### Match key
+
+A prior run blocks a new upload when all match:
+
+- same **`document_id`**
+- **`mode=UPLOAD_CREATED`**
+- same **`collection_id`** and **`model_id`** (stripped, same normalization as `start_run`)
+
+Do **not** use `pages_query`, page mapping, S3 key, or content hash in PR3.
+
+### Blocking statuses
+
+Block when any matching prior run has:
+
+- `STARTED`, `UPLOADED`, `RECOGNITION_STARTED`, or `SUCCEEDED`
+- `FAILED` with non-empty **`remote_doc_id`**
+
+Do **not** block `FAILED` with **`remote_doc_id`** null or blank (upload may be retried).
+
+**`STARTED` blocks** even if the row may be stale after a worker crash. **No** TTL/staleness logic in PR3 — ops may use **`TRANSKRIBUS_FORCE_REPROCESS`** or manual DB fix for stuck `STARTED` rows.
+
+### Behavior
+
+- **`find_blocking_upload_run`** in **`transkribus_run_persistence.py`** returns the most recent blocking row (any blocking row via ordered query — not “latest row only”).
+- **`TranskribusAdapter._execute_dev_upload`** calls it after upload config validation and **before** `start_run` / **`requests.Session`** / login / HTTP.
+- On block: **`logger.warning`** with `document_id`, `blocking_run_id`, `blocking_run_status`, `blocking_remote_doc_id`, `collection_id`, `model_id`; raise **`EnginePermanentError`** with actionable text; **no** new **`TranskribusRun`** row.
+- **`EXISTING_SERVER`** mode is **not** guarded.
+
+### Force override (dev/staging only)
+
+- **`TRANSKRIBUS_FORCE_REPROCESS`** (default **false**) on **`WorkerEnvConfig`** as **`transkribus_force_reprocess`**.
+- When **true**, bypasses the guard and allows another Trp upload (may create **duplicate/orphan** Trp documents). **Not** a product/admin reprocess mechanism — no Document fields, admin actions, API params, or worker kwargs in PR3.
+
+### Status layers (unchanged)
+
+Blocked upload does not change OCR review lifecycle or rollup rules. Worker may still persist **`DocumentTextResult.FAILED`** from the adapter error. **`TranskribusRun.status`** remains Trp attempt lifecycle only.
+
+### Deferred (post-PR3)
+
+- Reuse `remote_doc_id` / recognition-only retry
+- Cleanup/retention automation, Trp delete API
+- Staleness TTL for in-progress rows
+- Product reprocess policy (`VERIFIED`, file changed, admin action)
 
 ---
 
