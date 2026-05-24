@@ -159,6 +159,7 @@ class Command(BaseCommand):
                 text_input_type=doc.text_input_type,
                 route=route,
                 worker_env=self._cfg,
+                document_id=document_id,
             )
 
         except Exception as e:

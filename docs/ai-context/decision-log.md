@@ -15,7 +15,7 @@
 
 - **Real** Legacy TrpServer / PyLaia: upload ingest, existing-server-document dev mode, adapter + `transkribus_engine.py`, registry, `OcrEngineKey.TRANSKRIBUS`.
 - **Not** production-default. Technical smoke proves **wiring**, not archival OCR quality or UI fidelity.
-- Upload mode creates a **new** Trp document per run; Trp **`docId`** / job ids are **not written by the worker yet** — **`TranskribusRun`** schema exists (PR1); adapter persistence wiring is **PR2**.
+- Upload mode creates a **new** Trp document per run; **`TranskribusRun`** rows are written on dev/staging Transkribus adapter paths (PR2 wiring). Duplicate prevention and cleanup remain deferred.
 
 ### OCR review lifecycle (implemented)
 
@@ -53,13 +53,13 @@
 
 ### Blockers before broader Transkribus use
 
-**Schema (PR1, done):** **`TranskribusRun`** model records one Transkribus processing attempt per VS-Archive document (remote ids, job ids, attempt status). **Wiring (PR2, deferred):** adapter/worker must create/update rows on real runs.
+**Schema + wiring (PR1–PR2, done):** **`TranskribusRun`** records one Transkribus processing attempt per VS-Archive document. **`TranskribusAdapter`** (dev/staging paths) creates/updates rows through **`transkribus_run_persistence`**. **`run_worker`** passes generic **`document_id`** into **`transcribe_pages`**; no provider branches in the worker.
 
-Still decide (then implement in focused PRs): persistence wiring; reprocess and duplicate prevention; cleanup/retention runbook. **No** production `OCR_ROUTES` expansion until decided or explicitly deferred.
+Still decide (then implement in focused PRs): reprocess and duplicate prevention; cleanup/retention runbook. **No** production `OCR_ROUTES` expansion until decided or explicitly deferred.
 
 ### Near-term PR sequence
 
-1. ~~Trp identity persistence design + migration~~ → **`TranskribusRun` schema (PR1)**; **persistence wiring (PR2)** next.
+1. ~~Trp identity schema + persistence wiring~~ → **done (PR1 + PR2)**.
 2. Reprocess / duplicate policy.
 3. Cleanup runbook (automation later).
 4. Broader production routing only if explicitly approved.
@@ -97,9 +97,16 @@ Still decide (then implement in focused PRs): persistence wiring; reprocess and 
 
 Do **not** store Trp remote ids or job ids in **`review_reasons`**.
 
-### Deferred (PR2+)
+### Persistence wiring (PR2)
 
-- Adapter/worker persistence wiring (`document_id` kwargs, lifecycle updates).
+- **`transkribus_run_persistence.py`:** ORM-only helpers (`start_run`, `mark_uploaded`, `mark_recognition_started`, `mark_succeeded`, `mark_failed`).
+- **`TranskribusAdapter`:** stepwise engine calls + lifecycle updates; requires **`document_id`** kwarg from **`transcribe_pages`**.
+- **`transkribus_engine`:** **`PylaiaTranscriptionOutcome`** + **`complete_pylaia_transcription_after_job`**; **`pylaia_transcribe_document_with_session`** return type is the dataclass (tuple preserved on **`transcribe_existing_server_document`** / **`upload_then_transcribe_page_images_with_pylaia`** wrappers).
+- **`TranskribusRun.status=SUCCEEDED`** is Trp attempt success only — does not change **`DocumentTextResult.status=NEEDS_REVIEW`**, **`verification_status`**, or rollup.
+- **`dev_transkribus_transcribe`** unchanged (no **`document_id`** → no **`TranskribusRun`** rows from CLI unless added later).
+
+### Deferred (post-PR2)
+
 - Duplicate prevention, reprocess guards, cleanup/retention.
 - Production **`OCR_ROUTES`** expansion.
 
