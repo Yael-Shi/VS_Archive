@@ -15,6 +15,14 @@ _BLOCKING_UPLOAD_STATUSES = frozenset(
     }
 )
 
+_REUSABLE_UPLOAD_STATUSES = frozenset(
+    {
+        TranskribusRun.Status.FAILED,
+        TranskribusRun.Status.UPLOADED,
+        TranskribusRun.Status.RECOGNITION_STARTED,
+    }
+)
+
 _MAX_ERROR_DETAILS_LEN = 4000
 
 _SENSITIVE_PATTERNS = (
@@ -43,6 +51,47 @@ def _upload_run_blocks_new_upload(run: TranskribusRun) -> bool:
     if run.status == TranskribusRun.Status.FAILED:
         return bool((run.remote_doc_id or "").strip())
     return False
+
+
+def _run_is_reusable_for_recognition_retry(run: TranskribusRun) -> bool:
+    if run.status not in _REUSABLE_UPLOAD_STATUSES:
+        return False
+    if not (run.remote_doc_id or "").strip():
+        return False
+    if not (run.pages_query or "").strip():
+        return False
+    return True
+
+
+def find_reusable_upload_run(
+    *,
+    document_id: int,
+    collection_id: str,
+    model_id: str,
+) -> TranskribusRun | None:
+    """
+    Return the most recent UPLOAD_CREATED run that can seed recognition-only retry
+    for the same (document_id, collection_id, model_id), or None.
+
+    Qualifying statuses: FAILED, UPLOADED, RECOGNITION_STARTED (not SUCCEEDED).
+    Requires non-empty remote_doc_id and pages_query after strip.
+    """
+    col = str(collection_id).strip()
+    mid = str(model_id).strip()
+    candidates = (
+        TranskribusRun.objects.filter(
+            document_id=document_id,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id=col,
+            model_id=mid,
+            status__in=_REUSABLE_UPLOAD_STATUSES,
+        )
+        .order_by("-created_at", "-id")
+    )
+    for run in candidates:
+        if _run_is_reusable_for_recognition_retry(run):
+            return run
+    return None
 
 
 def find_blocking_upload_run(
@@ -116,6 +165,44 @@ def start_run(
         remote_doc_id=remote_doc_id,
         pages_query=pages_query,
     )
+
+
+def apply_source_upload_metadata(
+    run: TranskribusRun,
+    *,
+    source: TranskribusRun,
+) -> TranskribusRun:
+    """
+    Copy upload-time metadata from a prior UPLOAD_CREATED run onto a new attempt row
+    without calling TrpServer upload APIs (recognition-only retry).
+    """
+    raw_mapping = source.page_index_to_page_nr
+    if raw_mapping is None:
+        page_map: dict[int, int] | None = None
+    elif isinstance(raw_mapping, dict):
+        page_map = {int(k): int(v) for k, v in raw_mapping.items()}
+    else:
+        page_map = {int(k): int(v) for k, v in dict(raw_mapping).items()}
+
+    run.status = TranskribusRun.Status.UPLOADED
+    run.remote_doc_id = str(source.remote_doc_id).strip()
+    run.pages_query = str(source.pages_query).strip()
+    run.page_index_to_page_nr = page_map
+    run.upload_id = source.upload_id
+    ingest = (source.ingest_job_id or "").strip()
+    run.ingest_job_id = ingest if ingest else None
+    run.save(
+        update_fields=[
+            "status",
+            "remote_doc_id",
+            "upload_id",
+            "ingest_job_id",
+            "pages_query",
+            "page_index_to_page_nr",
+            "updated_at",
+        ]
+    )
+    return run
 
 
 def mark_uploaded(

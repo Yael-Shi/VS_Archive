@@ -1,8 +1,6 @@
 # VS-Archive — Status Flow Guardrails
 
-Suggested repository path: `docs/ai-context/status-flow.md`
-
-Purpose: keep the status layers in VS-Archive explicit, especially before Transkribus duplicate-prevention/reprocess work.
+Purpose: keep the status layers in VS-Archive explicit, especially before future Transkribus reuse, cleanup, reprocess, and verification work.
 
 ## Rule zero: do not collapse status layers
 
@@ -141,6 +139,12 @@ DocumentTextResult.status = NEEDS_REVIEW
 DocumentTextResult.verification_status = UNVERIFIED
 Document.processing_state_user = READY
 ```
+
+## Recognition-only retry (dev/staging V1)
+
+A **new** `TranskribusRun` row is created for each recognition-only recovery attempt. That row tracks the **new** PyLaia attempt lifecycle; it does **not** mean a new Trp upload occurred.
+
+`TranskribusRun.SUCCEEDED` on a prior upload-created run is **not** a reusable source for V1 recognition-only retry (recovery targets failed or incomplete attempts only).
 
 ## PR guardrails
 

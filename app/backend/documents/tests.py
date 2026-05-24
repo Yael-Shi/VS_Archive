@@ -2516,6 +2516,7 @@ def _transkribus_adapter_worker_env(**overrides):
         transkribus_collection_id="col",
         transkribus_model_id="42",
         transkribus_force_reprocess=False,
+        transkribus_recognition_only_retry=False,
     )
     base.update(overrides)
     return WorkerEnvConfig(**base)
@@ -2767,6 +2768,194 @@ class TranskribusRunPersistenceGuardTests(TestCase):
         )
         self.assertIsNone(
             trp.find_blocking_upload_run(
+                document_id=doc.id,
+                collection_id="col",
+                model_id="42",
+            )
+        )
+
+
+class TranskribusRunPersistenceReusableRunTests(TestCase):
+    def _create_document(self) -> Document:
+        return Document.objects.create(
+            title="Reusable run doc",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADED,
+        )
+
+    def test_find_reusable_returns_none_when_no_runs(self):
+        from documents.services import transkribus_run_persistence as trp
+
+        doc = self._create_document()
+        self.assertIsNone(
+            trp.find_reusable_upload_run(
+                document_id=doc.id,
+                collection_id="col",
+                model_id="42",
+            )
+        )
+
+    def test_find_reusable_returns_failed_with_remote_doc_id_and_pages_query(self):
+        from documents.services import transkribus_run_persistence as trp
+
+        doc = self._create_document()
+        run = TranskribusRun.objects.create(
+            document=doc,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id="col",
+            model_id="42",
+            status=TranskribusRun.Status.FAILED,
+            remote_doc_id="555",
+            pages_query="1",
+        )
+        found = trp.find_reusable_upload_run(
+            document_id=doc.id,
+            collection_id="col",
+            model_id="42",
+        )
+        self.assertIsNotNone(found)
+        self.assertEqual(found.id, run.id)
+
+    def test_find_reusable_failed_without_remote_doc_id_returns_none(self):
+        from documents.services import transkribus_run_persistence as trp
+
+        doc = self._create_document()
+        TranskribusRun.objects.create(
+            document=doc,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id="col",
+            model_id="42",
+            status=TranskribusRun.Status.FAILED,
+            remote_doc_id=None,
+        )
+        self.assertIsNone(
+            trp.find_reusable_upload_run(
+                document_id=doc.id,
+                collection_id="col",
+                model_id="42",
+            )
+        )
+
+    def test_find_reusable_failed_without_pages_query_returns_none(self):
+        from documents.services import transkribus_run_persistence as trp
+
+        doc = self._create_document()
+        TranskribusRun.objects.create(
+            document=doc,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id="col",
+            model_id="42",
+            status=TranskribusRun.Status.FAILED,
+            remote_doc_id="555",
+            pages_query=None,
+        )
+        self.assertIsNone(
+            trp.find_reusable_upload_run(
+                document_id=doc.id,
+                collection_id="col",
+                model_id="42",
+            )
+        )
+
+    def test_find_reusable_returns_uploaded_with_remote_doc_id_and_pages_query(self):
+        from documents.services import transkribus_run_persistence as trp
+
+        doc = self._create_document()
+        run = TranskribusRun.objects.create(
+            document=doc,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id="col",
+            model_id="42",
+            status=TranskribusRun.Status.UPLOADED,
+            remote_doc_id="111",
+            pages_query="1-2",
+        )
+        found = trp.find_reusable_upload_run(
+            document_id=doc.id,
+            collection_id="col",
+            model_id="42",
+        )
+        self.assertEqual(found.id, run.id)
+
+    def test_find_reusable_returns_recognition_started_with_remote_doc_id(self):
+        from documents.services import transkribus_run_persistence as trp
+
+        doc = self._create_document()
+        run = TranskribusRun.objects.create(
+            document=doc,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id="col",
+            model_id="42",
+            status=TranskribusRun.Status.RECOGNITION_STARTED,
+            remote_doc_id="222",
+            pages_query="1",
+            recognition_job_id="recog-old",
+        )
+        found = trp.find_reusable_upload_run(
+            document_id=doc.id,
+            collection_id="col",
+            model_id="42",
+        )
+        self.assertEqual(found.id, run.id)
+
+    def test_find_reusable_succeeded_with_remote_doc_id_returns_none(self):
+        from documents.services import transkribus_run_persistence as trp
+
+        doc = self._create_document()
+        TranskribusRun.objects.create(
+            document=doc,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id="col",
+            model_id="42",
+            status=TranskribusRun.Status.SUCCEEDED,
+            remote_doc_id="777",
+            pages_query="1",
+        )
+        self.assertIsNone(
+            trp.find_reusable_upload_run(
+                document_id=doc.id,
+                collection_id="col",
+                model_id="42",
+            )
+        )
+
+    def test_find_reusable_collection_mismatch_returns_none(self):
+        from documents.services import transkribus_run_persistence as trp
+
+        doc = self._create_document()
+        TranskribusRun.objects.create(
+            document=doc,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id="other-col",
+            model_id="42",
+            status=TranskribusRun.Status.FAILED,
+            remote_doc_id="555",
+            pages_query="1",
+        )
+        self.assertIsNone(
+            trp.find_reusable_upload_run(
+                document_id=doc.id,
+                collection_id="col",
+                model_id="42",
+            )
+        )
+
+    def test_find_reusable_model_mismatch_returns_none(self):
+        from documents.services import transkribus_run_persistence as trp
+
+        doc = self._create_document()
+        TranskribusRun.objects.create(
+            document=doc,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id="col",
+            model_id="99",
+            status=TranskribusRun.Status.FAILED,
+            remote_doc_id="555",
+            pages_query="1",
+        )
+        self.assertIsNone(
+            trp.find_reusable_upload_run(
                 document_id=doc.id,
                 collection_id="col",
                 model_id="42",
@@ -3061,6 +3250,317 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
                 transkribus_use_existing_server_document=True,
                 transkribus_dev_existing_document_id="99",
                 transkribus_dev_existing_pages="1",
+            ),
+            document_id=doc.id,
+        )
+        upload_runs = TranskribusRun.objects.filter(
+            document=doc, mode=TranskribusRun.Mode.UPLOAD_CREATED
+        ).count()
+        self.assertEqual(upload_runs, 1)
+        self.assertTrue(
+            TranskribusRun.objects.filter(
+                document=doc, mode=TranskribusRun.Mode.EXISTING_SERVER
+            ).exists()
+        )
+
+
+class TranskribusRecognitionOnlyRetryTests(TestCase):
+    def _create_document(self) -> Document:
+        return Document.objects.create(
+            title="Recognition-only retry doc",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADED,
+        )
+
+    def _seed_source_run(
+        self,
+        doc: Document,
+        *,
+        status: str,
+        remote_doc_id: str = "555",
+        pages_query: str = "1",
+        page_index_to_page_nr: dict | None = None,
+        upload_id: int = 10,
+        ingest_job_id: str = "ingest-1",
+    ) -> TranskribusRun:
+        return TranskribusRun.objects.create(
+            document=doc,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id="col",
+            model_id="42",
+            status=status,
+            remote_doc_id=remote_doc_id,
+            pages_query=pages_query,
+            page_index_to_page_nr=page_index_to_page_nr if page_index_to_page_nr is not None else {0: 1},
+            upload_id=upload_id,
+            ingest_job_id=ingest_job_id,
+        )
+
+    def _execute_dev_upload(
+        self,
+        doc: Document,
+        *,
+        pages: list | None = None,
+        worker_env_overrides: dict | None = None,
+    ):
+        from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
+        from documents.services.page_extraction import PageImage
+
+        if pages is None:
+            pages = [PageImage(page_index=0, image_bytes=b"x", mime_type="image/png")]
+        overrides = {"transkribus_dev_upload_mode": True}
+        if worker_env_overrides:
+            overrides.update(worker_env_overrides)
+        adapter = TranskribusAdapter()
+        return adapter.execute(
+            pages=pages,
+            language_hint="he",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            worker_env=_transkribus_adapter_worker_env(**overrides),
+            document_id=doc.id,
+        )
+
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
+    def test_flag_off_prior_failed_with_remote_doc_id_still_blocks(
+        self, m_login, m_upload
+    ):
+        from documents.services.htr_adapters.base import EnginePermanentError
+
+        doc = self._create_document()
+        self._seed_source_run(doc, status=TranskribusRun.Status.FAILED)
+        with self.assertRaises(EnginePermanentError) as ctx:
+            self._execute_dev_upload(
+                doc,
+                worker_env_overrides={"transkribus_recognition_only_retry": False},
+            )
+        self.assertIn("Transkribus upload blocked", str(ctx.exception))
+        m_upload.assert_not_called()
+        m_login.assert_not_called()
+
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
+    def test_flag_on_reusable_failed_run_skips_upload_and_returns_htr_result(
+        self, m_login, m_upload, m_start, m_complete
+    ):
+        doc = self._create_document()
+        source = self._seed_source_run(doc, status=TranskribusRun.Status.FAILED)
+        m_start.return_value = "recog-retry"
+        m_complete.return_value = PylaiaTranscriptionOutcome(
+            text="recovered text",
+            review_reasons=[],
+            recognition_job_id="recog-retry",
+        )
+        run_count_before = TranskribusRun.objects.filter(document=doc).count()
+        result = self._execute_dev_upload(
+            doc,
+            worker_env_overrides={"transkribus_recognition_only_retry": True},
+        )
+        m_upload.assert_not_called()
+        m_start.assert_called_once()
+        self.assertEqual(result.text, "recovered text")
+        self.assertEqual(result.engine_name, "transkribus-pylaia:42")
+        self.assertEqual(
+            TranskribusRun.objects.filter(document=doc).count(),
+            run_count_before + 1,
+        )
+        new_run = (
+            TranskribusRun.objects.filter(document=doc)
+            .order_by("-created_at", "-id")
+            .first()
+        )
+        self.assertNotEqual(new_run.id, source.id)
+        self.assertEqual(new_run.status, TranskribusRun.Status.SUCCEEDED)
+        self.assertEqual(new_run.remote_doc_id, "555")
+        self.assertEqual(new_run.pages_query, "1")
+        self.assertEqual(new_run.upload_id, 10)
+        self.assertEqual(new_run.ingest_job_id, "ingest-1")
+        source.refresh_from_db()
+        self.assertEqual(source.status, TranskribusRun.Status.FAILED)
+
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
+    def test_flag_on_reusable_uploaded_run_works(self, m_login, m_upload, m_start, m_complete):
+        doc = self._create_document()
+        self._seed_source_run(doc, status=TranskribusRun.Status.UPLOADED)
+        m_start.return_value = "recog-u"
+        m_complete.return_value = PylaiaTranscriptionOutcome(
+            text="from uploaded",
+            review_reasons=[],
+            recognition_job_id="recog-u",
+        )
+        self._execute_dev_upload(
+            doc,
+            worker_env_overrides={"transkribus_recognition_only_retry": True},
+        )
+        m_upload.assert_not_called()
+        m_start.assert_called_once()
+
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
+    def test_flag_on_reusable_recognition_started_run_works(
+        self, m_login, m_upload, m_start, m_complete
+    ):
+        doc = self._create_document()
+        self._seed_source_run(doc, status=TranskribusRun.Status.RECOGNITION_STARTED)
+        m_start.return_value = "recog-rs"
+        m_complete.return_value = PylaiaTranscriptionOutcome(
+            text="from recognition started",
+            review_reasons=[],
+            recognition_job_id="recog-rs",
+        )
+        self._execute_dev_upload(
+            doc,
+            worker_env_overrides={"transkribus_recognition_only_retry": True},
+        )
+        m_upload.assert_not_called()
+        m_start.assert_called_once()
+
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
+    def test_flag_on_prior_succeeded_does_not_trigger_recognition_only_blocks(
+        self, m_login, m_upload
+    ):
+        from documents.services.htr_adapters.base import EnginePermanentError
+
+        doc = self._create_document()
+        self._seed_source_run(doc, status=TranskribusRun.Status.SUCCEEDED)
+        with self.assertRaises(EnginePermanentError) as ctx:
+            self._execute_dev_upload(
+                doc,
+                worker_env_overrides={"transkribus_recognition_only_retry": True},
+            )
+        self.assertIn("Transkribus upload blocked", str(ctx.exception))
+        m_upload.assert_not_called()
+        m_login.assert_not_called()
+
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
+    def test_force_reprocess_wins_over_recognition_only_retry(
+        self, m_login, m_upload_ingest, m_start, m_complete
+    ):
+        from documents.services.transkribus_engine import TrpUploadOutcome
+
+        doc = self._create_document()
+        self._seed_source_run(doc, status=TranskribusRun.Status.FAILED)
+        m_upload_ingest.return_value = TrpUploadOutcome(
+            collection_id="col",
+            doc_id="999",
+            upload_id=2,
+            ingest_job_id="ingest-2",
+            pages_query="1",
+            page_index_to_page_nr={0: 1},
+        )
+        m_start.return_value = "recog-force"
+        m_complete.return_value = PylaiaTranscriptionOutcome(
+            text="forced upload",
+            review_reasons=[],
+            recognition_job_id="recog-force",
+        )
+        self._execute_dev_upload(
+            doc,
+            worker_env_overrides={
+                "transkribus_recognition_only_retry": True,
+                "transkribus_force_reprocess": True,
+            },
+        )
+        m_upload_ingest.assert_called_once()
+
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
+    def test_verified_document_text_result_blocks_before_http(
+        self, m_login, m_start
+    ):
+        from documents.services.htr_adapters.base import EnginePermanentError
+
+        doc = self._create_document()
+        self._seed_source_run(doc, status=TranskribusRun.Status.FAILED)
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="transkribus-pylaia:42",
+            engine_key=DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+            text="verified ground truth",
+        )
+        with self.assertRaises(EnginePermanentError) as ctx:
+            self._execute_dev_upload(
+                doc,
+                worker_env_overrides={"transkribus_recognition_only_retry": True},
+            )
+        self.assertIn("VERIFIED", str(ctx.exception))
+        m_login.assert_not_called()
+        m_start.assert_not_called()
+
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
+    def test_page_count_mismatch_blocks_before_http(self, m_login, m_start):
+        from documents.services.htr_adapters.base import EnginePermanentError
+        from documents.services.page_extraction import PageImage
+
+        doc = self._create_document()
+        self._seed_source_run(
+            doc,
+            status=TranskribusRun.Status.FAILED,
+            page_index_to_page_nr={0: 1, 1: 2},
+        )
+        two_pages = [
+            PageImage(page_index=0, image_bytes=b"a", mime_type="image/png"),
+            PageImage(page_index=1, image_bytes=b"b", mime_type="image/png"),
+            PageImage(page_index=2, image_bytes=b"c", mime_type="image/png"),
+        ]
+        with self.assertRaises(EnginePermanentError) as ctx:
+            self._execute_dev_upload(
+                doc,
+                pages=two_pages,
+                worker_env_overrides={"transkribus_recognition_only_retry": True},
+            )
+        self.assertIn("page mapping count", str(ctx.exception))
+        m_login.assert_not_called()
+        m_start.assert_not_called()
+
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
+    def test_existing_server_mode_unchanged_by_recognition_only_flag(
+        self, m_login, m_start, m_complete
+    ):
+        from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
+        from documents.services.page_extraction import PageImage
+
+        doc = self._create_document()
+        self._seed_source_run(
+            doc,
+            status=TranskribusRun.Status.SUCCEEDED,
+            remote_doc_id="777",
+        )
+        m_start.return_value = "recog-es"
+        m_complete.return_value = PylaiaTranscriptionOutcome(
+            text="es text",
+            review_reasons=[],
+            recognition_job_id="recog-es",
+        )
+        adapter = TranskribusAdapter()
+        adapter.execute(
+            pages=[PageImage(page_index=0, image_bytes=b"x", mime_type="image/png")],
+            language_hint="he",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            worker_env=_transkribus_adapter_worker_env(
+                transkribus_use_existing_server_document=True,
+                transkribus_dev_existing_document_id="99",
+                transkribus_dev_existing_pages="1",
+                transkribus_recognition_only_retry=True,
             ),
             document_id=doc.id,
         )

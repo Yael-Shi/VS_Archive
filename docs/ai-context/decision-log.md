@@ -55,14 +55,15 @@
 
 **Schema + wiring (PR1–PR2, done):** **`TranskribusRun`** records one Transkribus processing attempt per VS-Archive document. **`TranskribusAdapter`** (dev/staging paths) creates/updates rows through **`transkribus_run_persistence`**. **`run_worker`** passes generic **`document_id`** into **`transcribe_pages`**; no provider branches in the worker.
 
-Still decide (then implement in focused PRs): recognition-only retry / reuse of existing Trp `docId`; cleanup/retention runbook. **No** production `OCR_ROUTES` expansion until decided or explicitly deferred.
+Still decide (then implement in focused PRs): cleanup/retention runbook. **No** production `OCR_ROUTES` expansion until decided or explicitly deferred.
 
 ### Near-term PR sequence
 
 1. ~~Trp identity schema + persistence wiring~~ → **done (PR1 + PR2)**.
 2. ~~Duplicate upload guard (dev upload mode)~~ → **done (PR3)**.
-3. Cleanup runbook (automation later).
-4. Broader production routing only if explicitly approved.
+3. ~~Recognition-only retry V1 (dev/staging recovery)~~ → **done** (see section below).
+4. Cleanup runbook (automation later).
+5. Broader production routing only if explicitly approved.
 
 ---
 
@@ -107,8 +108,57 @@ Do **not** store Trp remote ids or job ids in **`review_reasons`**.
 
 ### Deferred (post-PR2)
 
-- Recognition-only retry / reuse of existing `remote_doc_id`, product reprocess guards, cleanup/retention.
+- Product/admin reprocess workflow, general re-run on **`TranskribusRun.SUCCEEDED`**, cleanup/retention.
 - Production **`OCR_ROUTES`** expansion.
+
+---
+
+## Transkribus — recognition-only retry V1 (recovery)
+
+**Decision:** Dev/staging **recovery-only** path to re-run PyLaia on an existing Trp **`remote_doc_id`** when upload-created ingest already succeeded but recognition/transcript did not complete cleanly. **Not** general reprocess and **not** for re-OCR after a successful Trp attempt.
+
+### Env flag (dev/staging only)
+
+- **`TRANSKRIBUS_RECOGNITION_ONLY_RETRY`** (default **false**) → **`WorkerEnvConfig.transkribus_recognition_only_retry`**
+- When **true** and a reusable source run exists → recognition-only (no **`/uploads`** ingest).
+- When **true** but no reusable source run → unchanged PR3 behavior (block or first upload).
+- **Not** a product/admin reprocess mechanism.
+
+### Precedence vs force upload
+
+- **`TRANSKRIBUS_FORCE_REPROCESS=true`** → full upload, **new** Trp document (may orphan prior docs). **Wins** if both flags are set.
+- Recognition-only → **no** upload, reuse existing **`remote_doc_id`**.
+
+### Reusable source run (`find_reusable_upload_run`)
+
+All must match:
+
+- **`mode=UPLOAD_CREATED`**, same **`document_id`**, **`collection_id`**, **`model_id`** (stripped)
+- non-empty **`remote_doc_id`** and **`pages_query`** (after strip)
+- **`status`** in **`FAILED`**, **`UPLOADED`**, **`RECOGNITION_STARTED`** only
+
+**Excluded from V1:**
+
+- **`SUCCEEDED`** (successful Trp attempt — use force reprocess for a new doc if needed)
+- **`STARTED`** without remote identity; **`FAILED`** without **`remote_doc_id`**; missing **`pages_query`**
+
+Returns most recent qualifying row (`-created_at`, `-id`).
+
+### Guards (fail fast, `EnginePermanentError`, no HTTP)
+
+- **`DocumentTextResult.verification_status=VERIFIED`** for the document → block (no force override in V1).
+- If source has **`page_index_to_page_nr`**: current **`PageImage[]`** count must equal mapping entry count (does not prove byte equality).
+
+### Behavior
+
+- **`TranskribusAdapter._execute_dev_upload`**: if force → full upload; elif recognition-only + reusable source → **`_execute_dev_recognition_only`**; else PR3 guard + full upload.
+- Creates a **new** **`TranskribusRun`** attempt row; copies upload metadata from source; **does not mutate** source row.
+- Skips **`run_trp_upload_page_images_through_ingest`**; PyLaia + transcript via existing engine helpers.
+- Worker persistence unchanged: automatic success → **`NEEDS_REVIEW`** + **`UNVERIFIED`**.
+
+### Deferred (post–recognition-only V1)
+
+- Re-run on **`SUCCEEDED`** source runs, staleness TTL, content-hash / file-changed detection, cleanup automation, product reprocess API.
 
 ---
 
@@ -155,10 +205,9 @@ Blocked upload does not change OCR review lifecycle or rollup rules. Worker may 
 
 ### Deferred (post-PR3)
 
-- Reuse `remote_doc_id` / recognition-only retry
 - Cleanup/retention automation, Trp delete API
 - Staleness TTL for in-progress rows
-- Product reprocess policy (`VERIFIED`, file changed, admin action)
+- Product reprocess policy (file changed, admin action) beyond recognition-only V1 guards
 
 ---
 

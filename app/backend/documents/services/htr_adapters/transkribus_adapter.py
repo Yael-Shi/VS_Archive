@@ -4,7 +4,7 @@ import logging
 import requests
 from typing import List, Optional
 
-from documents.models import TranskribusRun
+from documents.models import DocumentTextResult, TranskribusRun
 from documents.services import transkribus_engine as tr
 from documents.services.htr_adapters.base import (
     EnginePermanentError,
@@ -188,33 +188,171 @@ class TranskribusAdapter:
         engine_runtime = f"transkribus-pylaia:{model_id}"
 
         force_reprocess = getattr(worker_env, "transkribus_force_reprocess", False)
-        if not force_reprocess:
-            blocking = trp.find_blocking_upload_run(
+        recognition_only_retry = getattr(
+            worker_env, "transkribus_recognition_only_retry", False
+        )
+
+        if force_reprocess:
+            return self._execute_dev_upload_with_new_trp_document(
+                document_id=document_id,
+                pages=pages,
+                username=username,
+                password=password,
+                bearer=bearer,
+                collection_id=collection_id,
+                model_id=model_id,
+                engine_runtime=engine_runtime,
+            )
+
+        if recognition_only_retry:
+            source_run = trp.find_reusable_upload_run(
                 document_id=document_id,
                 collection_id=collection_id,
                 model_id=model_id,
             )
-            if blocking is not None:
-                logger.warning(
-                    "Transkribus upload blocked for document_id=%s "
-                    "blocking_run_id=%s blocking_run_status=%s "
-                    "blocking_remote_doc_id=%s collection_id=%s model_id=%s",
-                    document_id,
-                    blocking.id,
-                    blocking.status,
-                    blocking.remote_doc_id or "",
-                    str(collection_id).strip(),
-                    str(model_id).strip(),
-                )
-                raise EnginePermanentError(
-                    trp.format_upload_blocked_error_message(
-                        document_id=document_id,
-                        collection_id=collection_id,
-                        model_id=model_id,
-                        blocking_run=blocking,
-                    )
+            if source_run is not None:
+                return self._execute_dev_recognition_only(
+                    document_id=document_id,
+                    pages=pages,
+                    source_run=source_run,
+                    username=username,
+                    password=password,
+                    bearer=bearer,
+                    collection_id=collection_id,
+                    model_id=model_id,
+                    engine_runtime=engine_runtime,
                 )
 
+        blocking = trp.find_blocking_upload_run(
+            document_id=document_id,
+            collection_id=collection_id,
+            model_id=model_id,
+        )
+        if blocking is not None:
+            logger.warning(
+                "Transkribus upload blocked for document_id=%s "
+                "blocking_run_id=%s blocking_run_status=%s "
+                "blocking_remote_doc_id=%s collection_id=%s model_id=%s",
+                document_id,
+                blocking.id,
+                blocking.status,
+                blocking.remote_doc_id or "",
+                str(collection_id).strip(),
+                str(model_id).strip(),
+            )
+            raise EnginePermanentError(
+                trp.format_upload_blocked_error_message(
+                    document_id=document_id,
+                    collection_id=collection_id,
+                    model_id=model_id,
+                    blocking_run=blocking,
+                )
+            )
+
+        return self._execute_dev_upload_with_new_trp_document(
+            document_id=document_id,
+            pages=pages,
+            username=username,
+            password=password,
+            bearer=bearer,
+            collection_id=collection_id,
+            model_id=model_id,
+            engine_runtime=engine_runtime,
+        )
+
+    def _execute_dev_recognition_only(
+        self,
+        *,
+        document_id: int,
+        pages: List[PageImage],
+        source_run: TranskribusRun,
+        username: str,
+        password: str,
+        bearer: str,
+        collection_id: str,
+        model_id: str,
+        engine_runtime: str,
+    ) -> HtrResult:
+        self._guard_verified_text_results(document_id=document_id)
+        self._guard_page_count_matches_source_mapping(pages=pages, source_run=source_run)
+
+        remote_doc_id = str(source_run.remote_doc_id).strip()
+        pages_query = str(source_run.pages_query).strip()
+
+        logger.warning(
+            "Transkribus recognition-only retry for document_id=%s "
+            "source_run_id=%s source_run_status=%s remote_doc_id=%s "
+            "collection_id=%s model_id=%s",
+            document_id,
+            source_run.id,
+            source_run.status,
+            remote_doc_id,
+            str(collection_id).strip(),
+            str(model_id).strip(),
+        )
+
+        run = trp.start_run(
+            document_id=document_id,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id=collection_id,
+            model_id=model_id,
+        )
+        trp.apply_source_upload_metadata(run, source=source_run)
+
+        try:
+            with requests.Session() as session:
+                tr.login_trp_server(session, username=username, password=password)
+                recognition_job_id = tr.start_pylaia_recognition(
+                    session,
+                    collection_id=collection_id,
+                    model_id=model_id,
+                    document_id=remote_doc_id,
+                    pages_query=pages_query,
+                )
+                trp.mark_recognition_started(run, recognition_job_id=recognition_job_id)
+                outcome = tr.complete_pylaia_transcription_after_job(
+                    session,
+                    recognition_job_id=recognition_job_id,
+                    collection_id=collection_id,
+                    model_id=model_id,
+                    document_id=remote_doc_id,
+                    pages_query=pages_query,
+                    bearer_token=bearer,
+                )
+                trp.mark_succeeded(run, engine_runtime=engine_runtime)
+                return HtrResult(
+                    text=outcome.text,
+                    needs_review=bool(outcome.review_reasons),
+                    engine_name=engine_runtime,
+                    review_reasons=list(outcome.review_reasons),
+                )
+        except tr.TranskribusRetryableError as exc:
+            trp.mark_failed(
+                run,
+                error_code="TRANSKRIBUS_RECOGNITION_FAILED",
+                error_details=str(exc),
+            )
+            raise EngineRetryableError(str(exc)) from exc
+        except tr.TranskribusPermanentError as exc:
+            trp.mark_failed(
+                run,
+                error_code="TRANSKRIBUS_RECOGNITION_FAILED",
+                error_details=str(exc),
+            )
+            raise EnginePermanentError(str(exc)) from exc
+
+    def _execute_dev_upload_with_new_trp_document(
+        self,
+        *,
+        document_id: int,
+        pages: List[PageImage],
+        username: str,
+        password: str,
+        bearer: str,
+        collection_id: str,
+        model_id: str,
+        engine_runtime: str,
+    ) -> HtrResult:
         run = trp.start_run(
             document_id=document_id,
             mode=TranskribusRun.Mode.UPLOAD_CREATED,
@@ -278,6 +416,40 @@ class TranskribusAdapter:
             )
             trp.mark_failed(run, error_code=error_code, error_details=str(exc))
             raise EnginePermanentError(str(exc)) from exc
+
+    @staticmethod
+    def _guard_verified_text_results(*, document_id: int) -> None:
+        if DocumentTextResult.objects.filter(
+            document_id=document_id,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+        ).exists():
+            raise EnginePermanentError(
+                f"Transkribus recognition-only retry blocked: document_id={document_id} "
+                "has VERIFIED DocumentTextResult row(s). "
+                "Recognition-only retry must not overwrite human-verified text."
+            )
+
+    @staticmethod
+    def _guard_page_count_matches_source_mapping(
+        *,
+        pages: List[PageImage],
+        source_run: TranskribusRun,
+    ) -> None:
+        raw_mapping = source_run.page_index_to_page_nr
+        if not raw_mapping:
+            return
+        if isinstance(raw_mapping, dict):
+            mapping_len = len(raw_mapping)
+        else:
+            mapping_len = len(dict(raw_mapping))
+        page_count = len(pages)
+        if page_count != mapping_len:
+            raise EnginePermanentError(
+                "Transkribus recognition-only retry blocked: "
+                f"current PageImage count ({page_count}) does not match "
+                f"stored page mapping count ({mapping_len}) on source TranskribusRun "
+                f"id={source_run.id}."
+            )
 
     @staticmethod
     def _validate_existing_document_config(worker_env: object) -> None:
