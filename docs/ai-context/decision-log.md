@@ -15,7 +15,7 @@
 
 - **Real** Legacy TrpServer / PyLaia: upload ingest, existing-server-document dev mode, adapter + `transkribus_engine.py`, registry, `OcrEngineKey.TRANSKRIBUS`.
 - **Not** production-default. Technical smoke proves **wiring**, not archival OCR quality or UI fidelity.
-- Upload mode creates a **new** Trp document per run; VS-Archive does **not** persist Trp **`docId`** yet.
+- Upload mode creates a **new** Trp document per run; Trp **`docId`** / job ids are **not written by the worker yet** — **`TranskribusRun`** schema exists (PR1); adapter persistence wiring is **PR2**.
 
 ### OCR review lifecycle (implemented)
 
@@ -53,14 +53,55 @@
 
 ### Blockers before broader Transkribus use
 
-Decide (then implement in focused PRs): persist Trp **`docId`** / remote identity; reprocess and duplicate prevention; cleanup/retention runbook. **No** production `OCR_ROUTES` expansion until decided or explicitly deferred.
+**Schema (PR1, done):** **`TranskribusRun`** model records one Transkribus processing attempt per VS-Archive document (remote ids, job ids, attempt status). **Wiring (PR2, deferred):** adapter/worker must create/update rows on real runs.
+
+Still decide (then implement in focused PRs): persistence wiring; reprocess and duplicate prevention; cleanup/retention runbook. **No** production `OCR_ROUTES` expansion until decided or explicitly deferred.
 
 ### Near-term PR sequence
 
-1. Trp identity persistence design + migration.
+1. ~~Trp identity persistence design + migration~~ → **`TranskribusRun` schema (PR1)**; **persistence wiring (PR2)** next.
 2. Reprocess / duplicate policy.
 3. Cleanup runbook (automation later).
 4. Broader production routing only if explicitly approved.
+
+---
+
+## TranskribusRun — remote identity schema (PR1)
+
+**Decision:** Persist Transkribus processing attempts in a dedicated **`TranskribusRun`** model (one row per attempt), not as nullable fields on **`Document`**.
+
+**Scope (PR1):** Django model + migration + read-only admin + model tests only. **No** adapter, engine, worker, or routing changes.
+
+### Fields (summary)
+
+- **`document`** FK (CASCADE); multiple runs per document allowed.
+- **`status`:** `STARTED` | `UPLOADED` | `RECOGNITION_STARTED` | `SUCCEEDED` | `FAILED` — **Trp attempt lifecycle only**.
+- **`mode`:** `UPLOAD_CREATED` | `EXISTING_SERVER`.
+- **`collection_id`**, **`model_id`** — required snapshot at attempt start.
+- **`remote_doc_id`** — nullable; unknown at upload **`STARTED`** until ingest completes; may remain null on ingest failure.
+- **`pages_query`** — `CharField(max_length=512)`; nullable until known.
+- **`page_index_to_page_nr`** — nullable JSON (upload mode).
+- **`upload_id`**, **`ingest_job_id`**, **`recognition_job_id`** — nullable (upload fields N/A for existing-server mode).
+- **`engine_runtime`** — nullable; correlates with **`DocumentTextResult.engine`** on terminal success (PR2).
+- **`error_code`**, **`error_details`** — nullable; Trp attempt failure only.
+
+### Status layer separation (do not conflate)
+
+**`TranskribusRun.status`** does **not** replace or drive:
+
+- **`Document.processing_state_user`**
+- **`DocumentTextResult.status`** (e.g. automatic success → **`NEEDS_REVIEW`**)
+- **`DocumentTextResult.verification_status`**
+
+**`TranskribusRun.SUCCEEDED`** is **not** human verification. A successful Trp run may still yield **`NEEDS_REVIEW`** + **`UNVERIFIED`** text and a parent document **`READY`** when rollup expectations are met.
+
+Do **not** store Trp remote ids or job ids in **`review_reasons`**.
+
+### Deferred (PR2+)
+
+- Adapter/worker persistence wiring (`document_id` kwargs, lifecycle updates).
+- Duplicate prevention, reprocess guards, cleanup/retention.
+- Production **`OCR_ROUTES`** expansion.
 
 ---
 

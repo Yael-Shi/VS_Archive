@@ -312,3 +312,95 @@ class DocumentMetadata(models.Model):
 
     def __str__(self) -> str:
         return f"DocumentMetadata(document_id={self.document_id})"
+
+
+class TranskribusRun(models.Model):
+    """
+    One Transkribus processing attempt for a VS-Archive Document.
+
+    Tracks external TrpServer identity and job ids for ops/debugging.
+    ``TranskribusRun.status`` is the Trp attempt lifecycle only — it does not
+    replace ``Document.processing_state_user``, ``DocumentTextResult.status``,
+    or ``DocumentTextResult.verification_status``.
+    """
+
+    class Mode(models.TextChoices):
+        UPLOAD_CREATED = "UPLOAD_CREATED", "Upload created"
+        EXISTING_SERVER = "EXISTING_SERVER", "Existing server document"
+
+    class Status(models.TextChoices):
+        STARTED = "STARTED", "Started"
+        UPLOADED = "UPLOADED", "Uploaded"
+        RECOGNITION_STARTED = "RECOGNITION_STARTED", "Recognition started"
+        SUCCEEDED = "SUCCEEDED", "Succeeded"
+        FAILED = "FAILED", "Failed"
+
+    document = models.ForeignKey(
+        Document,
+        on_delete=models.CASCADE,
+        related_name="transkribus_runs",
+    )
+
+    status = models.CharField(
+        max_length=32,
+        choices=Status.choices,
+        default=Status.STARTED,
+    )
+
+    mode = models.CharField(max_length=32, choices=Mode.choices)
+
+    collection_id = models.CharField(max_length=64)
+    model_id = models.CharField(max_length=64)
+
+    remote_doc_id = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        help_text="TrpServer docId when known.",
+    )
+
+    pages_query = models.CharField(
+        max_length=512,
+        null=True,
+        blank=True,
+        help_text="Trp pages= query used for recognition/metadata.",
+    )
+
+    page_index_to_page_nr = models.JSONField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text="VS-Archive page_index → Trp pageNr (upload mode).",
+    )
+
+    upload_id = models.BigIntegerField(null=True, blank=True)
+    ingest_job_id = models.CharField(max_length=128, null=True, blank=True)
+    recognition_job_id = models.CharField(max_length=128, null=True, blank=True)
+
+    engine_runtime = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="Runtime engine string, e.g. transkribus-pylaia:{model_id}.",
+    )
+
+    error_code = models.CharField(max_length=64, null=True, blank=True)
+    error_details = models.TextField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["document", "-created_at"], name="tr_run_doc_created_idx"),
+            models.Index(fields=["document", "status"], name="tr_run_doc_status_idx"),
+            models.Index(fields=["remote_doc_id"], name="tr_run_remote_doc_idx"),
+            models.Index(fields=["status", "created_at"], name="tr_run_status_created_idx"),
+        ]
+
+    def __str__(self) -> str:
+        doc_part = self.remote_doc_id or "pending"
+        return (
+            f"TranskribusRun(doc={self.document_id}, status={self.status}, "
+            f"remote_doc_id={doc_part})"
+        )
