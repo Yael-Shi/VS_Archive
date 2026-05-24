@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import requests
 from typing import List, Optional
 
@@ -12,6 +13,8 @@ from documents.services.htr_adapters.base import (
 )
 from documents.services.page_extraction import PageImage
 from documents.services import transkribus_run_persistence as trp
+
+logger = logging.getLogger(__name__)
 
 _BOTH_DEV_MODES_MESSAGE = (
     "Transkribus dev modes are mutually exclusive: do not enable both "
@@ -183,6 +186,34 @@ class TranskribusAdapter:
         collection_id = getattr(worker_env, "transkribus_collection_id", None) or ""
         model_id = getattr(worker_env, "transkribus_model_id", None) or ""
         engine_runtime = f"transkribus-pylaia:{model_id}"
+
+        force_reprocess = getattr(worker_env, "transkribus_force_reprocess", False)
+        if not force_reprocess:
+            blocking = trp.find_blocking_upload_run(
+                document_id=document_id,
+                collection_id=collection_id,
+                model_id=model_id,
+            )
+            if blocking is not None:
+                logger.warning(
+                    "Transkribus upload blocked for document_id=%s "
+                    "blocking_run_id=%s blocking_run_status=%s "
+                    "blocking_remote_doc_id=%s collection_id=%s model_id=%s",
+                    document_id,
+                    blocking.id,
+                    blocking.status,
+                    blocking.remote_doc_id or "",
+                    str(collection_id).strip(),
+                    str(model_id).strip(),
+                )
+                raise EnginePermanentError(
+                    trp.format_upload_blocked_error_message(
+                        document_id=document_id,
+                        collection_id=collection_id,
+                        model_id=model_id,
+                        blocking_run=blocking,
+                    )
+                )
 
         run = trp.start_run(
             document_id=document_id,

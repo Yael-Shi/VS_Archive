@@ -2,7 +2,18 @@ from __future__ import annotations
 
 import re
 
+from django.db.models import Q
+
 from documents.models import TranskribusRun
+
+_BLOCKING_UPLOAD_STATUSES = frozenset(
+    {
+        TranskribusRun.Status.STARTED,
+        TranskribusRun.Status.UPLOADED,
+        TranskribusRun.Status.RECOGNITION_STARTED,
+        TranskribusRun.Status.SUCCEEDED,
+    }
+)
 
 _MAX_ERROR_DETAILS_LEN = 4000
 
@@ -24,6 +35,67 @@ def sanitize_error_details(message: str, *, max_len: int = _MAX_ERROR_DETAILS_LE
     if len(first_line) > max_len:
         return first_line[: max_len - 3] + "..."
     return first_line
+
+
+def _upload_run_blocks_new_upload(run: TranskribusRun) -> bool:
+    if run.status in _BLOCKING_UPLOAD_STATUSES:
+        return True
+    if run.status == TranskribusRun.Status.FAILED:
+        return bool((run.remote_doc_id or "").strip())
+    return False
+
+
+def find_blocking_upload_run(
+    *,
+    document_id: int,
+    collection_id: str,
+    model_id: str,
+) -> TranskribusRun | None:
+    """
+    Return the most recent UPLOAD_CREATED run that blocks a new Trp upload for the
+    same (document_id, collection_id, model_id), or None if upload may proceed.
+
+    Blocks: STARTED, UPLOADED, RECOGNITION_STARTED, SUCCEEDED, or FAILED with a
+    non-empty remote_doc_id (after strip). Does not block FAILED with remote_doc_id
+    null, empty, or whitespace-only.
+    """
+    col = str(collection_id).strip()
+    mid = str(model_id).strip()
+    candidates = (
+        TranskribusRun.objects.filter(
+            document_id=document_id,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id=col,
+            model_id=mid,
+        )
+        .filter(
+            Q(status__in=_BLOCKING_UPLOAD_STATUSES)
+            | Q(status=TranskribusRun.Status.FAILED)
+        )
+        .order_by("-created_at", "-id")
+    )
+    for run in candidates:
+        if _upload_run_blocks_new_upload(run):
+            return run
+    return None
+
+
+def format_upload_blocked_error_message(
+    *,
+    document_id: int,
+    collection_id: str,
+    model_id: str,
+    blocking_run: TranskribusRun,
+) -> str:
+    remote = (blocking_run.remote_doc_id or "").strip() or "none"
+    return (
+        f"Transkribus upload blocked: document_id={document_id} already has "
+        f"UPLOAD_CREATED run id={blocking_run.id} status={blocking_run.status} "
+        f"remote_doc_id={remote} (collection_id={str(collection_id).strip()}, "
+        f"model_id={str(model_id).strip()}). "
+        "Set TRANSKRIBUS_FORCE_REPROCESS=true to create another Transkribus document "
+        "(may orphan prior Trp documents)."
+    )
 
 
 def start_run(

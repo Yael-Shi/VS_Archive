@@ -229,8 +229,8 @@ A document may validly be **`processing_state_user=READY`** while text results a
 
 Broader Transkribus use (beyond controlled dev/staging) should **not** proceed until explicit decisions (and follow-up PRs) on:
 
-- **reprocess** policy and duplicate prevention (upload mode still creates a **new** Trp document per run; **`TranskribusRun`** records each attempt but does not reuse or block duplicates yet)
-- **cleanup/retention** (operational runbook first; no cleanup automation before identity + reprocess policy)
+- **reuse / recognition-only retry** and product reprocess policy (PR3 **duplicate upload guard** blocks accidental second Trp upload in dev upload mode unless **`TRANSKRIBUS_FORCE_REPROCESS=true`**; does not reuse `remote_doc_id`)
+- **cleanup/retention** (operational runbook first; no cleanup automation before reuse/reprocess policy and cleanup runbook are decided)
 
 Do **not** expand production `OCR_ROUTES` to Transkribus before those are decided or explicitly deferred in writing.
 

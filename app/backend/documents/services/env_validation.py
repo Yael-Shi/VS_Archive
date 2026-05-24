@@ -177,6 +177,7 @@ class WorkerEnvConfig:
     transkribus_collection_id: Optional[str] = field(default=None)
     transkribus_model_id: Optional[str] = field(default=None)
     transkribus_dev_existing_pages: Optional[str] = field(default=None)
+    transkribus_force_reprocess: bool = field(default=False)
 
 
 def validate_required_env() -> WorkerEnvConfig:
@@ -236,6 +237,7 @@ def validate_required_env() -> WorkerEnvConfig:
     transkribus_collection_id = _get("TRANSKRIBUS_COLLECTION_ID")
     transkribus_model_id = _get("TRANSKRIBUS_MODEL_ID")
     transkribus_dev_existing_pages = _get("TRANSKRIBUS_DEV_EXISTING_PAGES")
+    transkribus_force_reprocess = _get_bool("TRANSKRIBUS_FORCE_REPROCESS", default=False)
 
     if enable_hybrid_htr and not (transkribus_api_token or (transkribus_username and transkribus_password)):
         raise EnvConfigError("ENABLE_HYBRID_HTR is true but Transkribus credentials missing.")
@@ -275,4 +277,5 @@ def validate_required_env() -> WorkerEnvConfig:
         transkribus_collection_id=transkribus_collection_id,
         transkribus_model_id=transkribus_model_id,
         transkribus_dev_existing_pages=transkribus_dev_existing_pages,
+        transkribus_force_reprocess=transkribus_force_reprocess,
     )
