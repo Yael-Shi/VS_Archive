@@ -5,6 +5,7 @@ from .models import (
     DocumentTextResult,
     Tag,
     DocumentMetadata,
+    TranskribusRun,
 )
 
 
@@ -30,9 +31,29 @@ class DocumentMetadataInline(admin.StackedInline):
     readonly_fields = ("created_at", "updated_at")
 
 
+class TranskribusRunInline(admin.TabularInline):
+    model = TranskribusRun
+    extra = 0
+    can_delete = False
+    show_change_link = True
+    fields = (
+        "id",
+        "status",
+        "mode",
+        "remote_doc_id",
+        "model_id",
+        "recognition_job_id",
+        "created_at",
+    )
+    readonly_fields = fields
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
 @admin.register(Document)
 class DocumentAdmin(admin.ModelAdmin):
-    inlines = (DocumentMetadataInline,)
+    inlines = (DocumentMetadataInline, TranskribusRunInline)
 
     list_display = (
         "id",
@@ -146,3 +167,77 @@ class DocumentTextResultAdmin(admin.ModelAdmin):
         ("Verification", {"fields": ("verification_status",)}),
         ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )
+
+
+@admin.register(TranskribusRun)
+class TranskribusRunAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "document",
+        "status",
+        "mode",
+        "remote_doc_id",
+        "collection_id",
+        "model_id",
+        "created_at",
+    )
+    list_filter = ("status", "mode")
+    search_fields = (
+        "document__id",
+        "document__title",
+        "remote_doc_id",
+        "ingest_job_id",
+        "recognition_job_id",
+    )
+    ordering = ("-created_at",)
+
+    readonly_fields = (
+        "document",
+        "status",
+        "mode",
+        "collection_id",
+        "model_id",
+        "remote_doc_id",
+        "pages_query",
+        "page_index_to_page_nr",
+        "upload_id",
+        "ingest_job_id",
+        "recognition_job_id",
+        "engine_runtime",
+        "error_code",
+        "error_details",
+        "created_at",
+        "updated_at",
+    )
+
+    fieldsets = (
+        ("Identity", {"fields": ("document", "status", "mode")}),
+        (
+            "Trp remote context",
+            {
+                "fields": (
+                    "collection_id",
+                    "model_id",
+                    "remote_doc_id",
+                    "pages_query",
+                    "page_index_to_page_nr",
+                )
+            },
+        ),
+        (
+            "Job ids",
+            {"fields": ("upload_id", "ingest_job_id", "recognition_job_id")},
+        ),
+        (
+            "Outcome",
+            {"fields": ("engine_runtime", "error_code", "error_details")},
+        ),
+        ("Timestamps", {"fields": ("created_at", "updated_at")}),
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        # View/detail only — discourage manual edits to remote ids and status.
+        return request.method in ("GET", "HEAD")

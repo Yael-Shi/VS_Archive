@@ -22,7 +22,7 @@ VS-Archive is a Django backend project for managing historical family documents.
 - Worker routing to Transkribus: `language=he` + `HANDWRITTEN` when `TRANSKRIBUS_DEV_OCR_ROUTE` + `TRANSKRIBUS_DEV_UPLOAD_MODE` are set (see decision log).
 - Manual smoke: `python manage.py dev_transkribus_transcribe <file> --confirm-create-transkribus-doc`.
 
-**Not implemented:** Gemini→Transkribus fallback, hybrid OCR routing, production-default Transkribus in `OCR_ROUTES`, persisted Transkribus `docId` on `Document`, cleanup automation.
+**Not implemented:** Gemini→Transkribus fallback, hybrid OCR routing, production-default Transkribus in `OCR_ROUTES`, **TranskribusRun persistence wiring** (schema landed PR1; worker/adapter writes deferred PR2), cleanup automation.
 
 ## Routing layer (done)
 
@@ -65,9 +65,9 @@ Non-Hebrew documents may remain **`PARTIAL`** because `HEBREW_TEXT` (translation
 
 ## Near-term roadmap
 
-1. Transkribus remote identity / `docId` persistence design.
+1. ~~Transkribus remote identity schema~~ → **`TranskribusRun` (PR1 done)**; **persistence wiring (PR2)** next.
 2. Reprocess / duplicate-prevention policy.
-3. Cleanup / retention runbook (no automation before identity + policy).
+3. Cleanup / retention runbook (no automation before identity wiring + policy).
 4. Broader Transkribus production routing only with explicit approval.
 
 OCR quality/fidelity validation against the Transkribus UI is important but **not** the current docs/rules task.

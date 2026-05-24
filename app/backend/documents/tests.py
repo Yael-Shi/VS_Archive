@@ -15,7 +15,7 @@ from django.test import SimpleTestCase, TestCase
 from PIL import Image
 
 from documents.management.commands.run_worker import Command
-from documents.models import Document, DocumentTextResult
+from documents.models import Document, DocumentTextResult, TranskribusRun
 from documents.services.gemini_engine import GeminiError, GeminiResult
 from documents.services.htr_adapters.base import (
     EnginePermanentError,
@@ -2163,6 +2163,96 @@ class DevTranskribusTranscribeCommandTests(SimpleTestCase):
         src = inspect.getsource(mod)
         self.assertNotIn("select_ocr_route", src)
         self.assertNotIn("from documents.management.commands.run_worker", src)
+
+
+class TranskribusRunModelTests(TestCase):
+    def _create_document(self) -> Document:
+        return Document.objects.create(
+            title="Transkribus run test doc",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADED,
+        )
+
+    def test_create_minimal_upload_run_started(self):
+        doc = self._create_document()
+        run = TranskribusRun.objects.create(
+            document=doc,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id="42",
+            model_id="564149",
+        )
+        self.assertEqual(run.status, TranskribusRun.Status.STARTED)
+        self.assertIsNone(run.remote_doc_id)
+
+    def test_create_existing_server_run_with_remote_doc_id(self):
+        doc = self._create_document()
+        run = TranskribusRun.objects.create(
+            document=doc,
+            mode=TranskribusRun.Mode.EXISTING_SERVER,
+            collection_id="1",
+            model_id="99",
+            remote_doc_id="12345",
+            pages_query="1-3",
+        )
+        self.assertEqual(run.remote_doc_id, "12345")
+        self.assertEqual(run.pages_query, "1-3")
+        self.assertEqual(run.mode, TranskribusRun.Mode.EXISTING_SERVER)
+
+    def test_page_index_to_page_nr_json_roundtrip(self):
+        doc = self._create_document()
+        mapping = {"0": 1, "1": 2, "2": 3}
+        run = TranskribusRun.objects.create(
+            document=doc,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id="42",
+            model_id="564149",
+            page_index_to_page_nr=mapping,
+        )
+        run.refresh_from_db()
+        self.assertEqual(run.page_index_to_page_nr, mapping)
+
+    def test_default_status_is_started(self):
+        doc = self._create_document()
+        run = TranskribusRun(
+            document=doc,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id="42",
+            model_id="564149",
+        )
+        self.assertEqual(run.status, TranskribusRun.Status.STARTED)
+
+    def test_cascade_delete_from_document(self):
+        doc = self._create_document()
+        run = TranskribusRun.objects.create(
+            document=doc,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id="42",
+            model_id="564149",
+        )
+        run_id = run.id
+        doc.delete()
+        self.assertFalse(TranskribusRun.objects.filter(id=run_id).exists())
+
+    def test_status_choices_include_lifecycle_values(self):
+        expected = {
+            "STARTED",
+            "UPLOADED",
+            "RECOGNITION_STARTED",
+            "SUCCEEDED",
+            "FAILED",
+        }
+        self.assertEqual(
+            {choice.value for choice in TranskribusRun.Status},
+            expected,
+        )
+
+    def test_mode_choices(self):
+        expected = {"UPLOAD_CREATED", "EXISTING_SERVER"}
+        self.assertEqual(
+            {choice.value for choice in TranskribusRun.Mode},
+            expected,
+        )
 
 
 class OcrRoutingDevEnvGateTests(SimpleTestCase):
