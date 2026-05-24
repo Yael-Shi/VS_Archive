@@ -229,8 +229,7 @@ A document may validly be **`processing_state_user=READY`** while text results a
 
 Broader Transkribus use (beyond controlled dev/staging) should **not** proceed until explicit decisions (and follow-up PRs) on:
 
-- **where/how to persist** Transkribus remote document identity (`docId`) on the VS-Archive side
-- **reprocess** policy and duplicate prevention (upload mode creates a **new** Trp document per run today; VS-Archive does **not** persist `docId`)
+- **reprocess** policy and duplicate prevention (upload mode still creates a **new** Trp document per run; **`TranskribusRun`** records each attempt but does not reuse or block duplicates yet)
 - **cleanup/retention** (operational runbook first; no cleanup automation before identity + reprocess policy)
 
 Do **not** expand production `OCR_ROUTES` to Transkribus before those are decided or explicitly deferred in writing.

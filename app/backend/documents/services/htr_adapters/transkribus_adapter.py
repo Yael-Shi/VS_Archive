@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import requests
 from typing import List, Optional
 
+from documents.models import TranskribusRun
 from documents.services import transkribus_engine as tr
 from documents.services.htr_adapters.base import (
     EnginePermanentError,
@@ -9,6 +11,7 @@ from documents.services.htr_adapters.base import (
     HtrResult,
 )
 from documents.services.page_extraction import PageImage
+from documents.services import transkribus_run_persistence as trp
 
 _BOTH_DEV_MODES_MESSAGE = (
     "Transkribus dev modes are mutually exclusive: do not enable both "
@@ -21,6 +24,10 @@ _NO_DEV_MODE_MESSAGE = (
     "pre-existing TrpServer document, or TRANSKRIBUS_DEV_UPLOAD_MODE=true to "
     "upload PageImage[] into a new Transkribus document then run PyLaia. "
     "Production routing and VS-Archive-wide upload defaults remain deferred."
+)
+
+_MISSING_DOCUMENT_ID_MESSAGE = (
+    "TranskribusAdapter requires document_id (supplied by run_worker via transcribe_pages)."
 )
 
 
@@ -71,13 +78,31 @@ class TranskribusAdapter:
                 "for dev upload mode, image bytes are uploaded to TrpServer."
             )
 
-        if use_existing:
-            return self._execute_existing_server_document(worker_env, pages)
+        document_id = kwargs.get("document_id")
+        if document_id is None:
+            raise EnginePermanentError(_MISSING_DOCUMENT_ID_MESSAGE)
+        try:
+            document_id_int = int(document_id)
+        except (TypeError, ValueError) as exc:
+            raise EnginePermanentError(
+                f"TranskribusAdapter requires a valid integer document_id, got {document_id!r}"
+            ) from exc
 
-        return self._execute_dev_upload(worker_env, pages)
+        if use_existing:
+            return self._execute_existing_server_document(
+                worker_env, pages, document_id=document_id_int
+            )
+
+        return self._execute_dev_upload(
+            worker_env, pages, document_id=document_id_int
+        )
 
     def _execute_existing_server_document(
-        self, worker_env: object, pages: List[PageImage]
+        self,
+        worker_env: object,
+        pages: List[PageImage],
+        *,
+        document_id: int,
     ) -> HtrResult:
         self._validate_existing_document_config(worker_env)
 
@@ -86,34 +111,69 @@ class TranskribusAdapter:
         bearer = getattr(worker_env, "transkribus_api_token", None) or ""
         collection_id = getattr(worker_env, "transkribus_collection_id", None) or ""
         model_id = getattr(worker_env, "transkribus_model_id", None) or ""
-        doc_id = getattr(worker_env, "transkribus_dev_existing_document_id", None) or ""
+        remote_doc_id = (
+            getattr(worker_env, "transkribus_dev_existing_document_id", None) or ""
+        )
         pages_query = getattr(worker_env, "transkribus_dev_existing_pages", None) or ""
+        engine_runtime = f"transkribus-pylaia:{model_id}"
 
-        try:
-            text, review_reasons = tr.transcribe_existing_server_document(
-                username=username,
-                password=password,
-                bearer_token=bearer,
-                collection_id=collection_id,
-                model_id=model_id,
-                dev_document_id=doc_id,
-                dev_pages_query=pages_query,
-            )
-        except tr.TranskribusRetryableError as exc:
-            raise EngineRetryableError(str(exc)) from exc
-        except tr.TranskribusPermanentError as exc:
-            raise EnginePermanentError(str(exc)) from exc
-
-        needs_review = bool(review_reasons)
-        return HtrResult(
-            text=text,
-            needs_review=needs_review,
-            engine_name=f"transkribus-pylaia:{model_id}",
-            review_reasons=list(review_reasons),
+        run = trp.start_run(
+            document_id=document_id,
+            mode=TranskribusRun.Mode.EXISTING_SERVER,
+            collection_id=collection_id,
+            model_id=model_id,
+            remote_doc_id=remote_doc_id,
+            pages_query=pages_query,
         )
 
+        try:
+            with requests.Session() as session:
+                tr.login_trp_server(session, username=username, password=password)
+                recognition_job_id = tr.start_pylaia_recognition(
+                    session,
+                    collection_id=collection_id,
+                    model_id=model_id,
+                    document_id=remote_doc_id,
+                    pages_query=pages_query,
+                )
+                trp.mark_recognition_started(run, recognition_job_id=recognition_job_id)
+                outcome = tr.complete_pylaia_transcription_after_job(
+                    session,
+                    recognition_job_id=recognition_job_id,
+                    collection_id=collection_id,
+                    model_id=model_id,
+                    document_id=remote_doc_id,
+                    pages_query=pages_query,
+                    bearer_token=bearer,
+                )
+                trp.mark_succeeded(run, engine_runtime=engine_runtime)
+                return HtrResult(
+                    text=outcome.text,
+                    needs_review=bool(outcome.review_reasons),
+                    engine_name=engine_runtime,
+                    review_reasons=list(outcome.review_reasons),
+                )
+        except tr.TranskribusRetryableError as exc:
+            trp.mark_failed(
+                run,
+                error_code="TRANSKRIBUS_RECOGNITION_FAILED",
+                error_details=str(exc),
+            )
+            raise EngineRetryableError(str(exc)) from exc
+        except tr.TranskribusPermanentError as exc:
+            trp.mark_failed(
+                run,
+                error_code="TRANSKRIBUS_RECOGNITION_FAILED",
+                error_details=str(exc),
+            )
+            raise EnginePermanentError(str(exc)) from exc
+
     def _execute_dev_upload(
-        self, worker_env: object, pages: List[PageImage]
+        self,
+        worker_env: object,
+        pages: List[PageImage],
+        *,
+        document_id: int,
     ) -> HtrResult:
         self._validate_upload_dev_config(worker_env)
 
@@ -122,19 +182,70 @@ class TranskribusAdapter:
         bearer = getattr(worker_env, "transkribus_api_token", None) or ""
         collection_id = getattr(worker_env, "transkribus_collection_id", None) or ""
         model_id = getattr(worker_env, "transkribus_model_id", None) or ""
+        engine_runtime = f"transkribus-pylaia:{model_id}"
+
+        run = trp.start_run(
+            document_id=document_id,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id=collection_id,
+            model_id=model_id,
+        )
 
         try:
-            return tr.upload_then_transcribe_page_images_with_pylaia(
-                username=username,
-                password=password,
-                bearer_token=bearer,
-                collection_id=collection_id,
-                model_id=model_id,
-                pages=pages,
-            )
+            with requests.Session() as session:
+                tr.login_trp_server(session, username=username, password=password)
+                upload_out = tr.run_trp_upload_page_images_through_ingest(
+                    session,
+                    collection_id=collection_id,
+                    pages=pages,
+                )
+                trp.mark_uploaded(
+                    run,
+                    remote_doc_id=upload_out.doc_id,
+                    upload_id=upload_out.upload_id,
+                    ingest_job_id=upload_out.ingest_job_id,
+                    pages_query=upload_out.pages_query,
+                    page_index_to_page_nr=upload_out.page_index_to_page_nr,
+                )
+                recognition_job_id = tr.start_pylaia_recognition(
+                    session,
+                    collection_id=collection_id,
+                    model_id=model_id,
+                    document_id=upload_out.doc_id,
+                    pages_query=upload_out.pages_query,
+                )
+                trp.mark_recognition_started(run, recognition_job_id=recognition_job_id)
+                outcome = tr.complete_pylaia_transcription_after_job(
+                    session,
+                    recognition_job_id=recognition_job_id,
+                    collection_id=collection_id,
+                    model_id=model_id,
+                    document_id=upload_out.doc_id,
+                    pages_query=upload_out.pages_query,
+                    bearer_token=bearer,
+                )
+                trp.mark_succeeded(run, engine_runtime=engine_runtime)
+                return HtrResult(
+                    text=outcome.text,
+                    needs_review=bool(outcome.review_reasons),
+                    engine_name=engine_runtime,
+                    review_reasons=list(outcome.review_reasons),
+                )
         except tr.TranskribusRetryableError as exc:
+            error_code = (
+                "TRANSKRIBUS_UPLOAD_FAILED"
+                if run.status == TranskribusRun.Status.STARTED
+                else "TRANSKRIBUS_RECOGNITION_FAILED"
+            )
+            trp.mark_failed(run, error_code=error_code, error_details=str(exc))
             raise EngineRetryableError(str(exc)) from exc
         except tr.TranskribusPermanentError as exc:
+            error_code = (
+                "TRANSKRIBUS_UPLOAD_FAILED"
+                if run.status == TranskribusRun.Status.STARTED
+                else "TRANSKRIBUS_RECOGNITION_FAILED"
+            )
+            trp.mark_failed(run, error_code=error_code, error_details=str(exc))
             raise EnginePermanentError(str(exc)) from exc
 
     @staticmethod

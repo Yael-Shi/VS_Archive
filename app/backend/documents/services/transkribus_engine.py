@@ -627,6 +627,15 @@ class TrpUploadOutcome:
     page_index_to_page_nr: Dict[int, int]
 
 
+@dataclass(frozen=True)
+class PylaiaTranscriptionOutcome:
+    """PyLaia recognition + transcript fetch result (engine-only; not ``HtrResult``)."""
+
+    text: str
+    review_reasons: List[str]
+    recognition_job_id: str
+
+
 def run_trp_upload_page_images_through_ingest(
     session: requests.Session,
     *,
@@ -824,30 +833,23 @@ def parse_page_xml_to_text(page_xml: bytes) -> str:
     return "\n".join(lines)
 
 
-def pylaia_transcribe_document_with_session(
+def complete_pylaia_transcription_after_job(
     session: requests.Session,
     *,
+    recognition_job_id: str,
     collection_id: str,
     model_id: str,
     document_id: str,
     pages_query: str,
     bearer_token: str,
     timeout_sec: float = DEFAULT_HTTP_TIMEOUT_SEC,
-) -> Tuple[str, List[str]]:
+) -> PylaiaTranscriptionOutcome:
     """
-    PyLaia recognition → poll → page metadata → transcripts → PAGE XML text.
+    Poll a PyLaia job, fetch transcripts, and return PAGE-XML plain text.
 
-    Caller must already have a logged-in ``session``. Shared by
-    ``transcribe_existing_server_document`` and ``upload_then_transcribe_page_images_with_pylaia``.
+    Caller must already have submitted recognition (``recognition_job_id``).
     """
-    job_id = start_pylaia_recognition(
-        session,
-        collection_id=collection_id,
-        model_id=model_id,
-        document_id=document_id,
-        pages_query=pages_query,
-        timeout_sec=timeout_sec,
-    )
+    job_id = str(recognition_job_id).strip()
     poll_job_until_done(session, job_id, timeout_sec=timeout_sec)
     pages_meta = fetch_pages_metadata(
         session,
@@ -874,7 +876,47 @@ def pylaia_transcribe_document_with_session(
         page_texts.append(text)
 
     full_text = "\n\n".join(page_texts)
-    return full_text, review_reasons
+    return PylaiaTranscriptionOutcome(
+        text=full_text,
+        review_reasons=list(review_reasons),
+        recognition_job_id=job_id,
+    )
+
+
+def pylaia_transcribe_document_with_session(
+    session: requests.Session,
+    *,
+    collection_id: str,
+    model_id: str,
+    document_id: str,
+    pages_query: str,
+    bearer_token: str,
+    timeout_sec: float = DEFAULT_HTTP_TIMEOUT_SEC,
+) -> PylaiaTranscriptionOutcome:
+    """
+    PyLaia recognition → poll → page metadata → transcripts → PAGE XML text.
+
+    Caller must already have a logged-in ``session``. Shared by
+    ``transcribe_existing_server_document`` and ``upload_then_transcribe_page_images_with_pylaia``.
+    """
+    job_id = start_pylaia_recognition(
+        session,
+        collection_id=collection_id,
+        model_id=model_id,
+        document_id=document_id,
+        pages_query=pages_query,
+        timeout_sec=timeout_sec,
+    )
+    return complete_pylaia_transcription_after_job(
+        session,
+        recognition_job_id=job_id,
+        collection_id=collection_id,
+        model_id=model_id,
+        document_id=document_id,
+        pages_query=pages_query,
+        bearer_token=bearer_token,
+        timeout_sec=timeout_sec,
+    )
 
 
 def transcribe_existing_server_document(
@@ -894,7 +936,7 @@ def transcribe_existing_server_document(
     """
     session = requests.Session()
     login_trp_server(session, username=username, password=password)
-    return pylaia_transcribe_document_with_session(
+    outcome = pylaia_transcribe_document_with_session(
         session,
         collection_id=collection_id,
         model_id=model_id,
@@ -903,6 +945,7 @@ def transcribe_existing_server_document(
         bearer_token=bearer_token,
         timeout_sec=DEFAULT_HTTP_TIMEOUT_SEC,
     )
+    return outcome.text, list(outcome.review_reasons)
 
 
 def upload_then_transcribe_page_images_with_pylaia(
@@ -936,7 +979,7 @@ def upload_then_transcribe_page_images_with_pylaia(
         max_wait_sec=max_wait_sec,
         timeout_sec=timeout_sec,
     )
-    text, review_reasons = pylaia_transcribe_document_with_session(
+    outcome = pylaia_transcribe_document_with_session(
         session,
         collection_id=collection_id,
         model_id=model_id,
@@ -945,10 +988,10 @@ def upload_then_transcribe_page_images_with_pylaia(
         bearer_token=bearer_token,
         timeout_sec=timeout_sec,
     )
-    needs_review = bool(review_reasons)
+    needs_review = bool(outcome.review_reasons)
     return HtrResult(
-        text=text,
+        text=outcome.text,
         needs_review=needs_review,
         engine_name=f"transkribus-pylaia:{model_id}",
-        review_reasons=list(review_reasons),
+        review_reasons=list(outcome.review_reasons),
     )
