@@ -145,7 +145,7 @@ Bad:
 Good:
 
 - “Transkribus is implemented behind dev/staging env gates; static `OCR_ROUTES` remain Gemini-only.”
-- “Hebrew handwritten may route to Transkribus only when `TRANSKRIBUS_DEV_OCR_ROUTE` and upload mode flags are set.”
+- “Hebrew handwritten requires Transkribus; `ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN` is the route-activation flag, while the existing Transkribus dev/upload flags remain execution controls.”
 - “Automatic OCR/HTR worker success persists `NEEDS_REVIEW` + `UNVERIFIED`; policy reason `AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW`; `NEEDS_REVIEW_FLAG` only when `HtrResult.needs_review=True`.”
 
 Do not let documentation become more ambitious than the code.

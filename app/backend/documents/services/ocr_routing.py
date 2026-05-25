@@ -13,10 +13,6 @@ class OcrRouteConfig:
 
 
 OCR_ROUTES: dict[tuple[str, str], OcrRouteConfig] = {
-    ("he", Document.TextInputType.HANDWRITTEN): OcrRouteConfig(
-        engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
-        prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
-    ),
     ("he", Document.TextInputType.PRINTED): OcrRouteConfig(
         engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
         prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
@@ -47,6 +43,11 @@ OCR_ROUTES: dict[tuple[str, str], OcrRouteConfig] = {
     ),
 }
 
+HEBREW_HANDWRITTEN_TRANSKRIBUS_ROUTE = OcrRouteConfig(
+    engine_key=DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
+    prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+)
+
 
 def _env_bool(name: str, *, default: bool = False) -> bool:
     raw = os.getenv(name)
@@ -75,31 +76,20 @@ def select_ocr_route(language: str | None, text_input_type: str | None) -> OcrRo
     if text_type not in valid_text_types:
         raise ValueError(f"Invalid or missing text_input_type for OCR routing: {text_input_type!r}")
 
+    if (
+        lang == Document.Language.HEBREW
+        and text_type == Document.TextInputType.HANDWRITTEN
+    ):
+        if not _env_bool("ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN", default=False):
+            raise ValueError(
+                "Hebrew handwritten documents require Transkribus, but "
+                "ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN is not enabled. "
+                "Gemini fallback is not allowed for language='he' and "
+                "text_input_type='HANDWRITTEN'."
+            )
+        return HEBREW_HANDWRITTEN_TRANSKRIBUS_ROUTE
+
     route = OCR_ROUTES.get((lang, text_type))
     if route is None:
         raise ValueError(f"No OCR route configured for language={lang!r}, text_input_type={text_type!r}")
-
-    dev_ocr_route = _env_bool("TRANSKRIBUS_DEV_OCR_ROUTE", default=False)
-    if not dev_ocr_route:
-        return route
-
-    if lang != Document.Language.HEBREW or text_type != Document.TextInputType.HANDWRITTEN:
-        return route
-
-    if _env_bool("TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT", default=False):
-        raise ValueError(
-            "TRANSKRIBUS_DEV_OCR_ROUTE is enabled but TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT=true. "
-            "Dev OCR routing to Transkribus is only supported with upload mode "
-            "(TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT must be false)."
-        )
-
-    if not _env_bool("TRANSKRIBUS_DEV_UPLOAD_MODE", default=False):
-        raise ValueError(
-            "TRANSKRIBUS_DEV_OCR_ROUTE is enabled but TRANSKRIBUS_DEV_UPLOAD_MODE is not true. "
-            "Set TRANSKRIBUS_DEV_UPLOAD_MODE=true so the Transkribus adapter upload path matches routing."
-        )
-
-    return OcrRouteConfig(
-        engine_key=DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
-        prompt_variant=route.prompt_variant,
-    )
+    return route

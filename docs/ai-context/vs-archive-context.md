@@ -13,20 +13,20 @@ VS-Archive is a Django backend project for managing historical family documents.
 
 ## Current implementation (OCR/HTR)
 
-**Gemini** is the **production/default** engine: static `OCR_ROUTES` in `documents/services/ocr_routing.py` are all `GEMINI`.
+**Gemini** is the **production/default** engine for all routed pairs except Hebrew handwritten. Static `OCR_ROUTES` in `documents/services/ocr_routing.py` remain Gemini-only for the pairs that still use Gemini.
 
 **Transkribus** is **implemented** (Legacy TrpServer / PyLaia), but **not** broad production-default:
 
 - Real adapter + engine: `TranskribusAdapter`, `transkribus_engine.py`.
-- Dev/staging only unless production routing is explicitly approved later.
-- Worker routing to Transkribus: `language=he` + `HANDWRITTEN` when `TRANSKRIBUS_DEV_OCR_ROUTE` + `TRANSKRIBUS_DEV_UPLOAD_MODE` are set (see decision log).
+- Worker routing: `language=he` + `HANDWRITTEN` requires Transkribus. `ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN=true` activates that route; if the flag is off, routing fails fast instead of using Gemini.
+- Existing `TRANSKRIBUS_DEV_UPLOAD_MODE`, `TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT`, `TRANSKRIBUS_FORCE_REPROCESS`, and `TRANSKRIBUS_RECOGNITION_ONLY_RETRY` remain execution/recovery controls, not route-selection flags.
 - Manual smoke: `python manage.py dev_transkribus_transcribe <file> --confirm-create-transkribus-doc`.
 
-**Not implemented:** Gemini→Transkribus fallback, hybrid OCR routing, production-default Transkribus in `OCR_ROUTES`, product/admin reprocess workflow, cleanup automation, general re-OCR on successful Trp runs, or remote Trp deletion.
+**Not implemented:** Gemini→Transkribus fallback, Transkribus→Gemini fallback, hybrid OCR routing, broader Transkribus routing beyond Hebrew handwritten, product/admin reprocess workflow, cleanup automation, general re-OCR on successful Trp runs, or remote Trp deletion.
 
 **Recognition-only retry V1 (dev/staging):** when `TRANSKRIBUS_RECOGNITION_ONLY_RETRY=true`, dev upload mode may re-run PyLaia on an existing Trp `remote_doc_id` without a new upload — **recovery only** (failed/incomplete upload-created attempts). Excludes `SUCCEEDED` source runs; blocks if any `DocumentTextResult` is `VERIFIED`. `TRANSKRIBUS_FORCE_REPROCESS=true` still means a new upload/new Trp document. See `decision-log.md`.
 
-**TranskribusRun persistence:** dev/staging Transkribus adapter paths persist one row per attempt (remote ids, job ids, attempt status). Worker passes generic `document_id` only.
+**TranskribusRun persistence:** Transkribus adapter paths persist one row per attempt (remote ids, job ids, attempt status). Worker passes generic `document_id` only.
 
 **Cleanup / retention V1:** `python manage.py report_transkribus_cleanup` is a dry-run local reporting command. It classifies `TranskribusRun` rows and grouped `remote_doc_id` lineages for operator review, but it does not call Transkribus, delete remote docs, or delete local rows.
 
