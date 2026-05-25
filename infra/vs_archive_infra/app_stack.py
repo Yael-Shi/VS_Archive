@@ -8,6 +8,7 @@ from aws_cdk import aws_iam as iam
 from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_sqs as sqs
 from aws_cdk import aws_secretsmanager as secretsmanager
+from aws_cdk import aws_ssm as ssm
 from aws_cdk import aws_servicediscovery as servicediscovery
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_applicationautoscaling as scaling
@@ -50,10 +51,56 @@ class VsArchiveAppStack(Stack):
             return ecs.LogDrivers.aws_logs(stream_prefix=name_suffix, log_group=lg)
 
         public_subnets = ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC)
+        transkribus_parameter_prefix = f"/{cfg.project}/{cfg.env_name}/transkribus"
+        transkribus_secret_prefix = f"{cfg.project}/{cfg.env_name}/transkribus"
 
         # --- Gemini Secret ---
         gemini_secret = secretsmanager.Secret.from_secret_name_v2(
             self, "GeminiApiKeySecret", "vs-archive-dev/gemini_api_key"
+        )
+        transkribus_enable_hebrew_handwritten_param = (
+            ssm.StringParameter.from_string_parameter_name(
+                self,
+                "TranskribusEnableHebrewHandwrittenParam",
+                f"{transkribus_parameter_prefix}/enable-hebrew-handwritten",
+            )
+        )
+        transkribus_dev_upload_mode_param = ssm.StringParameter.from_string_parameter_name(
+            self,
+            "TranskribusDevUploadModeParam",
+            f"{transkribus_parameter_prefix}/dev-upload-mode",
+        )
+        transkribus_use_existing_server_document_param = (
+            ssm.StringParameter.from_string_parameter_name(
+                self,
+                "TranskribusUseExistingServerDocumentParam",
+                f"{transkribus_parameter_prefix}/use-existing-server-document",
+            )
+        )
+        transkribus_collection_id_param = ssm.StringParameter.from_string_parameter_name(
+            self,
+            "TranskribusCollectionIdParam",
+            f"{transkribus_parameter_prefix}/collection-id",
+        )
+        transkribus_model_id_param = ssm.StringParameter.from_string_parameter_name(
+            self,
+            "TranskribusModelIdParam",
+            f"{transkribus_parameter_prefix}/model-id",
+        )
+        transkribus_username_secret = secretsmanager.Secret.from_secret_name_v2(
+            self,
+            "TranskribusUsernameSecret",
+            f"{transkribus_secret_prefix}/username",
+        )
+        transkribus_password_secret = secretsmanager.Secret.from_secret_name_v2(
+            self,
+            "TranskribusPasswordSecret",
+            f"{transkribus_secret_prefix}/password",
+        )
+        transkribus_api_token_secret = secretsmanager.Secret.from_secret_name_v2(
+            self,
+            "TranskribusApiTokenSecret",
+            f"{transkribus_secret_prefix}/api-token",
         )
 
 
@@ -124,6 +171,14 @@ class VsArchiveAppStack(Stack):
             )
         )
         gemini_secret.grant_read(exec_role)
+        transkribus_enable_hebrew_handwritten_param.grant_read(exec_role)
+        transkribus_dev_upload_mode_param.grant_read(exec_role)
+        transkribus_use_existing_server_document_param.grant_read(exec_role)
+        transkribus_collection_id_param.grant_read(exec_role)
+        transkribus_model_id_param.grant_read(exec_role)
+        transkribus_username_secret.grant_read(exec_role)
+        transkribus_password_secret.grant_read(exec_role)
+        transkribus_api_token_secret.grant_read(exec_role)
 
         # --- Web Task ---
         web_task = ecs.FargateTaskDefinition(
@@ -216,6 +271,30 @@ class VsArchiveAppStack(Stack):
             secrets={
                 "DB_PASSWORD": ecs.Secret.from_secrets_manager(db_secret, "password"),
                 "GEMINI_API_KEY": ecs.Secret.from_secrets_manager(gemini_secret),
+                "ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": ecs.Secret.from_ssm_parameter(
+                    transkribus_enable_hebrew_handwritten_param
+                ),
+                "TRANSKRIBUS_DEV_UPLOAD_MODE": ecs.Secret.from_ssm_parameter(
+                    transkribus_dev_upload_mode_param
+                ),
+                "TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT": ecs.Secret.from_ssm_parameter(
+                    transkribus_use_existing_server_document_param
+                ),
+                "TRANSKRIBUS_COLLECTION_ID": ecs.Secret.from_ssm_parameter(
+                    transkribus_collection_id_param
+                ),
+                "TRANSKRIBUS_MODEL_ID": ecs.Secret.from_ssm_parameter(
+                    transkribus_model_id_param
+                ),
+                "TRANSKRIBUS_USERNAME": ecs.Secret.from_secrets_manager(
+                    transkribus_username_secret
+                ),
+                "TRANSKRIBUS_PASSWORD": ecs.Secret.from_secrets_manager(
+                    transkribus_password_secret
+                ),
+                "TRANSKRIBUS_API_TOKEN": ecs.Secret.from_secrets_manager(
+                    transkribus_api_token_secret
+                ),
             },
         )
 

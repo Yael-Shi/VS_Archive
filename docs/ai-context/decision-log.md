@@ -18,6 +18,7 @@
 - **Real** Legacy TrpServer / PyLaia: upload ingest, existing-server-document dev mode, adapter + `transkribus_engine.py`, registry, `OcrEngineKey.TRANSKRIBUS`.
 - **Not** broad production-default. Current approved routing scope is **Hebrew handwritten only**, behind **`ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN`**. That flag means the route is operationally enabled in the environment; it is **not** a fallback selector.
 - Existing **`TRANSKRIBUS_DEV_UPLOAD_MODE`**, **`TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT`**, **`TRANSKRIBUS_FORCE_REPROCESS`**, and **`TRANSKRIBUS_RECOGNITION_ONLY_RETRY`** remain execution / recovery controls. They are **not** the route-selection flag.
+- CDK now persists the worker-side Transkribus runtime wiring using AWS-managed config references: worker non-secret Transkribus values are read from SSM parameter names derived from project/env, secret values stay in Secrets Manager, and local dev uses `.env.local` / `.env.template` placeholders instead of committed real values.
 - Upload mode creates a **new** Trp document per run; **`TranskribusRun`** rows are written on Transkribus adapter paths (PR2 wiring). Duplicate prevention and cleanup remain deferred.
 
 ### OCR review lifecycle (implemented)
