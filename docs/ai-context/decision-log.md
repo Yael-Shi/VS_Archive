@@ -55,15 +55,16 @@
 
 **Schema + wiring (PR1–PR2, done):** **`TranskribusRun`** records one Transkribus processing attempt per VS-Archive document. **`TranskribusAdapter`** (dev/staging paths) creates/updates rows through **`transkribus_run_persistence`**. **`run_worker`** passes generic **`document_id`** into **`transcribe_pages`**; no provider branches in the worker.
 
-Still decide (then implement in focused PRs): cleanup/retention runbook. **No** production `OCR_ROUTES` expansion until decided or explicitly deferred.
+Cleanup/retention now has a **V1 dry-run reporting command** (`report_transkribus_cleanup`) for local operator visibility only. **Remote deletion, row deletion, and automation remain deferred.** **No** production `OCR_ROUTES` expansion until those broader decisions are made or explicitly deferred.
 
 ### Near-term PR sequence
 
 1. ~~Trp identity schema + persistence wiring~~ → **done (PR1 + PR2)**.
 2. ~~Duplicate upload guard (dev upload mode)~~ → **done (PR3)**.
 3. ~~Recognition-only retry V1 (dev/staging recovery)~~ → **done** (see section below).
-4. Cleanup runbook (automation later).
-5. Broader production routing only if explicitly approved.
+4. ~~Cleanup / retention V1 dry-run reporting~~ → **done**.
+5. Remote deletion / automation later, only after API behavior is verified and explicitly approved.
+6. Broader production routing only if explicitly approved.
 
 ---
 
@@ -208,6 +209,44 @@ Blocked upload does not change OCR review lifecycle or rollup rules. Worker may 
 - Cleanup/retention automation, Trp delete API
 - Staleness TTL for in-progress rows
 - Product reprocess policy (file changed, admin action) beyond recognition-only V1 guards
+
+---
+
+## Transkribus — cleanup / retention V1 (dry-run reporting only)
+
+**Decision:** implement a **local-only dry-run reporting command** first; do **not** delete remote Trp documents, do **not** delete `TranskribusRun` rows, and do **not** add cleanup logic to `run_worker.py`.
+
+### Implemented in V1
+
+- **`report_transkribus_cleanup`** reads local DB state only and reports:
+  - per-`remote_doc_id` retention / review buckets
+  - per-`TranskribusRun` buckets
+  - stale in-progress rows based on a reporting threshold (default **24h**)
+- **No** Transkribus HTTP calls, **no** delete endpoint usage, **no** local mutations.
+
+### Current retention policy
+
+- **Never auto-delete** from this V1 command.
+- **Retain** any `remote_doc_id` referenced by:
+  - **`EXISTING_SERVER`** runs
+  - any document with **`DocumentTextResult.verification_status=VERIFIED`**
+  - any run that remains reusable for **recognition-only retry V1**
+  - the newest successful/useful remote doc in a `(document_id, collection_id, model_id)` lineage
+- **Review only** buckets are operator hints for manual investigation. They are **not** deletion approvals.
+
+### Explicit non-scope
+
+- Remote Trp deletion
+- Local `TranskribusRun` deletion / pruning
+- Worker-triggered cleanup
+- Admin cleanup actions
+- Schema / migration changes for cleanup state
+
+### Why this is conservative
+
+- `remote_doc_id` is now persisted on **`TranskribusRun`**, which is enough for reporting and lineage analysis.
+- Recognition-only retry can reuse an older remote Trp document, so older rows may still represent a remote document that is **in use**.
+- `transkribus_engine.py` still has **no verified delete endpoint wrapper** in code, so remote deletion remains intentionally deferred.
 
 ---
 
@@ -584,7 +623,7 @@ This section records **operational risks and semantics** for env-gated **Transkr
 
 1. **Every** Transkribus **upload-mode** run that reaches Legacy TrpServer **creates a new server-side Transkribus document** (new **`docId`** on the Trp side for that upload path).
 
-2. VS-Archive **does not** currently persist the Transkribus **`docId`** anywhere in the database.
+2. VS-Archive currently persists the Transkribus **`docId`** as **`TranskribusRun.remote_doc_id`**. It is **not** persisted on the parent **`Document`** row.
 
 3. **Reprocessing** the same VS-Archive **`Document`** (e.g. another **`PROCESS_DOCUMENT`** message for the same **`document_id`**) can therefore create **additional** Transkribus documents—**duplicates on Trp** are possible even when VS-Archive still represents “one” archive document.
 
@@ -596,15 +635,15 @@ This section records **operational risks and semantics** for env-gated **Transkr
 
 ### Cleanup and retention
 
-5. **Cleanup / retention** for Transkribus-side documents is **not implemented** in the product. **Manual** deletion or archival in the **Transkribus UI** (or future external scripts) remains the **only** supported option today.
+5. **Cleanup / retention V1** is a **dry-run local reporting command** only. It classifies local rows / remote-doc lineages for operator review but **does not delete** remote Trp documents and **does not delete** local rows.
 
 ### Where not to stash `docId` (until an approved schema PR)
 
 6. Do **not** store Transkribus **`docId`** in **`DocumentTextResult.error_details`** or **`review_reasons`**—those fields have **failure** / **review-reason** semantics and are a poor fit for external identifiers.
 
-   If/when we **persist** **`docId`**, prefer **either**:
-   - **Explicit nullable field(s) on `Document`**, **or**
-   - **A dedicated link / history model** (one row per Trp document / run),
+   Current persistence is **`TranskribusRun.remote_doc_id`**. If future product requirements need a different home, prefer **either**:
+   - **Explicit nullable field(s) on `Document`** when the product truly needs one current linked Trp doc, **or**
+   - **A dedicated link / history model** beyond `TranskribusRun` if cleanup state needs richer lifecycle tracking,
 
    **Both require a separate, explicitly approved schema / migration PR** (out of scope for doc-only updates).
 
@@ -617,9 +656,9 @@ This section records **operational risks and semantics** for env-gated **Transkr
 ### Decisions still required before broader use
 
 8. Before expanding dev/staging volume or moving toward production routing, we still need explicit decisions on:
-   - **Whether** (and **where**) to **persist Transkribus `docId`** for audit, dedupe, and cleanup.
+   - Whether **`TranskribusRun.remote_doc_id`** remains sufficient for audit / dedupe / cleanup, or whether richer cleanup state is needed later.
    - **Whether** to **allow reprocessing** the same **`Document`** through Transkribus upload mode (and under what guards, e.g. **`VERIFIED`** results, file changed, explicit admin action).
-   - **Whether** to add **cleanup tooling** (e.g. management command calling Trp APIs) once **`docId`** is stored.
+   - **Whether** to add **destructive cleanup tooling** (e.g. Transkribus delete API calls) once API behavior is verified.
    - **Automatic OCR review lifecycle:** implemented in worker — see **“OCR review lifecycle (implemented)”** in Current state above (worker-wide **`NEEDS_REVIEW`**, not Transkribus-only).
 
-**`docId` persistence / reprocess / cleanup automation** remain undecided and unimplemented.
+**Remote deletion / reprocess / cleanup automation** remain undecided and unimplemented.

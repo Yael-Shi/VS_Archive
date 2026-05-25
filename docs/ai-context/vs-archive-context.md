@@ -22,11 +22,13 @@ VS-Archive is a Django backend project for managing historical family documents.
 - Worker routing to Transkribus: `language=he` + `HANDWRITTEN` when `TRANSKRIBUS_DEV_OCR_ROUTE` + `TRANSKRIBUS_DEV_UPLOAD_MODE` are set (see decision log).
 - Manual smoke: `python manage.py dev_transkribus_transcribe <file> --confirm-create-transkribus-doc`.
 
-**Not implemented:** Gemini→Transkribus fallback, hybrid OCR routing, production-default Transkribus in `OCR_ROUTES`, product/admin reprocess workflow, cleanup automation, general re-OCR on successful Trp runs.
+**Not implemented:** Gemini→Transkribus fallback, hybrid OCR routing, production-default Transkribus in `OCR_ROUTES`, product/admin reprocess workflow, cleanup automation, general re-OCR on successful Trp runs, or remote Trp deletion.
 
 **Recognition-only retry V1 (dev/staging):** when `TRANSKRIBUS_RECOGNITION_ONLY_RETRY=true`, dev upload mode may re-run PyLaia on an existing Trp `remote_doc_id` without a new upload — **recovery only** (failed/incomplete upload-created attempts). Excludes `SUCCEEDED` source runs; blocks if any `DocumentTextResult` is `VERIFIED`. `TRANSKRIBUS_FORCE_REPROCESS=true` still means a new upload/new Trp document. See `decision-log.md`.
 
 **TranskribusRun persistence:** dev/staging Transkribus adapter paths persist one row per attempt (remote ids, job ids, attempt status). Worker passes generic `document_id` only.
+
+**Cleanup / retention V1:** `python manage.py report_transkribus_cleanup` is a dry-run local reporting command. It classifies `TranskribusRun` rows and grouped `remote_doc_id` lineages for operator review, but it does not call Transkribus, delete remote docs, or delete local rows.
 
 **Duplicate upload guard (PR3):** dev upload mode blocks a second Trp upload for the same `(document_id, UPLOAD_CREATED, collection_id, model_id)` when a prior blocking run exists. Override with `TRANSKRIBUS_FORCE_REPROCESS=true` (new Trp doc) or recovery with `TRANSKRIBUS_RECOGNITION_ONLY_RETRY=true` when a reusable source run exists. See `decision-log.md`.
 
@@ -74,7 +76,8 @@ Non-Hebrew documents may remain **`PARTIAL`** because `HEBREW_TEXT` (translation
 1. ~~Transkribus remote identity schema + persistence wiring~~ → **done (PR1 + PR2)**.
 2. ~~Duplicate upload guard (dev upload mode)~~ → **done (PR3)**.
 3. ~~Recognition-only retry V1~~ → **done** (dev/staging recovery).
-4. Cleanup / retention runbook (automation later).
-5. Broader Transkribus production routing only with explicit approval.
+4. ~~Cleanup / retention V1 dry-run reporting~~ → **done**.
+5. Remote deletion / cleanup automation later, only with explicit approval.
+6. Broader Transkribus production routing only with explicit approval.
 
 OCR quality/fidelity validation against the Transkribus UI is important but **not** the current docs/rules task.

@@ -4,7 +4,8 @@ import inspect
 import json
 import os
 import tempfile
-from io import BytesIO
+from datetime import timedelta
+from io import BytesIO, StringIO
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -12,6 +13,7 @@ import requests
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import SimpleTestCase, TestCase
+from django.utils import timezone
 from PIL import Image
 
 from documents.management.commands.run_worker import Command
@@ -2282,6 +2284,269 @@ class DevTranskribusTranscribeCommandTests(SimpleTestCase):
         src = inspect.getsource(mod)
         self.assertNotIn("select_ocr_route", src)
         self.assertNotIn("from documents.management.commands.run_worker", src)
+
+
+class TranskribusCleanupReportTests(TestCase):
+    def _create_document(self, *, title: str = "Cleanup report doc") -> Document:
+        return Document.objects.create(
+            title=title,
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.READY,
+            language=Document.Language.HEBREW,
+        )
+
+    def _create_run(
+        self,
+        doc: Document,
+        *,
+        status: str,
+        mode: str = TranskribusRun.Mode.UPLOAD_CREATED,
+        remote_doc_id: str | None = None,
+        pages_query: str | None = "1",
+        collection_id: str = "col",
+        model_id: str = "42",
+        upload_id: int | None = 10,
+        ingest_job_id: str | None = "ingest-1",
+        recognition_job_id: str | None = None,
+        age_hours: int | None = None,
+    ) -> TranskribusRun:
+        run = TranskribusRun.objects.create(
+            document=doc,
+            mode=mode,
+            status=status,
+            collection_id=collection_id,
+            model_id=model_id,
+            remote_doc_id=remote_doc_id,
+            pages_query=pages_query,
+            page_index_to_page_nr={0: 1} if pages_query else None,
+            upload_id=upload_id,
+            ingest_job_id=ingest_job_id,
+            recognition_job_id=recognition_job_id,
+        )
+        if age_hours is not None:
+            ts = timezone.now() - timedelta(hours=age_hours)
+            TranskribusRun.objects.filter(id=run.id).update(created_at=ts, updated_at=ts)
+            run.refresh_from_db()
+        return run
+
+    def test_report_retains_remote_doc_shared_by_recognition_only_history(self):
+        from documents.services.transkribus_cleanup_report import (
+            RETAIN_LATEST_OR_REUSABLE_REMOTE_DOC,
+            build_transkribus_cleanup_report,
+        )
+
+        doc = self._create_document()
+        failed_run = self._create_run(
+            doc,
+            status=TranskribusRun.Status.FAILED,
+            remote_doc_id="555",
+            recognition_job_id="recog-old",
+        )
+        succeeded_run = self._create_run(
+            doc,
+            status=TranskribusRun.Status.SUCCEEDED,
+            remote_doc_id="555",
+            recognition_job_id="recog-new",
+        )
+
+        report = build_transkribus_cleanup_report()
+        remote_doc = report["remote_docs"][0]
+
+        self.assertEqual(remote_doc["bucket"], RETAIN_LATEST_OR_REUSABLE_REMOTE_DOC)
+        self.assertEqual(remote_doc["remote_doc_id"], "555")
+        self.assertEqual(remote_doc["run_ids"], [failed_run.id, succeeded_run.id])
+
+    def test_report_retains_existing_server_remote_doc(self):
+        from documents.services.transkribus_cleanup_report import (
+            RETAIN_EXISTING_SERVER,
+            build_transkribus_cleanup_report,
+        )
+
+        doc = self._create_document()
+        self._create_run(
+            doc,
+            status=TranskribusRun.Status.SUCCEEDED,
+            mode=TranskribusRun.Mode.EXISTING_SERVER,
+            remote_doc_id="existing-99",
+            upload_id=None,
+            ingest_job_id=None,
+        )
+
+        report = build_transkribus_cleanup_report()
+
+        self.assertEqual(report["remote_docs"][0]["bucket"], RETAIN_EXISTING_SERVER)
+
+    def test_report_retains_verified_document_remote_doc(self):
+        from documents.services.transkribus_cleanup_report import (
+            RETAIN_VERIFIED_DOCUMENT,
+            build_transkribus_cleanup_report,
+        )
+
+        doc = self._create_document()
+        self._create_run(
+            doc,
+            status=TranskribusRun.Status.SUCCEEDED,
+            remote_doc_id="777",
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="transkribus-pylaia:42",
+            engine_key=DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+            text="approved text",
+        )
+
+        report = build_transkribus_cleanup_report()
+
+        self.assertEqual(report["remote_docs"][0]["bucket"], RETAIN_VERIFIED_DOCUMENT)
+
+    def test_report_flags_superseded_successful_remote_doc(self):
+        from documents.services.transkribus_cleanup_report import (
+            RETAIN_LATEST_OR_REUSABLE_REMOTE_DOC,
+            REVIEW_SUPERSEDED_FORCE_REPROCESS_REMOTE_DOC,
+            build_transkribus_cleanup_report,
+        )
+
+        doc = self._create_document()
+        self._create_run(
+            doc,
+            status=TranskribusRun.Status.SUCCEEDED,
+            remote_doc_id="111",
+        )
+        self._create_run(
+            doc,
+            status=TranskribusRun.Status.SUCCEEDED,
+            remote_doc_id="222",
+        )
+
+        report = build_transkribus_cleanup_report()
+        remote_docs = {item["remote_doc_id"]: item["bucket"] for item in report["remote_docs"]}
+
+        self.assertEqual(
+            remote_docs["111"],
+            REVIEW_SUPERSEDED_FORCE_REPROCESS_REMOTE_DOC,
+        )
+        self.assertEqual(
+            remote_docs["222"],
+            RETAIN_LATEST_OR_REUSABLE_REMOTE_DOC,
+        )
+
+    def test_report_flags_failed_after_upload_when_remote_doc_not_reusable(self):
+        from documents.services.transkribus_cleanup_report import (
+            REVIEW_FAILED_AFTER_UPLOAD_REMOTE_DOC,
+            build_transkribus_cleanup_report,
+        )
+
+        doc = self._create_document()
+        self._create_run(
+            doc,
+            status=TranskribusRun.Status.FAILED,
+            remote_doc_id="333",
+            pages_query=None,
+            upload_id=20,
+            ingest_job_id="ingest-20",
+        )
+
+        report = build_transkribus_cleanup_report()
+
+        self.assertEqual(
+            report["remote_docs"][0]["bucket"],
+            REVIEW_FAILED_AFTER_UPLOAD_REMOTE_DOC,
+        )
+
+    def test_report_marks_stale_in_progress_run_without_reclassifying_remote_doc(self):
+        from documents.services.transkribus_cleanup_report import (
+            RETAIN_LATEST_OR_REUSABLE_REMOTE_DOC,
+            REVIEW_STALE_IN_PROGRESS_RUN,
+            build_transkribus_cleanup_report,
+        )
+
+        doc = self._create_document()
+        stale_run = self._create_run(
+            doc,
+            status=TranskribusRun.Status.UPLOADED,
+            remote_doc_id="444",
+            age_hours=72,
+        )
+
+        report = build_transkribus_cleanup_report(stale_hours=24)
+        remote_doc = report["remote_docs"][0]
+        run_row = next(item for item in report["runs"] if item["run_id"] == stale_run.id)
+
+        self.assertEqual(remote_doc["bucket"], RETAIN_LATEST_OR_REUSABLE_REMOTE_DOC)
+        self.assertEqual(run_row["bucket"], REVIEW_STALE_IN_PROGRESS_RUN)
+
+    def test_report_classifies_failed_without_remote_doc_as_local_only(self):
+        from documents.services.transkribus_cleanup_report import (
+            LOCAL_ONLY_FAILED_WITHOUT_REMOTE_DOC,
+            build_transkribus_cleanup_report,
+        )
+
+        doc = self._create_document()
+        failed_run = self._create_run(
+            doc,
+            status=TranskribusRun.Status.FAILED,
+            remote_doc_id=None,
+            pages_query=None,
+            upload_id=None,
+            ingest_job_id=None,
+        )
+
+        report = build_transkribus_cleanup_report()
+        run_row = next(item for item in report["runs"] if item["run_id"] == failed_run.id)
+
+        self.assertEqual(run_row["bucket"], LOCAL_ONLY_FAILED_WITHOUT_REMOTE_DOC)
+
+
+class ReportTranskribusCleanupCommandTests(TestCase):
+    def test_command_outputs_json_without_mutating_rows(self):
+        doc = Document.objects.create(
+            title="Cleanup command doc",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADED,
+        )
+        run = TranskribusRun.objects.create(
+            document=doc,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            status=TranskribusRun.Status.SUCCEEDED,
+            collection_id="col",
+            model_id="42",
+            remote_doc_id="555",
+            pages_query="1",
+            page_index_to_page_nr={0: 1},
+            upload_id=10,
+            ingest_job_id="ingest-1",
+            recognition_job_id="recog-1",
+        )
+        before = {
+            "run_count": TranskribusRun.objects.count(),
+            "status": run.status,
+            "updated_at": run.updated_at,
+        }
+
+        stdout = StringIO()
+        call_command("report_transkribus_cleanup", "--json", stdout=stdout)
+        payload = json.loads(stdout.getvalue())
+
+        run.refresh_from_db()
+        self.assertEqual(TranskribusRun.objects.count(), before["run_count"])
+        self.assertEqual(run.status, before["status"])
+        self.assertEqual(run.updated_at, before["updated_at"])
+        self.assertEqual(payload["summary"]["remote_doc_count"], 1)
+        self.assertEqual(payload["summary"]["run_count"], 1)
+
+    def test_cleanup_command_source_does_not_import_transkribus_engine_or_requests(self):
+        import documents.management.commands.report_transkribus_cleanup as mod
+
+        src = inspect.getsource(mod)
+        self.assertNotIn("transkribus_engine", src)
+        self.assertNotIn("requests", src)
 
 
 class TranskribusRunModelTests(TestCase):

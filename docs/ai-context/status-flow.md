@@ -146,6 +146,18 @@ A **new** `TranskribusRun` row is created for each recognition-only recovery att
 
 `TranskribusRun.SUCCEEDED` on a prior upload-created run is **not** a reusable source for V1 recognition-only retry (recovery targets failed or incomplete attempts only).
 
+## Cleanup / retention reporting (V1)
+
+`report_transkribus_cleanup` is an **operational dry-run report**, not a status layer.
+
+- A cleanup bucket such as `review_failed_after_upload_remote_doc` or `review_stale_in_progress_run` does **not** change:
+  - `Document.processing_state_user`
+  - `DocumentTextResult.status`
+  - `DocumentTextResult.verification_status`
+  - `TranskribusRun.status`
+- `review_*` buckets are **manual investigation hints**, not deletion approval.
+- `retain_*` buckets are operational safety classifications, not human verification.
+
 ## PR guardrails
 
 When implementing Transkribus duplicate prevention / reprocess policy:
