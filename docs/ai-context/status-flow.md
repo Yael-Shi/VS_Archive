@@ -163,8 +163,9 @@ A **new** `TranskribusRun` row is created for each recognition-only recovery att
 When implementing Transkribus duplicate prevention / reprocess policy:
 
 - Do not put Transkribus-specific logic in `run_worker.py`.
-- Do not change production routing.
+- Do not broaden Transkribus routing beyond Hebrew handwritten, and do not route Hebrew handwritten documents to Gemini when `ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN` is disabled.
 - Do not add Gemini→Transkribus fallback.
+- Do not add Transkribus→Gemini fallback.
 - Do not add hybrid routing.
 - Do not change `HtrResult`.
 - Do not store remote ids in `HtrResult`, `review_reasons`, `DocumentTextResult.engine`, or `prompt_variant`.

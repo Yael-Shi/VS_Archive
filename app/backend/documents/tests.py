@@ -18,6 +18,7 @@ from PIL import Image
 
 from documents.management.commands.run_worker import Command
 from documents.models import Document, DocumentTextResult, TranskribusRun
+from documents.services.env_validation import validate_required_env
 from documents.services.transkribus_engine import PylaiaTranscriptionOutcome
 from documents.services.gemini_engine import GeminiError, GeminiResult
 from documents.services.htr_adapters.base import (
@@ -1850,7 +1851,7 @@ class RunWorkerBehaviorTests(TestCase):
     @patch("documents.management.commands.run_worker.get_object_bytes")
     @patch("documents.management.commands.run_worker.extract_pages")
     @patch("documents.management.commands.run_worker.transcribe_pages")
-    def test_hebrew_gemini_success_ready_when_hebrew_text_usable_needs_review(
+    def test_hebrew_printed_gemini_success_ready_when_hebrew_text_usable_needs_review(
         self,
         mock_transcribe,
         mock_extract_pages,
@@ -1860,7 +1861,7 @@ class RunWorkerBehaviorTests(TestCase):
             title="Hebrew doc",
             doc_type=Document.DocType.PDF,
             language=Document.Language.HEBREW,
-            text_input_type=Document.TextInputType.HANDWRITTEN,
+            text_input_type=Document.TextInputType.PRINTED,
             upload_status=Document.UploadStatus.UPLOADED,
             file_s3_key="he.pdf",
             mime_type="application/pdf",
@@ -2029,7 +2030,7 @@ class RunWorkerBehaviorTests(TestCase):
     @patch("documents.management.commands.run_worker.get_object_bytes")
     @patch("documents.management.commands.run_worker.extract_pages")
     @patch("documents.management.commands.run_worker.transcribe_pages")
-    def test_env_gated_transkribus_route_used_and_persisted_by_worker(
+    def test_enabled_hebrew_handwritten_transkribus_route_used_and_persisted_by_worker(
         self,
         mock_transcribe,
         mock_extract_pages,
@@ -2066,9 +2067,7 @@ class RunWorkerBehaviorTests(TestCase):
         with patch.dict(
             os.environ,
             {
-                "TRANSKRIBUS_DEV_OCR_ROUTE": "true",
-                "TRANSKRIBUS_DEV_UPLOAD_MODE": "true",
-                "TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT": "false",
+                "ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "true",
             },
             clear=False,
         ):
@@ -2117,6 +2116,141 @@ class RunWorkerBehaviorTests(TestCase):
                     DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
                 )
                 self.assertIsNone(row.error_code)
+
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    def test_disabled_hebrew_handwritten_route_fails_fast_without_gemini_fallback(
+        self,
+        mock_get_object_bytes,
+        mock_extract_pages,
+        mock_transcribe,
+    ):
+        he_doc = Document.objects.create(
+            title="Hebrew HTR disabled",
+            doc_type=Document.DocType.PDF,
+            language=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADED,
+            file_s3_key="he-disabled.pdf",
+            mime_type="application/pdf",
+        )
+        mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
+        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+
+        msg = {
+            "Body": json.dumps(
+                {"type": "PROCESS_DOCUMENT", "document_id": he_doc.id}
+            )
+        }
+
+        with patch.dict(
+            os.environ,
+            {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "false"},
+            clear=False,
+        ):
+            self.assertTrue(self.command._process_message(msg))
+
+        mock_transcribe.assert_not_called()
+
+        for r_type in (
+            DocumentTextResult.ResultType.SOURCE_TEXT,
+            DocumentTextResult.ResultType.HEBREW_TEXT,
+        ):
+            with self.subTest(result_type=r_type):
+                failure = DocumentTextResult.objects.get(
+                    document=he_doc,
+                    result_type=r_type,
+                    engine="ocr-dispatch",
+                )
+                self.assertEqual(failure.status, DocumentTextResult.Status.FAILED)
+                self.assertEqual(failure.error_code, "OCR_ROUTING_INVALID")
+                self.assertEqual(failure.engine_key, "UNRESOLVED")
+                self.assertEqual(failure.prompt_variant, "UNRESOLVED")
+                self.assertIn(
+                    "ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN",
+                    failure.error_details or "",
+                )
+                self.assertIn("Gemini fallback", failure.error_details or "")
+
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    def test_transkribus_failure_persists_transkribus_route_metadata_without_gemini_fallback(
+        self,
+        mock_transcribe,
+        mock_extract_pages,
+        mock_get_object_bytes,
+    ):
+        he_doc = Document.objects.create(
+            title="Hebrew HTR failure",
+            doc_type=Document.DocType.PDF,
+            language=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADED,
+            file_s3_key="he-failure.pdf",
+            mime_type="application/pdf",
+        )
+        mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
+        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_transcribe.side_effect = EnginePermanentError(
+            "Transkribus upload failed in test"
+        )
+
+        msg = {
+            "Body": json.dumps(
+                {"type": "PROCESS_DOCUMENT", "document_id": he_doc.id}
+            )
+        }
+
+        with patch.dict(
+            os.environ,
+            {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "true"},
+            clear=False,
+        ):
+            self.assertTrue(self.command._process_message(msg))
+
+        for r_type in (
+            DocumentTextResult.ResultType.SOURCE_TEXT,
+            DocumentTextResult.ResultType.HEBREW_TEXT,
+        ):
+            with self.subTest(result_type=r_type):
+                failure = DocumentTextResult.objects.get(
+                    document=he_doc,
+                    result_type=r_type,
+                    engine="ocr-dispatch",
+                )
+                self.assertEqual(failure.status, DocumentTextResult.Status.FAILED)
+                self.assertEqual(failure.error_code, "OCR_FAILED")
+                self.assertEqual(
+                    failure.engine_key, DocumentTextResult.OcrEngineKey.TRANSKRIBUS
+                )
+                self.assertEqual(
+                    failure.prompt_variant,
+                    DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+                )
+                self.assertIn("Transkribus upload failed", failure.error_details or "")
+
+    def test_run_worker_source_does_not_reference_transkribus_route_flags(self):
+        import documents.management.commands.run_worker as mod
+
+        src = inspect.getsource(mod)
+        self.assertNotIn("ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN", src)
+        self.assertNotIn("TRANSKRIBUS_DEV_OCR_ROUTE", src)
+
+
+class WorkerEnvConfigTests(SimpleTestCase):
+    def test_validate_required_env_defaults_transkribus_hebrew_handwritten_flag_to_false(
+        self,
+    ):
+        with patch.dict(
+            os.environ,
+            {"GEMINI_API_KEY": "test-gemini-key"},
+            clear=True,
+        ):
+            cfg = validate_required_env()
+
+        self.assertFalse(cfg.enable_transkribus_hebrew_handwritten)
 
 
 def _worker_env_for_dev_transkribus_upload_command(**overrides):
@@ -3840,36 +3974,22 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
         )
 
 
-class OcrRoutingDevEnvGateTests(SimpleTestCase):
-    """TRANSKRIBUS_DEV_OCR_ROUTE gating in select_ocr_route; no live Transkribus."""
+class OcrRoutingTranskribusHebrewHandwrittenTests(SimpleTestCase):
+    """Hebrew handwritten routing policy; no live Transkribus."""
 
-    def test_ocr_routes_table_remains_gemini_only(self):
+    def test_ocr_routes_table_keeps_hebrew_handwritten_out_of_gemini_table(self):
+        self.assertNotIn(
+            (Document.Language.HEBREW, Document.TextInputType.HANDWRITTEN),
+            OCR_ROUTES,
+        )
         for cfg in OCR_ROUTES.values():
             self.assertEqual(cfg.engine_key, DocumentTextResult.OcrEngineKey.GEMINI)
 
-    def test_flag_off_returns_gemini_route(self):
+    def test_flag_on_he_handwritten_returns_transkribus(self):
         with patch.dict(
             os.environ,
             {
-                "TRANSKRIBUS_DEV_OCR_ROUTE": "false",
-                "TRANSKRIBUS_DEV_UPLOAD_MODE": "true",
-                "TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT": "false",
-            },
-            clear=False,
-        ):
-            route = select_ocr_route("he", Document.TextInputType.HANDWRITTEN)
-        self.assertEqual(route.engine_key, DocumentTextResult.OcrEngineKey.GEMINI)
-        self.assertEqual(
-            route.prompt_variant, DocumentTextResult.OcrPromptVariant.HANDWRITTEN
-        )
-
-    def test_flag_on_upload_on_he_handwritten_returns_transkribus(self):
-        with patch.dict(
-            os.environ,
-            {
-                "TRANSKRIBUS_DEV_OCR_ROUTE": "true",
-                "TRANSKRIBUS_DEV_UPLOAD_MODE": "true",
-                "TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT": "false",
+                "ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "true",
             },
             clear=False,
         ):
@@ -3879,41 +3999,53 @@ class OcrRoutingDevEnvGateTests(SimpleTestCase):
             route.prompt_variant, DocumentTextResult.OcrPromptVariant.HANDWRITTEN
         )
 
-    def test_flag_on_upload_off_raises(self):
+    def test_flag_off_he_handwritten_raises_clear_error(self):
         with patch.dict(
             os.environ,
             {
-                "TRANSKRIBUS_DEV_OCR_ROUTE": "true",
-                "TRANSKRIBUS_DEV_UPLOAD_MODE": "false",
-                "TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT": "false",
+                "ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "false",
             },
             clear=False,
         ):
             with self.assertRaises(ValueError) as ctx:
                 select_ocr_route("he", Document.TextInputType.HANDWRITTEN)
-        self.assertIn("TRANSKRIBUS_DEV_UPLOAD_MODE", str(ctx.exception))
+        self.assertIn("ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN", str(ctx.exception))
+        self.assertIn("Gemini fallback", str(ctx.exception))
 
-    def test_flag_on_existing_doc_mode_raises(self):
-        with patch.dict(
-            os.environ,
-            {
-                "TRANSKRIBUS_DEV_OCR_ROUTE": "true",
-                "TRANSKRIBUS_DEV_UPLOAD_MODE": "true",
-                "TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT": "true",
-            },
-            clear=False,
-        ):
-            with self.assertRaises(ValueError) as ctx:
-                select_ocr_route("he", Document.TextInputType.HANDWRITTEN)
-        self.assertIn("TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT", str(ctx.exception))
-
-    def test_flag_on_non_he_route_returns_gemini(self):
+    def test_legacy_dev_ocr_route_flag_does_not_select_hebrew_handwritten_route(self):
         with patch.dict(
             os.environ,
             {
                 "TRANSKRIBUS_DEV_OCR_ROUTE": "true",
                 "TRANSKRIBUS_DEV_UPLOAD_MODE": "true",
                 "TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT": "false",
+                "ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "false",
+            },
+            clear=False,
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                select_ocr_route("he", Document.TextInputType.HANDWRITTEN)
+        self.assertIn("ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN", str(ctx.exception))
+
+    def test_hebrew_printed_route_remains_gemini(self):
+        with patch.dict(
+            os.environ,
+            {
+                "ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "true",
+            },
+            clear=False,
+        ):
+            route = select_ocr_route("he", Document.TextInputType.PRINTED)
+        self.assertEqual(route.engine_key, DocumentTextResult.OcrEngineKey.GEMINI)
+        self.assertEqual(
+            route.prompt_variant, DocumentTextResult.OcrPromptVariant.PRINTED
+        )
+
+    def test_non_hebrew_handwritten_route_remains_gemini(self):
+        with patch.dict(
+            os.environ,
+            {
+                "ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "true",
             },
             clear=False,
         ):
@@ -3924,9 +4056,7 @@ class OcrRoutingDevEnvGateTests(SimpleTestCase):
         with patch.dict(
             os.environ,
             {
-                "TRANSKRIBUS_DEV_OCR_ROUTE": "true",
-                "TRANSKRIBUS_DEV_UPLOAD_MODE": "true",
-                "TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT": "false",
+                "ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "true",
             },
             clear=False,
         ):

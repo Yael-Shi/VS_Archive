@@ -135,16 +135,19 @@ On successful OCR/HTR persistence, these values should come from the worker-held
 
 ## Current provider state
 
-**Gemini** is the **production/default** OCR/HTR provider: real API and all static `OCR_ROUTES` entries point to `GEMINI`.
+**Gemini** is the **production/default** OCR/HTR provider for all routed pairs except Hebrew handwritten. Real API; the static `OCR_ROUTES` entries that remain in the table point to `GEMINI`.
 
-**Transkribus** is a **real** Legacy TrpServer / PyLaia integration (not a skeleton): `TranskribusAdapter`, `transkribus_engine.py`, registry wiring, and `DocumentTextResult.OcrEngineKey.TRANSKRIBUS`. It is **not** broad production-default routing. It runs only when explicit **dev/staging env gates** are enabled (see `docs/ai-context/decision-log.md` — Transkribus sections).
+**Transkribus** is a **real** Legacy TrpServer / PyLaia integration (not a skeleton): `TranskribusAdapter`, `transkribus_engine.py`, registry wiring, and `DocumentTextResult.OcrEngineKey.TRANSKRIBUS`. It is **not** broad production-default routing. Current approved routing scope is **Hebrew handwritten only**, behind **`ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN`**.
 
 **Intended routing policy (current):**
 
-- Static `OCR_ROUTES` remains **Gemini-only** unless explicitly changed later.
-- `language=he` + `text_input_type=HANDWRITTEN` may route to **Transkribus** only when **`TRANSKRIBUS_DEV_OCR_ROUTE=true`**, **`TRANSKRIBUS_DEV_UPLOAD_MODE=true`**, and **`TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT=false`** (see `select_ocr_route`).
+- Static `OCR_ROUTES` remains **Gemini-only** for the pairs that still use Gemini.
+- `language=he` + `text_input_type=HANDWRITTEN` requires **Transkribus**.
+- If **`ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN=true`**, route that pair to **Transkribus**.
+- If **`ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN=false`**, fail routing explicitly for that pair. Do **not** silently route Hebrew handwritten documents to Gemini.
 - All other `(language, text_input_type)` pairs remain **Gemini**.
-- **No** Gemini→Transkribus fallback. **No** hybrid OCR routing in code.
+- Existing `TRANSKRIBUS_DEV_UPLOAD_MODE`, `TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT`, `TRANSKRIBUS_FORCE_REPROCESS`, and `TRANSKRIBUS_RECOGNITION_ONLY_RETRY` are execution/recovery controls, not route-selection flags.
+- **No** Gemini→Transkribus fallback. **No** Transkribus→Gemini fallback. **No** hybrid OCR routing in code.
 - **`ENABLE_HYBRID_HTR`** only validates Transkribus credentials in `validate_required_env`; it does **not** enable hybrid engine routing.
 
 Gemini-specific behavior belongs in:
@@ -227,12 +230,12 @@ A document may validly be **`processing_state_user=READY`** while text results a
 
 ## Current operational boundary (Transkribus)
 
-Broader Transkribus use (beyond controlled dev/staging) should **not** proceed until explicit decisions (and follow-up PRs) on:
+Broader Transkribus use (beyond the approved Hebrew handwritten route) should **not** proceed until explicit decisions (and follow-up PRs) on:
 
 - **reuse / recognition-only retry** and product reprocess policy (PR3 **duplicate upload guard** blocks accidental second Trp upload in dev upload mode unless **`TRANSKRIBUS_FORCE_REPROCESS=true`**; does not reuse `remote_doc_id`)
 - **cleanup/retention** (operational runbook first; no cleanup automation before reuse/reprocess policy and cleanup runbook are decided)
 
-Do **not** expand production `OCR_ROUTES` to Transkribus before those are decided or explicitly deferred in writing.
+Do **not** broaden additional route cases or expand `OCR_ROUTES` to Transkribus before those are decided or explicitly deferred in writing.
 
 Technical smoke success (SQS/S3/DB/Transkribus/persistence) validates **wiring only**, not OCR quality or transcript fidelity. Fidelity validation is out of scope for the docs/rules sync PR.
 
