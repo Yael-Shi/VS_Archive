@@ -22,6 +22,7 @@ media/
 # Environment variables
 .env
 .env.*
+!.env.template
 
 # Linters / typecheck / test caches
 .pytest_cache/
