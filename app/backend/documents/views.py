@@ -7,11 +7,17 @@ from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q
 from django.http import HttpResponseBadRequest, JsonResponse, HttpResponseForbidden
-from django.shortcuts import render
+from django.shortcuts import get_object_or_404, render
 from django.views.decorators.csrf import csrf_exempt
 
-from .models import Document, Tag, DocumentMetadata
+from .models import Document, DocumentTextResult, Tag, DocumentMetadata
 from .s3 import create_presigned_put, create_presigned_get
+from documents.services.review_backlog import (
+    attach_review_summaries,
+    documents_in_review_backlog,
+    is_review_pending_text_result,
+    parse_review_reasons,
+)
 from documents.services.sqs import send_process_document_message
 from documents.services.text_presentation import get_text_presentation_for_document
 
@@ -566,6 +572,132 @@ def admin_backlog_page(request):
         len(docs),
     )
     return render(request, "documents/backlog.html", context)
+
+
+@login_required
+def review_backlog_page(request):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    q = request.GET.get("q", "") or ""
+    language = (request.GET.get("language") or "").strip()
+    text_input_type = (request.GET.get("text_input_type") or "").strip()
+    processing_state_user = (request.GET.get("processing_state_user") or "").strip()
+    engine_key = (request.GET.get("engine_key") or "").strip()
+    result_type = (request.GET.get("result_type") or "").strip()
+    verification_status = (request.GET.get("verification_status") or "").strip()
+
+    limit = 50
+    offset = _parse_int(request.GET.get("offset"), default=0, min_value=0)
+
+    qs = documents_in_review_backlog(
+        q=q,
+        language=language,
+        text_input_type=text_input_type,
+        processing_state_user=processing_state_user,
+        engine_key=engine_key,
+        result_type=result_type,
+        verification_status=verification_status,
+    )
+    total = qs.count()
+    # prefetch text_results for attach_review_summaries (batched; avoids N+1).
+    docs = list(
+        qs.prefetch_related("text_results")[offset : offset + limit]
+    )
+    rows = attach_review_summaries(docs)
+
+    context = {
+        "rows": rows,
+        "q": q,
+        "language": language,
+        "text_input_type": text_input_type,
+        "processing_state_user": processing_state_user,
+        "engine_key": engine_key,
+        "result_type": result_type,
+        "verification_status": verification_status,
+        "offset": offset,
+        "limit": limit,
+        "total": total,
+        "prev_offset": max(0, offset - limit),
+        "next_offset": (offset + limit) if (offset + limit) < total else None,
+        "language_choices": Document.Language.choices,
+        "text_input_type_choices": Document.TextInputType.choices,
+        "processing_state_choices": Document.ProcessingState.choices,
+        "engine_key_choices": DocumentTextResult.OcrEngineKey.choices,
+        "result_type_choices": DocumentTextResult.ResultType.choices,
+        "verification_status_choices": DocumentTextResult.VerificationStatus.choices,
+    }
+
+    logger.info(
+        "review_backlog_page user=%s offset=%s limit=%s total=%s returned=%s",
+        getattr(request.user, "username", None),
+        offset,
+        limit,
+        total,
+        len(docs),
+    )
+    return render(request, "documents/review_backlog.html", context)
+
+
+@login_required
+def review_detail_page(request, doc_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    doc = get_object_or_404(
+        Document.objects.select_related("admin_meta").prefetch_related(
+            "tags_m2m", "text_results", "transkribus_runs"
+        ),
+        id=doc_id,
+    )
+    admin_meta = getattr(doc, "admin_meta", None)
+
+    bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
+    content_url = None
+    if bucket and doc.file_s3_key:
+        content_url = create_presigned_get(bucket=bucket, key=doc.file_s3_key, expires_in=3600)
+
+    text_results = sorted(
+        doc.text_results.all(),
+        key=lambda r: (r.result_type, r.engine, -r.updated_at.timestamp()),
+    )
+    text_result_cards = []
+    for row in text_results:
+        text_result_cards.append(
+            {
+                "row": row,
+                "review_reasons": parse_review_reasons(row.review_reasons),
+                "text_length": len((row.text or "").strip()),
+                "is_pending_review": is_review_pending_text_result(row),
+            }
+        )
+
+    transkribus_runs = sorted(
+        doc.transkribus_runs.all(),
+        key=lambda r: r.created_at,
+        reverse=True,
+    )
+    latest_transkribus_run = transkribus_runs[0] if transkribus_runs else None
+
+    context = {
+        "doc": doc,
+        "admin_meta": admin_meta,
+        "content_url": content_url,
+        "text_result_cards": text_result_cards,
+        "latest_transkribus_run": latest_transkribus_run,
+        "transkribus_run_count": len(transkribus_runs),
+    }
+
+    logger.info(
+        "review_detail_page user=%s doc_id=%s text_results=%s transkribus_runs=%s",
+        getattr(request.user, "username", None),
+        doc.id,
+        len(text_results),
+        len(transkribus_runs),
+    )
+    return render(request, "documents/review_detail.html", context)
 
 
 @login_required

@@ -15,4 +15,10 @@ urlpatterns = [
     ),
     path("ui/upload/", views.upload_page, name="upload-page"),
     path("ui/admin/backlog/", views.admin_backlog_page, name="admin-backlog-page"),
+    path("ui/admin/review/", views.review_backlog_page, name="review-backlog-page"),
+    path(
+        "ui/admin/review/<int:doc_id>/",
+        views.review_detail_page,
+        name="review-detail-page",
+    ),
 ]

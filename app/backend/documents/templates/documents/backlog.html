@@ -1,15 +1,16 @@
 {% extends "base.html" %}
-{% block title %}VSArchive - Backlog מנהלים{% endblock %}
+{% block title %}VSArchive - השלמת פרטים{% endblock %}
 
 {% block content %}
   <div class="card" style="padding: 20px;">
-    <h1 class="page-title">Backlog מנהלים</h1>
+    <h1 class="page-title">השלמת פרטים</h1>
     <p class="page-subtitle">
-      מסמכים עם מטא־דאטה לא מלאה (Needs completion)
+      השלמת מטא־דאטה, תגיות ושדות קטלוג למנהלים (Needs completion)
     </p>
 
     <div style="display:flex; gap:10px; flex-wrap: wrap; align-items:center;">
       <a class="btn" href="/api/ui/documents/">חזרה למסמכים</a>
+      <a class="btn" href="/api/ui/admin/review/">בקרת תמלול</a>
 
       <div style="flex:1;"></div>
 
@@ -166,7 +167,7 @@
           </tr>
         {% empty %}
           <tr>
-            <td colspan="5">אין פריטים ב־Backlog 🎉</td>
+            <td colspan="5">אין פריטים בהשלמת פרטים 🎉</td>
           </tr>
         {% endfor %}
       </tbody>

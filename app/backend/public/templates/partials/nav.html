@@ -20,7 +20,8 @@
       {# קישורי Admin בלבד #}
       {% if user.is_staff or user.is_superuser %}
         <a class="btn btn-link" href="/api/ui/upload/">העלאה</a>
-        <a class="btn btn-link" href="/api/ui/admin/backlog/">Backlog מנהלים</a>
+        <a class="btn btn-link" href="/api/ui/admin/backlog/">השלמת פרטים</a>
+        <a class="btn btn-link" href="/api/ui/admin/review/">בקרת תמלול</a>
       {% endif %}
 
       <span class="muted" style="font-size: 13px;">

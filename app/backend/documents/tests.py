@@ -378,7 +378,6 @@ class TranskribusAdapterTests(TestCase):
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_execute_dev_upload_mode_calls_stepwise_engine(self, m_login, m_upload, m_start, m_complete):
         from documents.services.env_validation import WorkerEnvConfig
-        from documents.services.htr_adapters.base import HtrResult
         from documents.services.page_extraction import PageImage
 
         from documents.services.transkribus_engine import TrpUploadOutcome
@@ -521,7 +520,6 @@ class TranskribusAdapterTests(TestCase):
         self, m_login, m_upload, m_start, m_complete
     ):
         from documents.services.env_validation import WorkerEnvConfig
-        from documents.services.htr_adapters.base import HtrResult
         from documents.services.page_extraction import PageImage
 
         from documents.services.transkribus_engine import TrpUploadOutcome
@@ -922,7 +920,6 @@ class TranskribusUploadHelpersTests(SimpleTestCase):
     def test_strict_map_rejects_count_mismatch(self):
         from documents.services.page_extraction import PageImage
         from documents.services.transkribus_engine import (
-            TrpPageMetadata,
             TranskribusPermanentError,
             strict_map_page_index_to_trp_page_nr,
         )
@@ -4063,3 +4060,235 @@ class OcrRoutingTranskribusHebrewHandwrittenTests(SimpleTestCase):
             with self.assertRaises(ValueError) as ctx:
                 select_ocr_route(None, Document.TextInputType.HANDWRITTEN)
         self.assertIn("language", str(ctx.exception).lower())
+
+
+class ReviewBacklogServiceTests(SimpleTestCase):
+    def test_parse_review_reasons_json_list(self):
+        from documents.services.review_backlog import parse_review_reasons
+
+        self.assertEqual(
+            parse_review_reasons('["A","B"]'),
+            ["A", "B"],
+        )
+
+    def test_parse_review_reasons_plain_text_fallback(self):
+        from documents.services.review_backlog import parse_review_reasons
+
+        self.assertEqual(parse_review_reasons("legacy"), ["legacy"])
+
+    def test_is_review_pending_text_result(self):
+        from documents.services.review_backlog import is_review_pending_text_result
+
+        row = DocumentTextResult(
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="x",
+        )
+        self.assertTrue(is_review_pending_text_result(row))
+
+        row.status = DocumentTextResult.Status.SUCCEEDED
+        self.assertFalse(is_review_pending_text_result(row))
+
+    def test_is_review_pending_rejects_whitespace_only_text(self):
+        from documents.services.review_backlog import is_review_pending_text_result
+
+        row = DocumentTextResult(
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="  \n\t  ",
+        )
+        self.assertFalse(is_review_pending_text_result(row))
+
+
+class ReviewUiTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import User
+
+        self.staff = User.objects.create_user(
+            username="review_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.user = User.objects.create_user(
+            username="review_user",
+            password="test-pass",
+            is_staff=False,
+        )
+
+    def _create_document(self, **kwargs):
+        defaults = {
+            "title": "Review doc",
+            "doc_type": Document.DocType.IMAGE,
+            "text_input_type": Document.TextInputType.HANDWRITTEN,
+            "language": Document.Language.HEBREW,
+            "upload_status": Document.UploadStatus.UPLOADED,
+            "processing_state_user": Document.ProcessingState.READY,
+        }
+        defaults.update(kwargs)
+        return Document.objects.create(**defaults)
+
+    def _create_text_result(self, doc, **kwargs):
+        defaults = {
+            "result_type": DocumentTextResult.ResultType.HEBREW_TEXT,
+            "engine": "transkribus-pylaia:1",
+            "engine_key": DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
+            "prompt_variant": DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            "status": DocumentTextResult.Status.NEEDS_REVIEW,
+            "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
+            "text": "שורת בדיקה",
+            "review_reasons": '["AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW"]',
+        }
+        defaults.update(kwargs)
+        return DocumentTextResult.objects.create(document=doc, **defaults)
+
+    def test_review_backlog_requires_staff(self):
+        self.client.force_login(self.user)
+        resp = self.client.get("/api/ui/admin/review/")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_review_backlog_redirects_anonymous(self):
+        resp = self.client.get("/api/ui/admin/review/")
+        self.assertEqual(resp.status_code, 302)
+
+    def test_review_backlog_includes_needs_review_unverified(self):
+        doc = self._create_document()
+        self._create_text_result(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/admin/review/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, str(doc.id))
+        self.assertContains(resp, "בקרת תמלול")
+
+    def test_review_backlog_excludes_verified_pending_status(self):
+        doc = self._create_document()
+        self._create_text_result(
+            doc,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/admin/review/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, f'href="/api/ui/admin/review/{doc.id}/"')
+
+    def test_review_backlog_excludes_legacy_succeeded_unverified(self):
+        doc = self._create_document()
+        self._create_text_result(
+            doc,
+            status=DocumentTextResult.Status.SUCCEEDED,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/admin/review/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, f'href="/api/ui/admin/review/{doc.id}/"')
+
+    def test_review_backlog_excludes_whitespace_only_text(self):
+        doc = self._create_document()
+        self._create_text_result(doc, text="   \n\t  ")
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/admin/review/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, f'href="/api/ui/admin/review/{doc.id}/"')
+
+        from documents.services.review_backlog import (
+            attach_review_summaries,
+            documents_in_review_backlog,
+        )
+
+        self.assertNotIn(
+            doc.id,
+            set(documents_in_review_backlog().values_list("id", flat=True)),
+        )
+        doc.refresh_from_db()
+        _doc, summary = attach_review_summaries([doc])[0]
+        self.assertEqual(summary.pending_count, 0)
+
+    def test_review_backlog_multiple_pending_rows(self):
+        doc = self._create_document()
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="transkribus-pylaia:1",
+        )
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="transkribus-pylaia:1",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/admin/review/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "SOURCE_TEXT")
+        self.assertContains(resp, "HEBREW_TEXT")
+        self.assertContains(resp, "<strong>2</strong>")
+
+    def test_review_detail_shows_text_result_metadata(self):
+        doc = self._create_document()
+        self._create_text_result(
+            doc,
+            engine_key=DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
+            review_reasons='["AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW","MIN_TEXT_LENGTH"]',
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "NEEDS_REVIEW")
+        self.assertContains(resp, "UNVERIFIED")
+        self.assertContains(resp, "TRANSKRIBUS")
+        self.assertContains(resp, "AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW")
+        self.assertContains(resp, "שורת בדיקה")
+
+    def test_review_detail_shows_transkribus_run(self):
+        doc = self._create_document()
+        self._create_text_result(doc)
+        TranskribusRun.objects.create(
+            document=doc,
+            status=TranskribusRun.Status.SUCCEEDED,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id="col",
+            model_id="564149",
+            remote_doc_id="777",
+            pages_query="1",
+            page_index_to_page_nr={1: 1},
+            engine_runtime="transkribus-pylaia:564149",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "TranskribusRun")
+        self.assertContains(resp, "777")
+        self.assertContains(resp, "transkribus-pylaia:564149")
+
+    def test_review_detail_staff_only(self):
+        doc = self._create_document()
+        self._create_text_result(doc)
+        self.client.force_login(self.user)
+        resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_review_pages_no_mutation_on_get(self):
+        doc = self._create_document()
+        self._create_text_result(doc)
+        before_results = DocumentTextResult.objects.count()
+        before_docs = Document.objects.count()
+        self.client.force_login(self.staff)
+        self.client.get("/api/ui/admin/review/")
+        self.client.get(f"/api/ui/admin/review/{doc.id}/")
+        self.assertEqual(DocumentTextResult.objects.count(), before_results)
+        self.assertEqual(Document.objects.count(), before_docs)
+
+    def test_documents_in_review_backlog_language_filter(self):
+        from documents.services.review_backlog import documents_in_review_backlog
+
+        he_doc = self._create_document(language=Document.Language.HEBREW)
+        en_doc = self._create_document(language=Document.Language.ENGLISH, title="En")
+        self._create_text_result(he_doc)
+        self._create_text_result(en_doc)
+
+        ids = set(
+            documents_in_review_backlog(language=Document.Language.HEBREW).values_list(
+                "id", flat=True
+            )
+        )
+        self.assertIn(he_doc.id, ids)
+        self.assertNotIn(en_doc.id, ids)

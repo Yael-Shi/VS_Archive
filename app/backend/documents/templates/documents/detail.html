@@ -9,7 +9,9 @@
       <div style="flex:1;"></div>
 
       {% if is_admin %}
-        <a class="btn" href="/api/ui/admin/backlog/">Backlog מנהלים</a>
+        <a class="btn" href="/api/ui/admin/backlog/">השלמת פרטים</a>
+        <a class="btn" href="/api/ui/admin/review/">בקרת תמלול</a>
+        <a class="btn" href="/api/ui/admin/review/{{ doc.id }}/">פתח בבקרת תמלול</a>
         <a class="btn" href="/admin/documents/document/{{ doc.id }}/change/">עריכה (Django Admin)</a>
       {% endif %}
     </div>
