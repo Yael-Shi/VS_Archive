@@ -28,9 +28,6 @@
         <li><strong>NEEDS_REVIEW</strong> — תמלול אוטומטי תקין שדורש בדיקה אנושית; לא כשל טכני.</li>
         <li><strong>verification_status</strong> — שכבת אימות אנושי (UNVERIFIED / VERIFIED / REJECTED).</li>
       </ul>
-      <div class="muted" style="font-size: 13px; margin-top: 8px;">
-        אימות / דחייה / עריכת טקסט — יתווספו בשלב הבא (PR הבא).
-      </div>
     </div>
 
     <div class="spacer"></div>
@@ -77,7 +74,14 @@
                 <span class="badge badge-warn">ממתין לבקרה</span>
               {% endif %}
               <span class="badge">{{ card.row.status }}</span>
-              <span class="badge">{{ card.row.verification_status }}</span>
+              {% if card.row.verification_status == "VERIFIED" %}
+                <span class="badge badge-ok">מאומת</span>
+              {% elif card.row.verification_status == "REJECTED" %}
+                <span class="badge badge-bad">נדחה</span>
+              {% else %}
+                <span class="badge badge-warn">לא מאומת</span>
+              {% endif %}
+              <span class="badge muted" style="font-weight: normal;">{{ card.row.verification_status }}</span>
               <span class="badge">{{ card.row.engine_key }}</span>
               <span class="badge">{{ card.row.engine }}</span>
               {% if card.row.prompt_variant %}
@@ -105,6 +109,23 @@
               <div class="muted" style="font-size: 13px; margin-top: 8px;">
                 <strong>error_code:</strong> <code>{{ card.row.error_code }}</code><br/>
                 <strong>details:</strong> {{ card.row.error_details }}
+              </div>
+            {% endif %}
+
+            {% if card.is_pending_review %}
+              <div style="display:flex; gap:10px; flex-wrap: wrap; margin-top: 10px; align-items:center;">
+                {% if card.row.verification_status != "VERIFIED" %}
+                  <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/verify/" style="margin:0;">
+                    {% csrf_token %}
+                    <button class="btn btn-primary" type="submit">אשר תמלול</button>
+                  </form>
+                {% endif %}
+                {% if card.row.verification_status != "REJECTED" %}
+                  <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/reject/" style="margin:0;">
+                    {% csrf_token %}
+                    <button class="btn" type="submit">דחה תמלול</button>
+                  </form>
+                {% endif %}
               </div>
             {% endif %}
 

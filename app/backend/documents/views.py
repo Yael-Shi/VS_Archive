@@ -7,8 +7,9 @@ from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q
 from django.http import HttpResponseBadRequest, JsonResponse, HttpResponseForbidden
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
 
 from .models import Document, DocumentTextResult, Tag, DocumentMetadata
 from .s3 import create_presigned_put, create_presigned_get
@@ -698,6 +699,58 @@ def review_detail_page(request, doc_id: int):
         len(transkribus_runs),
     )
     return render(request, "documents/review_detail.html", context)
+
+
+def _review_text_result_not_eligible_response() -> HttpResponseBadRequest:
+    return HttpResponseBadRequest(
+        "transcription result is not eligible for review action"
+    )
+
+
+@login_required
+@require_POST
+def review_text_result_verify(request, result_id: int):
+    deny = _require_admin(request)
+    if deny:
+        return deny
+
+    row = get_object_or_404(DocumentTextResult, id=result_id)
+    if not is_review_pending_text_result(row):
+        return _review_text_result_not_eligible_response()
+
+    row.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
+    row.save(update_fields=["verification_status", "updated_at"])
+
+    logger.info(
+        "review_text_result_verify user=%s result_id=%s document_id=%s",
+        getattr(request.user, "username", None),
+        row.id,
+        row.document_id,
+    )
+    return redirect(f"/api/ui/admin/review/{row.document_id}/")
+
+
+@login_required
+@require_POST
+def review_text_result_reject(request, result_id: int):
+    deny = _require_admin(request)
+    if deny:
+        return deny
+
+    row = get_object_or_404(DocumentTextResult, id=result_id)
+    if not is_review_pending_text_result(row):
+        return _review_text_result_not_eligible_response()
+
+    row.verification_status = DocumentTextResult.VerificationStatus.REJECTED
+    row.save(update_fields=["verification_status", "updated_at"])
+
+    logger.info(
+        "review_text_result_reject user=%s result_id=%s document_id=%s",
+        getattr(request.user, "username", None),
+        row.id,
+        row.document_id,
+    )
+    return redirect(f"/api/ui/admin/review/{row.document_id}/")
 
 
 @login_required

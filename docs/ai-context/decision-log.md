@@ -28,14 +28,14 @@
 - Transkribus runtime wiring remains worker-only via SSM (non-secret flags/config) and Secrets Manager (credentials/token).
 - No OCR routing behavior changed, no adapter behavior changed, and no worker orchestration contract changed.
 
-### Admin UI — dual backlog workflows (PR1, read-only)
+### Admin UI — dual backlog workflows (PR1 list/detail, PR2 verify/reject)
 
 Two separate staff workflows; a document may appear in both.
 
 | Hebrew label | URL | Purpose |
 |---|---|---|
 | **השלמת פרטים** | `/api/ui/admin/backlog/` | Catalog/metadata completion (`metadata_status=NEEDS_COMPLETION`, tags, admin meta). Existing `admin_backlog_page` behavior unchanged; visible label renamed from generic “Backlog מנהלים”. |
-| **בקרת תמלול** | `/api/ui/admin/review/` | OCR/HTR human review queue (read-only PR1). Detail: `/api/ui/admin/review/<doc_id>/`. |
+| **בקרת תמלול** | `/api/ui/admin/review/` | OCR/HTR human review queue. Detail: `/api/ui/admin/review/<doc_id>/`. |
 
 **בקרת תמלול backlog query** — document included when it has at least one `DocumentTextResult` with:
 
@@ -45,7 +45,17 @@ Two separate staff workflows; a document may appear in both.
 
 Does **not** include legacy `SUCCEEDED` + `UNVERIFIED` rows. Does **not** reuse the metadata backlog queryset.
 
-**PR1 scope:** staff-only list + detail; full text and row metadata (`engine_key`, `review_reasons`, `TranskribusRun` summary on detail). **Deferred:** approve/reject (`verification_status` mutations), text edit/overwrite, hover/coordinate UI.
+**PR1 scope:** staff-only list + detail; full text and row metadata (`engine_key`, `review_reasons`, `TranskribusRun` summary on detail).
+
+**PR2 scope (manual verify/reject):**
+
+- Staff-only POST from review detail: `POST /api/ui/admin/review/text-results/<result_id>/verify/` and `.../reject/`.
+- Actions apply to **one `DocumentTextResult` transcription result** at a time (e.g. `SOURCE_TEXT` and `HEBREW_TEXT` on the same document are verified independently).
+- Eligibility: `is_review_pending_text_result(row)` — `NEEDS_REVIEW`, `verification_status` in `UNVERIFIED` / `REJECTED`, non-empty stripped `text`. Ineligible POST returns **400** (no silent redirect).
+- **Verify** → `verification_status=VERIFIED`; **reject** → `verification_status=REJECTED`.
+- Does **not** change `DocumentTextResult.status` (including leaving **`NEEDS_REVIEW`** after verification), `text`, `review_reasons`, or **`Document.processing_state_user`**.
+- Redirect to `/api/ui/admin/review/<document_id>/` after success. A document leaves the backlog when **no** pending rows remain (e.g. one of two results verified → document stays with `pending_count=1`; rejected rows remain pending).
+- **Deferred:** text edit/overwrite (future PR), hover/coordinate UI, audit fields/tables.
 
 ### OCR review lifecycle (implemented)
 

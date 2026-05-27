@@ -21,4 +21,14 @@ urlpatterns = [
         views.review_detail_page,
         name="review-detail-page",
     ),
+    path(
+        "ui/admin/review/text-results/<int:result_id>/verify/",
+        views.review_text_result_verify,
+        name="review-text-result-verify",
+    ),
+    path(
+        "ui/admin/review/text-results/<int:result_id>/reject/",
+        views.review_text_result_reject,
+        name="review-text-result-reject",
+    ),
 ]
