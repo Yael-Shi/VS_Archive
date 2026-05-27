@@ -28,6 +28,25 @@
 - Transkribus runtime wiring remains worker-only via SSM (non-secret flags/config) and Secrets Manager (credentials/token).
 - No OCR routing behavior changed, no adapter behavior changed, and no worker orchestration contract changed.
 
+### Admin UI — dual backlog workflows (PR1, read-only)
+
+Two separate staff workflows; a document may appear in both.
+
+| Hebrew label | URL | Purpose |
+|---|---|---|
+| **השלמת פרטים** | `/api/ui/admin/backlog/` | Catalog/metadata completion (`metadata_status=NEEDS_COMPLETION`, tags, admin meta). Existing `admin_backlog_page` behavior unchanged; visible label renamed from generic “Backlog מנהלים”. |
+| **בקרת תמלול** | `/api/ui/admin/review/` | OCR/HTR human review queue (read-only PR1). Detail: `/api/ui/admin/review/<doc_id>/`. |
+
+**בקרת תמלול backlog query** — document included when it has at least one `DocumentTextResult` with:
+
+- `status=NEEDS_REVIEW`
+- `verification_status` in `UNVERIFIED`, `REJECTED`
+- non-empty `text`
+
+Does **not** include legacy `SUCCEEDED` + `UNVERIFIED` rows. Does **not** reuse the metadata backlog queryset.
+
+**PR1 scope:** staff-only list + detail; full text and row metadata (`engine_key`, `review_reasons`, `TranskribusRun` summary on detail). **Deferred:** approve/reject (`verification_status` mutations), text edit/overwrite, hover/coordinate UI.
+
 ### OCR review lifecycle (implemented)
 
 **Automatic success** (`run_worker._save_htr_results`):
