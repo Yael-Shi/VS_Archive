@@ -4292,3 +4292,235 @@ class ReviewUiTests(TestCase):
         )
         self.assertIn(he_doc.id, ids)
         self.assertNotIn(en_doc.id, ids)
+
+    def _verify_url(self, result_id: int) -> str:
+        return f"/api/ui/admin/review/text-results/{result_id}/verify/"
+
+    def _reject_url(self, result_id: int) -> str:
+        return f"/api/ui/admin/review/text-results/{result_id}/reject/"
+
+    def test_staff_can_verify_pending_transcription_result(self):
+        doc = self._create_document()
+        row = self._create_text_result(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.post(self._verify_url(row.id))
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], f"/api/ui/admin/review/{doc.id}/")
+        row.refresh_from_db()
+        self.assertEqual(
+            row.verification_status, DocumentTextResult.VerificationStatus.VERIFIED
+        )
+
+    def test_staff_can_reject_pending_transcription_result(self):
+        doc = self._create_document()
+        row = self._create_text_result(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.post(self._reject_url(row.id))
+        self.assertEqual(resp.status_code, 302)
+        row.refresh_from_db()
+        self.assertEqual(
+            row.verification_status, DocumentTextResult.VerificationStatus.REJECTED
+        )
+
+    def test_verify_reject_post_requires_staff(self):
+        doc = self._create_document()
+        row = self._create_text_result(doc)
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.post(self._verify_url(row.id)).status_code, 403)
+        self.assertEqual(self.client.post(self._reject_url(row.id)).status_code, 403)
+
+    def test_verify_reject_post_redirects_anonymous(self):
+        doc = self._create_document()
+        row = self._create_text_result(doc)
+        self.assertEqual(self.client.post(self._verify_url(row.id)).status_code, 302)
+        self.assertEqual(self.client.post(self._reject_url(row.id)).status_code, 302)
+
+    def test_verify_changes_only_verification_status(self):
+        doc = self._create_document()
+        row = self._create_text_result(
+            doc,
+            review_reasons='["AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW","MIN_TEXT_LENGTH"]',
+        )
+        before = {
+            "status": row.status,
+            "text": row.text,
+            "review_reasons": row.review_reasons,
+            "processing_state_user": doc.processing_state_user,
+        }
+        self.client.force_login(self.staff)
+        self.client.post(self._verify_url(row.id))
+        row.refresh_from_db()
+        doc.refresh_from_db()
+        self.assertEqual(
+            row.verification_status, DocumentTextResult.VerificationStatus.VERIFIED
+        )
+        self.assertEqual(row.status, before["status"])
+        self.assertEqual(row.text, before["text"])
+        self.assertEqual(row.review_reasons, before["review_reasons"])
+        self.assertEqual(doc.processing_state_user, before["processing_state_user"])
+
+    def test_reject_changes_only_verification_status(self):
+        doc = self._create_document()
+        row = self._create_text_result(doc)
+        before_status = row.status
+        before_text = row.text
+        before_reasons = row.review_reasons
+        before_processing = doc.processing_state_user
+        self.client.force_login(self.staff)
+        self.client.post(self._reject_url(row.id))
+        row.refresh_from_db()
+        doc.refresh_from_db()
+        self.assertEqual(
+            row.verification_status, DocumentTextResult.VerificationStatus.REJECTED
+        )
+        self.assertEqual(row.status, before_status)
+        self.assertEqual(row.text, before_text)
+        self.assertEqual(row.review_reasons, before_reasons)
+        self.assertEqual(doc.processing_state_user, before_processing)
+
+    def test_verify_all_pending_rows_removes_document_from_backlog(self):
+        from documents.services.review_backlog import documents_in_review_backlog
+
+        doc = self._create_document()
+        r1 = self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="transkribus-pylaia:1",
+        )
+        r2 = self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="transkribus-pylaia:1",
+        )
+        self.client.force_login(self.staff)
+        self.client.post(self._verify_url(r1.id))
+        self.assertIn(doc.id, set(documents_in_review_backlog().values_list("id", flat=True)))
+        self.client.post(self._verify_url(r2.id))
+        self.assertNotIn(
+            doc.id, set(documents_in_review_backlog().values_list("id", flat=True))
+        )
+
+    def test_verify_one_of_two_pending_rows_keeps_document_in_backlog(self):
+        from documents.services.review_backlog import (
+            attach_review_summaries,
+            documents_in_review_backlog,
+        )
+
+        doc = self._create_document()
+        r1 = self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="transkribus-pylaia:1",
+        )
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="transkribus-pylaia:1",
+        )
+        self.client.force_login(self.staff)
+        self.client.post(self._verify_url(r1.id))
+        self.assertIn(doc.id, set(documents_in_review_backlog().values_list("id", flat=True)))
+        doc.refresh_from_db()
+        _doc, summary = attach_review_summaries([doc])[0]
+        self.assertEqual(summary.pending_count, 1)
+
+    def test_rejected_row_remains_in_review_backlog(self):
+        from documents.services.review_backlog import documents_in_review_backlog
+
+        doc = self._create_document()
+        row = self._create_text_result(doc)
+        self.client.force_login(self.staff)
+        self.client.post(self._reject_url(row.id))
+        row.refresh_from_db()
+        self.assertEqual(
+            row.verification_status, DocumentTextResult.VerificationStatus.REJECTED
+        )
+        self.assertIn(doc.id, set(documents_in_review_backlog().values_list("id", flat=True)))
+
+    def test_cannot_verify_failed_transcription_result(self):
+        doc = self._create_document()
+        row = self._create_text_result(
+            doc,
+            status=DocumentTextResult.Status.FAILED,
+            text="failed text",
+            error_code="OCR_DISPATCH",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(self._verify_url(row.id))
+        self.assertEqual(resp.status_code, 400)
+        row.refresh_from_db()
+        self.assertEqual(
+            row.verification_status, DocumentTextResult.VerificationStatus.UNVERIFIED
+        )
+
+    def test_cannot_reject_failed_transcription_result(self):
+        doc = self._create_document()
+        row = self._create_text_result(
+            doc,
+            status=DocumentTextResult.Status.FAILED,
+            text="failed text",
+        )
+        self.client.force_login(self.staff)
+        self.assertEqual(self.client.post(self._reject_url(row.id)).status_code, 400)
+
+    def test_cannot_verify_succeeded_transcription_result(self):
+        doc = self._create_document()
+        row = self._create_text_result(
+            doc,
+            status=DocumentTextResult.Status.SUCCEEDED,
+            text="legacy succeeded",
+        )
+        self.client.force_login(self.staff)
+        self.assertEqual(self.client.post(self._verify_url(row.id)).status_code, 400)
+
+    def test_cannot_verify_whitespace_only_text(self):
+        doc = self._create_document()
+        row = self._create_text_result(doc, text="  \n\t  ")
+        self.client.force_login(self.staff)
+        self.assertEqual(self.client.post(self._verify_url(row.id)).status_code, 400)
+
+    def test_cannot_verify_already_verified_transcription_result(self):
+        doc = self._create_document()
+        row = self._create_text_result(
+            doc,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        self.client.force_login(self.staff)
+        self.assertEqual(self.client.post(self._verify_url(row.id)).status_code, 400)
+
+    def test_invalid_result_id_returns_404(self):
+        self.client.force_login(self.staff)
+        self.assertEqual(self.client.post(self._verify_url(999999)).status_code, 404)
+        self.assertEqual(self.client.post(self._reject_url(999999)).status_code, 404)
+
+    def test_review_detail_shows_verify_reject_for_pending_unverified(self):
+        doc = self._create_document()
+        self._create_text_result(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "אשר תמלול")
+        self.assertContains(resp, "דחה תמלול")
+
+    def test_review_detail_rejected_pending_shows_verify_only(self):
+        doc = self._create_document()
+        self._create_text_result(
+            doc,
+            verification_status=DocumentTextResult.VerificationStatus.REJECTED,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "אשר תמלול")
+        self.assertNotContains(resp, "דחה תמלול")
+
+    def test_review_detail_no_actions_for_verified(self):
+        doc = self._create_document()
+        self._create_text_result(
+            doc,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
+        self.assertNotContains(resp, "אשר תמלול")
+        self.assertNotContains(resp, "/verify/")
