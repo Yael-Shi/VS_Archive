@@ -21,6 +21,13 @@
 - CDK now persists the worker-side Transkribus runtime wiring using AWS-managed config references: worker non-secret Transkribus values are read from SSM parameter names derived from project/env, secret values stay in Secrets Manager, and local dev uses `.env.local` / `.env.template` placeholders instead of committed real values.
 - Upload mode creates a **new** Trp document per run; **`TranskribusRun`** rows are written on Transkribus adapter paths (PR2 wiring). Duplicate prevention and cleanup remain deferred.
 
+### AWS deploy hardening (CDK + runtime parity)
+
+- CDK deploy hardening now preserves the intentional worker Gemini OCR/runtime tuning env values in the worker task definition to avoid silent behavior drift to application defaults.
+- Added a dedicated safe deploy runbook: `docs/ai-context/deploy-aws-cdk.md`.
+- Transkribus runtime wiring remains worker-only via SSM (non-secret flags/config) and Secrets Manager (credentials/token).
+- No OCR routing behavior changed, no adapter behavior changed, and no worker orchestration contract changed.
+
 ### OCR review lifecycle (implemented)
 
 **Automatic success** (`run_worker._save_htr_results`):
