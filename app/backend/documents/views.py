@@ -642,6 +642,12 @@ def review_backlog_page(request):
     return render(request, "documents/review_backlog.html", context)
 
 
+_REVIEW_RESULT_TYPE_LABELS = {
+    DocumentTextResult.ResultType.SOURCE_TEXT: "טקסט מקור",
+    DocumentTextResult.ResultType.HEBREW_TEXT: "טקסט עברית",
+}
+
+
 @login_required
 def review_detail_page(request, doc_id: int):
     deny = _require_admin_page(request)
@@ -670,6 +676,9 @@ def review_detail_page(request, doc_id: int):
         text_result_cards.append(
             {
                 "row": row,
+                "result_type_label": _REVIEW_RESULT_TYPE_LABELS.get(
+                    row.result_type, row.result_type
+                ),
                 "review_reasons": parse_review_reasons(row.review_reasons),
                 "text_length": len((row.text or "").strip()),
                 "is_pending_review": is_review_pending_text_result(row),

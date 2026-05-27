@@ -2,78 +2,117 @@
 {% block title %}VSArchive - בקרת תמלול · {{ doc.title }}{% endblock %}
 
 {% block content %}
-  <div class="card" style="padding: 18px;">
-    <div style="display:flex; gap:10px; align-items:center; flex-wrap: wrap;">
-      <a class="btn" href="/api/ui/admin/review/">חזרה לבקרת תמלול</a>
-      <a class="btn" href="/api/ui/documents/{{ doc.id }}/">תצוגת מסמך</a>
-      <a class="btn" href="/api/ui/admin/backlog/">השלמת פרטים</a>
-      <div style="flex:1;"></div>
-      <a class="btn" href="/admin/documents/document/{{ doc.id }}/change/">עריכה (Django Admin)</a>
-    </div>
+  <div class="review-page">
+    <header class="card review-header">
+      <div class="review-header-toolbar">
+        <a class="btn" href="/api/ui/admin/review/">חזרה לבקרת תמלול</a>
+        <a class="btn" href="/api/ui/documents/{{ doc.id }}/">תצוגת מסמך</a>
+        <a class="btn" href="/api/ui/admin/backlog/">השלמת פרטים</a>
+        <div style="flex:1;"></div>
+        <a class="btn" href="/admin/documents/document/{{ doc.id }}/change/">עריכה (Django Admin)</a>
+      </div>
+
+      <div class="spacer"></div>
+
+      <h1 class="page-title" style="margin: 0;">{{ doc.title }}</h1>
+      <div class="muted" style="margin-top: 6px; font-size: 13px;">
+        בקרת תמלול · מסמך #{{ doc.id }}
+        {% if doc.file_original_name %} · {{ doc.file_original_name }}{% endif %}
+      </div>
+
+      <div class="review-header-badges">
+        {% if doc.upload_status == "UPLOADED" %}
+          <span class="badge badge-ok">הועלה</span>
+        {% elif doc.upload_status == "FAILED" %}
+          <span class="badge badge-bad">העלאה נכשלה</span>
+        {% else %}
+          <span class="badge">{{ doc.upload_status }}</span>
+        {% endif %}
+
+        {% if doc.processing_state_user == "READY" %}
+          <span class="badge badge-ok">מוכן (עיבוד)</span>
+        {% elif doc.processing_state_user == "PROCESSING" %}
+          <span class="badge badge-warn">בעיבוד</span>
+        {% elif doc.processing_state_user == "FAILED" %}
+          <span class="badge badge-bad">עיבוד נכשל</span>
+        {% elif doc.processing_state_user == "PARTIAL" %}
+          <span class="badge">חלקי</span>
+        {% else %}
+          <span class="badge">{{ doc.processing_state_user }}</span>
+        {% endif %}
+
+        <span class="badge">{{ doc.language|default:"שפה לא ידועה" }}</span>
+        <span class="badge">{{ doc.text_input_type }}</span>
+        <span class="badge">{{ doc.doc_type }}</span>
+      </div>
+
+      <details class="review-details review-status-help">
+        <summary>מה המשמעות של הסטטוסים?</summary>
+        <div class="review-details-body">
+          <ul>
+            <li><strong>מוכן (READY)</strong> — פלטים צפויים קיימים וניתנים להצגה; לא אומר שהטקסט מאומת.</li>
+            <li><strong>NEEDS_REVIEW</strong> — תמלול אוטומטי תקין שדורש בדיקה אנושית; לא כשל טכני.</li>
+            <li><strong>verification_status</strong> — שכבת אימות אנושי (UNVERIFIED / VERIFIED / REJECTED).</li>
+          </ul>
+        </div>
+      </details>
+    </header>
 
     <div class="spacer"></div>
 
-    <h1 class="page-title" style="margin: 0;">{{ doc.title }}</h1>
-    <div class="muted" style="margin-top: 6px; font-size: 13px;">
-      בקרת תמלול · מסמך #{{ doc.id }}
-      {% if doc.file_original_name %} · {{ doc.file_original_name }}{% endif %}
-    </div>
+    <div class="review-workspace">
+      <aside class="card review-source-panel">
+        <div class="section-title">מסמך מקור</div>
 
-    <div class="spacer"></div>
+        {% if not content_url %}
+          <div class="muted">אין קובץ לצפייה (חסר מפתח S3 או דלי לא מוגדר).</div>
+        {% else %}
+          <a class="btn" href="{{ content_url }}" target="_blank" rel="noopener noreferrer">פתיחה בטאב חדש</a>
+          <div class="spacer"></div>
+          <div class="viewer">
+            {% if doc.doc_type == "IMAGE" %}
+              <img src="{{ content_url }}" alt="{{ doc.title }}" />
+            {% elif doc.doc_type == "PDF" %}
+              <iframe src="{{ content_url }}" title="{{ doc.title }}"></iframe>
+            {% else %}
+              <div class="muted">סוג מסמך לא נתמך לתצוגה: {{ doc.doc_type }}</div>
+            {% endif %}
+          </div>
+        {% endif %}
 
-    <div class="card" style="padding: 12px; border: 1px solid rgba(37, 99, 235, 0.2); background: #f8fafc;">
-      <div style="font-weight: 800;">שכבות סטטוס (קריאה בלבד)</div>
-      <ul class="muted" style="font-size: 13px; margin: 8px 0 0; padding-inline-start: 20px;">
-        <li><strong>מוכן (READY)</strong> — פלטים צפויים קיימים וניתנים להצגה; לא אומר שהטקסט מאומת.</li>
-        <li><strong>NEEDS_REVIEW</strong> — תמלול אוטומטי תקין שדורש בדיקה אנושית; לא כשל טכני.</li>
-        <li><strong>verification_status</strong> — שכבת אימות אנושי (UNVERIFIED / VERIFIED / REJECTED).</li>
-      </ul>
-    </div>
+        <details class="review-details">
+          <summary>מטא־דאטה למנהלים</summary>
+          <div class="review-details-body">
+            {% if admin_meta %}
+              {% if admin_meta.donor %}<div><strong>תורם:</strong> {{ admin_meta.donor }}</div>{% endif %}
+              {% if admin_meta.collection %}<div><strong>אוסף:</strong> {{ admin_meta.collection }}</div>{% endif %}
+              {% if admin_meta.original_location %}<div><strong>מיקום:</strong> {{ admin_meta.original_location }}</div>{% endif %}
+              {% if admin_meta.notes %}<div><strong>הערות:</strong> {{ admin_meta.notes }}</div>{% endif %}
+              {% if not admin_meta.donor and not admin_meta.collection and not admin_meta.original_location and not admin_meta.notes %}
+                <p class="muted">אין מידע מנהלים.</p>
+              {% endif %}
+            {% else %}
+              <p class="muted">אין מידע מנהלים.</p>
+            {% endif %}
+          </div>
+        </details>
+      </aside>
 
-    <div class="spacer"></div>
-
-    <div style="display:flex; gap:10px; flex-wrap: wrap; align-items:center;">
-      {% if doc.upload_status == "UPLOADED" %}
-        <span class="badge badge-ok">הועלה</span>
-      {% elif doc.upload_status == "FAILED" %}
-        <span class="badge badge-bad">העלאה נכשלה</span>
-      {% else %}
-        <span class="badge">{{ doc.upload_status }}</span>
-      {% endif %}
-
-      {% if doc.processing_state_user == "READY" %}
-        <span class="badge badge-ok">מוכן (עיבוד)</span>
-      {% elif doc.processing_state_user == "PROCESSING" %}
-        <span class="badge badge-warn">בעיבוד</span>
-      {% elif doc.processing_state_user == "FAILED" %}
-        <span class="badge badge-bad">עיבוד נכשל</span>
-      {% elif doc.processing_state_user == "PARTIAL" %}
-        <span class="badge">חלקי</span>
-      {% else %}
-        <span class="badge">{{ doc.processing_state_user }}</span>
-      {% endif %}
-
-      <span class="badge">{{ doc.language|default:"שפה לא ידועה" }}</span>
-      <span class="badge">{{ doc.text_input_type }}</span>
-      <span class="badge">{{ doc.doc_type }}</span>
-    </div>
-  </div>
-
-  <div class="spacer"></div>
-
-  <div class="two-col">
-    <div>
-      <div class="card" style="padding: 16px;">
-        <div class="section-title">תוצאות טקסט (כל השורות)</div>
+      <main class="card review-transcription-panel">
+        <div class="review-panel-head">
+          <div class="section-title" style="margin: 0;">בדיקת תמלול</div>
+          {% if text_result_cards %}
+            <div class="muted" style="font-size: 13px;">{{ text_result_cards|length }} תוצאות</div>
+          {% endif %}
+        </div>
 
         {% for card in text_result_cards %}
-          <div class="card" style="padding: 14px; margin-top: 12px; {% if card.is_pending_review %}border-color: rgba(181, 71, 8, 0.35);{% endif %}">
-            <div style="display:flex; gap:8px; flex-wrap: wrap; align-items:center;">
-              <span class="badge" style="font-weight: 800;">{{ card.row.result_type }}</span>
+          <article class="card review-result-card{% if card.is_pending_review %} review-result-card--pending{% endif %}">
+            <div class="review-result-head">
+              <span class="badge" style="font-weight: 800;">{{ card.result_type_label }}</span>
               {% if card.is_pending_review %}
                 <span class="badge badge-warn">ממתין לבקרה</span>
               {% endif %}
-              <span class="badge">{{ card.row.status }}</span>
               {% if card.row.verification_status == "VERIFIED" %}
                 <span class="badge badge-ok">מאומת</span>
               {% elif card.row.verification_status == "REJECTED" %}
@@ -81,144 +120,136 @@
               {% else %}
                 <span class="badge badge-warn">לא מאומת</span>
               {% endif %}
-              <span class="badge muted" style="font-weight: normal;">{{ card.row.verification_status }}</span>
-              <span class="badge">{{ card.row.engine_key }}</span>
-              <span class="badge">{{ card.row.engine }}</span>
-              {% if card.row.prompt_variant %}
-                <span class="badge">{{ card.row.prompt_variant }}</span>
-              {% endif %}
             </div>
 
-            <div class="muted" style="font-size: 13px; margin-top: 8px;">
-              אורך טקסט: <strong>{{ card.text_length }}</strong> תווים ·
-              נוצר {{ card.row.created_at }} · עודכן {{ card.row.updated_at }}
-            </div>
-
-            {% if card.review_reasons %}
-              <div style="margin-top: 8px;">
-                <div style="font-weight: 700; font-size: 13px;">סיבות בדיקה</div>
-                <div style="display:flex; gap:6px; flex-wrap: wrap; margin-top: 4px;">
-                  {% for reason in card.review_reasons %}
-                    <span class="badge">{{ reason }}</span>
-                  {% endfor %}
+            <details class="review-details">
+              <summary>פרטים טכניים</summary>
+              <div class="review-details-body">
+                <div style="display:flex; gap:6px; flex-wrap: wrap; margin-bottom: 8px;">
+                  <span class="badge">{{ card.row.result_type }}</span>
+                  <span class="badge">{{ card.row.status }}</span>
+                  <span class="badge">{{ card.row.verification_status }}</span>
+                  <span class="badge">{{ card.row.engine_key }}</span>
+                  <span class="badge">{{ card.row.engine }}</span>
+                  {% if card.row.prompt_variant %}
+                    <span class="badge">{{ card.row.prompt_variant }}</span>
+                  {% endif %}
                 </div>
-              </div>
-            {% endif %}
 
-            {% if card.row.status == "FAILED" %}
-              <div class="muted" style="font-size: 13px; margin-top: 8px;">
-                <strong>error_code:</strong> <code>{{ card.row.error_code }}</code><br/>
-                <strong>details:</strong> {{ card.row.error_details }}
+                <div>
+                  אורך טקסט: <strong>{{ card.text_length }}</strong> תווים ·
+                  נוצר {{ card.row.created_at }} · עודכן {{ card.row.updated_at }}
+                </div>
+
+                {% if card.review_reasons %}
+                  <div style="margin-top: 8px;">
+                    <div style="font-weight: 700;">סיבות בדיקה</div>
+                    <div style="display:flex; gap:6px; flex-wrap: wrap; margin-top: 4px;">
+                      {% for reason in card.review_reasons %}
+                        <span class="badge">{{ reason }}</span>
+                      {% endfor %}
+                    </div>
+                  </div>
+                {% endif %}
+
+                {% if card.row.status == "FAILED" %}
+                  <div style="margin-top: 8px;">
+                    <strong>error_code:</strong> <code>{{ card.row.error_code }}</code><br/>
+                    <strong>details:</strong> {{ card.row.error_details }}
+                  </div>
+                {% endif %}
               </div>
-            {% endif %}
+            </details>
 
             {% if card.is_pending_review %}
-              <div style="display:flex; gap:10px; flex-wrap: wrap; margin-top: 10px; align-items:center;">
-                {% if card.row.verification_status != "VERIFIED" %}
-                  <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/verify/" style="margin:0;">
-                    {% csrf_token %}
-                    <button class="btn btn-primary" type="submit">אשר תמלול</button>
-                  </form>
-                {% endif %}
-                {% if card.row.verification_status != "REJECTED" %}
-                  <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/reject/" style="margin:0;">
-                    {% csrf_token %}
-                    <button class="btn" type="submit">דחה תמלול</button>
-                  </form>
-                {% endif %}
+              <div class="review-zone">
+                <div class="review-zone-title">אימות תמלול</div>
+                <div class="review-zone-actions">
+                  {% if card.row.verification_status != "VERIFIED" %}
+                    <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/verify/" style="margin:0;">
+                      {% csrf_token %}
+                      <button class="btn btn-primary" type="submit">אשר תמלול</button>
+                    </form>
+                  {% endif %}
+                  {% if card.row.verification_status != "REJECTED" %}
+                    <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/reject/" style="margin:0;">
+                      {% csrf_token %}
+                      <button class="btn" type="submit">דחה תמלול</button>
+                    </form>
+                  {% endif %}
+                </div>
               </div>
             {% endif %}
 
-            <div class="spacer"></div>
             {% if card.is_editable %}
-              <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/text/" style="margin:0;">
-                {% csrf_token %}
-                <div class="muted" style="font-size: 13px; font-weight: 700; margin-bottom: 6px;">תיקון טקסט</div>
-                <textarea name="text" rows="12" style="width: 100%; font-family: inherit; font-size: 14px; line-height: 1.5; padding: 10px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.15); box-sizing: border-box;">{{ card.row.text }}</textarea>
-                <div style="margin-top: 8px;">
-                  <button class="btn" type="submit">שמור טקסט</button>
-                </div>
-              </form>
+              <div class="review-zone">
+                <div class="review-zone-title">עריכת טקסט</div>
+                <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/text/" style="margin:0;">
+                  {% csrf_token %}
+                  <textarea class="review-textarea" name="text" rows="12">{{ card.row.text }}</textarea>
+                  <div style="margin-top: 8px;">
+                    <button class="btn" type="submit">שמור טקסט</button>
+                  </div>
+                </form>
+              </div>
             {% elif card.row.text %}
-              <pre>{{ card.row.text }}</pre>
+              <div class="review-zone">
+                <pre class="review-readonly-text">{{ card.row.text }}</pre>
+              </div>
             {% else %}
-              <div class="muted">אין טקסט</div>
+              <div class="review-zone">
+                <div class="muted">אין טקסט</div>
+              </div>
             {% endif %}
-          </div>
+          </article>
         {% empty %}
-          <div class="muted">אין שורות DocumentTextResult למסמך זה.</div>
+          <div class="muted">אין תוצאות תמלול למסמך זה.</div>
         {% endfor %}
-      </div>
 
-      {% if latest_transkribus_run %}
-        <div class="spacer"></div>
-        <div class="card" style="padding: 16px;">
-          <div class="section-title">TranskribusRun (אחרון)</div>
-          {% if transkribus_run_count > 1 %}
-            <div class="muted" style="font-size: 13px; margin-bottom: 8px;">
-              סה״כ {{ transkribus_run_count }} ריצות; מוצגת האחרונה לפי זמן יצירה.
+        {% if latest_transkribus_run %}
+          <details class="card review-details review-transkribus-details">
+            <summary class="section-title">ריצת Transkribus אחרונה</summary>
+            <div class="review-details-body" style="color: var(--text);">
+              {% if transkribus_run_count > 1 %}
+                <div class="muted" style="margin-bottom: 8px;">
+                  סה״כ {{ transkribus_run_count }} ריצות; מוצגת האחרונה לפי זמן יצירה.
+                </div>
+              {% endif %}
+
+              <div class="meta-grid">
+                <div class="meta-item"><div class="k">status</div><div class="v">{{ latest_transkribus_run.status }}</div></div>
+                <div class="meta-item"><div class="k">mode</div><div class="v">{{ latest_transkribus_run.mode }}</div></div>
+                <div class="meta-item"><div class="k">collection_id</div><div class="v">{{ latest_transkribus_run.collection_id }}</div></div>
+                <div class="meta-item"><div class="k">model_id</div><div class="v">{{ latest_transkribus_run.model_id }}</div></div>
+                <div class="meta-item"><div class="k">remote_doc_id</div><div class="v">{{ latest_transkribus_run.remote_doc_id|default:"—" }}</div></div>
+                <div class="meta-item"><div class="k">pages_query</div><div class="v">{{ latest_transkribus_run.pages_query|default:"—" }}</div></div>
+                <div class="meta-item"><div class="k">engine_runtime</div><div class="v">{{ latest_transkribus_run.engine_runtime|default:"—" }}</div></div>
+                <div class="meta-item"><div class="k">recognition_job_id</div><div class="v">{{ latest_transkribus_run.recognition_job_id|default:"—" }}</div></div>
+                <div class="meta-item"><div class="k">ingest_job_id</div><div class="v">{{ latest_transkribus_run.ingest_job_id|default:"—" }}</div></div>
+                <div class="meta-item"><div class="k">upload_id</div><div class="v">{{ latest_transkribus_run.upload_id|default:"—" }}</div></div>
+              </div>
+
+              {% if latest_transkribus_run.page_index_to_page_nr %}
+                <div class="spacer"></div>
+                <div style="font-weight: 700;">page_index_to_page_nr</div>
+                <pre style="max-height: 120px;">{{ latest_transkribus_run.page_index_to_page_nr }}</pre>
+              {% endif %}
+
+              {% if latest_transkribus_run.error_code %}
+                <div class="spacer"></div>
+                <div class="muted">
+                  <strong>error_code:</strong> <code>{{ latest_transkribus_run.error_code }}</code><br/>
+                  {{ latest_transkribus_run.error_details }}
+                </div>
+              {% endif %}
+
+              <div class="muted" style="margin-top: 8px;">
+                נוצר {{ latest_transkribus_run.created_at }} · עודכן {{ latest_transkribus_run.updated_at }}
+              </div>
             </div>
-          {% endif %}
-
-          <div class="meta-grid">
-            <div class="meta-item"><div class="k">status</div><div class="v">{{ latest_transkribus_run.status }}</div></div>
-            <div class="meta-item"><div class="k">mode</div><div class="v">{{ latest_transkribus_run.mode }}</div></div>
-            <div class="meta-item"><div class="k">collection_id</div><div class="v">{{ latest_transkribus_run.collection_id }}</div></div>
-            <div class="meta-item"><div class="k">model_id</div><div class="v">{{ latest_transkribus_run.model_id }}</div></div>
-            <div class="meta-item"><div class="k">remote_doc_id</div><div class="v">{{ latest_transkribus_run.remote_doc_id|default:"—" }}</div></div>
-            <div class="meta-item"><div class="k">pages_query</div><div class="v">{{ latest_transkribus_run.pages_query|default:"—" }}</div></div>
-            <div class="meta-item"><div class="k">engine_runtime</div><div class="v">{{ latest_transkribus_run.engine_runtime|default:"—" }}</div></div>
-            <div class="meta-item"><div class="k">recognition_job_id</div><div class="v">{{ latest_transkribus_run.recognition_job_id|default:"—" }}</div></div>
-            <div class="meta-item"><div class="k">ingest_job_id</div><div class="v">{{ latest_transkribus_run.ingest_job_id|default:"—" }}</div></div>
-            <div class="meta-item"><div class="k">upload_id</div><div class="v">{{ latest_transkribus_run.upload_id|default:"—" }}</div></div>
-          </div>
-
-          {% if latest_transkribus_run.page_index_to_page_nr %}
-            <div class="spacer"></div>
-            <div style="font-weight: 700; font-size: 13px;">page_index_to_page_nr</div>
-            <pre style="max-height: 120px;">{{ latest_transkribus_run.page_index_to_page_nr }}</pre>
-          {% endif %}
-
-          {% if latest_transkribus_run.error_code %}
-            <div class="spacer"></div>
-            <div class="muted" style="font-size: 13px;">
-              <strong>error_code:</strong> <code>{{ latest_transkribus_run.error_code }}</code><br/>
-              {{ latest_transkribus_run.error_details }}
-            </div>
-          {% endif %}
-
-          <div class="muted" style="font-size: 13px; margin-top: 8px;">
-            נוצר {{ latest_transkribus_run.created_at }} · עודכן {{ latest_transkribus_run.updated_at }}
-          </div>
-        </div>
-      {% endif %}
-    </div>
-
-    <div class="card" style="padding: 16px;">
-      <div class="section-title">קובץ מקור</div>
-      {% if not content_url %}
-        <div class="muted">אין קובץ לצפייה (חסר מפתח S3 או דלי לא מוגדר).</div>
-      {% else %}
-        <a class="btn" href="{{ content_url }}" target="_blank" rel="noopener noreferrer">פתיחה בטאב חדש</a>
-        <div class="spacer"></div>
-        {% if doc.doc_type == "IMAGE" %}
-          <img src="{{ content_url }}" alt="{{ doc.title }}" style="max-width: 100%; border-radius: 14px; border: 1px solid rgba(0,0,0,0.1);" />
-        {% elif doc.doc_type == "PDF" %}
-          <iframe src="{{ content_url }}" style="width:100%; height: 70vh; border-radius: 14px; border: 1px solid rgba(0,0,0,0.1);"></iframe>
+          </details>
         {% endif %}
-      {% endif %}
-
-      <div class="section" style="margin-top: 16px;">
-        <h3 style="margin: 0 0 8px; font-size: 15px;">מטא־דאטה למנהלים</h3>
-        {% if admin_meta %}
-          {% if admin_meta.donor %}<div><strong>תורם:</strong> {{ admin_meta.donor }}</div>{% endif %}
-          {% if admin_meta.collection %}<div><strong>אוסף:</strong> {{ admin_meta.collection }}</div>{% endif %}
-          {% if admin_meta.original_location %}<div><strong>מיקום:</strong> {{ admin_meta.original_location }}</div>{% endif %}
-          {% if admin_meta.notes %}<div><strong>הערות:</strong> {{ admin_meta.notes }}</div>{% endif %}
-        {% else %}
-          <p class="muted">אין מידע מנהלים.</p>
-        {% endif %}
-      </div>
+      </main>
     </div>
   </div>
 {% endblock %}

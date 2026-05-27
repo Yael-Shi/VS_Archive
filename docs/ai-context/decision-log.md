@@ -68,6 +68,12 @@ Does **not** include legacy `SUCCEEDED` + `UNVERIFIED` rows. Does **not** reuse 
 - Submitted text must be non-empty after strip; multiline body preserved (whole text not stripped before save).
 - **Deferred:** hover/coordinate UI, audit fields/tables, explicit “reopen verified for editing” workflow.
 
+**PR4 scope (review detail workspace layout):**
+
+- בקרת תמלול detail (`/api/ui/admin/review/<doc_id>/`) — side-by-side workspace: **מסמך מקור** (sticky source preview on desktop) and **בדיקת תמלול** (per-result cards with separate **אימות תמלול** and **עריכת טקסט** zones).
+- Technical metadata, admin meta, and **ריצת Transkribus אחרונה** demoted into native `<details>` blocks; verify/reject actions stay visible outside collapsed sections.
+- **No** workflow semantic changes (verify/reject/edit POST contracts unchanged). **No** coordinate/hover highlighting — that remains future work and requires persisted geometry (PAGE XML / ALTO / line polygons).
+
 ### OCR review lifecycle (implemented)
 
 **Automatic success** (`run_worker._save_htr_results`):

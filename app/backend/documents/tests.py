@@ -4273,7 +4273,7 @@ class ReviewUiTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "TranskribusRun")
+        self.assertContains(resp, "ריצת Transkribus אחרונה")
         self.assertContains(resp, "777")
         self.assertContains(resp, "transkribus-pylaia:564149")
 
@@ -4723,10 +4723,41 @@ class ReviewUiTests(TestCase):
         self._create_text_result(doc)
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
-        self.assertContains(resp, "תיקון טקסט")
+        self.assertContains(resp, "עריכת טקסט")
         self.assertContains(resp, "שמור טקסט")
-        self.assertContains(resp, '<textarea name="text"')
+        self.assertContains(resp, 'name="text"')
+        self.assertContains(resp, "review-textarea")
         self.assertContains(resp, "/text/")
+
+    def test_review_detail_workspace_section_titles(self):
+        doc = self._create_document()
+        self._create_text_result(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "מסמך מקור")
+        self.assertContains(resp, "בדיקת תמלול")
+        self.assertContains(resp, "אימות תמלול")
+        self.assertContains(resp, "פרטים טכניים")
+
+    def test_review_detail_transkribus_in_collapsible_section(self):
+        doc = self._create_document()
+        self._create_text_result(doc)
+        TranskribusRun.objects.create(
+            document=doc,
+            status=TranskribusRun.Status.SUCCEEDED,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id="col",
+            model_id="564149",
+            remote_doc_id="888",
+            pages_query="1",
+            engine_runtime="transkribus-pylaia:564149",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
+        self.assertContains(resp, "<details")
+        self.assertContains(resp, "ריצת Transkribus אחרונה")
+        self.assertContains(resp, "888")
 
     def test_review_detail_no_textarea_for_verified_row(self):
         doc = self._create_document()
@@ -4737,5 +4768,5 @@ class ReviewUiTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
         self.assertNotContains(resp, "שמור טקסט")
-        self.assertNotContains(resp, '<textarea name="text"')
+        self.assertNotContains(resp, 'name="text"')
         self.assertNotContains(resp, "/text/")

@@ -224,6 +224,141 @@
 
     .spacer{ height: 10px; }
 
+    /* בקרת תמלול — review detail workspace (layout only) */
+    .container:has(.review-page){
+      max-width: 1320px;
+    }
+    .review-header{
+      padding: 14px 16px;
+    }
+    .review-header-toolbar{
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .review-header-badges{
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-top: 10px;
+    }
+    .review-status-help{
+      margin-top: 10px;
+      font-size: 13px;
+    }
+    .review-status-help ul{
+      margin: 8px 0 0;
+      padding-inline-start: 20px;
+      color: var(--muted);
+    }
+    .review-workspace{
+      display: grid;
+      grid-template-columns: minmax(280px, 0.95fr) minmax(320px, 1.15fr);
+      gap: 14px;
+      align-items: start;
+    }
+    @media (max-width: 980px){
+      .review-workspace{ grid-template-columns: 1fr; }
+    }
+    @media (min-width: 981px){
+      .review-source-panel{
+        position: sticky;
+        top: 16px;
+        align-self: start;
+        max-height: calc(100vh - 32px);
+        overflow: auto;
+      }
+    }
+    .review-source-panel,
+    .review-transcription-panel{
+      padding: 16px;
+    }
+    .review-panel-head{
+      display: flex;
+      gap: 10px;
+      align-items: baseline;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .review-result-card{
+      padding: 14px;
+      margin-top: 12px;
+    }
+    .review-result-card:first-of-type{
+      margin-top: 0;
+    }
+    .review-result-card--pending{
+      border-color: rgba(181, 71, 8, 0.35);
+    }
+    .review-result-head{
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .review-zone{
+      border-top: 1px solid var(--border);
+      margin-top: 12px;
+      padding-top: 12px;
+    }
+    .review-zone-title{
+      font-weight: 800;
+      font-size: 14px;
+      margin-bottom: 8px;
+    }
+    .review-zone-actions{
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .review-textarea{
+      width: 100%;
+      min-height: min(50vh, 480px);
+      font-size: 15px;
+      line-height: 1.6;
+      resize: vertical;
+    }
+    .review-readonly-text{
+      margin: 0;
+      max-height: 50vh;
+    }
+    .review-details{
+      margin-top: 10px;
+      font-size: 13px;
+    }
+    .review-details > summary{
+      cursor: pointer;
+      font-weight: 700;
+      color: var(--text);
+      list-style: none;
+    }
+    .review-details > summary::-webkit-details-marker{
+      display: none;
+    }
+    .review-details > summary::before{
+      content: "▸ ";
+      display: inline-block;
+      transition: transform 0.15s ease;
+    }
+    .review-details[open] > summary::before{
+      transform: rotate(90deg);
+    }
+    .review-details-body{
+      margin-top: 10px;
+      color: var(--muted);
+    }
+    .review-transkribus-details{
+      margin-top: 14px;
+      padding: 14px 16px;
+    }
+    .review-transkribus-details > summary.section-title{
+      margin: 0;
+    }
+
     /* Make buttons in forms look like links (used for logout) */
     .nav-btn{
       background: transparent;
