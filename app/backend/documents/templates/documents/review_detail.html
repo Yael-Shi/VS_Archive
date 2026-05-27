@@ -130,7 +130,16 @@
             {% endif %}
 
             <div class="spacer"></div>
-            {% if card.row.text %}
+            {% if card.is_editable %}
+              <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/text/" style="margin:0;">
+                {% csrf_token %}
+                <div class="muted" style="font-size: 13px; font-weight: 700; margin-bottom: 6px;">תיקון טקסט</div>
+                <textarea name="text" rows="12" style="width: 100%; font-family: inherit; font-size: 14px; line-height: 1.5; padding: 10px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.15); box-sizing: border-box;">{{ card.row.text }}</textarea>
+                <div style="margin-top: 8px;">
+                  <button class="btn" type="submit">שמור טקסט</button>
+                </div>
+              </form>
+            {% elif card.row.text %}
               <pre>{{ card.row.text }}</pre>
             {% else %}
               <div class="muted">אין טקסט</div>

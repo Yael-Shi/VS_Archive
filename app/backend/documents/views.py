@@ -16,6 +16,7 @@ from .s3 import create_presigned_put, create_presigned_get
 from documents.services.review_backlog import (
     attach_review_summaries,
     documents_in_review_backlog,
+    is_review_editable_text_result,
     is_review_pending_text_result,
     parse_review_reasons,
 )
@@ -672,6 +673,7 @@ def review_detail_page(request, doc_id: int):
                 "review_reasons": parse_review_reasons(row.review_reasons),
                 "text_length": len((row.text or "").strip()),
                 "is_pending_review": is_review_pending_text_result(row),
+                "is_editable": is_review_editable_text_result(row),
             }
         )
 
@@ -746,6 +748,33 @@ def review_text_result_reject(request, result_id: int):
 
     logger.info(
         "review_text_result_reject user=%s result_id=%s document_id=%s",
+        getattr(request.user, "username", None),
+        row.id,
+        row.document_id,
+    )
+    return redirect(f"/api/ui/admin/review/{row.document_id}/")
+
+
+@login_required
+@require_POST
+def review_text_result_update_text(request, result_id: int):
+    deny = _require_admin(request)
+    if deny:
+        return deny
+
+    row = get_object_or_404(DocumentTextResult, id=result_id)
+    if not is_review_editable_text_result(row):
+        return _review_text_result_not_eligible_response()
+
+    submitted = request.POST.get("text")
+    if submitted is None or not submitted.strip():
+        return HttpResponseBadRequest("text is required and must be non-empty")
+
+    row.text = submitted
+    row.save(update_fields=["text", "updated_at"])
+
+    logger.info(
+        "review_text_result_update_text user=%s result_id=%s document_id=%s",
         getattr(request.user, "username", None),
         row.id,
         row.document_id,

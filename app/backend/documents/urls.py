@@ -31,4 +31,9 @@ urlpatterns = [
         views.review_text_result_reject,
         name="review-text-result-reject",
     ),
+    path(
+        "ui/admin/review/text-results/<int:result_id>/text/",
+        views.review_text_result_update_text,
+        name="review-text-result-update-text",
+    ),
 ]
