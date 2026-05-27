@@ -138,6 +138,17 @@ def is_review_pending_text_result(row: DocumentTextResult) -> bool:
     return bool((row.text or "").strip())
 
 
+def is_review_editable_text_result(row: DocumentTextResult) -> bool:
+    """
+    Whether staff may overwrite ``DocumentTextResult.text`` from בקרת תמלול.
+
+    Currently matches ``is_review_pending_text_result`` (NEEDS_REVIEW, UNVERIFIED
+    or REJECTED, non-empty text). A future explicit reopen/edit workflow may
+    diverge (e.g. allow editing after verification with a separate action).
+    """
+    return is_review_pending_text_result(row)
+
+
 def summarize_pending_text_results(
     text_results: Sequence[DocumentTextResult],
 ) -> ReviewBacklogRowSummary:

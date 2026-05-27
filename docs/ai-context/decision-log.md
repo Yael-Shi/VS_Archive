@@ -55,7 +55,18 @@ Does **not** include legacy `SUCCEEDED` + `UNVERIFIED` rows. Does **not** reuse 
 - **Verify** → `verification_status=VERIFIED`; **reject** → `verification_status=REJECTED`.
 - Does **not** change `DocumentTextResult.status` (including leaving **`NEEDS_REVIEW`** after verification), `text`, `review_reasons`, or **`Document.processing_state_user`**.
 - Redirect to `/api/ui/admin/review/<document_id>/` after success. A document leaves the backlog when **no** pending rows remain (e.g. one of two results verified → document stays with `pending_count=1`; rejected rows remain pending).
-- **Deferred:** text edit/overwrite (future PR), hover/coordinate UI, audit fields/tables.
+
+**PR3 scope (staff-only text edit):**
+
+- Staff-only POST: `POST /api/ui/admin/review/text-results/<result_id>/text/` from בקרת תמלול detail (`name=text` form field).
+- Edits **one `DocumentTextResult` row** at a time (not the whole document, not visual/text lines).
+- Overwrites `DocumentTextResult.text` in place; **no** separate raw OCR/HTR output version history. Original source image/document remains canonical.
+- Eligibility: `is_review_editable_text_result(row)` — currently same as pending review (`NEEDS_REVIEW`, `UNVERIFIED` / `REJECTED`, non-empty stripped `text`). Ineligible POST returns **400**; invalid id **404**.
+- **VERIFIED**, **FAILED**, **SUCCEEDED** (including legacy), and whitespace-only existing text are **not** editable in PR3.
+- Does **not** verify: `verification_status` unchanged (`UNVERIFIED` stays unverified; `REJECTED` stays rejected). Reviewer uses PR2 **אשר תמלול** separately.
+- Does **not** change `DocumentTextResult.status`, `review_reasons`, or **`Document.processing_state_user`**. Saves `text` + `updated_at` only.
+- Submitted text must be non-empty after strip; multiline body preserved (whole text not stripped before save).
+- **Deferred:** hover/coordinate UI, audit fields/tables, explicit “reopen verified for editing” workflow.
 
 ### OCR review lifecycle (implemented)
 

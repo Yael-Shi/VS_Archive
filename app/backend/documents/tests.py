@@ -4099,6 +4099,24 @@ class ReviewBacklogServiceTests(SimpleTestCase):
         )
         self.assertFalse(is_review_pending_text_result(row))
 
+    def test_is_review_editable_matches_pending(self):
+        from documents.services.review_backlog import (
+            is_review_editable_text_result,
+            is_review_pending_text_result,
+        )
+
+        row = DocumentTextResult(
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="x",
+        )
+        self.assertEqual(
+            is_review_editable_text_result(row),
+            is_review_pending_text_result(row),
+        )
+        row.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
+        self.assertFalse(is_review_editable_text_result(row))
+
 
 class ReviewUiTests(TestCase):
     def setUp(self):
@@ -4298,6 +4316,9 @@ class ReviewUiTests(TestCase):
 
     def _reject_url(self, result_id: int) -> str:
         return f"/api/ui/admin/review/text-results/{result_id}/reject/"
+
+    def _text_url(self, result_id: int) -> str:
+        return f"/api/ui/admin/review/text-results/{result_id}/text/"
 
     def test_staff_can_verify_pending_transcription_result(self):
         doc = self._create_document()
@@ -4524,3 +4545,197 @@ class ReviewUiTests(TestCase):
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
         self.assertNotContains(resp, "אשר תמלול")
         self.assertNotContains(resp, "/verify/")
+
+    def test_staff_can_edit_pending_unverified_text(self):
+        doc = self._create_document()
+        row = self._create_text_result(doc, text="טקסט מקורי")
+        self.client.force_login(self.staff)
+        resp = self.client.post(self._text_url(row.id), {"text": "טקסט מתוקן"})
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], f"/api/ui/admin/review/{doc.id}/")
+        row.refresh_from_db()
+        self.assertEqual(row.text, "טקסט מתוקן")
+
+    def test_staff_can_edit_pending_rejected_text(self):
+        doc = self._create_document()
+        row = self._create_text_result(
+            doc,
+            verification_status=DocumentTextResult.VerificationStatus.REJECTED,
+            text="נדחה",
+        )
+        self.client.force_login(self.staff)
+        self.client.post(self._text_url(row.id), {"text": "תיקון אחרי דחייה"})
+        row.refresh_from_db()
+        self.assertEqual(row.text, "תיקון אחרי דחייה")
+        self.assertEqual(
+            row.verification_status, DocumentTextResult.VerificationStatus.REJECTED
+        )
+
+    def test_edit_redirects_to_review_detail(self):
+        doc = self._create_document()
+        row = self._create_text_result(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.post(self._text_url(row.id), {"text": "חדש"})
+        self.assertEqual(resp["Location"], f"/api/ui/admin/review/{doc.id}/")
+
+    def test_edit_preserves_multiline_text(self):
+        doc = self._create_document()
+        row = self._create_text_result(doc)
+        multiline = "שורה א\n\nשורה ב\t עם רווח"
+        self.client.force_login(self.staff)
+        self.client.post(self._text_url(row.id), {"text": multiline})
+        row.refresh_from_db()
+        self.assertEqual(row.text, multiline)
+
+    def test_edit_does_not_strip_whole_text_before_saving(self):
+        doc = self._create_document()
+        row = self._create_text_result(doc)
+        leading_trailing = "  שורה עם רווחים  \n"
+        self.client.force_login(self.staff)
+        self.client.post(self._text_url(row.id), {"text": leading_trailing})
+        row.refresh_from_db()
+        self.assertEqual(row.text, leading_trailing)
+
+    def test_edit_does_not_change_status_verification_reasons_or_processing(self):
+        doc = self._create_document()
+        row = self._create_text_result(
+            doc,
+            review_reasons='["AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW","MIN_TEXT_LENGTH"]',
+        )
+        before = {
+            "status": row.status,
+            "verification_status": row.verification_status,
+            "review_reasons": row.review_reasons,
+            "processing_state_user": doc.processing_state_user,
+        }
+        self.client.force_login(self.staff)
+        self.client.post(self._text_url(row.id), {"text": "עודכן"})
+        row.refresh_from_db()
+        doc.refresh_from_db()
+        self.assertEqual(row.status, before["status"])
+        self.assertEqual(row.verification_status, before["verification_status"])
+        self.assertEqual(row.review_reasons, before["review_reasons"])
+        self.assertEqual(doc.processing_state_user, before["processing_state_user"])
+
+    def test_edit_empty_submitted_text_returns_400(self):
+        doc = self._create_document()
+        row = self._create_text_result(doc, text="לפני")
+        self.client.force_login(self.staff)
+        resp = self.client.post(self._text_url(row.id), {"text": ""})
+        self.assertEqual(resp.status_code, 400)
+        row.refresh_from_db()
+        self.assertEqual(row.text, "לפני")
+
+    def test_edit_whitespace_only_submitted_text_returns_400(self):
+        doc = self._create_document()
+        row = self._create_text_result(doc, text="לפני")
+        self.client.force_login(self.staff)
+        resp = self.client.post(self._text_url(row.id), {"text": "  \n\t  "})
+        self.assertEqual(resp.status_code, 400)
+        row.refresh_from_db()
+        self.assertEqual(row.text, "לפני")
+
+    def test_edit_post_requires_staff(self):
+        doc = self._create_document()
+        row = self._create_text_result(doc)
+        self.client.force_login(self.user)
+        self.assertEqual(
+            self.client.post(self._text_url(row.id), {"text": "x"}).status_code, 403
+        )
+
+    def test_edit_post_redirects_anonymous(self):
+        doc = self._create_document()
+        row = self._create_text_result(doc)
+        self.assertEqual(
+            self.client.post(self._text_url(row.id), {"text": "x"}).status_code, 302
+        )
+
+    def test_edit_invalid_result_id_returns_404(self):
+        self.client.force_login(self.staff)
+        self.assertEqual(
+            self.client.post(self._text_url(999999), {"text": "x"}).status_code, 404
+        )
+
+    def test_cannot_edit_failed_transcription_result(self):
+        doc = self._create_document()
+        row = self._create_text_result(
+            doc,
+            status=DocumentTextResult.Status.FAILED,
+            text="failed text",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(self._text_url(row.id), {"text": "new"})
+        self.assertEqual(resp.status_code, 400)
+        row.refresh_from_db()
+        self.assertEqual(row.text, "failed text")
+
+    def test_cannot_edit_verified_transcription_result(self):
+        doc = self._create_document()
+        row = self._create_text_result(
+            doc,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(self._text_url(row.id), {"text": "new"})
+        self.assertEqual(resp.status_code, 400)
+        row.refresh_from_db()
+        self.assertEqual(row.text, "שורת בדיקה")
+
+    def test_cannot_edit_succeeded_transcription_result(self):
+        doc = self._create_document()
+        row = self._create_text_result(
+            doc,
+            status=DocumentTextResult.Status.SUCCEEDED,
+            text="legacy succeeded",
+        )
+        self.client.force_login(self.staff)
+        self.assertEqual(
+            self.client.post(self._text_url(row.id), {"text": "new"}).status_code, 400
+        )
+
+    def test_edited_unverified_row_remains_in_review_backlog(self):
+        from documents.services.review_backlog import documents_in_review_backlog
+
+        doc = self._create_document()
+        row = self._create_text_result(doc)
+        self.client.force_login(self.staff)
+        self.client.post(self._text_url(row.id), {"text": "עודכן"})
+        self.assertIn(doc.id, set(documents_in_review_backlog().values_list("id", flat=True)))
+
+    def test_edited_rejected_row_remains_in_review_backlog(self):
+        from documents.services.review_backlog import documents_in_review_backlog
+
+        doc = self._create_document()
+        row = self._create_text_result(
+            doc,
+            verification_status=DocumentTextResult.VerificationStatus.REJECTED,
+        )
+        self.client.force_login(self.staff)
+        self.client.post(self._text_url(row.id), {"text": "עודכן"})
+        row.refresh_from_db()
+        self.assertEqual(
+            row.verification_status, DocumentTextResult.VerificationStatus.REJECTED
+        )
+        self.assertIn(doc.id, set(documents_in_review_backlog().values_list("id", flat=True)))
+
+    def test_review_detail_shows_textarea_for_editable_row(self):
+        doc = self._create_document()
+        self._create_text_result(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
+        self.assertContains(resp, "תיקון טקסט")
+        self.assertContains(resp, "שמור טקסט")
+        self.assertContains(resp, '<textarea name="text"')
+        self.assertContains(resp, "/text/")
+
+    def test_review_detail_no_textarea_for_verified_row(self):
+        doc = self._create_document()
+        self._create_text_result(
+            doc,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
+        self.assertNotContains(resp, "שמור טקסט")
+        self.assertNotContains(resp, '<textarea name="text"')
+        self.assertNotContains(resp, "/text/")
