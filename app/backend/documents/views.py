@@ -642,10 +642,18 @@ def review_backlog_page(request):
     return render(request, "documents/review_backlog.html", context)
 
 
-_REVIEW_RESULT_TYPE_LABELS = {
-    DocumentTextResult.ResultType.SOURCE_TEXT: "טקסט מקור",
-    DocumentTextResult.ResultType.HEBREW_TEXT: "טקסט עברית",
-}
+def _review_result_type_label(doc: Document, result_type: str) -> str:
+    if doc.language == Document.Language.HEBREW:
+        if result_type == DocumentTextResult.ResultType.SOURCE_TEXT:
+            return "תמלול מקור (עברית כפי שחולצה)"
+        if result_type == DocumentTextResult.ResultType.HEBREW_TEXT:
+            return "טקסט עברי לבדיקה"
+
+    if result_type == DocumentTextResult.ResultType.SOURCE_TEXT:
+        return "תמלול מקור"
+    if result_type == DocumentTextResult.ResultType.HEBREW_TEXT:
+        return "טקסט עברי"
+    return result_type
 
 
 @login_required
@@ -676,9 +684,7 @@ def review_detail_page(request, doc_id: int):
         text_result_cards.append(
             {
                 "row": row,
-                "result_type_label": _REVIEW_RESULT_TYPE_LABELS.get(
-                    row.result_type, row.result_type
-                ),
+                "result_type_label": _review_result_type_label(doc, row.result_type),
                 "review_reasons": parse_review_reasons(row.review_reasons),
                 "text_length": len((row.text or "").strip()),
                 "is_pending_review": is_review_pending_text_result(row),
