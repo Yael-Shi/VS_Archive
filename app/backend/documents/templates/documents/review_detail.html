@@ -30,7 +30,7 @@
         {% endif %}
 
         {% if doc.processing_state_user == "READY" %}
-          <span class="badge badge-ok">מוכן (עיבוד)</span>
+          <span class="badge badge-ok">עיבוד הסתיים</span>
         {% elif doc.processing_state_user == "PROCESSING" %}
           <span class="badge badge-warn">בעיבוד</span>
         {% elif doc.processing_state_user == "FAILED" %}
@@ -50,9 +50,9 @@
         <summary>מה המשמעות של הסטטוסים?</summary>
         <div class="review-details-body">
           <ul>
-            <li><strong>מוכן (READY)</strong> — פלטים צפויים קיימים וניתנים להצגה; לא אומר שהטקסט מאומת.</li>
-            <li><strong>NEEDS_REVIEW</strong> — תמלול אוטומטי תקין שדורש בדיקה אנושית; לא כשל טכני.</li>
-            <li><strong>verification_status</strong> — שכבת אימות אנושי (UNVERIFIED / VERIFIED / REJECTED).</li>
+            <li><strong>עיבוד הסתיים</strong> — העיבוד האוטומטי הסתיים והטקסט זמין להצגה ולבדיקה.</li>
+            <li><strong>ממתין לבדיקה אנושית</strong> — התמלול נוצר אוטומטית ודורש אימות ידני.</li>
+            <li><strong>אושר / נדחה</strong> — תוצאת האימות הידני.</li>
           </ul>
         </div>
       </details>
@@ -104,6 +104,9 @@
           {% if text_result_cards %}
             <div class="muted" style="font-size: 13px;">{{ text_result_cards|length }} תוצאות</div>
           {% endif %}
+        </div>
+        <div class="muted" style="font-size: 13px; margin-top: 8px;">
+          השווי בין קובץ המקור לתמלול. אם צריך, ערכי את הטקסט. לאחר מכן אשרי או דחי את תוצאת התמלול.
         </div>
 
         {% for card in text_result_cards %}

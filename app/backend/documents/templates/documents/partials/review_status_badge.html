@@ -1,0 +1,7 @@
+{% if verification_status == "VERIFIED" %}
+  <span class="badge badge-ok">אושר אנושית</span>
+{% elif verification_status == "REJECTED" %}
+  <span class="badge badge-bad">נדחה בבקרה</span>
+{% else %}
+  <span class="badge badge-warn">ממתין לבדיקה אנושית</span>
+{% endif %}

@@ -4254,6 +4254,7 @@ class ReviewUiTests(TestCase):
         self.assertContains(resp, "UNVERIFIED")
         self.assertContains(resp, "TRANSKRIBUS")
         self.assertContains(resp, "AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW")
+        self.assertContains(resp, "טקסט עברי לבדיקה")
         self.assertContains(resp, "שורת בדיקה")
 
     def test_review_detail_shows_transkribus_run(self):
@@ -4737,6 +4738,7 @@ class ReviewUiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "מסמך מקור")
         self.assertContains(resp, "בדיקת תמלול")
+        self.assertContains(resp, "השווי בין קובץ המקור לתמלול")
         self.assertContains(resp, "אימות תמלול")
         self.assertContains(resp, "פרטים טכניים")
 
