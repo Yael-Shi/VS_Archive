@@ -34,9 +34,18 @@
 - Long-term direction is **`DocumentSourceFile`** as canonical ordered source representation; cutover/dual-write is a **later** PR.
 - **`DocumentTextResult`** stays **document-level**; no page-level text results in this foundation.
 
-### Deferred
+### Deferred (after PR2)
 
-- Upload ingest creating **`DocumentSourceFile`** rows, worker input from **`source_files`**, ordered review preview, geometry/hover, role/checksum/upload_status fields, backfill/migration of legacy single-file documents.
+- Multi-file upload ingest, worker input from **`source_files`**, ordered review preview, geometry/hover, role/checksum/upload_status fields, backfill/migration of legacy single-file documents.
+
+## DocumentSourceFile — single-file upload dual-write (PR2)
+
+**Decision:** On successful single-file **`upload_complete`**, upsert exactly one **`DocumentSourceFile`** at **`order_index=0`** mirroring current **`Document.file_*`** metadata (`sync_primary_document_source_file` in `documents/services/source_files.py`).
+
+**Scope (PR2):** Upload complete path + service helper + tests + this log entry only. **No** multi-file upload, **no** worker/OCR/routing/adapter changes, **no** review/source-preview UI changes, **no** backfill of existing documents, **no** API response shape change.
+
+- **`Document.file_s3_key`**, **`file_original_name`**, **`mime_type`**, **`size_bytes`** remain written and are still what runtime paths use today.
+- Idempotent **`update_or_create(document, order_index=0)`**; failed upload complete and missing-**`file_s3_key`** success paths do not create a source-file row.
 
 ## Current state — OCR/HTR and Transkribus (read this first)
 

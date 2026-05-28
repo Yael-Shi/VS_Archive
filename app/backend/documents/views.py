@@ -20,6 +20,7 @@ from documents.services.review_backlog import (
     is_review_pending_text_result,
     parse_review_reasons,
 )
+from documents.services.source_files import sync_primary_document_source_file
 from documents.services.sqs import send_process_document_message
 from documents.services.text_presentation import get_text_presentation_for_document
 
@@ -365,6 +366,8 @@ def upload_complete(request, doc_id: int):
                 "processing_state_user",
             ]
         )
+
+        sync_primary_document_source_file(doc)
 
         if not already_uploaded:
             try:
