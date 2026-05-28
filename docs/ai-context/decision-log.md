@@ -1,5 +1,12 @@
 # VS-Archive Decision Log
 
+## Future design note — multi-image logical documents (not implemented)
+
+- This entry records a **future design exploration only**. No behavior is implemented in this PR.
+- Source input from QA: some logical archival documents consist of multiple **ordered** image files that should remain one logical document.
+- A dedicated design note was added at `docs/ai-context/multi-image-documents-design.md`.
+- This log entry does **not** make final schema or upload/API decisions; those remain open for later implementation PRs.
+
 ## Current state — OCR/HTR and Transkribus (read this first)
 
 **Last aligned:** production-gated Hebrew handwritten Transkribus routing + OCR/HTR review lifecycle behavior.
