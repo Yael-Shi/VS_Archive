@@ -1,10 +1,10 @@
-<div class="card" style="padding: 12px 14px; border-radius: 18px; box-shadow: var(--shadow2);">
-  <div style="display:flex; align-items:center; gap:12px;">
-    <div style="font-weight: 900; letter-spacing: -0.3px;">
-      <a href="/" style="color: var(--text); text-decoration:none;">VSArchive</a>
+<div class="card nav-shell">
+  <div class="nav-row">
+    <div class="nav-brand">
+      <a href="/" class="nav-brand-link">VSArchive</a>
     </div>
 
-    <div style="display:flex; gap:10px; align-items:center; margin-inline-start: 12px;">
+    <div class="nav-links">
       <a class="btn btn-link" href="/">דף הבית</a>
       <a class="btn btn-link" href="/about/">אודות</a>
 
@@ -14,7 +14,7 @@
       {% endif %}
     </div>
 
-    <div style="flex:1;"></div>
+    <div class="nav-spacer"></div>
 
     {% if user.is_authenticated %}
       {# קישורי Admin בלבד #}
@@ -24,7 +24,7 @@
         <a class="btn btn-link" href="/api/ui/admin/review/">בקרת תמלול</a>
       {% endif %}
 
-      <span class="muted" style="font-size: 13px;">
+      <span class="muted nav-user">
         היי, {{ user.username }}
       </span>
 
