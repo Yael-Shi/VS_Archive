@@ -2900,6 +2900,149 @@ class DocumentSourceFileModelTests(TestCase):
             )
 
 
+class UploadCompleteSourceFileTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import User
+
+        self.staff = User.objects.create_user(
+            username="upload_complete_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+
+    def _create_uploading_document(self, **kwargs):
+        defaults = {
+            "title": "Upload complete test doc",
+            "doc_type": Document.DocType.IMAGE,
+            "text_input_type": Document.TextInputType.HANDWRITTEN,
+            "upload_status": Document.UploadStatus.UPLOADING,
+            "file_s3_key": "documents/99/original.jpg",
+            "file_original_name": "scan.jpg",
+            "mime_type": "image/jpeg",
+            "size_bytes": 1000,
+        }
+        defaults.update(kwargs)
+        return Document.objects.create(**defaults)
+
+    def _post_complete(self, doc_id: int, payload: dict):
+        self.client.force_login(self.staff)
+        return self.client.post(
+            f"/api/uploads/{doc_id}/complete/",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    @patch("documents.views.send_process_document_message")
+    def test_successful_upload_complete_creates_primary_source_file(
+        self, mock_enqueue
+    ):
+        doc = self._create_uploading_document()
+
+        resp = self._post_complete(
+            doc.id,
+            {
+                "success": True,
+                "file_size": 2048,
+                "file_mime": "image/png",
+            },
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["upload_status"], Document.UploadStatus.UPLOADED)
+        self.assertEqual(
+            body["processing_state_user"],
+            Document.ProcessingState.PROCESSING,
+        )
+        mock_enqueue.assert_called_once_with(document_id=doc.id)
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.size_bytes, 2048)
+        self.assertEqual(doc.mime_type, "image/png")
+
+        sources = list(DocumentSourceFile.objects.filter(document=doc))
+        self.assertEqual(len(sources), 1)
+        source = sources[0]
+        self.assertEqual(source.order_index, 0)
+        self.assertEqual(source.file_s3_key, doc.file_s3_key)
+        self.assertEqual(source.file_original_name, doc.file_original_name)
+        self.assertEqual(source.mime_type, doc.mime_type)
+        self.assertEqual(source.size_bytes, doc.size_bytes)
+
+    @patch("documents.views.send_process_document_message")
+    def test_repeated_upload_complete_does_not_duplicate_source_file(
+        self, mock_enqueue
+    ):
+        doc = self._create_uploading_document()
+
+        first = self._post_complete(doc.id, {"success": True})
+        self.assertEqual(first.status_code, 200)
+        mock_enqueue.assert_called_once()
+
+        second = self._post_complete(
+            doc.id,
+            {
+                "success": True,
+                "file_size": 4096,
+                "file_mime": "image/webp",
+            },
+        )
+        self.assertEqual(second.status_code, 200)
+        mock_enqueue.assert_called_once()
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.size_bytes, 4096)
+        self.assertEqual(doc.mime_type, "image/webp")
+
+        sources = list(DocumentSourceFile.objects.filter(document=doc))
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0].order_index, 0)
+        self.assertEqual(sources[0].size_bytes, 4096)
+        self.assertEqual(sources[0].mime_type, "image/webp")
+
+    @patch("documents.views.send_process_document_message")
+    def test_failed_upload_complete_does_not_create_source_file(self, mock_enqueue):
+        doc = self._create_uploading_document()
+
+        resp = self._post_complete(doc.id, {"success": False, "error": "s3 put failed"})
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["upload_status"], Document.UploadStatus.FAILED)
+        self.assertEqual(
+            body["processing_state_user"],
+            Document.ProcessingState.FAILED,
+        )
+        mock_enqueue.assert_not_called()
+        self.assertEqual(DocumentSourceFile.objects.filter(document=doc).count(), 0)
+
+    @patch("documents.views.send_process_document_message")
+    def test_success_without_file_s3_key_returns_400_and_no_source_file(
+        self, mock_enqueue
+    ):
+        doc = self._create_uploading_document(file_s3_key="")
+
+        resp = self._post_complete(doc.id, {"success": True})
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["error"], "file_s3_key missing")
+        mock_enqueue.assert_not_called()
+        self.assertEqual(DocumentSourceFile.objects.filter(document=doc).count(), 0)
+
+    @patch("documents.views.send_process_document_message")
+    def test_already_uploaded_retry_does_not_re_enqueue(self, mock_enqueue):
+        doc = self._create_uploading_document(
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.PROCESSING,
+        )
+
+        resp = self._post_complete(doc.id, {"success": True})
+
+        self.assertEqual(resp.status_code, 200)
+        mock_enqueue.assert_not_called()
+        self.assertEqual(DocumentSourceFile.objects.filter(document=doc).count(), 1)
+
+
 class TranskribusRunPersistenceServiceTests(TestCase):
     def _create_document(self) -> Document:
         return Document.objects.create(
