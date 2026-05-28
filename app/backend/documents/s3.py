@@ -10,6 +10,24 @@ def get_s3_client():
     )
 
 
+def mime_type_to_extension(mime_type: str) -> str:
+    mime = (mime_type or "").strip().lower()
+    if mime == "application/pdf":
+        return "pdf"
+    if mime.startswith("image/"):
+        return mime.split("/", 1)[1] or "img"
+    return "bin"
+
+
+def build_document_source_file_s3_key(
+    document_id: int,
+    order_index: int,
+    mime_type: str,
+) -> str:
+    ext = mime_type_to_extension(mime_type)
+    return f"documents/{document_id}/source/{order_index}.{ext}"
+
+
 def create_presigned_put(
     bucket: str,
     key: str,

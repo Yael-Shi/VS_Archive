@@ -3043,6 +3043,401 @@ class UploadCompleteSourceFileTests(TestCase):
         self.assertEqual(DocumentSourceFile.objects.filter(document=doc).count(), 1)
 
 
+class UploadApiTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import User
+
+        self.staff = User.objects.create_user(
+            username="upload_api_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+
+    def _post_create(self, payload: dict):
+        self.client.force_login(self.staff)
+        return self.client.post(
+            "/api/uploads/create/",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def _post_part_complete(self, doc_id: int, order_index: int, payload: dict):
+        self.client.force_login(self.staff)
+        return self.client.post(
+            f"/api/uploads/{doc_id}/parts/{order_index}/complete/",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def _post_finalize(self, doc_id: int, payload: dict | None = None):
+        self.client.force_login(self.staff)
+        body = payload if payload is not None else {"success": True}
+        return self.client.post(
+            f"/api/uploads/{doc_id}/finalize/",
+            data=json.dumps(body),
+            content_type="application/json",
+        )
+
+    def _post_complete(self, doc_id: int, payload: dict):
+        self.client.force_login(self.staff)
+        return self.client.post(
+            f"/api/uploads/{doc_id}/complete/",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def _base_create_payload(self, **overrides):
+        payload = {
+            "title": "Upload API test",
+            "doc_type": "IMAGE",
+            "text_input_type": "HANDWRITTEN",
+            "original_name": "scan.jpg",
+            "mime_type": "image/jpeg",
+            "size_bytes": 1000,
+        }
+        payload.update(overrides)
+        return payload
+
+    def _multi_files_payload(self, count: int = 2, **overrides):
+        files = [
+            {
+                "original_name": f"page-{i + 1}.jpg",
+                "mime_type": "image/jpeg",
+                "size_bytes": 1000 + i,
+            }
+            for i in range(count)
+        ]
+        payload = {
+            "title": "Multi-image upload test",
+            "text_input_type": "HANDWRITTEN",
+            "files": files,
+        }
+        payload.update(overrides)
+        return payload
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_single_file_create_response_shape_unchanged(self, _mock_put):
+        resp = self._post_create(self._base_create_payload())
+        self.assertEqual(resp.status_code, 201)
+        body = resp.json()
+        self.assertEqual(
+            set(body.keys()),
+            {"document_id", "upload_status", "s3_key", "upload_url"},
+        )
+        self.assertEqual(body["upload_status"], Document.UploadStatus.UPLOADING)
+        self.assertTrue(body["s3_key"].startswith("documents/"))
+        self.assertTrue(body["s3_key"].endswith("/original.jpeg"))
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch("documents.views.send_process_document_message")
+    def test_single_file_complete_still_enqueues_and_dual_writes(
+        self, mock_enqueue, _mock_put
+    ):
+        create_resp = self._post_create(self._base_create_payload())
+        doc_id = create_resp.json()["document_id"]
+
+        complete_resp = self._post_complete(
+            doc_id,
+            {"success": True, "file_size": 2048, "file_mime": "image/png"},
+        )
+        self.assertEqual(complete_resp.status_code, 200)
+        mock_enqueue.assert_called_once_with(document_id=doc_id)
+
+        doc = Document.objects.get(id=doc_id)
+        sources = list(DocumentSourceFile.objects.filter(document=doc))
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0].order_index, 0)
+        self.assertEqual(sources[0].upload_status, DocumentSourceFile.UploadStatus.UPLOADED)
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch("documents.views.send_process_document_message")
+    def test_single_file_complete_retry_does_not_re_enqueue(self, mock_enqueue, _mock_put):
+        create_resp = self._post_create(self._base_create_payload())
+        doc_id = create_resp.json()["document_id"]
+
+        self._post_complete(doc_id, {"success": True})
+        self._post_complete(doc_id, {"success": True})
+        mock_enqueue.assert_called_once()
+
+    @patch("documents.views.create_presigned_put")
+    def test_multi_image_create_returns_ordered_uploads(self, mock_put):
+        mock_put.side_effect = lambda **kwargs: f"https://example/{kwargs['key']}"
+
+        resp = self._post_create(self._multi_files_payload(count=3))
+        self.assertEqual(resp.status_code, 201)
+        body = resp.json()
+        self.assertEqual(body["doc_type"], Document.DocType.IMAGE)
+        self.assertEqual(body["expected_source_file_count"], 3)
+        self.assertEqual(len(body["uploads"]), 3)
+        self.assertEqual(
+            [row["order_index"] for row in body["uploads"]],
+            [0, 1, 2],
+        )
+        for row in body["uploads"]:
+            self.assertTrue(row["s3_key"].startswith(f"documents/{body['document_id']}/source/"))
+            self.assertTrue(row["upload_url"].startswith("https://example/"))
+
+        doc = Document.objects.get(id=body["document_id"])
+        self.assertEqual(doc.expected_source_file_count, 3)
+        sources = list(doc.source_files.order_by("order_index"))
+        self.assertEqual(len(sources), 3)
+        for index, source in enumerate(sources):
+            self.assertEqual(source.order_index, index)
+            self.assertEqual(source.upload_status, DocumentSourceFile.UploadStatus.PENDING)
+            self.assertEqual(source.file_s3_key, body["uploads"][index]["s3_key"])
+
+    def test_multi_image_create_rejects_empty_files(self):
+        resp = self._post_create(
+            {
+                "title": "Bad multi",
+                "text_input_type": "HANDWRITTEN",
+                "files": [],
+            }
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_multi_image_create_rejects_single_file_in_files(self):
+        resp = self._post_create(self._multi_files_payload(count=1))
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("single-file", resp.content.decode())
+
+    def test_multi_image_create_rejects_more_than_twenty_files(self):
+        resp = self._post_create(self._multi_files_payload(count=21))
+        self.assertEqual(resp.status_code, 400)
+
+    def test_multi_image_create_rejects_non_image_mime(self):
+        payload = self._multi_files_payload(count=2)
+        payload["files"][1]["mime_type"] = "application/pdf"
+        resp = self._post_create(payload)
+        self.assertEqual(resp.status_code, 400)
+
+    def test_multi_image_create_rejects_client_order_index(self):
+        payload = self._multi_files_payload(count=2)
+        payload["files"][0]["order_index"] = 5
+        resp = self._post_create(payload)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("order_index", resp.content.decode())
+
+    def test_multi_image_create_rejects_mixed_legacy_file_fields(self):
+        payload = self._multi_files_payload(count=2)
+        payload["original_name"] = "legacy.jpg"
+        payload["mime_type"] = "image/jpeg"
+        resp = self._post_create(payload)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("top-level single-file fields", resp.content.decode())
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch("documents.views.send_process_document_message")
+    def test_part_complete_success_does_not_enqueue(self, mock_enqueue, _mock_put):
+        create_resp = self._post_create(self._multi_files_payload(count=2))
+        doc_id = create_resp.json()["document_id"]
+
+        resp = self._post_part_complete(
+            doc_id,
+            0,
+            {"success": True, "file_size": 111, "file_mime": "image/webp"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        mock_enqueue.assert_not_called()
+
+        source = DocumentSourceFile.objects.get(document_id=doc_id, order_index=0)
+        self.assertEqual(source.upload_status, DocumentSourceFile.UploadStatus.UPLOADED)
+        self.assertEqual(source.size_bytes, 111)
+        self.assertEqual(source.mime_type, "image/webp")
+
+        doc = Document.objects.get(id=doc_id)
+        self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch("documents.views.send_process_document_message")
+    def test_part_complete_rejects_non_image_file_mime(self, mock_enqueue, _mock_put):
+        create_resp = self._post_create(self._multi_files_payload(count=2))
+        doc_id = create_resp.json()["document_id"]
+
+        resp = self._post_part_complete(
+            doc_id,
+            0,
+            {"success": True, "file_mime": "application/pdf"},
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("image/*", resp.content.decode())
+        mock_enqueue.assert_not_called()
+
+        source = DocumentSourceFile.objects.get(document_id=doc_id, order_index=0)
+        self.assertEqual(source.upload_status, DocumentSourceFile.UploadStatus.PENDING)
+
+        doc = Document.objects.get(id=doc_id)
+        self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch("documents.views.send_process_document_message")
+    def test_part_complete_failure_marks_document_failed(self, mock_enqueue, _mock_put):
+        create_resp = self._post_create(self._multi_files_payload(count=2))
+        doc_id = create_resp.json()["document_id"]
+
+        resp = self._post_part_complete(
+            doc_id,
+            1,
+            {"success": False, "error": "s3 put failed"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        mock_enqueue.assert_not_called()
+
+        doc = Document.objects.get(id=doc_id)
+        self.assertEqual(doc.upload_status, Document.UploadStatus.FAILED)
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.FAILED)
+
+        source = DocumentSourceFile.objects.get(document_id=doc_id, order_index=1)
+        self.assertEqual(source.upload_status, DocumentSourceFile.UploadStatus.FAILED)
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch("documents.views.send_process_document_message")
+    def test_part_complete_retry_after_document_failed_is_rejected(
+        self, mock_enqueue, _mock_put
+    ):
+        create_resp = self._post_create(self._multi_files_payload(count=2))
+        doc_id = create_resp.json()["document_id"]
+
+        fail_resp = self._post_part_complete(
+            doc_id,
+            1,
+            {"success": False, "error": "s3 put failed"},
+        )
+        self.assertEqual(fail_resp.status_code, 200)
+
+        source = DocumentSourceFile.objects.get(document_id=doc_id, order_index=1)
+        self.assertEqual(source.upload_status, DocumentSourceFile.UploadStatus.FAILED)
+        self.assertEqual(source.upload_error, "s3 put failed")
+
+        retry_resp = self._post_part_complete(
+            doc_id,
+            1,
+            {"success": True, "file_size": 999, "file_mime": "image/jpeg"},
+        )
+        self.assertEqual(retry_resp.status_code, 400)
+        mock_enqueue.assert_not_called()
+
+        source.refresh_from_db()
+        self.assertEqual(source.upload_status, DocumentSourceFile.UploadStatus.FAILED)
+        self.assertEqual(source.upload_error, "s3 put failed")
+        self.assertNotEqual(source.size_bytes, 999)
+
+        doc = Document.objects.get(id=doc_id)
+        self.assertEqual(doc.upload_status, Document.UploadStatus.FAILED)
+        self.assertEqual(doc.upload_error, "s3 put failed")
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.FAILED)
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch("documents.views.send_process_document_message")
+    def test_finalize_after_document_failed_is_rejected(self, mock_enqueue, _mock_put):
+        create_resp = self._post_create(self._multi_files_payload(count=2))
+        doc_id = create_resp.json()["document_id"]
+
+        self._post_part_complete(doc_id, 0, {"success": True})
+        self._post_part_complete(doc_id, 1, {"success": False, "error": "failed"})
+
+        resp = self._post_finalize(doc_id)
+        self.assertEqual(resp.status_code, 400)
+        mock_enqueue.assert_not_called()
+
+        doc = Document.objects.get(id=doc_id)
+        self.assertEqual(doc.upload_status, Document.UploadStatus.FAILED)
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.FAILED)
+        self.assertNotEqual(doc.processing_state_user, Document.ProcessingState.PARTIAL)
+        self.assertEqual(doc.file_s3_key, "")
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_part_complete_invalid_order_index_returns_400(self, _mock_put):
+        create_resp = self._post_create(self._multi_files_payload(count=2))
+        doc_id = create_resp.json()["document_id"]
+
+        resp = self._post_part_complete(doc_id, 9, {"success": True})
+        self.assertEqual(resp.status_code, 400)
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch("documents.views.send_process_document_message")
+    def test_finalize_fails_when_parts_pending(self, mock_enqueue, _mock_put):
+        create_resp = self._post_create(self._multi_files_payload(count=2))
+        doc_id = create_resp.json()["document_id"]
+
+        self._post_part_complete(doc_id, 0, {"success": True})
+
+        resp = self._post_finalize(doc_id)
+        self.assertEqual(resp.status_code, 400)
+        mock_enqueue.assert_not_called()
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch("documents.views.send_process_document_message")
+    def test_finalize_fails_when_part_failed(self, mock_enqueue, _mock_put):
+        create_resp = self._post_create(self._multi_files_payload(count=2))
+        doc_id = create_resp.json()["document_id"]
+
+        self._post_part_complete(doc_id, 0, {"success": True})
+        self._post_part_complete(doc_id, 1, {"success": False, "error": "failed"})
+
+        resp = self._post_finalize(doc_id)
+        self.assertEqual(resp.status_code, 400)
+        mock_enqueue.assert_not_called()
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch("documents.views.send_process_document_message")
+    def test_finalize_success_mirrors_primary_and_sets_partial(
+        self, mock_enqueue, _mock_put
+    ):
+        create_resp = self._post_create(self._multi_files_payload(count=2))
+        doc_id = create_resp.json()["document_id"]
+
+        self._post_part_complete(doc_id, 0, {"success": True, "file_size": 100})
+        self._post_part_complete(doc_id, 1, {"success": True, "file_size": 200})
+
+        resp = self._post_finalize(doc_id)
+        self.assertEqual(resp.status_code, 200)
+        mock_enqueue.assert_not_called()
+
+        body = resp.json()
+        self.assertEqual(body["upload_status"], Document.UploadStatus.UPLOADED)
+        self.assertEqual(body["processing_state_user"], Document.ProcessingState.PARTIAL)
+        self.assertNotEqual(
+            body["processing_state_user"],
+            Document.ProcessingState.PROCESSING,
+        )
+
+        doc = Document.objects.get(id=doc_id)
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.PARTIAL)
+        self.assertNotEqual(
+            doc.processing_state_user,
+            Document.ProcessingState.PROCESSING,
+        )
+        primary = DocumentSourceFile.objects.get(document=doc, order_index=0)
+        self.assertEqual(doc.file_s3_key, primary.file_s3_key)
+        self.assertEqual(doc.file_original_name, primary.file_original_name)
+        self.assertEqual(doc.mime_type, primary.mime_type)
+        self.assertEqual(doc.size_bytes, primary.size_bytes)
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch("documents.views.send_process_document_message")
+    def test_finalize_idempotent_retry(self, mock_enqueue, _mock_put):
+        create_resp = self._post_create(self._multi_files_payload(count=2))
+        doc_id = create_resp.json()["document_id"]
+
+        self._post_part_complete(doc_id, 0, {"success": True})
+        self._post_part_complete(doc_id, 1, {"success": True})
+
+        first = self._post_finalize(doc_id)
+        second = self._post_finalize(doc_id)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        mock_enqueue.assert_not_called()
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_legacy_complete_rejects_multi_image_document(self, _mock_put):
+        create_resp = self._post_create(self._multi_files_payload(count=2))
+        doc_id = create_resp.json()["document_id"]
+
+        resp = self._post_complete(doc_id, {"success": True})
+        self.assertEqual(resp.status_code, 400)
+
+
 class TranskribusRunPersistenceServiceTests(TestCase):
     def _create_document(self) -> Document:
         return Document.objects.create(

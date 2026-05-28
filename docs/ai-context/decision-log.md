@@ -47,6 +47,40 @@
 - **`Document.file_s3_key`**, **`file_original_name`**, **`mime_type`**, **`size_bytes`** remain written and are still what runtime paths use today.
 - Idempotent **`update_or_create(document, order_index=0)`**; failed upload complete and missing-**`file_s3_key`** success paths do not create a source-file row.
 
+## Multi-image upload — backend API contract (PR3)
+
+**Decision:** Add a **backend-only** multi-image upload contract on the existing upload API. **No** worker, UI, OCR/HTR, or review/source-preview changes in this PR.
+
+### Schema
+
+- **`Document.expected_source_file_count`** — nullable; `null` for legacy/single-file; set to **N ≥ 2** at multi-image create.
+- **`DocumentSourceFile.upload_status`** / **`upload_error`** — per-part upload lifecycle: **`PENDING`**, **`UPLOADED`**, **`FAILED`** (default **`PENDING`**).
+
+### API (admin-only, same auth as existing upload endpoints)
+
+- **`POST /api/uploads/create/`** — if **`files`** array is present → multi-image mode (2–20 **`image/*`** files only, server-assigned **`order_index`** from array order). Legacy single-file body/response unchanged when **`files`** is absent.
+- **`POST /api/uploads/<doc_id>/parts/<order_index>/complete/`** — mark one planned source file **`UPLOADED`** or **`FAILED`**; part failure marks parent **`Document.upload_status=FAILED`**.
+- **`POST /api/uploads/<doc_id>/finalize/`** — when all expected parts are **`UPLOADED`**, mirror **`order_index=0`** into **`Document.file_*`**, set **`Document.upload_status=UPLOADED`**, set **`Document.processing_state_user=PARTIAL`** (no **`ACTION_REQUIRED`** enum exists today), **do not enqueue SQS**.
+- Legacy **`POST .../complete/`** — unchanged for single-file docs; returns **400** for multi-image documents.
+
+### V1 failed-part policy (terminal)
+
+- **Any failed multi-image part** marks the whole upload attempt **`Document.upload_status=FAILED`** — **terminal in V1**.
+- While the document is **`FAILED`**, further **`success=true` part completion** and **finalize** return **400**; the failed **`DocumentSourceFile`** row stays **`FAILED`**, errors are not cleared, and the document is not moved back to **`UPLOADING`**, **`UPLOADED`**, **`PARTIAL`**, or **`PROCESSING`**.
+- **Downside (accepted for V1):** admins cannot retry/replace only one failed part; they must **start a new multi-image upload**.
+- **Deferred (future PR):** per-part retry/replacement before finalize — **not implemented** in PR3.
+
+### S3 keys
+
+- Multi-image parts: **`documents/{document_id}/source/{order_index}.{ext}`** (distinct, ordered).
+
+### Deferred (follow-up PRs)
+
+- Worker input from ordered **`source_files`** + SQS enqueue for multi-image documents.
+- Multi-image upload UI (`upload.html`).
+- Per-part upload retry/replacement after a failed part (see V1 failed-part policy above).
+- Page-level text results, hover/highlight, routing changes.
+
 ## Current state — OCR/HTR and Transkribus (read this first)
 
 **Last aligned:** production-gated Hebrew handwritten Transkribus routing + OCR/HTR review lifecycle behavior.

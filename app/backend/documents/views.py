@@ -11,8 +11,13 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from .models import Document, DocumentTextResult, Tag, DocumentMetadata
-from .s3 import create_presigned_put, create_presigned_get
+from .models import Document, DocumentSourceFile, DocumentTextResult, Tag, DocumentMetadata
+from .s3 import (
+    build_document_source_file_s3_key,
+    create_presigned_get,
+    create_presigned_put,
+    mime_type_to_extension,
+)
 from documents.services.review_backlog import (
     attach_review_summaries,
     documents_in_review_backlog,
@@ -20,7 +25,15 @@ from documents.services.review_backlog import (
     is_review_pending_text_result,
     parse_review_reasons,
 )
-from documents.services.source_files import sync_primary_document_source_file
+from documents.services.source_files import (
+    MULTI_IMAGE_MAX_FILES,
+    MULTI_IMAGE_MIN_FILES,
+    all_expected_source_files_uploaded,
+    get_source_file_for_order,
+    is_multi_image_document,
+    mirror_primary_document_from_source_file,
+    sync_primary_document_source_file,
+)
 from documents.services.sqs import send_process_document_message
 from documents.services.text_presentation import get_text_presentation_for_document
 
@@ -183,94 +196,64 @@ def _serialize_doc(d: Document, *, is_admin: bool) -> dict:
     return payload
 
 
-@csrf_exempt
-@login_required
-def create_upload(request):
-    deny = _require_admin(request)
-    if deny:
-        return deny
+def _uploads_bucket_or_error():
+    bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
+    if not bucket:
+        return None, JsonResponse(
+            {"error": "Bucket not configured (set UPLOADS_BUCKET_NAME or S3_BUCKET)"},
+            status=500,
+        )
+    return bucket, None
 
-    if request.method != "POST":
-        return _bad("POST only")
 
-    try:
-        payload = json.loads(request.body.decode("utf-8"))
-    except Exception:
-        return _bad("invalid json")
-
+def _parse_create_upload_common(payload: dict):
     title = (payload.get("title") or "").strip()
     if not title:
-        return _bad("title required")
-
-    doc_type = (payload.get("doc_type") or "").strip()
-    if doc_type not in ("PDF", "IMAGE"):
-        return _bad("doc_type must be PDF or IMAGE")
+        return None, _bad("title required")
 
     date_start_raw = payload.get("date_start")
     date_end_raw = payload.get("date_end")
     language = (payload.get("language") or "").strip() or None
     text_input_type_raw = payload.get("text_input_type")
     category_event = (payload.get("category_event") or "").strip() or None
-
-    # visibility exists but is admin-only operational; create_upload is admin-only anyway.
     visibility = (payload.get("visibility") or "private").strip()
-
     tags = payload.get("tags", None)
     admin_meta = payload.get("admin_meta", None)
-
-    mime_type = (
-        payload.get("mime_type")
-        or payload.get("content_type")
-        or "application/octet-stream"
-    ).strip()
-
-    # Admin-only: keep original filename in DB, do not show to non-admin.
-    original_name = (payload.get("original_name") or "").strip()
-
-    size_bytes = payload.get("size_bytes")
 
     try:
         ds = _parse_date_optional(date_start_raw, "date_start")
         de = _parse_date_optional(date_end_raw, "date_end")
         text_input_type = _parse_text_input_type(text_input_type_raw)
     except ValueError as e:
-        return _bad(str(e))
+        return None, _bad(str(e))
 
     if tags is None:
         tags = []
     if not isinstance(tags, list):
-        return _bad("tags must be a list")
+        return None, _bad("tags must be a list")
 
     if admin_meta is None:
         admin_meta = {}
     if not isinstance(admin_meta, dict):
-        return _bad("admin_meta must be an object")
+        return None, _bad("admin_meta must be an object")
 
     if visibility not in ("private", "public"):
-        return _bad("visibility must be private or public")
+        return None, _bad("visibility must be private or public")
 
-    bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
-    if not bucket:
-        return JsonResponse(
-            {"error": "Bucket not configured (set UPLOADS_BUCKET_NAME or S3_BUCKET)"},
-            status=500,
-        )
+    return {
+        "title": title,
+        "date_start": ds,
+        "date_end": de,
+        "language": language,
+        "text_input_type": text_input_type,
+        "category_event": category_event,
+        "visibility": visibility,
+        "tags": tags,
+        "admin_meta": admin_meta,
+    }, None
 
-    doc = Document.objects.create(
-        title=title,
-        doc_type=doc_type,
-        date_start=ds,
-        date_end=de,
-        language=language,
-        text_input_type=text_input_type,
-        category_event=category_event,
-        visibility=visibility,
-        upload_status=Document.UploadStatus.UPLOADING,
-        file_original_name=original_name,
-        mime_type=mime_type,
-        size_bytes=size_bytes if isinstance(size_bytes, int) else None,
-    )
 
+def _attach_document_tags_and_metadata(doc: Document, tags: list, admin_meta: dict) -> None:
     DocumentMetadata.objects.create(
         document=doc,
         notes=str(admin_meta.get("notes") or ""),
@@ -288,12 +271,168 @@ def create_upload(request):
         tag_obj, _ = Tag.objects.get_or_create(name=name)
         doc.tags_m2m.add(tag_obj)
 
-    ext = "bin"
-    if mime_type == "application/pdf":
-        ext = "pdf"
-    elif mime_type.startswith("image/"):
-        ext = mime_type.split("/", 1)[1] or "img"
 
+def _is_image_mime_type(mime_type: str) -> bool:
+    return (mime_type or "").strip().lower().startswith("image/")
+
+
+def _create_multi_image_upload(request, payload: dict, common: dict):
+    files_raw = payload.get("files")
+    if not isinstance(files_raw, list):
+        return _bad("files must be a list")
+
+    file_count = len(files_raw)
+    if file_count == 0:
+        return _bad("files must contain at least 2 image files")
+    if file_count == 1:
+        return _bad(
+            "multi-image upload requires at least 2 files; "
+            "use single-file upload for one image"
+        )
+    if file_count > MULTI_IMAGE_MAX_FILES:
+        return _bad(f"files must contain at most {MULTI_IMAGE_MAX_FILES} images")
+
+    legacy_file_fields = [
+        field
+        for field in ("original_name", "mime_type", "content_type", "size_bytes")
+        if field in payload
+    ]
+    if legacy_file_fields:
+        joined = ", ".join(legacy_file_fields)
+        return _bad(
+            "multi-image upload must not include top-level single-file fields: "
+            f"{joined}; provide file metadata inside files[]"
+        )
+
+    doc_type = (payload.get("doc_type") or "").strip()
+    if doc_type and doc_type != Document.DocType.IMAGE:
+        return _bad("multi-image upload requires doc_type=IMAGE")
+
+    parsed_files = []
+    for index, entry in enumerate(files_raw):
+        if not isinstance(entry, dict):
+            return _bad(f"files[{index}] must be an object")
+        if "order_index" in entry:
+            return _bad("order_index must not be provided; order is defined by files[] position")
+
+        original_name = (entry.get("original_name") or "").strip()
+        if not original_name:
+            return _bad(f"files[{index}].original_name is required")
+
+        mime_type = (
+            entry.get("mime_type") or entry.get("content_type") or ""
+        ).strip()
+        if not _is_image_mime_type(mime_type):
+            return _bad(f"files[{index}].mime_type must be an image/* MIME type")
+
+        size_bytes = entry.get("size_bytes")
+        if size_bytes is not None and not isinstance(size_bytes, int):
+            return _bad(f"files[{index}].size_bytes must be an integer")
+
+        parsed_files.append(
+            {
+                "original_name": original_name,
+                "mime_type": mime_type,
+                "size_bytes": size_bytes if isinstance(size_bytes, int) else None,
+            }
+        )
+
+    bucket, bucket_err = _uploads_bucket_or_error()
+    if bucket_err:
+        return bucket_err
+
+    doc = Document.objects.create(
+        title=common["title"],
+        doc_type=Document.DocType.IMAGE,
+        date_start=common["date_start"],
+        date_end=common["date_end"],
+        language=common["language"],
+        text_input_type=common["text_input_type"],
+        category_event=common["category_event"],
+        visibility=common["visibility"],
+        upload_status=Document.UploadStatus.UPLOADING,
+        expected_source_file_count=file_count,
+    )
+    _attach_document_tags_and_metadata(doc, common["tags"], common["admin_meta"])
+
+    uploads = []
+    for order_index, file_meta in enumerate(parsed_files):
+        key = build_document_source_file_s3_key(
+            document_id=doc.id,
+            order_index=order_index,
+            mime_type=file_meta["mime_type"],
+        )
+        DocumentSourceFile.objects.create(
+            document=doc,
+            order_index=order_index,
+            file_s3_key=key,
+            file_original_name=file_meta["original_name"],
+            mime_type=file_meta["mime_type"],
+            size_bytes=file_meta["size_bytes"],
+            upload_status=DocumentSourceFile.UploadStatus.PENDING,
+        )
+        upload_url = create_presigned_put(
+            bucket=bucket,
+            key=key,
+            content_type=file_meta["mime_type"],
+        )
+        uploads.append(
+            {
+                "order_index": order_index,
+                "s3_key": key,
+                "upload_url": upload_url,
+                "original_name": file_meta["original_name"],
+                "mime_type": file_meta["mime_type"],
+                "size_bytes": file_meta["size_bytes"],
+            }
+        )
+
+    return JsonResponse(
+        {
+            "document_id": doc.id,
+            "upload_status": doc.upload_status,
+            "doc_type": doc.doc_type,
+            "expected_source_file_count": file_count,
+            "uploads": uploads,
+        },
+        status=201,
+    )
+
+
+def _create_single_file_upload(request, payload: dict, common: dict):
+    doc_type = (payload.get("doc_type") or "").strip()
+    if doc_type not in ("PDF", "IMAGE"):
+        return _bad("doc_type must be PDF or IMAGE")
+
+    mime_type = (
+        payload.get("mime_type")
+        or payload.get("content_type")
+        or "application/octet-stream"
+    ).strip()
+    original_name = (payload.get("original_name") or "").strip()
+    size_bytes = payload.get("size_bytes")
+
+    bucket, bucket_err = _uploads_bucket_or_error()
+    if bucket_err:
+        return bucket_err
+
+    doc = Document.objects.create(
+        title=common["title"],
+        doc_type=doc_type,
+        date_start=common["date_start"],
+        date_end=common["date_end"],
+        language=common["language"],
+        text_input_type=common["text_input_type"],
+        category_event=common["category_event"],
+        visibility=common["visibility"],
+        upload_status=Document.UploadStatus.UPLOADING,
+        file_original_name=original_name,
+        mime_type=mime_type,
+        size_bytes=size_bytes if isinstance(size_bytes, int) else None,
+    )
+    _attach_document_tags_and_metadata(doc, common["tags"], common["admin_meta"])
+
+    ext = mime_type_to_extension(mime_type)
     key = f"documents/{doc.id}/original.{ext}"
     doc.file_s3_key = key
     doc.save(update_fields=["file_s3_key"])
@@ -309,6 +448,31 @@ def create_upload(request):
         },
         status=201,
     )
+
+
+@csrf_exempt
+@login_required
+def create_upload(request):
+    deny = _require_admin(request)
+    if deny:
+        return deny
+
+    if request.method != "POST":
+        return _bad("POST only")
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return _bad("invalid json")
+
+    common, err = _parse_create_upload_common(payload)
+    if err:
+        return err
+
+    if "files" in payload:
+        return _create_multi_image_upload(request, payload, common)
+
+    return _create_single_file_upload(request, payload, common)
 
 
 @csrf_exempt
@@ -334,6 +498,17 @@ def upload_complete(request, doc_id: int):
         doc = Document.objects.get(id=doc_id)
     except Document.DoesNotExist:
         return JsonResponse({"error": "not found"}, status=404)
+
+    if is_multi_image_document(doc):
+        return JsonResponse(
+            {
+                "error": (
+                    "multi-image documents use part completion and finalize endpoints"
+                ),
+                "document_id": doc.id,
+            },
+            status=400,
+        )
 
     if success:
         if not doc.file_s3_key:
@@ -401,6 +576,210 @@ def upload_complete(request, doc_id: int):
             "processing_state_user": doc.processing_state_user,
         }
     )
+
+
+def _parse_upload_success_payload(request):
+    if request.method != "POST":
+        return None, None, HttpResponseBadRequest("POST only")
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return None, None, HttpResponseBadRequest("invalid json")
+
+    success = payload.get("success")
+    if success not in (True, False):
+        return None, None, HttpResponseBadRequest("success must be true|false")
+
+    return payload, success, None
+
+
+def _finalize_response(doc: Document) -> JsonResponse:
+    return JsonResponse(
+        {
+            "document_id": doc.id,
+            "upload_status": doc.upload_status,
+            "processing_state_user": doc.processing_state_user,
+        }
+    )
+
+
+def _multi_image_upload_terminal_failed_response(doc: Document) -> JsonResponse:
+    return JsonResponse(
+        {
+            "error": (
+                "multi-image upload failed; create a new upload to retry "
+                "(per-part retry is not supported in V1)"
+            ),
+            "document_id": doc.id,
+        },
+        status=400,
+    )
+
+
+@csrf_exempt
+@login_required
+def upload_part_complete(request, doc_id: int, order_index: int):
+    deny = _require_admin(request)
+    if deny:
+        return deny
+
+    payload, success, err = _parse_upload_success_payload(request)
+    if err:
+        return err
+
+    try:
+        doc = Document.objects.get(id=doc_id)
+    except Document.DoesNotExist:
+        return JsonResponse({"error": "not found"}, status=404)
+
+    if not is_multi_image_document(doc):
+        return JsonResponse(
+            {"error": "not a multi-image document", "document_id": doc.id},
+            status=400,
+        )
+
+    if doc.upload_status == Document.UploadStatus.FAILED and success:
+        return _multi_image_upload_terminal_failed_response(doc)
+
+    expected = doc.expected_source_file_count
+    if order_index < 0 or order_index >= expected:
+        return JsonResponse(
+            {
+                "error": (
+                    f"order_index must be between 0 and {expected - 1} inclusive"
+                ),
+                "document_id": doc.id,
+            },
+            status=400,
+        )
+
+    source_file = get_source_file_for_order(doc, order_index)
+    if source_file is None:
+        return JsonResponse(
+            {
+                "error": f"source file missing for order_index={order_index}",
+                "document_id": doc.id,
+            },
+            status=400,
+        )
+
+    if success:
+        file_mime = payload.get("file_mime")
+        if isinstance(file_mime, str):
+            file_mime = file_mime.strip()
+            if file_mime and not _is_image_mime_type(file_mime):
+                return JsonResponse(
+                    {
+                        "error": "file_mime must be an image/* MIME type",
+                        "document_id": doc.id,
+                        "order_index": order_index,
+                    },
+                    status=400,
+                )
+
+        source_file.upload_status = DocumentSourceFile.UploadStatus.UPLOADED
+        source_file.upload_error = None
+        if isinstance(payload.get("file_size"), int):
+            source_file.size_bytes = payload["file_size"]
+        if isinstance(file_mime, str) and file_mime:
+            source_file.mime_type = file_mime
+        source_file.save(
+            update_fields=[
+                "upload_status",
+                "upload_error",
+                "size_bytes",
+                "mime_type",
+                "updated_at",
+            ]
+        )
+    else:
+        raw_err = (payload.get("error") or "upload failed")
+        err = str(raw_err).strip() or "upload failed"
+        source_file.upload_status = DocumentSourceFile.UploadStatus.FAILED
+        source_file.upload_error = err
+        source_file.save(update_fields=["upload_status", "upload_error", "updated_at"])
+
+        doc.upload_status = Document.UploadStatus.FAILED
+        doc.upload_error = err
+        doc.processing_state_user = Document.ProcessingState.FAILED
+        doc.save(update_fields=["upload_status", "upload_error", "processing_state_user"])
+
+    return JsonResponse(
+        {
+            "document_id": doc.id,
+            "order_index": order_index,
+            "upload_status": source_file.upload_status,
+            "document_upload_status": doc.upload_status,
+        }
+    )
+
+
+@csrf_exempt
+@login_required
+def upload_finalize(request, doc_id: int):
+    deny = _require_admin(request)
+    if deny:
+        return deny
+
+    payload, success, err = _parse_upload_success_payload(request)
+    if err:
+        return err
+
+    try:
+        doc = Document.objects.get(id=doc_id)
+    except Document.DoesNotExist:
+        return JsonResponse({"error": "not found"}, status=404)
+
+    if not is_multi_image_document(doc):
+        return JsonResponse(
+            {"error": "not a multi-image document", "document_id": doc.id},
+            status=400,
+        )
+
+    if doc.upload_status == Document.UploadStatus.FAILED:
+        return _multi_image_upload_terminal_failed_response(doc)
+
+    if not success:
+        raw_err = (payload.get("error") or "upload finalize failed")
+        err = str(raw_err).strip() or "upload finalize failed"
+        doc.upload_status = Document.UploadStatus.FAILED
+        doc.upload_error = err
+        doc.processing_state_user = Document.ProcessingState.FAILED
+        doc.save(update_fields=["upload_status", "upload_error", "processing_state_user"])
+        return _finalize_response(doc)
+
+    ready, ready_err = all_expected_source_files_uploaded(doc)
+    if not ready:
+        return JsonResponse(
+            {"error": ready_err, "document_id": doc.id},
+            status=400,
+        )
+
+    primary = get_source_file_for_order(doc, 0)
+    if primary is None:
+        return JsonResponse(
+            {"error": "primary source file missing", "document_id": doc.id},
+            status=400,
+        )
+
+    mirror_primary_document_from_source_file(doc, primary)
+    doc.upload_status = Document.UploadStatus.UPLOADED
+    doc.upload_error = None
+    doc.processing_state_user = Document.ProcessingState.PARTIAL
+    doc.save(
+        update_fields=[
+            "file_s3_key",
+            "file_original_name",
+            "mime_type",
+            "size_bytes",
+            "upload_status",
+            "upload_error",
+            "processing_state_user",
+        ]
+    )
+
+    return _finalize_response(doc)
 
 
 @login_required

@@ -6,6 +6,16 @@ urlpatterns = [
     path(
         "uploads/<int:doc_id>/complete/", views.upload_complete, name="uploads-complete"
     ),
+    path(
+        "uploads/<int:doc_id>/parts/<int:order_index>/complete/",
+        views.upload_part_complete,
+        name="uploads-part-complete",
+    ),
+    path(
+        "uploads/<int:doc_id>/finalize/",
+        views.upload_finalize,
+        name="uploads-finalize",
+    ),
     path("documents/", views.documents_list_api, name="documents-list-api"),
     path("ui/documents/", views.documents_list_page, name="documents-list-page"),
     path(
