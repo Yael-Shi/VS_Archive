@@ -14,6 +14,30 @@
 - A dedicated design note was added at `docs/ai-context/text-image-hover-design.md`.
 - This entry does **not** make final schema, UI, API, model, or persistence decisions; those remain open for later implementation PRs.
 
+## DocumentSourceFile — multi-image source identity foundation (PR1)
+
+**Decision:** Add **`DocumentSourceFile`** as the ordered source-file identity layer for future multi-image documents. One row per source file per logical **`Document`**.
+
+**Scope (PR1):** Django model + migration + model tests + this log entry only. **No** upload API changes, **no** worker/OCR/routing/adapter changes, **no** review/source-preview UI changes, **no** backfill of existing documents, **no** admin changes.
+
+### Fields and constraints
+
+- **`document`** FK (`related_name="source_files"`, CASCADE).
+- **`order_index`** — zero-based internal ordering; UI may show **`order_index + 1`** in a later PR.
+- **`file_s3_key`**, **`file_original_name`**, **`mime_type`**, **`size_bytes`**, **`created_at`**, **`updated_at`** — mirror single-file metadata shape on **`Document`**.
+- **`unique(document, order_index)`**, **`unique(document, file_s3_key)`**, **`CheckConstraint(order_index >= 0)`**, **`Meta.ordering = ["order_index"]`**.
+- V1 product direction is **multiple IMAGE source files only**; **MIME/image validation is deferred** to the upload flow (not enforced on the model in PR1).
+
+### Coexistence with `Document.file_*`
+
+- Existing **`Document.file_s3_key`**, **`file_original_name`**, **`mime_type`**, **`size_bytes`** remain unchanged and are still what upload/worker/UI use today.
+- Long-term direction is **`DocumentSourceFile`** as canonical ordered source representation; cutover/dual-write is a **later** PR.
+- **`DocumentTextResult`** stays **document-level**; no page-level text results in this foundation.
+
+### Deferred
+
+- Upload ingest creating **`DocumentSourceFile`** rows, worker input from **`source_files`**, ordered review preview, geometry/hover, role/checksum/upload_status fields, backfill/migration of legacy single-file documents.
+
 ## Current state — OCR/HTR and Transkribus (read this first)
 
 **Last aligned:** production-gated Hebrew handwritten Transkribus routing + OCR/HTR review lifecycle behavior.

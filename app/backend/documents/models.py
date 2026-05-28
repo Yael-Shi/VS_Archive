@@ -404,3 +404,53 @@ class TranskribusRun(models.Model):
             f"TranskribusRun(doc={self.document_id}, status={self.status}, "
             f"remote_doc_id={doc_part})"
         )
+
+
+class DocumentSourceFile(models.Model):
+    """
+    One ordered source file belonging to a logical Document.
+
+    V1 product scope (future PRs): multiple IMAGE source files per document only.
+    ``order_index`` is zero-based; UI may display ``order_index + 1`` later.
+    """
+
+    document = models.ForeignKey(
+        Document,
+        on_delete=models.CASCADE,
+        related_name="source_files",
+    )
+
+    order_index = models.IntegerField(
+        help_text="Zero-based position among this document's source files.",
+    )
+
+    file_s3_key = models.CharField(max_length=1024)
+    file_original_name = models.CharField(max_length=512, blank=True, default="")
+    mime_type = models.CharField(max_length=128, blank=True, default="")
+    size_bytes = models.BigIntegerField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["order_index"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["document", "order_index"],
+                name="uniq_document_sourcefile_order",
+            ),
+            models.UniqueConstraint(
+                fields=["document", "file_s3_key"],
+                name="uniq_document_sourcefile_s3_key",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(order_index__gte=0),
+                name="dsf_order_index_gte_0",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return (
+            f"DocumentSourceFile(doc={self.document_id}, "
+            f"order_index={self.order_index})"
+        )
