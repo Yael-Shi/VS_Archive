@@ -90,6 +90,15 @@ class Document(models.Model):
     size_bytes = models.BigIntegerField(null=True, blank=True)
     upload_error = models.TextField(null=True, blank=True)
 
+    expected_source_file_count = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Planned multi-image source file count when set at create; "
+            "null for legacy single-file documents."
+        ),
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -414,6 +423,11 @@ class DocumentSourceFile(models.Model):
     ``order_index`` is zero-based; UI may display ``order_index + 1`` later.
     """
 
+    class UploadStatus(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        UPLOADED = "UPLOADED", "Uploaded"
+        FAILED = "FAILED", "Failed"
+
     document = models.ForeignKey(
         Document,
         on_delete=models.CASCADE,
@@ -428,6 +442,13 @@ class DocumentSourceFile(models.Model):
     file_original_name = models.CharField(max_length=512, blank=True, default="")
     mime_type = models.CharField(max_length=128, blank=True, default="")
     size_bytes = models.BigIntegerField(null=True, blank=True)
+
+    upload_status = models.CharField(
+        max_length=16,
+        choices=UploadStatus.choices,
+        default=UploadStatus.PENDING,
+    )
+    upload_error = models.TextField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
