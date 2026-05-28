@@ -12,12 +12,13 @@ from unittest.mock import Mock, patch
 import requests
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import IntegrityError
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 from PIL import Image
 
 from documents.management.commands.run_worker import Command
-from documents.models import Document, DocumentTextResult, TranskribusRun
+from documents.models import Document, DocumentSourceFile, DocumentTextResult, TranskribusRun
 from documents.services.env_validation import validate_required_env
 from documents.services.transkribus_engine import PylaiaTranscriptionOutcome
 from documents.services.gemini_engine import GeminiError, GeminiResult
@@ -2768,6 +2769,135 @@ class TranskribusRunModelTests(TestCase):
             {choice.value for choice in TranskribusRun.Mode},
             expected,
         )
+
+
+class DocumentSourceFileModelTests(TestCase):
+    def _create_document(self) -> Document:
+        return Document.objects.create(
+            title="Source file test doc",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADED,
+        )
+
+    def test_create_source_file_with_metadata(self):
+        doc = self._create_document()
+        source = DocumentSourceFile.objects.create(
+            document=doc,
+            order_index=0,
+            file_s3_key="uploads/1/page-0.jpg",
+            file_original_name="scan-001.jpg",
+            mime_type="image/jpeg",
+            size_bytes=12345,
+        )
+        self.assertEqual(source.document_id, doc.id)
+        self.assertEqual(source.order_index, 0)
+        self.assertEqual(source.file_s3_key, "uploads/1/page-0.jpg")
+        self.assertEqual(source.file_original_name, "scan-001.jpg")
+        self.assertEqual(source.mime_type, "image/jpeg")
+        self.assertEqual(source.size_bytes, 12345)
+
+    def test_default_ordering_by_order_index(self):
+        doc = self._create_document()
+        DocumentSourceFile.objects.create(
+            document=doc,
+            order_index=2,
+            file_s3_key="uploads/1/page-2.jpg",
+        )
+        DocumentSourceFile.objects.create(
+            document=doc,
+            order_index=0,
+            file_s3_key="uploads/1/page-0.jpg",
+        )
+        DocumentSourceFile.objects.create(
+            document=doc,
+            order_index=1,
+            file_s3_key="uploads/1/page-1.jpg",
+        )
+        ordered = list(doc.source_files.all())
+        self.assertEqual([row.order_index for row in ordered], [0, 1, 2])
+
+    def test_unique_order_index_per_document(self):
+        doc = self._create_document()
+        DocumentSourceFile.objects.create(
+            document=doc,
+            order_index=0,
+            file_s3_key="uploads/1/page-0.jpg",
+        )
+        with self.assertRaises(IntegrityError):
+            DocumentSourceFile.objects.create(
+                document=doc,
+                order_index=0,
+                file_s3_key="uploads/1/page-0-dup.jpg",
+            )
+
+    def test_same_order_index_allowed_across_documents(self):
+        doc_a = self._create_document()
+        doc_b = self._create_document()
+        DocumentSourceFile.objects.create(
+            document=doc_a,
+            order_index=0,
+            file_s3_key="uploads/a/page-0.jpg",
+        )
+        DocumentSourceFile.objects.create(
+            document=doc_b,
+            order_index=0,
+            file_s3_key="uploads/b/page-0.jpg",
+        )
+        self.assertEqual(DocumentSourceFile.objects.filter(order_index=0).count(), 2)
+
+    def test_unique_file_s3_key_per_document(self):
+        doc = self._create_document()
+        DocumentSourceFile.objects.create(
+            document=doc,
+            order_index=0,
+            file_s3_key="uploads/1/shared.jpg",
+        )
+        with self.assertRaises(IntegrityError):
+            DocumentSourceFile.objects.create(
+                document=doc,
+                order_index=1,
+                file_s3_key="uploads/1/shared.jpg",
+            )
+
+    def test_same_file_s3_key_allowed_across_documents(self):
+        doc_a = self._create_document()
+        doc_b = self._create_document()
+        shared_key = "uploads/shared-key.jpg"
+        DocumentSourceFile.objects.create(
+            document=doc_a,
+            order_index=0,
+            file_s3_key=shared_key,
+        )
+        DocumentSourceFile.objects.create(
+            document=doc_b,
+            order_index=0,
+            file_s3_key=shared_key,
+        )
+        self.assertEqual(
+            DocumentSourceFile.objects.filter(file_s3_key=shared_key).count(),
+            2,
+        )
+
+    def test_cascade_delete_from_document(self):
+        doc = self._create_document()
+        source = DocumentSourceFile.objects.create(
+            document=doc,
+            order_index=0,
+            file_s3_key="uploads/1/page-0.jpg",
+        )
+        source_id = source.id
+        doc.delete()
+        self.assertFalse(DocumentSourceFile.objects.filter(id=source_id).exists())
+
+    def test_negative_order_index_rejected_by_db_constraint(self):
+        doc = self._create_document()
+        with self.assertRaises(IntegrityError):
+            DocumentSourceFile.objects.create(
+                document=doc,
+                order_index=-1,
+                file_s3_key="uploads/1/page-invalid.jpg",
+            )
 
 
 class TranskribusRunPersistenceServiceTests(TestCase):
