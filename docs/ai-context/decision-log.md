@@ -7,6 +7,13 @@
 - A dedicated design note was added at `docs/ai-context/multi-image-documents-design.md`.
 - This log entry does **not** make final schema or upload/API decisions; those remain open for later implementation PRs.
 
+## Future design note — text-to-source hover/highlight in review (not implemented)
+
+- This entry records a **future design exploration only**. No behavior is implemented in this PR.
+- Source input from QA: reviewers had trouble locating the matching source line while editing/checking transcription text.
+- A dedicated design note was added at `docs/ai-context/text-image-hover-design.md`.
+- This entry does **not** make final schema, UI, API, model, or persistence decisions; those remain open for later implementation PRs.
+
 ## Current state — OCR/HTR and Transkribus (read this first)
 
 **Last aligned:** production-gated Hebrew handwritten Transkribus routing + OCR/HTR review lifecycle behavior.
