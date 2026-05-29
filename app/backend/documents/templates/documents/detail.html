@@ -253,6 +253,24 @@
         <div class="muted">
           אין קובץ להצגה (העלאה נכשלה).
         </div>
+      {% elif source_preview_items or source_preview_unavailable_count %}
+        {% for item in source_preview_items %}
+          <div style="margin-top: 12px;">
+            <div class="muted" style="font-size: 13px; margin-bottom: 6px;">
+              עמוד {{ item.display_number }}{% if item.original_name %} — {{ item.original_name }}{% endif %}
+            </div>
+            {% if item.url %}
+              <img src="{{ item.url }}" alt="עמוד {{ item.display_number }}" style="max-width: 100%; border-radius: 14px; border: 1px solid rgba(0,0,0,0.1);" />
+            {% else %}
+              <div class="muted">לא ניתן לטעון תצוגה מקדימה לעמוד זה.</div>
+            {% endif %}
+          </div>
+        {% endfor %}
+        {% if source_preview_unavailable_count %}
+          <div class="muted" style="margin-top: 10px; font-size: 13px;">
+            חלק מהעמודים אינם זמינים לתצוגה מקדימה עדיין.
+          </div>
+        {% endif %}
       {% elif not content_url %}
         <div class="muted">
           אין קובץ לצפייה עדיין.

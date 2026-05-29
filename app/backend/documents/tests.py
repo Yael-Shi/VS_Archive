@@ -13,7 +13,7 @@ import requests
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import IntegrityError
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 from PIL import Image
 
@@ -5051,6 +5051,302 @@ class ReviewBacklogServiceTests(SimpleTestCase):
         )
         row.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
         self.assertFalse(is_review_editable_text_result(row))
+
+
+@override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+class SourcePreviewTests(TestCase):
+    """Read-only multi-image source preview on detail + review detail (PR5)."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+
+        self.staff = User.objects.create_user(
+            username="preview_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+
+    def _detail_url(self, doc_id: int) -> str:
+        return f"/api/ui/documents/{doc_id}/"
+
+    def _review_url(self, doc_id: int) -> str:
+        return f"/api/ui/admin/review/{doc_id}/"
+
+    def _single_file_doc(self):
+        doc = Document.objects.create(
+            title="Legacy single",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.READY,
+            file_s3_key="documents/1/original.jpg",
+            file_original_name="original.jpg",
+            mime_type="image/jpeg",
+        )
+        # PR2 dual-write leaves a source_files[0] row even for single-file docs.
+        DocumentSourceFile.objects.create(
+            document=doc,
+            order_index=0,
+            file_s3_key=doc.file_s3_key,
+            file_original_name=doc.file_original_name,
+            mime_type=doc.mime_type,
+            upload_status=DocumentSourceFile.UploadStatus.UPLOADED,
+        )
+        return doc
+
+    def _multi_image_doc(self, *, count=3, expected=None, language=Document.Language.HEBREW):
+        doc = Document.objects.create(
+            title="Multi image",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            language=language,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.READY,
+            file_s3_key=f"documents/9/source/0.png",
+            file_original_name="page-0.png",
+            mime_type="image/png",
+            expected_source_file_count=expected if expected is not None else count,
+        )
+        return doc
+
+    def _add_source(self, doc, order_index, *, upload_status=DocumentSourceFile.UploadStatus.UPLOADED):
+        return DocumentSourceFile.objects.create(
+            document=doc,
+            order_index=order_index,
+            file_s3_key=f"documents/{doc.id}/source/{order_index}.png",
+            file_original_name=f"page-{order_index}.png",
+            mime_type="image/png",
+            upload_status=upload_status,
+        )
+
+    # ----- legacy single-file (fallback path unchanged) -----
+
+    @patch("documents.services.source_files.create_presigned_get")
+    @patch("documents.views.create_presigned_get", return_value="https://example/legacy")
+    def test_legacy_single_file_detail_preview_unchanged(self, mock_view_get, mock_helper_get):
+        doc = self._single_file_doc()
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "https://example/legacy")
+        # legacy single-file documents must NOT use the source_files preview path
+        self.assertNotContains(resp, "עמוד 1")
+        mock_view_get.assert_called_once_with(
+            bucket="test-bucket", key=doc.file_s3_key, expires_in=3600
+        )
+        mock_helper_get.assert_not_called()
+
+    @patch("documents.services.source_files.create_presigned_get")
+    @patch("documents.views.create_presigned_get", return_value="https://example/legacy")
+    def test_legacy_single_file_review_detail_preview_unchanged(
+        self, mock_view_get, mock_helper_get
+    ):
+        doc = self._single_file_doc()
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._review_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "https://example/legacy")
+        self.assertNotContains(resp, "עמוד 1")
+        mock_view_get.assert_called_once_with(
+            bucket="test-bucket", key=doc.file_s3_key, expires_in=3600
+        )
+        mock_helper_get.assert_not_called()
+
+    def test_single_file_source_files_not_used_avoids_duplicate_first_preview(self):
+        doc = self._single_file_doc()
+        with patch(
+            "documents.views.create_presigned_get", return_value="https://example/legacy"
+        ):
+            self.client.force_login(self.staff)
+            resp = self.client.get(self._detail_url(doc.id))
+        body = resp.content.decode()
+        # legacy single-file path is used (no source_files preview), so the first file
+        # is not previewed twice via both Document.file_s3_key and source_files[0].
+        self.assertEqual(resp.context["source_preview_items"], [])
+        self.assertNotIn("עמוד 1", body)
+        # legacy single <img> still rendered from content_url
+        self.assertContains(resp, "https://example/legacy")
+
+    # ----- multi-image preview path -----
+
+    @patch("documents.views.create_presigned_get")
+    @patch("documents.services.source_files.create_presigned_get")
+    def test_multi_image_detail_shows_ordered_preview_items(
+        self, mock_helper_get, mock_view_get
+    ):
+        mock_helper_get.side_effect = lambda **kw: f"https://example/{kw['key']}"
+        doc = self._multi_image_doc(count=3)
+        for i in range(3):
+            self._add_source(doc, i)
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertIn("עמוד 1 — page-0.png", body)
+        self.assertIn("עמוד 2 — page-1.png", body)
+        self.assertIn("עמוד 3 — page-2.png", body)
+        # ordered by order_index
+        self.assertLess(body.index("עמוד 1"), body.index("עמוד 2"))
+        self.assertLess(body.index("עמוד 2"), body.index("עמוד 3"))
+        # multi-image documents do not generate the legacy single content_url
+        mock_view_get.assert_not_called()
+        self.assertEqual(mock_helper_get.call_count, 3)
+
+    @patch("documents.views.create_presigned_get")
+    @patch("documents.services.source_files.create_presigned_get")
+    def test_multi_image_review_detail_shows_ordered_preview_items(
+        self, mock_helper_get, mock_view_get
+    ):
+        mock_helper_get.side_effect = lambda **kw: f"https://example/{kw['key']}"
+        doc = self._multi_image_doc(count=3)
+        for i in range(3):
+            self._add_source(doc, i)
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._review_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertIn("עמוד 1 — page-0.png", body)
+        self.assertIn("עמוד 2 — page-1.png", body)
+        self.assertIn("עמוד 3 — page-2.png", body)
+        self.assertLess(body.index("עמוד 1"), body.index("עמוד 2"))
+        self.assertLess(body.index("עמוד 2"), body.index("עמוד 3"))
+        mock_view_get.assert_not_called()
+        self.assertEqual(mock_helper_get.call_count, 3)
+
+    def test_display_numbers_are_one_based(self):
+        from documents.services.source_files import build_source_preview
+
+        doc = self._multi_image_doc(count=2)
+        self._add_source(doc, 0)
+        self._add_source(doc, 1)
+        with patch(
+            "documents.services.source_files.create_presigned_get",
+            side_effect=lambda **kw: f"https://example/{kw['key']}",
+        ):
+            preview = build_source_preview(doc, "test-bucket")
+        self.assertEqual([i["display_number"] for i in preview.items], [1, 2])
+        self.assertEqual([i["order_index"] for i in preview.items], [0, 1])
+
+    @patch("documents.services.source_files.create_presigned_get")
+    def test_only_uploaded_source_files_are_previewed(self, mock_helper_get):
+        mock_helper_get.side_effect = lambda **kw: f"https://example/{kw['key']}"
+        doc = self._multi_image_doc(count=3, expected=3)
+        self._add_source(doc, 0, upload_status=DocumentSourceFile.UploadStatus.UPLOADED)
+        self._add_source(doc, 1, upload_status=DocumentSourceFile.UploadStatus.PENDING)
+        self._add_source(doc, 2, upload_status=DocumentSourceFile.UploadStatus.FAILED)
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.context["source_preview_items"]), 1)
+        self.assertEqual(resp.context["source_preview_unavailable_count"], 2)
+        # one presigned GET per displayed uploaded source file
+        self.assertEqual(mock_helper_get.call_count, 1)
+
+    @patch("documents.services.source_files.create_presigned_get")
+    def test_pending_failed_source_files_show_single_unavailable_note(self, mock_helper_get):
+        mock_helper_get.side_effect = lambda **kw: f"https://example/{kw['key']}"
+        doc = self._multi_image_doc(count=3, expected=3)
+        self._add_source(doc, 0, upload_status=DocumentSourceFile.UploadStatus.UPLOADED)
+        self._add_source(doc, 1, upload_status=DocumentSourceFile.UploadStatus.PENDING)
+        self._add_source(doc, 2, upload_status=DocumentSourceFile.UploadStatus.FAILED)
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+        body = resp.content.decode()
+        note = "חלק מהעמודים אינם זמינים לתצוגה מקדימה עדיין."
+        self.assertEqual(body.count(note), 1)
+
+    @patch("documents.views.create_presigned_get")
+    @patch("documents.services.source_files.create_presigned_get")
+    def test_no_uploaded_source_files_still_shows_unavailable_note(
+        self, mock_helper_get, mock_view_get
+    ):
+        doc = self._multi_image_doc(count=2, expected=2)
+        self._add_source(doc, 0, upload_status=DocumentSourceFile.UploadStatus.PENDING)
+        self._add_source(doc, 1, upload_status=DocumentSourceFile.UploadStatus.FAILED)
+        self.client.force_login(self.staff)
+        note = "חלק מהעמודים אינם זמינים לתצוגה מקדימה עדיין."
+
+        for url in (self._detail_url(doc.id), self._review_url(doc.id)):
+            with self.subTest(url=url):
+                resp = self.client.get(url)
+                self.assertEqual(resp.status_code, 200)
+                self.assertEqual(resp.context["source_preview_items"], [])
+                self.assertEqual(resp.context["source_preview_unavailable_count"], 2)
+                body = resp.content.decode()
+                self.assertEqual(body.count(note), 1)
+
+        # no uploaded files -> no presigned GET, and legacy content_url not used
+        mock_helper_get.assert_not_called()
+        mock_view_get.assert_not_called()
+
+    @patch("documents.services.source_files.create_presigned_get")
+    def test_presigned_get_called_once_per_displayed_uploaded_source_file(
+        self, mock_helper_get
+    ):
+        mock_helper_get.side_effect = lambda **kw: f"https://example/{kw['key']}"
+        doc = self._multi_image_doc(count=4, expected=4)
+        for i in range(4):
+            self._add_source(doc, i)
+        self.client.force_login(self.staff)
+        self.client.get(self._detail_url(doc.id))
+        self.assertEqual(mock_helper_get.call_count, 4)
+        called_keys = {c.kwargs["key"] for c in mock_helper_get.call_args_list}
+        self.assertEqual(
+            called_keys,
+            {f"documents/{doc.id}/source/{i}.png" for i in range(4)},
+        )
+
+    @patch("documents.services.source_files.create_presigned_get")
+    def test_presigned_get_failure_for_one_item_does_not_500(self, mock_helper_get):
+        def _fake(**kw):
+            if kw["key"].endswith("/1.png"):
+                raise RuntimeError("boom")
+            return f"https://example/{kw['key']}"
+
+        mock_helper_get.side_effect = _fake
+        doc = self._multi_image_doc(count=3, expected=3)
+        for i in range(3):
+            self._add_source(doc, i)
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        # other items still render; the failing one shows a muted per-item placeholder
+        self.assertIn(f"https://example/documents/{doc.id}/source/0.png", body)
+        self.assertIn("לא ניתן לטעון תצוגה מקדימה לעמוד זה.", body)
+
+    @patch("documents.services.source_files.create_presigned_get")
+    def test_multi_image_preview_get_does_not_mutate_state(self, mock_helper_get):
+        mock_helper_get.side_effect = lambda **kw: f"https://example/{kw['key']}"
+        doc = self._multi_image_doc(count=2, expected=2)
+        for i in range(2):
+            self._add_source(doc, i)
+        row = DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="transkribus-pylaia:1",
+            engine_key=DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="שורה",
+        )
+        before_results = DocumentTextResult.objects.count()
+        before_sources = DocumentSourceFile.objects.count()
+        self.client.force_login(self.staff)
+        self.client.get(self._detail_url(doc.id))
+        self.client.get(self._review_url(doc.id))
+        self.assertEqual(DocumentTextResult.objects.count(), before_results)
+        self.assertEqual(DocumentSourceFile.objects.count(), before_sources)
+        row.refresh_from_db()
+        self.assertEqual(row.status, DocumentTextResult.Status.NEEDS_REVIEW)
+        self.assertEqual(
+            row.verification_status, DocumentTextResult.VerificationStatus.UNVERIFIED
+        )
+        doc.refresh_from_db()
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.READY)
+        self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADED)
 
 
 class ReviewUiTests(TestCase):
