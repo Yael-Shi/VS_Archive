@@ -141,6 +141,31 @@
 
 - **Out of scope:** upload UI / file-input changes, worker/OCR/HTR/adapter/routing changes, review/verification semantic changes, `DocumentTextResult` / page-level text changes, hover/highlight, migrations, AWS/CDK/settings, public API changes, PDF preview changes (PDFs stay on the legacy path), broad visual redesign, tabs/JS/anchors.
 
+## Multi-image upload — admin UI (PR6)
+
+**Decision:** Make the existing **admin** upload page (`documents/templates/documents/upload.html`) able to create multi-image documents through the already-existing PR3/PR4 backend API. **Template + inline JS only.** **No** backend, worker, OCR/HTR, routing, review/verification semantic, `DocumentTextResult`, source-preview, schema, or public API contract changes.
+
+### Behavior
+
+- The single file input now has the **`multiple`** attribute. Client-side branching is by selection count:
+  - **1 file** → unchanged **legacy single-file flow** (`create` → presigned `PUT` → `complete/`); image **or** PDF, exactly as before. No confirmation prompt.
+  - **2–20 files** → **multi-image flow** (`create` with `files[]` → `PUT` each part → `parts/<order_index>/complete/` each → `finalize/`).
+- **Selection order is the document page order.** The selected files are listed (multi-image case only) as 1-based `עמוד N: <original_name>`. **No reorder controls and no drag/drop.**
+- Multi-image is **image-only**: 2+ selections are validated client-side — any non-`image/*` file or **>20** files is rejected **before** any API call (mirrors the backend rules; backend remains the enforcer). No PDF+image mixed selection, no multi-PDF.
+- For a 2+ selection the page forces **`doc_type=IMAGE`** (multi-image create requires/assumes `IMAGE`), so the user does not separately pick `doc_type`.
+- Shared metadata (`title`, `date_*`, `language`, `text_input_type`, `category_event`, `visibility`, `tags`, `admin_meta`) applies to the **whole `Document`**; per-file payload is only `original_name`, `mime_type`, `size_bytes` inside `files[]`.
+- Progress reuses the existing `#msg` status area: "יוצרת מסמך…", "מעלה עמוד K מתוך N…", "מאשרת עמוד K מתוך N…", "מסיימת מסמך…", success → redirect to the document detail page.
+- **Failed-part behavior (terminal in V1):** on an S3 `PUT` failure (or network error) the UI best-effort calls `parts/<order_index>/complete/` with `{ success:false, error }` so the backend marks the upload `FAILED`, then **stops** and shows a Hebrew message that the multi-image upload failed and must be **restarted**. **No per-part retry/replace.**
+- The `capture` attribute is no longer set on the file input (it conflicts with multi-select); `accept` mode handling by `doc_type` is otherwise unchanged.
+
+### Tests
+
+- `UploadPageTemplateTests` in `documents/tests.py` (template-render only): file input renders `multiple`; multi-image explanatory Hebrew copy present; key metadata fields still rendered; JS references `/parts/` and `/finalize/`; upload page remains admin-only (403 for non-admin). Existing backend multi-image API tests (`UploadApiTests`) are unchanged and not duplicated.
+
+### Scope / stop lines (PR6)
+
+- **Out of scope:** worker / OCR/HTR / adapter / routing changes, review/verification semantic changes, `DocumentTextResult` / page-level text results, hover/highlight, source-preview changes, migrations, AWS/CDK/settings, public API contract changes, PDF+image mixed upload, multi-PDF, per-part retry/replace, drag-drop/reordering, broad visual redesign. `views.py` `upload_page` context was already sufficient and was not changed.
+
 ## Current state — OCR/HTR and Transkribus (read this first)
 
 **Last aligned:** production-gated Hebrew handwritten Transkribus routing + OCR/HTR review lifecycle behavior.
