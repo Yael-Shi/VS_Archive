@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import logging
+from dataclasses import dataclass, field
 from typing import List, Optional
 
 from documents.models import Document, DocumentSourceFile
+from documents.s3 import create_presigned_get
+
+logger = logging.getLogger(__name__)
 
 MULTI_IMAGE_MIN_FILES = 2
 MULTI_IMAGE_MAX_FILES = 20
@@ -151,3 +156,71 @@ def get_ordered_source_files_for_processing(
         ordered.append(source)
 
     return ordered
+
+
+@dataclass
+class SourcePreview:
+    """Read-only source-preview context for the document/review detail UI."""
+
+    items: List[dict] = field(default_factory=list)
+    non_uploaded_count: int = 0
+
+
+def build_source_preview(
+    document: Document,
+    bucket: str,
+    expires_in: int = 3600,
+) -> SourcePreview:
+    """
+    Build read-only, ordered source-image preview items for a multi-image document.
+
+    Returns an empty ``SourcePreview`` for non-multi-image documents so callers keep
+    their existing single-file ``content_url`` behavior unchanged. Only
+    ``upload_status=UPLOADED`` source files get a preview entry; any other rows are
+    counted in ``non_uploaded_count`` so the UI can show one muted note instead of
+    rendering broken placeholders.
+
+    Presigned GET generation is guarded per item: a failure for one file yields
+    ``url=None`` (a muted placeholder in the template) rather than raising.
+    """
+    if not is_multi_image_document(document):
+        return SourcePreview()
+
+    items: List[dict] = []
+    non_uploaded_count = 0
+
+    for source in document.source_files.all():
+        if source.upload_status != DocumentSourceFile.UploadStatus.UPLOADED:
+            non_uploaded_count += 1
+            continue
+
+        url: Optional[str] = None
+        if bucket and (source.file_s3_key or "").strip():
+            try:
+                url = create_presigned_get(
+                    bucket=bucket,
+                    key=source.file_s3_key,
+                    expires_in=expires_in,
+                )
+            except Exception:
+                logger.exception(
+                    "source preview presigned GET failed",
+                    extra={
+                        "document_id": document.id,
+                        "order_index": source.order_index,
+                    },
+                )
+                url = None
+
+        items.append(
+            {
+                "display_number": source.order_index + 1,
+                "order_index": source.order_index,
+                "url": url,
+                "mime_type": source.mime_type,
+                "original_name": source.file_original_name,
+                "upload_status": source.upload_status,
+            }
+        )
+
+    return SourcePreview(items=items, non_uploaded_count=non_uploaded_count)

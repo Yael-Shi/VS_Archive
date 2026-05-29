@@ -120,6 +120,27 @@
 
 - **Out of scope:** upload UI, source-preview/review UI, hover/highlight, page-level `DocumentTextResult`, PDF/mixed files in multi-image (images only), per-part retry/replace, retry/backoff/DLQ redesign, schema/migration changes.
 
+## Multi-image source preview — read-only UI (PR5)
+
+**Decision:** Add **read-only** ordered source-image preview to the document detail page and the transcription review detail page for multi-image documents. **No** upload UI, worker, OCR/HTR, routing, review/verification semantic, `DocumentTextResult`, hover/highlight, or schema changes.
+
+### Behavior
+
+- New helper **`build_source_preview(document, bucket, expires_in=3600)`** in `documents/services/source_files.py` returns a `SourcePreview(items, non_uploaded_count)`.
+- **`source_files` is used only for multi-image documents** (`is_multi_image_document(doc)` / `expected_source_file_count >= 2`). For non-multi-image documents the helper returns empty and both views keep the **existing `content_url` single-file preview unchanged**.
+- **Legacy single-file documents are not switched** to the `source_files` rendering path even though PR2 dual-writes a `DocumentSourceFile(order_index=0)`. This prevents duplicate previews of the same first file via both `Document.file_s3_key` and `source_files[0]`.
+- Preview items are ordered by `order_index` (model `Meta.ordering`); UI shows 1-based **`display_number = order_index + 1`** with a muted `עמוד N — original_name` header.
+- **Only `upload_status=UPLOADED`** source files get a presigned GET / `<img>`. Any PENDING/FAILED/non-uploaded rows are counted (`non_uploaded_count`) and surfaced as **one muted note**; broken placeholders are not rendered per missing file.
+- Presigned GET is generated **per item and guarded**: a failure for one file yields `url=None` (muted per-item placeholder) and does not 500 the page.
+
+### Views
+
+- `document_detail_page` and `review_detail_page` prefetch `source_files`, call the helper, and pass `source_preview_items` + `source_preview_unavailable_count` to the templates. The legacy `content_url` is only generated for non-multi-image documents.
+
+### Scope / stop lines (PR5)
+
+- **Out of scope:** upload UI / file-input changes, worker/OCR/HTR/adapter/routing changes, review/verification semantic changes, `DocumentTextResult` / page-level text changes, hover/highlight, migrations, AWS/CDK/settings, public API changes, PDF preview changes (PDFs stay on the legacy path), broad visual redesign, tabs/JS/anchors.
+
 ## Current state — OCR/HTR and Transkribus (read this first)
 
 **Last aligned:** production-gated Hebrew handwritten Transkribus routing + OCR/HTR review lifecycle behavior.

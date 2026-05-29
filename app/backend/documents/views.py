@@ -29,6 +29,7 @@ from documents.services.source_files import (
     MULTI_IMAGE_MAX_FILES,
     MULTI_IMAGE_MIN_FILES,
     all_expected_source_files_uploaded,
+    build_source_preview,
     get_source_file_for_order,
     is_multi_image_document,
     mirror_primary_document_from_source_file,
@@ -1065,15 +1066,16 @@ def review_detail_page(request, doc_id: int):
 
     doc = get_object_or_404(
         Document.objects.select_related("admin_meta").prefetch_related(
-            "tags_m2m", "text_results", "transkribus_runs"
+            "tags_m2m", "text_results", "transkribus_runs", "source_files"
         ),
         id=doc_id,
     )
     admin_meta = getattr(doc, "admin_meta", None)
 
     bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
+    source_preview = build_source_preview(doc, bucket)
     content_url = None
-    if bucket and doc.file_s3_key:
+    if not is_multi_image_document(doc) and bucket and doc.file_s3_key:
         content_url = create_presigned_get(bucket=bucket, key=doc.file_s3_key, expires_in=3600)
 
     text_results = sorted(
@@ -1104,6 +1106,8 @@ def review_detail_page(request, doc_id: int):
         "doc": doc,
         "admin_meta": admin_meta,
         "content_url": content_url,
+        "source_preview_items": source_preview.items,
+        "source_preview_unavailable_count": source_preview.non_uploaded_count,
         "text_result_cards": text_result_cards,
         "latest_transkribus_run": latest_transkribus_run,
         "transkribus_run_count": len(transkribus_runs),
@@ -1203,7 +1207,7 @@ def document_detail_page(request, doc_id: int):
     try:
         doc = (
             Document.objects.select_related("admin_meta")
-            .prefetch_related("tags_m2m", "text_results")
+            .prefetch_related("tags_m2m", "text_results", "source_files")
             .get(id=doc_id)
         )
         admin_meta = getattr(doc, "admin_meta", None)
@@ -1211,9 +1215,10 @@ def document_detail_page(request, doc_id: int):
         return JsonResponse({"error": "not found"}, status=404)
 
     bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
+    source_preview = build_source_preview(doc, bucket)
     content_url = None
 
-    if bucket and doc.file_s3_key:
+    if not is_multi_image_document(doc) and bucket and doc.file_s3_key:
         content_url = create_presigned_get(bucket=bucket, key=doc.file_s3_key, expires_in=3600)
 
     text_presentation = get_text_presentation_for_document(doc)
@@ -1221,6 +1226,8 @@ def document_detail_page(request, doc_id: int):
     context = {
         "doc": doc,
         "content_url": content_url,
+        "source_preview_items": source_preview.items,
+        "source_preview_unavailable_count": source_preview.non_uploaded_count,
         "admin_meta": admin_meta,
         "text_presentation": text_presentation,
         "is_admin": _is_admin(request.user),
