@@ -62,3 +62,30 @@ def extract_pages(file_bytes: bytes, mime_type: Optional[str]) -> List[PageImage
         return [PageImage(page_index=1, image_bytes=png_bytes, mime_type=out_mt)]
 
     raise ValueError(f"Unsupported mime_type for page extraction: {mime_type!r}")
+
+
+def source_file_bytes_to_page(
+    order_index: int,
+    file_bytes: bytes,
+    mime_type: Optional[str],
+) -> PageImage:
+    """
+    Build one ``PageImage`` for a multi-image ``DocumentSourceFile``.
+
+    Multi-image V1 supports IMAGE source files only. Bytes are normalized to PNG, matching
+    the legacy single-image path (``extract_pages``). ``page_index`` is 1-based and contiguous
+    (``order_index + 1``) to preserve the existing PageImage convention and Transkribus pageNr
+    semantics; the source mapping is ``page_index - 1 == order_index``.
+    """
+    mt = (mime_type or "").strip().lower()
+    if not mt.startswith("image/"):
+        raise ValueError(
+            f"Unsupported mime_type for multi-image source file at order_index="
+            f"{order_index}: {mime_type!r} (images only in V1)"
+        )
+    png_bytes, out_mt = _normalize_image_to_png(file_bytes)
+    return PageImage(
+        page_index=order_index + 1,
+        image_bytes=png_bytes,
+        mime_type=out_mt,
+    )

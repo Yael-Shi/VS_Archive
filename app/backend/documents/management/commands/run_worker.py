@@ -18,7 +18,12 @@ from documents.services.expected_outputs import expected_result_types_for_docume
 from documents.services.htr_adapters.base import UnsupportedEngineError
 from documents.services.htr_engine import transcribe_pages
 from documents.services.ocr_routing import OcrRouteConfig, select_ocr_route
-from documents.services.page_extraction import extract_pages
+from documents.services.page_extraction import extract_pages, source_file_bytes_to_page
+from documents.services.source_files import (
+    MultiImageSourceFilesError,
+    get_ordered_source_files_for_processing,
+    is_multi_image_document,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +145,34 @@ class Command(BaseCommand):
         except Document.DoesNotExist:
             return True
 
+        # Pre-flight: multi-image source-file validation.
+        # Input-integrity failures here are distinct from OCR/HTR failures: mark the document
+        # FAILED, do not dispatch to adapters, and do not create misleading DocumentTextResult
+        # rows.
+        is_multi = is_multi_image_document(doc)
+        ordered_sources = None
+        if is_multi:
+            try:
+                ordered_sources = get_ordered_source_files_for_processing(doc)
+            except MultiImageSourceFilesError as e:
+                self.stderr.write(
+                    self.style.ERROR(
+                        f"Multi-image validation failed for doc {document_id}: {e}"
+                    )
+                )
+                logger.error(
+                    "multi-image source file validation failed",
+                    extra={"document_id": document_id},
+                )
+                try:
+                    with transaction.atomic():
+                        doc = Document.objects.select_for_update().get(id=document_id)
+                        doc.processing_state_user = Document.ProcessingState.FAILED
+                        doc.save(update_fields=["processing_state_user"])
+                except Document.DoesNotExist:
+                    pass
+                return True
+
         # Phase 2: Heavy work
         error: Optional[str] = None
         htr_result = None
@@ -148,9 +181,12 @@ class Command(BaseCommand):
 
         try:
             bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
-            file_bytes, s3_mime = get_object_bytes(bucket=bucket, key=doc.file_s3_key)
-            effective_mime = (doc.mime_type or s3_mime or "").strip()
-            pages = extract_pages(file_bytes=file_bytes, mime_type=effective_mime)
+            if is_multi:
+                pages = self._build_pages_from_source_files(bucket, ordered_sources or [])
+            else:
+                file_bytes, s3_mime = get_object_bytes(bucket=bucket, key=doc.file_s3_key)
+                effective_mime = (doc.mime_type or s3_mime or "").strip()
+                pages = extract_pages(file_bytes=file_bytes, mime_type=effective_mime)
 
             route = select_ocr_route(doc.language, doc.text_input_type)
             htr_result = transcribe_pages(
@@ -194,6 +230,26 @@ class Command(BaseCommand):
             pass
 
         return True
+
+    def _build_pages_from_source_files(self, bucket, ordered_sources):
+        """
+        Download each ordered ``DocumentSourceFile`` from S3 and build a PageImage list.
+
+        S3 I/O stays in the worker; ``source_file_bytes_to_page`` is the pure conversion that
+        normalizes bytes to PNG and assigns the page index. Pages are returned in
+        ``order_index`` order.
+        """
+        pages = []
+        for source in ordered_sources:
+            file_bytes, _s3_mime = get_object_bytes(bucket=bucket, key=source.file_s3_key)
+            pages.append(
+                source_file_bytes_to_page(
+                    order_index=source.order_index,
+                    file_bytes=file_bytes,
+                    mime_type=source.mime_type,
+                )
+            )
+        return pages
 
     # ------------------------------------------------------------------ DB Helpers
 

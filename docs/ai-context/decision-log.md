@@ -60,7 +60,7 @@
 
 - **`POST /api/uploads/create/`** — if **`files`** array is present → multi-image mode (2–20 **`image/*`** files only, server-assigned **`order_index`** from array order). Legacy single-file body/response unchanged when **`files`** is absent.
 - **`POST /api/uploads/<doc_id>/parts/<order_index>/complete/`** — mark one planned source file **`UPLOADED`** or **`FAILED`**; part failure marks parent **`Document.upload_status=FAILED`**.
-- **`POST /api/uploads/<doc_id>/finalize/`** — when all expected parts are **`UPLOADED`**, mirror **`order_index=0`** into **`Document.file_*`**, set **`Document.upload_status=UPLOADED`**, set **`Document.processing_state_user=PARTIAL`** (no **`ACTION_REQUIRED`** enum exists today), **do not enqueue SQS**.
+- **`POST /api/uploads/<doc_id>/finalize/`** — when all expected parts are **`UPLOADED`**, mirror **`order_index=0`** into **`Document.file_*`**, set **`Document.upload_status=UPLOADED`**, set **`Document.processing_state_user=PARTIAL`** (no **`ACTION_REQUIRED`** enum exists today), **do not enqueue SQS**. **[Superseded by PR4: the finalize success path now sets `PROCESSING` and enqueues `PROCESS_DOCUMENT`; see "Multi-image worker processing (PR4)" below.]**
 - Legacy **`POST .../complete/`** — unchanged for single-file docs; returns **400** for multi-image documents.
 
 ### V1 failed-part policy (terminal)
@@ -80,6 +80,45 @@
 - Multi-image upload UI (`upload.html`).
 - Per-part upload retry/replacement after a failed part (see V1 failed-part policy above).
 - Page-level text results, hover/highlight, routing changes.
+
+## Multi-image worker processing (PR4)
+
+**Decision:** Enable the worker to process finalized multi-image documents by building an ordered **`PageImage`** list from **`DocumentSourceFile`** rows, and enqueue multi-image documents on finalize. **No** UI, routing, adapter, or review/status semantic changes.
+
+### Worker input selection (`run_worker._process_message`)
+
+- **Legacy single-file documents are unchanged:** `Document.file_s3_key` → `get_object_bytes` → `extract_pages` → OCR/HTR. The legacy branch is selected whenever `is_multi_image_document(doc)` is false (i.e. `expected_source_file_count` is null or `< 2`).
+- **Multi-image documents** (`expected_source_file_count >= 2`): the worker reads `source_files` ordered by `order_index`, downloads each from S3 (`get_object_bytes`), and builds one `PageImage` per source file via `source_file_bytes_to_page`. The resulting ordered list flows into the **existing** `select_ocr_route` + `transcribe_pages` path. Output stays one document-level `DocumentTextResult` set (combined text from all pages). **No page-level text results.**
+- S3 I/O stays in the worker; `source_file_bytes_to_page` is a pure conversion (normalize bytes to PNG, assign page index).
+
+### `PageImage.page_index` convention (Decision)
+
+- Multi-image `page_index` is **1-based and contiguous**: `page_index = order_index + 1`. Source mapping is `page_index - 1 == order_index`.
+- **Rationale:** preserves the existing 1-based `PageImage` convention (legacy single image uses `page_index=1`) and Transkribus `pageNr` semantics (descriptor/pages-query derive `pageNr` from `page_index`; `pageNr=0` would be invalid). The product-facing `order_index` remains zero-based.
+
+### Pre-OCR validation and failure behavior (`get_ordered_source_files_for_processing`)
+
+- Before any OCR/HTR dispatch, multi-image input is validated: `expected_source_file_count >= 2`; a `DocumentSourceFile` exists for every `order_index` in `0..N-1` (contiguous); no extra/out-of-range rows (`order_index < 0` or `>= N`); each row is `upload_status=UPLOADED`; each row has a non-empty `file_s3_key`; each row is `image/*` (images only in V1).
+- **On validation failure** (`MultiImageSourceFilesError`): set **`Document.processing_state_user=FAILED`**, log a clear error, do **not** call OCR/HTR adapters, and do **not** create `DocumentTextResult` rows. These input-integrity failures are intentionally distinct from OCR/HTR pipeline failures (`_save_ocr_failure`), so no misleading text-result rows are written.
+
+### SQS enqueue on finalize (`upload_finalize`)
+
+- **Current behavior (supersedes PR3 for the success path):** on successful multi-image finalize, the document is set to **`processing_state_user=PROCESSING`** and a `PROCESS_DOCUMENT` message is enqueued (mirroring single-file `upload_complete`). PR3 previously left finalized multi-image documents at `PARTIAL` with no enqueue.
+- **Double-enqueue guard:** finalize only transitions state and enqueues when the document is not already `UPLOADED`. An idempotent finalize retry enqueues **once**. Failed-upload documents remain terminal `FAILED` and never enqueue.
+- **Enqueue failure** sets `Document.processing_state_user=FAILED`, records `upload_error`, and returns HTTP 500 (same shape as `upload_complete`).
+- Single-file `upload_complete` enqueue behavior is unchanged.
+
+### Routing / adapters (unchanged)
+
+- `select_ocr_route`, `transcribe_pages`, and both adapters already accept a multi-page `PageImage` list and combine output; no changes were needed. **No** Transkribus routing broadening, **no** Gemini fallback for Hebrew handwritten (still fails fast when `ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN=false`).
+
+### Processing-state rollup (unchanged)
+
+- `_update_processing_state` / `expected_result_types_for_document` are unchanged: Hebrew multi-image success → **`READY`**; non-Hebrew multi-image (only `SOURCE_TEXT` persisted, `HEBREW_TEXT` missing) → **`PARTIAL`** (intentional current policy); failures → `FAILED`/`PARTIAL` per existing semantics.
+
+### Scope / stop lines (PR4)
+
+- **Out of scope:** upload UI, source-preview/review UI, hover/highlight, page-level `DocumentTextResult`, PDF/mixed files in multi-image (images only), per-part retry/replace, retry/backoff/DLQ redesign, schema/migration changes.
 
 ## Current state — OCR/HTR and Transkribus (read this first)
 

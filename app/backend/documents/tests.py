@@ -2237,6 +2237,256 @@ class RunWorkerBehaviorTests(TestCase):
         self.assertNotIn("TRANSKRIBUS_DEV_OCR_ROUTE", src)
 
 
+def _png_bytes(color=(255, 0, 0)) -> bytes:
+    buf = BytesIO()
+    Image.new("RGB", (4, 4), color).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+class MultiImageWorkerTests(TestCase):
+    def setUp(self):
+        self.command = Command()
+        self.command._cfg = SimpleNamespace(
+            min_text_length=5,
+            gemini_double_pass=False,
+            gemini_consistency_min_ratio=0.85,
+            gemini_temperature=0.2,
+            gemini_top_k=40,
+            gemini_top_p=0.95,
+            gemini_max_output_tokens=8192,
+        )
+
+    def _make_doc(self, *, language, text_input_type, expected_count):
+        return Document.objects.create(
+            title="Multi-image doc",
+            doc_type=Document.DocType.IMAGE,
+            language=language,
+            text_input_type=text_input_type,
+            upload_status=Document.UploadStatus.UPLOADED,
+            expected_source_file_count=expected_count,
+        )
+
+    def _add_source(
+        self,
+        doc,
+        order_index,
+        *,
+        upload_status=DocumentSourceFile.UploadStatus.UPLOADED,
+        file_s3_key=None,
+        mime_type="image/png",
+    ):
+        return DocumentSourceFile.objects.create(
+            document=doc,
+            order_index=order_index,
+            file_s3_key=file_s3_key
+            if file_s3_key is not None
+            else f"documents/{doc.id}/source/{order_index}.png",
+            file_original_name=f"page-{order_index}.png",
+            mime_type=mime_type,
+            size_bytes=100 + order_index,
+            upload_status=upload_status,
+        )
+
+    def _message(self, doc) -> dict:
+        return {
+            "Body": json.dumps(
+                {"type": "PROCESS_DOCUMENT", "document_id": doc.id}
+            )
+        }
+
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    def test_multi_image_worker_builds_ordered_pages_with_one_based_page_index(
+        self, mock_transcribe, mock_get_object_bytes
+    ):
+        doc = self._make_doc(
+            language=Document.Language.ENGLISH,
+            text_input_type=Document.TextInputType.PRINTED,
+            expected_count=3,
+        )
+        # Create rows out of order to prove the worker orders by order_index.
+        self._add_source(doc, 2)
+        self._add_source(doc, 0)
+        self._add_source(doc, 1)
+
+        mock_get_object_bytes.side_effect = lambda bucket, key: (_png_bytes(), "image/png")
+        mock_transcribe.return_value = HtrResult(
+            text="combined text",
+            needs_review=False,
+            engine_name="gemini-2.0-flash",
+            review_reasons=[],
+        )
+
+        self.assertTrue(self.command._process_message(self._message(doc)))
+
+        # Each S3 key is read, in order_index order.
+        read_keys = [call.kwargs["key"] for call in mock_get_object_bytes.call_args_list]
+        self.assertEqual(
+            read_keys,
+            [
+                f"documents/{doc.id}/source/0.png",
+                f"documents/{doc.id}/source/1.png",
+                f"documents/{doc.id}/source/2.png",
+            ],
+        )
+
+        # The adapter receives the combined, ordered pages.
+        mock_transcribe.assert_called_once()
+        pages = mock_transcribe.call_args.kwargs["pages"]
+        self.assertEqual([p.page_index for p in pages], [1, 2, 3])
+        self.assertTrue(all(p.mime_type == "image/png" for p in pages))
+
+        result = DocumentTextResult.objects.get(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="gemini-2.0-flash",
+        )
+        self.assertEqual(result.status, DocumentTextResult.Status.NEEDS_REVIEW)
+        self.assertEqual(result.text, "combined text")
+        doc.refresh_from_db()
+        # Non-Hebrew: HEBREW_TEXT missing -> PARTIAL (intentional current policy).
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.PARTIAL)
+
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    def test_multi_image_hebrew_success_is_ready(
+        self, mock_transcribe, mock_get_object_bytes
+    ):
+        doc = self._make_doc(
+            language=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.PRINTED,
+            expected_count=2,
+        )
+        self._add_source(doc, 0)
+        self._add_source(doc, 1)
+
+        mock_get_object_bytes.side_effect = lambda bucket, key: (_png_bytes(), "image/png")
+        mock_transcribe.return_value = HtrResult(
+            text="טקסט עברי",
+            needs_review=False,
+            engine_name="gemini-2.0-flash",
+            review_reasons=[],
+        )
+
+        self.assertTrue(self.command._process_message(self._message(doc)))
+
+        self.assertTrue(
+            DocumentTextResult.objects.filter(
+                document=doc,
+                result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            ).exists()
+        )
+        doc.refresh_from_db()
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.READY)
+
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    def test_multi_image_hebrew_handwritten_does_not_fall_back_to_gemini(
+        self, mock_transcribe, mock_get_object_bytes
+    ):
+        doc = self._make_doc(
+            language=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            expected_count=2,
+        )
+        self._add_source(doc, 0)
+        self._add_source(doc, 1)
+
+        mock_get_object_bytes.side_effect = lambda bucket, key: (_png_bytes(), "image/png")
+
+        # Flag disabled (default): routing must fail explicitly, not route to Gemini.
+        with patch.dict(
+            os.environ,
+            {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "false"},
+            clear=False,
+        ):
+            self.assertTrue(self.command._process_message(self._message(doc)))
+
+        mock_transcribe.assert_not_called()
+        for r_type in (
+            DocumentTextResult.ResultType.SOURCE_TEXT,
+            DocumentTextResult.ResultType.HEBREW_TEXT,
+        ):
+            failure = DocumentTextResult.objects.get(
+                document=doc, result_type=r_type, engine="ocr-dispatch"
+            )
+            self.assertEqual(failure.status, DocumentTextResult.Status.FAILED)
+            self.assertEqual(failure.error_code, "OCR_ROUTING_INVALID")
+            self.assertEqual(failure.engine_key, "UNRESOLVED")
+            self.assertNotEqual(
+                failure.engine_key, DocumentTextResult.OcrEngineKey.GEMINI
+            )
+        doc.refresh_from_db()
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.FAILED)
+
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    def test_multi_image_validation_failures_mark_failed_without_ocr(
+        self, mock_transcribe, mock_get_object_bytes
+    ):
+        scenarios = {
+            "missing_row": "missing",
+            "pending": DocumentSourceFile.UploadStatus.PENDING,
+            "failed": DocumentSourceFile.UploadStatus.FAILED,
+            "empty_key": "empty_key",
+            "non_image": "non_image",
+        }
+
+        for label, mode in scenarios.items():
+            with self.subTest(scenario=label):
+                mock_transcribe.reset_mock()
+                mock_get_object_bytes.reset_mock()
+                doc = self._make_doc(
+                    language=Document.Language.ENGLISH,
+                    text_input_type=Document.TextInputType.PRINTED,
+                    expected_count=2,
+                )
+                self._add_source(doc, 0)
+                if mode == "missing":
+                    pass  # order_index=1 intentionally absent
+                elif mode == "empty_key":
+                    self._add_source(doc, 1, file_s3_key="")
+                elif mode == "non_image":
+                    self._add_source(doc, 1, mime_type="application/pdf")
+                else:
+                    self._add_source(doc, 1, upload_status=mode)
+
+                self.assertTrue(self.command._process_message(self._message(doc)))
+
+                mock_transcribe.assert_not_called()
+                mock_get_object_bytes.assert_not_called()
+                self.assertEqual(
+                    DocumentTextResult.objects.filter(document=doc).count(), 0
+                )
+                doc.refresh_from_db()
+                self.assertEqual(
+                    doc.processing_state_user, Document.ProcessingState.FAILED
+                )
+
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    def test_multi_image_extra_out_of_range_source_file_marks_failed_without_ocr(
+        self, mock_transcribe, mock_get_object_bytes
+    ):
+        doc = self._make_doc(
+            language=Document.Language.ENGLISH,
+            text_input_type=Document.TextInputType.PRINTED,
+            expected_count=2,
+        )
+        # Valid 0..N-1 rows, all uploaded, plus an extra out-of-range row.
+        self._add_source(doc, 0)
+        self._add_source(doc, 1)
+        self._add_source(doc, 99)
+
+        self.assertTrue(self.command._process_message(self._message(doc)))
+
+        mock_transcribe.assert_not_called()
+        mock_get_object_bytes.assert_not_called()
+        self.assertEqual(DocumentTextResult.objects.filter(document=doc).count(), 0)
+        doc.refresh_from_db()
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.FAILED)
+
+
 class WorkerEnvConfigTests(SimpleTestCase):
     def test_validate_required_env_defaults_transkribus_hebrew_handwritten_flag_to_false(
         self,
@@ -3381,7 +3631,7 @@ class UploadApiTests(TestCase):
 
     @patch("documents.views.create_presigned_put", return_value="https://example/upload")
     @patch("documents.views.send_process_document_message")
-    def test_finalize_success_mirrors_primary_and_sets_partial(
+    def test_finalize_success_mirrors_primary_sets_processing_and_enqueues(
         self, mock_enqueue, _mock_put
     ):
         create_resp = self._post_create(self._multi_files_payload(count=2))
@@ -3392,22 +3642,16 @@ class UploadApiTests(TestCase):
 
         resp = self._post_finalize(doc_id)
         self.assertEqual(resp.status_code, 200)
-        mock_enqueue.assert_not_called()
+        mock_enqueue.assert_called_once_with(document_id=doc_id)
 
         body = resp.json()
         self.assertEqual(body["upload_status"], Document.UploadStatus.UPLOADED)
-        self.assertEqual(body["processing_state_user"], Document.ProcessingState.PARTIAL)
-        self.assertNotEqual(
-            body["processing_state_user"],
-            Document.ProcessingState.PROCESSING,
+        self.assertEqual(
+            body["processing_state_user"], Document.ProcessingState.PROCESSING
         )
 
         doc = Document.objects.get(id=doc_id)
-        self.assertEqual(doc.processing_state_user, Document.ProcessingState.PARTIAL)
-        self.assertNotEqual(
-            doc.processing_state_user,
-            Document.ProcessingState.PROCESSING,
-        )
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.PROCESSING)
         primary = DocumentSourceFile.objects.get(document=doc, order_index=0)
         self.assertEqual(doc.file_s3_key, primary.file_s3_key)
         self.assertEqual(doc.file_original_name, primary.file_original_name)
@@ -3416,7 +3660,30 @@ class UploadApiTests(TestCase):
 
     @patch("documents.views.create_presigned_put", return_value="https://example/upload")
     @patch("documents.views.send_process_document_message")
-    def test_finalize_idempotent_retry(self, mock_enqueue, _mock_put):
+    def test_finalize_enqueue_failure_marks_document_failed(
+        self, mock_enqueue, _mock_put
+    ):
+        mock_enqueue.side_effect = RuntimeError("sqs down")
+        create_resp = self._post_create(self._multi_files_payload(count=2))
+        doc_id = create_resp.json()["document_id"]
+
+        self._post_part_complete(doc_id, 0, {"success": True})
+        self._post_part_complete(doc_id, 1, {"success": True})
+
+        resp = self._post_finalize(doc_id)
+        self.assertEqual(resp.status_code, 500)
+
+        doc = Document.objects.get(id=doc_id)
+        # Matches legacy upload_complete enqueue-failure behavior: the files are
+        # uploaded/finalized, so upload_status stays UPLOADED; only the worker enqueue
+        # failed, so processing_state_user becomes FAILED and upload_error records it.
+        self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADED)
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.FAILED)
+        self.assertIn("enqueue failed", doc.upload_error or "")
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch("documents.views.send_process_document_message")
+    def test_finalize_idempotent_retry_enqueues_once(self, mock_enqueue, _mock_put):
         create_resp = self._post_create(self._multi_files_payload(count=2))
         doc_id = create_resp.json()["document_id"]
 
@@ -3427,7 +3694,7 @@ class UploadApiTests(TestCase):
         second = self._post_finalize(doc_id)
         self.assertEqual(first.status_code, 200)
         self.assertEqual(second.status_code, 200)
-        mock_enqueue.assert_not_called()
+        mock_enqueue.assert_called_once_with(document_id=doc_id)
 
     @patch("documents.views.create_presigned_put", return_value="https://example/upload")
     def test_legacy_complete_rejects_multi_image_document(self, _mock_put):

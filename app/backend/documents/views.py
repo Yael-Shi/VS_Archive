@@ -763,10 +763,13 @@ def upload_finalize(request, doc_id: int):
             status=400,
         )
 
+    already_uploaded = doc.upload_status == Document.UploadStatus.UPLOADED
+
     mirror_primary_document_from_source_file(doc, primary)
     doc.upload_status = Document.UploadStatus.UPLOADED
     doc.upload_error = None
-    doc.processing_state_user = Document.ProcessingState.PARTIAL
+    if not already_uploaded:
+        doc.processing_state_user = Document.ProcessingState.PROCESSING
     doc.save(
         update_fields=[
             "file_s3_key",
@@ -778,6 +781,22 @@ def upload_finalize(request, doc_id: int):
             "processing_state_user",
         ]
     )
+
+    if not already_uploaded:
+        try:
+            send_process_document_message(document_id=doc.id)
+        except Exception as e:
+            logger.exception(
+                "enqueue failed in upload_finalize",
+                extra={"document_id": doc.id},
+            )
+            doc.processing_state_user = Document.ProcessingState.FAILED
+            doc.upload_error = f"enqueue failed: {e}"
+            doc.save(update_fields=["processing_state_user", "upload_error"])
+            return JsonResponse(
+                {"error": "enqueue failed", "details": str(e)},
+                status=500,
+            )
 
     return _finalize_response(doc)
 
