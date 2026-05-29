@@ -1,11 +1,19 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 from documents.models import Document, DocumentSourceFile
 
 MULTI_IMAGE_MIN_FILES = 2
 MULTI_IMAGE_MAX_FILES = 20
+
+
+class MultiImageSourceFilesError(ValueError):
+    """Raised when a document's multi-image source files are not valid for processing."""
+
+
+def _is_image_mime_type(mime_type: Optional[str]) -> bool:
+    return (mime_type or "").strip().lower().startswith("image/")
 
 
 def is_multi_image_document(document: Document) -> bool:
@@ -83,3 +91,63 @@ def all_expected_source_files_uploaded(document: Document) -> tuple[bool, str]:
             return False, f"source file not uploaded for order_index={order_index}"
 
     return True, ""
+
+
+def get_ordered_source_files_for_processing(
+    document: Document,
+) -> List[DocumentSourceFile]:
+    """
+    Validate and return this document's source files ordered by ``order_index`` (0..N-1).
+
+    Used by the worker before building the multi-image ``PageImage`` list. Raises
+    ``MultiImageSourceFilesError`` (no OCR/HTR dispatch) when any of the following fail:
+
+    - ``expected_source_file_count`` is missing or ``< MULTI_IMAGE_MIN_FILES``
+    - a ``DocumentSourceFile`` is missing for any ``order_index`` in ``0..N-1`` (contiguous)
+    - any row is not ``upload_status=UPLOADED``
+    - any row has an empty ``file_s3_key``
+    - any row is not an ``image/*`` MIME type (images only in V1)
+    """
+    expected = document.expected_source_file_count
+    if expected is None or expected < MULTI_IMAGE_MIN_FILES:
+        raise MultiImageSourceFilesError(
+            f"document_id={document.id} is not a multi-image document "
+            f"(expected_source_file_count={expected!r})"
+        )
+
+    sources = {
+        row.order_index: row
+        for row in DocumentSourceFile.objects.filter(document=document)
+    }
+
+    extra_indexes = sorted(idx for idx in sources if idx < 0 or idx >= expected)
+    if extra_indexes:
+        raise MultiImageSourceFilesError(
+            f"unexpected source file order_index values {extra_indexes} "
+            f"(valid range is 0..{expected - 1})"
+        )
+
+    ordered: List[DocumentSourceFile] = []
+    for order_index in range(expected):
+        source = sources.get(order_index)
+        if source is None:
+            raise MultiImageSourceFilesError(
+                f"source file missing for order_index={order_index}"
+            )
+        if source.upload_status != DocumentSourceFile.UploadStatus.UPLOADED:
+            raise MultiImageSourceFilesError(
+                f"source file not uploaded for order_index={order_index} "
+                f"(upload_status={source.upload_status})"
+            )
+        if not (source.file_s3_key or "").strip():
+            raise MultiImageSourceFilesError(
+                f"source file has empty file_s3_key for order_index={order_index}"
+            )
+        if not _is_image_mime_type(source.mime_type):
+            raise MultiImageSourceFilesError(
+                f"source file mime_type must be image/* for order_index={order_index} "
+                f"(got {source.mime_type!r})"
+            )
+        ordered.append(source)
+
+    return ordered
