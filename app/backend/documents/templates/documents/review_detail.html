@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load status_labels %}
 {% block title %}VSArchive - בקרת תמלול · {{ doc.title }}{% endblock %}
 
 {% block content %}
@@ -21,25 +22,8 @@
       </div>
 
       <div class="review-header-badges">
-        {% if doc.upload_status == "UPLOADED" %}
-          <span class="badge badge-ok">הועלה</span>
-        {% elif doc.upload_status == "FAILED" %}
-          <span class="badge badge-bad">העלאה נכשלה</span>
-        {% else %}
-          <span class="badge">{{ doc.upload_status }}</span>
-        {% endif %}
-
-        {% if doc.processing_state_user == "READY" %}
-          <span class="badge badge-ok">עיבוד הסתיים</span>
-        {% elif doc.processing_state_user == "PROCESSING" %}
-          <span class="badge badge-warn">בעיבוד</span>
-        {% elif doc.processing_state_user == "FAILED" %}
-          <span class="badge badge-bad">עיבוד נכשל</span>
-        {% elif doc.processing_state_user == "PARTIAL" %}
-          <span class="badge">חלקי</span>
-        {% else %}
-          <span class="badge">{{ doc.processing_state_user }}</span>
-        {% endif %}
+        {% upload_status_badge doc.upload_status %}
+        {% processing_state_badge doc.processing_state_user %}
 
         <span class="badge">{{ doc.language|default:"שפה לא ידועה" }}</span>
         <span class="badge">{{ doc.text_input_type }}</span>
@@ -50,7 +34,7 @@
         <summary>מה המשמעות של הסטטוסים?</summary>
         <div class="review-details-body">
           <ul>
-            <li><strong>עיבוד הסתיים</strong> — העיבוד האוטומטי הסתיים והטקסט זמין להצגה ולבדיקה.</li>
+            <li><strong>עיבוד הושלם</strong> — העיבוד האוטומטי הסתיים והטקסט זמין להצגה ולבדיקה.</li>
             <li><strong>ממתין לבדיקה אנושית</strong> — התמלול נוצר אוטומטית ודורש אימות ידני.</li>
             <li><strong>אושר / נדחה</strong> — תוצאת האימות הידני.</li>
           </ul>
@@ -136,13 +120,7 @@
               {% if card.is_pending_review %}
                 <span class="badge badge-warn">ממתין לבקרה</span>
               {% endif %}
-              {% if card.row.verification_status == "VERIFIED" %}
-                <span class="badge badge-ok">מאומת</span>
-              {% elif card.row.verification_status == "REJECTED" %}
-                <span class="badge badge-bad">נדחה</span>
-              {% else %}
-                <span class="badge badge-warn">לא מאומת</span>
-              {% endif %}
+              {% verification_status_badge card.row.verification_status %}
             </div>
 
             <details class="review-details">

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load status_labels %}
 {% block title %}VSArchive - מסמכים{% endblock %}
 
 {% block content %}
@@ -29,7 +30,7 @@
         <select name="metadata_status">
           <option value="">הכל</option>
           {% for v, label in metadata_status_choices %}
-            <option value="{{ v }}" {% if metadata_status == v %}selected{% endif %}>{{ label }}</option>
+            <option value="{{ v }}" {% if metadata_status == v %}selected{% endif %}>{{ v|metadata_status_label }}</option>
           {% endfor %}
         </select>
       </div>
@@ -88,25 +89,8 @@
             <div class="spacer" style="height:8px;"></div>
 
             <div style="display:flex; gap:8px; flex-wrap: wrap; align-items:center;">
-              {% if d.upload_status == "FAILED" %}
-                <span class="badge badge-bad">העלאה נכשלה</span>
-              {% elif d.upload_status == "UPLOADING" %}
-                <span class="badge badge-warn">בהעלאה</span>
-              {% elif d.upload_status == "UPLOADED" %}
-                <span class="badge badge-ok">הועלה</span>
-              {% endif %}
-
-              {% if d.processing_state_user == "READY" %}
-                <span class="badge badge-ok">מוכן</span>
-              {% elif d.processing_state_user == "PROCESSING" %}
-                <span class="badge badge-warn">בעיבוד</span>
-              {% elif d.processing_state_user == "FAILED" %}
-                <span class="badge badge-bad">עיבוד נכשל</span>
-              {% elif d.processing_state_user == "PARTIAL" %}
-                <span class="badge">חלקי</span>
-              {% else %}
-                <span class="badge">{{ d.processing_state_user }}</span>
-              {% endif %}
+              {% upload_status_badge d.upload_status %}
+              {% processing_state_badge d.processing_state_user %}
             </div>
           </td>
 
@@ -117,11 +101,7 @@
           <td>{{ d.doc_type }}</td>
 
           <td>
-            {% if d.metadata_status == "COMPLETED" %}
-              <span class="badge badge-ok">מטא־דאטה הושלמה</span>
-            {% else %}
-              <span class="badge">Needs completion</span>
-            {% endif %}
+            {% metadata_status_badge d.metadata_status %}
           </td>
 
           {% if is_admin %}

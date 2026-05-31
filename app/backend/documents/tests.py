@@ -6470,3 +6470,181 @@ class UploadPageTemplateTests(TestCase):
         self.client.force_login(self.viewer)
         resp = self.client.get("/api/ui/upload/")
         self.assertEqual(resp.status_code, 403)
+
+
+class StatusLabelFilterTests(SimpleTestCase):
+    """PR1 — centralized user-facing Hebrew status labels (status_labels tags).
+
+    These pin the single source of truth so labels cannot silently drift back
+    apart across pages. Enum values/semantics are unchanged.
+    """
+
+    def test_processing_state_label_ready_is_processing_completed(self):
+        from documents.templatetags.status_labels import processing_state_label
+
+        self.assertEqual(processing_state_label("READY"), "עיבוד הושלם")
+
+    def test_processing_state_label_ready_is_not_legacy_moochan(self):
+        from documents.templatetags.status_labels import processing_state_label
+
+        # "מוכן" wrongly implied human approval; it must no longer label READY.
+        self.assertNotEqual(processing_state_label("READY"), "מוכן")
+
+    def test_processing_state_labels_for_other_states(self):
+        from documents.templatetags.status_labels import processing_state_label
+
+        self.assertEqual(processing_state_label("PROCESSING"), "בעיבוד")
+        self.assertEqual(processing_state_label("PARTIAL"), "חלקי")
+        self.assertEqual(processing_state_label("FAILED"), "עיבוד נכשל")
+
+    def test_processing_state_label_unknown_falls_back_to_raw(self):
+        from documents.templatetags.status_labels import processing_state_label
+
+        self.assertEqual(processing_state_label("SOMETHING_NEW"), "SOMETHING_NEW")
+
+    def test_upload_status_labels(self):
+        from documents.templatetags.status_labels import upload_status_label
+
+        self.assertEqual(upload_status_label("UPLOADED"), "הועלה")
+        self.assertEqual(upload_status_label("UPLOADING"), "בהעלאה")
+        self.assertEqual(upload_status_label("FAILED"), "העלאה נכשלה")
+
+    def test_metadata_status_labels_are_hebrew(self):
+        from documents.templatetags.status_labels import metadata_status_label
+
+        self.assertEqual(metadata_status_label("NEEDS_COMPLETION"), "דורש השלמת פרטים")
+        self.assertEqual(metadata_status_label("COMPLETED"), "פרטים הושלמו")
+        # Regression: the raw English label must not be user-facing.
+        self.assertNotEqual(metadata_status_label("NEEDS_COMPLETION"), "Needs completion")
+
+    def test_verification_status_labels_are_separate_from_processing(self):
+        from documents.templatetags.status_labels import verification_status_label
+
+        self.assertEqual(verification_status_label("UNVERIFIED"), "ממתין לבדיקה אנושית")
+        self.assertEqual(verification_status_label("VERIFIED"), "אושר אנושית")
+        self.assertEqual(verification_status_label("REJECTED"), "נדחה בבקרה")
+
+
+class StatusLabelPresentationTests(TestCase):
+    """PR1 — pages render the centralized labels (no raw-enum/legacy leakage)."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+
+        self.staff = User.objects.create_user(
+            username="status_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+
+    def _create_document(self, **kwargs):
+        defaults = {
+            "title": "Status doc",
+            "doc_type": Document.DocType.IMAGE,
+            "text_input_type": Document.TextInputType.HANDWRITTEN,
+            "language": Document.Language.HEBREW,
+            "upload_status": Document.UploadStatus.UPLOADED,
+            "processing_state_user": Document.ProcessingState.READY,
+        }
+        defaults.update(kwargs)
+        return Document.objects.create(**defaults)
+
+    def _create_hebrew_text_result(self, doc, **kwargs):
+        defaults = {
+            "result_type": DocumentTextResult.ResultType.HEBREW_TEXT,
+            "engine": "transkribus-pylaia:1",
+            "engine_key": DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
+            "prompt_variant": DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            "status": DocumentTextResult.Status.NEEDS_REVIEW,
+            "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
+            "text": "שורת בדיקה",
+            "review_reasons": '["AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW"]',
+        }
+        defaults.update(kwargs)
+        return DocumentTextResult.objects.create(document=doc, **defaults)
+
+    def test_list_page_ready_uses_processing_completed_not_moochan(self):
+        self._create_document()
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/documents/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "עיבוד הושלם")
+        self.assertNotContains(resp, "מוכן")
+
+    def test_list_page_metadata_status_is_hebrew(self):
+        self._create_document(metadata_status=Document.MetadataStatus.NEEDS_COMPLETION)
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/documents/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "דורש השלמת פרטים")
+        # Neither the badge nor the metadata_status filter <option> may show the
+        # raw English enum label.
+        self.assertNotContains(resp, "Needs completion")
+
+    def test_detail_page_ready_uses_processing_completed(self):
+        doc = self._create_document()
+        self._create_hebrew_text_result(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "עיבוד הושלם")
+        self.assertNotContains(resp, "מוכן")
+
+    def test_detail_page_verification_label_separate_from_processing(self):
+        doc = self._create_document()
+        self._create_hebrew_text_result(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        # Human-review axis stays distinct from processing readiness.
+        self.assertContains(resp, "ממתין לבדיקה אנושית")
+
+    def test_admin_backlog_page_ready_uses_processing_completed(self):
+        self._create_document(
+            metadata_status=Document.MetadataStatus.NEEDS_COMPLETION,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/admin/backlog/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "עיבוד הושלם")
+        self.assertNotContains(resp, "מוכן")
+
+    def test_review_backlog_page_ready_uses_processing_completed(self):
+        doc = self._create_document()
+        self._create_hebrew_text_result(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/admin/review/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "עיבוד הושלם")
+        self.assertNotContains(resp, "מוכן")
+        # The processing_state_user and verification_status filter <option>s must
+        # render centralized Hebrew labels, not raw English enum choice labels.
+        self.assertNotContains(resp, ">Ready<")
+        self.assertNotContains(resp, ">Unverified<")
+
+    def test_review_detail_uses_centralized_labels_and_keeps_raw_debug(self):
+        doc = self._create_document()
+        self._create_hebrew_text_result(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        # User-facing labels are centralized...
+        self.assertContains(resp, "עיבוד הושלם")
+        self.assertContains(resp, "ממתין לבדיקה אנושית")
+        self.assertNotContains(resp, "מוכן")
+        # ...legacy verification wording is gone...
+        self.assertNotContains(resp, "לא מאומת")
+        # ...but raw enums remain available in the collapsed technical details.
+        self.assertContains(resp, "NEEDS_REVIEW")
+        self.assertContains(resp, "UNVERIFIED")
+
+    def test_review_detail_verified_row_shows_human_approved_label(self):
+        doc = self._create_document()
+        self._create_hebrew_text_result(
+            doc,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "אושר אנושית")
