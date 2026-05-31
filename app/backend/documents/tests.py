@@ -6003,3 +6003,70 @@ class ReviewUiTests(TestCase):
         self.assertNotContains(resp, "שמור טקסט")
         self.assertNotContains(resp, 'name="text"')
         self.assertNotContains(resp, "/text/")
+
+
+class UploadPageTemplateTests(TestCase):
+    """PR6 — multi-image upload UI on the admin upload page (template render only).
+
+    These pin the upload page markup/copy and that the multi-image client flow is
+    wired. They do not duplicate the backend multi-image API tests in UploadApiTests.
+    """
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+
+        self.staff = User.objects.create_user(
+            username="upload_page_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.viewer = User.objects.create_user(
+            username="upload_page_viewer",
+            password="test-pass",
+            is_staff=False,
+        )
+
+    def _get_page(self):
+        self.client.force_login(self.staff)
+        return self.client.get("/api/ui/upload/")
+
+    def test_upload_page_file_input_allows_multiple(self):
+        resp = self._get_page()
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'name="file" type="file" multiple')
+
+    def test_upload_page_contains_multi_image_explanatory_copy(self):
+        resp = self._get_page()
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "מסמך אחד מרובה עמודים לפי סדר הבחירה")
+        self.assertContains(resp, "ריבוי קבצים תומך בתמונות בלבד")
+        self.assertContains(resp, "PDF יש להעלות כקובץ יחיד")
+
+    def test_upload_page_still_renders_key_metadata_fields(self):
+        resp = self._get_page()
+        self.assertEqual(resp.status_code, 200)
+        for needle in (
+            'id="title"',
+            'id="doc_type"',
+            'id="text_input_type"',
+            'id="language"',
+            'id="visibility"',
+            'id="tags"',
+        ):
+            self.assertContains(resp, needle)
+
+    def test_upload_page_js_references_multi_image_endpoints(self):
+        resp = self._get_page()
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "/parts/")
+        self.assertContains(resp, "/finalize/")
+
+    def test_upload_page_shows_terminal_restart_copy_for_failed_multi_image(self):
+        resp = self._get_page()
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "ויש להתחיל העלאה חדשה")
+
+    def test_upload_page_requires_admin(self):
+        self.client.force_login(self.viewer)
+        resp = self.client.get("/api/ui/upload/")
+        self.assertEqual(resp.status_code, 403)

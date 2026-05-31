@@ -21,10 +21,17 @@
         <form id="uploadForm">
           <div class="field">
             <label for="file">קובץ *</label>
-            <input id="file" name="file" type="file" required />
+            <input id="file" name="file" type="file" multiple required />
             <div class="muted" style="font-size: 13px;">
               בנייד: ניתן לבחור תמונה מהגלריה או לצלם (כאשר doc_type=IMAGE).
             </div>
+            <div class="muted" style="font-size: 13px; margin-top: 6px;">
+              קובץ אחד = העלאה רגילה.<br />
+              2–20 תמונות = מסמך אחד מרובה עמודים לפי סדר הבחירה.<br />
+              ריבוי קבצים תומך בתמונות בלבד.<br />
+              PDF יש להעלות כקובץ יחיד.
+            </div>
+            <ul id="selectedFiles" class="muted" style="font-size: 13px; margin-top: 8px; padding-inline-start: 18px;"></ul>
           </div>
 
           <div class="field">
@@ -134,12 +141,16 @@
   </div>
 
 <script>
+  const MULTI_IMAGE_MIN_FILES = 2;
+  const MULTI_IMAGE_MAX_FILES = 20;
+
   const form = document.getElementById("uploadForm");
   const msgEl = document.getElementById("msg");
   const submitBtn = document.getElementById("submitBtn");
 
   const fileEl = document.getElementById("file");
   const docTypeEl = document.getElementById("doc_type");
+  const selectedFilesEl = document.getElementById("selectedFiles");
 
   function setMessage(kind, text) {
     msgEl.className = kind;
@@ -168,9 +179,8 @@
     return data;
   }
 
-  function isMobileBrowser() {
-    const ua = navigator.userAgent || "";
-    return /Android|iPhone|iPad|iPod/i.test(ua);
+  function isImageFile(f) {
+    return (f.type || "").toLowerCase().startsWith("image/");
   }
 
   function applyFileInputMode() {
@@ -178,29 +188,186 @@
 
     if (dt === "IMAGE") {
       fileEl.setAttribute("accept", "image/*");
-      if (isMobileBrowser()) fileEl.setAttribute("capture", "environment");
-      else fileEl.removeAttribute("capture");
     } else if (dt === "PDF") {
       fileEl.setAttribute("accept", "application/pdf");
-      fileEl.removeAttribute("capture");
     } else {
       fileEl.setAttribute("accept", "application/pdf,image/*");
-      fileEl.removeAttribute("capture");
     }
+    // `capture` conflicts with multi-select; multi-image upload needs gallery
+    // multi-pick, so we do not force camera capture on this input.
+    fileEl.removeAttribute("capture");
+  }
+
+  function renderSelectedFiles() {
+    const files = Array.from(fileEl.files || []);
+    selectedFilesEl.innerHTML = "";
+    // Only the multi-image case has a meaningful page order to show.
+    if (files.length < MULTI_IMAGE_MIN_FILES) return;
+    files.forEach((f, i) => {
+      const li = document.createElement("li");
+      li.textContent = `עמוד ${i + 1}: ${f.name}`;
+      selectedFilesEl.appendChild(li);
+    });
   }
 
   applyFileInputMode();
   docTypeEl.addEventListener("change", () => applyFileInputMode());
 
+  async function runSingleFileUpload(file, doc_type, meta) {
+    setMessage("ok", "יוצרת מסמך…");
+
+    const mime_type = file.type || "application/octet-stream";
+    const createPayload = Object.assign({}, meta, {
+      doc_type,
+      original_name: file.name,
+      mime_type,
+      size_bytes: file.size
+    });
+
+    const created = await jsonFetch("/api/uploads/create/", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(createPayload)
+    });
+
+    const documentId = created.document_id;
+    const uploadUrl = created.upload_url;
+    if (!documentId || !uploadUrl) {
+      throw new Error("Create response missing document_id or upload_url");
+    }
+
+    setMessage("ok", `מעלה ל-S3… (מסמך #${documentId})`);
+
+    const putRes = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: {"Content-Type": mime_type},
+      body: file
+    });
+    if (!putRes.ok) {
+      const putText = await putRes.text().catch(() => "");
+      throw new Error(`S3 PUT failed: HTTP ${putRes.status} ${putText}`);
+    }
+
+    setMessage("ok", "מסיימת העלאה…");
+
+    await jsonFetch(`/api/uploads/${documentId}/complete/`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ success: true, file_size: file.size, file_mime: mime_type })
+    });
+
+    setMessage("ok", "בוצע. מעבירה לעמוד המסמך…");
+    window.location.href = `/api/ui/documents/${documentId}/`;
+  }
+
+  async function reportPartFailure(documentId, orderIndex, message) {
+    // Best-effort: mark this part (and therefore the upload) FAILED on the backend.
+    // V1 failed-part policy is terminal; there is no per-part retry/replace.
+    try {
+      await jsonFetch(`/api/uploads/${documentId}/parts/${orderIndex}/complete/`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ success: false, error: message })
+      });
+    } catch (_) {
+      // Already in a failure path; ignore secondary errors.
+    }
+  }
+
+  async function runMultiImageUpload(files, meta) {
+    if (files.length > MULTI_IMAGE_MAX_FILES) {
+      throw new Error(`ניתן להעלות עד ${MULTI_IMAGE_MAX_FILES} תמונות במסמך אחד.`);
+    }
+    if (files.some((f) => !isImageFile(f))) {
+      throw new Error("בהעלאת ריבוי קבצים יש לבחור תמונות בלבד. PDF יש להעלות כקובץ יחיד.");
+    }
+
+    setMessage("ok", "יוצרת מסמך…");
+
+    const createPayload = Object.assign({}, meta, {
+      doc_type: "IMAGE",
+      files: files.map((f) => ({
+        original_name: f.name,
+        mime_type: f.type || "image/*",
+        size_bytes: f.size
+      }))
+    });
+
+    const created = await jsonFetch("/api/uploads/create/", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(createPayload)
+    });
+
+    const documentId = created.document_id;
+    const uploads = Array.isArray(created.uploads) ? created.uploads : null;
+    if (!documentId || !uploads || uploads.length !== files.length) {
+      throw new Error("Create response missing document_id or uploads[]");
+    }
+
+    const total = files.length;
+    const restartMsg = "ההעלאה מרובת־התמונות נכשלה ויש להתחיל העלאה חדשה (אין ניסיון חוזר לעמוד בודד בגרסה זו).";
+
+    for (let i = 0; i < uploads.length; i++) {
+      const entry = uploads[i];
+      const orderIndex = entry.order_index;
+      const file = files[orderIndex];
+      const mime_type = file.type || entry.mime_type || "image/*";
+
+      setMessage("ok", `מעלה עמוד ${orderIndex + 1} מתוך ${total}…`);
+
+      let putRes;
+      try {
+        putRes = await fetch(entry.upload_url, {
+          method: "PUT",
+          headers: {"Content-Type": mime_type},
+          body: file
+        });
+      } catch (netErr) {
+        await reportPartFailure(documentId, orderIndex, `network error: ${netErr}`);
+        throw new Error(`העלאת עמוד ${orderIndex + 1} נכשלה. ${restartMsg}`);
+      }
+      if (!putRes.ok) {
+        const putText = await putRes.text().catch(() => "");
+        await reportPartFailure(documentId, orderIndex, `S3 PUT failed: HTTP ${putRes.status} ${putText}`);
+        throw new Error(`העלאת עמוד ${orderIndex + 1} נכשלה. ${restartMsg}`);
+      }
+
+      setMessage("ok", `מאשרת עמוד ${orderIndex + 1} מתוך ${total}…`);
+      try {
+        await jsonFetch(`/api/uploads/${documentId}/parts/${orderIndex}/complete/`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({ success: true, file_size: file.size, file_mime: mime_type })
+        });
+      } catch (completeErr) {
+        await reportPartFailure(documentId, orderIndex, `part complete failed: ${completeErr && completeErr.message ? completeErr.message : completeErr}`);
+        throw new Error(`אישור עמוד ${orderIndex + 1} נכשל. ${restartMsg}`);
+      }
+    }
+
+    setMessage("ok", "מסיימת מסמך…");
+    await jsonFetch(`/api/uploads/${documentId}/finalize/`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ success: true })
+    });
+
+    setMessage("ok", "בוצע. מעבירה לעמוד המסמך…");
+    window.location.href = `/api/ui/documents/${documentId}/`;
+  }
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     setMessage("", "");
 
-    const file = fileEl.files[0];
-    if (!file) {
+    const files = Array.from(fileEl.files || []);
+    if (files.length === 0) {
       setMessage("error", "חובה לבחור קובץ.");
       return;
     }
+
+    const isMulti = files.length >= MULTI_IMAGE_MIN_FILES;
 
     const title = document.getElementById("title").value.trim();
     const doc_type = docTypeEl.value;
@@ -219,79 +386,30 @@
     const original_location = document.getElementById("original_location").value.trim();
     const notes = document.getElementById("notes").value.trim();
 
-    if (!title || !doc_type || !text_input_type) {
+    // Multi-image forces doc_type=IMAGE, so doc_type is only required for single-file.
+    if (!title || !text_input_type || (!isMulti && !doc_type)) {
       setMessage("error", "נא למלא שדות חובה: כותרת + סוג מסמך + סוג טקסט.");
       return;
     }
 
     const tags = parseTags(tagsRaw);
-
     const admin_meta = { donor, collection, original_location, notes };
+
+    const meta = { title, text_input_type, visibility, tags, admin_meta };
+    if (date_start) meta.date_start = date_start;
+    if (date_end) meta.date_end = date_end;
+    if (language) meta.language = language;
+    if (category_event) meta.category_event = category_event;
 
     submitBtn.disabled = true;
     submitBtn.style.opacity = "0.7";
 
     try {
-      setMessage("ok", "יוצרת העלאה…");
-
-      const createPayload = {
-        title,
-        doc_type,
-        text_input_type,
-        visibility,
-        tags,
-        admin_meta,
-        original_name: file.name,
-        mime_type: file.type || "application/octet-stream",
-        size_bytes: file.size
-      };
-
-      if (date_start) createPayload.date_start = date_start;
-      if (date_end) createPayload.date_end = date_end;
-      if (language) createPayload.language = language;
-      if (category_event) createPayload.category_event = category_event;
-
-      const created = await jsonFetch("/api/uploads/create/", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify(createPayload)
-      });
-
-      const documentId = created.document_id;
-      const uploadUrl = created.upload_url;
-
-      if (!documentId || !uploadUrl) {
-        throw new Error("Create response missing document_id or upload_url");
+      if (isMulti) {
+        await runMultiImageUpload(files, meta);
+      } else {
+        await runSingleFileUpload(files[0], doc_type, meta);
       }
-
-      setMessage("ok", `מעלה ל-S3… (מסמך #${documentId})`);
-
-      const putRes = await fetch(uploadUrl, {
-        method: "PUT",
-        headers: {"Content-Type": createPayload.mime_type},
-        body: file
-      });
-
-      if (!putRes.ok) {
-        const putText = await putRes.text().catch(() => "");
-        throw new Error(`S3 PUT failed: HTTP ${putRes.status} ${putText}`);
-      }
-
-      setMessage("ok", "מסיימת העלאה…");
-
-      await jsonFetch(`/api/uploads/${documentId}/complete/`, {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          success: true,
-          file_size: file.size,
-          file_mime: createPayload.mime_type
-        })
-      });
-
-      setMessage("ok", "בוצע. מעבירה לעמוד המסמך…");
-      window.location.href = `/api/ui/documents/${documentId}/`;
-
     } catch (err) {
       setMessage("error", String(err && err.message ? err.message : err));
       submitBtn.disabled = false;
@@ -299,15 +417,24 @@
     }
   });
 
-  fileEl.addEventListener("change", (e) => {
-    const f = e.target.files[0];
+  fileEl.addEventListener("change", () => {
+    const files = Array.from(fileEl.files || []);
+    renderSelectedFiles();
+
+    if (files.length >= MULTI_IMAGE_MIN_FILES) {
+      // Multi-image V1 is image-only; force IMAGE so the field stays valid/consistent.
+      docTypeEl.value = "IMAGE";
+      applyFileInputMode();
+      return;
+    }
+
+    const f = files[0];
     if (!f) return;
-    if (docTypeEl.value) return;
-
-    const mt = (f.type || "").toLowerCase();
-    if (mt === "application/pdf") docTypeEl.value = "PDF";
-    else if (mt.startsWith("image/")) docTypeEl.value = "IMAGE";
-
+    if (!docTypeEl.value) {
+      const mt = (f.type || "").toLowerCase();
+      if (mt === "application/pdf") docTypeEl.value = "PDF";
+      else if (mt.startsWith("image/")) docTypeEl.value = "IMAGE";
+    }
     applyFileInputMode();
   });
 </script>
