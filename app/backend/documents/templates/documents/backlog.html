@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load status_labels %}
 {% block title %}VSArchive - השלמת פרטים{% endblock %}
 
 {% block content %}
@@ -105,13 +106,7 @@
               <div class="spacer" style="height:8px;"></div>
 
               <div style="display:flex; gap:8px; flex-wrap: wrap; align-items:center;">
-                {% if d.upload_status == "FAILED" %}
-                  <span class="badge badge-bad">העלאה נכשלה</span>
-                {% elif d.upload_status == "UPLOADING" %}
-                  <span class="badge badge-warn">בהעלאה</span>
-                {% elif d.upload_status == "UPLOADED" %}
-                  <span class="badge badge-ok">הועלה</span>
-                {% endif %}
+                {% upload_status_badge d.upload_status %}
 
                 {% if not d.tags_m2m.exists %}
                   <span class="badge badge-bad">חסרות תגיות</span>
@@ -148,17 +143,7 @@
             </td>
 
             <td>
-              {% if d.processing_state_user == "READY" %}
-                <span class="badge badge-ok">מוכן</span>
-              {% elif d.processing_state_user == "PROCESSING" %}
-                <span class="badge badge-warn">בעיבוד</span>
-              {% elif d.processing_state_user == "FAILED" %}
-                <span class="badge badge-bad">נכשל</span>
-              {% elif d.processing_state_user == "PARTIAL" %}
-                <span class="badge">חלקי</span>
-              {% else %}
-                <span class="badge">{{ d.processing_state_user }}</span>
-              {% endif %}
+              {% processing_state_badge d.processing_state_user %}
             </td>
 
             <td>

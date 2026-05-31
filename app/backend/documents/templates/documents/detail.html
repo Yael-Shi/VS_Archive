@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load status_labels %}
 {% block title %}VSArchive - {{ doc.title }}{% endblock %}
 
 {% block content %}
@@ -31,29 +32,9 @@
     {# ===== Status row ===== #}
     <div style="display:flex; gap:10px; flex-wrap: wrap; align-items:center;">
 
-      {# Upload layer A: no file / upload failed #}
-      {% if doc.upload_status == "FAILED" %}
-        <span class="badge badge-bad">העלאה נכשלה</span>
-      {% elif doc.upload_status == "UPLOADING" %}
-        <span class="badge badge-warn">בהעלאה</span>
-      {% elif doc.upload_status == "UPLOADED" %}
-        <span class="badge badge-ok">הועלה</span>
-      {% else %}
-        <span class="badge">{{ doc.upload_status }}</span>
-      {% endif %}
-
-      {# Processing state (user-visible) #}
-      {% if doc.processing_state_user == "READY" %}
-        <span class="badge badge-ok">עיבוד הסתיים</span>
-      {% elif doc.processing_state_user == "PROCESSING" %}
-        <span class="badge badge-warn">בעיבוד</span>
-      {% elif doc.processing_state_user == "FAILED" %}
-        <span class="badge badge-bad">עיבוד נכשל</span>
-      {% elif doc.processing_state_user == "PARTIAL" %}
-        <span class="badge">חלקי</span>
-      {% else %}
-        <span class="badge">{{ doc.processing_state_user }}</span>
-      {% endif %}
+      {# Upload + processing-readiness badges (centralized in status_labels) #}
+      {% upload_status_badge doc.upload_status %}
+      {% processing_state_badge doc.processing_state_user %}
 
       <span class="badge">{{ doc.doc_type }}</span>
 

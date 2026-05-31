@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load status_labels %}
 {% block title %}VSArchive - בקרת תמלול{% endblock %}
 
 {% block content %}
@@ -49,7 +50,7 @@
         <select name="processing_state_user">
           <option value="">הכל</option>
           {% for v, label in processing_state_choices %}
-            <option value="{{ v }}" {% if processing_state_user == v %}selected{% endif %}>{{ label }}</option>
+            <option value="{{ v }}" {% if processing_state_user == v %}selected{% endif %}>{{ v|processing_state_label }}</option>
           {% endfor %}
         </select>
       </div>
@@ -79,7 +80,7 @@
         <select name="verification_status">
           <option value="">הכל</option>
           {% for v, label in verification_status_choices %}
-            <option value="{{ v }}" {% if verification_status == v %}selected{% endif %}>{{ label }}</option>
+            <option value="{{ v }}" {% if verification_status == v %}selected{% endif %}>{{ v|verification_status_label }}</option>
           {% endfor %}
         </select>
       </div>
@@ -92,7 +93,7 @@
 
     <div class="muted" style="font-size: 13px; margin-top: 10px;">
       מציג {{ rows|length }} מתוך {{ total }} מסמכים ·
-      <strong>עיבוד הסתיים</strong> אינו אומר שהטקסט אושר אנושית
+      <strong>עיבוד הושלם</strong> אינו אומר שהטקסט אושר אנושית
     </div>
   </div>
 
@@ -127,17 +128,7 @@
           <td>{% if doc.language %}{{ doc.language }}{% else %}<span class="muted">—</span>{% endif %}</td>
           <td>{{ doc.text_input_type }}</td>
           <td>
-            {% if doc.processing_state_user == "READY" %}
-              <span class="badge badge-ok">מוכן</span>
-            {% elif doc.processing_state_user == "PROCESSING" %}
-              <span class="badge badge-warn">בעיבוד</span>
-            {% elif doc.processing_state_user == "FAILED" %}
-              <span class="badge badge-bad">נכשל</span>
-            {% elif doc.processing_state_user == "PARTIAL" %}
-              <span class="badge">חלקי</span>
-            {% else %}
-              <span class="badge">{{ doc.processing_state_user }}</span>
-            {% endif %}
+            {% processing_state_badge doc.processing_state_user %}
           </td>
           <td><strong>{{ summary.pending_count }}</strong></td>
           <td style="font-size: 13px;">
