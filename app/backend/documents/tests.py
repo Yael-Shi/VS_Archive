@@ -6038,6 +6038,7 @@ class UploadPageTemplateTests(TestCase):
     def test_upload_page_contains_multi_image_explanatory_copy(self):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "לבחור כמה תמונות יחד")
         self.assertContains(resp, "מסמך אחד מרובה עמודים לפי סדר הבחירה")
         self.assertContains(resp, "ריבוי קבצים תומך בתמונות בלבד")
         self.assertContains(resp, "PDF יש להעלות כקובץ יחיד")
