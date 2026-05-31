@@ -1561,6 +1561,169 @@ class TranskribusEngineUnitTests(SimpleTestCase):
         self.assertEqual(len(meta.transcripts), 1)
 
 
+class TranskribusWorkdirRetryEngineTests(SimpleTestCase):
+    """Classification + bounded recognition retry for the transient PyLaia workdir failure."""
+
+    def test_classifier_true_for_workdir_signature(self):
+        from documents.services.transkribus_engine import (
+            is_retryable_pylaia_workdir_failure,
+        )
+
+        desc = (
+            "Could not create workdir at: "
+            "/tmp/HTR/PyLaia/trpProd/Decode/pylaiaDecode_564149"
+        )
+        self.assertTrue(is_retryable_pylaia_workdir_failure(desc))
+
+    def test_classifier_false_for_other_descriptions(self):
+        from documents.services.transkribus_engine import (
+            is_retryable_pylaia_workdir_failure,
+        )
+
+        self.assertFalse(is_retryable_pylaia_workdir_failure(None))
+        self.assertFalse(is_retryable_pylaia_workdir_failure(""))
+        self.assertFalse(is_retryable_pylaia_workdir_failure("model not found"))
+        self.assertFalse(
+            is_retryable_pylaia_workdir_failure("Could not create workdir at: /other/path")
+        )
+
+    @patch("documents.services.transkribus_engine.get_job")
+    def test_poll_workdir_failure_is_retryable(self, m_get):
+        from documents.services.transkribus_engine import (
+            TranskribusRetryableError,
+            poll_job_until_done,
+        )
+
+        m_get.return_value = {
+            "success": False,
+            "state": "FAILED",
+            "description": (
+                "Could not create workdir at: "
+                "/tmp/HTR/PyLaia/trpProd/Decode/pylaiaDecode_999"
+            ),
+        }
+        session = requests.Session()
+        with self.assertRaises(TranskribusRetryableError) as ctx:
+            poll_job_until_done(session, "w1", poll_interval_sec=0.0, max_wait_sec=5.0)
+        self.assertIn("workdir", str(ctx.exception).lower())
+
+    @patch("documents.services.transkribus_engine.get_job")
+    def test_poll_other_job_failure_remains_permanent(self, m_get):
+        from documents.services.transkribus_engine import (
+            TranskribusPermanentError,
+            poll_job_until_done,
+        )
+
+        m_get.return_value = {
+            "success": False,
+            "state": "FAILED",
+            "description": "PyLaia model could not be loaded",
+        }
+        session = requests.Session()
+        with self.assertRaises(TranskribusPermanentError):
+            poll_job_until_done(session, "p1", poll_interval_sec=0.0, max_wait_sec=5.0)
+
+    @patch("documents.services.transkribus_engine.time.sleep")
+    @patch("documents.services.transkribus_engine.complete_pylaia_transcription_after_job")
+    @patch("documents.services.transkribus_engine.start_pylaia_recognition")
+    def test_recognition_retries_workdir_then_succeeds(self, m_start, m_complete, m_sleep):
+        from documents.services.transkribus_engine import (
+            PylaiaTranscriptionOutcome,
+            TranskribusRetryableError,
+            run_recognition_with_workdir_retry,
+        )
+
+        m_start.side_effect = ["job-1", "job-2"]
+        m_complete.side_effect = [
+            TranskribusRetryableError(
+                "Transkribus job job-1 failed: Could not create workdir at: "
+                "/tmp/HTR/PyLaia/trpProd/Decode/pylaiaDecode_job-1"
+            ),
+            PylaiaTranscriptionOutcome(
+                text="recovered", review_reasons=[], recognition_job_id="job-2"
+            ),
+        ]
+        started: list[str] = []
+        session = requests.Session()
+        outcome = run_recognition_with_workdir_retry(
+            session,
+            collection_id="col",
+            model_id="42",
+            document_id="16537736",
+            pages_query="1-4",
+            bearer_token="b",
+            max_attempts=3,
+            retry_delays=(30, 300),
+            on_recognition_started=started.append,
+        )
+        self.assertEqual(outcome.text, "recovered")
+        self.assertEqual(m_start.call_count, 2)
+        self.assertEqual(started, ["job-1", "job-2"])
+        m_sleep.assert_called_once_with(30.0)
+
+    @patch("documents.services.transkribus_engine.time.sleep")
+    @patch("documents.services.transkribus_engine.complete_pylaia_transcription_after_job")
+    @patch("documents.services.transkribus_engine.start_pylaia_recognition")
+    def test_recognition_workdir_failure_reraised_after_budget(
+        self, m_start, m_complete, m_sleep
+    ):
+        from documents.services.transkribus_engine import (
+            TranskribusRetryableError,
+            run_recognition_with_workdir_retry,
+        )
+
+        m_start.side_effect = ["j1", "j2"]
+        workdir_exc = TranskribusRetryableError(
+            "Transkribus job failed: Could not create workdir at: "
+            "/tmp/HTR/PyLaia/trpProd/Decode/pylaiaDecode_x"
+        )
+        m_complete.side_effect = [workdir_exc, workdir_exc]
+        session = requests.Session()
+        with self.assertRaises(TranskribusRetryableError):
+            run_recognition_with_workdir_retry(
+                session,
+                collection_id="col",
+                model_id="42",
+                document_id="16539496",
+                pages_query="1-4",
+                bearer_token="b",
+                max_attempts=2,
+                retry_delays=(30, 300),
+            )
+        self.assertEqual(m_start.call_count, 2)
+        m_sleep.assert_called_once_with(30.0)
+
+    @patch("documents.services.transkribus_engine.time.sleep")
+    @patch("documents.services.transkribus_engine.complete_pylaia_transcription_after_job")
+    @patch("documents.services.transkribus_engine.start_pylaia_recognition")
+    def test_recognition_non_workdir_retryable_not_retried(
+        self, m_start, m_complete, m_sleep
+    ):
+        from documents.services.transkribus_engine import (
+            TranskribusRetryableError,
+            run_recognition_with_workdir_retry,
+        )
+
+        m_start.return_value = "j1"
+        m_complete.side_effect = TranskribusRetryableError(
+            "Transkribus get job: request timed out"
+        )
+        session = requests.Session()
+        with self.assertRaises(TranskribusRetryableError):
+            run_recognition_with_workdir_retry(
+                session,
+                collection_id="col",
+                model_id="42",
+                document_id="1",
+                pages_query="1",
+                bearer_token="b",
+                max_attempts=3,
+                retry_delays=(30, 300),
+            )
+        self.assertEqual(m_start.call_count, 1)
+        m_sleep.assert_not_called()
+
+
 class GeminiAdapterTests(SimpleTestCase):
     @patch("documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini")
     def test_worker_env_applies_gemini_defaults(self, mock_gemini_transcribe):
@@ -3451,9 +3614,20 @@ class UploadApiTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn("single-file", resp.content.decode())
 
-    def test_multi_image_create_rejects_more_than_twenty_files(self):
-        resp = self._post_create(self._multi_files_payload(count=21))
+    def test_multi_image_create_rejects_more_than_max_files(self):
+        resp = self._post_create(self._multi_files_payload(count=26))
         self.assertEqual(resp.status_code, 400)
+        self.assertIn("at most 25 images", resp.content.decode())
+
+    @patch("documents.views.create_presigned_put")
+    def test_multi_image_create_accepts_max_files(self, mock_put):
+        mock_put.side_effect = lambda **kwargs: f"https://example/{kwargs['key']}"
+
+        resp = self._post_create(self._multi_files_payload(count=25))
+        self.assertEqual(resp.status_code, 201)
+        body = resp.json()
+        self.assertEqual(body["expected_source_file_count"], 25)
+        self.assertEqual(len(body["uploads"]), 25)
 
     def test_multi_image_create_rejects_non_image_mime(self):
         payload = self._multi_files_payload(count=2)
@@ -4032,6 +4206,231 @@ class TranskribusAdapterPersistenceTests(TestCase):
         run = TranskribusRun.objects.get(document=doc)
         self.assertEqual(run.status, TranskribusRun.Status.FAILED)
         self.assertEqual(run.remote_doc_id, "99")
+
+
+class TranskribusWorkdirRetryAdapterTests(TestCase):
+    """Adapter dev-upload recovers from the transient PyLaia workdir failure via retry."""
+
+    def _create_document(self) -> Document:
+        return Document.objects.create(
+            title="Workdir retry doc",
+            doc_type=Document.DocType.PDF,
+            language=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADED,
+        )
+
+    def _upload_outcome(self):
+        from documents.services.transkribus_engine import TrpUploadOutcome
+
+        return TrpUploadOutcome(
+            collection_id="col",
+            doc_id="16537736",
+            upload_id=10,
+            ingest_job_id="ingest-1",
+            pages_query="1-4",
+            page_index_to_page_nr={1: 1, 2: 2, 3: 3, 4: 4},
+        )
+
+    @staticmethod
+    def _workdir_exc():
+        from documents.services.transkribus_engine import TranskribusRetryableError
+
+        return TranskribusRetryableError(
+            "Transkribus job j1 failed: Could not create workdir at: "
+            "/tmp/HTR/PyLaia/trpProd/Decode/pylaiaDecode_j1"
+        )
+
+    @patch("documents.services.transkribus_engine.time.sleep")
+    @patch("documents.services.transkribus_engine.complete_pylaia_transcription_after_job")
+    @patch("documents.services.transkribus_engine.start_pylaia_recognition")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
+    def test_dev_upload_recovers_workdir_failure_without_new_upload(
+        self, m_login, m_upload, m_start, m_complete, m_sleep
+    ):
+        from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
+        from documents.services.page_extraction import PageImage
+
+        doc = self._create_document()
+        m_upload.return_value = self._upload_outcome()
+        m_start.side_effect = ["recog-1", "recog-2"]
+        m_complete.side_effect = [
+            self._workdir_exc(),
+            PylaiaTranscriptionOutcome(
+                text="recovered text", review_reasons=[], recognition_job_id="recog-2"
+            ),
+        ]
+
+        adapter = TranskribusAdapter()
+        result = adapter.execute(
+            pages=[
+                PageImage(page_index=i, image_bytes=b"x", mime_type="image/png")
+                for i in (1, 2, 3, 4)
+            ],
+            language_hint="he",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            # max_retries=2 = deployed .env default → 2 recognition attempts.
+            worker_env=_transkribus_adapter_worker_env(
+                transkribus_dev_upload_mode=True, max_retries=2
+            ),
+            document_id=doc.id,
+        )
+
+        self.assertEqual(result.text, "recovered text")
+        self.assertEqual(result.engine_name, "transkribus-pylaia:42")
+        # Single upload; recognition retried once on the same remote doc.
+        m_upload.assert_called_once()
+        self.assertEqual(m_start.call_count, 2)
+        runs = list(TranskribusRun.objects.filter(document=doc))
+        self.assertEqual(len(runs), 1)
+        run = runs[0]
+        self.assertEqual(run.status, TranskribusRun.Status.SUCCEEDED)
+        self.assertEqual(run.remote_doc_id, "16537736")
+        self.assertEqual(run.recognition_job_id, "recog-2")
+
+    @patch("documents.services.transkribus_engine.time.sleep")
+    @patch("documents.services.transkribus_engine.complete_pylaia_transcription_after_job")
+    @patch("documents.services.transkribus_engine.start_pylaia_recognition")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
+    def test_dev_upload_workdir_failure_after_budget_raises_retryable_and_marks_failed(
+        self, m_login, m_upload, m_start, m_complete, m_sleep
+    ):
+        from documents.services.htr_adapters.base import EngineRetryableError
+        from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
+        from documents.services.page_extraction import PageImage
+
+        doc = self._create_document()
+        m_upload.return_value = self._upload_outcome()
+        # max_retries=2 = deployed .env default → exactly 2 recognition attempts.
+        m_start.side_effect = ["recog-1", "recog-2"]
+        m_complete.side_effect = [self._workdir_exc() for _ in range(2)]
+
+        adapter = TranskribusAdapter()
+        with self.assertRaises(EngineRetryableError):
+            adapter.execute(
+                pages=[
+                    PageImage(page_index=i, image_bytes=b"x", mime_type="image/png")
+                    for i in (1, 2, 3, 4)
+                ],
+                language_hint="he",
+                prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+                worker_env=_transkribus_adapter_worker_env(
+                    transkribus_dev_upload_mode=True, max_retries=2
+                ),
+                document_id=doc.id,
+            )
+
+        self.assertEqual(m_start.call_count, 2)
+        run = TranskribusRun.objects.get(document=doc)
+        self.assertEqual(run.status, TranskribusRun.Status.FAILED)
+        self.assertEqual(run.error_code, "TRANSKRIBUS_RECOGNITION_FAILED")
+
+
+class TranskribusWorkdirRetryWorkerTests(TestCase):
+    """
+    End-to-end worker persistence for the transient PyLaia workdir failure (Transkribus
+    HTTP + S3 + page extraction mocked; route selection, adapter/engine retry, and
+    DocumentTextResult persistence are real).
+
+    Budget-exhausted FAILED persistence and no-Gemini-fallback on Transkribus failure are
+    already covered by ``TranskribusWorkdirRetryAdapterTests`` (adapter raises after the
+    budget) plus the existing ``RunWorkerBehaviorTests`` Transkribus-failure tests, so only
+    the recovery path needs this heavier integration test.
+    """
+
+    def _make_worker_command(self):
+        cmd = Command()
+        # max_retries=2 = deployed .env default → 2 recognition attempts.
+        cmd._cfg = _transkribus_adapter_worker_env(
+            transkribus_dev_upload_mode=True, max_retries=2
+        )
+        return cmd
+
+    def _he_doc(self):
+        return Document.objects.create(
+            title="Hebrew workdir retry",
+            doc_type=Document.DocType.PDF,
+            language=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADED,
+            file_s3_key="he-workdir.pdf",
+            mime_type="application/pdf",
+        )
+
+    @patch("documents.services.transkribus_engine.time.sleep")
+    @patch("documents.services.transkribus_engine.complete_pylaia_transcription_after_job")
+    @patch("documents.services.transkribus_engine.start_pylaia_recognition")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    def test_worker_recovers_workdir_failure_persists_needs_review_not_failed(
+        self,
+        m_get_object_bytes,
+        m_extract_pages,
+        m_login,
+        m_upload,
+        m_start,
+        m_complete,
+        m_sleep,
+    ):
+        from documents.services.page_extraction import PageImage
+        from documents.services.transkribus_engine import TranskribusRetryableError, TrpUploadOutcome
+
+        m_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
+        m_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"x", mime_type="image/png")
+        ]
+        m_upload.return_value = TrpUploadOutcome(
+            collection_id="col",
+            doc_id="16539496",
+            upload_id=1,
+            ingest_job_id="ingest-1",
+            pages_query="1",
+            page_index_to_page_nr={1: 1},
+        )
+        m_start.side_effect = ["recog-1", "recog-2"]
+        m_complete.side_effect = [
+            TranskribusRetryableError(
+                "Transkribus job recog-1 failed: Could not create workdir at: "
+                "/tmp/HTR/PyLaia/trpProd/Decode/pylaiaDecode_recog-1"
+            ),
+            PylaiaTranscriptionOutcome(
+                text="worker recovered text", review_reasons=[], recognition_job_id="recog-2"
+            ),
+        ]
+
+        cmd = self._make_worker_command()
+        he_doc = self._he_doc()
+        msg = {"Body": json.dumps({"type": "PROCESS_DOCUMENT", "document_id": he_doc.id})}
+
+        with patch.dict(
+            os.environ, {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "true"}, clear=False
+        ):
+            self.assertTrue(cmd._process_message(msg))
+
+        # No terminal FAILED text rows; recovered text persisted as NEEDS_REVIEW.
+        self.assertFalse(
+            DocumentTextResult.objects.filter(
+                document=he_doc, status=DocumentTextResult.Status.FAILED
+            ).exists()
+        )
+        row = DocumentTextResult.objects.get(
+            document=he_doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="transkribus-pylaia:42",
+        )
+        self.assertEqual(row.status, DocumentTextResult.Status.NEEDS_REVIEW)
+        self.assertEqual(row.text, "worker recovered text")
+        self.assertEqual(row.engine_key, DocumentTextResult.OcrEngineKey.TRANSKRIBUS)
+        # Recovery stays on the Transkribus route; no Gemini fallback row.
+        self.assertFalse(
+            DocumentTextResult.objects.filter(
+                document=he_doc, engine_key=DocumentTextResult.OcrEngineKey.GEMINI
+            ).exists()
+        )
 
 
 class TranskribusRunPersistenceGuardTests(TestCase):

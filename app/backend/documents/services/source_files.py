@@ -10,7 +10,7 @@ from documents.s3 import create_presigned_get
 logger = logging.getLogger(__name__)
 
 MULTI_IMAGE_MIN_FILES = 2
-MULTI_IMAGE_MAX_FILES = 20
+MULTI_IMAGE_MAX_FILES = 25
 
 
 class MultiImageSourceFilesError(ValueError):
