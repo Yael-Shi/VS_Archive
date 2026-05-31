@@ -132,22 +132,15 @@ class TranskribusAdapter:
         try:
             with requests.Session() as session:
                 tr.login_trp_server(session, username=username, password=password)
-                recognition_job_id = tr.start_pylaia_recognition(
+                outcome = self._run_recognition(
                     session,
+                    run,
+                    worker_env=worker_env,
                     collection_id=collection_id,
                     model_id=model_id,
-                    document_id=remote_doc_id,
+                    remote_doc_id=remote_doc_id,
                     pages_query=pages_query,
-                )
-                trp.mark_recognition_started(run, recognition_job_id=recognition_job_id)
-                outcome = tr.complete_pylaia_transcription_after_job(
-                    session,
-                    recognition_job_id=recognition_job_id,
-                    collection_id=collection_id,
-                    model_id=model_id,
-                    document_id=remote_doc_id,
-                    pages_query=pages_query,
-                    bearer_token=bearer,
+                    bearer=bearer,
                 )
                 trp.mark_succeeded(run, engine_runtime=engine_runtime)
                 return HtrResult(
@@ -194,6 +187,7 @@ class TranskribusAdapter:
 
         if force_reprocess:
             return self._execute_dev_upload_with_new_trp_document(
+                worker_env=worker_env,
                 document_id=document_id,
                 pages=pages,
                 username=username,
@@ -212,6 +206,7 @@ class TranskribusAdapter:
             )
             if source_run is not None:
                 return self._execute_dev_recognition_only(
+                    worker_env=worker_env,
                     document_id=document_id,
                     pages=pages,
                     source_run=source_run,
@@ -250,6 +245,7 @@ class TranskribusAdapter:
             )
 
         return self._execute_dev_upload_with_new_trp_document(
+            worker_env=worker_env,
             document_id=document_id,
             pages=pages,
             username=username,
@@ -263,6 +259,7 @@ class TranskribusAdapter:
     def _execute_dev_recognition_only(
         self,
         *,
+        worker_env: object,
         document_id: int,
         pages: List[PageImage],
         source_run: TranskribusRun,
@@ -302,22 +299,15 @@ class TranskribusAdapter:
         try:
             with requests.Session() as session:
                 tr.login_trp_server(session, username=username, password=password)
-                recognition_job_id = tr.start_pylaia_recognition(
+                outcome = self._run_recognition(
                     session,
+                    run,
+                    worker_env=worker_env,
                     collection_id=collection_id,
                     model_id=model_id,
-                    document_id=remote_doc_id,
+                    remote_doc_id=remote_doc_id,
                     pages_query=pages_query,
-                )
-                trp.mark_recognition_started(run, recognition_job_id=recognition_job_id)
-                outcome = tr.complete_pylaia_transcription_after_job(
-                    session,
-                    recognition_job_id=recognition_job_id,
-                    collection_id=collection_id,
-                    model_id=model_id,
-                    document_id=remote_doc_id,
-                    pages_query=pages_query,
-                    bearer_token=bearer,
+                    bearer=bearer,
                 )
                 trp.mark_succeeded(run, engine_runtime=engine_runtime)
                 return HtrResult(
@@ -344,6 +334,7 @@ class TranskribusAdapter:
     def _execute_dev_upload_with_new_trp_document(
         self,
         *,
+        worker_env: object,
         document_id: int,
         pages: List[PageImage],
         username: str,
@@ -376,22 +367,15 @@ class TranskribusAdapter:
                     pages_query=upload_out.pages_query,
                     page_index_to_page_nr=upload_out.page_index_to_page_nr,
                 )
-                recognition_job_id = tr.start_pylaia_recognition(
+                outcome = self._run_recognition(
                     session,
+                    run,
+                    worker_env=worker_env,
                     collection_id=collection_id,
                     model_id=model_id,
-                    document_id=upload_out.doc_id,
+                    remote_doc_id=upload_out.doc_id,
                     pages_query=upload_out.pages_query,
-                )
-                trp.mark_recognition_started(run, recognition_job_id=recognition_job_id)
-                outcome = tr.complete_pylaia_transcription_after_job(
-                    session,
-                    recognition_job_id=recognition_job_id,
-                    collection_id=collection_id,
-                    model_id=model_id,
-                    document_id=upload_out.doc_id,
-                    pages_query=upload_out.pages_query,
-                    bearer_token=bearer,
+                    bearer=bearer,
                 )
                 trp.mark_succeeded(run, engine_runtime=engine_runtime)
                 return HtrResult(
@@ -416,6 +400,51 @@ class TranskribusAdapter:
             )
             trp.mark_failed(run, error_code=error_code, error_details=str(exc))
             raise EnginePermanentError(str(exc)) from exc
+
+    @staticmethod
+    def _recognition_retry_params(worker_env: object) -> tuple[int, tuple[int, int]]:
+        """
+        Derive bounded recognition-retry settings from the generic worker config.
+
+        Reuses the existing MAX_RETRIES / RETRY_DELAY_SECONDS_1 / RETRY_DELAY_SECONDS_2
+        knobs; no new env vars. Used only to recover the transient PyLaia workdir failure.
+        """
+        max_attempts = max(1, int(getattr(worker_env, "max_retries", 1) or 1))
+        delay_1 = int(getattr(worker_env, "retry_delay_seconds_1", 0) or 0)
+        delay_2 = int(getattr(worker_env, "retry_delay_seconds_2", 0) or 0)
+        return max_attempts, (delay_1, delay_2)
+
+    def _run_recognition(
+        self,
+        session,
+        run: TranskribusRun,
+        *,
+        worker_env: object,
+        collection_id: str,
+        model_id: str,
+        remote_doc_id: str,
+        pages_query: str,
+        bearer: str,
+    ):
+        """
+        Run PyLaia recognition for an already-resolved server document, with bounded
+        retry of the transient decode-node workdir failure. Persists the (latest)
+        recognition job id on ``run`` as each attempt starts.
+        """
+        max_attempts, retry_delays = self._recognition_retry_params(worker_env)
+        return tr.run_recognition_with_workdir_retry(
+            session,
+            collection_id=collection_id,
+            model_id=model_id,
+            document_id=remote_doc_id,
+            pages_query=pages_query,
+            bearer_token=bearer,
+            max_attempts=max_attempts,
+            retry_delays=retry_delays,
+            on_recognition_started=lambda job_id: trp.mark_recognition_started(
+                run, recognition_job_id=job_id
+            ),
+        )
 
     @staticmethod
     def _guard_verified_text_results(*, document_id: int) -> None:

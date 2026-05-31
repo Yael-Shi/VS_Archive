@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from io import BytesIO
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
 import requests
 
 from documents.services.htr_adapters.base import HtrResult
 from documents.services.page_extraction import PageImage
+
+logger = logging.getLogger(__name__)
 
 TRP_REST_BASE = "https://transkribus.eu/TrpServer/rest"
 _TRP_SESSION_COOKIE_DOMAIN = urlparse(TRP_REST_BASE).hostname or "transkribus.eu"
@@ -294,6 +297,48 @@ def _job_terminal_failure(job: dict) -> bool:
     return False
 
 
+# PyLaia decode nodes intermittently fail to create their per-job working directory,
+# surfaced by TrpServer as a job ``description`` such as
+# "Could not create workdir at: /tmp/HTR/PyLaia/trpProd/Decode/pylaiaDecode_<job_id>".
+# Manual API retries against the same document/pages/model recover, so this signature is
+# treated as transient/retryable rather than a permanent OCR failure.
+_PYLAIA_WORKDIR_FAILURE_PHRASE = "could not create workdir"
+_PYLAIA_WORKDIR_FAILURE_PATH = "/tmp/htr/pylaia/"
+
+
+def is_retryable_pylaia_workdir_failure(description: Optional[str]) -> bool:
+    """True for the transient PyLaia decode-node workdir-creation failure signature."""
+    if not description:
+        return False
+    text = description.lower()
+    return _PYLAIA_WORKDIR_FAILURE_PHRASE in text and _PYLAIA_WORKDIR_FAILURE_PATH in text
+
+
+def safe_job_failure_diagnostics(job: dict, job_id: str) -> Dict[str, Any]:
+    """
+    Extract a small, non-sensitive subset of a failed TrpServer job for logging.
+
+    Never includes tokens, cookies, image bytes, OCR text, presigned URLs, request
+    bodies, or secrets. Only coarse job identity/diagnostic fields.
+    """
+    diagnostics: Dict[str, Any] = {"job_id": str(job_id)}
+    state = job.get("state")
+    if isinstance(state, str) and state.strip():
+        diagnostics["state"] = state.strip()
+    module_url = job.get("moduleUrl")
+    if isinstance(module_url, str) and module_url.strip():
+        diagnostics["module_url"] = module_url.strip()
+    job_data = job.get("jobData")
+    if isinstance(job_data, dict):
+        client_id = job_data.get("clientId")
+        if client_id is not None:
+            diagnostics["client_id"] = str(client_id)
+    desc = job.get("description")
+    if isinstance(desc, str) and desc.strip():
+        diagnostics["description_first_line"] = desc.strip().splitlines()[0][:200]
+    return diagnostics
+
+
 def poll_job_until_done(
     session: requests.Session,
     job_id: str,
@@ -309,6 +354,14 @@ def poll_job_until_done(
             return job
         if _job_terminal_failure(job):
             desc = job.get("description") or job.get("state") or "unknown"
+            if is_retryable_pylaia_workdir_failure(str(desc)):
+                logger.warning(
+                    "Transkribus PyLaia workdir failure (retryable): %s",
+                    safe_job_failure_diagnostics(job, job_id),
+                )
+                raise _http_retryable(
+                    f"Transkribus job {job_id} failed: {desc}"
+                )
             raise _http_permanent(
                 f"Transkribus job {job_id} failed: {desc}"
             )
@@ -880,6 +933,82 @@ def complete_pylaia_transcription_after_job(
         text=full_text,
         review_reasons=list(review_reasons),
         recognition_job_id=job_id,
+    )
+
+
+def run_recognition_with_workdir_retry(
+    session: requests.Session,
+    *,
+    collection_id: str,
+    model_id: str,
+    document_id: str,
+    pages_query: str,
+    bearer_token: str,
+    max_attempts: int = 1,
+    retry_delays: Sequence[float] = (),
+    on_recognition_started: Optional[Callable[[str], None]] = None,
+    timeout_sec: float = DEFAULT_HTTP_TIMEOUT_SEC,
+) -> PylaiaTranscriptionOutcome:
+    """
+    Start PyLaia recognition and fetch transcripts, retrying only the transient
+    decode-node workdir-creation failure (see ``is_retryable_pylaia_workdir_failure``).
+
+    Each attempt issues a **new** recognition job against the **same** server document
+    (``document_id``/``pages_query``); no new upload is performed, so this is safe to retry
+    without creating duplicate Transkribus documents. ``on_recognition_started`` is invoked
+    with the latest recognition job id (e.g. to persist it on a ``TranskribusRun``).
+
+    Other retryable failures (timeouts, 5xx, polling timeout) and all permanent failures are
+    re-raised on the first occurrence, preserving existing behavior. After the retry budget is
+    exhausted, the last workdir failure is re-raised (caller maps it to the existing
+    failed-result behavior).
+    """
+    attempts = max(1, int(max_attempts))
+    for attempt in range(1, attempts + 1):
+        try:
+            recognition_job_id = start_pylaia_recognition(
+                session,
+                collection_id=collection_id,
+                model_id=model_id,
+                document_id=document_id,
+                pages_query=pages_query,
+                timeout_sec=timeout_sec,
+            )
+            if on_recognition_started is not None:
+                on_recognition_started(recognition_job_id)
+            return complete_pylaia_transcription_after_job(
+                session,
+                recognition_job_id=recognition_job_id,
+                collection_id=collection_id,
+                model_id=model_id,
+                document_id=document_id,
+                pages_query=pages_query,
+                bearer_token=bearer_token,
+                timeout_sec=timeout_sec,
+            )
+        except TranskribusRetryableError as exc:
+            if attempt < attempts and is_retryable_pylaia_workdir_failure(str(exc)):
+                delay = (
+                    float(retry_delays[min(attempt - 1, len(retry_delays) - 1)])
+                    if retry_delays
+                    else 0.0
+                )
+                logger.warning(
+                    "Transkribus recognition workdir failure; retrying "
+                    "attempt=%s/%s delay_sec=%s remote_doc_id=%s pages_query=%s",
+                    attempt,
+                    attempts,
+                    delay,
+                    document_id,
+                    pages_query,
+                )
+                if delay > 0:
+                    time.sleep(delay)
+                continue
+            raise
+    raise _http_retryable(
+        f"Transkribus recognition exhausted {attempts} workdir-retry attempts "
+        f"for document {document_id} pages {pages_query}"
     )
 
 

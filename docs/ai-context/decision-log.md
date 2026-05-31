@@ -58,7 +58,7 @@
 
 ### API (admin-only, same auth as existing upload endpoints)
 
-- **`POST /api/uploads/create/`** — if **`files`** array is present → multi-image mode (2–20 **`image/*`** files only, server-assigned **`order_index`** from array order). Legacy single-file body/response unchanged when **`files`** is absent.
+- **`POST /api/uploads/create/`** — if **`files`** array is present → multi-image mode (2–25 **`image/*`** files only, server-assigned **`order_index`** from array order). Legacy single-file body/response unchanged when **`files`** is absent.
 - **`POST /api/uploads/<doc_id>/parts/<order_index>/complete/`** — mark one planned source file **`UPLOADED`** or **`FAILED`**; part failure marks parent **`Document.upload_status=FAILED`**.
 - **`POST /api/uploads/<doc_id>/finalize/`** — when all expected parts are **`UPLOADED`**, mirror **`order_index=0`** into **`Document.file_*`**, set **`Document.upload_status=UPLOADED`**, set **`Document.processing_state_user=PARTIAL`** (no **`ACTION_REQUIRED`** enum exists today), **do not enqueue SQS**. **[Superseded by PR4: the finalize success path now sets `PROCESSING` and enqueues `PROCESS_DOCUMENT`; see "Multi-image worker processing (PR4)" below.]**
 - Legacy **`POST .../complete/`** — unchanged for single-file docs; returns **400** for multi-image documents.
@@ -149,7 +149,7 @@
 
 - The single file input now has the **`multiple`** attribute. Client-side branching is by selection count:
   - **1 file** → unchanged **legacy single-file flow** (`create` → presigned `PUT` → `complete/`); image **or** PDF, exactly as before. No confirmation prompt.
-  - **2–20 files** → **multi-image flow** (`create` with `files[]` → `PUT` each part → `parts/<order_index>/complete/` each → `finalize/`).
+  - **2–25 files** → **multi-image flow** (`create` with `files[]` → `PUT` each part → `parts/<order_index>/complete/` each → `finalize/`).
 - **Selection order is the document page order.** The selected files are listed (multi-image case only) as 1-based `עמוד N: <original_name>`. **No reorder controls and no drag/drop.**
 - Multi-image is **image-only**: 2+ selections are validated client-side — any non-`image/*` file or **>20** files is rejected **before** any API call (mirrors the backend rules; backend remains the enforcer). No PDF+image mixed selection, no multi-PDF.
 - For a 2+ selection the page forces **`doc_type=IMAGE`** (multi-image create requires/assumes `IMAGE`), so the user does not separately pick `doc_type`.
@@ -383,6 +383,31 @@ Returns most recent qualifying row (`-created_at`, `-id`).
 ### Deferred (post–recognition-only V1)
 
 - Re-run on **`SUCCEEDED`** source runs, staleness TTL, content-hash / file-changed detection, cleanup automation, product reprocess API.
+
+---
+
+## Transkribus — transient PyLaia workdir failure retry (recognition-only, in-adapter)
+
+**Decision:** Treat the transient PyLaia decode-node failure whose TrpServer job `description` matches **"Could not create workdir at: /tmp/HTR/PyLaia/"** as **retryable** instead of a terminal OCR failure. QA observed it on two Hebrew handwritten documents (`remote_doc_id` 16537736, 16539496); the same `remote_doc_id`/`pages`/model recovered on manual re-run, and both Bearer and session-cookie auth succeeded, so the root cause is transient Transkribus/PyLaia decode-node infrastructure, **not** auth mode.
+
+**Current behavior:**
+
+- `transkribus_engine.is_retryable_pylaia_workdir_failure(description)` classifies the signature. In `poll_job_until_done`, a terminal job failure matching it raises **`TranskribusRetryableError`** (→ `EngineRetryableError`); all other job failures stay **`TranskribusPermanentError`** (→ `EnginePermanentError`).
+- `transkribus_engine.run_recognition_with_workdir_retry(...)` runs recognition with a **bounded** retry of **only** this signature: each attempt issues a **new** PyLaia recognition job against the **same** server document (`remote_doc_id`/`pages_query`) on the same logged-in session — **no new `/uploads` ingest**, so it cannot create duplicate Trp documents. Other retryable errors (timeouts, 5xx, polling timeout) and all permanent errors are re-raised on first occurrence (behavior unchanged).
+- All three `TranskribusAdapter` recognition paths (existing-server, recognition-only, dev-upload-created) route through this helper. Retry budget reuses the existing generic worker config: `MAX_RETRIES` (attempts) and `RETRY_DELAY_SECONDS_1`/`RETRY_DELAY_SECONDS_2` (delays); **no new env vars**.
+- The retry is consumed **inside** a single adapter `execute()` (one `TranskribusRun`, latest `recognition_job_id` persisted). The worker is **unchanged and provider-agnostic**: it persists a terminal **`FAILED`** `DocumentTextResult` only **after** the budget is exhausted (existing failure path, `engine="ocr-dispatch"`, `engine_key=TRANSKRIBUS`). **No** Gemini fallback.
+- Safe diagnostics on the workdir failure log only coarse, non-sensitive job fields (job id, state, `moduleUrl`, `clientId`, first line of `description`, `remote_doc_id`, `pages_query`, attempt counter). No tokens, cookies, image bytes, OCR text, presigned URLs, request bodies, or secrets.
+
+**Out of scope / deferred:** broad worker-level retry, SQS/visibility/backoff/DLQ redesign (still deferred), fetch-existing-PAGE-XML-only recovery, admin reprocess action, and changing session-cookie vs Bearer auth (both verified working).
+
+### Runtime envelope vs SQS visibility (Known limitation)
+
+- **Worst-case runtime (current defaults `MAX_RETRIES=2`, `RETRY_DELAY_SECONDS_1=60`):** the bounded recognition retry worst-case is **~31 min** (attempt 1 poll ≤ `POLL_MAX_WAIT_SEC`=900s + one `RETRY_DELAY_SECONDS_1`=60s sleep + attempt 2 poll ≤ 900s). Whole-document worst-case, including the upload ingest poll (≤ 900s), is **~46 min dominant**, and potentially higher with per-call HTTP timeouts (`DEFAULT_HTTP_TIMEOUT_SEC`=60s for login, create, each PUT, each metadata/transcript fetch).
+- **At `MAX_RETRIES=2`, `RETRY_DELAY_SECONDS_2` is currently unused** — two attempts means exactly one inter-attempt sleep (`RETRY_DELAY_SECONDS_1`); `RETRY_DELAY_SECONDS_2` would only apply to a third attempt.
+- **Effective SQS visibility timeout is currently 300s** because `run_worker._receive_one` passes `VisibilityTimeout=300` on `receive_message`, which overrides the queue default of 10 minutes (`data_stack.py` `visibility_timeout=Duration.minutes(10)`).
+- **The visibility overrun pre-dates this PR:** a single Transkribus poll can wait up to `POLL_MAX_WAIT_SEC`=900s, already ~3× the 300s visibility window, independent of any retry.
+- **This PR widens the existing window but does not introduce a new concurrent-processing hazard under current infrastructure**, because the worker service is capped at **`max_capacity=1`** (`app_stack.py`). With a single consumer there is no concurrent re-delivery; re-processing only happens sequentially after a worker task dies (spot reclaim / deploy / nightly stop), and that path is guarded by the PR3 duplicate-upload guard.
+- **Before increasing worker `max_capacity` above 1**, add a visibility heartbeat (`ChangeMessageVisibility`) and/or a DLQ / `maxReceiveCount` design first. At >1 worker the visibility overrun becomes a genuine concurrent-duplicate-processing hazard (true with or without this PR). This remains part of the deferred retry/visibility/DLQ redesign.
 
 ---
 
