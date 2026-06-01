@@ -6821,3 +6821,223 @@ class ReviewDetailHierarchyTests(SimpleTestCase):
             doc, DocumentTextResult.ResultType.HEBREW_TEXT
         )
         self.assertIn("בדיקה", desc)
+
+
+class DocumentDetailTextGroupingTests(TestCase):
+    """Document detail text-result grouping and labeling (presentation-only)."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+
+        self.staff = User.objects.create_user(
+            username="detail_text_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+
+    def _create_document(self, **kwargs):
+        defaults = {
+            "title": "Detail text doc",
+            "doc_type": Document.DocType.IMAGE,
+            "text_input_type": Document.TextInputType.HANDWRITTEN,
+            "language": Document.Language.HEBREW,
+            "upload_status": Document.UploadStatus.UPLOADED,
+            "processing_state_user": Document.ProcessingState.READY,
+        }
+        defaults.update(kwargs)
+        return Document.objects.create(**defaults)
+
+    def _create_text_result(self, doc, **kwargs):
+        defaults = {
+            "engine": "transkribus-pylaia:1",
+            "engine_key": DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
+            "prompt_variant": DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            "status": DocumentTextResult.Status.NEEDS_REVIEW,
+            "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
+            "text": "שורת בדיקה",
+            "review_reasons": '["AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW"]',
+        }
+        defaults.update(kwargs)
+        return DocumentTextResult.objects.create(document=doc, **defaults)
+
+    def _detail_url(self, doc_id: int) -> str:
+        return f"/api/ui/documents/{doc_id}/"
+
+    def test_hebrew_detail_renders_source_text_when_persisted(self):
+        doc = self._create_document()
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="טקסט מקור עברי",
+        )
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="טקסט מקור עברי",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "תמלול מקור")
+        self.assertContains(resp, "טקסט עברי לבדיקה")
+        self.assertContains(resp, "טקסט מקור עברי", count=2)
+        self.assertContains(resp, "SOURCE_TEXT")
+        self.assertContains(resp, "HEBREW_TEXT")
+
+    def test_hebrew_detail_uses_distinct_labels_and_descriptions(self):
+        doc = self._create_document()
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="א",
+        )
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="ב",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "הטקסט כפי שחולץ אוטומטית מן המסמך.")
+        self.assertContains(resp, "הטקסט העברי שמיועד לבדיקה, עריכה ואישור.")
+        self.assertNotContains(resp, "תמלול מקור (עברית כפי שחולצה)")
+
+    def test_hebrew_identical_blocks_show_role_explanation(self):
+        doc = self._create_document()
+        shared = "טקסט משותף לבדיקה"
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text=shared,
+        )
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text=shared,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "שני מקטעים אלו עשויים להכיל טקסט זהה")
+
+    def test_non_hebrew_detail_preserves_source_and_translation_sections(self):
+        doc = self._create_document(language=Document.Language.ENGLISH)
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="English source line",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "תמלול מקור")
+        self.assertContains(resp, "טקסט בשפת המקור כפי שחולץ אוטומטית.")
+        self.assertContains(resp, "תרגום לעברית")
+        self.assertContains(resp, "אין תרגום לעברית עדיין.")
+        self.assertContains(resp, "English source line")
+
+    def test_non_hebrew_missing_translation_still_shows_missing_section(self):
+        doc = self._create_document(language=Document.Language.FRENCH)
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="Texte source",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "HEBREW_TEXT")
+        self.assertContains(resp, "אין תרגום לעברית עדיין.")
+
+    def test_detail_technical_details_remain_collapsed_with_raw_enums(self):
+        doc = self._create_document()
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="שורת מקור",
+        )
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="שורה",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        # User-facing labels (headings), not raw enum names.
+        self.assertContains(resp, "תמלול מקור")
+        self.assertContains(resp, "טקסט עברי לבדיקה")
+        # Raw enums remain in collapsed technical details.
+        self.assertContains(resp, "פרטים טכניים")
+        self.assertContains(resp, "<details")
+        self.assertContains(resp, "SOURCE_TEXT")
+        self.assertContains(resp, "HEBREW_TEXT")
+        self.assertContains(resp, "NEEDS_REVIEW")
+        self.assertContains(resp, "UNVERIFIED")
+        self.assertContains(resp, "transkribus-pylaia:1")
+
+
+class TextBlockDisplayMetaTests(SimpleTestCase):
+    """Pure metadata label tests for document detail text blocks (no DB)."""
+
+    def test_hebrew_source(self):
+        from documents.services.text_presentation import text_block_display_meta
+
+        doc = Document(language=Document.Language.HEBREW)
+        meta = text_block_display_meta(doc, "SOURCE_TEXT")
+        self.assertEqual(meta.label, "תמלול מקור")
+        self.assertEqual(meta.description, "הטקסט כפי שחולץ אוטומטית מן המסמך.")
+
+    def test_hebrew_hebrew_text(self):
+        from documents.services.text_presentation import text_block_display_meta
+
+        doc = Document(language=Document.Language.HEBREW)
+        meta = text_block_display_meta(doc, "HEBREW_TEXT")
+        self.assertEqual(meta.label, "טקסט עברי לבדיקה")
+        self.assertIn("עריכה", meta.description)
+
+    def test_non_hebrew_translation(self):
+        from documents.services.text_presentation import text_block_display_meta
+
+        doc = Document(language=Document.Language.ENGLISH)
+        meta = text_block_display_meta(doc, "HEBREW_TEXT")
+        self.assertEqual(meta.label, "תרגום לעברית")
+
+
+class TextPresentationHelperTests(TestCase):
+    """DB-backed tests for document detail text presentation helpers."""
+
+    def test_get_text_presentation_identical_flag(self):
+        from documents.services.text_presentation import get_text_presentation_for_document
+
+        doc = Document.objects.create(
+            title="Presentation helper doc",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            language=Document.Language.HEBREW,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.READY,
+        )
+        shared = "טקסט זהה"
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="engine-a",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text=shared,
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="engine-a",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text=shared,
+        )
+
+        presentation = get_text_presentation_for_document(doc)
+        self.assertTrue(presentation.show_source)
+        self.assertTrue(presentation.show_hebrew)
+        self.assertTrue(presentation.identical_source_and_hebrew)

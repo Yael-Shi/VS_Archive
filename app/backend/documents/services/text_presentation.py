@@ -23,11 +23,65 @@ class DisplayTextBlock:
 
 
 @dataclass(frozen=True)
+class TextBlockDisplayMeta:
+    label: str
+    description: str
+    empty_message: str
+
+
+@dataclass(frozen=True)
 class TextPresentation:
     source: Optional[DisplayTextBlock]
     hebrew: Optional[DisplayTextBlock]
     missing: list[ResultTypeStr]
     expected: list[ResultTypeStr]
+    source_meta: TextBlockDisplayMeta
+    hebrew_meta: TextBlockDisplayMeta
+    show_source: bool
+    show_hebrew: bool
+    identical_source_and_hebrew: bool
+
+
+def _is_hebrew_language(doc: Document) -> bool:
+    lang = (doc.language or "").strip().lower()
+    return lang in ("he", "heb", "hebrew")
+
+
+def text_block_display_meta(doc: Document, result_type: ResultTypeStr) -> TextBlockDisplayMeta:
+    """User-facing label and short explanation for a document detail text block."""
+    is_hebrew_doc = _is_hebrew_language(doc)
+
+    if result_type == "SOURCE_TEXT":
+        if is_hebrew_doc:
+            return TextBlockDisplayMeta(
+                label="תמלול מקור",
+                description="הטקסט כפי שחולץ אוטומטית מן המסמך.",
+                empty_message="אין תמלול מקור להצגה.",
+            )
+        return TextBlockDisplayMeta(
+            label="תמלול מקור",
+            description="טקסט בשפת המקור כפי שחולץ אוטומטית.",
+            empty_message="אין תמלול מקור עדיין.",
+        )
+
+    if result_type == "HEBREW_TEXT":
+        if is_hebrew_doc:
+            return TextBlockDisplayMeta(
+                label="טקסט עברי לבדיקה",
+                description="הטקסט העברי שמיועד לבדיקה, עריכה ואישור.",
+                empty_message="אין תמלול לעברית עדיין.",
+            )
+        return TextBlockDisplayMeta(
+            label="תרגום לעברית",
+            description="תרגום לעברית של טקסט המקור (אם קיים).",
+            empty_message="אין תרגום לעברית עדיין.",
+        )
+
+    return TextBlockDisplayMeta(
+        label=result_type,
+        description="",
+        empty_message="אין טקסט להצגה עדיין.",
+    )
 
 
 def _latest_displayable(doc: Document, result_type: ResultTypeStr) -> Optional[DocumentTextResult]:
@@ -121,4 +175,25 @@ def get_text_presentation_for_document(doc: Document) -> TextPresentation:
         if rt == "HEBREW_TEXT" and hebrew_obj is None:
             missing.append("HEBREW_TEXT")
 
-    return TextPresentation(source=source, hebrew=hebrew, missing=missing, expected=expected)
+    source_meta = text_block_display_meta(doc, "SOURCE_TEXT")
+    hebrew_meta = text_block_display_meta(doc, "HEBREW_TEXT")
+    show_source = "SOURCE_TEXT" in expected or source is not None
+    show_hebrew = "HEBREW_TEXT" in expected or hebrew is not None
+
+    identical_source_and_hebrew = False
+    if show_source and show_hebrew and source and hebrew:
+        source_text = (source.text or "").strip()
+        hebrew_text = (hebrew.text or "").strip()
+        identical_source_and_hebrew = bool(source_text) and source_text == hebrew_text
+
+    return TextPresentation(
+        source=source,
+        hebrew=hebrew,
+        missing=missing,
+        expected=expected,
+        source_meta=source_meta,
+        hebrew_meta=hebrew_meta,
+        show_source=show_source,
+        show_hebrew=show_hebrew,
+        identical_source_and_hebrew=identical_source_and_hebrew,
+    )
