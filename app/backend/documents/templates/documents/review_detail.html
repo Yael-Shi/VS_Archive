@@ -6,10 +6,12 @@
   <div class="review-page">
     <header class="card review-header">
       <div class="review-header-toolbar">
-        <a class="btn" href="/api/ui/admin/review/">חזרה לבקרת תמלול</a>
-        <a class="btn" href="/api/ui/documents/{{ doc.id }}/">תצוגת מסמך</a>
-        <a class="btn" href="/api/ui/admin/backlog/">השלמת פרטים</a>
+        {# Global navigation (lists/backlogs) #}
+        <a class="btn" href="/api/ui/admin/review/">חזרה לרשימת בקרת תמלול</a>
+        <a class="btn" href="/api/ui/admin/backlog/">רשימת השלמת פרטים</a>
         <div style="flex:1;"></div>
+        {# Actions for the current document #}
+        <a class="btn" href="/api/ui/documents/{{ doc.id }}/">תצוגת מסמך</a>
         <a class="btn" href="/admin/documents/document/{{ doc.id }}/change/">עריכה (Django Admin)</a>
       </div>
 
