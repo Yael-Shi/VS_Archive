@@ -104,7 +104,7 @@ def metadata_status_badge(value):
     return {"label": label, "tone": tone}
 
 
-@register.inclusion_tag("documents/partials/_status_badge.html")
+@register.inclusion_tag("documents/partials/_verification_badge.html")
 def verification_status_badge(value):
     label, tone = _resolve(_VERIFICATION_STATUS, value)
     return {"label": label, "tone": tone}

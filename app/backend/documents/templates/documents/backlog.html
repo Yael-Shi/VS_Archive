@@ -3,38 +3,37 @@
 {% block title %}VSArchive - השלמת פרטים{% endblock %}
 
 {% block content %}
-  <div class="card" style="padding: 20px;">
+  <div class="card page-header">
     <h1 class="page-title">השלמת פרטים</h1>
     <p class="page-subtitle">
       השלמת מטא־דאטה, תגיות ושדות קטלוג למנהלים (Needs completion)
     </p>
 
-    <div style="display:flex; gap:10px; flex-wrap: wrap; align-items:center;">
+    <div class="page-toolbar">
       <a class="btn" href="/api/ui/documents/">חזרה למסמכים</a>
       <a class="btn" href="/api/ui/admin/review/">רשימת בקרת תמלול</a>
 
-      <div style="flex:1;"></div>
+      <div class="flex-spacer"></div>
 
       {% if user.is_staff or user.is_superuser %}
         <a class="btn" href="/admin/">Django Admin</a>
       {% endif %}
     </div>
 
-    <div class="spacer"></div>
-
     {% if not user.is_staff and not user.is_superuser %}
-      <div class="card" style="padding: 14px; border: 1px solid rgba(180,35,24,0.25);">
-        <div style="font-weight: 900; color: var(--danger);">אין הרשאה</div>
-        <div style="margin-top: 6px;">
-          עמוד זה זמין למנהלים בלבד.
-        </div>
+      <div class="spacer"></div>
+      <div class="alert alert-danger">
+        <div class="alert-title">אין הרשאה</div>
+        <div>עמוד זה זמין למנהלים בלבד.</div>
       </div>
     {% else %}
 
-      <div class="card" style="padding: 14px;">
+      <div class="spacer"></div>
+
+      <div class="card card--nested filter-panel">
         <div class="section-title">פילטרים מהירים</div>
 
-        <div style="display:flex; gap:10px; flex-wrap: wrap; align-items:center; margin-top: 10px;">
+        <div class="flex-row filter-chips">
           <a class="btn {% if not only_missing_tags and not only_missing_admin_meta %}btn-primary{% endif %}"
              href="/api/ui/admin/backlog/">
             הכל
@@ -62,105 +61,107 @@
 
         <div class="spacer"></div>
 
-        <div class="muted" style="font-size: 13px;">
+        <div class="filter-summary">
           <strong>סיכום:</strong>
           סה״כ דורשים השלמה: <strong>{{ total_backlog }}</strong> ·
           בלי תגיות: <strong>{{ missing_tags_count }}</strong> ·
           מטא־דאטה ריק: <strong>{{ missing_admin_meta_count }}</strong>
         </div>
 
-        <div class="muted" style="font-size: 13px; margin-top: 6px;">
+        <div class="filter-summary">
           מציג {{ docs|length }} מתוך {{ total }} (אחרי פילטרים)
         </div>
       </div>
+    {% endif %}
+  </div>
+
+  {% if user.is_staff or user.is_superuser %}
+    <div class="spacer"></div>
+
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th class="col-w-55">מסמך</th>
+            <th class="col-w-10">סוג</th>
+            <th class="col-w-15">תגיות</th>
+            <th class="col-w-10">סטטוס</th>
+            <th class="col-w-10">פעולות</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for d in docs %}
+            <tr>
+              <td>
+                <div class="cell-title">
+                  <a href="/api/ui/documents/{{ d.id }}/">{{ d.title }}</a>
+                </div>
+
+                <div class="cell-meta">
+                  #{{ d.id }}
+                  {% if d.created_at %} · {{ d.created_at }}{% endif %}
+                  {% if d.file_original_name %} · {{ d.file_original_name }}{% endif %}
+                </div>
+
+                <div class="badge-row">
+                  {% upload_status_badge d.upload_status %}
+
+                  {% if not d.tags_m2m.exists %}
+                    <span class="badge badge-bad">חסרות תגיות</span>
+                  {% endif %}
+
+                  {% if d.admin_meta %}
+                    {% if not d.admin_meta.donor and not d.admin_meta.collection and not d.admin_meta.original_location and not d.admin_meta.notes %}
+                      <span class="badge badge-warn">מטא־דאטה ריק</span>
+                    {% endif %}
+                  {% else %}
+                    <span class="badge badge-warn">מטא־דאטה חסר</span>
+                  {% endif %}
+                </div>
+
+                {% if d.admin_meta %}
+                  <div class="cell-meta">
+                    {% if d.admin_meta.donor %}<span><strong>תורם:</strong> {{ d.admin_meta.donor }}</span>{% endif %}
+                    {% if d.admin_meta.collection %}<span> · <strong>אוסף:</strong> {{ d.admin_meta.collection }}</span>{% endif %}
+                    {% if d.admin_meta.original_location %}<span> · <strong>מיקום:</strong> {{ d.admin_meta.original_location }}</span>{% endif %}
+                  </div>
+                {% endif %}
+              </td>
+
+              <td>{{ d.doc_type }}</td>
+
+              <td>
+                {% if d.tags_m2m.exists %}
+                  <div class="badge-row">
+                    {% for t in d.tags_m2m.all %}
+                      <span class="badge">{{ t.name }}</span>
+                    {% endfor %}
+                  </div>
+                {% else %}
+                  <span class="muted">—</span>
+                {% endif %}
+              </td>
+
+              <td>
+                {% processing_state_badge d.processing_state_user %}
+              </td>
+
+              <td>
+                <a class="btn" href="/admin/documents/document/{{ d.id }}/change/">עריכה</a>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="5" class="table-empty">אין פריטים בהשלמת פרטים 🎉</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
 
     <div class="spacer"></div>
 
-    <table class="table">
-      <thead>
-        <tr>
-          <th style="width: 55%;">מסמך</th>
-          <th style="width: 10%;">סוג</th>
-          <th style="width: 15%;">תגיות</th>
-          <th style="width: 10%;">סטטוס</th>
-          <th style="width: 10%;">פעולות</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for d in docs %}
-          <tr>
-            <td>
-              <div style="font-weight: 900;">
-                <a href="/api/ui/documents/{{ d.id }}/">{{ d.title }}</a>
-              </div>
-
-              <div class="muted" style="font-size: 13px;">
-                #{{ d.id }}
-                {% if d.created_at %} · {{ d.created_at }}{% endif %}
-                {% if user.is_staff or user.is_superuser %}
-                  {% if d.file_original_name %} · {{ d.file_original_name }}{% endif %}
-                {% endif %}
-              </div>
-
-              <div class="spacer" style="height:8px;"></div>
-
-              <div style="display:flex; gap:8px; flex-wrap: wrap; align-items:center;">
-                {% upload_status_badge d.upload_status %}
-
-                {% if not d.tags_m2m.exists %}
-                  <span class="badge badge-bad">חסרות תגיות</span>
-                {% endif %}
-
-                {% if d.admin_meta %}
-                  {% if not d.admin_meta.donor and not d.admin_meta.collection and not d.admin_meta.original_location and not d.admin_meta.notes %}
-                    <span class="badge badge-warn">מטא־דאטה ריק</span>
-                  {% endif %}
-                {% else %}
-                  <span class="badge badge-warn">מטא־דאטה חסר</span>
-                {% endif %}
-              </div>
-
-              {% if d.admin_meta %}
-                <div class="muted" style="font-size: 13px; margin-top: 8px;">
-                  {% if d.admin_meta.donor %}<span><strong>תורם:</strong> {{ d.admin_meta.donor }}</span>{% endif %}
-                  {% if d.admin_meta.collection %}<span> · <strong>אוסף:</strong> {{ d.admin_meta.collection }}</span>{% endif %}
-                  {% if d.admin_meta.original_location %}<span> · <strong>מיקום:</strong> {{ d.admin_meta.original_location }}</span>{% endif %}
-                </div>
-              {% endif %}
-            </td>
-
-            <td>{{ d.doc_type }}</td>
-
-            <td>
-              {% if d.tags_m2m.exists %}
-                {% for t in d.tags_m2m.all %}
-                  <span class="badge">{{ t.name }}</span>
-                {% endfor %}
-              {% else %}
-                <span class="muted">—</span>
-              {% endif %}
-            </td>
-
-            <td>
-              {% processing_state_badge d.processing_state_user %}
-            </td>
-
-            <td>
-              <a class="btn" href="/admin/documents/document/{{ d.id }}/change/">עריכה</a>
-            </td>
-          </tr>
-        {% empty %}
-          <tr>
-            <td colspan="5">אין פריטים בהשלמת פרטים 🎉</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-
-    <div class="spacer"></div>
-
-    <div style="display:flex; gap:10px; flex-wrap: wrap; align-items:center;">
+    <div class="pagination-bar">
       {% if offset > 0 %}
         <a class="btn"
            href="?offset={{ prev_offset }}{% if only_missing_tags %}&amp;only_missing_tags=1{% endif %}{% if only_missing_admin_meta %}&amp;only_missing_admin_meta=1{% endif %}">
@@ -175,6 +176,5 @@
         </a>
       {% endif %}
     </div>
-
-    {% endif %}
+  {% endif %}
 {% endblock %}

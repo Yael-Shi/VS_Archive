@@ -9,7 +9,7 @@
         {# Global navigation (lists/backlogs) #}
         <a class="btn" href="/api/ui/admin/review/">חזרה לרשימת בקרת תמלול</a>
         <a class="btn" href="/api/ui/admin/backlog/">רשימת השלמת פרטים</a>
-        <div style="flex:1;"></div>
+        <div class="flex-spacer"></div>
         {# Actions for the current document #}
         <a class="btn" href="/api/ui/documents/{{ doc.id }}/">תצוגת מסמך</a>
         <a class="btn" href="/admin/documents/document/{{ doc.id }}/change/">עריכה (Django Admin)</a>
@@ -17,8 +17,8 @@
 
       <div class="spacer"></div>
 
-      <h1 class="page-title" style="margin: 0;">{{ doc.title }}</h1>
-      <div class="muted" style="margin-top: 6px; font-size: 13px;">
+      <h1 class="page-title">{{ doc.title }}</h1>
+      <div class="page-lead">
         בקרת תמלול · מסמך #{{ doc.id }}
         {% if doc.file_original_name %} · {{ doc.file_original_name }}{% endif %}
       </div>
@@ -31,7 +31,7 @@
       <details class="review-details review-header-meta">
         <summary>פרטי מסמך ומשמעות סטטוסים</summary>
         <div class="review-details-body">
-          <div style="display:flex; gap:6px; flex-wrap: wrap; margin-bottom: 10px;">
+          <div class="badge-row badge-row--tight-bottom">
             <span class="badge">{{ doc.language|default:"שפה לא ידועה" }}</span>
             <span class="badge">{{ doc.text_input_type }}</span>
             <span class="badge">{{ doc.doc_type }}</span>
@@ -110,9 +110,9 @@
 
       <main class="card review-transcription-panel">
         <div class="review-panel-head">
-          <div class="section-title" style="margin: 0;">2. בדיקת תמלול</div>
+          <div class="section-title">2. בדיקת תמלול</div>
           {% if text_result_cards %}
-            <div class="muted" style="font-size: 13px;">{{ text_result_cards|length }} תוצאות</div>
+            <div class="muted text-sm">{{ text_result_cards|length }} תוצאות</div>
           {% endif %}
         </div>
 
@@ -139,10 +139,10 @@
             <div class="review-zone review-zone--primary">
               <div class="review-zone-title">טקסט שחולץ</div>
               {% if card.is_editable %}
-                <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/text/" style="margin:0;">
+                <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/text/" class="inline-form">
                   {% csrf_token %}
                   <textarea class="review-textarea" name="text" rows="12">{{ card.row.text }}</textarea>
-                  <div class="review-zone-actions" style="margin-top: 8px;">
+                  <div class="review-zone-actions review-zone-actions--spaced">
                     <button class="btn btn-primary" type="submit">שמור טקסט</button>
                   </div>
                 </form>
@@ -159,13 +159,13 @@
                 <div class="review-zone-title">אימות תמלול</div>
                 <div class="review-zone-actions">
                   {% if card.row.verification_status != "VERIFIED" %}
-                    <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/verify/" style="margin:0;">
+                    <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/verify/" class="inline-form">
                       {% csrf_token %}
                       <button class="btn btn-primary" type="submit">אשר תמלול</button>
                     </form>
                   {% endif %}
                   {% if card.row.verification_status != "REJECTED" %}
-                    <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/reject/" style="margin:0;">
+                    <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/reject/" class="inline-form">
                       {% csrf_token %}
                       <button class="btn" type="submit">דחה תמלול</button>
                     </form>
@@ -182,7 +182,7 @@
             <details class="review-details review-details--secondary">
               <summary>פרטים טכניים</summary>
               <div class="review-details-body">
-                <div style="display:flex; gap:6px; flex-wrap: wrap; margin-bottom: 8px;">
+                <div class="badge-row badge-row--tight-bottom">
                   <span class="badge">{{ card.row.result_type }}</span>
                   <span class="badge">{{ card.row.status }}</span>
                   <span class="badge">{{ card.row.verification_status }}</span>
@@ -201,7 +201,7 @@
                 {% if card.review_reasons %}
                   <div style="margin-top: 8px;">
                     <div style="font-weight: 700;">סיבות בדיקה</div>
-                    <div style="display:flex; gap:6px; flex-wrap: wrap; margin-top: 4px;">
+                    <div class="badge-row">
                       {% for reason in card.review_reasons %}
                         <span class="badge">{{ reason }}</span>
                       {% endfor %}
@@ -225,9 +225,9 @@
         {% if latest_transkribus_run %}
           <details class="card review-details review-transkribus-details review-details--secondary">
             <summary class="section-title">ריצת Transkribus אחרונה</summary>
-            <div class="review-details-body" style="color: var(--text);">
+            <div class="review-details-body review-details-body--primary">
               {% if transkribus_run_count > 1 %}
-                <div class="muted" style="margin-bottom: 8px;">
+                <div class="muted text-sm" style="margin-bottom: 8px;">
                   סה״כ {{ transkribus_run_count }} ריצות; מוצגת האחרונה לפי זמן יצירה.
                 </div>
               {% endif %}
@@ -247,7 +247,7 @@
 
               {% if latest_transkribus_run.page_index_to_page_nr %}
                 <div class="spacer"></div>
-                <div style="font-weight: 700;">page_index_to_page_nr</div>
+                <div class="section-title">page_index_to_page_nr</div>
                 <pre style="max-height: 120px;">{{ latest_transkribus_run.page_index_to_page_nr }}</pre>
               {% endif %}
 
@@ -259,7 +259,7 @@
                 </div>
               {% endif %}
 
-              <div class="muted" style="margin-top: 8px;">
+              <div class="page-lead">
                 נוצר {{ latest_transkribus_run.created_at }} · עודכן {{ latest_transkribus_run.updated_at }}
               </div>
             </div>

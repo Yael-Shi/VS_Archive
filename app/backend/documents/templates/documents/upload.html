@@ -2,36 +2,36 @@
 {% block title %}VSArchive - העלאת מסמך{% endblock %}
 
 {% block content %}
-  <div class="card" style="padding: 20px;">
-    <div style="display:flex; gap:10px; align-items:center; flex-wrap: wrap;">
+  <div class="card page-header">
+    <div class="page-toolbar">
       <a class="btn" href="/api/ui/documents/">חזרה לרשימה</a>
     </div>
 
-    <h1 class="page-title" style="margin-top: 12px;">העלאת מסמך</h1>
+    <h1 class="page-title">העלאת מסמך</h1>
     <p class="page-subtitle">
       העלאה מתבצעת בתהליך: create → presigned PUT → complete
     </p>
 
-    <div id="msg" class=""></div>
+    <div id="msg" class="msg" role="status" aria-live="polite"></div>
 
     <div class="two-col">
-      <div class="card" style="padding: 16px;">
+      <div class="card card--pad-lg">
         <div class="section-title">קובץ + פרטים בסיסיים</div>
 
         <form id="uploadForm">
           <div class="field">
             <label for="file">קובץ *</label>
             <input id="file" name="file" type="file" multiple required />
-            <div class="muted" style="font-size: 13px;">
+            <div class="field-hint">
               ניתן לבחור כמה תמונות יחד בחלון הבחירה (Ctrl/Cmd, או לחיצה ארוכה בנייד).
             </div>
-            <div class="muted" style="font-size: 13px; margin-top: 6px;">
+            <div class="field-hint">
               קובץ אחד = העלאה רגילה (תמונה או PDF).<br />
               2–25 תמונות = מסמך אחד מרובה עמודים לפי סדר הבחירה.<br />
               ריבוי קבצים תומך בתמונות בלבד.<br />
               PDF יש להעלות כקובץ יחיד.
             </div>
-            <ul id="selectedFiles" class="muted" style="font-size: 13px; margin-top: 8px; padding-inline-start: 18px;"></ul>
+            <ul id="selectedFiles" class="field-hint selected-files-list"></ul>
           </div>
 
           <div class="field">
@@ -47,7 +47,7 @@
                 <option value="{{ v }}">{{ label }}</option>
               {% endfor %}
             </select>
-            <div class="muted" style="font-size: 13px;">שאר המטא־דאטה ניתן להשלים בהמשך.</div>
+            <div class="field-hint">שאר המטא־דאטה ניתן להשלים בהמשך.</div>
           </div>
 
           <div class="meta-grid">
@@ -104,13 +104,13 @@
             <input id="tags" name="tags" type="text" placeholder="למשל: משפחה, ירושלים, 1948" />
           </div>
 
-          <div style="display:flex; gap:10px; margin-top: 12px; flex-wrap: wrap;">
+          <div class="form-actions form-actions--spaced">
             <button id="submitBtn" class="btn btn-primary" type="submit">העלאה</button>
           </div>
         </form>
       </div>
 
-      <div class="card" style="padding: 16px;">
+      <div class="card card--pad-lg">
         <div class="section-title">מטא־דאטה למנהלים (אופציונלי)</div>
 
         <div class="field">
@@ -133,7 +133,7 @@
           <textarea id="notes" name="notes" placeholder="הערות פנימיות..."></textarea>
         </div>
 
-        <div class="muted" style="font-size: 13px;">
+        <div class="field-hint">
           הערה: גם אם תשאירי ריק, אפשר להשלים אחר־כך.
         </div>
       </div>
@@ -153,11 +153,10 @@
   const selectedFilesEl = document.getElementById("selectedFiles");
 
   function setMessage(kind, text) {
-    msgEl.className = kind;
+    msgEl.className = "msg";
+    if (kind === "error") msgEl.classList.add("msg-error");
+    else if (kind === "ok") msgEl.classList.add("msg-ok");
     msgEl.textContent = text || "";
-    msgEl.style.marginTop = text ? "10px" : "0";
-    msgEl.style.color = (kind === "error") ? "#b42318" : (kind === "ok" ? "#067647" : "#101828");
-    msgEl.style.whiteSpace = "pre-wrap";
   }
 
   function parseTags(raw) {
@@ -402,7 +401,6 @@
     if (category_event) meta.category_event = category_event;
 
     submitBtn.disabled = true;
-    submitBtn.style.opacity = "0.7";
 
     try {
       if (isMulti) {
@@ -413,7 +411,6 @@
     } catch (err) {
       setMessage("error", String(err && err.message ? err.message : err));
       submitBtn.disabled = false;
-      submitBtn.style.opacity = "1";
     }
   });
 

@@ -28,9 +28,9 @@
         היי, {{ user.username }}
       </span>
 
-      <form action="/accounts/logout/" method="post" style="display:inline; margin:0;">
+      <form action="/accounts/logout/" method="post" class="nav-form">
         {% csrf_token %}
-        <button type="submit" class="btn btn-link" style="color: var(--danger);">
+        <button type="submit" class="btn btn-danger">
           התנתקות
         </button>
       </form>

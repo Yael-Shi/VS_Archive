@@ -3,13 +3,13 @@
 {% block title %}VSArchive - בקרת תמלול{% endblock %}
 
 {% block content %}
-  <div class="card" style="padding: 20px;">
+  <div class="card page-header">
     <h1 class="page-title">בקרת תמלול</h1>
     <p class="page-subtitle">
       מסמכים עם תמלול אוטומטי שדורש בדיקה אנושית לפני אישור סופי.
     </p>
 
-    <div style="display:flex; gap:10px; flex-wrap: wrap; align-items:center;">
+    <div class="page-toolbar">
       <a class="btn" href="/api/ui/documents/">חזרה למסמכים</a>
       <a class="btn" href="/api/ui/admin/backlog/">רשימת השלמת פרטים</a>
       {% if user.is_staff or user.is_superuser %}
@@ -20,7 +20,7 @@
     <div class="spacer"></div>
 
     <form method="get" class="toolbar">
-      <div class="field" style="min-width: 220px;">
+      <div class="field field--wide">
         <label>חיפוש</label>
         <input type="text" name="q" placeholder="מזהה / כותרת / שם קובץ" value="{{ q }}">
       </div>
@@ -85,13 +85,13 @@
         </select>
       </div>
 
-      <div style="display:flex; gap:10px;">
+      <div class="form-actions">
         <button class="btn btn-primary" type="submit">החל סינון</button>
         <a class="btn" href="/api/ui/admin/review/">ניקוי</a>
       </div>
     </form>
 
-    <div class="muted" style="font-size: 13px; margin-top: 10px;">
+    <div class="filter-summary page-header-note">
       מציג {{ rows|length }} מתוך {{ total }} מסמכים ·
       <strong>עיבוד הושלם</strong> אינו אומר שהטקסט אושר אנושית
     </div>
@@ -99,76 +99,80 @@
 
   <div class="spacer"></div>
 
-  <table class="table">
-    <thead>
-      <tr>
-        <th style="width: 32%;">מסמך</th>
-        <th style="width: 8%;">שפה</th>
-        <th style="width: 10%;">קלט</th>
-        <th style="width: 8%;">עיבוד</th>
-        <th style="width: 6%;">ממתין</th>
-        <th style="width: 12%;">תוצאות / מנוע</th>
-        <th style="width: 14%;">סיבות בדיקה</th>
-        <th style="width: 10%;">פעולות</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for doc, summary in rows %}
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
         <tr>
-          <td>
-            <div style="font-weight: 900;">
-              <a href="/api/ui/admin/review/{{ doc.id }}/">{{ doc.title }}</a>
-            </div>
-            <div class="muted" style="font-size: 13px;">
-              #{{ doc.id }}
-              {% if doc.file_original_name %} · {{ doc.file_original_name }}{% endif %}
-              · עודכן {{ doc.updated_at }}
-            </div>
-          </td>
-          <td>{% if doc.language %}{{ doc.language }}{% else %}<span class="muted">—</span>{% endif %}</td>
-          <td>{{ doc.text_input_type }}</td>
-          <td>
-            {% processing_state_badge doc.processing_state_user %}
-          </td>
-          <td><strong>{{ summary.pending_count }}</strong></td>
-          <td style="font-size: 13px;">
-            {% if summary.result_types %}
-              <div><strong>סוג:</strong> {{ summary.result_types|join:", " }}</div>
-            {% endif %}
-            {% if summary.engine_keys %}
-              <div><strong>מנוע:</strong> {{ summary.engine_keys|join:", " }}</div>
-            {% endif %}
-            {% if summary.verification_statuses %}
-              <div class="muted">{{ summary.verification_statuses|join:", " }}</div>
-            {% endif %}
-          </td>
-          <td style="font-size: 12px;">
-            {% if summary.review_reasons %}
-              {% for reason in summary.review_reasons|slice:":4" %}
-                <span class="badge" style="margin: 2px 0;">{{ reason }}</span>
-              {% endfor %}
-              {% if summary.review_reasons|length > 4 %}
-                <span class="muted">+{{ summary.review_reasons|length|add:"-4" }}</span>
+          <th class="col-w-32">מסמך</th>
+          <th class="col-w-8">שפה</th>
+          <th class="col-w-10">קלט</th>
+          <th class="col-w-8">עיבוד</th>
+          <th class="col-w-6">ממתין</th>
+          <th class="col-w-12">תוצאות / מנוע</th>
+          <th class="col-w-14">סיבות בדיקה</th>
+          <th class="col-w-10">פעולות</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for doc, summary in rows %}
+          <tr>
+            <td>
+              <div class="cell-title">
+                <a href="/api/ui/admin/review/{{ doc.id }}/">{{ doc.title }}</a>
+              </div>
+              <div class="cell-meta">
+                #{{ doc.id }}
+                {% if doc.file_original_name %} · {{ doc.file_original_name }}{% endif %}
+                · עודכן {{ doc.updated_at }}
+              </div>
+            </td>
+            <td>{% if doc.language %}{{ doc.language }}{% else %}<span class="muted">—</span>{% endif %}</td>
+            <td>{{ doc.text_input_type }}</td>
+            <td>
+              {% processing_state_badge doc.processing_state_user %}
+            </td>
+            <td><strong>{{ summary.pending_count }}</strong></td>
+            <td class="text-sm">
+              {% if summary.result_types %}
+                <div><strong>סוג:</strong> {{ summary.result_types|join:", " }}</div>
               {% endif %}
-            {% else %}
-              <span class="muted">—</span>
-            {% endif %}
-          </td>
-          <td>
-            <a class="btn" href="/api/ui/admin/review/{{ doc.id }}/">פתח לבדיקה</a>
-          </td>
-        </tr>
-      {% empty %}
-        <tr>
-          <td colspan="8">אין מסמכים בבקרת תמלול כרגע</td>
-        </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+              {% if summary.engine_keys %}
+                <div><strong>מנוע:</strong> {{ summary.engine_keys|join:", " }}</div>
+              {% endif %}
+              {% if summary.verification_statuses %}
+                <div class="muted">{{ summary.verification_statuses|join:", " }}</div>
+              {% endif %}
+            </td>
+            <td class="text-sm">
+              {% if summary.review_reasons %}
+                <div class="badge-row">
+                  {% for reason in summary.review_reasons|slice:":4" %}
+                    <span class="badge">{{ reason }}</span>
+                  {% endfor %}
+                  {% if summary.review_reasons|length > 4 %}
+                    <span class="muted">+{{ summary.review_reasons|length|add:"-4" }}</span>
+                  {% endif %}
+                </div>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td>
+              <a class="btn" href="/api/ui/admin/review/{{ doc.id }}/">פתח לבדיקה</a>
+            </td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="8" class="table-empty">אין מסמכים בבקרת תמלול כרגע</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 
   <div class="spacer"></div>
 
-  <div style="display:flex; gap:10px; flex-wrap: wrap; align-items:center;">
+  <div class="pagination-bar">
     {% if offset > 0 %}
       <a class="btn"
          href="?offset={{ prev_offset }}&amp;q={{ q|urlencode }}&amp;language={{ language|urlencode }}&amp;text_input_type={{ text_input_type|urlencode }}&amp;processing_state_user={{ processing_state_user|urlencode }}&amp;engine_key={{ engine_key|urlencode }}&amp;result_type={{ result_type|urlencode }}&amp;verification_status={{ verification_status|urlencode }}">

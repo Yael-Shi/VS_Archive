@@ -1,39 +1,43 @@
-<div class="detail-text-block" style="border: 1px solid rgba(0,0,0,0.08); border-radius: 10px; padding: 12px;">
-  <div style="font-weight: 800;">{{ meta.label }}</div>
-  <div class="muted" style="margin-top: 4px; font-size: 13px;">{{ meta.description }}</div>
+<div class="detail-text-block">
+  <div class="detail-text-block__title">{{ meta.label }}</div>
+  <div class="muted text-sm page-lead">{{ meta.description }}</div>
 
   {% if block %}
-    <div class="muted" style="margin-top: 8px; font-size: 13px; display:flex; gap:8px; flex-wrap: wrap; align-items:center;">
+    <div class="badge-row">
       {% include "documents/partials/review_status_badge.html" with verification_status=block.verification_status %}
     </div>
 
     {% if block.status == "FAILED" %}
-      <div class="spacer"></div>
-      <div class="muted" style="font-size: 13px;">
+      <div class="spacer-sm"></div>
+      <div class="muted text-sm">
         <strong>error_code:</strong> <code>{{ block.error_code }}</code><br/>
         <strong>details:</strong> {{ block.error_details }}
       </div>
     {% endif %}
 
-    <div class="spacer"></div>
+    <div class="spacer-sm"></div>
 
     {% if block.text %}
-      <pre class="card" style="padding: 12px; margin:0; white-space: pre-wrap; border: 1px solid rgba(0,0,0,0.08);">{{ block.text }}</pre>
+      <div class="detail-text-block__body">
+        <pre>{{ block.text }}</pre>
+      </div>
     {% else %}
       <div class="muted">{{ meta.empty_message }}</div>
     {% endif %}
 
-    <details style="margin-top: 8px;">
-      <summary class="muted" style="cursor: pointer;">פרטים טכניים</summary>
-      <div class="muted" style="margin-top: 6px; font-size: 13px; display:flex; gap:8px; flex-wrap: wrap;">
-        <span class="badge">{{ block.result_type }}</span>
-        <span class="badge">{{ block.status }}</span>
-        <span class="badge">{{ block.verification_status }}</span>
-        <span class="badge">{{ block.engine }}</span>
-        <span>{{ block.created_at }}</span>
+    <details class="review-details review-details--secondary">
+      <summary>פרטים טכניים</summary>
+      <div class="review-details-body">
+        <div class="badge-row">
+          <span class="badge">{{ block.result_type }}</span>
+          <span class="badge">{{ block.status }}</span>
+          <span class="badge">{{ block.verification_status }}</span>
+          <span class="badge">{{ block.engine }}</span>
+          <span class="muted">{{ block.created_at }}</span>
+        </div>
       </div>
     </details>
   {% else %}
-    <div class="muted" style="margin-top: 8px;">{{ meta.empty_message }}</div>
+    <div class="muted page-lead">{{ meta.empty_message }}</div>
   {% endif %}
 </div>
