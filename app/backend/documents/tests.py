@@ -6354,7 +6354,7 @@ class ReviewUiTests(TestCase):
         self._create_text_result(doc)
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
-        self.assertContains(resp, "עריכת טקסט")
+        self.assertContains(resp, "טקסט שחולץ")
         self.assertContains(resp, "שמור טקסט")
         self.assertContains(resp, 'name="text"')
         self.assertContains(resp, "review-textarea")
@@ -6368,9 +6368,36 @@ class ReviewUiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "מסמך מקור")
         self.assertContains(resp, "בדיקת תמלול")
-        self.assertContains(resp, "השווי בין קובץ המקור לתמלול")
+        self.assertContains(resp, "איך לבדוק:")
+        self.assertContains(resp, "משווים בין קובץ המקור לתמלול")
         self.assertContains(resp, "אימות תמלול")
         self.assertContains(resp, "פרטים טכניים")
+
+    def test_review_detail_verified_shows_non_actionable_reason(self):
+        doc = self._create_document()
+        self._create_text_result(
+            doc,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "התמלול כבר אושר אנושית")
+        self.assertNotContains(resp, "אשר תמלול")
+
+    def test_review_detail_failed_row_shows_non_actionable_reason(self):
+        doc = self._create_document()
+        self._create_text_result(
+            doc,
+            status=DocumentTextResult.Status.FAILED,
+            text="",
+            error_code="OCR_FAILED",
+            error_details="test failure",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "תמלול זה נכשל בעיבוד")
 
     def test_review_detail_transkribus_in_collapsible_section(self):
         doc = self._create_document()
@@ -6748,3 +6775,49 @@ class NavigationLabelTests(TestCase):
         self.assertContains(resp, "תצוגת מסמך")
         self.assertContains(resp, f'href="/api/ui/documents/{doc.id}/"')
         self.assertContains(resp, "רשימת השלמת פרטים")
+
+
+class ReviewDetailHierarchyTests(SimpleTestCase):
+    """Review detail information hierarchy — presentation helpers (no DB)."""
+
+    def test_non_actionable_reason_none_when_pending(self):
+        from documents.views import _review_non_actionable_reason
+
+        row = DocumentTextResult(
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="שורה",
+        )
+        self.assertIsNone(_review_non_actionable_reason(row))
+
+    def test_non_actionable_reason_verified(self):
+        from documents.views import _review_non_actionable_reason
+
+        row = DocumentTextResult(
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+            text="שורה",
+        )
+        reason = _review_non_actionable_reason(row)
+        self.assertIsNotNone(reason)
+        self.assertIn("אושר אנושית", reason)
+
+    def test_non_actionable_reason_empty_text(self):
+        from documents.views import _review_non_actionable_reason
+
+        row = DocumentTextResult(
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="   ",
+        )
+        reason = _review_non_actionable_reason(row)
+        self.assertEqual(reason, "אין טקסט זמין לבדיקה.")
+
+    def test_result_type_description_hebrew_hebrew_text(self):
+        from documents.views import _review_result_type_description
+
+        doc = Document(language=Document.Language.HEBREW)
+        desc = _review_result_type_description(
+            doc, DocumentTextResult.ResultType.HEBREW_TEXT
+        )
+        self.assertIn("בדיקה", desc)

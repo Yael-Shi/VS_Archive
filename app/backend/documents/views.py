@@ -1058,6 +1058,45 @@ def _review_result_type_label(doc: Document, result_type: str) -> str:
     return result_type
 
 
+def _review_result_type_description(doc: Document, result_type: str) -> str:
+    """One-line reviewer-facing explanation of what a text result represents."""
+    if doc.language == Document.Language.HEBREW:
+        if result_type == DocumentTextResult.ResultType.SOURCE_TEXT:
+            return "טקסט המקור כפי שחולץ אוטומטית מן המסמך."
+        if result_type == DocumentTextResult.ResultType.HEBREW_TEXT:
+            return "הטקסט העברי שמיועד לבדיקה ולאישור."
+
+    if result_type == DocumentTextResult.ResultType.SOURCE_TEXT:
+        return "טקסט בשפת המקור כפי שחולץ אוטומטית."
+    if result_type == DocumentTextResult.ResultType.HEBREW_TEXT:
+        return "תרגום לעברית (אם קיים)."
+    return ""
+
+
+def _review_non_actionable_reason(row: DocumentTextResult) -> Optional[str]:
+    """
+    Human-readable reason when edit/approve/reject controls are unavailable.
+
+    Display-only; uses the same eligibility rules as ``is_review_pending_text_result``.
+    """
+    if is_review_pending_text_result(row):
+        return None
+
+    if row.verification_status == DocumentTextResult.VerificationStatus.VERIFIED:
+        return "התמלול כבר אושר אנושית — אין פעולות בקרה זמינות במסך זה."
+
+    if row.status == DocumentTextResult.Status.FAILED:
+        return "תמלול זה נכשל בעיבוד — לא ניתן לבדוק או לאשר."
+
+    if not (row.text or "").strip():
+        return "אין טקסט זמין לבדיקה."
+
+    if row.status != DocumentTextResult.Status.NEEDS_REVIEW:
+        return "תוצאה זו אינה ממתינה לבקרה."
+
+    return "פעולות בקרה אינן זמינות לתוצאה זו."
+
+
 @login_required
 def review_detail_page(request, doc_id: int):
     deny = _require_admin_page(request)
@@ -1088,10 +1127,14 @@ def review_detail_page(request, doc_id: int):
             {
                 "row": row,
                 "result_type_label": _review_result_type_label(doc, row.result_type),
+                "result_type_description": _review_result_type_description(
+                    doc, row.result_type
+                ),
                 "review_reasons": parse_review_reasons(row.review_reasons),
                 "text_length": len((row.text or "").strip()),
                 "is_pending_review": is_review_pending_text_result(row),
                 "is_editable": is_review_editable_text_result(row),
+                "non_actionable_reason": _review_non_actionable_reason(row),
             }
         )
 
