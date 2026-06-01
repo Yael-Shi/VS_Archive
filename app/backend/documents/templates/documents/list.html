@@ -3,14 +3,14 @@
 {% block title %}VSArchive - מסמכים{% endblock %}
 
 {% block content %}
-  <div class="card" style="padding: 20px;">
+  <div class="card page-header">
     <h1 class="page-title">מסמכים</h1>
     <p class="page-subtitle">
       מציג {{ docs|length }} מתוך {{ total }} מסמכים
     </p>
 
     <form method="get" class="toolbar">
-      <div class="field" style="min-width: 280px;">
+      <div class="field field--wide">
         <label>חיפוש</label>
         <input type="text" name="q" placeholder="כותרת / תגיות / קטגוריה" value="{{ q }}">
       </div>
@@ -47,7 +47,7 @@
         </div>
       {% endif %}
 
-      <div style="display:flex; gap:10px;">
+      <div class="form-actions">
         <button class="btn btn-primary" type="submit">החלה</button>
         <a class="btn" href="/api/ui/documents/">ניקוי</a>
       </div>
@@ -56,84 +56,84 @@
 
   <div class="spacer"></div>
 
-  <table class="table">
-    <thead>
-      <tr>
-        <th style="width: 55%;">כותרת</th>
-        <th style="width: 15%;">שפה</th>
-        <th style="width: 10%;">סוג</th>
-        <th style="width: 10%;">סטטוס</th>
-        {% if is_admin %}
-          <th style="width: 10%;">נראות</th>
-        {% endif %}
-      </tr>
-    </thead>
-    <tbody>
-      {% for d in docs %}
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
         <tr>
-          <td>
-            <div style="font-weight: 800;">
-              <a href="/api/ui/documents/{{ d.id }}/">{{ d.title }}</a>
-            </div>
-
-            <div class="muted" style="font-size: 13px;">
-              {% if d.date_start or d.date_end %}
-                {{ d.date_start }} - {{ d.date_end }}
-              {% else %}
-                ללא טווח תאריכים
-              {% endif %}
-              · #{{ d.id }}
-              {% if is_admin and d.file_original_name %} · {{ d.file_original_name }}{% endif %}
-            </div>
-
-            <div class="spacer" style="height:8px;"></div>
-
-            <div style="display:flex; gap:8px; flex-wrap: wrap; align-items:center;">
-              {% upload_status_badge d.upload_status %}
-              {% processing_state_badge d.processing_state_user %}
-            </div>
-          </td>
-
-          <td>
-            {% if d.language %}{{ d.language }}{% else %}<span class="muted">לא ידוע</span>{% endif %}
-          </td>
-
-          <td>{{ d.doc_type }}</td>
-
-          <td>
-            {% metadata_status_badge d.metadata_status %}
-          </td>
-
+          <th class="col-w-55">כותרת</th>
+          <th class="col-w-15">שפה</th>
+          <th class="col-w-10">סוג</th>
+          <th class="col-w-10">סטטוס</th>
           {% if is_admin %}
-            <td>
-              {% if d.visibility == "public" %}
-                <span class="badge badge-ok">ציבורי</span>
-              {% else %}
-                <span class="badge">פרטי</span>
-              {% endif %}
-            </td>
+            <th class="col-w-10">נראות</th>
           {% endif %}
         </tr>
-      {% empty %}
-        <tr>
-          <td colspan="{% if is_admin %}5{% else %}4{% endif %}">לא נמצאו מסמכים</td>
-        </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+      </thead>
+      <tbody>
+        {% for d in docs %}
+          <tr>
+            <td>
+              <div class="cell-title">
+                <a href="/api/ui/documents/{{ d.id }}/">{{ d.title }}</a>
+              </div>
+
+              <div class="cell-meta">
+                {% if d.date_start or d.date_end %}
+                  {{ d.date_start }} - {{ d.date_end }}
+                {% else %}
+                  ללא טווח תאריכים
+                {% endif %}
+                · #{{ d.id }}
+                {% if is_admin and d.file_original_name %} · {{ d.file_original_name }}{% endif %}
+              </div>
+
+              <div class="badge-row">
+                {% upload_status_badge d.upload_status %}
+                {% processing_state_badge d.processing_state_user %}
+              </div>
+            </td>
+
+            <td>
+              {% if d.language %}{{ d.language }}{% else %}<span class="muted">לא ידוע</span>{% endif %}
+            </td>
+
+            <td>{{ d.doc_type }}</td>
+
+            <td>
+              {% metadata_status_badge d.metadata_status %}
+            </td>
+
+            {% if is_admin %}
+              <td>
+                {% if d.visibility == "public" %}
+                  <span class="badge badge-ok">ציבורי</span>
+                {% else %}
+                  <span class="badge">פרטי</span>
+                {% endif %}
+              </td>
+            {% endif %}
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="{% if is_admin %}5{% else %}4{% endif %}" class="table-empty">לא נמצאו מסמכים</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 
   <div class="spacer"></div>
 
-  <div style="display:flex; gap:10px; flex-wrap: wrap; align-items:center;">
+  <div class="pagination-bar">
     {% if is_admin %}
       <a class="btn btn-primary" href="/api/ui/upload/">העלאת מסמך חדש</a>
       <a class="btn" href="/api/ui/admin/backlog/">רשימת השלמת פרטים</a>
       <a class="btn" href="/api/ui/admin/review/">רשימת בקרת תמלול</a>
     {% endif %}
 
-    <div style="flex:1;"></div>
+    <div class="flex-spacer"></div>
 
-    <div style="display:flex; gap:10px;">
+    <div class="form-actions">
       {% if offset > 0 %}
         <a class="btn" href="?q={{ q|urlencode }}&upload_status={{ upload_status|urlencode }}&visibility={{ visibility|urlencode }}&doc_type={{ doc_type|urlencode }}&metadata_status={{ metadata_status|urlencode }}&offset={{ prev_offset }}">
           הקודם

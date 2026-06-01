@@ -3,8 +3,8 @@
 {% block title %}VSArchive - {{ doc.title }}{% endblock %}
 
 {% block content %}
-  <div class="card" style="padding: 18px;">
-    <div style="display:flex; gap:10px; align-items:center; flex-wrap: wrap;">
+  <div class="card card--pad-lg">
+    <div class="page-toolbar">
       {# Global navigation (lists/backlogs) #}
       <a class="btn" href="/api/ui/documents/">חזרה לרשימה</a>
       {% if is_admin %}
@@ -12,7 +12,7 @@
         <a class="btn" href="/api/ui/admin/review/">רשימת בקרת תמלול</a>
       {% endif %}
 
-      <div style="flex:1;"></div>
+      <div class="flex-spacer"></div>
 
       {% if is_admin %}
         {# Actions for the current document #}
@@ -23,9 +23,9 @@
 
     <div class="spacer"></div>
 
-    <h1 class="page-title" style="margin: 0;">{{ doc.title }}</h1>
+    <h1 class="page-title">{{ doc.title }}</h1>
 
-    <div class="muted" style="margin-top: 6px; font-size: 13px;">
+    <div class="page-lead">
       מסמך #{{ doc.id }}
       {% if is_admin and doc.file_original_name %} · {{ doc.file_original_name }}{% endif %}
       {% if doc.date_start or doc.date_end %} · {{ doc.date_start }} - {{ doc.date_end }}{% endif %}
@@ -34,7 +34,7 @@
     <div class="spacer"></div>
 
     {# ===== Status row ===== #}
-    <div style="display:flex; gap:10px; flex-wrap: wrap; align-items:center;">
+    <div class="badge-row">
 
       {# Upload + processing-readiness badges (centralized in status_labels) #}
       {% upload_status_badge doc.upload_status %}
@@ -57,7 +57,7 @@
         {% endif %}
       {% endif %}
     </div>
-    <div class="muted" style="margin-top: 8px; font-size: 13px;">
+    <div class="page-lead">
       {% if doc.processing_state_user == "READY" %}
         העיבוד האוטומטי הסתיים והטקסט זמין להצגה ולבדיקה. זה עדיין לא אישור אנושי.
       {% elif doc.processing_state_user == "PROCESSING" %}
@@ -68,12 +68,12 @@
     {# ===== Upload error (admin-only details) ===== #}
     {% if doc.upload_status == "FAILED" %}
       <div class="spacer"></div>
-      <div class="card" style="padding: 12px; border: 1px solid rgba(180,35,24,0.25);">
-        <div style="font-weight: 800; color: var(--danger);">אין קובץ / העלאה נכשלה</div>
+      <div class="alert alert-danger">
+        <div class="alert-title">אין קובץ / העלאה נכשלה</div>
         {% if is_admin and doc.upload_error %}
-          <div style="margin-top: 6px;">{{ doc.upload_error }}</div>
+          <div>{{ doc.upload_error }}</div>
         {% else %}
-          <div class="muted" style="margin-top: 6px; font-size: 13px;">
+          <div class="muted text-sm">
             פנו למנהל המערכת.
           </div>
         {% endif %}
@@ -85,25 +85,25 @@
 
   <div class="two-col">
     {# ===== Left: Text output ===== #}
-    <div class="card" style="padding: 16px;">
+    <div class="card card--pad-lg">
       <div class="section-title">טקסט שחולץ</div>
 
       {% if text_presentation.missing %}
-        <div class="muted" style="margin-top: 6px; font-size: 13px;">
+        <div class="page-lead">
           {% if doc.processing_state_user == "PROCESSING" %}
             בעיבוד… חסר: <code>{{ text_presentation.missing|join:", " }}</code>
           {% else %}
             חסרים פלטים: <code>{{ text_presentation.missing|join:", " }}</code>
           {% endif %}
         </div>
-        <div class="spacer"></div>
+        <div class="spacer-sm"></div>
       {% endif %}
 
       {% if text_presentation.identical_source_and_hebrew %}
-        <div class="muted" style="margin-top: 6px; font-size: 13px;">
+        <div class="page-lead">
           שני מקטעים אלו עשויים להכיל טקסט זהה — כל אחד מייצג תפקיד שונה (חילוץ מקור לעומת טקסט לבדיקה).
         </div>
-        <div class="spacer"></div>
+        <div class="spacer-sm"></div>
       {% endif %}
 
       {% if text_presentation.show_source %}
@@ -120,7 +120,7 @@
     </div>
 
     {# ===== Right: File viewer + admin metadata ===== #}
-    <div class="card" style="padding: 16px;">
+    <div class="card card--pad-lg">
       <div class="section-title">קובץ מקור</div>
 
       {% if doc.upload_status == "FAILED" %}
@@ -129,19 +129,19 @@
         </div>
       {% elif source_preview_items or source_preview_unavailable_count %}
         {% for item in source_preview_items %}
-          <div style="margin-top: 12px;">
-            <div class="muted" style="font-size: 13px; margin-bottom: 6px;">
+          <div class="source-preview-page viewer">
+            <div class="muted text-sm source-preview-page__label">
               עמוד {{ item.display_number }}{% if item.original_name %} — {{ item.original_name }}{% endif %}
             </div>
             {% if item.url %}
-              <img src="{{ item.url }}" alt="עמוד {{ item.display_number }}" style="max-width: 100%; border-radius: 14px; border: 1px solid rgba(0,0,0,0.1);" />
+              <img src="{{ item.url }}" alt="עמוד {{ item.display_number }}" />
             {% else %}
               <div class="muted">לא ניתן לטעון תצוגה מקדימה לעמוד זה.</div>
             {% endif %}
           </div>
         {% endfor %}
         {% if source_preview_unavailable_count %}
-          <div class="muted" style="margin-top: 10px; font-size: 13px;">
+          <div class="page-lead">
             חלק מהעמודים אינם זמינים לתצוגה מקדימה עדיין.
           </div>
         {% endif %}
@@ -153,23 +153,25 @@
           {% endif %}
         </div>
       {% else %}
-        <div style="display:flex; gap:10px; align-items:center; flex-wrap: wrap;">
+        <div class="flex-row">
           <a class="btn" href="{{ content_url }}" target="_blank" rel="noopener noreferrer">פתיחה בטאב חדש</a>
         </div>
 
         <div class="spacer"></div>
 
-        {% if doc.doc_type == "IMAGE" %}
-          <img src="{{ content_url }}" alt="{{ doc.title }}" style="max-width: 100%; border-radius: 14px; border: 1px solid rgba(0,0,0,0.1);" />
-        {% elif doc.doc_type == "PDF" %}
-          <iframe src="{{ content_url }}" style="width:100%; height: 70vh; border-radius: 14px; border: 1px solid rgba(0,0,0,0.1);"></iframe>
-        {% else %}
-          <div class="muted">doc_type לא נתמך: {{ doc.doc_type }}</div>
-        {% endif %}
+        <div class="viewer">
+          {% if doc.doc_type == "IMAGE" %}
+            <img src="{{ content_url }}" alt="{{ doc.title }}" />
+          {% elif doc.doc_type == "PDF" %}
+            <iframe src="{{ content_url }}" title="{{ doc.title }}"></iframe>
+          {% else %}
+            <div class="muted">doc_type לא נתמך: {{ doc.doc_type }}</div>
+          {% endif %}
+        </div>
       {% endif %}
 
       {% if is_admin %}
-        <div class="section">
+        <div class="admin-meta">
           <h3>מטא־דאטה למנהלים</h3>
 
           {% if admin_meta %}
