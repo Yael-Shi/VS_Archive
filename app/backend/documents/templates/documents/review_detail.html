@@ -26,15 +26,16 @@
       <div class="review-header-badges">
         {% upload_status_badge doc.upload_status %}
         {% processing_state_badge doc.processing_state_user %}
-
-        <span class="badge">{{ doc.language|default:"שפה לא ידועה" }}</span>
-        <span class="badge">{{ doc.text_input_type }}</span>
-        <span class="badge">{{ doc.doc_type }}</span>
       </div>
 
-      <details class="review-details review-status-help">
-        <summary>מה המשמעות של הסטטוסים?</summary>
+      <details class="review-details review-header-meta">
+        <summary>פרטי מסמך ומשמעות סטטוסים</summary>
         <div class="review-details-body">
+          <div style="display:flex; gap:6px; flex-wrap: wrap; margin-bottom: 10px;">
+            <span class="badge">{{ doc.language|default:"שפה לא ידועה" }}</span>
+            <span class="badge">{{ doc.text_input_type }}</span>
+            <span class="badge">{{ doc.doc_type }}</span>
+          </div>
           <ul>
             <li><strong>עיבוד הושלם</strong> — העיבוד האוטומטי הסתיים והטקסט זמין להצגה ולבדיקה.</li>
             <li><strong>ממתין לבדיקה אנושית</strong> — התמלול נוצר אוטומטית ודורש אימות ידני.</li>
@@ -48,12 +49,15 @@
 
     <div class="review-workspace">
       <aside class="card review-source-panel">
-        <div class="section-title">מסמך מקור</div>
+        <div class="section-title">1. מסמך מקור</div>
+        <div class="muted review-source-note">
+          יש להשוות את התמלול מול העמודים לפי הסדר. אין כרגע התאמה אוטומטית בין שורות בטקסט לעמודים.
+        </div>
 
         {% if source_preview_items or source_preview_unavailable_count %}
           {% for item in source_preview_items %}
-            <div style="margin-top: 12px;">
-              <div class="muted" style="font-size: 13px; margin-bottom: 6px;">
+            <div class="review-source-page">
+              <div class="muted review-source-page-label">
                 עמוד {{ item.display_number }}{% if item.original_name %} — {{ item.original_name }}{% endif %}
               </div>
               <div class="viewer">
@@ -66,7 +70,7 @@
             </div>
           {% endfor %}
           {% if source_preview_unavailable_count %}
-            <div class="muted" style="margin-top: 10px; font-size: 13px;">
+            <div class="muted review-source-page-label">
               חלק מהעמודים אינם זמינים לתצוגה מקדימה עדיין.
             </div>
           {% endif %}
@@ -106,26 +110,76 @@
 
       <main class="card review-transcription-panel">
         <div class="review-panel-head">
-          <div class="section-title" style="margin: 0;">בדיקת תמלול</div>
+          <div class="section-title" style="margin: 0;">2. בדיקת תמלול</div>
           {% if text_result_cards %}
             <div class="muted" style="font-size: 13px;">{{ text_result_cards|length }} תוצאות</div>
           {% endif %}
         </div>
-        <div class="muted" style="font-size: 13px; margin-top: 8px;">
-          השווי בין קובץ המקור לתמלול. אם צריך, ערכי את הטקסט. לאחר מכן אשרי או דחי את תוצאת התמלול.
+
+        <div class="review-guidance" role="note">
+          <strong>איך לבדוק:</strong>
+          משווים בין קובץ המקור לתמלול. אם צריך, עורכים את הטקסט. לאחר מכן מאשרים או דוחים את תוצאת התמלול.
         </div>
 
         {% for card in text_result_cards %}
           <article class="card review-result-card{% if card.is_pending_review %} review-result-card--pending{% endif %}">
             <div class="review-result-head">
-              <span class="badge" style="font-weight: 800;">{{ card.result_type_label }}</span>
+              <span class="badge review-result-type-badge">{{ card.result_type_label }}</span>
+              {% verification_status_badge card.row.verification_status %}
               {% if card.is_pending_review %}
                 <span class="badge badge-warn">ממתין לבקרה</span>
               {% endif %}
-              {% verification_status_badge card.row.verification_status %}
             </div>
 
-            <details class="review-details">
+            {% if card.result_type_description %}
+              <div class="muted review-result-description">{{ card.result_type_description }}</div>
+            {% endif %}
+
+            {# Primary workflow: text (edit or read) #}
+            <div class="review-zone review-zone--primary">
+              <div class="review-zone-title">טקסט שחולץ</div>
+              {% if card.is_editable %}
+                <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/text/" style="margin:0;">
+                  {% csrf_token %}
+                  <textarea class="review-textarea" name="text" rows="12">{{ card.row.text }}</textarea>
+                  <div class="review-zone-actions" style="margin-top: 8px;">
+                    <button class="btn btn-primary" type="submit">שמור טקסט</button>
+                  </div>
+                </form>
+              {% elif card.row.text %}
+                <pre class="review-readonly-text">{{ card.row.text }}</pre>
+              {% else %}
+                <div class="muted">אין טקסט</div>
+              {% endif %}
+            </div>
+
+            {# Primary workflow: approve / reject #}
+            {% if card.is_pending_review %}
+              <div class="review-zone review-zone--primary">
+                <div class="review-zone-title">אימות תמלול</div>
+                <div class="review-zone-actions">
+                  {% if card.row.verification_status != "VERIFIED" %}
+                    <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/verify/" style="margin:0;">
+                      {% csrf_token %}
+                      <button class="btn btn-primary" type="submit">אשר תמלול</button>
+                    </form>
+                  {% endif %}
+                  {% if card.row.verification_status != "REJECTED" %}
+                    <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/reject/" style="margin:0;">
+                      {% csrf_token %}
+                      <button class="btn" type="submit">דחה תמלול</button>
+                    </form>
+                  {% endif %}
+                </div>
+              </div>
+            {% elif card.non_actionable_reason %}
+              <div class="review-non-actionable-reason">
+                {{ card.non_actionable_reason }}
+              </div>
+            {% endif %}
+
+            {# Secondary: technical/debug metadata (collapsed) #}
+            <details class="review-details review-details--secondary">
               <summary>פרטים טכניים</summary>
               <div class="review-details-body">
                 <div style="display:flex; gap:6px; flex-wrap: wrap; margin-bottom: 8px;">
@@ -163,54 +217,13 @@
                 {% endif %}
               </div>
             </details>
-
-            {% if card.is_pending_review %}
-              <div class="review-zone">
-                <div class="review-zone-title">אימות תמלול</div>
-                <div class="review-zone-actions">
-                  {% if card.row.verification_status != "VERIFIED" %}
-                    <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/verify/" style="margin:0;">
-                      {% csrf_token %}
-                      <button class="btn btn-primary" type="submit">אשר תמלול</button>
-                    </form>
-                  {% endif %}
-                  {% if card.row.verification_status != "REJECTED" %}
-                    <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/reject/" style="margin:0;">
-                      {% csrf_token %}
-                      <button class="btn" type="submit">דחה תמלול</button>
-                    </form>
-                  {% endif %}
-                </div>
-              </div>
-            {% endif %}
-
-            {% if card.is_editable %}
-              <div class="review-zone">
-                <div class="review-zone-title">עריכת טקסט</div>
-                <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/text/" style="margin:0;">
-                  {% csrf_token %}
-                  <textarea class="review-textarea" name="text" rows="12">{{ card.row.text }}</textarea>
-                  <div style="margin-top: 8px;">
-                    <button class="btn" type="submit">שמור טקסט</button>
-                  </div>
-                </form>
-              </div>
-            {% elif card.row.text %}
-              <div class="review-zone">
-                <pre class="review-readonly-text">{{ card.row.text }}</pre>
-              </div>
-            {% else %}
-              <div class="review-zone">
-                <div class="muted">אין טקסט</div>
-              </div>
-            {% endif %}
           </article>
         {% empty %}
           <div class="muted">אין תוצאות תמלול למסמך זה.</div>
         {% endfor %}
 
         {% if latest_transkribus_run %}
-          <details class="card review-details review-transkribus-details">
+          <details class="card review-details review-transkribus-details review-details--secondary">
             <summary class="section-title">ריצת Transkribus אחרונה</summary>
             <div class="review-details-body" style="color: var(--text);">
               {% if transkribus_run_count > 1 %}
