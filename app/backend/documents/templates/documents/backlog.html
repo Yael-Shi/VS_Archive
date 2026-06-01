@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% load status_labels %}
-{% block title %}VSArchive - השלמת פרטים{% endblock %}
+{% block title %}VSArchive - רשימת השלמת פרטים{% endblock %}
 
 {% block content %}
   <div class="card page-header">
-    <h1 class="page-title">השלמת פרטים</h1>
-    <p class="page-subtitle">
-      השלמת מטא־דאטה, תגיות ושדות קטלוג למנהלים (Needs completion)
-    </p>
+    <h1 class="page-title">רשימת השלמת פרטים</h1>
+    <p class="page-subtitle">מסמכים שדורשים השלמת פרטי קטלוג — תגיות, שדות מנהל ומטא־דאטה. זו רשימה נפרדת מבקרת התמלול.</p>
+
+    <div class="backlog-explainer">כאן משלימים פרטי מסמך וקטלוג (תגיות, תורם, אוסף, הערות). סטטוס «דורש השלמת פרטים» אינו קשור לבדיקת תמלול אוטומטי.</div>
 
     <div class="page-toolbar">
       <a class="btn" href="/api/ui/documents/">חזרה למסמכים</a>
@@ -30,10 +30,11 @@
 
       <div class="spacer"></div>
 
-      <div class="card card--nested filter-panel">
-        <div class="section-title">פילטרים מהירים</div>
+      <div class="filter-panel">
+        <div class="section-title">סינון רשימת השלמת פרטים</div>
+        <p class="filter-panel__help">הציגו את כל המסמכים שדורשים השלמה, או צמצמו לפי תגיות חסרות או מטא־דאטה ריק.</p>
 
-        <div class="flex-row filter-chips">
+        <div class="flex-row filter-chips filter-chips--controls">
           <a class="btn {% if not only_missing_tags and not only_missing_admin_meta %}btn-primary{% endif %}"
              href="/api/ui/admin/backlog/">
             הכל
@@ -59,7 +60,21 @@
           {% endif %}
         </div>
 
-        <div class="spacer"></div>
+        {% if only_missing_tags or only_missing_admin_meta %}
+          <div class="filter-chips" aria-label="סינון פעיל">
+            <span class="filter-chips__label">סינון פעיל:</span>
+
+            {% if only_missing_tags %}
+              <span class="filter-chip"><span class="filter-chip__key">תגיות:</span> חסרות תגיות</span>
+            {% endif %}
+
+            {% if only_missing_admin_meta %}
+              <span class="filter-chip"><span class="filter-chip__key">מטא־דאטה:</span> שדות ריקים</span>
+            {% endif %}
+
+            <a class="filter-chip filter-chip--action" href="/api/ui/admin/backlog/">ניקוי הכל</a>
+          </div>
+        {% endif %}
 
         <div class="filter-summary">
           <strong>סיכום:</strong>
@@ -128,7 +143,9 @@
                 {% endif %}
               </td>
 
-              <td>{{ d.doc_type }}</td>
+              <td>
+                {% if d.doc_type == "IMAGE" %}תמונה{% elif d.doc_type == "PDF" %}PDF{% else %}{{ d.doc_type }}{% endif %}
+              </td>
 
               <td>
                 {% if d.tags_m2m.exists %}
@@ -147,12 +164,24 @@
               </td>
 
               <td>
-                <a class="btn" href="/admin/documents/document/{{ d.id }}/change/">עריכה</a>
+                <div class="table-actions">
+                  <a class="btn btn-primary" href="/admin/documents/document/{{ d.id }}/change/">עריכה</a>
+                </div>
               </td>
             </tr>
           {% empty %}
             <tr>
-              <td colspan="5" class="table-empty">אין פריטים בהשלמת פרטים 🎉</td>
+              <td colspan="5" class="table-empty">
+                <div class="empty-state">
+                  <div class="empty-state__title">אין מסמכים ברשימה</div>
+                  {% if only_missing_tags or only_missing_admin_meta %}
+                    <p>אין מסמכים התואמים את הפילטרים שנבחרו. נסו לנקות את הפילטרים או לבחור קריטריון אחר.</p>
+                    <a class="btn" href="/api/ui/admin/backlog/">ניקוי פילטרים</a>
+                  {% else %}
+                    <p>כרגע אין מסמכים שדורשים השלמת פרטי קטלוג או מטא־דאטה.</p>
+                  {% endif %}
+                </div>
+              </td>
             </tr>
           {% endfor %}
         </tbody>

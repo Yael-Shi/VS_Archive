@@ -5,53 +5,96 @@
 {% block content %}
   <div class="card page-header">
     <h1 class="page-title">מסמכים</h1>
-    <p class="page-subtitle">
-      מציג {{ docs|length }} מתוך {{ total }} מסמכים
-    </p>
+    <p class="page-subtitle">רשימת כל המסמכים במערכת. ניתן לסנן לפי חיפוש, סוג קובץ וסטטוס מטא־דאטה. מציג {{ docs|length }} מתוך {{ total }} מסמכים.</p>
 
-    <form method="get" class="toolbar">
-      <div class="field field--wide">
-        <label>חיפוש</label>
-        <input type="text" name="q" placeholder="כותרת / תגיות / קטגוריה" value="{{ q }}">
-      </div>
+    <div class="filter-panel">
+      <div class="section-title">סינון מסמכים</div>
+      <p class="filter-panel__help">הגדירו קריטריונים ולחצו «החלה». «ניקוי» מאפס את כל הפילטרים ומחזיר לרשימה המלאה.</p>
 
-      <div class="field">
-        <label>סוג</label>
-        <select name="doc_type">
-          <option value="">הכל</option>
-          {% for v, label in doc_type_choices %}
-            <option value="{{ v }}" {% if doc_type == v %}selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select>
-      </div>
+      <form method="get" class="toolbar">
+        <div class="field field--wide">
+          <label for="filter-q">חיפוש</label>
+          <input id="filter-q" type="text" name="q" placeholder="כותרת / תגיות / קטגוריה" value="{{ q }}">
+        </div>
 
-      <div class="field">
-        <label>סטטוס מטא־דאטה</label>
-        <select name="metadata_status">
-          <option value="">הכל</option>
-          {% for v, label in metadata_status_choices %}
-            <option value="{{ v }}" {% if metadata_status == v %}selected{% endif %}>{{ v|metadata_status_label }}</option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <div class="field">
-        <label>סטטוס העלאה</label>
-        <input type="text" name="upload_status" placeholder="UPLOADED / FAILED / UPLOADING" value="{{ upload_status }}">
-      </div>
-
-      {% if is_admin %}
         <div class="field">
-          <label>נראות</label>
-          <input type="text" name="visibility" placeholder="private / public" value="{{ visibility }}">
+          <label for="filter-doc-type">סוג</label>
+          <select id="filter-doc-type" name="doc_type">
+            <option value="">הכל</option>
+            {% for v, label in doc_type_choices %}
+              <option value="{{ v }}" {% if doc_type == v %}selected{% endif %}>
+                {% if v == "IMAGE" %}תמונה{% elif v == "PDF" %}PDF{% else %}{{ label }}{% endif %}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="filter-metadata-status">סטטוס מטא־דאטה</label>
+          <select id="filter-metadata-status" name="metadata_status">
+            <option value="">הכל</option>
+            {% for v, label in metadata_status_choices %}
+              <option value="{{ v }}" {% if metadata_status == v %}selected{% endif %}>{{ v|metadata_status_label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="filter-upload-status">סטטוס העלאה</label>
+          <input id="filter-upload-status" type="text" name="upload_status" placeholder="UPLOADED / UPLOADING / FAILED" value="{{ upload_status }}">
+          <span class="field-hint">ערכים טכניים — לסינון מדויק</span>
+        </div>
+
+        {% if is_admin %}
+          <div class="field">
+            <label for="filter-visibility">נראות</label>
+            <input id="filter-visibility" type="text" name="visibility" placeholder="private / public" value="{{ visibility }}">
+            <span class="field-hint">private = פרטי · public = ציבורי</span>
+          </div>
+        {% endif %}
+
+        <div class="field field--actions">
+          <div class="form-actions">
+            <button class="btn btn-primary" type="submit">החלה</button>
+            <a class="btn" href="/api/ui/documents/">ניקוי</a>
+          </div>
+        </div>
+      </form>
+
+      {% if q or doc_type or metadata_status or upload_status or visibility %}
+        <div class="filter-chips" aria-label="סינון פעיל">
+          <span class="filter-chips__label">סינון פעיל:</span>
+
+          {% if q %}
+            <span class="filter-chip"><span class="filter-chip__key">חיפוש:</span> {{ q }}</span>
+          {% endif %}
+
+          {% if doc_type %}
+            <span class="filter-chip">
+              <span class="filter-chip__key">סוג:</span>
+              {% if doc_type == "IMAGE" %}תמונה{% elif doc_type == "PDF" %}PDF{% else %}{{ doc_type }}{% endif %}
+            </span>
+          {% endif %}
+
+          {% if metadata_status %}
+            <span class="filter-chip"><span class="filter-chip__key">סטטוס מטא־דאטה:</span> {{ metadata_status|metadata_status_label }}</span>
+          {% endif %}
+
+          {% if upload_status %}
+            <span class="filter-chip"><span class="filter-chip__key">סטטוס העלאה:</span> {{ upload_status|upload_status_label }}</span>
+          {% endif %}
+
+          {% if visibility %}
+            <span class="filter-chip">
+              <span class="filter-chip__key">נראות:</span>
+              {% if visibility == "public" %}ציבורי{% elif visibility == "private" %}פרטי{% else %}{{ visibility }}{% endif %}
+            </span>
+          {% endif %}
+
+          <a class="filter-chip filter-chip--action" href="/api/ui/documents/">ניקוי הכל</a>
         </div>
       {% endif %}
-
-      <div class="form-actions">
-        <button class="btn btn-primary" type="submit">החלה</button>
-        <a class="btn" href="/api/ui/documents/">ניקוי</a>
-      </div>
-    </form>
+    </div>
   </div>
 
   <div class="spacer"></div>
@@ -97,7 +140,9 @@
               {% if d.language %}{{ d.language }}{% else %}<span class="muted">לא ידוע</span>{% endif %}
             </td>
 
-            <td>{{ d.doc_type }}</td>
+            <td>
+              {% if d.doc_type == "IMAGE" %}תמונה{% elif d.doc_type == "PDF" %}PDF{% else %}{{ d.doc_type }}{% endif %}
+            </td>
 
             <td>
               {% metadata_status_badge d.metadata_status %}
@@ -115,7 +160,17 @@
           </tr>
         {% empty %}
           <tr>
-            <td colspan="{% if is_admin %}5{% else %}4{% endif %}" class="table-empty">לא נמצאו מסמכים</td>
+            <td colspan="{% if is_admin %}5{% else %}4{% endif %}" class="table-empty">
+              <div class="empty-state">
+                <div class="empty-state__title">לא נמצאו מסמכים</div>
+                {% if q or doc_type or metadata_status or upload_status or visibility %}
+                  <p>אין מסמכים התואמים את הסינון הנוכחי. נסו לשנות את החיפוש או לנקות את הפילטרים.</p>
+                  <a class="btn" href="/api/ui/documents/">ניקוי פילטרים</a>
+                {% else %}
+                  <p>עדיין לא הועלו מסמכים למערכת.</p>
+                {% endif %}
+              </div>
+            </td>
           </tr>
         {% endfor %}
       </tbody>
