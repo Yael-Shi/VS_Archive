@@ -6648,3 +6648,103 @@ class StatusLabelPresentationTests(TestCase):
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "אושר אנושית")
+
+
+class NavigationLabelTests(TestCase):
+    """Navigation/action label cleanup (presentation-only).
+
+    These pin the distinction between *global* list/backlog navigation and
+    *current-document* actions, and that link targets + admin gating are
+    unchanged.
+    """
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+
+        self.staff = User.objects.create_user(
+            username="nav_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.user = User.objects.create_user(
+            username="nav_user",
+            password="test-pass",
+            is_staff=False,
+        )
+
+    def _create_document(self, **kwargs):
+        defaults = {
+            "title": "Nav doc",
+            "doc_type": Document.DocType.IMAGE,
+            "text_input_type": Document.TextInputType.HANDWRITTEN,
+            "language": Document.Language.HEBREW,
+            "upload_status": Document.UploadStatus.UPLOADED,
+            "processing_state_user": Document.ProcessingState.READY,
+        }
+        defaults.update(kwargs)
+        return Document.objects.create(**defaults)
+
+    def _create_text_result(self, doc, **kwargs):
+        defaults = {
+            "result_type": DocumentTextResult.ResultType.HEBREW_TEXT,
+            "engine": "transkribus-pylaia:1",
+            "engine_key": DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
+            "prompt_variant": DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            "status": DocumentTextResult.Status.NEEDS_REVIEW,
+            "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
+            "text": "שורת בדיקה",
+            "review_reasons": '["AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW"]',
+        }
+        defaults.update(kwargs)
+        return DocumentTextResult.objects.create(document=doc, **defaults)
+
+    def test_global_nav_uses_list_wording_for_admin(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/documents/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "רשימת בקרת תמלול")
+        self.assertContains(resp, "רשימת השלמת פרטים")
+        self.assertContains(resp, 'href="/api/ui/admin/review/"')
+        self.assertContains(resp, 'href="/api/ui/admin/backlog/"')
+
+    def test_detail_distinguishes_global_list_from_current_doc_action(self):
+        doc = self._create_document()
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        # Global list link and current-document action use distinct labels...
+        self.assertContains(resp, "רשימת בקרת תמלול")
+        self.assertContains(resp, "בקרת תמלול למסמך זה")
+        # ...the old ambiguous label is gone...
+        self.assertNotContains(resp, "בדיקת תמלול למסמך זה")
+        # ...and both still point at their original, distinct hrefs.
+        self.assertContains(resp, 'href="/api/ui/admin/review/"')
+        self.assertContains(resp, f'href="/api/ui/admin/review/{doc.id}/"')
+        self.assertContains(resp, "רשימת השלמת פרטים")
+
+    def test_detail_admin_action_links_hidden_for_non_admin(self):
+        doc = self._create_document()
+        self.client.force_login(self.user)
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        # Non-admin keeps the global "back to list" link...
+        self.assertContains(resp, "חזרה לרשימה")
+        # ...but admin navigation/actions stay hidden (gating unchanged).
+        self.assertNotContains(resp, "בקרת תמלול למסמך זה")
+        self.assertNotContains(resp, "רשימת בקרת תמלול")
+        self.assertNotContains(resp, "/api/ui/admin/review/")
+
+    def test_review_detail_has_back_to_review_list_link(self):
+        doc = self._create_document()
+        self._create_text_result(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "חזרה לרשימת בקרת תמלול")
+        # The old ambiguous "back" label is gone.
+        self.assertNotContains(resp, "חזרה לבקרת תמלול<")
+        # Global list + current-document links keep their original hrefs.
+        self.assertContains(resp, 'href="/api/ui/admin/review/"')
+        self.assertContains(resp, "תצוגת מסמך")
+        self.assertContains(resp, f'href="/api/ui/documents/{doc.id}/"')
+        self.assertContains(resp, "רשימת השלמת פרטים")
