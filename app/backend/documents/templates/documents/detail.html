@@ -99,134 +99,23 @@
         <div class="spacer"></div>
       {% endif %}
 
-      {# Case A: Hebrew-only transcription (no SOURCE_TEXT expected) #}
-      {% if "SOURCE_TEXT" not in text_presentation.expected %}
-        <div style="font-weight: 800; margin-top: 4px;">טקסט עברי לבדיקה</div>
-
-        {% if text_presentation.hebrew %}
-          <div class="muted" style="margin-top: 8px; font-size: 13px; display:flex; gap:8px; flex-wrap: wrap; align-items:center;">
-            {% include "documents/partials/review_status_badge.html" with verification_status=text_presentation.hebrew.verification_status %}
-          </div>
-
-          {% if text_presentation.hebrew.status == "FAILED" %}
-            <div class="spacer"></div>
-            <div class="muted" style="font-size: 13px;">
-              <strong>error_code:</strong> <code>{{ text_presentation.hebrew.error_code }}</code><br/>
-              <strong>details:</strong> {{ text_presentation.hebrew.error_details }}
-            </div>
-          {% endif %}
-
-          <div class="spacer"></div>
-
-          {% if text_presentation.hebrew.text %}
-            <div class="muted" style="font-size: 13px; margin-bottom: 6px;">
-              זהו הטקסט העברי שמיועד לבדיקה ואישור.
-            </div>
-            <pre class="card" style="padding: 12px; margin:0; white-space: pre-wrap; border: 1px solid rgba(0,0,0,0.08);">{{ text_presentation.hebrew.text }}</pre>
-          {% else %}
-            <div class="muted">אין טקסט להצגה עדיין.</div>
-          {% endif %}
-          <details style="margin-top: 8px;">
-            <summary class="muted" style="cursor: pointer;">פרטים טכניים</summary>
-            <div class="muted" style="margin-top: 6px; font-size: 13px; display:flex; gap:8px; flex-wrap: wrap;">
-              <span class="badge">{{ text_presentation.hebrew.status }}</span>
-              <span class="badge">{{ text_presentation.hebrew.verification_status }}</span>
-              <span class="badge">{{ text_presentation.hebrew.engine }}</span>
-              <span>{{ text_presentation.hebrew.created_at }}</span>
-            </div>
-          </details>
-        {% else %}
-          <div class="muted" style="margin-top: 8px;">אין תמלול לעברית עדיין.</div>
-        {% endif %}
-
-      {# Case B: Source transcription + Hebrew translation #}
-      {% else %}
-        {% if doc.language == "he" %}
-          <div style="font-weight: 800; margin-top: 4px;">תמלול מקור (עברית כפי שחולצה)</div>
-        {% else %}
-          <div style="font-weight: 800; margin-top: 4px;">תמלול מקור</div>
-        {% endif %}
-
-        {% if text_presentation.source %}
-          <div class="muted" style="margin-top: 8px; font-size: 13px; display:flex; gap:8px; flex-wrap: wrap; align-items:center;">
-            {% include "documents/partials/review_status_badge.html" with verification_status=text_presentation.source.verification_status %}
-          </div>
-
-          {% if text_presentation.source.status == "FAILED" %}
-            <div class="spacer"></div>
-            <div class="muted" style="font-size: 13px;">
-              <strong>error_code:</strong> <code>{{ text_presentation.source.error_code }}</code><br/>
-              <strong>details:</strong> {{ text_presentation.source.error_details }}
-            </div>
-          {% endif %}
-
-          <div class="spacer"></div>
-          {% if text_presentation.source.text %}
-            {% if doc.language == "he" %}
-              <div class="muted" style="font-size: 13px; margin-bottom: 6px;">
-                זהו טקסט המקור כפי שחולץ אוטומטית מן המסמך.
-              </div>
-            {% endif %}
-            <pre class="card" style="padding: 12px; margin:0; white-space: pre-wrap; border: 1px solid rgba(0,0,0,0.08);">{{ text_presentation.source.text }}</pre>
-          {% else %}
-            <div class="muted">אין תמלול מקור להצגה.</div>
-          {% endif %}
-          <details style="margin-top: 8px;">
-            <summary class="muted" style="cursor: pointer;">פרטים טכניים</summary>
-            <div class="muted" style="margin-top: 6px; font-size: 13px; display:flex; gap:8px; flex-wrap: wrap;">
-              <span class="badge">{{ text_presentation.source.status }}</span>
-              <span class="badge">{{ text_presentation.source.verification_status }}</span>
-              <span class="badge">{{ text_presentation.source.engine }}</span>
-              <span>{{ text_presentation.source.created_at }}</span>
-            </div>
-          </details>
-        {% else %}
-          <div class="muted" style="margin-top: 8px;">אין תמלול מקור עדיין.</div>
-        {% endif %}
-
+      {% if text_presentation.identical_source_and_hebrew %}
+        <div class="muted" style="margin-top: 6px; font-size: 13px;">
+          שני מקטעים אלו עשויים להכיל טקסט זהה — כל אחד מייצג תפקיד שונה (חילוץ מקור לעומת טקסט לבדיקה).
+        </div>
         <div class="spacer"></div>
-        {% if doc.language == "he" %}
-          <div style="font-weight: 800;">טקסט עברי לבדיקה</div>
-        {% else %}
-          <div style="font-weight: 800;">תרגום לעברית</div>
-        {% endif %}
+      {% endif %}
 
-        {% if text_presentation.hebrew %}
-          <div class="muted" style="margin-top: 8px; font-size: 13px; display:flex; gap:8px; flex-wrap: wrap; align-items:center;">
-            {% include "documents/partials/review_status_badge.html" with verification_status=text_presentation.hebrew.verification_status %}
-          </div>
+      {% if text_presentation.show_source %}
+        {% include "documents/partials/detail_text_block.html" with meta=text_presentation.source_meta block=text_presentation.source %}
+      {% endif %}
 
-          {% if text_presentation.hebrew.status == "FAILED" %}
-            <div class="spacer"></div>
-            <div class="muted" style="font-size: 13px;">
-              <strong>error_code:</strong> <code>{{ text_presentation.hebrew.error_code }}</code><br/>
-              <strong>details:</strong> {{ text_presentation.hebrew.error_details }}
-            </div>
-          {% endif %}
+      {% if text_presentation.show_source and text_presentation.show_hebrew %}
+        <div class="spacer"></div>
+      {% endif %}
 
-          <div class="spacer"></div>
-          {% if text_presentation.hebrew.text %}
-            {% if doc.language == "he" %}
-              <div class="muted" style="font-size: 13px; margin-bottom: 6px;">
-                זהו הטקסט העברי שמיועד לבדיקה ואישור.
-              </div>
-            {% endif %}
-            <pre class="card" style="padding: 12px; margin:0; white-space: pre-wrap; border: 1px solid rgba(0,0,0,0.08);">{{ text_presentation.hebrew.text }}</pre>
-          {% else %}
-            <div class="muted">אין תרגום לעברית להצגה.</div>
-          {% endif %}
-          <details style="margin-top: 8px;">
-            <summary class="muted" style="cursor: pointer;">פרטים טכניים</summary>
-            <div class="muted" style="margin-top: 6px; font-size: 13px; display:flex; gap:8px; flex-wrap: wrap;">
-              <span class="badge">{{ text_presentation.hebrew.status }}</span>
-              <span class="badge">{{ text_presentation.hebrew.verification_status }}</span>
-              <span class="badge">{{ text_presentation.hebrew.engine }}</span>
-              <span>{{ text_presentation.hebrew.created_at }}</span>
-            </div>
-          </details>
-        {% else %}
-          <div class="muted" style="margin-top: 8px;">אין תרגום לעברית עדיין.</div>
-        {% endif %}
+      {% if text_presentation.show_hebrew %}
+        {% include "documents/partials/detail_text_block.html" with meta=text_presentation.hebrew_meta block=text_presentation.hebrew %}
       {% endif %}
     </div>
 
