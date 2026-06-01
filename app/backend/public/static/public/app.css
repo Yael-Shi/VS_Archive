@@ -987,6 +987,10 @@ pre {
   align-items: start;
 }
 
+.public-life-dates {
+  margin: 0 0 var(--space-3);
+}
+
 .public-bio-card__text {
   min-width: 0;
 }
