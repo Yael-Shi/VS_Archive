@@ -124,6 +124,7 @@ LOGOUT_REDIRECT_URL = "/"
 
 CSRF_TRUSTED_ORIGINS = [
     "https://*.ngrok-free.dev",
+    "https://vs-archive.com",
     "http://vs-arc-vsarc-arz8x1qh0dhg-1038935491.eu-central-1.elb.amazonaws.com",
 ]
 
@@ -134,5 +135,6 @@ CSRF_TRUSTED_ORIGINS = os.getenv(
 
 
 CSRF_TRUSTED_ORIGINS = [s.strip() for s in CSRF_TRUSTED_ORIGINS if s.strip()]
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # build v2.2
