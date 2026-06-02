@@ -3541,6 +3541,14 @@ class UploadApiTests(TestCase):
         self.assertTrue(body["s3_key"].startswith("documents/"))
         self.assertTrue(body["s3_key"].endswith("/original.jpeg"))
 
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_create_upload_defaults_visibility_private_when_omitted(self, _mock_put):
+        resp = self._post_create(self._base_create_payload())
+        self.assertEqual(resp.status_code, 201)
+        doc = Document.objects.get(id=resp.json()["document_id"])
+        self.assertEqual(doc.visibility, Document.Visibility.PRIVATE)
+
     @patch("documents.views.create_presigned_put", return_value="https://example/upload")
     @patch("documents.views.send_process_document_message")
     def test_single_file_complete_still_enqueues_and_dual_writes(
@@ -6750,7 +6758,7 @@ class NavigationLabelTests(TestCase):
         self.assertContains(resp, "רשימת השלמת פרטים")
 
     def test_detail_admin_action_links_hidden_for_non_admin(self):
-        doc = self._create_document()
+        doc = self._create_document(visibility=Document.Visibility.PUBLIC)
         self.client.force_login(self.user)
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
@@ -7041,3 +7049,150 @@ class TextPresentationHelperTests(TestCase):
         self.assertTrue(presentation.show_source)
         self.assertTrue(presentation.show_hebrew)
         self.assertTrue(presentation.identical_source_and_hebrew)
+
+
+class DocumentVisibilityAccessControlTests(TestCase):
+    """PR1 — public archive visibility: only explicit public documents for non-staff."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+
+        self.staff = User.objects.create_user(
+            username="visibility_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.viewer = User.objects.create_user(
+            username="visibility_viewer",
+            password="test-pass",
+            is_staff=False,
+        )
+
+    def _create_document(self, *, visibility=Document.Visibility.PRIVATE, title="Vis doc", **kwargs):
+        defaults = {
+            "title": title,
+            "doc_type": Document.DocType.IMAGE,
+            "text_input_type": Document.TextInputType.HANDWRITTEN,
+            "language": Document.Language.HEBREW,
+            "upload_status": Document.UploadStatus.UPLOADED,
+            "processing_state_user": Document.ProcessingState.READY,
+            "visibility": visibility,
+            "file_s3_key": "documents/99/original.jpg",
+            "mime_type": "image/jpeg",
+        }
+        defaults.update(kwargs)
+        return Document.objects.create(**defaults)
+
+    def test_anonymous_list_api_public_only(self):
+        public_doc = self._create_document(
+            visibility=Document.Visibility.PUBLIC,
+            title="Public list API",
+        )
+        self._create_document(
+            visibility=Document.Visibility.PRIVATE,
+            title="Private list API",
+        )
+        resp = self.client.get("/api/documents/")
+        self.assertEqual(resp.status_code, 200)
+        ids = {item["id"] for item in resp.json()["items"]}
+        self.assertEqual(ids, {public_doc.id})
+
+    def test_anonymous_list_page_public_only(self):
+        public_doc = self._create_document(
+            visibility=Document.Visibility.PUBLIC,
+            title="Public list UI",
+        )
+        self._create_document(
+            visibility=Document.Visibility.PRIVATE,
+            title="Private list UI",
+        )
+        resp = self.client.get("/api/ui/documents/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, public_doc.title)
+        self.assertNotContains(resp, "Private list UI")
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_get", return_value="https://example.com/presigned")
+    def test_anonymous_public_detail_ok_private_detail_404(self, _mock_presign):
+        public_doc = self._create_document(visibility=Document.Visibility.PUBLIC)
+        private_doc = self._create_document(visibility=Document.Visibility.PRIVATE)
+        self.assertEqual(
+            self.client.get(f"/api/ui/documents/{public_doc.id}/").status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.get(f"/api/ui/documents/{private_doc.id}/").status_code,
+            404,
+        )
+
+    def test_viewer_same_visibility_rules_as_anonymous(self):
+        public_doc = self._create_document(visibility=Document.Visibility.PUBLIC)
+        private_doc = self._create_document(visibility=Document.Visibility.PRIVATE)
+        self.client.force_login(self.viewer)
+        resp = self.client.get("/api/documents/")
+        ids = {item["id"] for item in resp.json()["items"]}
+        self.assertIn(public_doc.id, ids)
+        self.assertNotIn(private_doc.id, ids)
+        self.assertEqual(
+            self.client.get(f"/api/ui/documents/{private_doc.id}/").status_code,
+            404,
+        )
+
+    def test_staff_sees_public_and_private_in_list(self):
+        public_doc = self._create_document(visibility=Document.Visibility.PUBLIC)
+        private_doc = self._create_document(visibility=Document.Visibility.PRIVATE)
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/documents/")
+        ids = {item["id"] for item in resp.json()["items"]}
+        self.assertEqual(ids, {public_doc.id, private_doc.id})
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_get", return_value="https://example.com/presigned")
+    def test_private_detail_does_not_presign_for_anonymous(self, mock_presign):
+        doc = self._create_document(visibility=Document.Visibility.PRIVATE)
+        self.assertEqual(self.client.get(f"/api/ui/documents/{doc.id}/").status_code, 404)
+        mock_presign.assert_not_called()
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_get", return_value="https://example.com/presigned")
+    def test_public_detail_presigns_for_anonymous(self, mock_presign):
+        doc = self._create_document(visibility=Document.Visibility.PUBLIC)
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        mock_presign.assert_called_once()
+
+    def test_admin_backlog_requires_staff(self):
+        self.client.force_login(self.viewer)
+        resp = self.client.get("/api/ui/admin/backlog/")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_upload_page_still_requires_staff(self):
+        self.client.force_login(self.viewer)
+        self.assertEqual(self.client.get("/api/ui/upload/").status_code, 403)
+
+
+class DocumentAccessServiceTests(TestCase):
+    def test_document_queryset_for_user_filters_non_admin(self):
+        from documents.services.document_access import document_queryset_for_user
+        from django.contrib.auth.models import User
+
+        public_doc = Document.objects.create(
+            title="Public svc",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        private_doc = Document.objects.create(
+            title="Private svc",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PRIVATE,
+        )
+        staff = User.objects.create_user(username="svc_staff", is_staff=True)
+        viewer = User.objects.create_user(username="svc_viewer", is_staff=False)
+
+        viewer_ids = set(document_queryset_for_user(viewer).values_list("id", flat=True))
+        self.assertEqual(viewer_ids, {public_doc.id})
+
+        staff_ids = set(document_queryset_for_user(staff).values_list("id", flat=True))
+        self.assertEqual(staff_ids, {public_doc.id, private_doc.id})

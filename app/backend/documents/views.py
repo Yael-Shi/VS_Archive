@@ -6,7 +6,7 @@ from typing import Optional
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q
-from django.http import HttpResponseBadRequest, JsonResponse, HttpResponseForbidden
+from django.http import Http404, HttpResponseBadRequest, JsonResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
@@ -34,6 +34,11 @@ from documents.services.source_files import (
     is_multi_image_document,
     mirror_primary_document_from_source_file,
     sync_primary_document_source_file,
+)
+from documents.services.document_access import (
+    document_queryset_for_user,
+    get_viewable_document,
+    is_document_admin,
 )
 from documents.services.sqs import send_process_document_message
 from documents.services.text_presentation import get_text_presentation_for_document
@@ -82,7 +87,7 @@ def _parse_text_input_type(raw_value: Optional[str]) -> str:
 
 
 def _is_admin(user) -> bool:
-    return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
+    return is_document_admin(user)
 
 
 def _require_admin(request):
@@ -99,15 +104,16 @@ def _require_admin_page(request):
 
 def _base_queryset(
     *,
+    user,
     q: str,
     upload_status: str,
     visibility: str,
     doc_type: str,
     metadata_status: str,
-    is_admin: bool,
 ):
+    is_admin = _is_admin(user)
     qs = (
-        Document.objects.all()
+        document_queryset_for_user(user)
         .prefetch_related("tags_m2m")
         .order_by("-created_at")
     )
@@ -802,7 +808,6 @@ def upload_finalize(request, doc_id: int):
     return _finalize_response(doc)
 
 
-@login_required
 def documents_list_api(request):
     q = request.GET.get("q", "") or ""
     upload_status = (request.GET.get("upload_status") or "").strip()
@@ -816,12 +821,12 @@ def documents_list_api(request):
     is_admin = _is_admin(request.user)
 
     qs = _base_queryset(
+        user=request.user,
         q=q,
         upload_status=upload_status,
         visibility=visibility,
         doc_type=doc_type,
         metadata_status=metadata_status,
-        is_admin=is_admin,
     )
     total = qs.count()
 
@@ -846,7 +851,6 @@ def documents_list_api(request):
     return JsonResponse({"count": total, "limit": limit, "offset": offset, "items": items})
 
 
-@login_required
 def documents_list_page(request):
     q = request.GET.get("q", "") or ""
     upload_status = (request.GET.get("upload_status") or "").strip()
@@ -860,12 +864,12 @@ def documents_list_page(request):
     is_admin = _is_admin(request.user)
 
     qs = _base_queryset(
+        user=request.user,
         q=q,
         upload_status=upload_status,
         visibility=visibility,
         doc_type=doc_type,
         metadata_status=metadata_status,
-        is_admin=is_admin,
     )
     total = qs.count()
     docs = list(qs[offset : offset + limit])
@@ -1245,17 +1249,21 @@ def review_text_result_update_text(request, result_id: int):
     return redirect(f"/api/ui/admin/review/{row.document_id}/")
 
 
-@login_required
 def document_detail_page(request, doc_id: int):
+    is_admin = _is_admin(request.user)
+    detail_qs = Document.objects.select_related("admin_meta").prefetch_related(
+        "tags_m2m", "text_results", "source_files"
+    )
     try:
-        doc = (
-            Document.objects.select_related("admin_meta")
-            .prefetch_related("tags_m2m", "text_results", "source_files")
-            .get(id=doc_id)
+        doc = get_viewable_document(
+            request.user,
+            doc_id,
+            queryset=detail_qs,
         )
-        admin_meta = getattr(doc, "admin_meta", None)
-    except Document.DoesNotExist:
-        return JsonResponse({"error": "not found"}, status=404)
+    except Http404:
+        raise
+
+    admin_meta = getattr(doc, "admin_meta", None) if is_admin else None
 
     bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
     source_preview = build_source_preview(doc, bucket)
@@ -1273,7 +1281,7 @@ def document_detail_page(request, doc_id: int):
         "source_preview_unavailable_count": source_preview.non_uploaded_count,
         "admin_meta": admin_meta,
         "text_presentation": text_presentation,
-        "is_admin": _is_admin(request.user),
+        "is_admin": is_admin,
     }
 
     logger.info(

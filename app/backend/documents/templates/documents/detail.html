@@ -107,7 +107,7 @@
       {% endif %}
 
       {% if text_presentation.show_source %}
-        {% include "documents/partials/detail_text_block.html" with meta=text_presentation.source_meta block=text_presentation.source %}
+        {% include "documents/partials/detail_text_block.html" with meta=text_presentation.source_meta block=text_presentation.source is_admin=is_admin %}
       {% endif %}
 
       {% if text_presentation.show_source and text_presentation.show_hebrew %}
@@ -115,7 +115,7 @@
       {% endif %}
 
       {% if text_presentation.show_hebrew %}
-        {% include "documents/partials/detail_text_block.html" with meta=text_presentation.hebrew_meta block=text_presentation.hebrew %}
+        {% include "documents/partials/detail_text_block.html" with meta=text_presentation.hebrew_meta block=text_presentation.hebrew is_admin=is_admin %}
       {% endif %}
     </div>
 
