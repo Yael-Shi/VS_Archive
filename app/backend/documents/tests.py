@@ -7170,6 +7170,63 @@ class DocumentVisibilityAccessControlTests(TestCase):
         self.client.force_login(self.viewer)
         self.assertEqual(self.client.get("/api/ui/upload/").status_code, 403)
 
+    def test_anonymous_list_page_hides_internal_document_id_display(self):
+        public_doc = self._create_document(
+            visibility=Document.Visibility.PUBLIC,
+            title="Public list ID hidden",
+        )
+        resp = self.client.get("/api/ui/documents/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, public_doc.title)
+        self.assertNotContains(resp, f"· #{public_doc.id}")
+
+    def test_viewer_list_page_hides_internal_document_id_display(self):
+        public_doc = self._create_document(
+            visibility=Document.Visibility.PUBLIC,
+            title="Viewer list ID hidden",
+        )
+        self.client.force_login(self.viewer)
+        resp = self.client.get("/api/ui/documents/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, public_doc.title)
+        self.assertNotContains(resp, f"· #{public_doc.id}")
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_get", return_value="https://example.com/presigned")
+    def test_anonymous_detail_page_hides_internal_document_id_display(self, _mock_presign):
+        public_doc = self._create_document(visibility=Document.Visibility.PUBLIC)
+        resp = self.client.get(f"/api/ui/documents/{public_doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, f"מסמך #{public_doc.id}")
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_get", return_value="https://example.com/presigned")
+    def test_viewer_detail_page_hides_internal_document_id_display(self, _mock_presign):
+        public_doc = self._create_document(visibility=Document.Visibility.PUBLIC)
+        self.client.force_login(self.viewer)
+        resp = self.client.get(f"/api/ui/documents/{public_doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, f"מסמך #{public_doc.id}")
+
+    def test_staff_list_page_shows_internal_document_id_display(self):
+        public_doc = self._create_document(
+            visibility=Document.Visibility.PUBLIC,
+            title="Staff list ID visible",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/documents/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, f"· #{public_doc.id}")
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_get", return_value="https://example.com/presigned")
+    def test_staff_detail_page_shows_internal_document_id_display(self, _mock_presign):
+        public_doc = self._create_document(visibility=Document.Visibility.PUBLIC)
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/documents/{public_doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, f"מסמך #{public_doc.id}")
+
 
 class DocumentAccessServiceTests(TestCase):
     def test_document_queryset_for_user_filters_non_admin(self):

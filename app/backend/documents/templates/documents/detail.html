@@ -26,9 +26,13 @@
     <h1 class="page-title">{{ doc.title }}</h1>
 
     <div class="page-lead">
-      מסמך #{{ doc.id }}
-      {% if is_admin and doc.file_original_name %} · {{ doc.file_original_name }}{% endif %}
-      {% if doc.date_start or doc.date_end %} · {{ doc.date_start }} - {{ doc.date_end }}{% endif %}
+      {% if is_admin %}
+        מסמך #{{ doc.id }}
+        {% if doc.file_original_name %} · {{ doc.file_original_name }}{% endif %}
+        {% if doc.date_start or doc.date_end %} · {{ doc.date_start }} - {{ doc.date_end }}{% endif %}
+      {% elif doc.date_start or doc.date_end %}
+        {{ doc.date_start }} - {{ doc.date_end }}
+      {% endif %}
     </div>
 
     <div class="spacer"></div>
