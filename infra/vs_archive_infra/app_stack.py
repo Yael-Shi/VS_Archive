@@ -61,6 +61,9 @@ class VsArchiveAppStack(Stack):
         gemini_secret = secretsmanager.Secret.from_secret_name_v2(
             self, "GeminiApiKeySecret", "vs-archive-dev/gemini_api_key"
         )
+        django_secret_key = secretsmanager.Secret.from_secret_name_v2(
+            self, "DjangoSecretKeySecret", "vs-archive-dev/django_secret_key"
+        )
         transkribus_enable_hebrew_handwritten_param = (
             ssm.StringParameter.from_string_parameter_name(
                 self,
@@ -174,6 +177,7 @@ class VsArchiveAppStack(Stack):
             )
         )
         gemini_secret.grant_read(exec_role)
+        django_secret_key.grant_read(exec_role)
         transkribus_enable_hebrew_handwritten_param.grant_read(exec_role)
         transkribus_dev_upload_mode_param.grant_read(exec_role)
         transkribus_use_existing_server_document_param.grant_read(exec_role)
@@ -230,10 +234,16 @@ class VsArchiveAppStack(Stack):
                 "GEMINI_FREE_DAILY_REQUEST_LIMIT": "200",
                 "GEMINI_FREE_DAILY_IMAGE_LIMIT": "200",
                 "TRANSKRIBUS_FREE_MONTHLY_CREDITS": "50",
+
+                # Django (production)
+                "DJANGO_DEBUG": "0",
+                "ALLOWED_HOSTS": "vs-archive.com",
+                "CSRF_TRUSTED_ORIGINS": "https://vs-archive.com",
             },
             secrets={
                 "DB_PASSWORD": ecs.Secret.from_secrets_manager(db_secret, "password"),
                 "GEMINI_API_KEY": ecs.Secret.from_secrets_manager(gemini_secret),
+                "DJANGO_SECRET_KEY": ecs.Secret.from_secrets_manager(django_secret_key),
             },
         ).add_port_mappings(ecs.PortMapping(container_port=8000))
 
@@ -290,10 +300,14 @@ class VsArchiveAppStack(Stack):
                 "REPORT_SEND_TIME": "23:00",
                 "FREE_TIER_ALERT_PCT": "80",
                 "LOG_LEVEL": "INFO",
+                "DJANGO_DEBUG": "0",
+                "ALLOWED_HOSTS": "vs-archive.com",
+                "CSRF_TRUSTED_ORIGINS": "https://vs-archive.com",
             },
             secrets={
                 "DB_PASSWORD": ecs.Secret.from_secrets_manager(db_secret, "password"),
                 "GEMINI_API_KEY": ecs.Secret.from_secrets_manager(gemini_secret),
+                "DJANGO_SECRET_KEY": ecs.Secret.from_secrets_manager(django_secret_key),
                 "ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": ecs.Secret.from_ssm_parameter(
                     transkribus_enable_hebrew_handwritten_param
                 ),

@@ -1,6 +1,9 @@
 from pathlib import Path
 import os
+import re
 import tempfile
+
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -12,18 +15,49 @@ if google_json:
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = tfile.name
 # --------------------------------------------------------
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-!5*72sfq!20ubj(3&k48o_##@+_+%5t%ph@*66@&1x)yxzydz&"
+_LOCAL_DEV_SECRET_KEY = "django-insecure-local-dev-only-change-me"
+_LOCAL_DEV_ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+_LOCAL_DEBUG_CSRF_ORIGINS = ["https://*.ngrok-free.dev"]
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+
+def _split_env_list(value: str) -> list[str]:
+    parts: list[str] = []
+    for chunk in re.split(r"[\s,]+", value.strip()):
+        item = chunk.strip()
+        if item:
+            parts.append(item)
+    return parts
+
+
+DEBUG = os.getenv("DJANGO_DEBUG", "0") == "1"
+
+_django_secret_key = os.getenv("DJANGO_SECRET_KEY", "").strip()
+if _django_secret_key:
+    SECRET_KEY = _django_secret_key
+elif DEBUG:
+    SECRET_KEY = _LOCAL_DEV_SECRET_KEY
+else:
+    raise ImproperlyConfigured(
+        "DJANGO_SECRET_KEY must be set when DJANGO_DEBUG is False."
+    )
 
 UPLOADS_BUCKET_NAME = os.getenv("UPLOADS_BUCKET_NAME") or os.getenv("S3_BUCKET") or ""
 AWS_REGION = os.environ.get("AWS_REGION", "eu-central-1")
 
-ALLOWED_HOSTS = ["*"]  # dev only
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", SECRET_KEY)
-DEBUG = os.getenv("DJANGO_DEBUG", "1") == "1"
+_allowed_hosts_raw = os.getenv("ALLOWED_HOSTS", "").strip()
+if _allowed_hosts_raw:
+    ALLOWED_HOSTS = _split_env_list(_allowed_hosts_raw)
+elif DEBUG:
+    ALLOWED_HOSTS = list(_LOCAL_DEV_ALLOWED_HOSTS)
+else:
+    raise ImproperlyConfigured(
+        "ALLOWED_HOSTS must be set when DJANGO_DEBUG is False."
+    )
+
+if not DEBUG and "*" in ALLOWED_HOSTS:
+    raise ImproperlyConfigured(
+        "ALLOWED_HOSTS must not contain '*' when DJANGO_DEBUG is False."
+    )
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -122,19 +156,24 @@ LOGIN_URL = "/accounts/login/"
 LOGIN_REDIRECT_URL = "/api/ui/documents/"
 LOGOUT_REDIRECT_URL = "/"
 
-CSRF_TRUSTED_ORIGINS = [
-    "https://*.ngrok-free.dev",
-    "https://vs-archive.com",
-    "http://vs-arc-vsarc-arz8x1qh0dhg-1038935491.eu-central-1.elb.amazonaws.com",
-]
+if DEBUG:
+    _csrf_trusted_origins_default = " ".join(_LOCAL_DEBUG_CSRF_ORIGINS)
+else:
+    _csrf_trusted_origins_default = ""
 
-CSRF_TRUSTED_ORIGINS = os.getenv(
-    "CSRF_TRUSTED_ORIGINS",
-    " ".join(CSRF_TRUSTED_ORIGINS)
-).split()
+_csrf_trusted_origins_raw = os.getenv(
+    "CSRF_TRUSTED_ORIGINS", _csrf_trusted_origins_default
+).strip()
+CSRF_TRUSTED_ORIGINS = _split_env_list(_csrf_trusted_origins_raw)
 
+if not DEBUG and not CSRF_TRUSTED_ORIGINS:
+    raise ImproperlyConfigured(
+        "CSRF_TRUSTED_ORIGINS must be set when DJANGO_DEBUG is False."
+    )
 
-CSRF_TRUSTED_ORIGINS = [s.strip() for s in CSRF_TRUSTED_ORIGINS if s.strip()]
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_HTTPONLY = True
 
 # build v2.2
