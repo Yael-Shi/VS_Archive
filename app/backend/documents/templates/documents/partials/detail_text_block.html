@@ -7,7 +7,7 @@
       {% include "documents/partials/review_status_badge.html" with verification_status=block.verification_status %}
     </div>
 
-    {% if block.status == "FAILED" %}
+    {% if is_admin and block.status == "FAILED" %}
       <div class="spacer-sm"></div>
       <div class="muted text-sm">
         <strong>error_code:</strong> <code>{{ block.error_code }}</code><br/>
@@ -25,18 +25,20 @@
       <div class="muted">{{ meta.empty_message }}</div>
     {% endif %}
 
-    <details class="review-details review-details--secondary">
-      <summary>פרטים טכניים</summary>
-      <div class="review-details-body">
-        <div class="badge-row">
-          <span class="badge">{{ block.result_type }}</span>
-          <span class="badge">{{ block.status }}</span>
-          <span class="badge">{{ block.verification_status }}</span>
-          <span class="badge">{{ block.engine }}</span>
-          <span class="muted">{{ block.created_at }}</span>
+    {% if is_admin %}
+      <details class="review-details review-details--secondary">
+        <summary>פרטים טכניים</summary>
+        <div class="review-details-body">
+          <div class="badge-row">
+            <span class="badge">{{ block.result_type }}</span>
+            <span class="badge">{{ block.status }}</span>
+            <span class="badge">{{ block.verification_status }}</span>
+            <span class="badge">{{ block.engine }}</span>
+            <span class="muted">{{ block.created_at }}</span>
+          </div>
         </div>
-      </div>
-    </details>
+      </details>
+    {% endif %}
   {% else %}
     <div class="muted page-lead">{{ meta.empty_message }}</div>
   {% endif %}

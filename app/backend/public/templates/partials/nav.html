@@ -8,10 +8,7 @@
       <a class="btn btn-link" href="/">דף הבית</a>
       <a class="btn btn-link" href="/about/">אודות</a>
 
-      {# "מסמכים" אמור להיות רק למשתמשים מחוברים (כרגע אין צפייה לאנונימיים) #}
-      {% if user.is_authenticated %}
-        <a class="btn btn-link" href="/api/ui/documents/">מסמכים</a>
-      {% endif %}
+      <a class="btn btn-link" href="/api/ui/documents/">מסמכים</a>
     </div>
 
     <div class="nav-spacer"></div>
