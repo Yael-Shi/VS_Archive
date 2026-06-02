@@ -58,6 +58,7 @@ class VsArchiveNetworkStack(Stack):
         )
 
         self.sg_alb.add_ingress_rule(peer=ec2.Peer.any_ipv4(), connection=ec2.Port.tcp(80))
+        self.sg_alb.add_ingress_rule(peer=ec2.Peer.any_ipv4(), connection=ec2.Port.tcp(443))
         self.sg_web.add_ingress_rule(peer=self.sg_alb, connection=ec2.Port.tcp(8000))
         self.sg_pg.add_ingress_rule(peer=self.sg_web, connection=ec2.Port.tcp(5432))
         self.sg_efs.add_ingress_rule(peer=self.sg_pg, connection=ec2.Port.tcp(2049))

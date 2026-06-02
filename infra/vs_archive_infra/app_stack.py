@@ -13,6 +13,9 @@ from aws_cdk import aws_servicediscovery as servicediscovery
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_applicationautoscaling as scaling
 from aws_cdk import aws_efs as efs
+from aws_cdk import aws_route53 as route53
+from aws_cdk import aws_route53_targets as route53_targets
+from aws_cdk import aws_certificatemanager as acm
 from typing import cast
 from .config import EnvConfig
 
@@ -340,12 +343,52 @@ class VsArchiveAppStack(Stack):
             internet_facing=True,
             security_group=sg_alb,
         )
-        listener = alb.add_listener(f"{cfg.prefix}-http", port=80, open=True)
-        listener.add_targets(
+        zone = route53.HostedZone.from_hosted_zone_attributes(
+            self,
+            f"{cfg.prefix}-public-zone",
+            hosted_zone_id="Z000559832QUY29WUM9HN",
+            zone_name="vs-archive.com",
+        )
+        certificate = acm.Certificate(
+            self,
+            f"{cfg.prefix}-vs-archive-cert",
+            domain_name="vs-archive.com",
+            validation=acm.CertificateValidation.from_dns(zone),
+        )
+        web_target_group = elbv2.ApplicationTargetGroup(
+            self,
             f"{cfg.prefix}-tg",
+            vpc=vpc,
             port=8000,
+            protocol=elbv2.ApplicationProtocol.HTTP,
+            target_type=elbv2.TargetType.IP,
             targets=[web_svc],
             health_check=elbv2.HealthCheck(path="/health/", interval=Duration.seconds(30)),
+        )
+        https_listener = alb.add_listener(
+            f"{cfg.prefix}-https",
+            port=443,
+            certificates=[certificate],
+            open=True,
+        )
+        https_listener.add_target_groups(
+            f"{cfg.prefix}-https-forward",
+            target_groups=[web_target_group],
+        )
+        http_listener = alb.add_listener(f"{cfg.prefix}-http", port=80, open=True)
+        http_listener.add_action(
+            f"{cfg.prefix}-http-to-https-redirect",
+            action=elbv2.ListenerAction.redirect(
+                protocol="HTTPS",
+                port="443",
+                permanent=True,
+            ),
+        )
+        route53.ARecord(
+            self,
+            f"{cfg.prefix}-apex-alias",
+            zone=zone,
+            target=route53.RecordTarget.from_alias(route53_targets.LoadBalancerTarget(alb)),
         )
 
         for svc in [web_svc, worker_svc, pg_svc]:
