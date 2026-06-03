@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - עריכת תוכן ציבורי{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'public-about' %}">צפייה בעמוד אודות</a>
+      <a class="btn" href="/">דף הבית</a>
+    </div>
+
+    <h1 class="page-title">עריכת תוכן ציבורי</h1>
+    <p class="page-subtitle">
+      עריכת טקסטים שמופיעים בעמוד «אודות» — ביוגרפיה, על הארכיון, על היוצרת ויצירת קשר.
+    </p>
+
+    {% if saved %}
+      <div class="msg msg-ok" role="status">התוכן נשמר בהצלחה.</div>
+    {% elif error_message %}
+      <div class="msg msg-error" role="alert">{{ error_message }}</div>
+    {% endif %}
+  </div>
+
+  <div class="spacer"></div>
+
+  <form method="post" class="public-content-edit-form">
+    {% csrf_token %}
+
+    {% for block in blocks %}
+      <section class="card card--pad-lg public-content-edit-block">
+        <h2 class="section-title">{{ block.def.label }}</h2>
+        <p class="field-hint">מזהה: {{ block.def.key }}</p>
+
+        {% if block.def.show_title %}
+          <div class="field">
+            <label for="title_{{ block.def.key }}">כותרת</label>
+            <input
+              id="title_{{ block.def.key }}"
+              name="title_{{ block.def.key }}"
+              type="text"
+              value="{{ block.content.title }}"
+            />
+          </div>
+        {% else %}
+          <input type="hidden" name="title_{{ block.def.key }}" value="{{ block.content.title }}" />
+        {% endif %}
+
+        <div class="field">
+          <label for="body_{{ block.def.key }}">תוכן</label>
+          <textarea
+            id="body_{{ block.def.key }}"
+            name="body_{{ block.def.key }}"
+            rows="10"
+          >{{ block.content.body }}</textarea>
+          <div class="field-hint">הפרידו בין פסקאות בשורה ריקה.</div>
+        </div>
+      </section>
+
+      <div class="spacer"></div>
+    {% endfor %}
+
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">שמירה</button>
+      <a class="btn" href="{% url 'public-about' %}">ביטול</a>
+    </div>
+  </form>
+{% endblock %}
