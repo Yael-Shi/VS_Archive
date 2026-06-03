@@ -282,10 +282,6 @@ def _attach_document_tags_and_metadata(doc: Document, tags: list, admin_meta: di
         doc.tags_m2m.add(tag_obj)
 
 
-def _is_image_mime_type(mime_type: str) -> bool:
-    return (mime_type or "").strip().lower().startswith("image/")
-
-
 def _create_multi_image_upload(request, payload: dict, common: dict):
     files_raw = payload.get("files")
     if not isinstance(files_raw, list):
@@ -688,15 +684,20 @@ def upload_part_complete(request, doc_id: int, order_index: int):
         file_mime = payload.get("file_mime")
         if isinstance(file_mime, str):
             file_mime = file_mime.strip()
-            if file_mime and not _is_image_mime_type(file_mime):
-                return JsonResponse(
-                    {
-                        "error": "file_mime must be an image/* MIME type",
-                        "document_id": doc.id,
-                        "order_index": order_index,
-                    },
-                    status=400,
+            if file_mime:
+                metadata_err = validate_image_upload_metadata(
+                    mime_type=file_mime,
+                    original_name=source_file.file_original_name or "",
                 )
+                if metadata_err:
+                    return JsonResponse(
+                        {
+                            "error": metadata_err.replace("mime_type", "file_mime"),
+                            "document_id": doc.id,
+                            "order_index": order_index,
+                        },
+                        status=400,
+                    )
 
         source_file.upload_status = DocumentSourceFile.UploadStatus.UPLOADED
         source_file.upload_error = None
