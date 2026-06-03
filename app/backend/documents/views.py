@@ -30,7 +30,6 @@ from documents.services.upload_validation import (
 )
 from documents.services.source_files import (
     MULTI_IMAGE_MAX_FILES,
-    MULTI_IMAGE_MIN_FILES,
     all_expected_source_files_uploaded,
     build_source_preview,
     get_source_file_for_order,

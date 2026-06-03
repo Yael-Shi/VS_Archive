@@ -115,9 +115,12 @@ def _parse_page_json_strict(raw: str, *, page_index: int) -> Dict[str, Any]:
     # Validation and defaults
     for k in _REQUIRED_KEYS:
         if k not in data:
-            if k == "text": data[k] = ""
-            elif k == "has_unclear": data[k] = False
-            else: data[k] = 0
+            if k == "text":
+                data[k] = ""
+            elif k == "has_unclear":
+                data[k] = False
+            else:
+                data[k] = 0
     
     return data
 
