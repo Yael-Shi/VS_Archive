@@ -3791,7 +3791,7 @@ class UploadApiTests(TestCase):
         resp = self._post_part_complete(
             doc_id,
             0,
-            {"success": True, "file_size": 111, "file_mime": "image/webp"},
+            {"success": True, "file_size": 111, "file_mime": "image/jpeg"},
         )
         self.assertEqual(resp.status_code, 200)
         mock_enqueue.assert_not_called()
@@ -3799,7 +3799,7 @@ class UploadApiTests(TestCase):
         source = DocumentSourceFile.objects.get(document_id=doc_id, order_index=0)
         self.assertEqual(source.upload_status, DocumentSourceFile.UploadStatus.UPLOADED)
         self.assertEqual(source.size_bytes, 111)
-        self.assertEqual(source.mime_type, "image/webp")
+        self.assertEqual(source.mime_type, "image/jpeg")
 
         doc = Document.objects.get(id=doc_id)
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
@@ -3816,7 +3816,7 @@ class UploadApiTests(TestCase):
             {"success": True, "file_mime": "application/pdf"},
         )
         self.assertEqual(resp.status_code, 400)
-        self.assertIn("image/*", resp.content.decode())
+        self.assertIn("must be one of", resp.content.decode())
         mock_enqueue.assert_not_called()
 
         source = DocumentSourceFile.objects.get(document_id=doc_id, order_index=0)
@@ -3824,6 +3824,52 @@ class UploadApiTests(TestCase):
 
         doc = Document.objects.get(id=doc_id)
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch("documents.views.send_process_document_message")
+    def test_part_complete_accepts_mime_matching_stored_extension(self, mock_enqueue, _mock_put):
+        create_resp = self._post_create(self._multi_files_payload(count=2))
+        doc_id = create_resp.json()["document_id"]
+
+        resp = self._post_part_complete(
+            doc_id,
+            1,
+            {"success": True, "file_mime": "image/jpeg"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        mock_enqueue.assert_not_called()
+        source = DocumentSourceFile.objects.get(document_id=doc_id, order_index=1)
+        self.assertEqual(source.mime_type, "image/jpeg")
+        self.assertEqual(source.file_original_name, "page-2.jpg")
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_part_complete_rejects_unsupported_mime(self, _mock_put):
+        create_resp = self._post_create(self._multi_files_payload(count=2))
+        doc_id = create_resp.json()["document_id"]
+
+        resp = self._post_part_complete(
+            doc_id,
+            0,
+            {"success": True, "file_mime": "text/plain"},
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("must be one of", resp.content.decode())
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_part_complete_rejects_mime_extension_mismatch(self, _mock_put):
+        payload = self._multi_files_payload(count=2)
+        payload["files"][0]["original_name"] = "page-1.png"
+        payload["files"][0]["mime_type"] = "image/png"
+        create_resp = self._post_create(payload)
+        doc_id = create_resp.json()["document_id"]
+
+        resp = self._post_part_complete(
+            doc_id,
+            0,
+            {"success": True, "file_mime": "image/jpeg"},
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("does not match", resp.content.decode())
 
     @patch("documents.views.create_presigned_put", return_value="https://example/upload")
     @patch("documents.views.send_process_document_message")
