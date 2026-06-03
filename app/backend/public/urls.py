@@ -4,4 +4,5 @@ from . import views
 urlpatterns = [
     path("", views.home, name="public-home"),
     path("about/", views.about, name="public-about"),
+    path("about/edit/", views.edit_public_content, name="public-content-edit"),
 ]
