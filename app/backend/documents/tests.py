@@ -3321,7 +3321,7 @@ class UploadCompleteSourceFileTests(TestCase):
             "documents.views.s3_object_exists",
             return_value=True,
         )
-        self.s3_exists_patcher.start()
+        self.mock_s3_exists = self.s3_exists_patcher.start()
         self.addCleanup(self.s3_exists_patcher.stop)
 
         self.staff = User.objects.create_user(
@@ -3363,7 +3363,7 @@ class UploadCompleteSourceFileTests(TestCase):
             {
                 "success": True,
                 "file_size": 2048,
-                "file_mime": "image/png",
+                "file_mime": "image/jpeg",
             },
         )
 
@@ -3378,7 +3378,7 @@ class UploadCompleteSourceFileTests(TestCase):
 
         doc.refresh_from_db()
         self.assertEqual(doc.size_bytes, 2048)
-        self.assertEqual(doc.mime_type, "image/png")
+        self.assertEqual(doc.mime_type, "image/jpeg")
 
         sources = list(DocumentSourceFile.objects.filter(document=doc))
         self.assertEqual(len(sources), 1)
@@ -3404,7 +3404,7 @@ class UploadCompleteSourceFileTests(TestCase):
             {
                 "success": True,
                 "file_size": 4096,
-                "file_mime": "image/webp",
+                "file_mime": "image/jpeg",
             },
         )
         self.assertEqual(second.status_code, 200)
@@ -3412,13 +3412,13 @@ class UploadCompleteSourceFileTests(TestCase):
 
         doc.refresh_from_db()
         self.assertEqual(doc.size_bytes, 4096)
-        self.assertEqual(doc.mime_type, "image/webp")
+        self.assertEqual(doc.mime_type, "image/jpeg")
 
         sources = list(DocumentSourceFile.objects.filter(document=doc))
         self.assertEqual(len(sources), 1)
         self.assertEqual(sources[0].order_index, 0)
         self.assertEqual(sources[0].size_bytes, 4096)
-        self.assertEqual(sources[0].mime_type, "image/webp")
+        self.assertEqual(sources[0].mime_type, "image/jpeg")
 
     @patch("documents.views.send_process_document_message")
     def test_failed_upload_complete_does_not_create_source_file(self, mock_enqueue):
@@ -3506,7 +3506,7 @@ class UploadApiTests(TestCase):
             "documents.views.s3_object_exists",
             return_value=True,
         )
-        self.s3_exists_patcher.start()
+        self.mock_s3_exists = self.s3_exists_patcher.start()
         self.addCleanup(self.s3_exists_patcher.stop)
 
         self.staff = User.objects.create_user(
@@ -3608,7 +3608,7 @@ class UploadApiTests(TestCase):
 
         complete_resp = self._post_complete(
             doc_id,
-            {"success": True, "file_size": 2048, "file_mime": "image/png"},
+            {"success": True, "file_size": 2048, "file_mime": "image/jpeg"},
         )
         self.assertEqual(complete_resp.status_code, 200)
         mock_enqueue.assert_called_once_with(document_id=doc_id)
@@ -3628,6 +3628,122 @@ class UploadApiTests(TestCase):
         self._post_complete(doc_id, {"success": True})
         self._post_complete(doc_id, {"success": True})
         mock_enqueue.assert_called_once()
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch("documents.views.send_process_document_message")
+    def test_single_file_complete_valid_image_succeeds_when_s3_exists(
+        self, mock_enqueue, _mock_put
+    ):
+        create_resp = self._post_create(self._base_create_payload())
+        doc_id = create_resp.json()["document_id"]
+        doc = Document.objects.get(id=doc_id)
+
+        resp = self._post_complete(
+            doc_id,
+            {"success": True, "file_size": 2048, "file_mime": "image/jpeg"},
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.mock_s3_exists.assert_called_once_with("test-bucket", doc.file_s3_key)
+        mock_enqueue.assert_called_once_with(document_id=doc_id)
+        doc.refresh_from_db()
+        self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADED)
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.PROCESSING)
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch("documents.views.send_process_document_message")
+    def test_single_file_complete_rejects_unsupported_file_mime(
+        self, mock_enqueue, _mock_put
+    ):
+        create_resp = self._post_create(self._base_create_payload())
+        doc_id = create_resp.json()["document_id"]
+
+        resp = self._post_complete(
+            doc_id,
+            {"success": True, "file_mime": "text/plain"},
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("must be one of", resp.content.decode())
+        self.mock_s3_exists.assert_not_called()
+        mock_enqueue.assert_not_called()
+        doc = Document.objects.get(id=doc_id)
+        self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch("documents.views.send_process_document_message")
+    def test_single_file_complete_rejects_mime_extension_mismatch(
+        self, mock_enqueue, _mock_put
+    ):
+        create_resp = self._post_create(
+            self._base_create_payload(
+                original_name="scan.png",
+                mime_type="image/png",
+            )
+        )
+        doc_id = create_resp.json()["document_id"]
+
+        resp = self._post_complete(
+            doc_id,
+            {"success": True, "file_mime": "image/jpeg"},
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("does not match", resp.content.decode())
+        self.mock_s3_exists.assert_not_called()
+        mock_enqueue.assert_not_called()
+        doc = Document.objects.get(id=doc_id)
+        self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch("documents.views.send_process_document_message")
+    def test_single_file_complete_pdf_rejects_non_pdf_mime(
+        self, mock_enqueue, _mock_put
+    ):
+        create_resp = self._post_create(
+            self._base_create_payload(
+                doc_type="PDF",
+                mime_type="application/pdf",
+                original_name="document.pdf",
+            )
+        )
+        doc_id = create_resp.json()["document_id"]
+
+        resp = self._post_complete(
+            doc_id,
+            {"success": True, "file_mime": "image/jpeg"},
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("application/pdf", resp.content.decode())
+        self.mock_s3_exists.assert_not_called()
+        mock_enqueue.assert_not_called()
+        doc = Document.objects.get(id=doc_id)
+        self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch("documents.views.send_process_document_message")
+    def test_single_file_complete_mime_validation_failure_does_not_enqueue(
+        self, mock_enqueue, _mock_put
+    ):
+        create_resp = self._post_create(self._base_create_payload())
+        doc_id = create_resp.json()["document_id"]
+        doc = Document.objects.get(id=doc_id)
+        initial_mime_type = doc.mime_type
+
+        resp = self._post_complete(
+            doc_id,
+            {"success": True, "file_mime": "application/pdf"},
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.mock_s3_exists.assert_not_called()
+        mock_enqueue.assert_not_called()
+        doc.refresh_from_db()
+        self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
+        self.assertEqual(doc.mime_type, initial_mime_type)
+        self.assertEqual(DocumentSourceFile.objects.filter(document_id=doc_id).count(), 0)
 
     @patch("documents.views.create_presigned_put")
     def test_multi_image_create_returns_ordered_uploads(self, mock_put):
@@ -4168,7 +4284,7 @@ class UploadApiCsrfTests(TestCase):
             "documents.views.s3_object_exists",
             return_value=True,
         )
-        self.s3_exists_patcher.start()
+        self.mock_s3_exists = self.s3_exists_patcher.start()
         self.addCleanup(self.s3_exists_patcher.stop)
 
         self.staff = User.objects.create_user(
@@ -4252,6 +4368,7 @@ class UploadApiCsrfTests(TestCase):
             text_input_type=Document.TextInputType.HANDWRITTEN,
             upload_status=Document.UploadStatus.UPLOADING,
             file_s3_key="documents/1/original.jpg",
+            file_original_name="original.jpg",
         )
         self.csrf_client.force_login(self.staff)
         resp = self._post_json(
@@ -4269,6 +4386,7 @@ class UploadApiCsrfTests(TestCase):
             text_input_type=Document.TextInputType.HANDWRITTEN,
             upload_status=Document.UploadStatus.UPLOADING,
             file_s3_key="documents/1/original.jpg",
+            file_original_name="original.jpg",
         )
         token = self._csrf_token_for_user(self.staff)
         resp = self._post_json(
