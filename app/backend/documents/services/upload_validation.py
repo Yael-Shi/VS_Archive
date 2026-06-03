@@ -86,6 +86,23 @@ def validate_image_upload_metadata(
     return None
 
 
+def validate_allowed_image_mime(
+    mime_type: str,
+    *,
+    field_prefix: str = "",
+) -> Optional[str]:
+    """
+    Validate MIME is on the image allowlist without checking filename extension.
+    """
+    mime = _normalize_mime_type(mime_type)
+    if mime not in ALLOWED_IMAGE_MIMES:
+        return (
+            f"{_field_label(field_prefix, 'mime_type')} must be one of: "
+            f"{', '.join(sorted(ALLOWED_IMAGE_MIMES))}"
+        )
+    return None
+
+
 def validate_single_file_upload_metadata(
     *,
     doc_type: str,
