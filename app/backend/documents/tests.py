@@ -5884,7 +5884,7 @@ class SourcePreviewTests(TestCase):
             language=language,
             upload_status=Document.UploadStatus.UPLOADED,
             processing_state_user=Document.ProcessingState.READY,
-            file_s3_key=f"documents/9/source/0.png",
+            file_s3_key="documents/9/source/0.png",
             file_original_name="page-0.png",
             mime_type="image/png",
             expected_source_file_count=expected if expected is not None else count,
