@@ -11,11 +11,14 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from .models import Document, DocumentSourceFile, DocumentTextResult, Tag, DocumentMetadata
+from botocore.exceptions import BotoCoreError, ClientError
+
 from .s3 import (
     build_document_source_file_s3_key,
     create_presigned_get,
     create_presigned_put,
     mime_type_to_extension,
+    s3_object_exists,
 )
 from documents.services.review_backlog import (
     attach_review_summaries,
@@ -213,6 +216,37 @@ def _uploads_bucket_or_error():
             status=500,
         )
     return bucket, None
+
+
+def _verify_upload_s3_object_exists(
+    *,
+    bucket: str,
+    key: str,
+    document_id: int,
+    order_index: Optional[int] = None,
+) -> Optional[JsonResponse]:
+    """
+    HeadObject check before marking upload complete.
+
+    Returns a JsonResponse on missing object or verification failure; None if present.
+    """
+    body: dict = {"document_id": document_id}
+    if order_index is not None:
+        body["order_index"] = order_index
+
+    try:
+        if not s3_object_exists(bucket, key):
+            body["error"] = "s3 object not found"
+            return JsonResponse(body, status=400)
+    except (BotoCoreError, ClientError):
+        logger.exception(
+            "s3 head_object failed during upload verification",
+            extra={"document_id": document_id, "order_index": order_index, "s3_key": key},
+        )
+        body["error"] = "s3 verification failed"
+        return JsonResponse(body, status=502)
+
+    return None
 
 
 def _parse_create_upload_common(payload: dict):
@@ -537,6 +571,18 @@ def upload_complete(request, doc_id: int):
                 status=400,
             )
 
+        bucket, bucket_err = _uploads_bucket_or_error()
+        if bucket_err:
+            return bucket_err
+
+        s3_err = _verify_upload_s3_object_exists(
+            bucket=bucket,
+            key=doc.file_s3_key,
+            document_id=doc.id,
+        )
+        if s3_err:
+            return s3_err
+
         already_uploaded = doc.upload_status == Document.UploadStatus.UPLOADED
 
         doc.upload_status = Document.UploadStatus.UPLOADED
@@ -697,6 +743,29 @@ def upload_part_complete(request, doc_id: int, order_index: int):
                         },
                         status=400,
                     )
+
+        if not source_file.file_s3_key:
+            return JsonResponse(
+                {
+                    "error": "file_s3_key missing",
+                    "document_id": doc.id,
+                    "order_index": order_index,
+                },
+                status=400,
+            )
+
+        bucket, bucket_err = _uploads_bucket_or_error()
+        if bucket_err:
+            return bucket_err
+
+        s3_err = _verify_upload_s3_object_exists(
+            bucket=bucket,
+            key=source_file.file_s3_key,
+            document_id=doc.id,
+            order_index=order_index,
+        )
+        if s3_err:
+            return s3_err
 
         source_file.upload_status = DocumentSourceFile.UploadStatus.UPLOADED
         source_file.upload_error = None

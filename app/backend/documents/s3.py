@@ -1,6 +1,9 @@
 import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
 from typing import Tuple, Optional
+
+_S3_NOT_FOUND_ERROR_CODES = frozenset({"404", "NoSuchKey", "NotFound"})
 
 
 def get_s3_client():
@@ -61,6 +64,23 @@ def create_presigned_get(
         },
         ExpiresIn=expires_in,
     )
+
+
+def s3_object_exists(bucket: str, key: str) -> bool:
+    """
+    Return True when the object exists in S3 (HeadObject succeeds).
+
+    Raises BotoCoreError or ClientError for unexpected AWS/client failures.
+    """
+    s3 = get_s3_client()
+    try:
+        s3.head_object(Bucket=bucket, Key=key)
+        return True
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code", "")
+        if code in _S3_NOT_FOUND_ERROR_CODES:
+            return False
+        raise
 
 
 def get_object_bytes(bucket: str, key: str) -> Tuple[bytes, Optional[str]]:
