@@ -3640,8 +3640,132 @@ class UploadApiTests(TestCase):
     def test_multi_image_create_rejects_non_image_mime(self):
         payload = self._multi_files_payload(count=2)
         payload["files"][1]["mime_type"] = "application/pdf"
+        payload["files"][1]["original_name"] = "page-2.pdf"
         resp = self._post_create(payload)
         self.assertEqual(resp.status_code, 400)
+        self.assertIn("must be one of", resp.content.decode())
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_single_image_accepts_jpeg_jpg(self, _mock_put):
+        resp = self._post_create(
+            self._base_create_payload(
+                doc_type="IMAGE",
+                mime_type="image/jpeg",
+                original_name="scan.jpg",
+            )
+        )
+        self.assertEqual(resp.status_code, 201)
+
+    def test_single_image_rejects_pdf_mime_with_jpg_extension(self):
+        resp = self._post_create(
+            self._base_create_payload(
+                doc_type="IMAGE",
+                mime_type="application/pdf",
+                original_name="scan.jpg",
+            )
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("must be one of", resp.content.decode())
+
+    def test_single_image_rejects_jpeg_mime_with_pdf_extension(self):
+        resp = self._post_create(
+            self._base_create_payload(
+                doc_type="IMAGE",
+                mime_type="image/jpeg",
+                original_name="scan.pdf",
+            )
+        )
+        self.assertEqual(resp.status_code, 400)
+        body = resp.content.decode()
+        self.assertTrue(
+            "does not match" in body or "allowed image extension" in body,
+            msg=body,
+        )
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_single_pdf_accepts_pdf_mime_and_extension(self, _mock_put):
+        resp = self._post_create(
+            self._base_create_payload(
+                doc_type="PDF",
+                mime_type="application/pdf",
+                original_name="document.pdf",
+            )
+        )
+        self.assertEqual(resp.status_code, 201)
+
+    def test_single_pdf_rejects_png_mime_with_pdf_extension(self):
+        resp = self._post_create(
+            self._base_create_payload(
+                doc_type="PDF",
+                mime_type="image/png",
+                original_name="document.pdf",
+            )
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("application/pdf", resp.content.decode())
+
+    def test_single_pdf_rejects_pdf_mime_with_png_extension(self):
+        resp = self._post_create(
+            self._base_create_payload(
+                doc_type="PDF",
+                mime_type="application/pdf",
+                original_name="document.png",
+            )
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn(".pdf", resp.content.decode())
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_multi_image_accepts_allowed_image_types(self, _mock_put):
+        payload = self._multi_files_payload(count=2)
+        payload["files"] = [
+            {
+                "original_name": "a.jpg",
+                "mime_type": "image/jpeg",
+                "size_bytes": 100,
+            },
+            {
+                "original_name": "b.png",
+                "mime_type": "image/png",
+                "size_bytes": 200,
+            },
+        ]
+        resp = self._post_create(payload)
+        self.assertEqual(resp.status_code, 201)
+
+    def test_multi_image_rejects_pdf_in_files(self):
+        payload = self._multi_files_payload(count=2)
+        payload["files"][1] = {
+            "original_name": "page-2.pdf",
+            "mime_type": "application/pdf",
+            "size_bytes": 1000,
+        }
+        resp = self._post_create(payload)
+        self.assertEqual(resp.status_code, 400)
+
+    def test_multi_image_rejects_unsupported_mime(self):
+        payload = self._multi_files_payload(count=2)
+        payload["files"][0]["mime_type"] = "text/plain"
+        payload["files"][0]["original_name"] = "page-1.txt"
+        resp = self._post_create(payload)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("must be one of", resp.content.decode())
+
+    def test_multi_image_rejects_unsupported_extension(self):
+        payload = self._multi_files_payload(count=2)
+        payload["files"][0]["original_name"] = "page-1.exe"
+        payload["files"][0]["mime_type"] = "image/jpeg"
+        resp = self._post_create(payload)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("allowed image extension", resp.content.decode())
+
+    def test_multi_image_rejects_mime_extension_mismatch(self):
+        payload = self._multi_files_payload(count=2)
+        payload["files"][0]["mime_type"] = "image/jpeg"
+        payload["files"][0]["original_name"] = "page-1.png"
+        resp = self._post_create(payload)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("does not match", resp.content.decode())
 
     def test_multi_image_create_rejects_client_order_index(self):
         payload = self._multi_files_payload(count=2)
