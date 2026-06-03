@@ -19,6 +19,7 @@
         <div class="section-title">קובץ + פרטים בסיסיים</div>
 
         <form id="uploadForm">
+          {% csrf_token %}
           <div class="field">
             <label for="file">קובץ *</label>
             <input id="file" name="file" type="file" multiple required />
@@ -166,8 +167,28 @@
       .filter(Boolean);
   }
 
+  function getCsrfToken() {
+    const input = document.querySelector("#uploadForm input[name=csrfmiddlewaretoken]");
+    if (input && input.value) {
+      return input.value;
+    }
+    const name = "csrftoken";
+    if (!document.cookie) return "";
+    for (const part of document.cookie.split(";")) {
+      const cookie = part.trim();
+      if (cookie.startsWith(name + "=")) {
+        return decodeURIComponent(cookie.substring(name.length + 1));
+      }
+    }
+    return "";
+  }
+
   async function jsonFetch(url, options) {
-    const res = await fetch(url, options);
+    const headers = Object.assign(
+      {"Content-Type": "application/json", "X-CSRFToken": getCsrfToken()},
+      (options && options.headers) || {}
+    );
+    const res = await fetch(url, Object.assign({}, options || {}, {headers}));
     const text = await res.text();
     let data = null;
     try { data = JSON.parse(text); } catch (_) {}
@@ -225,7 +246,6 @@
 
     const created = await jsonFetch("/api/uploads/create/", {
       method: "POST",
-      headers: {"Content-Type": "application/json"},
       body: JSON.stringify(createPayload)
     });
 
@@ -251,7 +271,6 @@
 
     await jsonFetch(`/api/uploads/${documentId}/complete/`, {
       method: "POST",
-      headers: {"Content-Type": "application/json"},
       body: JSON.stringify({ success: true, file_size: file.size, file_mime: mime_type })
     });
 
@@ -265,7 +284,6 @@
     try {
       await jsonFetch(`/api/uploads/${documentId}/parts/${orderIndex}/complete/`, {
         method: "POST",
-        headers: {"Content-Type": "application/json"},
         body: JSON.stringify({ success: false, error: message })
       });
     } catch (_) {
@@ -294,7 +312,6 @@
 
     const created = await jsonFetch("/api/uploads/create/", {
       method: "POST",
-      headers: {"Content-Type": "application/json"},
       body: JSON.stringify(createPayload)
     });
 
@@ -336,7 +353,6 @@
       try {
         await jsonFetch(`/api/uploads/${documentId}/parts/${orderIndex}/complete/`, {
           method: "POST",
-          headers: {"Content-Type": "application/json"},
           body: JSON.stringify({ success: true, file_size: file.size, file_mime: mime_type })
         });
       } catch (completeErr) {
@@ -348,7 +364,6 @@
     setMessage("ok", "מסיימת מסמך…");
     await jsonFetch(`/api/uploads/${documentId}/finalize/`, {
       method: "POST",
-      headers: {"Content-Type": "application/json"},
       body: JSON.stringify({ success: true })
     });
 

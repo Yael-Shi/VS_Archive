@@ -8,7 +8,6 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Q
 from django.http import Http404, HttpResponseBadRequest, JsonResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from .models import Document, DocumentSourceFile, DocumentTextResult, Tag, DocumentMetadata
@@ -457,7 +456,6 @@ def _create_single_file_upload(request, payload: dict, common: dict):
     )
 
 
-@csrf_exempt
 @login_required
 def create_upload(request):
     deny = _require_admin(request)
@@ -482,7 +480,6 @@ def create_upload(request):
     return _create_single_file_upload(request, payload, common)
 
 
-@csrf_exempt
 @login_required
 def upload_complete(request, doc_id: int):
     deny = _require_admin(request)
@@ -624,7 +621,6 @@ def _multi_image_upload_terminal_failed_response(doc: Document) -> JsonResponse:
     )
 
 
-@csrf_exempt
 @login_required
 def upload_part_complete(request, doc_id: int, order_index: int):
     deny = _require_admin(request)
@@ -722,7 +718,6 @@ def upload_part_complete(request, doc_id: int, order_index: int):
     )
 
 
-@csrf_exempt
 @login_required
 def upload_finalize(request, doc_id: int):
     deny = _require_admin(request)
