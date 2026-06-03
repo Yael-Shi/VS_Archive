@@ -3887,6 +3887,210 @@ class UploadApiTests(TestCase):
         self.assertEqual(resp.status_code, 400)
 
 
+class UploadApiCsrfTests(TestCase):
+    """Upload JSON endpoints use session auth + Django CSRF (same as other admin POSTs)."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        from django.test import Client
+
+        self.staff = User.objects.create_user(
+            username="upload_csrf_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.viewer = User.objects.create_user(
+            username="upload_csrf_viewer",
+            password="test-pass",
+            is_staff=False,
+        )
+        self.csrf_client = Client(enforce_csrf_checks=True)
+
+    def _csrf_token_for_user(self, user):
+        self.csrf_client.force_login(user)
+        resp = self.csrf_client.get("/api/ui/documents/")
+        self.assertEqual(resp.status_code, 200)
+        return resp.cookies["csrftoken"].value
+
+    def _post_json(self, url, payload, *, csrf_token=None, user=None):
+        if user is not None:
+            self.csrf_client.force_login(user)
+        kwargs = {}
+        if csrf_token is not None:
+            kwargs["HTTP_X_CSRFTOKEN"] = csrf_token
+        return self.csrf_client.post(
+            url,
+            data=json.dumps(payload),
+            content_type="application/json",
+            **kwargs,
+        )
+
+    def _single_create_payload(self):
+        return {
+            "title": "Upload CSRF test",
+            "doc_type": "IMAGE",
+            "text_input_type": "HANDWRITTEN",
+            "original_name": "scan.jpg",
+            "mime_type": "image/jpeg",
+            "size_bytes": 1000,
+        }
+
+    def test_unauthenticated_create_without_csrf_is_rejected(self):
+        resp = self._post_json("/api/uploads/create/", self._single_create_payload())
+        self.assertEqual(resp.status_code, 403)
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_authenticated_create_without_csrf_is_rejected(self, _mock_put):
+        self.csrf_client.force_login(self.staff)
+        resp = self._post_json("/api/uploads/create/", self._single_create_payload())
+        self.assertEqual(resp.status_code, 403)
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_authenticated_create_with_csrf_succeeds(self, _mock_put):
+        token = self._csrf_token_for_user(self.staff)
+        resp = self._post_json(
+            "/api/uploads/create/",
+            self._single_create_payload(),
+            csrf_token=token,
+            user=self.staff,
+        )
+        self.assertEqual(resp.status_code, 201)
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_non_staff_create_forbidden_even_with_csrf(self, _mock_put):
+        token = self._csrf_token_for_user(self.viewer)
+        resp = self._post_json(
+            "/api/uploads/create/",
+            self._single_create_payload(),
+            csrf_token=token,
+            user=self.viewer,
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    @patch("documents.views.send_process_document_message")
+    def test_complete_without_csrf_is_rejected(self, _mock_enqueue):
+        doc = Document.objects.create(
+            title="CSRF complete test",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADING,
+            file_s3_key="documents/1/original.jpg",
+        )
+        self.csrf_client.force_login(self.staff)
+        resp = self._post_json(
+            f"/api/uploads/{doc.id}/complete/",
+            {"success": True, "file_size": 100, "file_mime": "image/jpeg"},
+        )
+        self.assertEqual(resp.status_code, 403)
+        _mock_enqueue.assert_not_called()
+
+    @patch("documents.views.send_process_document_message")
+    def test_complete_with_csrf_succeeds(self, _mock_enqueue):
+        doc = Document.objects.create(
+            title="CSRF complete test",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADING,
+            file_s3_key="documents/1/original.jpg",
+        )
+        token = self._csrf_token_for_user(self.staff)
+        resp = self._post_json(
+            f"/api/uploads/{doc.id}/complete/",
+            {"success": True, "file_size": 100, "file_mime": "image/jpeg"},
+            csrf_token=token,
+            user=self.staff,
+        )
+        self.assertEqual(resp.status_code, 200)
+        _mock_enqueue.assert_called_once_with(document_id=doc.id)
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_part_complete_without_csrf_is_rejected(self, _mock_put):
+        create_token = self._csrf_token_for_user(self.staff)
+        create_resp = self._post_json(
+            "/api/uploads/create/",
+            {
+                "title": "Multi CSRF test",
+                "text_input_type": "HANDWRITTEN",
+                "files": [
+                    {
+                        "original_name": "page-1.jpg",
+                        "mime_type": "image/jpeg",
+                        "size_bytes": 1000,
+                    },
+                    {
+                        "original_name": "page-2.jpg",
+                        "mime_type": "image/jpeg",
+                        "size_bytes": 1001,
+                    },
+                ],
+            },
+            csrf_token=create_token,
+            user=self.staff,
+        )
+        doc_id = create_resp.json()["document_id"]
+
+        self.csrf_client.force_login(self.staff)
+        resp = self._post_json(
+            f"/api/uploads/{doc_id}/parts/0/complete/",
+            {"success": True, "file_size": 1000, "file_mime": "image/jpeg"},
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch("documents.views.send_process_document_message")
+    def test_part_complete_and_finalize_with_csrf_succeed(
+        self, _mock_enqueue, _mock_put
+    ):
+        create_token = self._csrf_token_for_user(self.staff)
+        create_resp = self._post_json(
+            "/api/uploads/create/",
+            {
+                "title": "Multi CSRF test",
+                "text_input_type": "HANDWRITTEN",
+                "files": [
+                    {
+                        "original_name": "page-1.jpg",
+                        "mime_type": "image/jpeg",
+                        "size_bytes": 1000,
+                    },
+                    {
+                        "original_name": "page-2.jpg",
+                        "mime_type": "image/jpeg",
+                        "size_bytes": 1001,
+                    },
+                ],
+            },
+            csrf_token=create_token,
+            user=self.staff,
+        )
+        doc_id = create_resp.json()["document_id"]
+        token = self._csrf_token_for_user(self.staff)
+
+        part0 = self._post_json(
+            f"/api/uploads/{doc_id}/parts/0/complete/",
+            {"success": True, "file_size": 1000, "file_mime": "image/jpeg"},
+            csrf_token=token,
+            user=self.staff,
+        )
+        part1 = self._post_json(
+            f"/api/uploads/{doc_id}/parts/1/complete/",
+            {"success": True, "file_size": 1001, "file_mime": "image/jpeg"},
+            csrf_token=token,
+            user=self.staff,
+        )
+        finalize = self._post_json(
+            f"/api/uploads/{doc_id}/finalize/",
+            {"success": True},
+            csrf_token=token,
+            user=self.staff,
+        )
+
+        self.assertEqual(part0.status_code, 200)
+        self.assertEqual(part1.status_code, 200)
+        self.assertEqual(finalize.status_code, 200)
+        _mock_enqueue.assert_called_once_with(document_id=doc_id)
+
+
 class TranskribusRunPersistenceServiceTests(TestCase):
     def _create_document(self) -> Document:
         return Document.objects.create(
@@ -6495,6 +6699,25 @@ class UploadPageTemplateTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "/parts/")
         self.assertContains(resp, "/finalize/")
+
+    def test_upload_page_js_sends_csrf_token_on_json_fetch(self):
+        resp = self._get_page()
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "X-CSRFToken")
+        self.assertContains(resp, "getCsrfToken")
+        self.assertContains(resp, '#uploadForm input[name=csrfmiddlewaretoken]')
+
+    def test_upload_page_renders_own_csrf_token_in_upload_form(self):
+        resp = self._get_page()
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'id="uploadForm"')
+        self.assertContains(resp, 'name="csrfmiddlewaretoken"')
+        # Token must come from the upload form itself, not only global nav markup.
+        form_start = resp.content.index(b'id="uploadForm"')
+        csrf_pos = resp.content.index(b'name="csrfmiddlewaretoken"', form_start)
+        nav_pos = resp.content.index(b"nav-shell")
+        self.assertGreater(csrf_pos, form_start)
+        self.assertGreater(csrf_pos, nav_pos)
 
     def test_upload_page_shows_terminal_restart_copy_for_failed_multi_image(self):
         resp = self._get_page()

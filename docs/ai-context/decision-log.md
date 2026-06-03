@@ -911,3 +911,15 @@ This section records **operational risks and semantics** for env-gated **Transkr
    - **Automatic OCR review lifecycle:** implemented in worker — see **“OCR review lifecycle (implemented)”** in Current state above (worker-wide **`NEEDS_REVIEW`**, not Transkribus-only).
 
 **Remote deletion / reprocess / cleanup automation** remain undecided and unimplemented.
+
+## Upload JSON endpoints — CSRF protection (session auth)
+
+**Decision:** Admin upload JSON endpoints (`POST /api/uploads/create/`, `complete/`, `parts/<order_index>/complete/`, `finalize/`) use **`@login_required`**, **`_require_admin` (staff)**, and **Django CSRF middleware** — not `@csrf_exempt`.
+
+**Current behavior:**
+
+- These endpoints are **browser-session admin flows** only. The upload page renders its own `{% csrf_token %}` hidden input; client JS sends `X-CSRFToken` from that input first, with cookie fallback.
+- **`@csrf_exempt` was removed** from all four upload JSON views; no compensating exemption remains.
+- Auth requirements are unchanged: unauthenticated → login redirect; non-staff → 403.
+
+**Out of scope (separate hardening work):** MIME/size validation, S3 HEAD verification, presigned URL policy, rate limits, and API-token auth for non-browser clients.
