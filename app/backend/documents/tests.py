@@ -4164,6 +4164,13 @@ class UploadApiCsrfTests(TestCase):
         from django.contrib.auth.models import User
         from django.test import Client
 
+        self.s3_exists_patcher = patch(
+            "documents.views.s3_object_exists",
+            return_value=True,
+        )
+        self.s3_exists_patcher.start()
+        self.addCleanup(self.s3_exists_patcher.stop)
+
         self.staff = User.objects.create_user(
             username="upload_csrf_staff",
             password="test-pass",
