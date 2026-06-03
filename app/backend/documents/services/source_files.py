@@ -6,6 +6,10 @@ from typing import List, Optional
 
 from documents.models import Document, DocumentSourceFile
 from documents.s3 import create_presigned_get
+from documents.services.upload_validation import (
+    validate_allowed_image_mime,
+    validate_image_upload_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +21,24 @@ class MultiImageSourceFilesError(ValueError):
     """Raised when a document's multi-image source files are not valid for processing."""
 
 
-def _is_image_mime_type(mime_type: Optional[str]) -> bool:
-    return (mime_type or "").strip().lower().startswith("image/")
+def _validate_source_file_image_metadata(
+    source: DocumentSourceFile,
+    order_index: int,
+) -> None:
+    original_name = (source.file_original_name or "").strip()
+    if original_name:
+        metadata_err = validate_image_upload_metadata(
+            mime_type=source.mime_type or "",
+            original_name=original_name,
+        )
+    else:
+        metadata_err = validate_allowed_image_mime(source.mime_type or "")
+
+    if metadata_err:
+        raise MultiImageSourceFilesError(
+            f"source file metadata invalid for order_index={order_index}: "
+            f"{metadata_err}"
+        )
 
 
 def is_multi_image_document(document: Document) -> bool:
@@ -111,7 +131,7 @@ def get_ordered_source_files_for_processing(
     - a ``DocumentSourceFile`` is missing for any ``order_index`` in ``0..N-1`` (contiguous)
     - any row is not ``upload_status=UPLOADED``
     - any row has an empty ``file_s3_key``
-    - any row is not an ``image/*`` MIME type (images only in V1)
+    - any row fails centralized image MIME/extension metadata validation (V1)
     """
     expected = document.expected_source_file_count
     if expected is None or expected < MULTI_IMAGE_MIN_FILES:
@@ -148,11 +168,7 @@ def get_ordered_source_files_for_processing(
             raise MultiImageSourceFilesError(
                 f"source file has empty file_s3_key for order_index={order_index}"
             )
-        if not _is_image_mime_type(source.mime_type):
-            raise MultiImageSourceFilesError(
-                f"source file mime_type must be image/* for order_index={order_index} "
-                f"(got {source.mime_type!r})"
-            )
+        _validate_source_file_image_metadata(source, order_index)
         ordered.append(source)
 
     return ordered
