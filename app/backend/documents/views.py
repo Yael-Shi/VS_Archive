@@ -24,6 +24,10 @@ from documents.services.review_backlog import (
     is_review_pending_text_result,
     parse_review_reasons,
 )
+from documents.services.upload_validation import (
+    validate_image_upload_metadata,
+    validate_single_file_upload_metadata,
+)
 from documents.services.source_files import (
     MULTI_IMAGE_MAX_FILES,
     MULTI_IMAGE_MIN_FILES,
@@ -328,8 +332,13 @@ def _create_multi_image_upload(request, payload: dict, common: dict):
         mime_type = (
             entry.get("mime_type") or entry.get("content_type") or ""
         ).strip()
-        if not _is_image_mime_type(mime_type):
-            return _bad(f"files[{index}].mime_type must be an image/* MIME type")
+        file_err = validate_image_upload_metadata(
+            mime_type=mime_type,
+            original_name=original_name,
+            field_prefix=f"files[{index}]",
+        )
+        if file_err:
+            return _bad(file_err)
 
         size_bytes = entry.get("size_bytes")
         if size_bytes is not None and not isinstance(size_bytes, int):
@@ -417,6 +426,14 @@ def _create_single_file_upload(request, payload: dict, common: dict):
     ).strip()
     original_name = (payload.get("original_name") or "").strip()
     size_bytes = payload.get("size_bytes")
+
+    metadata_err = validate_single_file_upload_metadata(
+        doc_type=doc_type,
+        mime_type=mime_type,
+        original_name=original_name,
+    )
+    if metadata_err:
+        return _bad(metadata_err)
 
     bucket, bucket_err = _uploads_bucket_or_error()
     if bucket_err:
