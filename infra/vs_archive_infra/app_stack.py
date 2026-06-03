@@ -256,6 +256,9 @@ class VsArchiveAppStack(Stack):
             vpc_subnets=public_subnets,
             security_groups=[sg_web],
             enable_execute_command=True,
+            # Give the ALB enough time to mark the new web target healthy
+            # after Django startup checks/migrations.
+            health_check_grace_period=Duration.seconds(180),
         )
 
         # --- Worker Task (Spot Cost Saving) ---
