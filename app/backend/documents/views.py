@@ -571,6 +571,25 @@ def upload_complete(request, doc_id: int):
                 status=400,
             )
 
+        file_mime_raw = payload.get("file_mime")
+        file_mime: str | None = None
+        if isinstance(file_mime_raw, str):
+            file_mime = file_mime_raw.strip()
+            if file_mime:
+                metadata_err = validate_single_file_upload_metadata(
+                    doc_type=doc.doc_type,
+                    mime_type=file_mime,
+                    original_name=doc.file_original_name or "",
+                )
+                if metadata_err:
+                    return JsonResponse(
+                        {
+                            "error": metadata_err.replace("mime_type", "file_mime"),
+                            "document_id": doc.id,
+                        },
+                        status=400,
+                    )
+
         bucket, bucket_err = _uploads_bucket_or_error()
         if bucket_err:
             return bucket_err
@@ -590,8 +609,8 @@ def upload_complete(request, doc_id: int):
 
         if isinstance(payload.get("file_size"), int):
             doc.size_bytes = payload["file_size"]
-        if isinstance(payload.get("file_mime"), str):
-            doc.mime_type = payload["file_mime"]
+        if file_mime:
+            doc.mime_type = file_mime
 
         doc.processing_state_user = Document.ProcessingState.PROCESSING
         doc.save(
