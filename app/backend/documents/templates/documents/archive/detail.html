@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load document_date_display %}
+{% load document_date_display archive_labels %}
 {% block title %}VSArchive - {{ item.title }}{% endblock %}
 
 {% block content %}
@@ -26,13 +26,12 @@
     <div class="spacer"></div>
 
     <div class="badge-row">
-      <span class="badge">{{ item.get_item_type_display }}</span>
+      <span class="badge">{{ item.item_type|archive_item_type_label }}</span>
       {% if is_admin %}
-        {% if item.visibility == "public" %}
-          <span class="badge badge-ok">ציבורי</span>
-        {% else %}
-          <span class="badge">פרטי (משפחה)</span>
-        {% endif %}
+        <span class="badge{% if item.visibility == 'public' %} badge-ok{% endif %}">
+          {{ item.visibility|archive_visibility_label }}
+        </span>
+        <span class="badge">{{ item.metadata_status|archive_metadata_status_label }}</span>
       {% endif %}
     </div>
 

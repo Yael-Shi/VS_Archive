@@ -61,6 +61,13 @@ from documents.services.archive_item_validation import (
     parse_date_precision,
 )
 from documents.services.manual_text_validation import parse_manual_text_form
+from documents.services.archive_item_presentation import (
+    ARCHIVE_LIST_ITEM_TYPE_FILTER_CHOICES,
+    archive_manage_item_type_ui_choices,
+    archive_metadata_status_ui_choices,
+    archive_visibility_ui_choices,
+    normalize_archive_list_item_type_filter,
+)
 from documents.services.sqs import send_process_document_message
 from documents.services.text_presentation import get_text_presentation_for_document
 
@@ -1476,9 +1483,9 @@ def _manual_text_form_context(
         "form_errors": form_errors,
         "page_title": page_title,
         "submit_label": submit_label,
-        "visibility_choices": ArchiveItem.Visibility.choices,
+        "visibility_choices": archive_visibility_ui_choices(),
         "date_precision_choices": DATE_PRECISION_UI_CHOICES,
-        "metadata_status_choices": ArchiveItem.MetadataStatus.choices,
+        "metadata_status_choices": archive_metadata_status_ui_choices(),
     }
 
 
@@ -1507,10 +1514,7 @@ def _manual_text_form_data_from_item(item: ArchiveItem) -> dict:
 
 
 def _archive_item_type_choices() -> list[tuple[str, str]]:
-    return [
-        (ARCHIVE_ITEM_TYPE_MANUAL_TEXT, "טקסט מוקלד"),
-        (ARCHIVE_ITEM_TYPE_OCR_DOCUMENT, "מסמך / תמונת טקסט לעיבוד"),
-    ]
+    return archive_manage_item_type_ui_choices()
 
 
 def _normalized_archive_item_type(raw: str | None) -> str:
@@ -1537,17 +1541,29 @@ def _submit_manual_text_create(request):
 
 
 def archive_list_page(request):
+    item_type_filter = normalize_archive_list_item_type_filter(
+        request.GET.get("item_type")
+    )
     items = (
         archive_item_queryset_for_user(request.user)
         .select_related("manual_text_content", "ocr_document")
         .order_by("-created_at")
     )
+    if item_type_filter:
+        items = items.filter(item_type=item_type_filter)
+    item_type_filter_slug = ""
+    if item_type_filter == ArchiveItem.ItemType.OCR_DOCUMENT:
+        item_type_filter_slug = ARCHIVE_ITEM_TYPE_OCR_DOCUMENT
+    elif item_type_filter == ArchiveItem.ItemType.MANUAL_TEXT:
+        item_type_filter_slug = ARCHIVE_ITEM_TYPE_MANUAL_TEXT
     return render(
         request,
         "documents/archive/list.html",
         context={
             "items": items,
             "is_admin": _is_admin(request.user),
+            "item_type_filter": item_type_filter_slug,
+            "item_type_filter_choices": ARCHIVE_LIST_ITEM_TYPE_FILTER_CHOICES,
         },
     )
 
@@ -1646,7 +1662,7 @@ def archive_manage_manual_text_create_page(request):
         context=_manual_text_form_context(
             form_data=form_data,
             form_errors=form_errors,
-            page_title="יצירת טקסט ידני",
+            page_title="יצירת טקסט מוקלד",
             submit_label="שמירה",
         ),
     )
@@ -1691,7 +1707,7 @@ def archive_manage_edit_page(request, item_id: int):
         context=_manual_text_form_context(
             form_data=form_data,
             form_errors=form_errors,
-            page_title="עריכת טקסט ידני",
+            page_title="עריכת טקסט מוקלד",
             submit_label="עדכון",
         ),
     )

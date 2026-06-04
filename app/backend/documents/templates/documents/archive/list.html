@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load document_date_display %}
+{% load document_date_display archive_labels %}
 {% block title %}VSArchive - ארכיון{% endblock %}
 
 {% block content %}
@@ -8,7 +8,19 @@
     <p class="page-subtitle">פריטי ארכיון לפי הרשאות הצפייה שלך.</p>
 
     <div class="page-toolbar">
-      <a class="btn" href="{% url 'documents-list-page' %}">מסמכים (OCR)</a>
+      {% for slug, label in item_type_filter_choices %}
+        {% if slug %}
+          <a
+            class="btn{% if item_type_filter == slug %} btn-primary{% endif %}"
+            href="{% url 'archive-list' %}?item_type={{ slug }}"
+          >{{ label }}</a>
+        {% else %}
+          <a
+            class="btn{% if not item_type_filter %} btn-primary{% endif %}"
+            href="{% url 'archive-list' %}"
+          >{{ label }}</a>
+        {% endif %}
+      {% endfor %}
       {% if is_admin %}
         <a class="btn" href="{% url 'archive-manage-list' %}">ניהול ארכיון</a>
       {% endif %}
@@ -30,7 +42,7 @@
             {% for item in items %}
               <tr>
                 <td><a href="{% url 'archive-detail' item_id=item.id %}">{{ item.title }}</a></td>
-                <td>{{ item.get_item_type_display }}</td>
+                <td>{{ item.item_type|archive_item_type_label }}</td>
                 <td>{{ item|document_date_display }}</td>
               </tr>
             {% endfor %}
