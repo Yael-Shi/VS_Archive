@@ -5,6 +5,7 @@ from typing import Optional
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
+from django.db import transaction
 from django.db.models import Q
 from django.http import Http404, HttpResponseBadRequest, JsonResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
@@ -1710,4 +1711,30 @@ def archive_manage_edit_page(request, item_id: int):
             page_title="עריכת טקסט מוקלד",
             submit_label="עדכון",
         ),
+    )
+
+
+@login_required
+def archive_manage_delete_page(request, item_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    try:
+        item = ArchiveItem.objects.select_related("manual_text_content").get(
+            id=item_id,
+            item_type=ArchiveItem.ItemType.MANUAL_TEXT,
+        )
+    except ArchiveItem.DoesNotExist:
+        raise Http404() from None
+
+    if request.method == "POST":
+        with transaction.atomic():
+            item.delete()
+        return redirect("archive-manage-list")
+
+    return render(
+        request,
+        "documents/archive/manual_text_delete_confirm.html",
+        context={"item": item},
     )

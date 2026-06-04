@@ -39,6 +39,7 @@
                 <td>
                   {% if item.item_type == "MANUAL_TEXT" %}
                     <a class="btn" href="{% url 'archive-manage-edit' item_id=item.id %}">עריכה</a>
+                    <a class="btn" href="{% url 'archive-manage-delete' item_id=item.id %}">מחיקה</a>
                   {% else %}
                     —
                   {% endif %}

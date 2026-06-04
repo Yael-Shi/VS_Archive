@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth.models import Group, User
 from django.db import IntegrityError
-from django.test import RequestFactory, TestCase, override_settings
+from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
 from documents.admin import ArchiveItemAdmin, DocumentAdmin, ManualTextContentAdmin
@@ -1115,3 +1115,229 @@ class ArchiveItemPresentationUiTests(TestCase):
         self.assertContains(resp, "הושלם")
         self.assertNotContains(resp, "MANUAL_TEXT")
         self.assertNotContains(resp, "COMPLETED")
+
+
+class ManualTextArchiveItemDeleteTests(TestCase):
+    DELETE_URL_TEMPLATE = "/archive/manage/{item_id}/delete/"
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="manual_text_delete_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.family_group, _ = Group.objects.get_or_create(
+            name=ARCHIVE_FAMILY_GROUP_NAME
+        )
+        self.csrf_client = Client(enforce_csrf_checks=True)
+
+    def _create_family_user(self, username="manual_text_delete_family"):
+        user = User.objects.create_user(username=username, password="test-pass")
+        user.groups.add(self.family_group)
+        return user
+
+    def _delete_url(self, item_id: int) -> str:
+        return self.DELETE_URL_TEMPLATE.format(item_id=item_id)
+
+    def test_staff_can_access_delete_confirmation_for_manual_text(self):
+        item = create_manual_text_archive_item(title="Delete me", body="Body")
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._delete_url(item.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "מחיקת טקסט מוקלד")
+        self.assertContains(resp, item.title)
+        self.assertContains(resp, "לא ניתן לשחזר מתוך האתר כרגע")
+
+    def test_get_confirmation_does_not_delete_archive_item(self):
+        item = create_manual_text_archive_item(title="Still here", body="Body")
+        self.client.force_login(self.staff)
+        self.client.get(self._delete_url(item.id))
+        self.assertTrue(ArchiveItem.objects.filter(pk=item.id).exists())
+
+    def test_get_confirmation_does_not_delete_manual_text_content(self):
+        item = create_manual_text_archive_item(title="Content stays", body="Body")
+        content_id = item.manual_text_content.id
+        self.client.force_login(self.staff)
+        self.client.get(self._delete_url(item.id))
+        self.assertTrue(ManualTextContent.objects.filter(pk=content_id).exists())
+
+    def test_staff_post_deletes_archive_item(self):
+        item = create_manual_text_archive_item(title="Gone item", body="Body")
+        item_id = item.id
+        self.client.force_login(self.staff)
+        resp = self.client.post(self._delete_url(item_id))
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], reverse("archive-manage-list"))
+        self.assertFalse(ArchiveItem.objects.filter(pk=item_id).exists())
+
+    def test_staff_post_deletes_manual_text_content_via_cascade(self):
+        item = create_manual_text_archive_item(title="Gone content", body="Body")
+        content_id = item.manual_text_content.id
+        self.client.force_login(self.staff)
+        self.client.post(self._delete_url(item.id))
+        self.assertFalse(ManualTextContent.objects.filter(pk=content_id).exists())
+
+    def test_after_post_delete_archive_detail_returns_404(self):
+        item = create_manual_text_archive_item(title="Detail gone", body="Body")
+        item_id = item.id
+        self.client.force_login(self.staff)
+        self.client.post(self._delete_url(item_id))
+        resp = self.client.get(f"/archive/{item_id}/")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_after_post_delete_item_not_in_manage_list(self):
+        item = create_manual_text_archive_item(title="Manage list gone", body="Body")
+        self.client.force_login(self.staff)
+        self.client.post(self._delete_url(item.id))
+        resp = self.client.get(reverse("archive-manage-list"))
+        self.assertNotContains(resp, "Manage list gone")
+
+    def test_anonymous_cannot_access_delete_page(self):
+        item = create_manual_text_archive_item(title="Protected", body="Body")
+        resp = self.client.get(self._delete_url(item.id))
+        self.assertIn(resp.status_code, (302, 403))
+
+    def test_family_user_cannot_access_delete_page(self):
+        item = create_manual_text_archive_item(title="Family blocked", body="Body")
+        self.client.force_login(self._create_family_user())
+        resp = self.client.get(self._delete_url(item.id))
+        self.assertEqual(resp.status_code, 403)
+
+    def test_non_staff_authenticated_user_cannot_access_delete_page(self):
+        item = create_manual_text_archive_item(title="User blocked", body="Body")
+        user = User.objects.create_user(
+            username="manual_text_delete_user",
+            password="test-pass",
+            is_staff=False,
+        )
+        self.client.force_login(user)
+        resp = self.client.get(self._delete_url(item.id))
+        self.assertEqual(resp.status_code, 403)
+
+    def test_delete_route_returns_404_for_ocr_document(self):
+        doc = create_ocr_document(
+            title="OCR delete guard",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._delete_url(doc.archive_item_id))
+        self.assertEqual(resp.status_code, 404)
+
+    def test_ocr_document_is_not_deleted_through_delete_route(self):
+        doc = create_ocr_document(
+            title="OCR survives",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+        )
+        archive_item_id = doc.archive_item_id
+        self.client.force_login(self.staff)
+        resp = self.client.post(self._delete_url(archive_item_id))
+        self.assertEqual(resp.status_code, 404)
+        self.assertTrue(ArchiveItem.objects.filter(pk=archive_item_id).exists())
+        self.assertTrue(Document.objects.filter(pk=doc.id).exists())
+
+    def test_delete_action_appears_for_staff_on_manual_text_detail(self):
+        item = create_manual_text_archive_item(title="Detail delete link", body="Body")
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertContains(resp, reverse("archive-manage-delete", kwargs={"item_id": item.id}))
+        self.assertContains(resp, reverse("archive-manage-edit", kwargs={"item_id": item.id}))
+        self.assertContains(resp, "מחיקה")
+
+    def test_delete_and_edit_actions_do_not_appear_for_staff_on_ocr_document_detail(self):
+        doc = create_ocr_document(
+            title="OCR detail no manual actions",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/archive/{doc.archive_item_id}/", follow=True)
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(
+            resp,
+            reverse("archive-manage-delete", kwargs={"item_id": doc.archive_item_id}),
+        )
+        self.assertNotContains(
+            resp,
+            reverse("archive-manage-edit", kwargs={"item_id": doc.archive_item_id}),
+        )
+
+    def test_delete_action_appears_for_staff_on_manage_list_manual_text_row(self):
+        item = create_manual_text_archive_item(title="Manage delete link", body="Body")
+        self.client.force_login(self.staff)
+        resp = self.client.get(reverse("archive-manage-list"))
+        self.assertContains(resp, reverse("archive-manage-delete", kwargs={"item_id": item.id}))
+        self.assertContains(resp, "מחיקה")
+
+    def test_delete_action_does_not_appear_for_anonymous_on_detail(self):
+        item = create_manual_text_archive_item(
+            title="Anonymous detail",
+            body="Body",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertNotContains(resp, reverse("archive-manage-delete", kwargs={"item_id": item.id}))
+
+    def test_delete_action_does_not_appear_for_family_user_on_detail(self):
+        item = create_manual_text_archive_item(
+            title="Family detail",
+            body="Body",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        self.client.force_login(self._create_family_user())
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertNotContains(resp, reverse("archive-manage-delete", kwargs={"item_id": item.id}))
+
+    def test_delete_action_does_not_appear_for_non_staff_on_detail(self):
+        item = create_manual_text_archive_item(
+            title="User detail",
+            body="Body",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        user = User.objects.create_user(
+            username="manual_text_delete_viewer",
+            password="test-pass",
+            is_staff=False,
+        )
+        self.client.force_login(user)
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertNotContains(resp, reverse("archive-manage-delete", kwargs={"item_id": item.id}))
+
+    def test_family_user_cannot_access_manage_list_with_delete_action(self):
+        create_manual_text_archive_item(title="Family manage", body="Body")
+        self.client.force_login(self._create_family_user())
+        resp = self.client.get(reverse("archive-manage-list"))
+        self.assertEqual(resp.status_code, 403)
+
+    def test_non_staff_cannot_access_manage_list_with_delete_action(self):
+        create_manual_text_archive_item(title="User manage", body="Body")
+        user = User.objects.create_user(
+            username="manual_text_delete_manage_user",
+            password="test-pass",
+            is_staff=False,
+        )
+        self.client.force_login(user)
+        resp = self.client.get(reverse("archive-manage-list"))
+        self.assertEqual(resp.status_code, 403)
+
+    def test_delete_action_does_not_appear_for_ocr_document_on_manage_list(self):
+        doc = create_ocr_document(
+            title="OCR no delete button",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(reverse("archive-manage-list"))
+        self.assertNotContains(
+            resp,
+            reverse("archive-manage-delete", kwargs={"item_id": doc.archive_item_id}),
+        )
+
+    def test_post_delete_requires_csrf(self):
+        item = create_manual_text_archive_item(title="CSRF guard", body="Body")
+        self.csrf_client.force_login(self.staff)
+        resp = self.csrf_client.post(self._delete_url(item.id))
+        self.assertEqual(resp.status_code, 403)
+        self.assertTrue(ArchiveItem.objects.filter(pk=item.id).exists())
