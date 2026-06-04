@@ -6,6 +6,7 @@ from datetime import date, datetime
 from typing import Any
 
 from documents.models import ArchiveItem
+from documents.services.archive_item_validation import parse_date_precision
 
 
 def parse_optional_date(value: str | None, field_name: str) -> date | None:
@@ -33,14 +34,6 @@ def parse_metadata_status(raw_value: str | None) -> str:
     valid = {choice.value for choice in ArchiveItem.MetadataStatus}
     if value not in valid:
         raise ValueError("metadata_status is invalid")
-    return value
-
-
-def parse_date_precision(raw_value: str | None) -> str:
-    value = (raw_value or ArchiveItem.DatePrecision.UNKNOWN).strip().upper()
-    valid = {choice.value for choice in ArchiveItem.DatePrecision}
-    if value not in valid:
-        raise ValueError("date_precision is invalid")
     return value
 
 

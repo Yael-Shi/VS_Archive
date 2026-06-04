@@ -56,6 +56,10 @@ from documents.services.archive_item_access import (
     archive_item_queryset_for_user,
     get_viewable_archive_item,
 )
+from documents.services.archive_item_validation import (
+    DATE_PRECISION_UI_CHOICES,
+    parse_date_precision,
+)
 from documents.services.manual_text_validation import parse_manual_text_form
 from documents.services.sqs import send_process_document_message
 from documents.services.text_presentation import get_text_presentation_for_document
@@ -295,6 +299,7 @@ def _parse_create_upload_common(payload: dict):
         ds = _parse_date_optional(date_start_raw, "date_start")
         de = _parse_date_optional(date_end_raw, "date_end")
         text_input_type = _parse_text_input_type(text_input_type_raw)
+        date_precision = parse_date_precision(payload.get("date_precision"))
     except ValueError as e:
         return None, _bad(str(e))
 
@@ -315,6 +320,7 @@ def _parse_create_upload_common(payload: dict):
         "title": title,
         "date_start": ds,
         "date_end": de,
+        "date_precision": date_precision,
         "language": language,
         "text_input_type": text_input_type,
         "category_event": category_event,
@@ -418,6 +424,7 @@ def _create_multi_image_upload(request, payload: dict, common: dict):
         doc_type=Document.DocType.IMAGE,
         date_start=common["date_start"],
         date_end=common["date_end"],
+        date_precision=common["date_precision"],
         language=common["language"],
         text_input_type=common["text_input_type"],
         category_event=common["category_event"],
@@ -501,6 +508,7 @@ def _create_single_file_upload(request, payload: dict, common: dict):
         doc_type=doc_type,
         date_start=common["date_start"],
         date_end=common["date_end"],
+        date_precision=common["date_precision"],
         language=common["language"],
         text_input_type=common["text_input_type"],
         category_event=common["category_event"],
@@ -1445,6 +1453,7 @@ def upload_page(request):
         context={
             "doc_type_choices": Document.DocType.choices,
             "text_input_type_choices": Document.TextInputType.choices,
+            "date_precision_choices": DATE_PRECISION_UI_CHOICES,
         },
     )
 
@@ -1462,7 +1471,7 @@ def _manual_text_form_context(
         "page_title": page_title,
         "submit_label": submit_label,
         "visibility_choices": ArchiveItem.Visibility.choices,
-        "date_precision_choices": ArchiveItem.DatePrecision.choices,
+        "date_precision_choices": DATE_PRECISION_UI_CHOICES,
         "metadata_status_choices": ArchiveItem.MetadataStatus.choices,
     }
 
