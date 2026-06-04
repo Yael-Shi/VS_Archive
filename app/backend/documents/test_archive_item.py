@@ -5,6 +5,7 @@ from django.contrib.admin.sites import AdminSite
 from django.contrib.auth.models import Group, User
 from django.db import IntegrityError
 from django.test import RequestFactory, TestCase, override_settings
+from django.urls import reverse
 
 from documents.admin import ArchiveItemAdmin, DocumentAdmin, ManualTextContentAdmin
 from documents.models import ArchiveItem, Document, DocumentSourceFile, DocumentTextResult, ManualTextContent
@@ -746,3 +747,75 @@ class OcrDocumentArchiveItemAccessTests(TestCase):
         resp = self.client.get(f"/archive/{doc.archive_item_id}/")
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp["Location"], f"/api/ui/documents/{doc.id}/")
+
+
+class ArchiveNavigationTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="archive_nav_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.family_group, _ = Group.objects.get_or_create(
+            name=ARCHIVE_FAMILY_GROUP_NAME
+        )
+
+    def _create_family_user(self, username="archive_nav_family"):
+        user = User.objects.create_user(username=username, password="test-pass")
+        user.groups.add(self.family_group)
+        return user
+
+    def test_global_nav_shows_archive_link_for_anonymous(self):
+        resp = self.client.get(reverse("public-home"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, reverse("archive-list"))
+        self.assertContains(resp, "ארכיון")
+
+    def test_global_nav_hides_manage_link_for_anonymous(self):
+        resp = self.client.get(reverse("public-home"))
+        self.assertNotContains(resp, reverse("archive-manage-list"))
+        self.assertNotContains(resp, "ניהול ארכיון")
+
+    def test_global_nav_shows_manage_link_for_staff(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(reverse("public-home"))
+        self.assertContains(resp, reverse("archive-manage-list"))
+        self.assertContains(resp, "ניהול ארכיון")
+
+    def test_global_nav_hides_manage_link_for_family_user(self):
+        self.client.force_login(self._create_family_user())
+        resp = self.client.get(reverse("public-home"))
+        self.assertContains(resp, reverse("archive-list"))
+        self.assertNotContains(resp, reverse("archive-manage-list"))
+        self.assertNotContains(resp, "ניהול ארכיון")
+
+    def test_global_nav_hides_manage_link_for_non_staff_authenticated_user(self):
+        user = User.objects.create_user(
+            username="archive_nav_user",
+            password="test-pass",
+            is_staff=False,
+        )
+        self.client.force_login(user)
+        resp = self.client.get(reverse("public-home"))
+        self.assertNotContains(resp, reverse("archive-manage-list"))
+        self.assertNotContains(resp, "ניהול ארכיון")
+
+    def test_archive_list_page_shows_manage_toolbar_for_staff(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(reverse("archive-list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, reverse("archive-manage-list"))
+        self.assertContains(resp, "ניהול ארכיון")
+
+    def test_archive_list_page_hides_manage_toolbar_for_anonymous(self):
+        resp = self.client.get(reverse("archive-list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, reverse("archive-manage-list"))
+        self.assertNotContains(resp, "ניהול ארכיון")
+
+    def test_archive_manage_list_shows_manual_text_create_for_staff(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(reverse("archive-manage-list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, reverse("archive-manage-manual-text-create"))
+        self.assertContains(resp, "יצירת טקסט ידני")
