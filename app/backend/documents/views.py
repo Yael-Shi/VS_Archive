@@ -10,8 +10,12 @@ from django.http import Http404, HttpResponseBadRequest, JsonResponse, HttpRespo
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from .models import Document, DocumentSourceFile, DocumentTextResult, Tag, DocumentMetadata
-from documents.services.archive_items import create_ocr_document
+from .models import ArchiveItem, Document, DocumentSourceFile, DocumentTextResult, Tag, DocumentMetadata
+from documents.services.archive_items import (
+    create_manual_text_archive_item,
+    create_ocr_document,
+    update_manual_text_archive_item,
+)
 from botocore.exceptions import BotoCoreError, ClientError
 
 from .s3 import (
@@ -48,6 +52,11 @@ from documents.services.document_access import (
     get_viewable_document,
     is_document_admin,
 )
+from documents.services.archive_item_access import (
+    archive_item_queryset_for_user,
+    get_viewable_archive_item,
+)
+from documents.services.manual_text_validation import parse_manual_text_form
 from documents.services.sqs import send_process_document_message
 from documents.services.text_presentation import get_text_presentation_for_document
 
@@ -1437,4 +1446,184 @@ def upload_page(request):
             "doc_type_choices": Document.DocType.choices,
             "text_input_type_choices": Document.TextInputType.choices,
         },
+    )
+
+
+def _manual_text_form_context(
+    *,
+    form_data: dict,
+    form_errors: list[str],
+    page_title: str,
+    submit_label: str,
+) -> dict:
+    return {
+        "form_data": form_data,
+        "form_errors": form_errors,
+        "page_title": page_title,
+        "submit_label": submit_label,
+        "visibility_choices": ArchiveItem.Visibility.choices,
+        "date_precision_choices": ArchiveItem.DatePrecision.choices,
+        "metadata_status_choices": ArchiveItem.MetadataStatus.choices,
+    }
+
+
+def _empty_manual_text_form_data() -> dict:
+    return {
+        "title": "",
+        "body": "",
+        "visibility": ArchiveItem.Visibility.PRIVATE,
+        "date_start": "",
+        "date_end": "",
+        "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
+        "metadata_status": ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
+    }
+
+
+def _manual_text_form_data_from_item(item: ArchiveItem) -> dict:
+    return {
+        "title": item.title,
+        "body": item.manual_text_content.body,
+        "visibility": item.visibility,
+        "date_start": item.date_start.isoformat() if item.date_start else "",
+        "date_end": item.date_end.isoformat() if item.date_end else "",
+        "date_precision": item.date_precision,
+        "metadata_status": item.metadata_status,
+    }
+
+
+def archive_list_page(request):
+    items = (
+        archive_item_queryset_for_user(request.user)
+        .select_related("manual_text_content", "ocr_document")
+        .order_by("-created_at")
+    )
+    return render(
+        request,
+        "documents/archive/list.html",
+        context={
+            "items": items,
+            "is_admin": _is_admin(request.user),
+        },
+    )
+
+
+def archive_detail_page(request, item_id: int):
+    item = get_viewable_archive_item(request.user, item_id)
+
+    if item.item_type == ArchiveItem.ItemType.OCR_DOCUMENT:
+        doc = Document.objects.filter(archive_item_id=item.id).first()
+        if doc is None:
+            raise Http404()
+        return redirect("documents-detail-page", doc_id=doc.id)
+
+    if item.item_type != ArchiveItem.ItemType.MANUAL_TEXT:
+        raise Http404()
+
+    return render(
+        request,
+        "documents/archive/detail.html",
+        context={
+            "item": item,
+            "body": item.manual_text_content.body,
+            "is_admin": _is_admin(request.user),
+        },
+    )
+
+
+@login_required
+def archive_manage_list_page(request):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    items = (
+        ArchiveItem.objects.all()
+        .select_related("manual_text_content", "ocr_document")
+        .order_by("-created_at")
+    )
+    return render(
+        request,
+        "documents/archive/manage_list.html",
+        context={"items": items},
+    )
+
+
+@login_required
+def archive_manage_manual_text_create_page(request):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    form_errors: list[str] = []
+    form_data = _empty_manual_text_form_data()
+
+    if request.method == "POST":
+        parsed, form_errors = parse_manual_text_form(request.POST)
+        form_data = parsed
+        if not form_errors:
+            item = create_manual_text_archive_item(
+                title=parsed["title"],
+                body=parsed["body"],
+                visibility=parsed["visibility"],
+                date_start=parsed["date_start_value"],
+                date_end=parsed["date_end_value"],
+                date_precision=parsed["date_precision"],
+                metadata_status=parsed["metadata_status"],
+            )
+            return redirect("archive-detail", item_id=item.id)
+
+    return render(
+        request,
+        "documents/archive/manual_text_form.html",
+        context=_manual_text_form_context(
+            form_data=form_data,
+            form_errors=form_errors,
+            page_title="יצירת טקסט ידני",
+            submit_label="שמירה",
+        ),
+    )
+
+
+@login_required
+def archive_manage_edit_page(request, item_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    try:
+        item = ArchiveItem.objects.select_related("manual_text_content").get(
+            id=item_id,
+            item_type=ArchiveItem.ItemType.MANUAL_TEXT,
+        )
+    except ArchiveItem.DoesNotExist:
+        raise Http404() from None
+
+    form_errors: list[str] = []
+    form_data = _manual_text_form_data_from_item(item)
+
+    if request.method == "POST":
+        parsed, form_errors = parse_manual_text_form(request.POST)
+        form_data = parsed
+        if not form_errors:
+            update_manual_text_archive_item(
+                item,
+                title=parsed["title"],
+                body=parsed["body"],
+                visibility=parsed["visibility"],
+                date_start=parsed["date_start_value"],
+                date_end=parsed["date_end_value"],
+                date_precision=parsed["date_precision"],
+                metadata_status=parsed["metadata_status"],
+            )
+            return redirect("archive-detail", item_id=item.id)
+
+    return render(
+        request,
+        "documents/archive/manual_text_form.html",
+        context=_manual_text_form_context(
+            form_data=form_data,
+            form_errors=form_errors,
+            page_title="עריכת טקסט ידני",
+            submit_label="עדכון",
+        ),
     )

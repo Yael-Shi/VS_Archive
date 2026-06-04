@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% load document_date_display %}
+{% block title %}VSArchive - {{ item.title }}{% endblock %}
+
+{% block content %}
+  <div class="card card--pad-lg">
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-list' %}">חזרה לארכיון</a>
+      {% if is_admin %}
+        <a class="btn" href="{% url 'archive-manage-list' %}">ניהול ארכיון</a>
+        <a class="btn" href="{% url 'archive-manage-edit' item_id=item.id %}">עריכה</a>
+      {% endif %}
+    </div>
+
+    <div class="spacer"></div>
+
+    <h1 class="page-title">{{ item.title }}</h1>
+    <div class="page-lead">
+      {% if is_admin %}
+        פריט ארכיון #{{ item.id }} · {{ item|document_date_display }}
+      {% else %}
+        {{ item|document_date_display }}
+      {% endif %}
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="badge-row">
+      <span class="badge">{{ item.get_item_type_display }}</span>
+      {% if is_admin %}
+        {% if item.visibility == "public" %}
+          <span class="badge badge-ok">ציבורי</span>
+        {% else %}
+          <span class="badge">פרטי (משפחה)</span>
+        {% endif %}
+      {% endif %}
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="section-title">תוכן</div>
+    <div class="text-block text-block--pre">{{ body|linebreaksbr }}</div>
+  </div>
+{% endblock %}

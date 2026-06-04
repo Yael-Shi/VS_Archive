@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - {{ page_title }}{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-manage-list' %}">חזרה לניהול</a>
+    </div>
+
+    <h1 class="page-title">{{ page_title }}</h1>
+    <p class="page-subtitle">תוכן מוקלד ידנית — ללא OCR, ללא העלאת קובץ, ללא יצירת מסמך.</p>
+
+    {% if form_errors %}
+      <div class="spacer"></div>
+      <div class="alert alert-danger">
+        <div class="alert-title">שגיאה בטופס</div>
+        <ul>
+          {% for error in form_errors %}
+            <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    <div class="spacer"></div>
+
+    <form method="post">
+      {% csrf_token %}
+
+      <div class="field">
+        <label for="title">כותרת *</label>
+        <input id="title" name="title" type="text" value="{{ form_data.title }}" />
+      </div>
+
+      <div class="field">
+        <label for="body">תוכן *</label>
+        <textarea id="body" name="body" rows="12">{{ form_data.body }}</textarea>
+      </div>
+
+      <div class="field">
+        <label for="visibility">נראות / גישה</label>
+        <select id="visibility" name="visibility">
+          {% for value, label in visibility_choices %}
+            <option value="{{ value }}" {% if form_data.visibility == value %}selected{% endif %}>
+              {{ label }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="meta-grid">
+        <div class="field">
+          <label for="date_start">תאריך התחלה</label>
+          <input id="date_start" name="date_start" type="date" value="{{ form_data.date_start }}" />
+        </div>
+        <div class="field">
+          <label for="date_end">תאריך סיום</label>
+          <input id="date_end" name="date_end" type="date" value="{{ form_data.date_end }}" />
+        </div>
+      </div>
+
+      <div class="meta-grid">
+        <div class="field">
+          <label for="date_precision">דיוק תאריך</label>
+          <select id="date_precision" name="date_precision">
+            {% for value, label in date_precision_choices %}
+              <option value="{{ value }}" {% if form_data.date_precision == value %}selected{% endif %}>
+                {{ label }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="metadata_status">סטטוס מטא־דאטה</label>
+          <select id="metadata_status" name="metadata_status">
+            {% for value, label in metadata_status_choices %}
+              <option value="{{ value }}" {% if form_data.metadata_status == value %}selected{% endif %}>
+                {{ label }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="spacer"></div>
+      <button type="submit" class="btn btn-primary">{{ submit_label }}</button>
+    </form>
+  </div>
+{% endblock %}

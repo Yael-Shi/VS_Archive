@@ -16,7 +16,38 @@
 
 **Delete behavior:** Legacy **`Document`** delete paths run inside **`transaction.atomic()`** so document-row removal and linked **`ArchiveItem`** cleanup commit or roll back together. At the ORM level, **`ArchiveItem.delete()`** is the canonical parent delete path (**`on_delete=CASCADE`** on **`Document.archive_item`** removes the linked OCR **`Document`** and its **`CASCADE`** children). **`ArchiveItem`** deletion through Django admin is **disabled** until a deliberate archive-item deletion policy/workflow is designed. Legacy **`Document`** delete paths (instance and **`QuerySet.delete`**) also remove the linked **`ArchiveItem`** so bulk document deletes do not leave orphan **`OCR_DOCUMENT`** rows.
 
-**Deferred:** UI/API reads from **`ArchiveItem`**; ongoing shared-field sync; deduplicating **`Document`** fields; **`MANUAL_TEXT`** / **`PHOTO`** item flows; archive-item-level text results.
+**Deferred:** UI/API reads from **`ArchiveItem`** for OCR-backed documents; ongoing shared-field sync; deduplicating **`Document`** fields; **`PHOTO`** item flows; archive-item-level text results for OCR outputs; unified public **`ArchiveItem`** listing across item types.
+
+## ArchiveItem — manual text (`MANUAL_TEXT`)
+
+**Decision:** Implement the first non-OCR **`ArchiveItem`** content type as staff/admin-entered manual text. **`ArchiveItem`** is the **runtime source of truth** for **`MANUAL_TEXT`** items; **`ManualTextContent.body`** stores the typed content (not **`DocumentTextResult`**).
+
+**Runtime source of truth (bridge phase):**
+
+- **`OCR_DOCUMENT`:** **`Document`** remains runtime source of truth for OCR-specific fields and bridge upload/list/detail/review behavior. **`ArchiveItem.visibility`** is the access-control source of truth for viewing. Shared non-access fields are copied at create/backfill only — **no** ongoing sync. Do not assume **`ArchiveItem`** copies stay current after **`Document`** edits. **`Document.visibility`** remains a temporary compatibility field.
+- **`MANUAL_TEXT`:** **`ArchiveItem`** + **`ManualTextContent`** are runtime source of truth. Before a future OCR cutover, refresh/sync shared fields from **`Document`** or run an explicit migration strategy.
+
+**Model:** **`ManualTextContent`** — `OneToOneField` to **`ArchiveItem`** (`related_name="manual_text_content"`, `on_delete=CASCADE`), plus **`body`**, **`created_at`**, **`updated_at`**. Uses **`ArchiveItem.item_type=MANUAL_TEXT`**.
+
+**Access (`ArchiveItem.visibility`):** **`public`** (everyone) and **`private`** (approved **`archive_family`** group + staff/admin). **`private`** means private family archive content, not staff-only. Centralized in **`documents/services/archive_item_access.py`**. **`ArchiveItem.visibility`** is the access-control source of truth for all item types. **`Document.visibility`** remains a temporary compatibility/bridge field; document list/detail access respects **`document.archive_item.visibility`**. Non-viewable items return **404**. Family invitation/account-management is deferred.
+
+**Services:** **`create_manual_text_archive_item(...)`** and **`update_manual_text_archive_item(...)`** in **`documents/services/archive_items.py`**. Server-side validation in **`manual_text_validation.py`**. Default **`metadata_status=NEEDS_COMPLETION`**; staff choose **`NEEDS_COMPLETION`** or **`COMPLETED`** on create/edit. **Does not** create **`Document`**, **`DocumentSourceFile`**, or **`DocumentTextResult`**. **Does not** enqueue SQS or run OCR/HTR.
+
+**UI routes (archive-oriented, not `/api/ui/...`):**
+
+- **`/archive/`** — unified visible archive item list for current viewer
+- **`/archive/<id>/`** — detail (**`MANUAL_TEXT`** in this PR; **`OCR_DOCUMENT`** redirects to existing document detail during bridge)
+- **`/archive/manage/`** — staff/admin management list
+- **`/archive/manage/new/manual-text/`** — staff/admin create
+- **`/archive/manage/<id>/edit/`** — staff/admin edit (**`MANUAL_TEXT`** only)
+
+Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`safe`**).
+
+**Admin:** **`ArchiveItemAdmin`** and **`ManualTextContentAdmin`** remain view-only. Django admin is **not** the primary create/edit flow.
+
+**Future metadata (deferred):** people mentioned/shown, places, narrator/author/source, event context, relationships between archive items, richer date/source/confidence notes.
+
+**Still deferred:** **`PHOTO`** items; full **`OCR_DOCUMENT`** cutover to **`ArchiveItem`** list/detail/search/API; ongoing **`Document`** ↔ **`ArchiveItem`** sync; storing manual text in **`DocumentTextResult`**; invitation/account-management for family users beyond Django Group membership.
 
 ## Document date precision — schema foundation (PR 2)
 
