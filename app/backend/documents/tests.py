@@ -3910,19 +3910,19 @@ class UploadApiTests(TestCase):
         self.assertIn("single-file", resp.content.decode())
 
     def test_multi_image_create_rejects_more_than_max_files(self):
-        resp = self._post_create(self._multi_files_payload(count=26))
+        resp = self._post_create(self._multi_files_payload(count=31))
         self.assertEqual(resp.status_code, 400)
-        self.assertIn("at most 25 images", resp.content.decode())
+        self.assertIn("at most 30 images", resp.content.decode())
 
     @patch("documents.views.create_presigned_put")
     def test_multi_image_create_accepts_max_files(self, mock_put):
         mock_put.side_effect = lambda **kwargs: f"https://example/{kwargs['key']}"
 
-        resp = self._post_create(self._multi_files_payload(count=25))
+        resp = self._post_create(self._multi_files_payload(count=30))
         self.assertEqual(resp.status_code, 201)
         body = resp.json()
-        self.assertEqual(body["expected_source_file_count"], 25)
-        self.assertEqual(len(body["uploads"]), 25)
+        self.assertEqual(body["expected_source_file_count"], 30)
+        self.assertEqual(len(body["uploads"]), 30)
 
     def test_multi_image_create_rejects_non_image_mime(self):
         payload = self._multi_files_payload(count=2)
