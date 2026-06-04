@@ -392,6 +392,14 @@ class ManualTextArchiveItemTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Staff readable body.")
 
+    def test_manual_text_create_form_renders_hebrew_date_precision_labels(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.CREATE_URL)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "דיוק תאריך")
+        for label in ("ללא תאריך", "שנה בלבד", "חודש", "יום מדויק", "טווח"):
+            self.assertContains(resp, label)
+
     def test_staff_can_create_manual_text_through_ui(self):
         self.client.force_login(self.staff)
         resp = self.client.post(

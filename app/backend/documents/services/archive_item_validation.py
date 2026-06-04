@@ -1,0 +1,21 @@
+"""Shared validation and UI choices for archive item date fields."""
+
+from __future__ import annotations
+
+from documents.models import ArchiveItem
+
+DATE_PRECISION_UI_CHOICES = (
+    (ArchiveItem.DatePrecision.UNKNOWN, "ללא תאריך"),
+    (ArchiveItem.DatePrecision.YEAR, "שנה בלבד"),
+    (ArchiveItem.DatePrecision.MONTH, "חודש"),
+    (ArchiveItem.DatePrecision.EXACT_DAY, "יום מדויק"),
+    (ArchiveItem.DatePrecision.RANGE, "טווח"),
+)
+
+
+def parse_date_precision(raw_value: str | None) -> str:
+    value = (raw_value or ArchiveItem.DatePrecision.UNKNOWN).strip().upper()
+    valid = {choice.value for choice in ArchiveItem.DatePrecision}
+    if value not in valid:
+        raise ValueError("date_precision is invalid")
+    return value

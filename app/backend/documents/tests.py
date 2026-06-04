@@ -3720,6 +3720,43 @@ class UploadApiTests(TestCase):
         doc = Document.objects.get(id=resp.json()["document_id"])
         self.assertEqual(doc.visibility, Document.Visibility.PRIVATE)
 
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_single_file_create_accepts_year_date_precision(self, _mock_put):
+        resp = self._post_create(
+            self._base_create_payload(date_precision=Document.DatePrecision.YEAR)
+        )
+        self.assertEqual(resp.status_code, 201)
+        doc = Document.objects.get(id=resp.json()["document_id"])
+        self.assertEqual(doc.date_precision, Document.DatePrecision.YEAR)
+        self.assertEqual(doc.archive_item.date_precision, Document.DatePrecision.YEAR)
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_multi_image_create_accepts_year_date_precision(self, _mock_put):
+        resp = self._post_create(
+            self._multi_files_payload(date_precision=Document.DatePrecision.YEAR)
+        )
+        self.assertEqual(resp.status_code, 201)
+        doc = Document.objects.get(id=resp.json()["document_id"])
+        self.assertEqual(doc.date_precision, Document.DatePrecision.YEAR)
+        self.assertEqual(doc.archive_item.date_precision, Document.DatePrecision.YEAR)
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_create_upload_defaults_date_precision_unknown_when_omitted(self, _mock_put):
+        resp = self._post_create(self._base_create_payload())
+        self.assertEqual(resp.status_code, 201)
+        doc = Document.objects.get(id=resp.json()["document_id"])
+        self.assertEqual(doc.date_precision, Document.DatePrecision.UNKNOWN)
+        self.assertEqual(doc.archive_item.date_precision, Document.DatePrecision.UNKNOWN)
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_create_upload_rejects_invalid_date_precision(self, _mock_put):
+        resp = self._post_create(self._base_create_payload(date_precision="GUESS"))
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn(b"date_precision is invalid", resp.content)
+
     @patch("documents.views.create_presigned_put", return_value="https://example/upload")
     @patch("documents.views.send_process_document_message")
     def test_single_file_complete_still_enqueues_and_dual_writes(
@@ -7241,9 +7278,19 @@ class UploadPageTemplateTests(TestCase):
             'id="text_input_type"',
             'id="language"',
             'id="visibility"',
+            'id="date_precision"',
             'id="tags"',
         ):
             self.assertContains(resp, needle)
+
+    def test_upload_page_renders_hebrew_date_precision_labels(self):
+        resp = self._get_page()
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "דיוק תאריך")
+        for label in ("ללא תאריך", "שנה בלבד", "חודש", "יום מדויק", "טווח"):
+            self.assertContains(resp, label)
+        self.assertContains(resp, 'getElementById("date_precision")')
+        self.assertContains(resp, "date_precision")
 
     def test_upload_page_js_references_multi_image_endpoints(self):
         resp = self._get_page()
