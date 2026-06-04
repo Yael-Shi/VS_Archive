@@ -922,4 +922,31 @@ This section records **operational risks and semantics** for env-gated **Transkr
 - **`@csrf_exempt` was removed** from all four upload JSON views; no compensating exemption remains.
 - Auth requirements are unchanged: unauthenticated → login redirect; non-staff → 403.
 
-**Out of scope (separate hardening work):** MIME/size validation, S3 HEAD verification, presigned URL policy, rate limits, and API-token auth for non-browser clients.
+**Out of scope at CSRF PR time (partially addressed June 2026):** upload-completion MIME validation and S3 HeadObject metadata verification are documented in **“Upload hardening — June 2026 follow-ups”** below. Still deferred: file size validation, S3 CORS tightening, presigned URL policy, rate limits, API-token auth for non-browser clients, deeper content sniffing, and broader upload validation beyond those completion paths.
+
+## Upload hardening — June 2026 follow-ups
+
+**Record (June 2026):** Additional upload-hardening and test-reliability follow-ups after upload completion S3 HeadObject verification work.
+
+### Completed
+
+- Removed unused **`BotoCoreError`** import from **`documents/s3.py`** — no behavior change.
+- **`UploadApiCsrfTests`** now mocks **`documents.views.head_s3_object`** (upload S3 metadata verification) instead of depending on local AWS credentials or live S3. Keeps CSRF tests focused on CSRF/auth behavior. No production change.
+- Legacy single-file **`upload_complete`**: validates non-empty payload **`file_mime`** via centralized upload metadata validation **before** S3 verification and **before** persisting MIME metadata. Invalid MIME/extension mismatch → **400**; document not marked uploaded; processing not enqueued. No migrations.
+- Extended upload S3 verification from existence-only HeadObject checks to uploaded-object metadata verification:
+  - Private helper **`_verify_uploaded_s3_object_metadata`** in **`documents/views.py`** (renamed to reflect metadata checks, not only existence).
+  - **`upload_complete`** and **`upload_part_complete`** compare S3 HeadObject **`ContentType`** to expected MIME before marking complete.
+  - Missing expected MIME, missing S3 **`ContentType`**, or mismatch → **400**.
+  - Missing S3 object → **400**.
+  - AWS/client HeadObject failure → **502**.
+  - Failed verification does not mark upload/part uploaded and does not enqueue processing.
+  - MIME normalization for comparison: **`image/jpg`** → **`image/jpeg`**, **`image/pjpeg`** → **`image/jpeg`**. **`application/octet-stream`** is not accepted as a substitute for a specific expected MIME.
+
+### Out of scope (these PRs)
+
+- OCR/HTR, Transkribus, Gemini, worker, routing, **`DocumentTextResult`** / processing-state semantics, frontend, S3 CORS tightening, infrastructure, migrations.
+- File size validation, presigned URL policy, rate limits, API-token auth for non-browser clients, and deeper content sniffing remain deferred.
+
+### Rationale
+
+Closes consistency gaps in the upload completion path: the backend no longer relies only on client-reported metadata and object existence; it also verifies the uploaded object's stored S3 **`ContentType`** before accepting completion.
