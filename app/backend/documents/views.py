@@ -66,6 +66,12 @@ from documents.services.text_presentation import get_text_presentation_for_docum
 
 logger = logging.getLogger(__name__)
 
+ARCHIVE_ITEM_TYPE_MANUAL_TEXT = "manual_text"
+ARCHIVE_ITEM_TYPE_OCR_DOCUMENT = "ocr_document"
+_VALID_ARCHIVE_ITEM_CREATE_TYPES = frozenset(
+    {ARCHIVE_ITEM_TYPE_MANUAL_TEXT, ARCHIVE_ITEM_TYPE_OCR_DOCUMENT}
+)
+
 
 def _bad(msg: str, status: int = 400):
     # status kept for compatibility (caller may expect it)
@@ -1500,6 +1506,36 @@ def _manual_text_form_data_from_item(item: ArchiveItem) -> dict:
     }
 
 
+def _archive_item_type_choices() -> list[tuple[str, str]]:
+    return [
+        (ARCHIVE_ITEM_TYPE_MANUAL_TEXT, "טקסט מוקלד"),
+        (ARCHIVE_ITEM_TYPE_OCR_DOCUMENT, "מסמך / תמונת טקסט לעיבוד"),
+    ]
+
+
+def _normalized_archive_item_type(raw: str | None) -> str:
+    value = (raw or "").strip()
+    if value in _VALID_ARCHIVE_ITEM_CREATE_TYPES:
+        return value
+    return ""
+
+
+def _submit_manual_text_create(request):
+    parsed, form_errors = parse_manual_text_form(request.POST)
+    if form_errors:
+        return None, parsed, form_errors
+    item = create_manual_text_archive_item(
+        title=parsed["title"],
+        body=parsed["body"],
+        visibility=parsed["visibility"],
+        date_start=parsed["date_start_value"],
+        date_end=parsed["date_end_value"],
+        date_precision=parsed["date_precision"],
+        metadata_status=parsed["metadata_status"],
+    )
+    return redirect("archive-detail", item_id=item.id), parsed, form_errors
+
+
 def archive_list_page(request):
     items = (
         archive_item_queryset_for_user(request.user)
@@ -1558,6 +1594,39 @@ def archive_manage_list_page(request):
 
 
 @login_required
+def archive_manage_new_page(request):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    item_type = _normalized_archive_item_type(
+        request.POST.get("item_type") or request.GET.get("item_type")
+    )
+    form_errors: list[str] = []
+    form_data = _empty_manual_text_form_data()
+
+    if request.method == "POST" and item_type == ARCHIVE_ITEM_TYPE_MANUAL_TEXT:
+        success_redirect, form_data, form_errors = _submit_manual_text_create(request)
+        if success_redirect:
+            return success_redirect
+
+    return render(
+        request,
+        "documents/archive/manage_new.html",
+        context={
+            "item_type": item_type,
+            "item_type_choices": _archive_item_type_choices(),
+            **_manual_text_form_context(
+                form_data=form_data,
+                form_errors=form_errors,
+                page_title="יצירת פריט חדש",
+                submit_label="שמירה",
+            ),
+        },
+    )
+
+
+@login_required
 def archive_manage_manual_text_create_page(request):
     deny = _require_admin_page(request)
     if deny:
@@ -1567,19 +1636,9 @@ def archive_manage_manual_text_create_page(request):
     form_data = _empty_manual_text_form_data()
 
     if request.method == "POST":
-        parsed, form_errors = parse_manual_text_form(request.POST)
-        form_data = parsed
-        if not form_errors:
-            item = create_manual_text_archive_item(
-                title=parsed["title"],
-                body=parsed["body"],
-                visibility=parsed["visibility"],
-                date_start=parsed["date_start_value"],
-                date_end=parsed["date_end_value"],
-                date_precision=parsed["date_precision"],
-                metadata_status=parsed["metadata_status"],
-            )
-            return redirect("archive-detail", item_id=item.id)
+        success_redirect, form_data, form_errors = _submit_manual_text_create(request)
+        if success_redirect:
+            return success_redirect
 
     return render(
         request,

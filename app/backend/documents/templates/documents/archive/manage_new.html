@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - {{ page_title }}{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-manage-list' %}">חזרה לניהול</a>
+    </div>
+
+    <h1 class="page-title">{{ page_title }}</h1>
+    <p class="page-subtitle">בחרו סוג פריט חדש. פריטי תמונה בלבד (ללא טקסט) יתווספו בעתיד.</p>
+
+    <div class="spacer"></div>
+
+    <form method="get" action="{% url 'archive-manage-new' %}">
+      <div class="field">
+        <label for="item_type">סוג פריט</label>
+        <select id="item_type" name="item_type" onchange="this.form.submit()">
+          <option value="" {% if not item_type %}selected{% endif %}>— בחרו סוג —</option>
+          {% for value, label in item_type_choices %}
+            <option value="{{ value }}" {% if item_type == value %}selected{% endif %}>
+              {{ label }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+    </form>
+
+    {% if item_type == "manual_text" %}
+      <div class="spacer"></div>
+
+      {% if form_errors %}
+        <div class="alert alert-danger">
+          <div class="alert-title">שגיאה בטופס</div>
+          <ul>
+            {% for error in form_errors %}
+              <li>{{ error }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+        <div class="spacer"></div>
+      {% endif %}
+
+      <p class="page-subtitle">תוכן מוקלד ידנית — ללא OCR, ללא העלאת קובץ, ללא יצירת מסמך.</p>
+
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="item_type" value="manual_text" />
+        {% include "documents/archive/manual_text_form_fields.html" %}
+        <div class="spacer"></div>
+        <button type="submit" class="btn btn-primary">{{ submit_label }}</button>
+      </form>
+    {% elif item_type == "ocr_document" %}
+      <div class="spacer"></div>
+      <div class="card">
+        <p>
+          מסמכים, תמונות וקבצי PDF לעיבוד OCR/HTR עדיין נוצרים דרך זרימת ההעלאה הקיימת.
+          לאחר ההעלאה נוצר פריט ארכיון מסוג מסמך OCR.
+        </p>
+        <div class="spacer"></div>
+        <a class="btn btn-primary" href="{% url 'upload-page' %}">מעבר להעלאת מסמך</a>
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}
