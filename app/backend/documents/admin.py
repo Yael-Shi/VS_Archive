@@ -100,6 +100,7 @@ class DocumentAdmin(admin.ModelAdmin):
                 "fields": (
                     "date_start",
                     "date_end",
+                    "date_precision",
                     "language",
                     "category_event",
                     "tags_m2m",

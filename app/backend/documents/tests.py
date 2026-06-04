@@ -8001,6 +8001,57 @@ class DocumentVisibilityAccessControlTests(TestCase):
         self.assertContains(resp, f"מסמך #{public_doc.id}")
 
 
+class DocumentDatePrecisionTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import User
+
+        self.staff = User.objects.create_user(
+            username="date_precision_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+
+    def test_default_date_precision_is_unknown_without_dates(self):
+        doc = Document.objects.create(
+            title="No dates",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        self.assertIsNone(doc.date_start)
+        self.assertIsNone(doc.date_end)
+        self.assertEqual(doc.date_precision, Document.DatePrecision.UNKNOWN)
+
+    def test_date_precision_choices_include_v1_values(self):
+        values = {choice.value for choice in Document.DatePrecision}
+        self.assertEqual(
+            values,
+            {"EXACT_DAY", "MONTH", "YEAR", "RANGE", "UNKNOWN"},
+        )
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_upload_create_without_date_precision_succeeds(self, _mock_put):
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            "/api/uploads/create/",
+            data=json.dumps(
+                {
+                    "title": "Upload without date precision",
+                    "doc_type": "IMAGE",
+                    "text_input_type": "HANDWRITTEN",
+                    "original_name": "scan.jpg",
+                    "mime_type": "image/jpeg",
+                    "size_bytes": 1000,
+                    "date_start": "1948-05-12",
+                    "date_end": "1948-05-12",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        doc = Document.objects.get(id=resp.json()["document_id"])
+        self.assertEqual(doc.date_precision, Document.DatePrecision.UNKNOWN)
+
+
 class DocumentAccessServiceTests(TestCase):
     def test_document_queryset_for_user_filters_non_admin(self):
         from documents.services.document_access import document_queryset_for_user

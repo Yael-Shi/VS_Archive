@@ -30,6 +30,13 @@ class Document(models.Model):
         HANDWRITTEN = "HANDWRITTEN", "Handwritten"
         PRINTED = "PRINTED", "Printed"
 
+    class DatePrecision(models.TextChoices):
+        EXACT_DAY = "EXACT_DAY", "Exact day"
+        MONTH = "MONTH", "Month"
+        YEAR = "YEAR", "Year"
+        RANGE = "RANGE", "Range"
+        UNKNOWN = "UNKNOWN", "Unknown"
+
     # Required for V1
     title = models.CharField(max_length=255)
     doc_type = models.CharField(max_length=16, choices=DocType.choices)
@@ -37,6 +44,11 @@ class Document(models.Model):
     # Optional metadata (often unknown at upload time)
     date_start = models.DateField(null=True, blank=True)
     date_end = models.DateField(null=True, blank=True)
+    date_precision = models.CharField(
+        max_length=16,
+        choices=DatePrecision.choices,
+        default=DatePrecision.UNKNOWN,
+    )
 
     language = models.CharField(
         max_length=8,

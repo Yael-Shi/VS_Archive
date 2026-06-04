@@ -1,6 +1,8 @@
-# Document Date Precision Design (Future)
+# Document Date Precision Design
 
-This note defines how VS-Archive should represent, display, and eventually filter **partial or imprecise** document dates. It is **documentation only** — no model, migration, UI, or API changes in this PR.
+This note defines how VS-Archive should represent, display, and eventually filter **partial or imprecise** document dates.
+
+**Implemented (foundation):** `Document.date_precision` (`DatePrecision` enum) + migration `0019`. Default `UNKNOWN` for all rows (no backfill from `date_start`/`date_end`). UI, upload inputs, display, and filtering are **not** implemented yet.
 
 ## 1. Problem statement
 
@@ -17,6 +19,7 @@ Real archive documents often do not have a single exact calendar day. Catalogers
 
 - `date_start` — `DateField`, nullable, blank allowed
 - `date_end` — `DateField`, nullable, blank allowed
+- `date_precision` — `CharField`, choices `EXACT_DAY` / `MONTH` / `YEAR` / `RANGE` / `UNKNOWN`, default `UNKNOWN` (schema foundation only; not yet set by upload/UI)
 
 Both are optional metadata (“often unknown at upload time” per model comments).
 
@@ -204,7 +207,7 @@ Explicit boundaries for all work until follow-up PRs are approved:
 | PR | Scope |
 |----|--------|
 | **PR 1** | This design doc + decision-log pointer only. |
-| **PR 2** | Model migration: `date_precision` (+ optional `date_display` / note fields if approved). Data migration plan documented; backfill executed only per section 8 decision. |
+| **PR 2** | **Done (foundation):** `date_precision` field + migration; default `UNKNOWN` for existing and new rows until UI/backfill PRs. No `date_display` / note fields. |
 | **PR 3** | Admin/upload/edit UI: precision selector, conditional inputs, validation. |
 | **PR 4** | List/detail (and public if applicable) display using precision-aware labels. |
 | **PR 5** | Filtering/search: overlap queries, “no date”, year/month natural filters. |
