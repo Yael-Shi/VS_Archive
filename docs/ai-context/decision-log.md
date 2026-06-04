@@ -1,6 +1,16 @@
 # VS-Archive Decision Log
 
-## Future design note — document date precision (not implemented)
+## Document date precision — schema foundation (PR 2)
+
+**Decision:** Add **`Document.date_precision`** (`DatePrecision`: `EXACT_DAY`, `MONTH`, `YEAR`, `RANGE`, `UNKNOWN`) with Django default **`UNKNOWN`**. Migration adds the column with that default for **all** existing rows — **no** inference from `date_start`/`date_end` in this PR.
+
+**Scope (PR 2):** Model + migration + minimal admin fieldset + focused tests + design-doc pointer update only. **No** upload/UI/display/filtering changes, **no** `date_display` / `date_note` / estimated-date fields, **no** backfill script beyond the migration default.
+
+**Deferred:** Precision-aware save/display (PR 3–5 in `docs/ai-context/document-date-precision.md`); automated backfill rules (section 8 of that doc) require explicit approval before any data migration beyond `UNKNOWN`.
+
+## Future design note — document date precision (design exploration; PR 1)
+
+**Schema status updated by the PR 2 entry above.** Remaining bullets describe product direction, not current implementation.
 
 - This entry records a **future design exploration only**. No behavior is implemented in this PR.
 - Source input from QA: `Document.date_start` / `date_end` alone imply false precision for year-only, month-only, unknown, and range cases; list/detail currently render raw ISO dates.
