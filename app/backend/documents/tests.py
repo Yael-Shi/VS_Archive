@@ -3317,12 +3317,14 @@ class UploadCompleteSourceFileTests(TestCase):
     def setUp(self):
         from django.contrib.auth.models import User
 
-        self.s3_exists_patcher = patch(
-            "documents.views.s3_object_exists",
-            return_value=True,
+        from documents.s3 import S3HeadObjectResult
+
+        self.s3_head_patcher = patch(
+            "documents.views.head_s3_object",
+            return_value=S3HeadObjectResult(exists=True, content_type="image/jpeg"),
         )
-        self.mock_s3_exists = self.s3_exists_patcher.start()
-        self.addCleanup(self.s3_exists_patcher.stop)
+        self.mock_s3_head = self.s3_head_patcher.start()
+        self.addCleanup(self.s3_head_patcher.stop)
 
         self.staff = User.objects.create_user(
             username="upload_complete_staff",
@@ -3464,17 +3466,19 @@ class UploadCompleteSourceFileTests(TestCase):
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
     @patch("documents.views.send_process_document_message")
-    @patch("documents.views.s3_object_exists", return_value=False)
     def test_upload_complete_missing_s3_object_returns_400_and_does_not_enqueue(
-        self, mock_s3_exists, mock_enqueue
+        self, mock_enqueue
     ):
+        from documents.s3 import S3HeadObjectResult
+
+        self.mock_s3_head.return_value = S3HeadObjectResult(exists=False)
         doc = self._create_uploading_document()
 
         resp = self._post_complete(doc.id, {"success": True})
 
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.json()["error"], "s3 object not found")
-        mock_s3_exists.assert_called_once_with("test-bucket", doc.file_s3_key)
+        self.mock_s3_head.assert_called_once_with("test-bucket", doc.file_s3_key)
         mock_enqueue.assert_not_called()
 
         doc.refresh_from_db()
@@ -3483,31 +3487,148 @@ class UploadCompleteSourceFileTests(TestCase):
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
     @patch("documents.views.send_process_document_message")
-    @patch("documents.views.s3_object_exists", return_value=True)
-    def test_upload_complete_succeeds_when_s3_object_exists(
-        self, mock_s3_exists, mock_enqueue
+    def test_upload_complete_succeeds_when_s3_content_type_matches(
+        self, mock_enqueue
     ):
+        doc = self._create_uploading_document()
+
+        resp = self._post_complete(
+            doc.id,
+            {"success": True, "file_mime": "image/jpeg"},
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.mock_s3_head.assert_called_once_with("test-bucket", doc.file_s3_key)
+        mock_enqueue.assert_called_once_with(document_id=doc.id)
+        doc.refresh_from_db()
+        self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADED)
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.send_process_document_message")
+    def test_upload_complete_rejects_s3_content_type_mismatch(self, mock_enqueue):
+        from documents.s3 import S3HeadObjectResult
+
+        self.mock_s3_head.return_value = S3HeadObjectResult(
+            exists=True, content_type="image/png"
+        )
+        doc = self._create_uploading_document()
+
+        resp = self._post_complete(
+            doc.id,
+            {"success": True, "file_mime": "image/jpeg"},
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["error"], "s3 content type mismatch")
+        self.assertEqual(resp.json()["document_id"], doc.id)
+        mock_enqueue.assert_not_called()
+        doc.refresh_from_db()
+        self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.send_process_document_message")
+    def test_upload_complete_rejects_missing_s3_content_type(self, mock_enqueue):
+        from documents.s3 import S3HeadObjectResult
+
+        self.mock_s3_head.return_value = S3HeadObjectResult(exists=True, content_type=None)
         doc = self._create_uploading_document()
 
         resp = self._post_complete(doc.id, {"success": True})
 
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["error"], "s3 content type missing")
+        mock_enqueue.assert_not_called()
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.send_process_document_message")
+    def test_upload_complete_uses_document_mime_when_file_mime_omitted(
+        self, mock_enqueue
+    ):
+        from documents.s3 import S3HeadObjectResult
+
+        self.mock_s3_head.return_value = S3HeadObjectResult(
+            exists=True, content_type="image/jpeg"
+        )
+        doc = self._create_uploading_document(mime_type="image/jpeg")
+
+        resp = self._post_complete(doc.id, {"success": True})
+
         self.assertEqual(resp.status_code, 200)
-        mock_s3_exists.assert_called_once_with("test-bucket", doc.file_s3_key)
         mock_enqueue.assert_called_once_with(document_id=doc.id)
-        doc.refresh_from_db()
-        self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADED)
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.send_process_document_message")
+    def test_upload_complete_accepts_s3_content_type_with_charset_suffix(
+        self, mock_enqueue
+    ):
+        from documents.s3 import S3HeadObjectResult
+
+        self.mock_s3_head.return_value = S3HeadObjectResult(
+            exists=True, content_type="image/jpeg; charset=binary"
+        )
+        doc = self._create_uploading_document()
+
+        resp = self._post_complete(
+            doc.id,
+            {"success": True, "file_mime": "image/jpeg"},
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        mock_enqueue.assert_called_once()
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.send_process_document_message")
+    def test_upload_complete_accepts_s3_jpg_alias_as_jpeg(self, mock_enqueue):
+        from documents.s3 import S3HeadObjectResult
+
+        for s3_mime in ("image/jpg", "image/pjpeg"):
+            with self.subTest(s3_mime=s3_mime):
+                mock_enqueue.reset_mock()
+                self.mock_s3_head.return_value = S3HeadObjectResult(
+                    exists=True, content_type=s3_mime
+                )
+                doc = self._create_uploading_document(
+                    file_s3_key=f"documents/{s3_mime.replace('/', '-')}/original.jpg",
+                )
+
+                resp = self._post_complete(
+                    doc.id,
+                    {"success": True, "file_mime": "image/jpeg"},
+                )
+
+                self.assertEqual(resp.status_code, 200)
+                mock_enqueue.assert_called_once()
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.send_process_document_message")
+    def test_upload_complete_s3_verification_failure_returns_502(self, mock_enqueue):
+        from botocore.exceptions import ClientError
+
+        self.mock_s3_head.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "denied"}},
+            "HeadObject",
+        )
+        doc = self._create_uploading_document()
+
+        resp = self._post_complete(doc.id, {"success": True})
+
+        self.assertEqual(resp.status_code, 502)
+        self.assertEqual(resp.json()["error"], "s3 verification failed")
+        mock_enqueue.assert_not_called()
 
 
 class UploadApiTests(TestCase):
     def setUp(self):
         from django.contrib.auth.models import User
 
-        self.s3_exists_patcher = patch(
-            "documents.views.s3_object_exists",
-            return_value=True,
+        from documents.s3 import S3HeadObjectResult
+
+        self.s3_head_patcher = patch(
+            "documents.views.head_s3_object",
+            return_value=S3HeadObjectResult(exists=True, content_type="image/jpeg"),
         )
-        self.mock_s3_exists = self.s3_exists_patcher.start()
-        self.addCleanup(self.s3_exists_patcher.stop)
+        self.mock_s3_head = self.s3_head_patcher.start()
+        self.addCleanup(self.s3_head_patcher.stop)
 
         self.staff = User.objects.create_user(
             username="upload_api_staff",
@@ -3645,7 +3766,7 @@ class UploadApiTests(TestCase):
         )
 
         self.assertEqual(resp.status_code, 200)
-        self.mock_s3_exists.assert_called_once_with("test-bucket", doc.file_s3_key)
+        self.mock_s3_head.assert_called_once_with("test-bucket", doc.file_s3_key)
         mock_enqueue.assert_called_once_with(document_id=doc_id)
         doc.refresh_from_db()
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADED)
@@ -3666,7 +3787,7 @@ class UploadApiTests(TestCase):
 
         self.assertEqual(resp.status_code, 400)
         self.assertIn("must be one of", resp.content.decode())
-        self.mock_s3_exists.assert_not_called()
+        self.mock_s3_head.assert_not_called()
         mock_enqueue.assert_not_called()
         doc = Document.objects.get(id=doc_id)
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
@@ -3691,7 +3812,7 @@ class UploadApiTests(TestCase):
 
         self.assertEqual(resp.status_code, 400)
         self.assertIn("does not match", resp.content.decode())
-        self.mock_s3_exists.assert_not_called()
+        self.mock_s3_head.assert_not_called()
         mock_enqueue.assert_not_called()
         doc = Document.objects.get(id=doc_id)
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
@@ -3717,7 +3838,7 @@ class UploadApiTests(TestCase):
 
         self.assertEqual(resp.status_code, 400)
         self.assertIn("application/pdf", resp.content.decode())
-        self.mock_s3_exists.assert_not_called()
+        self.mock_s3_head.assert_not_called()
         mock_enqueue.assert_not_called()
         doc = Document.objects.get(id=doc_id)
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
@@ -3738,7 +3859,7 @@ class UploadApiTests(TestCase):
         )
 
         self.assertEqual(resp.status_code, 400)
-        self.mock_s3_exists.assert_not_called()
+        self.mock_s3_head.assert_not_called()
         mock_enqueue.assert_not_called()
         doc.refresh_from_db()
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
@@ -3972,9 +4093,8 @@ class UploadApiTests(TestCase):
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
     @patch("documents.views.create_presigned_put", return_value="https://example/upload")
     @patch("documents.views.send_process_document_message")
-    @patch("documents.views.s3_object_exists", return_value=True)
-    def test_part_complete_succeeds_when_s3_object_exists(
-        self, mock_s3_exists, mock_enqueue, _mock_put
+    def test_part_complete_succeeds_when_s3_content_type_matches(
+        self, mock_enqueue, _mock_put
     ):
         create_resp = self._post_create(self._multi_files_payload(count=2))
         doc_id = create_resp.json()["document_id"]
@@ -3987,7 +4107,7 @@ class UploadApiTests(TestCase):
         )
 
         self.assertEqual(resp.status_code, 200)
-        mock_s3_exists.assert_called_once_with("test-bucket", source.file_s3_key)
+        self.mock_s3_head.assert_called_once_with("test-bucket", source.file_s3_key)
         mock_enqueue.assert_not_called()
         source.refresh_from_db()
         self.assertEqual(source.upload_status, DocumentSourceFile.UploadStatus.UPLOADED)
@@ -3995,10 +4115,43 @@ class UploadApiTests(TestCase):
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
     @patch("documents.views.create_presigned_put", return_value="https://example/upload")
     @patch("documents.views.send_process_document_message")
-    @patch("documents.views.s3_object_exists", return_value=False)
-    def test_part_complete_missing_s3_object_leaves_part_pending(
-        self, mock_s3_exists, mock_enqueue, _mock_put
+    def test_part_complete_rejects_s3_content_type_mismatch(
+        self, mock_enqueue, _mock_put
     ):
+        from documents.s3 import S3HeadObjectResult
+
+        self.mock_s3_head.return_value = S3HeadObjectResult(
+            exists=True, content_type="image/png"
+        )
+        create_resp = self._post_create(self._multi_files_payload(count=2))
+        doc_id = create_resp.json()["document_id"]
+        source = DocumentSourceFile.objects.get(document_id=doc_id, order_index=0)
+
+        resp = self._post_part_complete(
+            doc_id,
+            0,
+            {"success": True, "file_size": 111, "file_mime": "image/jpeg"},
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["error"], "s3 content type mismatch")
+        self.assertEqual(resp.json()["document_id"], doc_id)
+        self.assertEqual(resp.json()["order_index"], 0)
+        mock_enqueue.assert_not_called()
+        source.refresh_from_db()
+        self.assertEqual(source.upload_status, DocumentSourceFile.UploadStatus.PENDING)
+        doc = Document.objects.get(id=doc_id)
+        self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch("documents.views.send_process_document_message")
+    def test_part_complete_missing_s3_object_leaves_part_pending(
+        self, mock_enqueue, _mock_put
+    ):
+        from documents.s3 import S3HeadObjectResult
+
+        self.mock_s3_head.return_value = S3HeadObjectResult(exists=False)
         create_resp = self._post_create(self._multi_files_payload(count=2))
         doc_id = create_resp.json()["document_id"]
         source = DocumentSourceFile.objects.get(document_id=doc_id, order_index=0)
@@ -4012,7 +4165,7 @@ class UploadApiTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.json()["error"], "s3 object not found")
         self.assertEqual(resp.json()["order_index"], 0)
-        mock_s3_exists.assert_called_once_with("test-bucket", source.file_s3_key)
+        self.mock_s3_head.assert_called_once_with("test-bucket", source.file_s3_key)
         mock_enqueue.assert_not_called()
 
         source.refresh_from_db()
@@ -4280,12 +4433,14 @@ class UploadApiCsrfTests(TestCase):
         from django.contrib.auth.models import User
         from django.test import Client
 
-        self.s3_exists_patcher = patch(
-            "documents.views.s3_object_exists",
-            return_value=True,
+        from documents.s3 import S3HeadObjectResult
+
+        self.s3_head_patcher = patch(
+            "documents.views.head_s3_object",
+            return_value=S3HeadObjectResult(exists=True, content_type="image/jpeg"),
         )
-        self.mock_s3_exists = self.s3_exists_patcher.start()
-        self.addCleanup(self.s3_exists_patcher.stop)
+        self.mock_s3_head = self.s3_head_patcher.start()
+        self.addCleanup(self.s3_head_patcher.stop)
 
         self.staff = User.objects.create_user(
             username="upload_csrf_staff",

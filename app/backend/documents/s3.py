@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import boto3
 from botocore.exceptions import ClientError
 from django.conf import settings
@@ -66,21 +68,44 @@ def create_presigned_get(
     )
 
 
+@dataclass(frozen=True)
+class S3HeadObjectResult:
+    exists: bool
+    content_type: Optional[str] = None
+
+
+def head_s3_object(bucket: str, key: str) -> S3HeadObjectResult:
+    """
+    HeadObject for upload verification.
+
+    Returns exists=False for missing keys. Raises BotoCoreError or ClientError
+    for unexpected AWS/client failures.
+    """
+    s3 = get_s3_client()
+    try:
+        resp = s3.head_object(Bucket=bucket, Key=key)
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code", "")
+        if code in _S3_NOT_FOUND_ERROR_CODES:
+            return S3HeadObjectResult(exists=False)
+        raise
+
+    content_type = resp.get("ContentType")
+    if isinstance(content_type, str):
+        content_type = content_type.strip() or None
+    else:
+        content_type = None
+
+    return S3HeadObjectResult(exists=True, content_type=content_type)
+
+
 def s3_object_exists(bucket: str, key: str) -> bool:
     """
     Return True when the object exists in S3 (HeadObject succeeds).
 
     Raises BotoCoreError or ClientError for unexpected AWS/client failures.
     """
-    s3 = get_s3_client()
-    try:
-        s3.head_object(Bucket=bucket, Key=key)
-        return True
-    except ClientError as e:
-        code = e.response.get("Error", {}).get("Code", "")
-        if code in _S3_NOT_FOUND_ERROR_CODES:
-            return False
-        raise
+    return head_s3_object(bucket, key).exists
 
 
 def get_object_bytes(bucket: str, key: str) -> Tuple[bytes, Optional[str]]:

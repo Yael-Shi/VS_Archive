@@ -38,6 +38,25 @@ def _normalize_mime_type(mime_type: str) -> str:
     return (mime_type or "").strip().lower().split(";", 1)[0].strip()
 
 
+_S3_CONTENT_TYPE_ALIASES: dict[str, str] = {
+    "image/jpg": "image/jpeg",
+    "image/pjpeg": "image/jpeg",
+}
+
+
+def normalize_upload_mime_type(mime_type: str) -> str:
+    """
+    Normalize MIME for upload/S3 ContentType comparison (lowercase, no parameters).
+    Maps a small set of known S3/browser alias values to canonical types.
+    """
+    base = _normalize_mime_type(mime_type)
+    return _S3_CONTENT_TYPE_ALIASES.get(base, base)
+
+
+def upload_mime_types_match(expected: str, actual: str) -> bool:
+    return normalize_upload_mime_type(expected) == normalize_upload_mime_type(actual)
+
+
 def file_extension(original_name: str) -> str:
     name = (original_name or "").strip().lower()
     if not name or "." not in name:

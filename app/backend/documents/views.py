@@ -17,8 +17,8 @@ from .s3 import (
     build_document_source_file_s3_key,
     create_presigned_get,
     create_presigned_put,
+    head_s3_object,
     mime_type_to_extension,
-    s3_object_exists,
 )
 from documents.services.review_backlog import (
     attach_review_summaries,
@@ -28,6 +28,8 @@ from documents.services.review_backlog import (
     parse_review_reasons,
 )
 from documents.services.upload_validation import (
+    normalize_upload_mime_type,
+    upload_mime_types_match,
     validate_image_upload_metadata,
     validate_single_file_upload_metadata,
 )
@@ -218,26 +220,30 @@ def _uploads_bucket_or_error():
     return bucket, None
 
 
-def _verify_upload_s3_object_exists(
+def _verify_uploaded_s3_object_metadata(
     *,
     bucket: str,
     key: str,
     document_id: int,
+    expected_mime: str,
     order_index: Optional[int] = None,
 ) -> Optional[JsonResponse]:
     """
-    HeadObject check before marking upload complete.
+    Verify that an uploaded S3 object exists and that its stored ContentType
+    matches the expected MIME before marking the upload complete.
 
-    Returns a JsonResponse on missing object or verification failure; None if present.
+    Returns a JsonResponse on verification failure; None when checks pass.
     """
     body: dict = {"document_id": document_id}
     if order_index is not None:
         body["order_index"] = order_index
 
+    if not normalize_upload_mime_type(expected_mime):
+        body["error"] = "expected mime type missing"
+        return JsonResponse(body, status=400)
+
     try:
-        if not s3_object_exists(bucket, key):
-            body["error"] = "s3 object not found"
-            return JsonResponse(body, status=400)
+        head = head_s3_object(bucket, key)
     except (BotoCoreError, ClientError):
         logger.exception(
             "s3 head_object failed during upload verification",
@@ -245,6 +251,18 @@ def _verify_upload_s3_object_exists(
         )
         body["error"] = "s3 verification failed"
         return JsonResponse(body, status=502)
+
+    if not head.exists:
+        body["error"] = "s3 object not found"
+        return JsonResponse(body, status=400)
+
+    if not head.content_type:
+        body["error"] = "s3 content type missing"
+        return JsonResponse(body, status=400)
+
+    if not upload_mime_types_match(expected_mime, head.content_type):
+        body["error"] = "s3 content type mismatch"
+        return JsonResponse(body, status=400)
 
     return None
 
@@ -594,10 +612,12 @@ def upload_complete(request, doc_id: int):
         if bucket_err:
             return bucket_err
 
-        s3_err = _verify_upload_s3_object_exists(
+        expected_mime = file_mime or (doc.mime_type or "")
+        s3_err = _verify_uploaded_s3_object_metadata(
             bucket=bucket,
             key=doc.file_s3_key,
             document_id=doc.id,
+            expected_mime=expected_mime,
         )
         if s3_err:
             return s3_err
@@ -777,10 +797,17 @@ def upload_part_complete(request, doc_id: int, order_index: int):
         if bucket_err:
             return bucket_err
 
-        s3_err = _verify_upload_s3_object_exists(
+        payload_file_mime = payload.get("file_mime")
+        if isinstance(payload_file_mime, str) and payload_file_mime.strip():
+            expected_mime = payload_file_mime.strip()
+        else:
+            expected_mime = source_file.mime_type or ""
+
+        s3_err = _verify_uploaded_s3_object_metadata(
             bucket=bucket,
             key=source_file.file_s3_key,
             document_id=doc.id,
+            expected_mime=expected_mime,
             order_index=order_index,
         )
         if s3_err:
