@@ -41,7 +41,7 @@
         <div class="spacer"></div>
       {% endif %}
 
-      <p class="page-subtitle">תוכן מוקלד ידנית — ללא OCR, ללא העלאת קובץ, ללא יצירת מסמך.</p>
+      <p class="page-subtitle">טקסט מוקלד ידנית — ללא העלאת קובץ.</p>
 
       <form method="post">
         {% csrf_token %}
@@ -54,11 +54,11 @@
       <div class="spacer"></div>
       <div class="card">
         <p>
-          מסמכים, תמונות וקבצי PDF לעיבוד OCR/HTR עדיין נוצרים דרך זרימת ההעלאה הקיימת.
-          לאחר ההעלאה נוצר פריט ארכיון מסוג מסמך OCR.
+          <strong>מסמך סרוק / PDF</strong> — העלאת מסמך לעיבוד טקסט דרך זרימת ההעלאה הקיימת.
+          לאחר ההעלאה נוצר פריט ארכיון מסוג מסמך סרוק.
         </p>
         <div class="spacer"></div>
-        <a class="btn btn-primary" href="{% url 'upload-page' %}">מעבר להעלאת מסמך</a>
+        <a class="btn btn-primary" href="{% url 'upload-page' %}">המשך להעלאת מסמך</a>
       </div>
     {% endif %}
   </div>

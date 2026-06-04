@@ -16,6 +16,12 @@ from documents.services.archive_items import (
     update_manual_text_archive_item,
 )
 from documents.services.archive_item_access import ARCHIVE_FAMILY_GROUP_NAME
+from documents.services.archive_item_presentation import (
+    archive_item_type_label,
+    archive_metadata_status_label,
+    language_label,
+    visibility_label,
+)
 
 
 class ArchiveItemFoundationTests(TestCase):
@@ -861,7 +867,7 @@ class ArchiveNavigationTests(TestCase):
         resp = self.client.get(reverse("archive-manage-list"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, reverse("archive-manage-manual-text-create"))
-        self.assertContains(resp, "יצירת טקסט ידני")
+        self.assertContains(resp, "יצירת טקסט מוקלד")
 
 
 class UnifiedArchiveItemCreatePageTests(TestCase):
@@ -927,7 +933,8 @@ class UnifiedArchiveItemCreatePageTests(TestCase):
         self.assertContains(resp, 'value="manual_text"')
         self.assertContains(resp, "טקסט מוקלד")
         self.assertContains(resp, 'value="ocr_document"')
-        self.assertContains(resp, "מסמך / תמונת טקסט לעיבוד")
+        self.assertContains(resp, "מסמך סרוק / PDF")
+        self.assertNotContains(resp, "OCR document")
 
     def test_unified_page_shows_manual_text_form_when_type_selected(self):
         self.client.force_login(self.staff)
@@ -959,11 +966,152 @@ class UnifiedArchiveItemCreatePageTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(self.NEW_URL, {"item_type": "ocr_document"})
         self.assertContains(resp, reverse("upload-page"))
-        self.assertContains(resp, "מעבר להעלאת מסמך")
+        self.assertContains(resp, "המשך להעלאת מסמך")
+        self.assertContains(resp, "העלאת מסמך לעיבוד טקסט")
+        self.assertNotContains(resp, "OCR/HTR")
 
     def test_existing_manual_text_route_still_works(self):
         self.client.force_login(self.staff)
         resp = self.client.get(self.MANUAL_TEXT_CREATE_URL)
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "יצירת טקסט ידני")
+        self.assertContains(resp, "יצירת טקסט מוקלד")
         self.assertContains(resp, 'name="body"')
+
+
+class ArchiveItemPresentationUiTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="presentation_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.family_group, _ = Group.objects.get_or_create(
+            name=ARCHIVE_FAMILY_GROUP_NAME
+        )
+
+    def _create_family_user(self, username="presentation_family"):
+        user = User.objects.create_user(username=username, password="test-pass")
+        user.groups.add(self.family_group)
+        return user
+
+    def test_presentation_helpers_map_values_to_hebrew(self):
+        self.assertEqual(visibility_label("public"), "ציבורי")
+        self.assertEqual(visibility_label("private"), "פרטי")
+        self.assertEqual(
+            archive_metadata_status_label("NEEDS_COMPLETION"),
+            "דורש השלמת פרטים",
+        )
+        self.assertEqual(archive_metadata_status_label("COMPLETED"), "הושלם")
+        self.assertEqual(
+            archive_item_type_label(ArchiveItem.ItemType.OCR_DOCUMENT),
+            "מסמך סרוק / PDF",
+        )
+        self.assertEqual(
+            archive_item_type_label(ArchiveItem.ItemType.MANUAL_TEXT),
+            "טקסט מוקלד",
+        )
+        self.assertEqual(language_label("heb"), "עברית")
+        self.assertEqual(language_label("he"), "עברית")
+        self.assertEqual(language_label("en"), "אנגלית")
+
+    def test_archive_list_does_not_expose_raw_item_type_labels(self):
+        create_manual_text_archive_item(
+            title="Label manual",
+            body="body",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        create_ocr_document(
+            title="Label OCR",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(reverse("archive-list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "מסמך סרוק / PDF")
+        self.assertContains(resp, "טקסט מוקלד")
+        self.assertNotContains(resp, "OCR document")
+        self.assertNotContains(resp, "Manual text")
+
+    def test_archive_list_shows_type_filter_buttons(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(reverse("archive-list"))
+        self.assertContains(resp, "הכול")
+        self.assertContains(resp, "מסמכים סרוקים / PDF")
+        self.assertContains(resp, "טקסטים מוקלדים")
+        self.assertNotContains(resp, "מסמכים (OCR)")
+
+    def test_archive_list_item_type_filter_limits_results(self):
+        create_manual_text_archive_item(
+            title="Filter manual only",
+            body="x",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        create_ocr_document(
+            title="Filter OCR only",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        resp = self.client.get(reverse("archive-list"), {"item_type": "manual_text"})
+        self.assertContains(resp, "Filter manual only")
+        self.assertNotContains(resp, "Filter OCR only")
+
+        resp = self.client.get(reverse("archive-list"), {"item_type": "ocr_document"})
+        self.assertContains(resp, "Filter OCR only")
+        self.assertNotContains(resp, "Filter manual only")
+
+    def test_archive_list_filter_respects_anonymous_visibility(self):
+        create_manual_text_archive_item(
+            title="Public manual filter",
+            body="x",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        create_manual_text_archive_item(
+            title="Private manual filter",
+            body="x",
+            visibility=ArchiveItem.Visibility.PRIVATE,
+        )
+        resp = self.client.get(reverse("archive-list"), {"item_type": "manual_text"})
+        self.assertContains(resp, "Public manual filter")
+        self.assertNotContains(resp, "Private manual filter")
+
+    def test_archive_manage_list_shows_hebrew_visibility_and_metadata(self):
+        create_manual_text_archive_item(
+            title="Manage labels item",
+            body="x",
+            visibility=ArchiveItem.Visibility.PRIVATE,
+            metadata_status=ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(reverse("archive-manage-list"))
+        self.assertContains(resp, "פרטי")
+        self.assertContains(resp, "דורש השלמת פרטים")
+        self.assertNotContains(resp, "Private")
+        self.assertNotContains(resp, "Needs completion")
+
+    def test_manual_text_form_renders_hebrew_visibility_and_metadata_choices(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get("/archive/manage/new/manual-text/")
+        self.assertContains(resp, "ציבורי")
+        self.assertContains(resp, "פרטי")
+        self.assertContains(resp, "דורש השלמת פרטים")
+        self.assertContains(resp, "הושלם")
+        self.assertNotContains(resp, ">Public<")
+        self.assertNotContains(resp, "Completed")
+
+    def test_archive_detail_admin_shows_hebrew_badges(self):
+        item = create_manual_text_archive_item(
+            title="Detail labels",
+            body="Body text",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+            metadata_status=ArchiveItem.MetadataStatus.COMPLETED,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertContains(resp, "טקסט מוקלד")
+        self.assertContains(resp, "ציבורי")
+        self.assertContains(resp, "הושלם")
+        self.assertNotContains(resp, "MANUAL_TEXT")
+        self.assertNotContains(resp, "COMPLETED")
