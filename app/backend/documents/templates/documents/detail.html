@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load status_labels %}
+{% load status_labels document_date_display %}
 {% block title %}VSArchive - {{ doc.title }}{% endblock %}
 
 {% block content %}
@@ -29,9 +29,9 @@
       {% if is_admin %}
         מסמך #{{ doc.id }}
         {% if doc.file_original_name %} · {{ doc.file_original_name }}{% endif %}
-        {% if doc.date_start or doc.date_end %} · {{ doc.date_start }} - {{ doc.date_end }}{% endif %}
-      {% elif doc.date_start or doc.date_end %}
-        {{ doc.date_start }} - {{ doc.date_end }}
+        · {{ doc|document_date_display }}
+      {% else %}
+        {{ doc|document_date_display }}
       {% endif %}
     </div>
 
