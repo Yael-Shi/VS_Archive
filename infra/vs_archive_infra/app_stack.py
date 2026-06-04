@@ -259,6 +259,10 @@ class VsArchiveAppStack(Stack):
             # Give the ALB enough time to mark the new web target healthy
             # after Django startup checks/migrations.
             health_check_grace_period=Duration.seconds(180),
+            # Keep the old web task serving while the replacement web task
+            # passes ALB health checks.
+            min_healthy_percent=100,
+            max_healthy_percent=200,
         )
 
         # --- Worker Task (Spot Cost Saving) ---
