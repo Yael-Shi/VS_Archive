@@ -1,5 +1,6 @@
 from django.contrib import admin
 from .models import (
+    ArchiveItem,
     Document,
     CorrectionRequest,
     DocumentTextResult,
@@ -51,6 +52,35 @@ class TranskribusRunInline(admin.TabularInline):
         return False
 
 
+@admin.register(ArchiveItem)
+class ArchiveItemAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "title",
+        "item_type",
+        "visibility",
+        "metadata_status",
+        "date_precision",
+        "created_at",
+    )
+    list_filter = ("item_type", "visibility", "metadata_status", "date_precision")
+    search_fields = ("title",)
+    ordering = ("-created_at",)
+    readonly_fields = ("created_at", "updated_at")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_view_permission(self, request, obj=None):
+        return super().has_view_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
 @admin.register(Document)
 class DocumentAdmin(admin.ModelAdmin):
     inlines = (DocumentMetadataInline, TranskribusRunInline)
@@ -58,6 +88,7 @@ class DocumentAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "title",
+        "archive_item",
         "doc_type",
         "text_input_type",
         "metadata_status",
@@ -82,7 +113,7 @@ class DocumentAdmin(admin.ModelAdmin):
     filter_horizontal = ("tags_m2m",)
 
     fieldsets = (
-        ("Core", {"fields": ("title", "doc_type", "text_input_type")}),
+        ("Core", {"fields": ("archive_item", "title", "doc_type", "text_input_type")}),
         (
             "Status",
             {
@@ -121,7 +152,10 @@ class DocumentAdmin(admin.ModelAdmin):
         ),
         ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )
-    readonly_fields = ("created_at", "updated_at")
+    readonly_fields = ("archive_item", "created_at", "updated_at")
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(CorrectionRequest)

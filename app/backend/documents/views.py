@@ -11,6 +11,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from .models import Document, DocumentSourceFile, DocumentTextResult, Tag, DocumentMetadata
+from documents.services.archive_items import create_ocr_document
 from botocore.exceptions import BotoCoreError, ClientError
 
 from .s3 import (
@@ -403,7 +404,7 @@ def _create_multi_image_upload(request, payload: dict, common: dict):
     if bucket_err:
         return bucket_err
 
-    doc = Document.objects.create(
+    doc = create_ocr_document(
         title=common["title"],
         doc_type=Document.DocType.IMAGE,
         date_start=common["date_start"],
@@ -486,7 +487,7 @@ def _create_single_file_upload(request, payload: dict, common: dict):
     if bucket_err:
         return bucket_err
 
-    doc = Document.objects.create(
+    doc = create_ocr_document(
         title=common["title"],
         doc_type=doc_type,
         date_start=common["date_start"],

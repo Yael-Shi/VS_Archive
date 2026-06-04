@@ -19,6 +19,7 @@ from PIL import Image
 
 from documents.management.commands.run_worker import Command
 from documents.models import Document, DocumentSourceFile, DocumentTextResult, TranskribusRun
+from documents.services.archive_items import create_ocr_document
 from documents.services.env_validation import validate_required_env
 from documents.services.transkribus_engine import PylaiaTranscriptionOutcome
 from documents.services.gemini_engine import GeminiError, GeminiResult
@@ -130,7 +131,7 @@ class HtrRegistryTests(SimpleTestCase):
 
 class TranskribusAdapterTests(TestCase):
     def _create_document(self) -> Document:
-        return Document.objects.create(
+        return create_ocr_document(
             title="Transkribus adapter test doc",
             doc_type=Document.DocType.PDF,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -1850,7 +1851,7 @@ class RunWorkerBehaviorTests(TestCase):
             gemini_top_k=40,
             gemini_top_p=0.95,
         )
-        self.doc = Document.objects.create(
+        self.doc = create_ocr_document(
             title="Doc",
             doc_type=Document.DocType.PDF,
             language=Document.Language.ENGLISH,
@@ -2018,7 +2019,7 @@ class RunWorkerBehaviorTests(TestCase):
         mock_extract_pages,
         mock_get_object_bytes,
     ):
-        he_doc = Document.objects.create(
+        he_doc = create_ocr_document(
             title="Hebrew doc",
             doc_type=Document.DocType.PDF,
             language=Document.Language.HEBREW,
@@ -2156,7 +2157,7 @@ class RunWorkerBehaviorTests(TestCase):
         mock_extract_pages,
         mock_transcribe,
     ):
-        doc = Document.objects.create(
+        doc = create_ocr_document(
             title="BadLang",
             doc_type=Document.DocType.PDF,
             language=None,
@@ -2210,7 +2211,7 @@ class RunWorkerBehaviorTests(TestCase):
             review_reasons=[],
         )
 
-        he_doc = Document.objects.create(
+        he_doc = create_ocr_document(
             title="Hebrew HTR",
             doc_type=Document.DocType.PDF,
             language=Document.Language.HEBREW,
@@ -2287,7 +2288,7 @@ class RunWorkerBehaviorTests(TestCase):
         mock_extract_pages,
         mock_transcribe,
     ):
-        he_doc = Document.objects.create(
+        he_doc = create_ocr_document(
             title="Hebrew HTR disabled",
             doc_type=Document.DocType.PDF,
             language=Document.Language.HEBREW,
@@ -2343,7 +2344,7 @@ class RunWorkerBehaviorTests(TestCase):
         mock_extract_pages,
         mock_get_object_bytes,
     ):
-        he_doc = Document.objects.create(
+        he_doc = create_ocr_document(
             title="Hebrew HTR failure",
             doc_type=Document.DocType.PDF,
             language=Document.Language.HEBREW,
@@ -2420,7 +2421,7 @@ class MultiImageWorkerTests(TestCase):
         )
 
     def _make_doc(self, *, language, text_input_type, expected_count):
-        return Document.objects.create(
+        return create_ocr_document(
             title="Multi-image doc",
             doc_type=Document.DocType.IMAGE,
             language=language,
@@ -2833,7 +2834,7 @@ class DevTranskribusTranscribeCommandTests(SimpleTestCase):
 
 class TranskribusCleanupReportTests(TestCase):
     def _create_document(self, *, title: str = "Cleanup report doc") -> Document:
-        return Document.objects.create(
+        return create_ocr_document(
             title=title,
             doc_type=Document.DocType.PDF,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -3050,7 +3051,7 @@ class TranskribusCleanupReportTests(TestCase):
 
 class ReportTranskribusCleanupCommandTests(TestCase):
     def test_command_outputs_json_without_mutating_rows(self):
-        doc = Document.objects.create(
+        doc = create_ocr_document(
             title="Cleanup command doc",
             doc_type=Document.DocType.PDF,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -3096,7 +3097,7 @@ class ReportTranskribusCleanupCommandTests(TestCase):
 
 class TranskribusRunModelTests(TestCase):
     def _create_document(self) -> Document:
-        return Document.objects.create(
+        return create_ocr_document(
             title="Transkribus run test doc",
             doc_type=Document.DocType.PDF,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -3186,7 +3187,7 @@ class TranskribusRunModelTests(TestCase):
 
 class DocumentSourceFileModelTests(TestCase):
     def _create_document(self) -> Document:
-        return Document.objects.create(
+        return create_ocr_document(
             title="Source file test doc",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -3344,7 +3345,7 @@ class UploadCompleteSourceFileTests(TestCase):
             "size_bytes": 1000,
         }
         defaults.update(kwargs)
-        return Document.objects.create(**defaults)
+        return create_ocr_document(**defaults)
 
     def _post_complete(self, doc_id: int, payload: dict):
         self.client.force_login(self.staff)
@@ -4517,7 +4518,7 @@ class UploadApiCsrfTests(TestCase):
 
     @patch("documents.views.send_process_document_message")
     def test_complete_without_csrf_is_rejected(self, _mock_enqueue):
-        doc = Document.objects.create(
+        doc = create_ocr_document(
             title="CSRF complete test",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -4535,7 +4536,7 @@ class UploadApiCsrfTests(TestCase):
 
     @patch("documents.views.send_process_document_message")
     def test_complete_with_csrf_succeeds(self, _mock_enqueue):
-        doc = Document.objects.create(
+        doc = create_ocr_document(
             title="CSRF complete test",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -4643,7 +4644,7 @@ class UploadApiCsrfTests(TestCase):
 
 class TranskribusRunPersistenceServiceTests(TestCase):
     def _create_document(self) -> Document:
-        return Document.objects.create(
+        return create_ocr_document(
             title="Persistence test doc",
             doc_type=Document.DocType.PDF,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -4791,7 +4792,7 @@ def _transkribus_adapter_worker_env(**overrides):
 
 class TranskribusAdapterPersistenceTests(TestCase):
     def _create_document(self) -> Document:
-        return Document.objects.create(
+        return create_ocr_document(
             title="Adapter persistence doc",
             doc_type=Document.DocType.PDF,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -4974,7 +4975,7 @@ class TranskribusWorkdirRetryAdapterTests(TestCase):
     """Adapter dev-upload recovers from the transient PyLaia workdir failure via retry."""
 
     def _create_document(self) -> Document:
-        return Document.objects.create(
+        return create_ocr_document(
             title="Workdir retry doc",
             doc_type=Document.DocType.PDF,
             language=Document.Language.HEBREW,
@@ -5111,7 +5112,7 @@ class TranskribusWorkdirRetryWorkerTests(TestCase):
         return cmd
 
     def _he_doc(self):
-        return Document.objects.create(
+        return create_ocr_document(
             title="Hebrew workdir retry",
             doc_type=Document.DocType.PDF,
             language=Document.Language.HEBREW,
@@ -5197,7 +5198,7 @@ class TranskribusWorkdirRetryWorkerTests(TestCase):
 
 class TranskribusRunPersistenceGuardTests(TestCase):
     def _create_document(self) -> Document:
-        return Document.objects.create(
+        return create_ocr_document(
             title="Guard persistence doc",
             doc_type=Document.DocType.PDF,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -5269,7 +5270,7 @@ class TranskribusRunPersistenceGuardTests(TestCase):
 
 class TranskribusRunPersistenceReusableRunTests(TestCase):
     def _create_document(self) -> Document:
-        return Document.objects.create(
+        return create_ocr_document(
             title="Reusable run doc",
             doc_type=Document.DocType.PDF,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -5457,7 +5458,7 @@ class TranskribusRunPersistenceReusableRunTests(TestCase):
 
 class TranskribusUploadDuplicateGuardTests(TestCase):
     def _create_document(self) -> Document:
-        return Document.objects.create(
+        return create_ocr_document(
             title="Duplicate guard doc",
             doc_type=Document.DocType.PDF,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -5758,7 +5759,7 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
 
 class TranskribusRecognitionOnlyRetryTests(TestCase):
     def _create_document(self) -> Document:
-        return Document.objects.create(
+        return create_ocr_document(
             title="Recognition-only retry doc",
             doc_type=Document.DocType.PDF,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -6234,7 +6235,7 @@ class SourcePreviewTests(TestCase):
         return f"/api/ui/admin/review/{doc_id}/"
 
     def _single_file_doc(self):
-        doc = Document.objects.create(
+        doc = create_ocr_document(
             title="Legacy single",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.PRINTED,
@@ -6257,7 +6258,7 @@ class SourcePreviewTests(TestCase):
         return doc
 
     def _multi_image_doc(self, *, count=3, expected=None, language=Document.Language.HEBREW):
-        doc = Document.objects.create(
+        doc = create_ocr_document(
             title="Multi image",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -6535,7 +6536,7 @@ class ReviewUiTests(TestCase):
             "processing_state_user": Document.ProcessingState.READY,
         }
         defaults.update(kwargs)
-        return Document.objects.create(**defaults)
+        return create_ocr_document(**defaults)
 
     def _create_text_result(self, doc, **kwargs):
         defaults = {
@@ -7355,7 +7356,7 @@ class StatusLabelPresentationTests(TestCase):
             "processing_state_user": Document.ProcessingState.READY,
         }
         defaults.update(kwargs)
-        return Document.objects.create(**defaults)
+        return create_ocr_document(**defaults)
 
     def _create_hebrew_text_result(self, doc, **kwargs):
         defaults = {
@@ -7490,7 +7491,7 @@ class NavigationLabelTests(TestCase):
             "processing_state_user": Document.ProcessingState.READY,
         }
         defaults.update(kwargs)
-        return Document.objects.create(**defaults)
+        return create_ocr_document(**defaults)
 
     def _create_text_result(self, doc, **kwargs):
         defaults = {
@@ -7626,7 +7627,7 @@ class DocumentDetailTextGroupingTests(TestCase):
             "processing_state_user": Document.ProcessingState.READY,
         }
         defaults.update(kwargs)
-        return Document.objects.create(**defaults)
+        return create_ocr_document(**defaults)
 
     def _create_text_result(self, doc, **kwargs):
         defaults = {
@@ -7792,7 +7793,7 @@ class TextPresentationHelperTests(TestCase):
     def test_get_text_presentation_identical_flag(self):
         from documents.services.text_presentation import get_text_presentation_for_document
 
-        doc = Document.objects.create(
+        doc = create_ocr_document(
             title="Presentation helper doc",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -7854,7 +7855,7 @@ class DocumentVisibilityAccessControlTests(TestCase):
             "mime_type": "image/jpeg",
         }
         defaults.update(kwargs)
-        return Document.objects.create(**defaults)
+        return create_ocr_document(**defaults)
 
     def test_anonymous_list_api_public_only(self):
         public_doc = self._create_document(
@@ -8025,7 +8026,7 @@ class DocumentDatePrecisionTests(TestCase):
             "upload_status": Document.UploadStatus.UPLOADED,
         }
         defaults.update(kwargs)
-        return Document.objects.create(**defaults)
+        return create_ocr_document(**defaults)
 
     def test_format_unknown_without_dates(self):
         from documents.services.document_date import NO_DATE_LABEL, format_document_date
@@ -8155,7 +8156,7 @@ class DocumentDatePrecisionTests(TestCase):
         self.assertNotContains(resp, "1948-05-12")
 
     def test_default_date_precision_is_unknown_without_dates(self):
-        doc = Document.objects.create(
+        doc = create_ocr_document(
             title="No dates",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -8200,13 +8201,13 @@ class DocumentAccessServiceTests(TestCase):
         from documents.services.document_access import document_queryset_for_user
         from django.contrib.auth.models import User
 
-        public_doc = Document.objects.create(
+        public_doc = create_ocr_document(
             title="Public svc",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
             visibility=Document.Visibility.PUBLIC,
         )
-        private_doc = Document.objects.create(
+        private_doc = create_ocr_document(
             title="Private svc",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
