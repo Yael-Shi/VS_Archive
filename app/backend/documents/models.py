@@ -52,6 +52,22 @@ class ArchiveItem(models.Model):
         return f"{self.title} ({self.item_type})"
 
 
+class ManualTextContent(models.Model):
+    """First-party typed text for MANUAL_TEXT archive items (not OCR output)."""
+
+    archive_item = models.OneToOneField(
+        ArchiveItem,
+        on_delete=models.CASCADE,
+        related_name="manual_text_content",
+    )
+    body = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return f"ManualTextContent(archive_item_id={self.archive_item_id})"
+
+
 class DocumentQuerySet(models.QuerySet):
     def delete(self):
         with transaction.atomic():

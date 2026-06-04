@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% load document_date_display %}
+{% block title %}VSArchive - ניהול ארכיון{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <h1 class="page-title">ניהול ארכיון</h1>
+    <p class="page-subtitle">רשימת כל פריטי הארכיון — לצוות בלבד.</p>
+
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-list' %}">חזרה לארכיון</a>
+      <a class="btn btn-primary" href="{% url 'archive-manage-manual-text-create' %}">יצירת טקסט ידני</a>
+    </div>
+
+    <div class="spacer"></div>
+
+    {% if items %}
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>כותרת</th>
+              <th>סוג</th>
+              <th>נראות</th>
+              <th>מטא־דאטה</th>
+              <th>פעולות</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+              <tr>
+                <td>{{ item.id }}</td>
+                <td><a href="{% url 'archive-detail' item_id=item.id %}">{{ item.title }}</a></td>
+                <td>{{ item.get_item_type_display }}</td>
+                <td>{{ item.get_visibility_display }}</td>
+                <td>{{ item.get_metadata_status_display }}</td>
+                <td>
+                  {% if item.item_type == "MANUAL_TEXT" %}
+                    <a class="btn" href="{% url 'archive-manage-edit' item_id=item.id %}">עריכה</a>
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">אין פריטי ארכיון.</p>
+    {% endif %}
+  </div>
+{% endblock %}

@@ -4,6 +4,7 @@ from .models import (
     Document,
     CorrectionRequest,
     DocumentTextResult,
+    ManualTextContent,
     Tag,
     DocumentMetadata,
     TranskribusRun,
@@ -76,6 +77,23 @@ class ArchiveItemAdmin(admin.ModelAdmin):
 
     def has_view_permission(self, request, obj=None):
         return super().has_view_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ManualTextContent)
+class ManualTextContentAdmin(admin.ModelAdmin):
+    list_display = ("id", "archive_item", "created_at", "updated_at")
+    search_fields = ("archive_item__title", "body")
+    ordering = ("-created_at",)
+    readonly_fields = ("archive_item", "body", "created_at", "updated_at")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
 
     def has_delete_permission(self, request, obj=None):
         return False

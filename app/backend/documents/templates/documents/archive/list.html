@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% load document_date_display %}
+{% block title %}VSArchive - ארכיון{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <h1 class="page-title">ארכיון</h1>
+    <p class="page-subtitle">פריטי ארכיון לפי הרשאות הצפייה שלך.</p>
+
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'documents-list-page' %}">מסמכים (OCR)</a>
+      {% if is_admin %}
+        <a class="btn" href="{% url 'archive-manage-list' %}">ניהול ארכיון</a>
+      {% endif %}
+    </div>
+
+    <div class="spacer"></div>
+
+    {% if items %}
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>כותרת</th>
+              <th>סוג</th>
+              <th>תאריך</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+              <tr>
+                <td><a href="{% url 'archive-detail' item_id=item.id %}">{{ item.title }}</a></td>
+                <td>{{ item.get_item_type_display }}</td>
+                <td>{{ item|document_date_display }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">אין פריטי ארכיון להצגה.</p>
+    {% endif %}
+  </div>
+{% endblock %}

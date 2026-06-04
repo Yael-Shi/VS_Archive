@@ -29,5 +29,6 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("health/", health),
     path("accounts/", include("django.contrib.auth.urls")),
+    path("archive/", include("documents.archive_urls")),
     path("api/", include("documents.urls")),
 ]
