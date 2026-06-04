@@ -1,5 +1,69 @@
 import uuid
-from django.db import models
+
+from django.db import models, transaction
+
+
+class ArchiveItem(models.Model):
+    """Central archival content entity; OCR-backed documents link via Document.archive_item."""
+
+    class ItemType(models.TextChoices):
+        OCR_DOCUMENT = "OCR_DOCUMENT", "OCR document"
+        MANUAL_TEXT = "MANUAL_TEXT", "Manual text"
+        PHOTO = "PHOTO", "Photo"
+
+    class Visibility(models.TextChoices):
+        PRIVATE = "private", "Private"
+        PUBLIC = "public", "Public"
+
+    class MetadataStatus(models.TextChoices):
+        NEEDS_COMPLETION = "NEEDS_COMPLETION", "Needs completion"
+        COMPLETED = "COMPLETED", "Completed"
+
+    class DatePrecision(models.TextChoices):
+        EXACT_DAY = "EXACT_DAY", "Exact day"
+        MONTH = "MONTH", "Month"
+        YEAR = "YEAR", "Year"
+        RANGE = "RANGE", "Range"
+        UNKNOWN = "UNKNOWN", "Unknown"
+
+    title = models.CharField(max_length=255)
+    item_type = models.CharField(max_length=32, choices=ItemType.choices)
+    visibility = models.CharField(
+        max_length=16,
+        choices=Visibility.choices,
+        default=Visibility.PRIVATE,
+    )
+    date_start = models.DateField(null=True, blank=True)
+    date_end = models.DateField(null=True, blank=True)
+    date_precision = models.CharField(
+        max_length=16,
+        choices=DatePrecision.choices,
+        default=DatePrecision.UNKNOWN,
+    )
+    metadata_status = models.CharField(
+        max_length=32,
+        choices=MetadataStatus.choices,
+        default=MetadataStatus.NEEDS_COMPLETION,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return f"{self.title} ({self.item_type})"
+
+
+class DocumentQuerySet(models.QuerySet):
+    def delete(self):
+        with transaction.atomic():
+            archive_item_ids = list(
+                self.exclude(archive_item_id__isnull=True)
+                .values_list("archive_item_id", flat=True)
+                .distinct()
+            )
+            deleted_count, deleted_map = super().delete()
+            if archive_item_ids:
+                ArchiveItem.objects.filter(pk__in=archive_item_ids).delete()
+            return deleted_count, deleted_map
 
 
 class Document(models.Model):
@@ -111,11 +175,26 @@ class Document(models.Model):
         ),
     )
 
+    archive_item = models.OneToOneField(
+        ArchiveItem,
+        on_delete=models.CASCADE,
+        related_name="ocr_document",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = DocumentQuerySet.as_manager()
+
     def __str__(self) -> str:
         return str(self.title)
+
+    def delete(self, using=None, keep_parents=False):
+        with transaction.atomic():
+            archive_item_id = self.archive_item_id
+            super().delete(using=using, keep_parents=keep_parents)
+            if archive_item_id:
+                ArchiveItem.objects.filter(pk=archive_item_id).delete()
 
 
 class DocumentTextResult(models.Model):

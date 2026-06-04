@@ -1,5 +1,23 @@
 # VS-Archive Decision Log
 
+## ArchiveItem — central content entity foundation
+
+**Decision:** Introduce **`ArchiveItem`** as the long-term central archival content entity. Existing and new OCR-backed **`Document`** rows link via **`Document.archive_item`** (`OneToOneField`, `on_delete=CASCADE`, `related_name="ocr_document"`).
+
+**Initial `item_type` values:** `OCR_DOCUMENT`, `MANUAL_TEXT`, `PHOTO` (enum only for the latter two in this PR).
+
+**Scope (this PR):** Model + migration + data backfill + `create_ocr_document` helper + upload create paths + minimal admin + focused tests + docs. **No** manual-text or photo-only creation flows. **No** removal of shared fields from **`Document`**. **No** list/detail/review UI cutover to **`ArchiveItem`**. **No** OCR/HTR, routing, visibility, or date-display behavior changes.
+
+**Bridge semantics (temporary):** **`ArchiveItem`** shared fields are initialized from **`Document`** at **create** and **migration backfill** time only. There is **no** ongoing sync on edit. **`Document`** remains the runtime source of truth for existing list/detail/upload/review behavior until a later cutover PR. Field duplication on both models is a **migration bridge**, not the final architecture. **Do not assume** **`ArchiveItem`** copies stay current after **`Document`** edits during the bridge phase. Before any future cutover that makes **`ArchiveItem`** the runtime source of truth for list/detail/search/API, shared fields must be refreshed from current **`Document`** values or migrated through an **explicit sync strategy** (not implemented in this PR).
+
+**Backfill:** Migration `0020_archiveitem_foundation` is **self-contained** (uses `apps.get_model` only; does not import runtime services). It creates **`ArchiveItem`** rows for documents missing **`archive_item`**, copying **`title`**, **`visibility`**, **`date_start`**, **`date_end`**, **`date_precision`**, **`metadata_status`** with **`item_type=OCR_DOCUMENT`** — no inference beyond stored document values. **`created_at`** / **`updated_at`** are set via **`QuerySet.update`** after create so **`auto_now_add`** / **`auto_now`** do not overwrite document timestamps.
+
+**Create path:** Production upload APIs and tests use explicit **`create_ocr_document`**. **`Document.objects.create`** does **not** auto-create **`ArchiveItem`** (no manager override). **Django admin:** **`Document`** add is disabled. OCR-backed documents must be created via upload / **`create_ocr_document`**, not admin “Add document”. **`ArchiveItemAdmin`** is **view-only** during the foundation bridge: add/change/delete disabled; view via normal **`has_view_permission`** checks. Do not manually edit **`ArchiveItem`** shared fields in admin until **`ArchiveItem`** is runtime source of truth or a sync/cutover PR exists — editing would drift from **`Document`** with no ongoing sync.
+
+**Delete behavior:** Legacy **`Document`** delete paths run inside **`transaction.atomic()`** so document-row removal and linked **`ArchiveItem`** cleanup commit or roll back together. At the ORM level, **`ArchiveItem.delete()`** is the canonical parent delete path (**`on_delete=CASCADE`** on **`Document.archive_item`** removes the linked OCR **`Document`** and its **`CASCADE`** children). **`ArchiveItem`** deletion through Django admin is **disabled** until a deliberate archive-item deletion policy/workflow is designed. Legacy **`Document`** delete paths (instance and **`QuerySet.delete`**) also remove the linked **`ArchiveItem`** so bulk document deletes do not leave orphan **`OCR_DOCUMENT`** rows.
+
+**Deferred:** UI/API reads from **`ArchiveItem`**; ongoing shared-field sync; deduplicating **`Document`** fields; **`MANUAL_TEXT`** / **`PHOTO`** item flows; archive-item-level text results.
+
 ## Document date precision — schema foundation (PR 2)
 
 **Decision:** Add **`Document.date_precision`** (`DatePrecision`: `EXACT_DAY`, `MONTH`, `YEAR`, `RANGE`, `UNKNOWN`) with Django default **`UNKNOWN`**. Migration adds the column with that default for **all** existing rows — **no** inference from `date_start`/`date_end` in this PR.

@@ -4,6 +4,10 @@ VS-Archive is a Django backend project for managing historical family documents.
 
 ## Main domain
 
+- **`ArchiveItem`** is the long-term central archival content entity (title, visibility, dates, metadata status, item type). This PR adds the model and links existing OCR-backed **`Document`** rows as **`item_type=OCR_DOCUMENT`** without changing runtime upload/OCR/UI behavior.
+- **`Document`** remains the runtime source of truth for list/detail/upload/review until a later cutover PR. Shared **`ArchiveItem`** fields are copied from **`Document`** at create/backfill only — **no** ongoing sync in this PR. Do not assume **`ArchiveItem`** copies stay current after **`Document`** edits during the bridge. Before a cutover that makes **`ArchiveItem`** the runtime source of truth for list/detail/search/API, refresh shared fields from **`Document`** or run an explicit sync/migration strategy. Duplicated fields are a temporary migration bridge, not the final model.
+- OCR-backed documents: create via upload API / **`create_ocr_document()`** only — not Django admin “Add document”. **`ArchiveItemAdmin`** is view-only in this foundation phase (no add/edit/delete in admin); do not manually edit **`ArchiveItem`** shared fields until cutover/sync — they are copied from **`Document`** at create/backfill only. Admin **`ArchiveItem`** delete waits for a deliberate deletion policy.
+- Manual text and photo-only archive items are **not** implemented yet (`MANUAL_TEXT` / `PHOTO` are enum placeholders only).
 - Documents may be uploaded as IMAGE or PDF.
 - Documents have metadata (`language`, `text_input_type`, etc.).
 - OCR/HTR extracts text into `DocumentTextResult` rows.

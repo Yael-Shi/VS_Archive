@@ -1,6 +1,7 @@
 from django.test import TestCase
 
 from documents.models import Document, DocumentSourceFile
+from documents.services.archive_items import create_ocr_document
 from documents.services.source_files import (
     MULTI_IMAGE_MIN_FILES,
     MultiImageSourceFilesError,
@@ -10,7 +11,7 @@ from documents.services.source_files import (
 
 class GetOrderedSourceFilesForProcessingTests(TestCase):
     def _make_doc(self, expected_count: int = 2) -> Document:
-        return Document.objects.create(
+        return create_ocr_document(
             title="Multi-image doc",
             doc_type=Document.DocType.IMAGE,
             language=Document.Language.ENGLISH,
