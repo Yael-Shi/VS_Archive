@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load status_labels %}
+{% load status_labels document_date_display %}
 {% block title %}VSArchive - מסמכים{% endblock %}
 
 {% block content %}
@@ -121,11 +121,7 @@
               </div>
 
               <div class="cell-meta">
-                {% if d.date_start or d.date_end %}
-                  {{ d.date_start }} - {{ d.date_end }}
-                {% else %}
-                  ללא טווח תאריכים
-                {% endif %}
+                {{ d|document_date_display }}
                 {% if is_admin %} · #{{ d.id }}{% endif %}
                 {% if is_admin and d.file_original_name %} · {{ d.file_original_name }}{% endif %}
               </div>

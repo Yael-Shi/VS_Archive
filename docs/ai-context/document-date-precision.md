@@ -2,7 +2,9 @@
 
 This note defines how VS-Archive should represent, display, and eventually filter **partial or imprecise** document dates.
 
-**Implemented (foundation):** `Document.date_precision` (`DatePrecision` enum) + migration `0019`. Default `UNKNOWN` for all rows (no backfill from `date_start`/`date_end`). UI, upload inputs, display, and filtering are **not** implemented yet.
+**Implemented (foundation):** `Document.date_precision` (`DatePrecision` enum) + migration `0019`. Default `UNKNOWN` for all rows (no backfill from `date_start`/`date_end`).
+
+**Implemented (display helper / list-detail):** `format_document_date()` in `documents/services/document_date.py` + `document_date_display` template filter; list/detail templates use precision-aware labels. For `UNKNOWN`, display is always **ללא תאריך** (normalized bounds are not shown), including when bounds are null. Implemented **before** upload/edit precision UI. Upload/edit save-by-precision, filtering/search, and backfill are **not** implemented yet.
 
 ## 1. Problem statement
 
@@ -27,7 +29,7 @@ Both are optional metadata (“often unknown at upload time” per model comment
 
 - Upload/admin create accepts optional `date_start` / `date_end` as `YYYY-MM-DD` (`_parse_date_optional` in `documents/views.py`).
 - Upload template labels: **תאריך התחלה** / **תאריך סיום** with HTML `type="date"` (`upload.html`).
-- List and detail templates render `{{ date_start }} - {{ date_end }}` when either is set (`list.html`, `detail.html`).
+- List and detail templates use `format_document_date` / `document_date_display` (not raw `date_start - date_end`).
 
 **Product/modeling gap:**
 
@@ -208,9 +210,9 @@ Explicit boundaries for all work until follow-up PRs are approved:
 |----|--------|
 | **PR 1** | This design doc + decision-log pointer only. |
 | **PR 2** | **Done (foundation):** `date_precision` field + migration; default `UNKNOWN` for existing and new rows until UI/backfill PRs. No `date_display` / note fields. |
-| **PR 3** | Admin/upload/edit UI: precision selector, conditional inputs, validation. |
-| **PR 4** | List/detail (and public if applicable) display using precision-aware labels. |
-| **PR 5** | Filtering/search: overlap queries, “no date”, year/month natural filters. |
+| **PR 3** | Admin/upload/edit UI: precision selector, conditional inputs, validation. **Not implemented.** |
+| **Display helper / list-detail** | **Done:** precision-aware labels on list/detail via `document_date.py` helper; `UNKNOWN` shows ללא תאריך and ignores bounds. Shipped before PR 3 because the display helper was smaller and safer. |
+| **PR 5** (filtering) | Filtering/search: overlap queries, “no date”, year/month natural filters. **Not implemented.** |
 | **PR 6** | Optional: `APPROXIMATE`, `DECADE`, `BEFORE`/`AFTER`, `HEBREW_DATE`, `SEASON`, source/confidence metadata. |
 
 ## Related docs

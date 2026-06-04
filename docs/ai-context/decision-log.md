@@ -8,6 +8,12 @@
 
 **Deferred:** Precision-aware save/display (PR 3–5 in `docs/ai-context/document-date-precision.md`); automated backfill rules (section 8 of that doc) require explicit approval before any data migration beyond `UNKNOWN`.
 
+## Document date precision — list/detail display
+
+**Decision:** Add **`format_document_date(document)`** for list/detail UI. **`UNKNOWN`** always displays **ללא תאריך** and **does not** show `date_start`/`date_end` even when populated (Option B). Other precisions format from bounds without exposing normalized first/last days for month/year.
+
+**Scope:** Helper + template filter + `list.html` / `detail.html` only. Shipped **before** upload/edit precision UI (design-doc sequence PR 3). **No** model/migration/upload/API/filtering/backfill changes.
+
 ## Future design note — document date precision (design exploration; PR 1)
 
 **Schema status updated by the PR 2 entry above.** Remaining bullets describe product direction, not current implementation.
