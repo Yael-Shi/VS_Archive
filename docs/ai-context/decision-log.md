@@ -131,7 +131,7 @@ Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`s
 
 ### API (admin-only, same auth as existing upload endpoints)
 
-- **`POST /api/uploads/create/`** — if **`files`** array is present → multi-image mode (2–25 **`image/*`** files only, server-assigned **`order_index`** from array order). Legacy single-file body/response unchanged when **`files`** is absent.
+- **`POST /api/uploads/create/`** — if **`files`** array is present → multi-image mode (2–30 **`image/*`** files only, server-assigned **`order_index`** from array order). Legacy single-file body/response unchanged when **`files`** is absent.
 - **`POST /api/uploads/<doc_id>/parts/<order_index>/complete/`** — mark one planned source file **`UPLOADED`** or **`FAILED`**; part failure marks parent **`Document.upload_status=FAILED`**.
 - **`POST /api/uploads/<doc_id>/finalize/`** — when all expected parts are **`UPLOADED`**, mirror **`order_index=0`** into **`Document.file_*`**, set **`Document.upload_status=UPLOADED`**, set **`Document.processing_state_user=PARTIAL`** (no **`ACTION_REQUIRED`** enum exists today), **do not enqueue SQS**. **[Superseded by PR4: the finalize success path now sets `PROCESSING` and enqueues `PROCESS_DOCUMENT`; see "Multi-image worker processing (PR4)" below.]**
 - Legacy **`POST .../complete/`** — unchanged for single-file docs; returns **400** for multi-image documents.
@@ -222,9 +222,9 @@ Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`s
 
 - The single file input now has the **`multiple`** attribute. Client-side branching is by selection count:
   - **1 file** → unchanged **legacy single-file flow** (`create` → presigned `PUT` → `complete/`); image **or** PDF, exactly as before. No confirmation prompt.
-  - **2–25 files** → **multi-image flow** (`create` with `files[]` → `PUT` each part → `parts/<order_index>/complete/` each → `finalize/`).
+  - **2–30 files** → **multi-image flow** (`create` with `files[]` → `PUT` each part → `parts/<order_index>/complete/` each → `finalize/`).
 - **Selection order is the document page order.** The selected files are listed (multi-image case only) as 1-based `עמוד N: <original_name>`. **No reorder controls and no drag/drop.**
-- Multi-image is **image-only**: 2+ selections are validated client-side — any non-`image/*` file or **>20** files is rejected **before** any API call (mirrors the backend rules; backend remains the enforcer). No PDF+image mixed selection, no multi-PDF.
+- Multi-image is **image-only**: 2+ selections are validated client-side — any non-`image/*` file or **>30** files is rejected **before** any API call (mirrors the backend rules; backend remains the enforcer). No PDF+image mixed selection, no multi-PDF.
 - For a 2+ selection the page forces **`doc_type=IMAGE`** (multi-image create requires/assumes `IMAGE`), so the user does not separately pick `doc_type`.
 - Shared metadata (`title`, `date_*`, `language`, `text_input_type`, `category_event`, `visibility`, `tags`, `admin_meta`) applies to the **whole `Document`**; per-file payload is only `original_name`, `mime_type`, `size_bytes` inside `files[]`.
 - Progress reuses the existing `#msg` status area: "יוצרת מסמך…", "מעלה עמוד K מתוך N…", "מאשרת עמוד K מתוך N…", "מסיימת מסמך…", success → redirect to the document detail page.
