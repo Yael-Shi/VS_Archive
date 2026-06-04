@@ -6,6 +6,11 @@ urlpatterns = [
     path("", views.archive_list_page, name="archive-list"),
     path("manage/", views.archive_manage_list_page, name="archive-manage-list"),
     path(
+        "manage/new/",
+        views.archive_manage_new_page,
+        name="archive-manage-new",
+    ),
+    path(
         "manage/new/manual-text/",
         views.archive_manage_manual_text_create_page,
         name="archive-manage-manual-text-create",

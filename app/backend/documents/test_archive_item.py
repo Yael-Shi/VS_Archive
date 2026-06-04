@@ -758,6 +758,8 @@ class OcrDocumentArchiveItemAccessTests(TestCase):
 
 
 class ArchiveNavigationTests(TestCase):
+    NEW_ITEM_URL = "/archive/manage/new/"
+
     def setUp(self):
         self.staff = User.objects.create_user(
             username="archive_nav_staff",
@@ -772,6 +774,39 @@ class ArchiveNavigationTests(TestCase):
         user = User.objects.create_user(username=username, password="test-pass")
         user.groups.add(self.family_group)
         return user
+
+    def test_global_nav_does_not_show_documents_link(self):
+        resp = self.client.get(reverse("public-home"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, 'href="/api/ui/documents/">מסמכים')
+
+    def test_global_nav_shows_create_archive_item_for_staff(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(reverse("public-home"))
+        self.assertContains(resp, reverse("archive-manage-new"))
+        self.assertContains(resp, "יצירת פריט חדש")
+
+    def test_global_nav_hides_create_archive_item_for_anonymous(self):
+        resp = self.client.get(reverse("public-home"))
+        self.assertNotContains(resp, reverse("archive-manage-new"))
+        self.assertNotContains(resp, "יצירת פריט חדש")
+
+    def test_global_nav_hides_create_archive_item_for_family_user(self):
+        self.client.force_login(self._create_family_user())
+        resp = self.client.get(reverse("public-home"))
+        self.assertNotContains(resp, reverse("archive-manage-new"))
+        self.assertNotContains(resp, "יצירת פריט חדש")
+
+    def test_global_nav_hides_create_archive_item_for_non_staff_authenticated_user(self):
+        user = User.objects.create_user(
+            username="archive_nav_non_staff",
+            password="test-pass",
+            is_staff=False,
+        )
+        self.client.force_login(user)
+        resp = self.client.get(reverse("public-home"))
+        self.assertNotContains(resp, reverse("archive-manage-new"))
+        self.assertNotContains(resp, "יצירת פריט חדש")
 
     def test_global_nav_shows_archive_link_for_anonymous(self):
         resp = self.client.get(reverse("public-home"))
@@ -827,3 +862,108 @@ class ArchiveNavigationTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, reverse("archive-manage-manual-text-create"))
         self.assertContains(resp, "יצירת טקסט ידני")
+
+
+class UnifiedArchiveItemCreatePageTests(TestCase):
+    NEW_URL = "/archive/manage/new/"
+    MANUAL_TEXT_CREATE_URL = "/archive/manage/new/manual-text/"
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="unified_create_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.family_group, _ = Group.objects.get_or_create(
+            name=ARCHIVE_FAMILY_GROUP_NAME
+        )
+
+    def _create_family_user(self, username="unified_create_family"):
+        user = User.objects.create_user(username=username, password="test-pass")
+        user.groups.add(self.family_group)
+        return user
+
+    def _valid_create_payload(self, **overrides):
+        payload = {
+            "item_type": "manual_text",
+            "title": "Unified manual text",
+            "body": "Typed through unified page.",
+            "visibility": ArchiveItem.Visibility.PUBLIC,
+            "metadata_status": ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
+            "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_staff_can_access_unified_create_page(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.NEW_URL)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "יצירת פריט חדש")
+
+    def test_anonymous_cannot_access_unified_create_page(self):
+        resp = self.client.get(self.NEW_URL)
+        self.assertIn(resp.status_code, (302, 403))
+
+    def test_non_staff_cannot_access_unified_create_page(self):
+        user = User.objects.create_user(
+            username="unified_create_user",
+            password="test-pass",
+            is_staff=False,
+        )
+        self.client.force_login(user)
+        resp = self.client.get(self.NEW_URL)
+        self.assertEqual(resp.status_code, 403)
+
+    def test_family_user_cannot_access_unified_create_page(self):
+        self.client.force_login(self._create_family_user())
+        resp = self.client.get(self.NEW_URL)
+        self.assertEqual(resp.status_code, 403)
+
+    def test_unified_page_contains_item_type_select(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.NEW_URL)
+        self.assertContains(resp, 'name="item_type"')
+        self.assertContains(resp, 'value="manual_text"')
+        self.assertContains(resp, "טקסט מוקלד")
+        self.assertContains(resp, 'value="ocr_document"')
+        self.assertContains(resp, "מסמך / תמונת טקסט לעיבוד")
+
+    def test_unified_page_shows_manual_text_form_when_type_selected(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.NEW_URL, {"item_type": "manual_text"})
+        self.assertContains(resp, 'name="title"')
+        self.assertContains(resp, 'name="body"')
+        self.assertContains(resp, 'name="metadata_status"')
+        self.assertContains(resp, 'name="date_precision"')
+
+    def test_staff_can_create_manual_text_through_unified_page(self):
+        self.client.force_login(self.staff)
+        resp = self.client.post(self.NEW_URL, data=self._valid_create_payload())
+        self.assertEqual(resp.status_code, 302)
+        item = ArchiveItem.objects.get(title="Unified manual text")
+        self.assertEqual(item.item_type, ArchiveItem.ItemType.MANUAL_TEXT)
+        self.assertEqual(item.manual_text_content.body, "Typed through unified page.")
+
+    def test_unified_page_shows_validation_errors_for_manual_text(self):
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.NEW_URL,
+            data=self._valid_create_payload(title="   ", body="Body"),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "title is required")
+        self.assertContains(resp, 'name="body"')
+
+    def test_ocr_document_option_links_to_upload_page(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.NEW_URL, {"item_type": "ocr_document"})
+        self.assertContains(resp, reverse("upload-page"))
+        self.assertContains(resp, "מעבר להעלאת מסמך")
+
+    def test_existing_manual_text_route_still_works(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.MANUAL_TEXT_CREATE_URL)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "יצירת טקסט ידני")
+        self.assertContains(resp, 'name="body"')
