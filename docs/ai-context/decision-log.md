@@ -1,5 +1,13 @@
 # VS-Archive Decision Log
 
+## Future design note — document date precision (not implemented)
+
+- This entry records a **future design exploration only**. No behavior is implemented in this PR.
+- Source input from QA: `Document.date_start` / `date_end` alone imply false precision for year-only, month-only, unknown, and range cases; list/detail currently render raw ISO dates.
+- A dedicated design note was added at `docs/ai-context/document-date-precision.md`.
+- **Core decision (documented, not coded):** keep normalized `date_start`/`date_end` for filtering/sorting; add `date_precision` (and display rules) so UI never shows expanded bounds as exact cataloger knowledge.
+- This entry does **not** make final migration/backfill or UI decisions; those remain open for PR 2+ in the sequence in the design doc.
+
 ## Future design note — multi-image logical documents (not implemented)
 
 - This entry records a **future design exploration only**. No behavior is implemented in this PR.
