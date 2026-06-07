@@ -1,3 +1,4 @@
+import datetime
 import json
 from unittest.mock import patch
 
@@ -18,6 +19,7 @@ from documents.models import (
     Tag,
 )
 from documents.services.archive_items import (
+    ARCHIVE_ITEM_SHARED_FIELD_NAMES,
     archive_item_field_values_from_document,
     create_manual_text_archive_item,
     create_ocr_document,
@@ -42,6 +44,17 @@ from documents.services.archive_item_presentation import (
 )
 
 
+def assert_ocr_shared_fields_match(test_case, doc: Document) -> None:
+    """Assert all six shared archival fields match between Document and ArchiveItem."""
+    item = doc.archive_item
+    for name in ARCHIVE_ITEM_SHARED_FIELD_NAMES:
+        test_case.assertEqual(
+            getattr(doc, name),
+            getattr(item, name),
+            msg=f"shared field mismatch: {name}",
+        )
+
+
 class ArchiveItemFoundationTests(TestCase):
     def test_create_ocr_document_links_archive_item_with_shared_fields(self):
         doc = create_ocr_document(
@@ -59,6 +72,65 @@ class ArchiveItemFoundationTests(TestCase):
         self.assertEqual(item.visibility, doc.visibility)
         self.assertEqual(item.date_precision, doc.date_precision)
         self.assertEqual(item.metadata_status, doc.metadata_status)
+        assert_ocr_shared_fields_match(self, doc)
+
+    def test_create_ocr_document_all_six_shared_fields_match(self):
+        date_start = datetime.date(1920, 3, 15)
+        date_end = datetime.date(1925, 6, 1)
+        doc = create_ocr_document(
+            title="All six shared fields",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            visibility=Document.Visibility.PUBLIC,
+            metadata_status=Document.MetadataStatus.COMPLETED,
+            date_start=date_start,
+            date_end=date_end,
+            date_precision=Document.DatePrecision.RANGE,
+        )
+        item = doc.archive_item
+        self.assertEqual(item.title, "All six shared fields")
+        self.assertEqual(item.visibility, ArchiveItem.Visibility.PUBLIC)
+        self.assertEqual(item.metadata_status, ArchiveItem.MetadataStatus.COMPLETED)
+        self.assertEqual(item.date_start, date_start)
+        self.assertEqual(item.date_end, date_end)
+        self.assertEqual(item.date_precision, ArchiveItem.DatePrecision.RANGE)
+        assert_ocr_shared_fields_match(self, doc)
+
+    def test_create_ocr_document_omitted_shared_fields_use_archive_item_defaults(self):
+        doc = create_ocr_document(
+            title="Defaults test",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        item = doc.archive_item
+        self.assertEqual(item.visibility, ArchiveItem.Visibility.PRIVATE)
+        self.assertEqual(
+            item.metadata_status, ArchiveItem.MetadataStatus.NEEDS_COMPLETION
+        )
+        self.assertIsNone(item.date_start)
+        self.assertIsNone(item.date_end)
+        self.assertEqual(item.date_precision, ArchiveItem.DatePrecision.UNKNOWN)
+        assert_ocr_shared_fields_match(self, doc)
+
+    def test_create_ocr_document_runtime_fields_remain_document_side(self):
+        doc = create_ocr_document(
+            title="Runtime fields test",
+            doc_type=Document.DocType.PDF,
+            language=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADING,
+            category_event="family-event",
+        )
+        item = doc.archive_item
+        self.assertEqual(doc.doc_type, Document.DocType.PDF)
+        self.assertEqual(doc.language, Document.Language.HEBREW)
+        self.assertEqual(doc.text_input_type, Document.TextInputType.HANDWRITTEN)
+        self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
+        self.assertEqual(doc.category_event, "family-event")
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.PROCESSING)
+        self.assertEqual(item.item_type, ArchiveItem.ItemType.OCR_DOCUMENT)
+        self.assertFalse(hasattr(item, "doc_type"))
+        self.assertFalse(hasattr(item, "upload_status"))
 
     def test_document_objects_create_requires_explicit_archive_item(self):
         with self.assertRaises(IntegrityError):
@@ -345,6 +417,7 @@ class ArchiveItemUploadIntegrationTests(TestCase):
         self.assertEqual(doc.archive_item.visibility, Document.Visibility.PUBLIC)
         self.assertEqual(doc.archive_item.title, doc.title)
         self.assertEqual(doc.visibility, Document.Visibility.PUBLIC)
+        assert_ocr_shared_fields_match(self, doc)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
     @patch("documents.views.create_presigned_put", return_value="https://example/upload")
@@ -360,6 +433,7 @@ class ArchiveItemUploadIntegrationTests(TestCase):
         self.assertEqual(doc.archive_item.item_type, ArchiveItem.ItemType.OCR_DOCUMENT)
         self.assertEqual(doc.archive_item.visibility, Document.Visibility.PRIVATE)
         self.assertEqual(DocumentSourceFile.objects.filter(document=doc).count(), 2)
+        assert_ocr_shared_fields_match(self, doc)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
     @patch("documents.views.create_presigned_put", return_value="https://example/upload")
