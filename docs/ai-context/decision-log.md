@@ -81,6 +81,14 @@ Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`s
 
 **Routes:** Same **`/archive/manage/<id>/edit/`** as PR1/PR2a; redirect after save → document detail.
 
+## ArchiveItem — metadata completion backlog edit links (PR3)
+
+**Decision:** The staff metadata completion backlog (**השלמת פרטים**, **`/api/ui/admin/backlog/`**) uses the first-party **`OCR_DOCUMENT`** edit UI as the **primary** per-row action (**`עריכת מטא־דאטה`** → **`/archive/manage/<archive_item_id>/edit/`**). Django Admin document change remains available as a **secondary** technical path (**`עריכה (Django Admin)`**).
+
+**Unchanged:** **`admin_backlog_page`** queryset, filters (**`only_missing_tags`**, **`only_missing_admin_meta`**), counts, pagination, auth, and inclusion rule (**`metadata_status=NEEDS_COMPLETION`** only). **No** auto-completion of **`metadata_status`** when catalog/tags are filled. **No** changes to בקרת תמלול review backlog, OCR edit form behavior, OCR/HTR processing, or **`ArchiveItem`** runtime cutover.
+
+**Scope (PR3):** Backlog template action links, focused tests, this log entry.
+
 ## Document date precision — schema foundation (PR 2)
 
 **Decision:** Add **`Document.date_precision`** (`DatePrecision`: `EXACT_DAY`, `MONTH`, `YEAR`, `RANGE`, `UNKNOWN`) with Django default **`UNKNOWN`**. Migration adds the column with that default for **all** existing rows — **no** inference from `date_start`/`date_end` in this PR.

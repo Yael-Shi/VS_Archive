@@ -7506,6 +7506,169 @@ class StatusLabelPresentationTests(TestCase):
         self.assertContains(resp, "אושר אנושית")
 
 
+class AdminBacklogMetadataEditLinkTests(TestCase):
+    """Metadata completion backlog — first-party OCR edit as primary row action (PR3)."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+
+        self.staff = User.objects.create_user(
+            username="backlog_edit_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.viewer = User.objects.create_user(
+            username="backlog_edit_viewer",
+            password="test-pass",
+            is_staff=False,
+        )
+
+    def _create_document(self, **kwargs):
+        defaults = {
+            "title": "Backlog edit doc",
+            "doc_type": Document.DocType.IMAGE,
+            "text_input_type": Document.TextInputType.HANDWRITTEN,
+            "language": Document.Language.HEBREW,
+            "upload_status": Document.UploadStatus.UPLOADED,
+            "processing_state_user": Document.ProcessingState.READY,
+            "metadata_status": Document.MetadataStatus.NEEDS_COMPLETION,
+        }
+        defaults.update(kwargs)
+        return create_ocr_document(**defaults)
+
+    def _link_opening_tag(self, html: str, href: str) -> str:
+        marker = f'href="{href}"'
+        href_pos = html.find(marker)
+        self.assertNotEqual(href_pos, -1, f"missing link href={href!r}")
+        tag_start = html.rfind("<a", 0, href_pos)
+        tag_end = html.find(">", href_pos)
+        self.assertNotEqual(tag_start, -1)
+        self.assertGreater(tag_end, href_pos)
+        return html[tag_start : tag_end + 1]
+
+    def _link_label(self, html: str, href: str) -> str:
+        marker = f'href="{href}"'
+        href_pos = html.find(marker)
+        self.assertNotEqual(href_pos, -1, f"missing link href={href!r}")
+        tag_end = html.find(">", href_pos)
+        close_start = html.find("</a>", tag_end)
+        self.assertNotEqual(close_start, -1)
+        return html[tag_end + 1 : close_start].strip()
+
+    def test_backlog_row_links_to_first_party_ocr_edit(self):
+        doc = self._create_document(title="First-party edit target")
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/admin/backlog/")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        edit_href = f"/archive/manage/{doc.archive_item_id}/edit/"
+        self.assertEqual(self._link_label(html, edit_href), "עריכת מטא־דאטה")
+        self.assertIn("btn-primary", self._link_opening_tag(html, edit_href))
+
+    def test_backlog_django_admin_link_is_secondary(self):
+        doc = self._create_document(title="Secondary admin link")
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/admin/backlog/")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        admin_href = f"/admin/documents/document/{doc.id}/change/"
+        self.assertEqual(self._link_label(html, admin_href), "עריכה (Django Admin)")
+        admin_tag = self._link_opening_tag(html, admin_href)
+        self.assertIn("btn", admin_tag)
+        self.assertNotIn("btn-primary", admin_tag)
+
+    def test_backlog_includes_needs_completion_only(self):
+        needs = self._create_document(
+            title="Needs completion visible",
+            metadata_status=Document.MetadataStatus.NEEDS_COMPLETION,
+        )
+        completed = self._create_document(
+            title="Completed hidden",
+            metadata_status=Document.MetadataStatus.COMPLETED,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/admin/backlog/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, needs.title)
+        self.assertNotContains(resp, completed.title)
+
+    def test_completed_document_excluded_even_with_empty_tags_and_admin_meta(self):
+        from documents.models import DocumentMetadata
+
+        doc = self._create_document(
+            title="Completed despite empty catalog",
+            metadata_status=Document.MetadataStatus.COMPLETED,
+        )
+        DocumentMetadata.objects.create(document=doc)
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/admin/backlog/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, doc.title)
+
+    def test_only_missing_tags_filter_unchanged(self):
+        from documents.models import Tag
+
+        missing = self._create_document(title="Missing tags doc")
+        tagged = self._create_document(title="Tagged doc")
+        tag = Tag.objects.create(name="backlog-filter-tag")
+        tagged.tags_m2m.add(tag)
+
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/admin/backlog/?only_missing_tags=1")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, missing.title)
+        self.assertNotContains(resp, tagged.title)
+
+    def test_only_missing_admin_meta_filter_unchanged(self):
+        from documents.models import DocumentMetadata
+
+        empty_meta = self._create_document(title="Empty admin meta doc")
+        DocumentMetadata.objects.create(
+            document=empty_meta,
+            donor="",
+            collection="",
+            original_location="",
+            notes="",
+        )
+        filled_meta = self._create_document(title="Filled admin meta doc")
+        DocumentMetadata.objects.create(
+            document=filled_meta,
+            donor="Donor present",
+        )
+
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/admin/backlog/?only_missing_admin_meta=1")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, empty_meta.title)
+        self.assertNotContains(resp, filled_meta.title)
+
+    def test_review_backlog_does_not_link_to_archive_manage_edit(self):
+        doc = self._create_document(title="Review only doc")
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="transkribus-pylaia:1",
+            engine_key=DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="שורת בדיקה",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/admin/review/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, f"/archive/manage/{doc.archive_item_id}/edit/")
+
+    def test_admin_backlog_requires_staff(self):
+        self.client.force_login(self.viewer)
+        resp = self.client.get("/api/ui/admin/backlog/")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_admin_backlog_redirects_anonymous(self):
+        resp = self.client.get("/api/ui/admin/backlog/")
+        self.assertEqual(resp.status_code, 302)
+
+
 class NavigationLabelTests(TestCase):
     """Navigation/action label cleanup (presentation-only).
 
