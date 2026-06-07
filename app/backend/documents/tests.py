@@ -3757,6 +3757,107 @@ class UploadApiTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn(b"date_precision is invalid", resp.content)
 
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_create_upload_saves_author_name_and_source_title_on_archive_item(
+        self, _mock_put
+    ):
+        resp = self._post_create(
+            self._base_create_payload(
+                author_name="רחל כהן",
+                source_title="הארץ",
+            )
+        )
+        self.assertEqual(resp.status_code, 201)
+        doc = Document.objects.get(id=resp.json()["document_id"])
+        self.assertEqual(doc.archive_item.author_name, "רחל כהן")
+        self.assertEqual(doc.archive_item.source_title, "הארץ")
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_create_upload_strips_author_name_and_source_title_whitespace(
+        self, _mock_put
+    ):
+        resp = self._post_create(
+            self._base_create_payload(
+                author_name="  יוסף לוי  ",
+                source_title="  דבר  ",
+            )
+        )
+        self.assertEqual(resp.status_code, 201)
+        doc = Document.objects.get(id=resp.json()["document_id"])
+        self.assertEqual(doc.archive_item.author_name, "יוסף לוי")
+        self.assertEqual(doc.archive_item.source_title, "דבר")
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_create_upload_omitted_source_metadata_saves_empty_strings(
+        self, _mock_put
+    ):
+        resp = self._post_create(self._base_create_payload())
+        self.assertEqual(resp.status_code, 201)
+        doc = Document.objects.get(id=resp.json()["document_id"])
+        self.assertEqual(doc.archive_item.author_name, "")
+        self.assertEqual(doc.archive_item.source_title, "")
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_create_upload_whitespace_only_source_metadata_saves_empty_strings(
+        self, _mock_put
+    ):
+        resp = self._post_create(
+            self._base_create_payload(
+                author_name="   ",
+                source_title="\t",
+            )
+        )
+        self.assertEqual(resp.status_code, 201)
+        doc = Document.objects.get(id=resp.json()["document_id"])
+        self.assertEqual(doc.archive_item.author_name, "")
+        self.assertEqual(doc.archive_item.source_title, "")
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_create_upload_rejects_over_255_author_name(self, _mock_put):
+        before_count = Document.objects.count()
+        resp = self._post_create(
+            self._base_create_payload(author_name="א" * 256)
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn(
+            "מחבר/ת חייב להיות עד 255 תווים".encode("utf-8"),
+            resp.content,
+        )
+        self.assertEqual(Document.objects.count(), before_count)
+
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_create_upload_rejects_over_255_source_title(self, _mock_put):
+        before_count = Document.objects.count()
+        resp = self._post_create(
+            self._base_create_payload(source_title="מ" * 256)
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn(
+            "מקור חייב להיות עד 255 תווים".encode("utf-8"),
+            resp.content,
+        )
+        self.assertEqual(Document.objects.count(), before_count)
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_multi_image_create_saves_source_metadata_on_archive_item(
+        self, _mock_put
+    ):
+        resp = self._post_create(
+            self._multi_files_payload(
+                author_name="דוד בן-גוריון",
+                source_title="מגילת העצמאות",
+            )
+        )
+        self.assertEqual(resp.status_code, 201)
+        doc = Document.objects.get(id=resp.json()["document_id"])
+        self.assertEqual(doc.archive_item.author_name, "דוד בן-גוריון")
+        self.assertEqual(doc.archive_item.source_title, "מגילת העצמאות")
+
     @patch("documents.views.create_presigned_put", return_value="https://example/upload")
     @patch("documents.views.send_process_document_message")
     def test_single_file_complete_still_enqueues_and_dual_writes(
@@ -7274,6 +7375,8 @@ class UploadPageTemplateTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         for needle in (
             'id="title"',
+            'id="author_name"',
+            'id="source_title"',
             'id="doc_type"',
             'id="text_input_type"',
             'id="language"',
