@@ -41,14 +41,26 @@ def shared_archive_item_for_document(document: Any):
     return document.archive_item
 
 
-def _split_ocr_document_create_kwargs(document_kwargs: dict) -> tuple[dict, dict]:
-    """Split create kwargs into shared archival fields and Document runtime fields."""
+def _split_ocr_document_create_kwargs(
+    document_kwargs: dict,
+) -> tuple[dict, dict, dict]:
+    """Split create kwargs into shared, ArchiveItem-only, and Document runtime fields.
+
+    ``author_name`` and ``source_title`` are ArchiveItem bibliographic metadata only.
+    They are removed here so they never reach ``Document.objects.create``.
+    """
     runtime_kwargs = dict(document_kwargs)
     shared_kwargs = {}
     for name in ARCHIVE_ITEM_SHARED_FIELD_NAMES:
         if name in runtime_kwargs:
             shared_kwargs[name] = runtime_kwargs.pop(name)
-    return shared_kwargs, runtime_kwargs
+
+    source_metadata_kwargs = {
+        "author_name": runtime_kwargs.pop("author_name", ""),
+        "source_title": runtime_kwargs.pop("source_title", ""),
+    }
+
+    return shared_kwargs, source_metadata_kwargs, runtime_kwargs
 
 
 @transaction.atomic
@@ -63,7 +75,9 @@ def create_ocr_document(**document_kwargs: Any):
     """
     from documents.models import ArchiveItem, Document
 
-    shared_kwargs, runtime_kwargs = _split_ocr_document_create_kwargs(document_kwargs)
+    shared_kwargs, source_metadata_kwargs, runtime_kwargs = (
+        _split_ocr_document_create_kwargs(document_kwargs)
+    )
 
     pending_item = ArchiveItem(
         item_type=ArchiveItem.ItemType.OCR_DOCUMENT,
@@ -73,6 +87,8 @@ def create_ocr_document(**document_kwargs: Any):
     archive_item = ArchiveItem.objects.create(
         item_type=ArchiveItem.ItemType.OCR_DOCUMENT,
         **archive_values,
+        author_name=source_metadata_kwargs["author_name"],
+        source_title=source_metadata_kwargs["source_title"],
     )
     mirror_values = archive_item_field_values_from_archive_item(archive_item)
     return Document.objects.create(

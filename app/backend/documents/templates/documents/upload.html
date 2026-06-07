@@ -40,6 +40,17 @@
             <input id="title" name="title" type="text" required />
           </div>
 
+          <div class="meta-grid">
+            <div class="field">
+              <label for="author_name">מחבר/ת</label>
+              <input id="author_name" name="author_name" type="text" />
+            </div>
+            <div class="field">
+              <label for="source_title">מקור</label>
+              <input id="source_title" name="source_title" type="text" />
+            </div>
+          </div>
+
           <div class="field">
             <label for="doc_type">סוג מסמך *</label>
             <select id="doc_type" name="doc_type" required>
@@ -402,6 +413,8 @@
     const text_input_type = document.getElementById("text_input_type").value || "";
     const category_event = document.getElementById("category_event").value.trim() || "";
     const visibility = document.getElementById("visibility").value || "private";
+    const author_name = document.getElementById("author_name").value.trim();
+    const source_title = document.getElementById("source_title").value.trim();
 
     const tagsRaw = document.getElementById("tags").value;
 
@@ -424,6 +437,8 @@
     if (date_end) meta.date_end = date_end;
     if (language) meta.language = language;
     if (category_event) meta.category_event = category_event;
+    if (author_name) meta.author_name = author_name;
+    if (source_title) meta.source_title = source_title;
 
     submitBtn.disabled = true;
 

@@ -44,6 +44,7 @@ from documents.services.review_backlog import (
     is_review_pending_text_result,
     parse_review_reasons,
 )
+from documents.services.archive_metadata_validation import validate_source_metadata_fields
 from documents.services.upload_validation import (
     normalize_upload_mime_type,
     upload_mime_types_match,
@@ -344,6 +345,15 @@ def _parse_create_upload_common(payload: dict):
     if visibility not in ("private", "public"):
         return None, _bad("visibility must be private or public")
 
+    author_name = (payload.get("author_name") or "").strip()
+    source_title = (payload.get("source_title") or "").strip()
+    source_errors = validate_source_metadata_fields(
+        author_name=author_name,
+        source_title=source_title,
+    )
+    if source_errors:
+        return None, _bad(source_errors[0])
+
     return {
         "title": title,
         "date_start": ds,
@@ -355,6 +365,8 @@ def _parse_create_upload_common(payload: dict):
         "visibility": visibility,
         "tags": tags,
         "admin_meta": admin_meta,
+        "author_name": author_name,
+        "source_title": source_title,
     }, None
 
 
@@ -452,6 +464,8 @@ def _create_multi_image_upload(request, payload: dict, common: dict):
         text_input_type=common["text_input_type"],
         category_event=common["category_event"],
         visibility=common["visibility"],
+        author_name=common["author_name"],
+        source_title=common["source_title"],
         upload_status=Document.UploadStatus.UPLOADING,
         expected_source_file_count=file_count,
     )
@@ -536,6 +550,8 @@ def _create_single_file_upload(request, payload: dict, common: dict):
         text_input_type=common["text_input_type"],
         category_event=common["category_event"],
         visibility=common["visibility"],
+        author_name=common["author_name"],
+        source_title=common["source_title"],
         upload_status=Document.UploadStatus.UPLOADING,
         file_original_name=original_name,
         mime_type=mime_type,
