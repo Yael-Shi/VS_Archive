@@ -1,4 +1,4 @@
-"""PR5c — OCR_DOCUMENT read-path display cutover (ArchiveItem shared fields)."""
+"""PR5c/PR5f — OCR_DOCUMENT ArchiveItem shared-field read and filter cutover."""
 
 from __future__ import annotations
 
@@ -8,12 +8,13 @@ from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
 from unittest.mock import patch
 
-from documents.models import ArchiveItem, Document, DocumentTextResult
+from documents.models import ArchiveItem, Document, DocumentTextResult, Tag
 from documents.services.archive_items import create_manual_text_archive_item, create_ocr_document
+from documents.services.review_backlog import documents_in_review_backlog
 
 
 class OcrReadPathCutoverTests(TestCase):
-    """Display reads shared archival fields from ArchiveItem; filters/access unchanged."""
+    """Display and filters use ArchiveItem for shared archival fields."""
 
     EDIT_URL_TEMPLATE = "/archive/manage/{item_id}/edit/"
 
@@ -135,40 +136,39 @@ class OcrReadPathCutoverTests(TestCase):
         self.assertIn("ArchiveItem-side title", html)
         self.assertNotIn("Document-side title", html)
 
-    def test_metadata_backlog_displays_archive_item_title_but_inclusion_uses_document(
-        self,
-    ):
-        in_backlog = self._create_drifted_doc(
+    def test_metadata_backlog_inclusion_uses_archive_item_metadata_status(self):
+        excluded_drift = self._create_drifted_doc(
             metadata_status=Document.MetadataStatus.NEEDS_COMPLETION,
         )
-        excluded = self._create_ocr_doc(
+        included_drift = self._create_ocr_doc(
             title="Excluded document title",
             metadata_status=Document.MetadataStatus.COMPLETED,
         )
-        ArchiveItem.objects.filter(pk=excluded.archive_item_id).update(
-            title="Excluded archive title",
+        ArchiveItem.objects.filter(pk=included_drift.archive_item_id).update(
+            title="Included archive title",
             metadata_status=ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
         )
         self.client.force_login(self.staff)
         resp = self.client.get("/api/ui/admin/backlog/")
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
-        self.assertIn("ArchiveItem-side title", html)
-        self.assertNotIn("Excluded archive title", html)
+        self.assertIn("Included archive title", html)
+        self.assertNotIn("ArchiveItem-side title", html)
         self.assertNotIn("Excluded document title", html)
-        self.assertIn(str(in_backlog.id), html)
+        self.assertIn(f"/api/ui/documents/{included_drift.id}/", html)
+        self.assertNotIn(f"/api/ui/documents/{excluded_drift.id}/", html)
 
-    def test_list_metadata_status_filter_still_uses_document_field(self):
-        needs = self._create_ocr_doc(
+    def test_list_metadata_status_filter_uses_archive_item_field(self):
+        excluded = self._create_ocr_doc(
             title="Needs filter doc",
             metadata_status=Document.MetadataStatus.NEEDS_COMPLETION,
         )
-        self._apply_archive_item_drift(needs)
-        completed = self._create_ocr_doc(
+        self._apply_archive_item_drift(excluded)
+        included = self._create_ocr_doc(
             title="Completed filter doc",
             metadata_status=Document.MetadataStatus.COMPLETED,
         )
-        ArchiveItem.objects.filter(pk=completed.archive_item_id).update(
+        ArchiveItem.objects.filter(pk=included.archive_item_id).update(
             title="Completed archive title",
             metadata_status=ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
         )
@@ -178,8 +178,141 @@ class OcrReadPathCutoverTests(TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
-        self.assertIn("ArchiveItem-side title", html)
-        self.assertNotIn("Completed archive title", html)
+        self.assertIn("Completed archive title", html)
+        self.assertNotIn("ArchiveItem-side title", html)
+
+    def test_json_api_metadata_status_filter_uses_archive_item_field(self):
+        excluded = self._create_ocr_doc(
+            metadata_status=Document.MetadataStatus.NEEDS_COMPLETION,
+        )
+        self._apply_archive_item_drift(excluded)
+        included = self._create_ocr_doc(
+            title="API filter included",
+            metadata_status=Document.MetadataStatus.COMPLETED,
+        )
+        ArchiveItem.objects.filter(pk=included.archive_item_id).update(
+            title="API filter archive title",
+            metadata_status=ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/documents/?metadata_status=NEEDS_COMPLETION")
+        self.assertEqual(resp.status_code, 200)
+        ids = {item["id"] for item in resp.json()["items"]}
+        self.assertIn(included.id, ids)
+        self.assertNotIn(excluded.id, ids)
+
+    def test_visibility_filter_uses_archive_item_field(self):
+        excluded = self._create_ocr_doc(
+            title="Private mirror doc",
+            visibility=Document.Visibility.PRIVATE,
+        )
+        ArchiveItem.objects.filter(pk=excluded.archive_item_id).update(
+            title="Public archive title",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        included = self._create_ocr_doc(
+            title="Public mirror doc",
+            visibility=Document.Visibility.PUBLIC,
+        )
+        ArchiveItem.objects.filter(pk=included.archive_item_id).update(
+            title="Private archive title",
+            visibility=ArchiveItem.Visibility.PRIVATE,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/documents/?visibility=private")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertIn("Private archive title", html)
+        self.assertNotIn("Public archive title", html)
+
+    def test_q_search_finds_archive_item_title_when_document_title_differs(self):
+        doc = self._create_ocr_doc(title="Document-only title phrase")
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
+            title="ArchiveItem-only title phrase",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/documents/?q=ArchiveItem-only+title+phrase")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "ArchiveItem-only title phrase")
+        self.assertNotContains(resp, "Document-only title phrase")
+
+    def test_q_search_still_finds_category_event_on_document(self):
+        doc = self._create_ocr_doc(
+            title="Category search doc",
+            category_event="Unique category event marker",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(
+            "/api/ui/documents/?q=Unique+category+event+marker"
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, str(doc.id))
+
+    def test_q_search_still_finds_tags_on_document(self):
+        doc = self._create_ocr_doc(title="Tag search doc")
+        tag = Tag.objects.create(name="pr5f-filter-tag-unique")
+        doc.tags_m2m.add(tag)
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/documents/?q=pr5f-filter-tag-unique")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, str(doc.id))
+
+    def test_doc_type_filter_still_uses_document_field(self):
+        image_doc = self._create_ocr_doc(
+            title="Image type doc",
+            doc_type=Document.DocType.IMAGE,
+        )
+        pdf_doc = self._create_ocr_doc(
+            title="PDF type doc",
+            doc_type=Document.DocType.PDF,
+            file_s3_key="documents/99/original.pdf",
+            mime_type="application/pdf",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/documents/?doc_type=PDF")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertIn("PDF type doc", html)
+        self.assertNotIn("Image type doc", html)
+
+    def test_upload_status_filter_still_uses_document_field(self):
+        uploaded = self._create_ocr_doc(
+            title="Uploaded status doc",
+            upload_status=Document.UploadStatus.UPLOADED,
+        )
+        failed = self._create_ocr_doc(
+            title="Failed status doc",
+            upload_status=Document.UploadStatus.FAILED,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/documents/?upload_status=FAILED")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertIn("Failed status doc", html)
+        self.assertNotIn("Uploaded status doc", html)
+
+    def test_review_backlog_q_title_search_uses_archive_item_title(self):
+        doc = self._create_review_pending_doc()
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
+            title="Review backlog archive title unique",
+        )
+        ids = set(
+            documents_in_review_backlog(
+                q="Review backlog archive title unique"
+            ).values_list("id", flat=True)
+        )
+        self.assertIn(doc.id, ids)
+
+    def test_review_backlog_membership_unchanged_when_metadata_status_drifts(self):
+        doc = self._create_review_pending_doc()
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
+            metadata_status=ArchiveItem.MetadataStatus.COMPLETED,
+        )
+        Document.objects.filter(pk=doc.pk).update(
+            metadata_status=Document.MetadataStatus.NEEDS_COMPLETION,
+        )
+        ids = set(documents_in_review_backlog().values_list("id", flat=True))
+        self.assertIn(doc.id, ids)
 
     def test_access_still_follows_archive_item_visibility(self):
         doc = create_ocr_document(

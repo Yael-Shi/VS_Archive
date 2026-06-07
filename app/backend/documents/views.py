@@ -176,16 +176,16 @@ def _base_queryset(
         qs = qs.filter(doc_type=doc_type)
 
     if metadata_status:
-        qs = qs.filter(metadata_status=metadata_status)
+        qs = qs.filter(archive_item__metadata_status=metadata_status)
 
     # visibility is admin-only operational field
     if is_admin and visibility:
-        qs = qs.filter(visibility=visibility)
+        qs = qs.filter(archive_item__visibility=visibility)
 
     q = (q or "").strip()
     if q:
         filters = (
-            Q(title__icontains=q)
+            Q(archive_item__title__icontains=q)
             | Q(category_event__icontains=q)
             | Q(tags_m2m__name__icontains=q)
         )
@@ -1091,7 +1091,9 @@ def admin_backlog_page(request):
     base_qs = (
         Document.objects.select_related("admin_meta", "archive_item")
         .prefetch_related("tags_m2m")
-        .filter(metadata_status=Document.MetadataStatus.NEEDS_COMPLETION)
+        .filter(
+            archive_item__metadata_status=ArchiveItem.MetadataStatus.NEEDS_COMPLETION
+        )
         .order_by("-created_at")
         .distinct()
     )

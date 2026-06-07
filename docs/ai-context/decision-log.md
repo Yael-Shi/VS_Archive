@@ -155,6 +155,18 @@ Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`s
 
 **Docs:** `docs/ai-context/ocr-archiveitem-cutover.md` (PR5e implementation note).
 
+## ArchiveItem — OCR_DOCUMENT filter/search/backlog/admin alignment (PR5f)
+
+**Decision:** Shared archival **filters**, **search title arm**, and **metadata completion backlog membership** read from linked **`ArchiveItem`** (`archive_item__*` joins on **`Document`** querysets). **`Document`** shared columns remain compatibility mirrors only. **Runtime/processing filters** stay **`Document`**-based (`doc_type`, `upload_status`, `language`, `text_input_type`, `processing_state_user`, review **`DocumentTextResult`** filters, tags/admin_meta/catalog search arms).
+
+**Scope (PR5f):** **`views._base_queryset`** (`metadata_status`, admin `visibility`, `q` title); **`admin_backlog_page`** membership (`archive_item__metadata_status=NEEDS_COMPLETION`); **`documents_in_review_backlog`** `q` title search; **`DocumentAdmin`** shared fields readonly with compatibility-mirror fieldset and first-party edit pointer; list display/filter/search use ArchiveItem-backed semantics. **No** migration, upload/create, reconciliation command, OCR/HTR, worker, or permissions changes.
+
+**Django Admin:** **`DocumentAdmin`** shared fields (**`title`**, **`visibility`**, **`metadata_status`**, **`date_*`**) are **read-only** mirrors. **`ArchiveItemAdmin`** remains view-only. Staff edit canonical OCR metadata at **`/archive/manage/<archive_item_id>/edit/`**.
+
+**Unchanged:** **`reconcile_ocr_shared_fields`** behavior (PR5b repair tool). Review backlog **membership** (pending **`DocumentTextResult`** only). **`only_missing_tags`** / **`only_missing_admin_meta`** sub-filters. Dropping **`Document`** shared columns → optional PR5g.
+
+**Docs:** `docs/ai-context/ocr-archiveitem-cutover.md` (PR5f implementation note).
+
 ## Document date precision — schema foundation (PR 2)
 
 **Decision:** Add **`Document.date_precision`** (`DatePrecision`: `EXACT_DAY`, `MONTH`, `YEAR`, `RANGE`, `UNKNOWN`) with Django default **`UNKNOWN`**. Migration adds the column with that default for **all** existing rows — **no** inference from `date_start`/`date_end` in this PR.
