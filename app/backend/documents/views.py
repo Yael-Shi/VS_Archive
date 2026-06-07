@@ -1830,24 +1830,25 @@ def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
         form_errors = shared_errors + catalog_errors + tags_errors
         form_data = {**parsed_shared, **parsed_catalog, **parsed_tags}
         if not form_errors:
-            update_ocr_document_metadata(
-                doc,
-                title=parsed_shared["title"],
-                visibility=parsed_shared["visibility"],
-                date_start=parsed_shared["date_start_value"],
-                date_end=parsed_shared["date_end_value"],
-                date_precision=parsed_shared["date_precision"],
-                metadata_status=parsed_shared["metadata_status"],
-            )
-            update_ocr_document_catalog_metadata(
-                doc,
-                donor=parsed_catalog["donor"],
-                collection=parsed_catalog["collection"],
-                original_location=parsed_catalog["original_location"],
-                notes=parsed_catalog["notes"],
-                category_event=parsed_catalog["category_event_value"],
-            )
-            update_ocr_document_tags(doc, tag_names=parsed_tags["tag_names"])
+            with transaction.atomic():
+                update_ocr_document_metadata(
+                    doc,
+                    title=parsed_shared["title"],
+                    visibility=parsed_shared["visibility"],
+                    date_start=parsed_shared["date_start_value"],
+                    date_end=parsed_shared["date_end_value"],
+                    date_precision=parsed_shared["date_precision"],
+                    metadata_status=parsed_shared["metadata_status"],
+                )
+                update_ocr_document_catalog_metadata(
+                    doc,
+                    donor=parsed_catalog["donor"],
+                    collection=parsed_catalog["collection"],
+                    original_location=parsed_catalog["original_location"],
+                    notes=parsed_catalog["notes"],
+                    category_event=parsed_catalog["category_event_value"],
+                )
+                update_ocr_document_tags(doc, tag_names=parsed_tags["tag_names"])
             return redirect("documents-detail-page", doc_id=doc.id)
 
     return render(

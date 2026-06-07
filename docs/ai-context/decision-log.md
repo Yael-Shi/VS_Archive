@@ -83,7 +83,7 @@ Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`s
 
 ## ArchiveItem — metadata completion backlog edit links (PR3)
 
-**Decision:** The staff metadata completion backlog (**השלמת פרטים**, **`/api/ui/admin/backlog/`**) uses the first-party **`OCR_DOCUMENT`** edit UI as the **primary** per-row action (**`עריכת מטא־דאטה`** → **`/archive/manage/<archive_item_id>/edit/`**). Django Admin document change remains available as a **secondary** technical path (**`עריכה (Django Admin)`**).
+**Decision:** The staff metadata completion backlog (**השלמת פרטים**, **`/api/ui/admin/backlog/`**) uses the first-party **`OCR_DOCUMENT`** edit UI as the **primary** per-row action (**`עריכת מטא־דאטה`** → **`/archive/manage/<archive_item_id>/edit/`**). Django Admin document change remains available as a **secondary** technical path (**`עריכה טכנית (Django Admin)`**).
 
 **Unchanged:** **`admin_backlog_page`** queryset, filters (**`only_missing_tags`**, **`only_missing_admin_meta`**), counts, pagination, auth, and inclusion rule (**`metadata_status=NEEDS_COMPLETION`** only). **No** auto-completion of **`metadata_status`** when catalog/tags are filled. **No** changes to בקרת תמלול review backlog, OCR edit form behavior, OCR/HTR processing, or **`ArchiveItem`** runtime cutover.
 
@@ -96,6 +96,14 @@ Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`s
 **Unchanged:** Metadata edit save behavior, review POST handlers, **`DocumentTextResult`** status/verification semantics, backlog queryset/filters/counts, permissions, OCR/HTR processing, upload API, worker/SQS, **`ArchiveItem`** runtime cutover. **No** delete action for **`OCR_DOCUMENT`**.
 
 **Scope (PR4):** Detail/review-detail/manage-list template action links, focused tests, this log entry.
+
+## ArchiveItem — OCR metadata edit audit follow-up (pre-PR5)
+
+**Decision:** Small hardening after the OCR metadata UI chain audit: harmonize metadata backlog Django Admin label to **`עריכה טכנית (Django Admin)`** (matches PR4 detail/review wording); wrap combined shared/catalog/tags OCR metadata save in one **`transaction.atomic()`** block so DB failure cannot leave partial persistence; add focused regression tests for cross-section validation blocking and family GET **403** on **`/archive/manage/<id>/edit/`**.
+
+**Unchanged:** Validation rules, field set, backlog queryset/filters/auth, review backlog, OCR/HTR processing, upload/worker behavior.
+
+**Scope:** `backlog.html`, `_archive_manage_edit_ocr_document`, focused tests, this log entry.
 
 ## Document date precision — schema foundation (PR 2)
 
