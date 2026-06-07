@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from django.db import transaction
@@ -109,13 +110,22 @@ def update_manual_text_archive_item(
     return archive_item
 
 
-def sync_archive_item_shared_fields_from_document(document) -> None:
+def sync_archive_item_shared_fields_from_document(
+    document,
+    *,
+    field_names: Sequence[str] | None = None,
+) -> None:
     """Mirror shared archival fields from Document onto its linked ArchiveItem."""
+    names = (
+        tuple(field_names)
+        if field_names is not None
+        else ARCHIVE_ITEM_SHARED_FIELD_NAMES
+    )
     archive_item = document.archive_item
     values = archive_item_field_values_from_document(document)
-    for name, value in values.items():
-        setattr(archive_item, name, value)
-    archive_item.save(update_fields=[*ARCHIVE_ITEM_SHARED_FIELD_NAMES, "updated_at"])
+    for name in names:
+        setattr(archive_item, name, values[name])
+    archive_item.save(update_fields=[*names, "updated_at"])
 
 
 @transaction.atomic
