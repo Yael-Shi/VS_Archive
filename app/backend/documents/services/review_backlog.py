@@ -47,6 +47,7 @@ def documents_in_review_backlog(
                 ).filter(pending)
             )
         )
+        .select_related("archive_item")
         .order_by("-updated_at")
         .distinct()
     )
@@ -54,10 +55,13 @@ def documents_in_review_backlog(
     q = (q or "").strip()
     if q:
         if q.isdigit():
-            qs = qs.filter(Q(id=int(q)) | Q(title__icontains=q))
+            qs = qs.filter(
+                Q(id=int(q)) | Q(archive_item__title__icontains=q)
+            )
         else:
             qs = qs.filter(
-                Q(title__icontains=q) | Q(file_original_name__icontains=q)
+                Q(archive_item__title__icontains=q)
+                | Q(file_original_name__icontains=q)
             )
 
     if language:

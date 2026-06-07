@@ -76,14 +76,14 @@ OCR edit form GET seed reads shared fields from **`ArchiveItem`** (via **`shared
 | **`/archive/<id>/`** MANUAL_TEXT detail | **`ArchiveItem`** |
 | **`/archive/<id>/`** OCR_DOCUMENT detail | Redirects to document detail |
 | **`/api/ui/documents/`** list, detail, API serialization | **`ArchiveItem`** (via `doc.archive_item`; PR5c) |
-| Metadata completion backlog | **`Document`** queryset; row **title** display from **`ArchiveItem`** (PR5c) |
+| Metadata completion backlog | **`ArchiveItem`** membership (`metadata_status`); row **title** display from **`ArchiveItem`** (PR5f) |
 | OCR edit form (GET seed data) | **`ArchiveItem`** (PR5d) |
-| Search/filter (`title`, `metadata_status`, `visibility` admin filter) | **`Document`** |
+| Search/filter (`title`, `metadata_status`, `visibility` admin filter) | **`ArchiveItem`** via `archive_item__*` (PR5f) |
 | Date display (`format_document_date` / `document_date_display`) | Duck-typed object — used with both **`doc`** and **`item`** depending on template |
 
 ### Main drift vector
 
-**Django Admin `Document`** allows editing shared fields **without** syncing **`ArchiveItem`**. **`ArchiveItemAdmin`** is view-only. Drift can occur when staff use the secondary technical admin path instead of first-party OCR edit.
+**Django Admin `Document`** shared fields are **read-only compatibility mirrors** (PR5f); staff edit canonical metadata via first-party OCR edit. **`ArchiveItemAdmin`** remains view-only.
 
 **`create_ocr_document`** (PR5e) creates **`ArchiveItem`** first as canonical for shared fields; **`Document`** receives mirror values at insert time. Upload API contract unchanged. The worker does not modify shared fields.
 
@@ -99,7 +99,7 @@ Shared field set: **`ARCHIVE_ITEM_SHARED_FIELD_NAMES`** in `documents/services/a
 |--------|--------|
 | **Document** | `Document.title` (`CharField`, required) |
 | **ArchiveItem** | `ArchiveItem.title` (`CharField`, required) |
-| **Write paths** | `create_ocr_document` / upload API (both at create); `update_ocr_document_metadata` (ArchiveItem → Document mirror; PR5d); Django Admin Document (no sync) |
+| **Write paths** | `create_ocr_document` / upload API (both at create); `update_ocr_document_metadata` (ArchiveItem → Document mirror; PR5d); Django Admin Document shared fields read-only (PR5f) |
 | **Read paths** | Document list, detail, review, backlog, API; archive list/manage; OCR edit form seed |
 | **Target owner** | **`ArchiveItem`** |
 
@@ -110,7 +110,7 @@ Shared field set: **`ARCHIVE_ITEM_SHARED_FIELD_NAMES`** in `documents/services/a
 | **Document** | `Document.visibility` (`private` / `public`) |
 | **ArchiveItem** | `ArchiveItem.visibility` (same choices) |
 | **Write paths** | Same as title |
-| **Read paths** | **Access:** `archive_item.visibility`. **Display:** document detail badge uses `doc.visibility`; archive list/manage use `item.visibility`; document list admin filter uses `Document.visibility` |
+| **Read paths** | **Access:** `archive_item.visibility`. **Display/filter:** document surfaces use `archive_item` (PR5c/PR5f); archive list/manage use `item.visibility` |
 | **Target owner** | **`ArchiveItem`** (already access SoT; must align display and writes) |
 
 ### metadata_status
@@ -119,8 +119,8 @@ Shared field set: **`ARCHIVE_ITEM_SHARED_FIELD_NAMES`** in `documents/services/a
 |--------|--------|
 | **Document** | `Document.metadata_status` (`NEEDS_COMPLETION` / `COMPLETED`) |
 | **ArchiveItem** | `ArchiveItem.metadata_status` (same choices) |
-| **Write paths** | Create default `NEEDS_COMPLETION`; OCR edit sync; Django Admin Document |
-| **Read paths** | Backlog filters `Document.metadata_status`; document list filter; archive manage list shows `item.metadata_status`; OCR edit form seed |
+| **Write paths** | Create default `NEEDS_COMPLETION`; OCR edit sync; Django Admin Document shared fields read-only (PR5f) |
+| **Read paths** | Backlog membership and document list filter use `archive_item.metadata_status` (PR5f); archive manage list shows `item.metadata_status`; OCR edit form seed |
 | **Target owner** | **`ArchiveItem`** |
 
 ### date_start / date_end / date_precision
@@ -129,7 +129,7 @@ Shared field set: **`ARCHIVE_ITEM_SHARED_FIELD_NAMES`** in `documents/services/a
 |--------|--------|
 | **Document** | `Document.date_start`, `Document.date_end`, `Document.date_precision` |
 | **ArchiveItem** | `ArchiveItem.date_start`, `ArchiveItem.date_end`, `ArchiveItem.date_precision` |
-| **Write paths** | Upload API, `create_ocr_document`, OCR edit sync, Django Admin Document |
+| **Write paths** | Upload API, `create_ocr_document`, OCR edit sync; Django Admin Document shared fields read-only (PR5f) |
 | **Read paths** | `format_document_date()` used on both `doc` and `item` in templates; upload does not set precision explicitly (defaults `UNKNOWN`) |
 | **Target owner** | **`ArchiveItem`** |
 
@@ -234,7 +234,7 @@ Duplicated shared fields on **`Document`** remain as a **compatibility mirror** 
 
 **Implementation (done):** User-facing OCR document **display** reads the six shared archival fields from linked **`ArchiveItem`** (list/detail/review HTML, metadata backlog row titles, JSON **`/api/documents/`** via **`_serialize_doc`**, visibility badges, dates). Helper **`shared_archive_item_for_document`**. **`format_document_date`** accepts any object with date fields. Querysets use **`select_related("archive_item")`** where needed.
 
-**Unchanged (deferred):** Write paths; list/backlog/review **filters and search** (still **`Document`** fields — PR5f); **`admin_backlog_page`** membership rule; Django Admin.
+**Unchanged (deferred at PR5c):** Write paths; list/backlog/review **filters and search**; **`admin_backlog_page`** membership rule; Django Admin — all addressed in PR5f.
 
 ### PR5d — Write-path flip
 
@@ -260,17 +260,19 @@ Duplicated shared fields on **`Document`** remain as a **compatibility mirror** 
 
 **Implementation (done):** **`create_ocr_document`** splits kwargs via **`_split_ocr_document_create_kwargs`**, resolves shared-field defaults on an unsaved **`ArchiveItem`**, creates **`ArchiveItem`** first, then creates **`Document`** with runtime kwargs plus mirror values from **`archive_item_field_values_from_archive_item`**. No post-create sync UPDATE. Upload API and upload behavior unchanged.
 
-**Unchanged (deferred):** List/backlog/review **filters and search** and backlog **membership** (PR5f); Django Admin shared-field editability (PR5f).
+**Unchanged (deferred at PR5e):** List/backlog/review **filters and search** and backlog **membership**; Django Admin shared-field editability — addressed in PR5f.
 
 ### PR5f — Backlog/search/filter/admin alignment
 
 | | |
 |--|--|
 | **Goal** | Metadata backlog, document list filters, and search use **`archive_item__*`** joins or shared helpers; **`Document`** admin shared fields **read-only** with pointer to first-party OCR edit |
-| **Scope** | `views.py` (`_base_queryset`, `admin_backlog_page`); `admin.py` fieldsets |
+| **Scope** | `views.py` (`_base_queryset`, `admin_backlog_page`); `review_backlog.py` (title search); `admin.py` fieldsets |
 | **Out of scope** | Enabling **`ArchiveItemAdmin`** edit; catalog field migration |
 | **Tests** | Backlog/filter tests; admin cannot mutate shared fields via POST |
 | **Risk** | **Medium** |
+
+**Implementation (done):** **`_base_queryset`** filters `metadata_status` and admin `visibility` via **`archive_item__*`**, and `q` title via **`archive_item__title`**. **`admin_backlog_page`** membership uses **`archive_item__metadata_status=NEEDS_COMPLETION`**. Review backlog **`q`** title search uses **`archive_item__title`**. **`DocumentAdmin`** shared fields are readonly compatibility mirrors; list display/filter/search use ArchiveItem-backed semantics. **`reconcile_ocr_shared_fields`** unchanged.
 
 ### PR5g — Compatibility mirror deprecation (optional, later)
 
@@ -331,15 +333,12 @@ Run reconciliation **before** read-path and write-path cutover PRs:
 - **`create_ocr_document`** — **`ArchiveItem`** canonical create for six shared fields; **`Document`** mirror values set at insert from **`archive_item_field_values_from_archive_item`** (no post-create sync UPDATE).
 - Upload API unchanged; no ongoing sync except OCR edit, create, and reconciliation.
 
-### Deferred
+### Django Admin (PR5f — current)
 
-- List/backlog/search/filter/admin alignment (PR5f).
-- Sync on **explicit staff edit** and **atomic create** only — no background job.
-
-### Django Admin
-
-- **`Document`**: shared fields become **read-only / de-emphasized** (PR5f); help text points to **`/archive/manage/<archive_item_id>/edit/`**.
+- **`Document`**: shared fields are **read-only compatibility mirrors**; fieldset help text points to **`/archive/manage/<archive_item_id>/edit/`**. List display/filter/search use ArchiveItem-backed semantics for shared fields.
 - **`ArchiveItemAdmin`**: remains view-only until a deliberate archive-item admin policy exists; first-party OCR edit remains primary staff path.
+
+Sync on **explicit staff edit** and **atomic create** only — no background job.
 
 ---
 

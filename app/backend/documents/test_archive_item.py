@@ -356,6 +356,63 @@ class ArchiveItemAdminPolicyTests(TestCase):
         admin = DocumentAdmin(Document, self.site)
         self.assertIn("archive_item", admin.readonly_fields)
 
+    def test_document_admin_shared_mirror_fields_are_readonly(self):
+        admin = DocumentAdmin(Document, self.site)
+        for field in (
+            "title",
+            "visibility",
+            "metadata_status",
+            "date_start",
+            "date_end",
+            "date_precision",
+        ):
+            self.assertIn(field, admin.readonly_fields)
+
+    def test_document_admin_post_cannot_change_shared_mirror_fields(self):
+        doc = create_ocr_document(
+            title="Admin mirror before",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PRIVATE,
+            metadata_status=Document.MetadataStatus.NEEDS_COMPLETION,
+            file_s3_key="documents/99/original.jpg",
+            mime_type="image/jpeg",
+        )
+        item = doc.archive_item
+        before_title = item.title
+        before_visibility = item.visibility
+        before_metadata_status = item.metadata_status
+
+        client = Client()
+        client.force_login(self.request.user)
+        change_url = f"/admin/documents/document/{doc.id}/change/"
+        get_resp = client.get(change_url)
+        self.assertEqual(get_resp.status_code, 200)
+
+        form = get_resp.context["adminform"].form
+        post_data = {}
+        for name in form.fields:
+            value = form[name].value()
+            if value is None:
+                value = ""
+            post_data[name] = value
+        post_data["_save"] = "Save"
+        post_data["title"] = "Admin POST drift title"
+        post_data["visibility"] = Document.Visibility.PUBLIC
+        post_data["metadata_status"] = Document.MetadataStatus.COMPLETED
+
+        post_resp = client.post(change_url, post_data, follow=True)
+        self.assertEqual(post_resp.status_code, 200)
+
+        item.refresh_from_db()
+        doc.refresh_from_db()
+        self.assertEqual(item.title, before_title)
+        self.assertEqual(item.visibility, before_visibility)
+        self.assertEqual(item.metadata_status, before_metadata_status)
+        self.assertEqual(doc.title, before_title)
+        self.assertEqual(doc.visibility, before_visibility)
+        self.assertEqual(doc.metadata_status, before_metadata_status)
+
 
 class ArchiveItemUploadIntegrationTests(TestCase):
     def setUp(self):

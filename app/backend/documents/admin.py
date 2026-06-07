@@ -10,6 +10,20 @@ from .models import (
     TranskribusRun,
 )
 
+_SHARED_MIRROR_READONLY_FIELDS = (
+    "title",
+    "visibility",
+    "metadata_status",
+    "date_start",
+    "date_end",
+    "date_precision",
+)
+
+_SHARED_MIRROR_FIELDSET_DESCRIPTION = (
+    "Read-only compatibility mirror. Edit canonical OCR metadata at "
+    "/archive/manage/<archive_item_id>/edit/."
+)
+
 
 @admin.register(Tag)
 class TagAdmin(admin.ModelAdmin):
@@ -105,41 +119,52 @@ class DocumentAdmin(admin.ModelAdmin):
 
     list_display = (
         "id",
-        "title",
+        "canonical_title",
         "archive_item",
         "doc_type",
         "text_input_type",
-        "metadata_status",
+        "canonical_metadata_status",
         "upload_status",
         "processing_state_user",
-        "visibility",
+        "canonical_visibility",
         "created_at",
         "updated_at",
     )
     list_filter = (
         "doc_type",
         "text_input_type",
-        "metadata_status",
+        "archive_item__metadata_status",
         "upload_status",
         "processing_state_user",
-        "visibility",
+        "archive_item__visibility",
         "tags_m2m",
     )
-    search_fields = ("title", "category_event", "language", "text_input_type", "tags_m2m__name")
+    search_fields = (
+        "archive_item__title",
+        "category_event",
+        "language",
+        "text_input_type",
+        "tags_m2m__name",
+    )
     ordering = ("-created_at",)
 
     filter_horizontal = ("tags_m2m",)
 
     fieldsets = (
-        ("Core", {"fields": ("archive_item", "title", "doc_type", "text_input_type")}),
+        ("Core", {"fields": ("archive_item", "doc_type", "text_input_type")}),
         (
-            "Status",
+            "Shared archival fields — compatibility mirror",
+            {
+                "fields": _SHARED_MIRROR_READONLY_FIELDS,
+                "description": _SHARED_MIRROR_FIELDSET_DESCRIPTION,
+            },
+        ),
+        (
+            "Processing status",
             {
                 "fields": (
-                    "metadata_status",
                     "upload_status",
                     "processing_state_user",
-                    "visibility",
                 )
             },
         ),
@@ -147,9 +172,6 @@ class DocumentAdmin(admin.ModelAdmin):
             "Optional metadata",
             {
                 "fields": (
-                    "date_start",
-                    "date_end",
-                    "date_precision",
                     "language",
                     "category_event",
                     "tags_m2m",
@@ -170,7 +192,30 @@ class DocumentAdmin(admin.ModelAdmin):
         ),
         ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )
-    readonly_fields = ("archive_item", "created_at", "updated_at")
+    readonly_fields = (
+        "archive_item",
+        *_SHARED_MIRROR_READONLY_FIELDS,
+        "created_at",
+        "updated_at",
+    )
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("archive_item")
+
+    @admin.display(description="Title", ordering="archive_item__title")
+    def canonical_title(self, obj: Document) -> str:
+        return obj.archive_item.title
+
+    @admin.display(
+        description="Metadata status",
+        ordering="archive_item__metadata_status",
+    )
+    def canonical_metadata_status(self, obj: Document) -> str:
+        return obj.archive_item.metadata_status
+
+    @admin.display(description="Visibility", ordering="archive_item__visibility")
+    def canonical_visibility(self, obj: Document) -> str:
+        return obj.archive_item.visibility
 
     def has_add_permission(self, request):
         return False
