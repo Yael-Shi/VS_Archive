@@ -186,17 +186,21 @@
         <div class="admin-meta">
           <h3>מטא־דאטה למנהלים</h3>
 
+          {% if doc.category_event %}<div><strong>אירוע / קטגוריה:</strong> {{ doc.category_event }}</div>{% endif %}
+
           {% if admin_meta %}
             {% if admin_meta.donor %}<div><strong>תורם:</strong> {{ admin_meta.donor }}</div>{% endif %}
             {% if admin_meta.collection %}<div><strong>אוסף:</strong> {{ admin_meta.collection }}</div>{% endif %}
             {% if admin_meta.original_location %}<div><strong>מיקום מקור:</strong> {{ admin_meta.original_location }}</div>{% endif %}
             {% if admin_meta.notes %}<div><strong>הערות:</strong> {{ admin_meta.notes }}</div>{% endif %}
 
-            {% if not admin_meta.donor and not admin_meta.collection and not admin_meta.original_location and not admin_meta.notes %}
+            {% if not admin_meta.donor and not admin_meta.collection and not admin_meta.original_location and not admin_meta.notes and not doc.category_event %}
               <p class="muted">אין מידע מנהלים עדיין.</p>
             {% endif %}
           {% else %}
-            <p class="muted">אין מידע מנהלים עדיין.</p>
+            {% if not doc.category_event %}
+              <p class="muted">אין מידע מנהלים עדיין.</p>
+            {% endif %}
           {% endif %}
         </div>
       {% endif %}

@@ -12,10 +12,14 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from .models import ArchiveItem, Document, DocumentSourceFile, DocumentTextResult, Tag, DocumentMetadata
+from documents.services.archive_catalog_metadata_validation import (
+    parse_ocr_catalog_metadata_form,
+)
 from documents.services.archive_items import (
     create_manual_text_archive_item,
     create_ocr_document,
     update_manual_text_archive_item,
+    update_ocr_document_catalog_metadata,
     update_ocr_document_metadata,
 )
 from botocore.exceptions import BotoCoreError, ClientError
@@ -1540,6 +1544,24 @@ def _archive_metadata_form_data_from_document(document: Document) -> dict:
     )
 
 
+def _ocr_catalog_form_data_from_document(document: Document) -> dict:
+    admin_meta = getattr(document, "admin_meta", None)
+    return {
+        "donor": admin_meta.donor if admin_meta else "",
+        "collection": admin_meta.collection if admin_meta else "",
+        "original_location": admin_meta.original_location if admin_meta else "",
+        "notes": admin_meta.notes if admin_meta else "",
+        "category_event": document.category_event or "",
+    }
+
+
+def _ocr_document_edit_form_data_from_document(document: Document) -> dict:
+    return {
+        **_archive_metadata_form_data_from_document(document),
+        **_ocr_catalog_form_data_from_document(document),
+    }
+
+
 def _empty_archive_metadata_form_data() -> dict:
     return _archive_metadata_form_data(
         title="",
@@ -1781,25 +1803,39 @@ def _archive_manage_edit_manual_text(request, item: ArchiveItem):
 
 
 def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
-    doc = Document.objects.filter(archive_item_id=item.id).first()
+    doc = (
+        Document.objects.select_related("admin_meta")
+        .filter(archive_item_id=item.id)
+        .first()
+    )
     if doc is None:
         raise Http404()
 
     form_errors: list[str] = []
-    form_data = _archive_metadata_form_data_from_document(doc)
+    form_data = _ocr_document_edit_form_data_from_document(doc)
 
     if request.method == "POST":
-        parsed, form_errors = parse_archive_metadata_form(request.POST)
-        form_data = parsed
+        parsed_shared, shared_errors = parse_archive_metadata_form(request.POST)
+        parsed_catalog, catalog_errors = parse_ocr_catalog_metadata_form(request.POST)
+        form_errors = shared_errors + catalog_errors
+        form_data = {**parsed_shared, **parsed_catalog}
         if not form_errors:
             update_ocr_document_metadata(
                 doc,
-                title=parsed["title"],
-                visibility=parsed["visibility"],
-                date_start=parsed["date_start_value"],
-                date_end=parsed["date_end_value"],
-                date_precision=parsed["date_precision"],
-                metadata_status=parsed["metadata_status"],
+                title=parsed_shared["title"],
+                visibility=parsed_shared["visibility"],
+                date_start=parsed_shared["date_start_value"],
+                date_end=parsed_shared["date_end_value"],
+                date_precision=parsed_shared["date_precision"],
+                metadata_status=parsed_shared["metadata_status"],
+            )
+            update_ocr_document_catalog_metadata(
+                doc,
+                donor=parsed_catalog["donor"],
+                collection=parsed_catalog["collection"],
+                original_location=parsed_catalog["original_location"],
+                notes=parsed_catalog["notes"],
+                category_event=parsed_catalog["category_event_value"],
             )
             return redirect("documents-detail-page", doc_id=doc.id)
 

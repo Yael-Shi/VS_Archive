@@ -8,7 +8,7 @@
     </div>
 
     <h1 class="page-title">{{ page_title }}</h1>
-    <p class="page-subtitle">מסמך סרוק / PDF — עריכת שדות מטא־דאטה משותפים בלבד.</p>
+    <p class="page-subtitle">מסמך סרוק / PDF — עריכת שדות מטא־דאטה משותפים ושדות קטלוגיים.</p>
 
     {% if form_errors %}
       <div class="spacer"></div>
@@ -27,6 +27,8 @@
     <form method="post">
       {% csrf_token %}
       {% include "documents/archive/archive_metadata_form_fields.html" %}
+      <div class="spacer"></div>
+      {% include "documents/archive/ocr_catalog_metadata_form_fields.html" %}
       <div class="spacer"></div>
       <button type="submit" class="btn btn-primary">{{ submit_label }}</button>
     </form>

@@ -153,3 +153,38 @@ def update_ocr_document_metadata(
     )
     sync_archive_item_shared_fields_from_document(document)
     return document
+
+
+@transaction.atomic
+def update_ocr_document_catalog_metadata(
+    document,
+    *,
+    donor: str,
+    collection: str,
+    original_location: str,
+    notes: str,
+    category_event: str | None,
+):
+    """
+    Update OCR catalog scalar metadata on Document and DocumentMetadata.
+
+    Document remains OCR runtime source of truth. Does not sync ArchiveItem.
+    """
+    from documents.models import ArchiveItem, DocumentMetadata
+
+    if document.archive_item.item_type != ArchiveItem.ItemType.OCR_DOCUMENT:
+        raise ValueError("document is not linked to an OCR_DOCUMENT archive item")
+
+    document.category_event = category_event
+    document.save(update_fields=["category_event", "updated_at"])
+
+    DocumentMetadata.objects.update_or_create(
+        document=document,
+        defaults={
+            "donor": donor,
+            "collection": collection,
+            "original_location": original_location,
+            "notes": notes,
+        },
+    )
+    return document
