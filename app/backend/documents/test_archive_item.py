@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth.models import Group, User
 from django.db import IntegrityError
-from django.test import Client, RequestFactory, TestCase, override_settings
+from django.test import Client, RequestFactory, SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 
 from documents.admin import ArchiveItemAdmin, DocumentAdmin, ManualTextContentAdmin
@@ -15,6 +15,7 @@ from documents.models import (
     DocumentSourceFile,
     DocumentTextResult,
     ManualTextContent,
+    Tag,
 )
 from documents.services.archive_items import (
     archive_item_field_values_from_document,
@@ -24,6 +25,12 @@ from documents.services.archive_items import (
     update_manual_text_archive_item,
     update_ocr_document_catalog_metadata,
     update_ocr_document_metadata,
+    update_ocr_document_tags,
+)
+from documents.services.archive_tags_validation import (
+    normalize_tag_names_from_list,
+    parse_comma_separated_tag_names,
+    parse_ocr_tags_form,
 )
 from documents.services.archive_item_access import ARCHIVE_FAMILY_GROUP_NAME
 from documents.services.archive_item_presentation import (
@@ -1408,6 +1415,367 @@ class OcrDocumentCatalogMetadataEditTests(TestCase):
         doc.refresh_from_db()
         self.assertEqual(doc.category_event, "Service event")
         self.assertEqual(doc.admin_meta.donor, "Service donor")
+
+
+class ArchiveTagsValidationTests(SimpleTestCase):
+    def test_parse_comma_separated_basic(self):
+        self.assertEqual(parse_comma_separated_tag_names("a, b"), ["a", "b"])
+
+    def test_parse_comma_separated_trims_and_drops_empty(self):
+        self.assertEqual(
+            parse_comma_separated_tag_names("  a  , , b ,  "),
+            ["a", "b"],
+        )
+
+    def test_parse_comma_separated_dedupes_preserving_order(self):
+        self.assertEqual(
+            parse_comma_separated_tag_names("b, a, b, c, a"),
+            ["b", "a", "c"],
+        )
+
+    def test_parse_comma_separated_preserves_casing(self):
+        self.assertEqual(
+            parse_comma_separated_tag_names("Family, family"),
+            ["Family", "family"],
+        )
+
+    def test_parse_ocr_tags_form_rejects_max_length(self):
+        long_tag = "x" * 65
+        _, errors = parse_ocr_tags_form({"tags": f"ok, {long_tag}"})
+        self.assertEqual(errors, ["תגית חייבת להיות עד 64 תווים"])
+
+    def test_normalize_tag_names_from_list_skips_none_and_empty(self):
+        self.assertEqual(
+            normalize_tag_names_from_list([None, "", "  ", "a"]),
+            ["a"],
+        )
+
+    def test_normalize_tag_names_from_list_strips_whitespace(self):
+        self.assertEqual(
+            normalize_tag_names_from_list(["  a  ", " b "]),
+            ["a", "b"],
+        )
+
+    def test_normalize_tag_names_from_list_dedupes_preserving_order(self):
+        self.assertEqual(
+            normalize_tag_names_from_list(["b", "a", "b", "c", "a"]),
+            ["b", "a", "c"],
+        )
+
+    def test_normalize_tag_names_from_list_preserves_casing(self):
+        self.assertEqual(
+            normalize_tag_names_from_list(["Family", "family"]),
+            ["Family", "family"],
+        )
+
+
+class OcrDocumentTagsEditTests(TestCase):
+    EDIT_URL_TEMPLATE = "/archive/manage/{item_id}/edit/"
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="ocr_tags_edit_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.family_group, _ = Group.objects.get_or_create(
+            name=ARCHIVE_FAMILY_GROUP_NAME
+        )
+
+    def _create_family_user(self, username="ocr_tags_edit_family_user"):
+        user = User.objects.create_user(username=username, password="test-pass")
+        user.groups.add(self.family_group)
+        return user
+
+    def _valid_metadata_payload(self, **overrides):
+        payload = {
+            "title": "Tags OCR title",
+            "visibility": ArchiveItem.Visibility.PRIVATE,
+            "metadata_status": ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
+            "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
+            "donor": "",
+            "collection": "",
+            "original_location": "",
+            "notes": "",
+            "category_event": "",
+            "tags": "",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_staff_get_ocr_edit_form_shows_tags_field_and_prefill(self):
+        doc = create_ocr_document(
+            title="Tags prefill",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        family_tag = Tag.objects.create(name="משפחה")
+        jerusalem_tag = Tag.objects.create(name="ירושלים")
+        doc.tags_m2m.add(family_tag, jerusalem_tag)
+        self.client.force_login(self.staff)
+        resp = self.client.get(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id)
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'name="tags"')
+        self.assertContains(resp, "משפחה, ירושלים")
+
+    def test_staff_post_saves_tags(self):
+        doc = create_ocr_document(
+            title="Tags save",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Tags save",
+                tags="משפחה, 1948",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        doc.refresh_from_db()
+        self.assertEqual(
+            list(doc.tags_m2m.order_by("name").values_list("name", flat=True)),
+            ["1948", "משפחה"],
+        )
+
+    def test_staff_post_replaces_tags(self):
+        doc = create_ocr_document(
+            title="Tags replace",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        old_tag = Tag.objects.create(name="old-tag")
+        doc.tags_m2m.add(old_tag)
+        self.client.force_login(self.staff)
+        self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Tags replace",
+                tags="new-tag",
+            ),
+        )
+        doc.refresh_from_db()
+        self.assertEqual(
+            list(doc.tags_m2m.values_list("name", flat=True)),
+            ["new-tag"],
+        )
+        self.assertTrue(Tag.objects.filter(name="old-tag").exists())
+
+    def test_staff_post_clears_tags(self):
+        doc = create_ocr_document(
+            title="Tags clear",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        doc.tags_m2m.add(Tag.objects.create(name="to-clear"))
+        self.client.force_login(self.staff)
+        self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(title="Tags clear", tags=""),
+        )
+        doc.refresh_from_db()
+        self.assertFalse(doc.tags_m2m.exists())
+
+    def test_tag_validation_error_blocks_partial_save(self):
+        doc = create_ocr_document(
+            title="Before tag error",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            category_event="Before event",
+        )
+        doc.tags_m2m.add(Tag.objects.create(name="keep-me"))
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="After tag error",
+                category_event="After event",
+                tags="x" * 65,
+            ),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "תגית חייבת להיות עד 64 תווים")
+        doc.refresh_from_db()
+        self.assertEqual(doc.title, "Before tag error")
+        self.assertEqual(doc.category_event, "Before event")
+        self.assertEqual(
+            list(doc.tags_m2m.values_list("name", flat=True)),
+            ["keep-me"],
+        )
+
+    def test_anonymous_cannot_edit_tags(self):
+        doc = create_ocr_document(
+            title="Anonymous tags guard",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Hacked",
+                tags="hacked",
+            ),
+        )
+        self.assertIn(resp.status_code, (302, 403))
+        doc.refresh_from_db()
+        self.assertFalse(doc.tags_m2m.exists())
+
+    def test_family_user_cannot_edit_tags(self):
+        doc = create_ocr_document(
+            title="Family tags guard",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        self.client.force_login(self._create_family_user())
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Hacked family",
+                tags="hacked",
+            ),
+        )
+        self.assertEqual(resp.status_code, 403)
+        doc.refresh_from_db()
+        self.assertFalse(doc.tags_m2m.exists())
+
+    def test_non_staff_cannot_edit_tags(self):
+        doc = create_ocr_document(
+            title="User tags guard",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        user = User.objects.create_user(
+            username="ocr_tags_edit_non_staff",
+            password="test-pass",
+            is_staff=False,
+        )
+        self.client.force_login(user)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Hacked user",
+                tags="hacked",
+            ),
+        )
+        self.assertEqual(resp.status_code, 403)
+        doc.refresh_from_db()
+        self.assertFalse(doc.tags_m2m.exists())
+
+    def test_tags_edit_does_not_change_document_text_results(self):
+        doc = create_ocr_document(
+            title="Tags result guard",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        result = DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="test-engine",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            text="unchanged transcript",
+        )
+        self.client.force_login(self.staff)
+        self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Tags result guard",
+                tags="tag-a",
+            ),
+        )
+        result.refresh_from_db()
+        self.assertEqual(result.text, "unchanged transcript")
+        self.assertEqual(result.status, DocumentTextResult.Status.NEEDS_REVIEW)
+        self.assertEqual(result.engine, "test-engine")
+
+    def test_tags_edit_does_not_change_ocr_processing_fields(self):
+        doc = create_ocr_document(
+            title="Tags processing guard",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            upload_status=Document.UploadStatus.UPLOADED,
+            file_s3_key="uploads/tags-guard.pdf",
+            file_original_name="tags-guard.pdf",
+            mime_type="application/pdf",
+        )
+        before = {
+            "doc_type": doc.doc_type,
+            "text_input_type": doc.text_input_type,
+            "language": doc.language,
+            "upload_status": doc.upload_status,
+            "file_s3_key": doc.file_s3_key,
+            "file_original_name": doc.file_original_name,
+            "mime_type": doc.mime_type,
+        }
+        self.client.force_login(self.staff)
+        self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Tags processing guard",
+                tags="tag-a",
+            ),
+        )
+        doc.refresh_from_db()
+        for field, value in before.items():
+            self.assertEqual(getattr(doc, field), value)
+
+    def test_update_ocr_document_tags_service_sets_and_reuses_tags(self):
+        doc = create_ocr_document(
+            title="Service tags",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        existing = Tag.objects.create(name="existing")
+        update_ocr_document_tags(doc, tag_names=["existing", "new-tag"])
+        doc.refresh_from_db()
+        self.assertEqual(
+            set(doc.tags_m2m.values_list("name", flat=True)),
+            {"existing", "new-tag"},
+        )
+        self.assertEqual(Tag.objects.filter(name="existing").count(), 1)
+        self.assertEqual(existing.pk, Tag.objects.get(name="existing").pk)
+
+    def test_update_ocr_document_tags_service_replace_all(self):
+        doc = create_ocr_document(
+            title="Service replace",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        old_tag = Tag.objects.create(name="old")
+        doc.tags_m2m.add(old_tag)
+        update_ocr_document_tags(doc, tag_names=["fresh"])
+        doc.refresh_from_db()
+        self.assertEqual(
+            list(doc.tags_m2m.values_list("name", flat=True)),
+            ["fresh"],
+        )
+        self.assertTrue(Tag.objects.filter(name="old").exists())
+
+    def test_update_ocr_document_tags_service_clears_tags(self):
+        doc = create_ocr_document(
+            title="Service clear",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        doc.tags_m2m.add(Tag.objects.create(name="gone"))
+        update_ocr_document_tags(doc, tag_names=[])
+        doc.refresh_from_db()
+        self.assertFalse(doc.tags_m2m.exists())
+
+    def test_update_ocr_document_tags_service_rejects_non_ocr_item(self):
+        doc = create_ocr_document(
+            title="Service guard",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        item = doc.archive_item
+        item.item_type = ArchiveItem.ItemType.MANUAL_TEXT
+        item.save(update_fields=["item_type"])
+        with self.assertRaises(ValueError):
+            update_ocr_document_tags(doc, tag_names=["a"])
 
 
 class OcrDocumentArchiveItemAccessTests(TestCase):

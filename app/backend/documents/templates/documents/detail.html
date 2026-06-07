@@ -188,17 +188,23 @@
 
           {% if doc.category_event %}<div><strong>אירוע / קטגוריה:</strong> {{ doc.category_event }}</div>{% endif %}
 
+          {% if admin_tags %}
+            <div><strong>תגיות:</strong>
+              {% for t in admin_tags %}{{ t.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+            </div>
+          {% endif %}
+
           {% if admin_meta %}
             {% if admin_meta.donor %}<div><strong>תורם:</strong> {{ admin_meta.donor }}</div>{% endif %}
             {% if admin_meta.collection %}<div><strong>אוסף:</strong> {{ admin_meta.collection }}</div>{% endif %}
             {% if admin_meta.original_location %}<div><strong>מיקום מקור:</strong> {{ admin_meta.original_location }}</div>{% endif %}
             {% if admin_meta.notes %}<div><strong>הערות:</strong> {{ admin_meta.notes }}</div>{% endif %}
 
-            {% if not admin_meta.donor and not admin_meta.collection and not admin_meta.original_location and not admin_meta.notes and not doc.category_event %}
+            {% if not admin_meta.donor and not admin_meta.collection and not admin_meta.original_location and not admin_meta.notes and not doc.category_event and not admin_tags %}
               <p class="muted">אין מידע מנהלים עדיין.</p>
             {% endif %}
           {% else %}
-            {% if not doc.category_event %}
+            {% if not doc.category_event and not admin_tags %}
               <p class="muted">אין מידע מנהלים עדיין.</p>
             {% endif %}
           {% endif %}

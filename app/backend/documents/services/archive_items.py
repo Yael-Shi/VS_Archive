@@ -188,3 +188,28 @@ def update_ocr_document_catalog_metadata(
         },
     )
     return document
+
+
+@transaction.atomic
+def update_ocr_document_tags(
+    document,
+    *,
+    tag_names: list[str],
+):
+    """
+    Replace all tags on an OCR-backed Document.
+
+    Document remains OCR runtime source of truth. Does not sync ArchiveItem.
+    Unused Tag rows are left in the database.
+    """
+    from documents.models import ArchiveItem, Tag
+
+    if document.archive_item.item_type != ArchiveItem.ItemType.OCR_DOCUMENT:
+        raise ValueError("document is not linked to an OCR_DOCUMENT archive item")
+
+    tag_objs = []
+    for name in tag_names:
+        tag_obj, _ = Tag.objects.get_or_create(name=name)
+        tag_objs.append(tag_obj)
+    document.tags_m2m.set(tag_objs)
+    return document
