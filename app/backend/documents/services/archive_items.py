@@ -24,6 +24,13 @@ def archive_item_field_values_from_document(document: Any) -> dict[str, Any]:
     }
 
 
+def archive_item_field_values_from_archive_item(archive_item: Any) -> dict[str, Any]:
+    """Build Document mirror field values copied from an ArchiveItem (no inference)."""
+    return {
+        name: getattr(archive_item, name) for name in ARCHIVE_ITEM_SHARED_FIELD_NAMES
+    }
+
+
 def shared_archive_item_for_document(document: Any):
     """Return the read source for OCR_DOCUMENT shared archival fields (display only).
 
@@ -138,6 +145,24 @@ def sync_archive_item_shared_fields_from_document(
     archive_item.save(update_fields=[*names, "updated_at"])
 
 
+def sync_document_shared_fields_from_archive_item(
+    document,
+    *,
+    field_names: Sequence[str] | None = None,
+) -> None:
+    """Mirror shared archival fields from linked ArchiveItem onto Document."""
+    names = (
+        tuple(field_names)
+        if field_names is not None
+        else ARCHIVE_ITEM_SHARED_FIELD_NAMES
+    )
+    archive_item = document.archive_item
+    values = archive_item_field_values_from_archive_item(archive_item)
+    for name in names:
+        setattr(document, name, values[name])
+    document.save(update_fields=[*names, "updated_at"])
+
+
 @transaction.atomic
 def update_ocr_document_metadata(
     document,
@@ -150,28 +175,31 @@ def update_ocr_document_metadata(
     metadata_status: str,
 ):
     """
-    Update shared archival metadata on an OCR-backed Document and sync ArchiveItem.
+    Update shared archival metadata on an OCR-backed Document.
 
-    Document remains OCR runtime source of truth during the bridge phase.
+    ArchiveItem is canonical for the six shared archival fields. Document shared
+    fields are updated as a compatibility mirror. Document remains OCR/runtime
+    source of truth for processing-specific fields.
     """
     from documents.models import ArchiveItem
 
     if document.archive_item.item_type != ArchiveItem.ItemType.OCR_DOCUMENT:
         raise ValueError("document is not linked to an OCR_DOCUMENT archive item")
 
-    document.title = title
-    document.visibility = visibility
-    document.date_start = date_start
-    document.date_end = date_end
-    document.date_precision = date_precision
-    document.metadata_status = metadata_status
-    document.save(
+    archive_item = document.archive_item
+    archive_item.title = title
+    archive_item.visibility = visibility
+    archive_item.date_start = date_start
+    archive_item.date_end = date_end
+    archive_item.date_precision = date_precision
+    archive_item.metadata_status = metadata_status
+    archive_item.save(
         update_fields=[
             *ARCHIVE_ITEM_SHARED_FIELD_NAMES,
             "updated_at",
         ]
     )
-    sync_archive_item_shared_fields_from_document(document)
+    sync_document_shared_fields_from_archive_item(document)
     return document
 
 

@@ -1541,13 +1541,14 @@ def _archive_metadata_form_data(
 
 
 def _archive_metadata_form_data_from_document(document: Document) -> dict:
+    item = shared_archive_item_for_document(document)
     return _archive_metadata_form_data(
-        title=document.title,
-        visibility=document.visibility,
-        date_start=document.date_start,
-        date_end=document.date_end,
-        date_precision=document.date_precision,
-        metadata_status=document.metadata_status,
+        title=item.title,
+        visibility=item.visibility,
+        date_start=item.date_start,
+        date_end=item.date_end,
+        date_precision=item.date_precision,
+        metadata_status=item.metadata_status,
     )
 
 
@@ -1817,7 +1818,7 @@ def _archive_manage_edit_manual_text(request, item: ArchiveItem):
 
 def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
     doc = (
-        Document.objects.select_related("admin_meta")
+        Document.objects.select_related("archive_item", "admin_meta")
         .prefetch_related("tags_m2m")
         .filter(archive_item_id=item.id)
         .first()

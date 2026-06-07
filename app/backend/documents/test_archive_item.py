@@ -22,6 +22,7 @@ from documents.services.archive_items import (
     create_manual_text_archive_item,
     create_ocr_document,
     sync_archive_item_shared_fields_from_document,
+    sync_document_shared_fields_from_archive_item,
     update_manual_text_archive_item,
     update_ocr_document_catalog_metadata,
     update_ocr_document_metadata,
@@ -101,7 +102,37 @@ class ArchiveItemFoundationTests(TestCase):
         self.assertEqual(item.metadata_status, ArchiveItem.MetadataStatus.COMPLETED)
         self.assertEqual(item.date_precision, ArchiveItem.DatePrecision.YEAR)
 
-    def test_update_ocr_document_metadata_syncs_archive_item(self):
+    def test_sync_document_shared_fields_from_archive_item(self):
+        doc = create_ocr_document(
+            title="Document before mirror sync",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PRIVATE,
+        )
+        item = doc.archive_item
+        item.title = "ArchiveItem after mirror sync"
+        item.visibility = ArchiveItem.Visibility.PUBLIC
+        item.metadata_status = ArchiveItem.MetadataStatus.COMPLETED
+        item.date_precision = ArchiveItem.DatePrecision.YEAR
+        item.save(
+            update_fields=[
+                "title",
+                "visibility",
+                "metadata_status",
+                "date_precision",
+                "updated_at",
+            ]
+        )
+        sync_document_shared_fields_from_archive_item(doc)
+        doc.refresh_from_db()
+        self.assertEqual(doc.title, "ArchiveItem after mirror sync")
+        self.assertEqual(doc.visibility, Document.Visibility.PUBLIC)
+        self.assertEqual(doc.metadata_status, Document.MetadataStatus.COMPLETED)
+        self.assertEqual(doc.date_precision, Document.DatePrecision.YEAR)
+
+    def test_update_ocr_document_metadata_keeps_document_and_archive_item_in_sync(
+        self,
+    ):
         doc = create_ocr_document(
             title="Service before",
             doc_type=Document.DocType.PDF,
@@ -126,6 +157,45 @@ class ArchiveItemFoundationTests(TestCase):
         self.assertEqual(item.visibility, ArchiveItem.Visibility.PUBLIC)
         self.assertEqual(doc.date_precision, Document.DatePrecision.MONTH)
         self.assertEqual(item.date_precision, ArchiveItem.DatePrecision.MONTH)
+
+    def test_update_ocr_document_metadata_writes_archive_item_canonical_when_drifted(
+        self,
+    ):
+        doc = create_ocr_document(
+            title="Document drift title",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            visibility=Document.Visibility.PRIVATE,
+            metadata_status=Document.MetadataStatus.NEEDS_COMPLETION,
+            date_precision=Document.DatePrecision.UNKNOWN,
+        )
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
+            title="ArchiveItem drift title",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+            metadata_status=ArchiveItem.MetadataStatus.COMPLETED,
+            date_precision=ArchiveItem.DatePrecision.YEAR,
+        )
+        doc.refresh_from_db()
+
+        update_ocr_document_metadata(
+            doc,
+            title="Submitted canonical title",
+            visibility=ArchiveItem.Visibility.PRIVATE,
+            date_start=None,
+            date_end=None,
+            date_precision=ArchiveItem.DatePrecision.MONTH,
+            metadata_status=ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
+        )
+        doc.refresh_from_db()
+        item = doc.archive_item
+        item.refresh_from_db()
+        for model in (doc, item):
+            self.assertEqual(model.title, "Submitted canonical title")
+            self.assertEqual(model.visibility, ArchiveItem.Visibility.PRIVATE)
+            self.assertEqual(
+                model.metadata_status, ArchiveItem.MetadataStatus.NEEDS_COMPLETION
+            )
+            self.assertEqual(model.date_precision, ArchiveItem.DatePrecision.MONTH)
 
     def test_archive_item_delete_cascades_document_and_text_results(self):
         doc = create_ocr_document(
@@ -813,6 +883,65 @@ class OcrDocumentMetadataEditTests(TestCase):
             self.assertEqual(str(model.date_start), "1920-03-01")
             self.assertEqual(str(model.date_end), "1921-06-30")
 
+    def test_post_writes_archive_item_canonical_and_mirrors_document_when_drifted(
+        self,
+    ):
+        doc = create_ocr_document(
+            title="Document drift POST",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PRIVATE,
+            category_event="Before event",
+        )
+        doc.tags_m2m.add(Tag.objects.create(name="before-tag"))
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
+            title="ArchiveItem drift POST",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data={
+                **self._valid_metadata_payload(
+                    title="POST canonical title",
+                    visibility=ArchiveItem.Visibility.PRIVATE,
+                    metadata_status=ArchiveItem.MetadataStatus.COMPLETED,
+                    date_precision=ArchiveItem.DatePrecision.YEAR,
+                    date_start="1930-01-01",
+                    date_end="1935-12-31",
+                ),
+                "donor": "POST donor",
+                "collection": "POST collection",
+                "original_location": "POST location",
+                "notes": "POST notes",
+                "category_event": "After event",
+                "tags": "after-tag",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        doc.refresh_from_db()
+        item = doc.archive_item
+        item.refresh_from_db()
+        for model in (doc, item):
+            self.assertEqual(model.title, "POST canonical title")
+            self.assertEqual(model.visibility, ArchiveItem.Visibility.PRIVATE)
+            self.assertEqual(
+                model.metadata_status, ArchiveItem.MetadataStatus.COMPLETED
+            )
+            self.assertEqual(model.date_precision, ArchiveItem.DatePrecision.YEAR)
+            self.assertEqual(str(model.date_start), "1930-01-01")
+            self.assertEqual(str(model.date_end), "1935-12-31")
+        admin_meta = doc.admin_meta
+        self.assertEqual(admin_meta.donor, "POST donor")
+        self.assertEqual(admin_meta.collection, "POST collection")
+        self.assertEqual(admin_meta.original_location, "POST location")
+        self.assertEqual(admin_meta.notes, "POST notes")
+        self.assertEqual(doc.category_event, "After event")
+        self.assertEqual(
+            list(doc.tags_m2m.values_list("name", flat=True)),
+            ["after-tag"],
+        )
+
     def test_visibility_change_affects_archive_access(self):
         doc = create_ocr_document(
             title="Visibility toggle OCR",
@@ -896,6 +1025,10 @@ class OcrDocumentMetadataEditTests(TestCase):
             text_input_type=Document.TextInputType.HANDWRITTEN,
             category_event="Before event",
         )
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
+            title="ArchiveItem before shared error",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
         doc.tags_m2m.add(Tag.objects.create(name="keep-tag"))
         self.client.force_login(self.staff)
         resp = self.client.post(
@@ -916,7 +1049,11 @@ class OcrDocumentMetadataEditTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "invalid date_start format")
         doc.refresh_from_db()
+        item = doc.archive_item
+        item.refresh_from_db()
         self.assertEqual(doc.title, "Before shared error")
+        self.assertEqual(item.title, "ArchiveItem before shared error")
+        self.assertEqual(item.visibility, ArchiveItem.Visibility.PUBLIC)
         self.assertEqual(doc.category_event, "Before event")
         self.assertFalse(
             DocumentMetadata.objects.filter(document=doc, donor="New donor").exists()
@@ -1333,6 +1470,10 @@ class OcrDocumentCatalogMetadataEditTests(TestCase):
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
         )
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
+            title="ArchiveItem before catalog error",
+            metadata_status=ArchiveItem.MetadataStatus.COMPLETED,
+        )
         doc.tags_m2m.add(Tag.objects.create(name="keep-tag"))
         self.client.force_login(self.staff)
         resp = self.client.post(
@@ -1346,7 +1487,11 @@ class OcrDocumentCatalogMetadataEditTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "תורם/ת חייב להיות עד 255 תווים")
         doc.refresh_from_db()
+        item = doc.archive_item
+        item.refresh_from_db()
         self.assertEqual(doc.title, "Before catalog error")
+        self.assertEqual(item.title, "ArchiveItem before catalog error")
+        self.assertEqual(item.metadata_status, ArchiveItem.MetadataStatus.COMPLETED)
         self.assertFalse(DocumentMetadata.objects.filter(document=doc).exists())
         self.assertEqual(
             list(doc.tags_m2m.values_list("name", flat=True)),
@@ -1681,6 +1826,10 @@ class OcrDocumentTagsEditTests(TestCase):
             text_input_type=Document.TextInputType.HANDWRITTEN,
             category_event="Before event",
         )
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
+            title="ArchiveItem before tag error",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
         doc.tags_m2m.add(Tag.objects.create(name="keep-me"))
         self.client.force_login(self.staff)
         resp = self.client.post(
@@ -1694,7 +1843,11 @@ class OcrDocumentTagsEditTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "תגית חייבת להיות עד 64 תווים")
         doc.refresh_from_db()
+        item = doc.archive_item
+        item.refresh_from_db()
         self.assertEqual(doc.title, "Before tag error")
+        self.assertEqual(item.title, "ArchiveItem before tag error")
+        self.assertEqual(item.visibility, ArchiveItem.Visibility.PUBLIC)
         self.assertEqual(doc.category_event, "Before event")
         self.assertEqual(
             list(doc.tags_m2m.values_list("name", flat=True)),

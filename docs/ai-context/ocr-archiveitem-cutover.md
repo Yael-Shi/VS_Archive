@@ -11,7 +11,7 @@ Design document for moving the six duplicated shared archival fields on **`OCR_D
 
 **Key code references (current behavior):**
 
-- `documents/services/archive_items.py` — `ARCHIVE_ITEM_SHARED_FIELD_NAMES`, `create_ocr_document`, `update_ocr_document_metadata`, `sync_archive_item_shared_fields_from_document`
+- `documents/services/archive_items.py` — `ARCHIVE_ITEM_SHARED_FIELD_NAMES`, `create_ocr_document`, `update_ocr_document_metadata`, `sync_document_shared_fields_from_archive_item`, `sync_archive_item_shared_fields_from_document`
 - `documents/services/archive_item_access.py` — visibility access control
 - `documents/services/document_access.py` — document view access via `archive_item.visibility`
 - `documents/views.py` — OCR edit, document list/API, metadata backlog
@@ -58,11 +58,11 @@ Define how VS-Archive should complete the **ArchiveItem-first** direction for **
 
 During the bridge phase, **`Document`** remains canonical for OCR-specific and processing fields: **`doc_type`**, **`language`**, **`text_input_type`**, upload/processing state, file storage, **`DocumentSourceFile`**, **`DocumentTextResult`**, and related runtime artifacts.
 
-### Edit-time sync after PR1+
+### Edit-time sync (PR5d — ArchiveItem canonical)
 
-On successful staff OCR metadata edit at **`/archive/manage/<archive_item_id>/edit/`**, **`update_ocr_document_metadata`** saves shared fields on **`Document`** first, then mirrors them to the linked **`ArchiveItem`** via **`sync_archive_item_shared_fields_from_document`**. Catalog scalar metadata and tags save on **`Document`** only (no **`ArchiveItem`** mirror). The combined save is wrapped in **`transaction.atomic()`**.
+On successful staff OCR metadata edit at **`/archive/manage/<archive_item_id>/edit/`**, **`update_ocr_document_metadata`** saves shared fields on linked **`ArchiveItem`** first, then mirrors them to **`Document`** via **`sync_document_shared_fields_from_archive_item`**. Catalog scalar metadata and tags save on **`Document`** only (no **`ArchiveItem`** mirror). The combined save is wrapped in **`transaction.atomic()`**.
 
-This is **bridge behavior**, not the final source-of-truth design.
+OCR edit form GET seed reads shared fields from **`ArchiveItem`** (via **`shared_archive_item_for_document`**).
 
 ### ArchiveItem.visibility is already access source of truth
 
@@ -77,7 +77,7 @@ This is **bridge behavior**, not the final source-of-truth design.
 | **`/archive/<id>/`** OCR_DOCUMENT detail | Redirects to document detail |
 | **`/api/ui/documents/`** list, detail, API serialization | **`ArchiveItem`** (via `doc.archive_item`; PR5c) |
 | Metadata completion backlog | **`Document`** queryset; row **title** display from **`ArchiveItem`** (PR5c) |
-| OCR edit form (GET seed data) | **`Document`** |
+| OCR edit form (GET seed data) | **`ArchiveItem`** (PR5d) |
 | Search/filter (`title`, `metadata_status`, `visibility` admin filter) | **`Document`** |
 | Date display (`format_document_date` / `document_date_display`) | Duck-typed object — used with both **`doc`** and **`item`** depending on template |
 
@@ -99,7 +99,7 @@ Shared field set: **`ARCHIVE_ITEM_SHARED_FIELD_NAMES`** in `documents/services/a
 |--------|--------|
 | **Document** | `Document.title` (`CharField`, required) |
 | **ArchiveItem** | `ArchiveItem.title` (`CharField`, required) |
-| **Write paths** | `create_ocr_document` / upload API (both at create); `update_ocr_document_metadata` (Document → sync AI); Django Admin Document (no sync) |
+| **Write paths** | `create_ocr_document` / upload API (both at create); `update_ocr_document_metadata` (ArchiveItem → Document mirror; PR5d); Django Admin Document (no sync) |
 | **Read paths** | Document list, detail, review, backlog, API; archive list/manage; OCR edit form seed |
 | **Target owner** | **`ArchiveItem`** |
 
@@ -234,7 +234,7 @@ Duplicated shared fields on **`Document`** remain as a **compatibility mirror** 
 
 **Implementation (done):** User-facing OCR document **display** reads the six shared archival fields from linked **`ArchiveItem`** (list/detail/review HTML, metadata backlog row titles, JSON **`/api/documents/`** via **`_serialize_doc`**, visibility badges, dates). Helper **`shared_archive_item_for_document`**. **`format_document_date`** accepts any object with date fields. Querysets use **`select_related("archive_item")`** where needed.
 
-**Unchanged (deferred):** Write paths; OCR edit form GET seed (still **`Document`** — PR5d); list/backlog/review **filters and search** (still **`Document`** fields — PR5f); **`admin_backlog_page`** membership rule; Django Admin.
+**Unchanged (deferred):** Write paths; list/backlog/review **filters and search** (still **`Document`** fields — PR5f); **`admin_backlog_page`** membership rule; Django Admin.
 
 ### PR5d — Write-path flip
 
@@ -245,6 +245,8 @@ Duplicated shared fields on **`Document`** remain as a **compatibility mirror** 
 | **Out of scope** | Upload API changes; removing `sync_archive_item_shared_fields_from_document` until mirror policy stable |
 | **Tests** | Edit round-trip; both models in sync after save; validation blocking unchanged |
 | **Risk** | **Medium** |
+
+**Implementation (done):** **`update_ocr_document_metadata`** saves six shared fields on **`ArchiveItem`**, then **`sync_document_shared_fields_from_archive_item`** mirrors to **`Document`**. OCR edit GET seed reads from **`ArchiveItem`**. **`sync_archive_item_shared_fields_from_document`** retained for PR5b reconciliation only.
 
 ### PR5e — Upload/create alignment
 
@@ -302,7 +304,7 @@ Run reconciliation **before** read-path and write-path cutover PRs:
 
 | Phase | Winner | Policy |
 |-------|--------|--------|
-| **Pre-cutover reconcile (PR5b)** | **`Document`** for bulk apply (non-visibility fields) | Most staff writes and upload go to **`Document`**; OCR edit already syncs Document → ArchiveItem |
+| **Pre-cutover reconcile (PR5b)** | **`Document`** for bulk apply (non-visibility fields) | Bulk repair before cutover; do not re-run casually after PR5d without dry-run review |
 | **Visibility mismatches (PR5b)** | **Opt-in only** | Dry-run reports high-severity visibility drift. Default **`--apply`** skips **`visibility`**. Use **`--apply --include-visibility`** only after reviewing dry-run — copying visibility changes who can view items |
 | **Post write-cutover (PR5d+)** | **`ArchiveItem`** | **`Document`** mirror updated from **`ArchiveItem`** on every canonical write |
 | **Django Admin Document edits** | Prevented (PR5f) | Read-only shared fields eliminate new drift |
@@ -315,15 +317,15 @@ Run reconciliation **before** read-path and write-path cutover PRs:
 
 ## 8. Sync and admin policy
 
-### Current (bridge)
+### OCR metadata edit (PR5d — current)
 
-- **`sync_archive_item_shared_fields_from_document`** — temporary; runs after OCR metadata edit (Document → ArchiveItem).
-- Upload create copies fields at create time only (no ongoing sync except OCR edit).
+- **`update_ocr_document_metadata`** — **`ArchiveItem`** canonical save, then **`sync_document_shared_fields_from_archive_item`** (ArchiveItem → Document mirror).
+- **`sync_archive_item_shared_fields_from_document`** — PR5b reconciliation command and legacy repair only; not used on the canonical OCR edit write path.
+- Upload create copies fields at create time only (no ongoing sync except OCR edit and reconciliation).
 
-### Post write-cutover (target)
+### Deferred
 
-- Replace primary sync direction with **`sync_document_shared_fields_from_archive_item`** (ArchiveItem → Document mirror).
-- Retire Document → ArchiveItem sync from the canonical write path.
+- **`create_ocr_document`** ArchiveItem-first create ordering (PR5e).
 - Sync on **explicit staff edit** and **atomic create** only — no background job.
 
 ### Django Admin
