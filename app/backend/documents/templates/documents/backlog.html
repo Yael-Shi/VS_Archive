@@ -165,7 +165,10 @@
 
               <td>
                 <div class="table-actions">
-                  <a class="btn btn-primary" href="/admin/documents/document/{{ d.id }}/change/">עריכה</a>
+                  {% if d.archive_item_id %}
+                    <a class="btn btn-primary" href="{% url 'archive-manage-edit' item_id=d.archive_item_id %}">עריכת מטא־דאטה</a>
+                  {% endif %}
+                  <a class="btn" href="/admin/documents/document/{{ d.id }}/change/">עריכה (Django Admin)</a>
                 </div>
               </td>
             </tr>
