@@ -61,6 +61,16 @@ Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`s
 
 **Out of scope / still deferred:** Full **`ArchiveItem`** runtime cutover for OCR list/detail/search/API; automatic sync on non-edit paths (e.g. Django admin **`Document`** edits); **`PHOTO`** items.
 
+## ArchiveItem — OCR catalog scalar metadata edit UI (PR2a)
+
+**Decision:** Extend the existing staff/admin **`OCR_DOCUMENT`** edit UI at **`/archive/manage/<id>/edit/`** to edit catalog scalar metadata: **`donor`**, **`collection`**, **`original_location`**, **`notes`** (on **`DocumentMetadata`** / **`admin_meta`**) and **`category_event`** (on **`Document`**).
+
+**Persistence:** **`update_ocr_document_catalog_metadata`** saves **`category_event`** on **`Document`** and upserts **`DocumentMetadata`** via **`update_or_create`**. **`Document`** remains OCR runtime source of truth. **No** **`ArchiveItem`** mirror for catalog fields. **No** OCR/HTR, upload, worker, routing, or **`DocumentTextResult`** changes.
+
+**Scope (PR2a):** Catalog validation/parsing, service, OCR edit form/templates, staff detail display for **`category_event`**, tests, this log entry. **Tags** intentionally deferred to **PR2b**. **No** **`language`** / **`text_input_type`** editing. **Not** a full **`OCR_DOCUMENT`** cutover. **No** **`PHOTO`** items.
+
+**Routes:** Same **`/archive/manage/<id>/edit/`** as PR1; redirect after save → document detail.
+
 ## Document date precision — schema foundation (PR 2)
 
 **Decision:** Add **`Document.date_precision`** (`DatePrecision`: `EXACT_DAY`, `MONTH`, `YEAR`, `RANGE`, `UNKNOWN`) with Django default **`UNKNOWN`**. Migration adds the column with that default for **all** existing rows — **no** inference from `date_start`/`date_end` in this PR.

@@ -8,13 +8,21 @@ from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
 from documents.admin import ArchiveItemAdmin, DocumentAdmin, ManualTextContentAdmin
-from documents.models import ArchiveItem, Document, DocumentSourceFile, DocumentTextResult, ManualTextContent
+from documents.models import (
+    ArchiveItem,
+    Document,
+    DocumentMetadata,
+    DocumentSourceFile,
+    DocumentTextResult,
+    ManualTextContent,
+)
 from documents.services.archive_items import (
     archive_item_field_values_from_document,
     create_manual_text_archive_item,
     create_ocr_document,
     sync_archive_item_shared_fields_from_document,
     update_manual_text_archive_item,
+    update_ocr_document_catalog_metadata,
     update_ocr_document_metadata,
 )
 from documents.services.archive_item_access import ARCHIVE_FAMILY_GROUP_NAME
@@ -1001,6 +1009,405 @@ class OcrDocumentMetadataEditTests(TestCase):
             resp,
             reverse("archive-manage-edit", kwargs={"item_id": doc.archive_item_id}),
         )
+
+
+class OcrDocumentCatalogMetadataEditTests(TestCase):
+    EDIT_URL_TEMPLATE = "/archive/manage/{item_id}/edit/"
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="ocr_catalog_edit_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.family_group, _ = Group.objects.get_or_create(
+            name=ARCHIVE_FAMILY_GROUP_NAME
+        )
+
+    def _create_family_user(self, username="ocr_catalog_edit_family_user"):
+        user = User.objects.create_user(username=username, password="test-pass")
+        user.groups.add(self.family_group)
+        return user
+
+    def _valid_metadata_payload(self, **overrides):
+        payload = {
+            "title": "Catalog OCR title",
+            "visibility": ArchiveItem.Visibility.PRIVATE,
+            "metadata_status": ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
+            "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
+            "donor": "",
+            "collection": "",
+            "original_location": "",
+            "notes": "",
+            "category_event": "",
+        }
+        payload.update(overrides)
+        return payload
+
+    def _valid_catalog_payload(self, **overrides):
+        payload = {
+            "donor": "יעל שיפמן",
+            "collection": "ארכיון משפחתי",
+            "original_location": "ירושלים",
+            "notes": "הערה פנימית",
+            "category_event": "חתונה",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_staff_get_ocr_edit_form_shows_catalog_fields(self):
+        doc = create_ocr_document(
+            title="Catalog form fields",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            category_event="בר מצווה",
+        )
+        DocumentMetadata.objects.create(
+            document=doc,
+            donor="Donor A",
+            collection="Collection B",
+            original_location="Tel Aviv",
+            notes="Some notes",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id)
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'name="donor"')
+        self.assertContains(resp, 'name="collection"')
+        self.assertContains(resp, 'name="original_location"')
+        self.assertContains(resp, 'name="notes"')
+        self.assertContains(resp, 'name="category_event"')
+        self.assertContains(resp, "Donor A")
+        self.assertContains(resp, "Collection B")
+        self.assertContains(resp, "Tel Aviv")
+        self.assertContains(resp, "Some notes")
+        self.assertContains(resp, "בר מצווה")
+
+    def test_staff_post_saves_catalog_metadata(self):
+        doc = create_ocr_document(
+            title="Catalog save",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Catalog save",
+                **self._valid_catalog_payload(),
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        doc.refresh_from_db()
+        admin_meta = doc.admin_meta
+        self.assertEqual(admin_meta.donor, "יעל שיפמן")
+        self.assertEqual(admin_meta.collection, "ארכיון משפחתי")
+        self.assertEqual(admin_meta.original_location, "ירושלים")
+        self.assertEqual(admin_meta.notes, "הערה פנימית")
+        self.assertEqual(doc.category_event, "חתונה")
+
+    def test_post_creates_document_metadata_when_missing(self):
+        doc = create_ocr_document(
+            title="Missing admin meta",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+        )
+        self.assertFalse(DocumentMetadata.objects.filter(document=doc).exists())
+        self.client.force_login(self.staff)
+        self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Missing admin meta",
+                donor="New donor",
+            ),
+        )
+        doc.refresh_from_db()
+        self.assertTrue(DocumentMetadata.objects.filter(document=doc).exists())
+        self.assertEqual(doc.admin_meta.donor, "New donor")
+
+    def test_post_updates_existing_document_metadata(self):
+        doc = create_ocr_document(
+            title="Existing admin meta",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            category_event="Before event",
+        )
+        DocumentMetadata.objects.create(
+            document=doc,
+            donor="Old donor",
+            collection="Old collection",
+            original_location="Old location",
+            notes="Old notes",
+        )
+        self.client.force_login(self.staff)
+        self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Existing admin meta",
+                **self._valid_catalog_payload(),
+            ),
+        )
+        doc.refresh_from_db()
+        self.assertEqual(DocumentMetadata.objects.filter(document=doc).count(), 1)
+        self.assertEqual(doc.admin_meta.donor, "יעל שיפמן")
+        self.assertEqual(doc.admin_meta.collection, "ארכיון משפחתי")
+        self.assertEqual(doc.admin_meta.original_location, "ירושלים")
+        self.assertEqual(doc.admin_meta.notes, "הערה פנימית")
+        self.assertEqual(doc.category_event, "חתונה")
+
+    def test_clearing_catalog_fields_persists_empty_values(self):
+        doc = create_ocr_document(
+            title="Clear catalog",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            category_event="Event to clear",
+        )
+        DocumentMetadata.objects.create(
+            document=doc,
+            donor="Donor",
+            collection="Collection",
+            original_location="Location",
+            notes="Notes",
+        )
+        self.client.force_login(self.staff)
+        self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(title="Clear catalog"),
+        )
+        doc.refresh_from_db()
+        self.assertEqual(doc.admin_meta.donor, "")
+        self.assertEqual(doc.admin_meta.collection, "")
+        self.assertEqual(doc.admin_meta.original_location, "")
+        self.assertEqual(doc.admin_meta.notes, "")
+        self.assertIsNone(doc.category_event)
+
+    def test_donor_max_length_rejected(self):
+        doc = create_ocr_document(
+            title="Donor length",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Donor length",
+                donor="x" * 256,
+            ),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "תורם/ת חייב להיות עד 255 תווים")
+
+    def test_collection_max_length_rejected(self):
+        doc = create_ocr_document(
+            title="Collection length",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Collection length",
+                collection="x" * 256,
+            ),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "אוסף חייב להיות עד 255 תווים")
+
+    def test_original_location_max_length_rejected(self):
+        doc = create_ocr_document(
+            title="Location length",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Location length",
+                original_location="x" * 256,
+            ),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "מיקום מקורי חייב להיות עד 255 תווים")
+
+    def test_category_event_max_length_rejected(self):
+        doc = create_ocr_document(
+            title="Category length",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Category length",
+                category_event="x" * 256,
+            ),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "אירוע / קטגוריה חייב להיות עד 255 תווים")
+
+    def test_anonymous_cannot_edit_catalog_metadata(self):
+        doc = create_ocr_document(
+            title="Anonymous catalog guard",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Hacked",
+                **self._valid_catalog_payload(),
+            ),
+        )
+        self.assertIn(resp.status_code, (302, 403))
+        doc.refresh_from_db()
+        self.assertFalse(DocumentMetadata.objects.filter(document=doc).exists())
+        self.assertIsNone(doc.category_event)
+
+    def test_family_user_cannot_edit_catalog_metadata(self):
+        doc = create_ocr_document(
+            title="Family catalog guard",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        self.client.force_login(self._create_family_user())
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Hacked family",
+                **self._valid_catalog_payload(),
+            ),
+        )
+        self.assertEqual(resp.status_code, 403)
+        doc.refresh_from_db()
+        self.assertFalse(DocumentMetadata.objects.filter(document=doc).exists())
+
+    def test_non_staff_cannot_edit_catalog_metadata(self):
+        doc = create_ocr_document(
+            title="User catalog guard",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        user = User.objects.create_user(
+            username="ocr_catalog_edit_non_staff",
+            password="test-pass",
+            is_staff=False,
+        )
+        self.client.force_login(user)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Hacked user",
+                **self._valid_catalog_payload(),
+            ),
+        )
+        self.assertEqual(resp.status_code, 403)
+        doc.refresh_from_db()
+        self.assertFalse(DocumentMetadata.objects.filter(document=doc).exists())
+
+    def test_catalog_edit_does_not_change_archive_item_shared_fields_when_unchanged(self):
+        doc = create_ocr_document(
+            title="Shared unchanged",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PRIVATE,
+            metadata_status=Document.MetadataStatus.NEEDS_COMPLETION,
+            date_precision=Document.DatePrecision.UNKNOWN,
+        )
+        item = doc.archive_item
+        before = archive_item_field_values_from_document(doc)
+        self.client.force_login(self.staff)
+        self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Shared unchanged",
+                **self._valid_catalog_payload(),
+            ),
+        )
+        item.refresh_from_db()
+        after = archive_item_field_values_from_document(doc)
+        self.assertEqual(before, after)
+
+    def test_catalog_edit_does_not_change_document_text_results(self):
+        doc = create_ocr_document(
+            title="Catalog result guard",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        result = DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="test-engine",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            text="unchanged transcript",
+        )
+        self.client.force_login(self.staff)
+        self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Catalog result guard",
+                **self._valid_catalog_payload(),
+            ),
+        )
+        result.refresh_from_db()
+        self.assertEqual(result.text, "unchanged transcript")
+        self.assertEqual(result.status, DocumentTextResult.Status.NEEDS_REVIEW)
+        self.assertEqual(result.engine, "test-engine")
+
+    def test_catalog_edit_does_not_change_ocr_processing_fields(self):
+        doc = create_ocr_document(
+            title="Catalog processing guard",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            upload_status=Document.UploadStatus.UPLOADED,
+            file_s3_key="uploads/catalog-guard.pdf",
+            file_original_name="catalog-guard.pdf",
+            mime_type="application/pdf",
+        )
+        before = {
+            "doc_type": doc.doc_type,
+            "text_input_type": doc.text_input_type,
+            "language": doc.language,
+            "upload_status": doc.upload_status,
+            "file_s3_key": doc.file_s3_key,
+            "file_original_name": doc.file_original_name,
+            "mime_type": doc.mime_type,
+        }
+        self.client.force_login(self.staff)
+        self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Catalog processing guard",
+                **self._valid_catalog_payload(),
+            ),
+        )
+        doc.refresh_from_db()
+        for field, value in before.items():
+            self.assertEqual(getattr(doc, field), value)
+
+    def test_update_ocr_document_catalog_metadata_service_upserts(self):
+        doc = create_ocr_document(
+            title="Service upsert",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        update_ocr_document_catalog_metadata(
+            doc,
+            donor="Service donor",
+            collection="Service collection",
+            original_location="Service location",
+            notes="Service notes",
+            category_event="Service event",
+        )
+        doc.refresh_from_db()
+        self.assertEqual(doc.category_event, "Service event")
+        self.assertEqual(doc.admin_meta.donor, "Service donor")
 
 
 class OcrDocumentArchiveItemAccessTests(TestCase):
