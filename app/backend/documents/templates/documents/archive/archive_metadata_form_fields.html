@@ -1,0 +1,50 @@
+<div class="field">
+  <label for="title">כותרת *</label>
+  <input id="title" name="title" type="text" value="{{ form_data.title }}" />
+</div>
+
+<div class="field">
+  <label for="visibility">נראות / גישה</label>
+  <select id="visibility" name="visibility">
+    {% for value, label in visibility_choices %}
+      <option value="{{ value }}" {% if form_data.visibility == value %}selected{% endif %}>
+        {{ label }}
+      </option>
+    {% endfor %}
+  </select>
+</div>
+
+<div class="meta-grid">
+  <div class="field">
+    <label for="date_start">תאריך התחלה</label>
+    <input id="date_start" name="date_start" type="date" value="{{ form_data.date_start }}" />
+  </div>
+  <div class="field">
+    <label for="date_end">תאריך סיום</label>
+    <input id="date_end" name="date_end" type="date" value="{{ form_data.date_end }}" />
+  </div>
+</div>
+
+<div class="meta-grid">
+  <div class="field">
+    <label for="date_precision">דיוק תאריך</label>
+    <select id="date_precision" name="date_precision">
+      {% for value, label in date_precision_choices %}
+        <option value="{{ value }}" {% if form_data.date_precision == value %}selected{% endif %}>
+          {{ label }}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="field">
+    <label for="metadata_status">סטטוס מטא־דאטה</label>
+    <select id="metadata_status" name="metadata_status">
+      {% for value, label in metadata_status_choices %}
+        <option value="{{ value }}" {% if form_data.metadata_status == value %}selected{% endif %}>
+          {{ label }}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+</div>

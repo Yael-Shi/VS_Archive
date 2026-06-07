@@ -13,7 +13,9 @@ from documents.services.archive_items import (
     archive_item_field_values_from_document,
     create_manual_text_archive_item,
     create_ocr_document,
+    sync_archive_item_shared_fields_from_document,
     update_manual_text_archive_item,
+    update_ocr_document_metadata,
 )
 from documents.services.archive_item_access import ARCHIVE_FAMILY_GROUP_NAME
 from documents.services.archive_item_presentation import (
@@ -64,6 +66,51 @@ class ArchiveItemFoundationTests(TestCase):
         self.assertEqual(values["visibility"], Document.Visibility.PUBLIC)
         self.assertEqual(values["metadata_status"], Document.MetadataStatus.COMPLETED)
         self.assertEqual(values["date_precision"], Document.DatePrecision.RANGE)
+
+    def test_sync_archive_item_shared_fields_from_document(self):
+        doc = create_ocr_document(
+            title="Before sync",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PRIVATE,
+        )
+        doc.title = "After sync"
+        doc.visibility = Document.Visibility.PUBLIC
+        doc.metadata_status = Document.MetadataStatus.COMPLETED
+        doc.date_precision = Document.DatePrecision.YEAR
+        sync_archive_item_shared_fields_from_document(doc)
+        item = doc.archive_item
+        item.refresh_from_db()
+        self.assertEqual(item.title, "After sync")
+        self.assertEqual(item.visibility, ArchiveItem.Visibility.PUBLIC)
+        self.assertEqual(item.metadata_status, ArchiveItem.MetadataStatus.COMPLETED)
+        self.assertEqual(item.date_precision, ArchiveItem.DatePrecision.YEAR)
+
+    def test_update_ocr_document_metadata_syncs_archive_item(self):
+        doc = create_ocr_document(
+            title="Service before",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            visibility=Document.Visibility.PRIVATE,
+        )
+        update_ocr_document_metadata(
+            doc,
+            title="Service after",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+            date_start=None,
+            date_end=None,
+            date_precision=ArchiveItem.DatePrecision.MONTH,
+            metadata_status=ArchiveItem.MetadataStatus.COMPLETED,
+        )
+        doc.refresh_from_db()
+        item = doc.archive_item
+        item.refresh_from_db()
+        self.assertEqual(doc.title, "Service after")
+        self.assertEqual(item.title, "Service after")
+        self.assertEqual(doc.visibility, Document.Visibility.PUBLIC)
+        self.assertEqual(item.visibility, ArchiveItem.Visibility.PUBLIC)
+        self.assertEqual(doc.date_precision, Document.DatePrecision.MONTH)
+        self.assertEqual(item.date_precision, ArchiveItem.DatePrecision.MONTH)
 
     def test_archive_item_delete_cascades_document_and_text_results(self):
         doc = create_ocr_document(
@@ -496,18 +543,6 @@ class ManualTextArchiveItemTests(TestCase):
         item.refresh_from_db()
         self.assertEqual(item.title, "Edit guard family")
 
-    def test_edit_ocr_document_archive_item_returns_404(self):
-        doc = create_ocr_document(
-            title="OCR edit guard",
-            doc_type=Document.DocType.IMAGE,
-            text_input_type=Document.TextInputType.HANDWRITTEN,
-        )
-        self.client.force_login(self.staff)
-        resp = self.client.get(
-            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id)
-        )
-        self.assertEqual(resp.status_code, 404)
-
     def test_blank_title_rejected_on_create(self):
         self.client.force_login(self.staff)
         resp = self.client.post(
@@ -664,6 +699,308 @@ class ManualTextArchiveItemTests(TestCase):
         self.assertFalse(admin.has_add_permission(request))
         self.assertFalse(admin.has_change_permission(request))
         self.assertFalse(admin.has_delete_permission(request))
+
+
+class OcrDocumentMetadataEditTests(TestCase):
+    EDIT_URL_TEMPLATE = "/archive/manage/{item_id}/edit/"
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="ocr_edit_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.family_group, _ = Group.objects.get_or_create(
+            name=ARCHIVE_FAMILY_GROUP_NAME
+        )
+
+    def _create_family_user(self, username="ocr_edit_family_user"):
+        user = User.objects.create_user(username=username, password="test-pass")
+        user.groups.add(self.family_group)
+        return user
+
+    def _valid_metadata_payload(self, **overrides):
+        payload = {
+            "title": "Updated OCR title",
+            "visibility": ArchiveItem.Visibility.PUBLIC,
+            "metadata_status": ArchiveItem.MetadataStatus.COMPLETED,
+            "date_precision": ArchiveItem.DatePrecision.YEAR,
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_staff_can_get_ocr_metadata_edit_form(self):
+        doc = create_ocr_document(
+            title="OCR edit form",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id)
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "OCR edit form")
+        self.assertContains(resp, "עריכת מטא־דאטה")
+        self.assertNotContains(resp, 'name="body"')
+
+    def test_staff_can_post_valid_ocr_metadata_edits(self):
+        doc = create_ocr_document(
+            title="Before OCR edit",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PRIVATE,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="After OCR edit",
+                date_start="1940-01-01",
+                date_end="1945-12-31",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            resp["Location"],
+            reverse("documents-detail-page", kwargs={"doc_id": doc.id}),
+        )
+
+    def test_shared_fields_updated_on_document_and_archive_item(self):
+        doc = create_ocr_document(
+            title="Shared fields before",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            visibility=Document.Visibility.PRIVATE,
+            metadata_status=Document.MetadataStatus.NEEDS_COMPLETION,
+            date_precision=Document.DatePrecision.UNKNOWN,
+        )
+        self.client.force_login(self.staff)
+        self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Shared fields after",
+                visibility=ArchiveItem.Visibility.PUBLIC,
+                metadata_status=ArchiveItem.MetadataStatus.COMPLETED,
+                date_precision=ArchiveItem.DatePrecision.RANGE,
+                date_start="1920-03-01",
+                date_end="1921-06-30",
+            ),
+        )
+        doc.refresh_from_db()
+        item = doc.archive_item
+        item.refresh_from_db()
+        for model in (doc, item):
+            self.assertEqual(model.title, "Shared fields after")
+            self.assertEqual(model.visibility, ArchiveItem.Visibility.PUBLIC)
+            self.assertEqual(model.metadata_status, ArchiveItem.MetadataStatus.COMPLETED)
+            self.assertEqual(model.date_precision, ArchiveItem.DatePrecision.RANGE)
+            self.assertEqual(str(model.date_start), "1920-03-01")
+            self.assertEqual(str(model.date_end), "1921-06-30")
+
+    def test_visibility_change_affects_archive_access(self):
+        doc = create_ocr_document(
+            title="Visibility toggle OCR",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PRIVATE,
+        )
+        detail_url = f"/api/ui/documents/{doc.id}/"
+        self.assertEqual(self.client.get(detail_url).status_code, 404)
+
+        self.client.force_login(self.staff)
+        self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Visibility toggle OCR",
+                visibility=ArchiveItem.Visibility.PUBLIC,
+            ),
+        )
+        self.client.logout()
+        self.assertEqual(self.client.get(detail_url).status_code, 200)
+
+        self.client.force_login(self.staff)
+        self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="Visibility toggle OCR",
+                visibility=ArchiveItem.Visibility.PRIVATE,
+            ),
+        )
+        self.client.logout()
+        self.assertEqual(self.client.get(detail_url).status_code, 404)
+
+        self.client.force_login(self._create_family_user())
+        self.assertEqual(self.client.get(detail_url).status_code, 200)
+
+    def test_anonymous_cannot_edit_ocr_metadata(self):
+        doc = create_ocr_document(
+            title="Anonymous OCR guard",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(title="Hacked"),
+        )
+        self.assertIn(resp.status_code, (302, 403))
+        doc.refresh_from_db()
+        self.assertEqual(doc.title, "Anonymous OCR guard")
+
+    def test_family_user_cannot_edit_ocr_metadata(self):
+        doc = create_ocr_document(
+            title="Family OCR guard",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        self.client.force_login(self._create_family_user())
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(title="Hacked family"),
+        )
+        self.assertEqual(resp.status_code, 403)
+        doc.refresh_from_db()
+        self.assertEqual(doc.title, "Family OCR guard")
+
+    def test_non_staff_cannot_edit_ocr_metadata(self):
+        doc = create_ocr_document(
+            title="User OCR guard",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        user = User.objects.create_user(
+            username="ocr_edit_non_staff",
+            password="test-pass",
+            is_staff=False,
+        )
+        self.client.force_login(user)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(title="Hacked user"),
+        )
+        self.assertEqual(resp.status_code, 403)
+        doc.refresh_from_db()
+        self.assertEqual(doc.title, "User OCR guard")
+
+    def test_invalid_date_rejected_on_ocr_edit(self):
+        doc = create_ocr_document(
+            title="Invalid date OCR",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(date_start="not-a-date"),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "invalid date_start format")
+
+    def test_invalid_date_precision_rejected_on_ocr_edit(self):
+        doc = create_ocr_document(
+            title="Invalid precision OCR",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(date_precision="GUESS"),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "date_precision is invalid")
+
+    def test_edit_does_not_change_document_text_results(self):
+        doc = create_ocr_document(
+            title="OCR result guard",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        result = DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="test-engine",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            text="unchanged transcript",
+        )
+        self.client.force_login(self.staff)
+        self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(title="OCR result guard edited"),
+        )
+        result.refresh_from_db()
+        self.assertEqual(result.text, "unchanged transcript")
+        self.assertEqual(result.status, DocumentTextResult.Status.NEEDS_REVIEW)
+        self.assertEqual(result.engine, "test-engine")
+
+    def test_edit_does_not_change_ocr_processing_fields(self):
+        doc = create_ocr_document(
+            title="Processing guard",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            upload_status=Document.UploadStatus.UPLOADED,
+            file_s3_key="uploads/guard.pdf",
+            file_original_name="guard.pdf",
+            mime_type="application/pdf",
+        )
+        before = {
+            "doc_type": doc.doc_type,
+            "text_input_type": doc.text_input_type,
+            "language": doc.language,
+            "upload_status": doc.upload_status,
+            "file_s3_key": doc.file_s3_key,
+            "file_original_name": doc.file_original_name,
+            "mime_type": doc.mime_type,
+        }
+        self.client.force_login(self.staff)
+        self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(title="Processing guard edited"),
+        )
+        doc.refresh_from_db()
+        for field, value in before.items():
+            self.assertEqual(getattr(doc, field), value)
+
+    def test_missing_linked_document_returns_404(self):
+        item = ArchiveItem.objects.create(
+            item_type=ArchiveItem.ItemType.OCR_DOCUMENT,
+            title="Orphan OCR item",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.EDIT_URL_TEMPLATE.format(item_id=item.id))
+        self.assertEqual(resp.status_code, 404)
+
+    def test_edit_link_appears_on_document_detail_for_staff(self):
+        doc = create_ocr_document(
+            title="Detail edit link OCR",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(
+            reverse("documents-detail-page", kwargs={"doc_id": doc.id})
+        )
+        self.assertContains(
+            resp,
+            reverse("archive-manage-edit", kwargs={"item_id": doc.archive_item_id}),
+        )
+        self.assertContains(resp, "עריכת מטא־דאטה")
+
+    def test_edit_action_appears_for_ocr_document_on_manage_list(self):
+        doc = create_ocr_document(
+            title="OCR manage edit link",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(reverse("archive-manage-list"))
+        self.assertContains(
+            resp,
+            reverse("archive-manage-edit", kwargs={"item_id": doc.archive_item_id}),
+        )
 
 
 class OcrDocumentArchiveItemAccessTests(TestCase):
@@ -1245,9 +1582,9 @@ class ManualTextArchiveItemDeleteTests(TestCase):
         self.assertContains(resp, reverse("archive-manage-edit", kwargs={"item_id": item.id}))
         self.assertContains(resp, "מחיקה")
 
-    def test_delete_and_edit_actions_do_not_appear_for_staff_on_ocr_document_detail(self):
+    def test_delete_action_still_hidden_for_staff_on_ocr_document_detail(self):
         doc = create_ocr_document(
-            title="OCR detail no manual actions",
+            title="OCR detail no delete action",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
             visibility=Document.Visibility.PUBLIC,
@@ -1259,7 +1596,7 @@ class ManualTextArchiveItemDeleteTests(TestCase):
             resp,
             reverse("archive-manage-delete", kwargs={"item_id": doc.archive_item_id}),
         )
-        self.assertNotContains(
+        self.assertContains(
             resp,
             reverse("archive-manage-edit", kwargs={"item_id": doc.archive_item_id}),
         )

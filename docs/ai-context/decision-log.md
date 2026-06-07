@@ -39,7 +39,7 @@
 - **`/archive/<id>/`** — detail (**`MANUAL_TEXT`** in this PR; **`OCR_DOCUMENT`** redirects to existing document detail during bridge)
 - **`/archive/manage/`** — staff/admin management list
 - **`/archive/manage/new/manual-text/`** — staff/admin create
-- **`/archive/manage/<id>/edit/`** — staff/admin edit (**`MANUAL_TEXT`** only)
+- **`/archive/manage/<id>/edit/`** — staff/admin edit (**`MANUAL_TEXT`** body + shared metadata; **`OCR_DOCUMENT`** shared metadata only — see **“OCR shared metadata edit UI (PR1)”** below)
 
 Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`safe`**).
 
@@ -47,7 +47,19 @@ Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`s
 
 **Future metadata (deferred):** people mentioned/shown, places, narrator/author/source, event context, relationships between archive items, richer date/source/confidence notes.
 
-**Still deferred:** **`PHOTO`** items; full **`OCR_DOCUMENT`** cutover to **`ArchiveItem`** list/detail/search/API; ongoing **`Document`** ↔ **`ArchiveItem`** sync; storing manual text in **`DocumentTextResult`**; invitation/account-management for family users beyond Django Group membership.
+**Still deferred:** **`PHOTO`** items; full **`OCR_DOCUMENT`** cutover to **`ArchiveItem`** list/detail/search/API; automatic ongoing **`Document`** ↔ **`ArchiveItem`** sync outside explicit edit-time sync; storing manual text in **`DocumentTextResult`**; invitation/account-management for family users beyond Django Group membership.
+
+## ArchiveItem — OCR shared metadata edit UI (PR1)
+
+**Decision:** Add a staff/admin first-party UI to edit the six shared archival fields on existing **`OCR_DOCUMENT`** items: **`title`**, **`visibility`**, **`metadata_status`**, **`date_start`**, **`date_end`**, **`date_precision`**.
+
+**Edit-time sync (bridge phase):** On successful OCR metadata edit, **`update_ocr_document_metadata`** saves shared fields on **`Document`** first, then mirrors them to the linked **`ArchiveItem`** via **`sync_archive_item_shared_fields_from_document`**. **`Document`** remains the OCR runtime source of truth during the bridge. **`ArchiveItem.visibility`** remains the access-control source of truth for viewing (document list/detail access reads **`document.archive_item.visibility`**).
+
+**Scope (PR1):** Shared metadata edit routes/templates/services/tests/docs only. **Not** a full **`OCR_DOCUMENT`** cutover. **No** catalog fields (donor, collection, tags, etc.). **No** **`language`** / **`text_input_type`** editing. **No** OCR/HTR, upload, worker, or **`DocumentTextResult`** changes.
+
+**Routes:** **`/archive/manage/<id>/edit/`** serves **`OCR_DOCUMENT`** items (redirect after save → existing document detail). Staff edit link also on document detail (**`עריכת מטא־דאטה`**) and manage list.
+
+**Out of scope / still deferred:** Full **`ArchiveItem`** runtime cutover for OCR list/detail/search/API; automatic sync on non-edit paths (e.g. Django admin **`Document`** edits); **`PHOTO`** items.
 
 ## Document date precision — schema foundation (PR 2)
 

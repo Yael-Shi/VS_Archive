@@ -16,6 +16,7 @@ from documents.services.archive_items import (
     create_manual_text_archive_item,
     create_ocr_document,
     update_manual_text_archive_item,
+    update_ocr_document_metadata,
 )
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -62,6 +63,7 @@ from documents.services.archive_item_validation import (
     parse_date_precision,
 )
 from documents.services.manual_text_validation import parse_manual_text_form
+from documents.services.archive_metadata_validation import parse_archive_metadata_form
 from documents.services.archive_item_presentation import (
     ARCHIVE_LIST_ITEM_TYPE_FILTER_CHOICES,
     archive_manage_item_type_ui_choices,
@@ -1472,7 +1474,7 @@ def upload_page(request):
     )
 
 
-def _manual_text_form_context(
+def _archive_metadata_form_context(
     *,
     form_data: dict,
     form_errors: list[str],
@@ -1490,27 +1492,80 @@ def _manual_text_form_context(
     }
 
 
+def _manual_text_form_context(
+    *,
+    form_data: dict,
+    form_errors: list[str],
+    page_title: str,
+    submit_label: str,
+) -> dict:
+    return _archive_metadata_form_context(
+        form_data=form_data,
+        form_errors=form_errors,
+        page_title=page_title,
+        submit_label=submit_label,
+    )
+
+
+def _archive_metadata_form_data(
+    *,
+    title: str,
+    visibility: str,
+    date_start,
+    date_end,
+    date_precision: str,
+    metadata_status: str,
+) -> dict:
+    return {
+        "title": title,
+        "visibility": visibility,
+        "date_start": date_start.isoformat() if date_start else "",
+        "date_end": date_end.isoformat() if date_end else "",
+        "date_precision": date_precision,
+        "metadata_status": metadata_status,
+    }
+
+
+def _archive_metadata_form_data_from_document(document: Document) -> dict:
+    return _archive_metadata_form_data(
+        title=document.title,
+        visibility=document.visibility,
+        date_start=document.date_start,
+        date_end=document.date_end,
+        date_precision=document.date_precision,
+        metadata_status=document.metadata_status,
+    )
+
+
+def _empty_archive_metadata_form_data() -> dict:
+    return _archive_metadata_form_data(
+        title="",
+        visibility=ArchiveItem.Visibility.PRIVATE,
+        date_start=None,
+        date_end=None,
+        date_precision=ArchiveItem.DatePrecision.UNKNOWN,
+        metadata_status=ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
+    )
+
+
 def _empty_manual_text_form_data() -> dict:
     return {
-        "title": "",
+        **_empty_archive_metadata_form_data(),
         "body": "",
-        "visibility": ArchiveItem.Visibility.PRIVATE,
-        "date_start": "",
-        "date_end": "",
-        "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
-        "metadata_status": ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
     }
 
 
 def _manual_text_form_data_from_item(item: ArchiveItem) -> dict:
     return {
-        "title": item.title,
+        **_archive_metadata_form_data(
+            title=item.title,
+            visibility=item.visibility,
+            date_start=item.date_start,
+            date_end=item.date_end,
+            date_precision=item.date_precision,
+            metadata_status=item.metadata_status,
+        ),
         "body": item.manual_text_content.body,
-        "visibility": item.visibility,
-        "date_start": item.date_start.isoformat() if item.date_start else "",
-        "date_end": item.date_end.isoformat() if item.date_end else "",
-        "date_precision": item.date_precision,
-        "metadata_status": item.metadata_status,
     }
 
 
@@ -1676,13 +1731,21 @@ def archive_manage_edit_page(request, item_id: int):
         return deny
 
     try:
-        item = ArchiveItem.objects.select_related("manual_text_content").get(
-            id=item_id,
-            item_type=ArchiveItem.ItemType.MANUAL_TEXT,
-        )
+        item = ArchiveItem.objects.select_related(
+            "manual_text_content",
+            "ocr_document",
+        ).get(id=item_id)
     except ArchiveItem.DoesNotExist:
         raise Http404() from None
 
+    if item.item_type == ArchiveItem.ItemType.MANUAL_TEXT:
+        return _archive_manage_edit_manual_text(request, item)
+    if item.item_type == ArchiveItem.ItemType.OCR_DOCUMENT:
+        return _archive_manage_edit_ocr_document(request, item)
+    raise Http404()
+
+
+def _archive_manage_edit_manual_text(request, item: ArchiveItem):
     form_errors: list[str] = []
     form_data = _manual_text_form_data_from_item(item)
 
@@ -1709,6 +1772,41 @@ def archive_manage_edit_page(request, item_id: int):
             form_data=form_data,
             form_errors=form_errors,
             page_title="עריכת טקסט מוקלד",
+            submit_label="עדכון",
+        ),
+    )
+
+
+def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
+    doc = Document.objects.filter(archive_item_id=item.id).first()
+    if doc is None:
+        raise Http404()
+
+    form_errors: list[str] = []
+    form_data = _archive_metadata_form_data_from_document(doc)
+
+    if request.method == "POST":
+        parsed, form_errors = parse_archive_metadata_form(request.POST)
+        form_data = parsed
+        if not form_errors:
+            update_ocr_document_metadata(
+                doc,
+                title=parsed["title"],
+                visibility=parsed["visibility"],
+                date_start=parsed["date_start_value"],
+                date_end=parsed["date_end_value"],
+                date_precision=parsed["date_precision"],
+                metadata_status=parsed["metadata_status"],
+            )
+            return redirect("documents-detail-page", doc_id=doc.id)
+
+    return render(
+        request,
+        "documents/archive/ocr_document_form.html",
+        context=_archive_metadata_form_context(
+            form_data=form_data,
+            form_errors=form_errors,
+            page_title="עריכת מטא־דאטה",
             submit_label="עדכון",
         ),
     )

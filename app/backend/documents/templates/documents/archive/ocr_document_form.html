@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - {{ page_title }}{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-manage-list' %}">חזרה לניהול</a>
+    </div>
+
+    <h1 class="page-title">{{ page_title }}</h1>
+    <p class="page-subtitle">מסמך סרוק / PDF — עריכת שדות מטא־דאטה משותפים בלבד.</p>
+
+    {% if form_errors %}
+      <div class="spacer"></div>
+      <div class="alert alert-danger">
+        <div class="alert-title">שגיאה בטופס</div>
+        <ul>
+          {% for error in form_errors %}
+            <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    <div class="spacer"></div>
+
+    <form method="post">
+      {% csrf_token %}
+      {% include "documents/archive/archive_metadata_form_fields.html" %}
+      <div class="spacer"></div>
+      <button type="submit" class="btn btn-primary">{{ submit_label }}</button>
+    </form>
+  </div>
+{% endblock %}
