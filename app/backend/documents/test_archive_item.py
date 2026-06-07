@@ -877,6 +877,55 @@ class OcrDocumentMetadataEditTests(TestCase):
         doc.refresh_from_db()
         self.assertEqual(doc.title, "Family OCR guard")
 
+    def test_family_user_cannot_get_ocr_metadata_edit_form(self):
+        doc = create_ocr_document(
+            title="Family GET guard",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        self.client.force_login(self._create_family_user())
+        resp = self.client.get(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id)
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_shared_validation_error_blocks_catalog_and_tags(self):
+        doc = create_ocr_document(
+            title="Before shared error",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            category_event="Before event",
+        )
+        doc.tags_m2m.add(Tag.objects.create(name="keep-tag"))
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data={
+                **self._valid_metadata_payload(
+                    title="After shared error",
+                    date_start="not-a-date",
+                ),
+                "donor": "New donor",
+                "collection": "",
+                "original_location": "",
+                "notes": "",
+                "category_event": "After event",
+                "tags": "new-tag",
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "invalid date_start format")
+        doc.refresh_from_db()
+        self.assertEqual(doc.title, "Before shared error")
+        self.assertEqual(doc.category_event, "Before event")
+        self.assertFalse(
+            DocumentMetadata.objects.filter(document=doc, donor="New donor").exists()
+        )
+        self.assertEqual(
+            list(doc.tags_m2m.values_list("name", flat=True)),
+            ["keep-tag"],
+        )
+
     def test_non_staff_cannot_edit_ocr_metadata(self):
         doc = create_ocr_document(
             title="User OCR guard",
@@ -1277,6 +1326,32 @@ class OcrDocumentCatalogMetadataEditTests(TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "אירוע / קטגוריה חייב להיות עד 255 תווים")
+
+    def test_catalog_validation_error_blocks_shared_and_tags(self):
+        doc = create_ocr_document(
+            title="Before catalog error",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        doc.tags_m2m.add(Tag.objects.create(name="keep-tag"))
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="After catalog error",
+                donor="x" * 256,
+                tags="new-tag",
+            ),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "תורם/ת חייב להיות עד 255 תווים")
+        doc.refresh_from_db()
+        self.assertEqual(doc.title, "Before catalog error")
+        self.assertFalse(DocumentMetadata.objects.filter(document=doc).exists())
+        self.assertEqual(
+            list(doc.tags_m2m.values_list("name", flat=True)),
+            ["keep-tag"],
+        )
 
     def test_anonymous_cannot_edit_catalog_metadata(self):
         doc = create_ocr_document(

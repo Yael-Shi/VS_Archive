@@ -7572,7 +7572,7 @@ class AdminBacklogMetadataEditLinkTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
         admin_href = f"/admin/documents/document/{doc.id}/change/"
-        self.assertEqual(self._link_label(html, admin_href), "עריכה (Django Admin)")
+        self.assertEqual(self._link_label(html, admin_href), "עריכה טכנית (Django Admin)")
         admin_tag = self._link_opening_tag(html, admin_href)
         self.assertIn("btn", admin_tag)
         self.assertNotIn("btn-primary", admin_tag)
