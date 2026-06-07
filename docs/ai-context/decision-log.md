@@ -125,6 +125,16 @@ Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`s
 
 **Docs:** `docs/ai-context/ocr-archiveitem-cutover.md` (PR5b implementation note).
 
+## ArchiveItem — OCR_DOCUMENT read-path display cutover (PR5c)
+
+**Decision:** User-facing OCR document **display** reads the six shared archival fields from linked **`ArchiveItem`**, not **`Document`**. **`Document`** remains OCR/runtime/processing source of truth.
+
+**Scope (PR5c):** Helper **`shared_archive_item_for_document`**; **`format_document_date`** docstring/type generalization; **`_serialize_doc`** and OCR list/detail/review/backlog **templates**; **`select_related("archive_item")`** on display querysets. **No** write-path, upload/create, reconciliation, Admin, or filter/search/backlog membership changes.
+
+**Unchanged (deferred):** List/backlog/review **filters and search** still use **`Document`** shared fields (PR5f). Metadata backlog **inclusion** still **`Document.metadata_status=NEEDS_COMPLETION`**. OCR edit form GET seed still **`Document`** (PR5d). Access still **`ArchiveItem.visibility`**.
+
+**Docs:** `docs/ai-context/ocr-archiveitem-cutover.md` (PR5c implementation note).
+
 ## Document date precision — schema foundation (PR 2)
 
 **Decision:** Add **`Document.date_precision`** (`DatePrecision`: `EXACT_DAY`, `MONTH`, `YEAR`, `RANGE`, `UNKNOWN`) with Django default **`UNKNOWN`**. Migration adds the column with that default for **all** existing rows — **no** inference from `date_start`/`date_end` in this PR.

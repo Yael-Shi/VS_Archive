@@ -75,8 +75,8 @@ This is **bridge behavior**, not the final source-of-truth design.
 | **`/archive/`** list, **`/archive/manage/`** (staff) | **`ArchiveItem`** |
 | **`/archive/<id>/`** MANUAL_TEXT detail | **`ArchiveItem`** |
 | **`/archive/<id>/`** OCR_DOCUMENT detail | Redirects to document detail |
-| **`/api/ui/documents/`** list, detail, API serialization | **`Document`** |
-| Metadata completion backlog | **`Document`** queryset and display |
+| **`/api/ui/documents/`** list, detail, API serialization | **`ArchiveItem`** (via `doc.archive_item`; PR5c) |
+| Metadata completion backlog | **`Document`** queryset; row **title** display from **`ArchiveItem`** (PR5c) |
 | OCR edit form (GET seed data) | **`Document`** |
 | Search/filter (`title`, `metadata_status`, `visibility` admin filter) | **`Document`** |
 | Date display (`format_document_date` / `document_date_display`) | Duck-typed object — used with both **`doc`** and **`item`** depending on template |
@@ -232,6 +232,10 @@ Duplicated shared fields on **`Document`** remain as a **compatibility mirror** 
 | **Tests** | List/detail parity; access unchanged; visibility badge from ArchiveItem |
 | **Risk** | **Medium** — user-visible labels |
 
+**Implementation (done):** User-facing OCR document **display** reads the six shared archival fields from linked **`ArchiveItem`** (list/detail/review HTML, metadata backlog row titles, JSON **`/api/documents/`** via **`_serialize_doc`**, visibility badges, dates). Helper **`shared_archive_item_for_document`**. **`format_document_date`** accepts any object with date fields. Querysets use **`select_related("archive_item")`** where needed.
+
+**Unchanged (deferred):** Write paths; OCR edit form GET seed (still **`Document`** — PR5d); list/backlog/review **filters and search** (still **`Document`** fields — PR5f); **`admin_backlog_page`** membership rule; Django Admin.
+
 ### PR5d — Write-path flip
 
 | | |
@@ -352,7 +356,7 @@ Run reconciliation **before** read-path and write-path cutover PRs:
 | PR | Focus |
 |----|-------|
 | PR5b | Reconciliation command dry-run/apply; mismatch detection; idempotency |
-| PR5c | Display parity document vs archive surfaces; access unchanged |
+| PR5c | Display parity document vs archive surfaces; access unchanged; ArchiveItem shared-field display on OCR pages |
 | PR5d | Write round-trip; both models in sync after OCR edit |
 | PR5e | Upload create leaves both models matching |
 | PR5f | Backlog inclusion rules; filter/search; admin readonly on shared fields |

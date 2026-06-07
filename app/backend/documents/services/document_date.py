@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Any
 
 from documents.models import Document
 
@@ -15,13 +16,14 @@ def _format_day_label(value: date) -> str:
     return value.strftime("%d/%m/%Y")
 
 
-def format_document_date(document: Document) -> str:
-    """Return a human-facing date label according to ``document.date_precision``.
+def format_document_date(obj: Any) -> str:
+    """Return a human-facing date label according to ``obj.date_precision``.
 
-    Normalized ``date_start`` / ``date_end`` are used only when precision is not
-    ``UNKNOWN``. For ``UNKNOWN``, bounds are ignored (Option B).
+    Accepts any object with ``date_start``, ``date_end``, and ``date_precision``
+    (e.g. ``Document`` or ``ArchiveItem``). Normalized bounds are used only when
+    precision is not ``UNKNOWN``. For ``UNKNOWN``, bounds are ignored (Option B).
     """
-    precision = document.date_precision or Document.DatePrecision.UNKNOWN
+    precision = obj.date_precision or Document.DatePrecision.UNKNOWN
     if precision not in _VALID_PRECISIONS:
         return NO_DATE_LABEL
 
@@ -29,8 +31,8 @@ def format_document_date(document: Document) -> str:
         return NO_DATE_LABEL
 
     if precision == Document.DatePrecision.EXACT_DAY:
-        start = document.date_start
-        end = document.date_end
+        start = obj.date_start
+        end = obj.date_end
         if start and end and start == end:
             return _format_day_label(start)
         if start:
@@ -40,18 +42,18 @@ def format_document_date(document: Document) -> str:
         return NO_DATE_LABEL
 
     if precision == Document.DatePrecision.MONTH:
-        if document.date_start:
-            return f"{document.date_start.month:02d}/{document.date_start.year}"
+        if obj.date_start:
+            return f"{obj.date_start.month:02d}/{obj.date_start.year}"
         return NO_DATE_LABEL
 
     if precision == Document.DatePrecision.YEAR:
-        if document.date_start:
-            return str(document.date_start.year)
+        if obj.date_start:
+            return str(obj.date_start.year)
         return NO_DATE_LABEL
 
     if precision == Document.DatePrecision.RANGE:
-        start = document.date_start
-        end = document.date_end
+        start = obj.date_start
+        end = obj.date_end
         if start and end:
             if start == end:
                 return _format_day_label(start)

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load status_labels document_date_display %}
-{% block title %}VSArchive - {{ doc.title }}{% endblock %}
+{% block title %}VSArchive - {{ doc.archive_item.title }}{% endblock %}
 
 {% block content %}
   <div class="card card--pad-lg">
@@ -26,15 +26,15 @@
 
     <div class="spacer"></div>
 
-    <h1 class="page-title">{{ doc.title }}</h1>
+    <h1 class="page-title">{{ doc.archive_item.title }}</h1>
 
     <div class="page-lead">
       {% if is_admin %}
         מסמך #{{ doc.id }}
         {% if doc.file_original_name %} · {{ doc.file_original_name }}{% endif %}
-        · {{ doc|document_date_display }}
+        · {{ doc.archive_item|document_date_display }}
       {% else %}
-        {{ doc|document_date_display }}
+        {{ doc.archive_item|document_date_display }}
       {% endif %}
     </div>
 
@@ -57,7 +57,7 @@
 
       {# visibility is admin-only operational; do not show to non-admin #}
       {% if is_admin %}
-        {% if doc.visibility == "public" %}
+        {% if doc.archive_item.visibility == "public" %}
           <span class="badge badge-ok">ציבורי</span>
         {% else %}
           <span class="badge">פרטי</span>
@@ -173,9 +173,9 @@
 
         <div class="viewer">
           {% if doc.doc_type == "IMAGE" %}
-            <img src="{{ content_url }}" alt="{{ doc.title }}" />
+            <img src="{{ content_url }}" alt="{{ doc.archive_item.title }}" />
           {% elif doc.doc_type == "PDF" %}
-            <iframe src="{{ content_url }}" title="{{ doc.title }}"></iframe>
+            <iframe src="{{ content_url }}" title="{{ doc.archive_item.title }}"></iframe>
           {% else %}
             <div class="muted">doc_type לא נתמך: {{ doc.doc_type }}</div>
           {% endif %}
