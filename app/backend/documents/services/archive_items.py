@@ -92,6 +92,8 @@ def create_manual_text_archive_item(
     date_end=None,
     date_precision: str | None = None,
     metadata_status: str | None = None,
+    author_name: str = "",
+    source_title: str = "",
 ):
     """
     Create a MANUAL_TEXT ArchiveItem with linked ManualTextContent.
@@ -108,6 +110,8 @@ def create_manual_text_archive_item(
         date_end=date_end,
         date_precision=date_precision or ArchiveItem.DatePrecision.UNKNOWN,
         metadata_status=metadata_status or ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
+        author_name=author_name,
+        source_title=source_title,
     )
     ManualTextContent.objects.create(archive_item=archive_item, body=body)
     return archive_item
@@ -124,6 +128,8 @@ def update_manual_text_archive_item(
     date_end=None,
     date_precision: str,
     metadata_status: str,
+    author_name: str = "",
+    source_title: str = "",
 ):
     """
     Update a MANUAL_TEXT ArchiveItem and its ManualTextContent body.
@@ -141,6 +147,8 @@ def update_manual_text_archive_item(
     archive_item.date_end = date_end
     archive_item.date_precision = date_precision
     archive_item.metadata_status = metadata_status
+    archive_item.author_name = author_name
+    archive_item.source_title = source_title
     archive_item.save()
 
     content = archive_item.manual_text_content
@@ -195,6 +203,8 @@ def update_ocr_document_metadata(
     date_end=None,
     date_precision: str,
     metadata_status: str,
+    author_name: str = "",
+    source_title: str = "",
 ):
     """
     Update shared archival metadata on an OCR-backed Document.
@@ -215,9 +225,13 @@ def update_ocr_document_metadata(
     archive_item.date_end = date_end
     archive_item.date_precision = date_precision
     archive_item.metadata_status = metadata_status
+    archive_item.author_name = author_name
+    archive_item.source_title = source_title
     archive_item.save(
         update_fields=[
             *ARCHIVE_ITEM_SHARED_FIELD_NAMES,
+            "author_name",
+            "source_title",
             "updated_at",
         ]
     )

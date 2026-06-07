@@ -1531,6 +1531,8 @@ def _archive_metadata_form_data(
     date_end,
     date_precision: str,
     metadata_status: str,
+    author_name: str = "",
+    source_title: str = "",
 ) -> dict:
     return {
         "title": title,
@@ -1539,6 +1541,8 @@ def _archive_metadata_form_data(
         "date_end": date_end.isoformat() if date_end else "",
         "date_precision": date_precision,
         "metadata_status": metadata_status,
+        "author_name": author_name,
+        "source_title": source_title,
     }
 
 
@@ -1551,6 +1555,8 @@ def _archive_metadata_form_data_from_document(document: Document) -> dict:
         date_end=item.date_end,
         date_precision=item.date_precision,
         metadata_status=item.metadata_status,
+        author_name=item.author_name,
+        source_title=item.source_title,
     )
 
 
@@ -1605,6 +1611,8 @@ def _manual_text_form_data_from_item(item: ArchiveItem) -> dict:
             date_end=item.date_end,
             date_precision=item.date_precision,
             metadata_status=item.metadata_status,
+            author_name=item.author_name,
+            source_title=item.source_title,
         ),
         "body": item.manual_text_content.body,
     }
@@ -1633,6 +1641,8 @@ def _submit_manual_text_create(request):
         date_end=parsed["date_end_value"],
         date_precision=parsed["date_precision"],
         metadata_status=parsed["metadata_status"],
+        author_name=parsed["author_name"],
+        source_title=parsed["source_title"],
     )
     return redirect("archive-detail", item_id=item.id), parsed, form_errors
 
@@ -1803,6 +1813,8 @@ def _archive_manage_edit_manual_text(request, item: ArchiveItem):
                 date_end=parsed["date_end_value"],
                 date_precision=parsed["date_precision"],
                 metadata_status=parsed["metadata_status"],
+                author_name=parsed["author_name"],
+                source_title=parsed["source_title"],
             )
             return redirect("archive-detail", item_id=item.id)
 
@@ -1847,6 +1859,8 @@ def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
                     date_end=parsed_shared["date_end_value"],
                     date_precision=parsed_shared["date_precision"],
                     metadata_status=parsed_shared["metadata_status"],
+                    author_name=parsed_shared["author_name"],
+                    source_title=parsed_shared["source_title"],
                 )
                 update_ocr_document_catalog_metadata(
                     doc,
