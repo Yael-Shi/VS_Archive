@@ -105,6 +105,16 @@ Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`s
 
 **Scope:** `backlog.html`, `_archive_manage_edit_ocr_document`, focused tests, this log entry.
 
+## ArchiveItem — OCR_DOCUMENT shared-field source-of-truth cutover design (PR5a)
+
+**Decision:** Approve the design for **`OCR_DOCUMENT`** shared-field source-of-truth cutover. **Target:** **`ArchiveItem`** is canonical for the six shared archival fields (**`title`**, **`visibility`**, **`metadata_status`**, **`date_start`**, **`date_end`**, **`date_precision`**). **`Document`** remains OCR/runtime/processing source of truth. Duplicated **`Document`** shared fields stay as temporary compatibility mirrors until optional later schema cleanup.
+
+**Implementation:** Deferred to **PR5b+** (reconcile → read cutover → write flip → upload/admin/backlog alignment). **Not** implemented in PR5a.
+
+**Docs:** `docs/ai-context/ocr-archiveitem-cutover.md`
+
+**Out of scope (cutover series):** OCR/HTR, upload API, worker/SQS, **`DocumentTextResult`** semantics, catalog/tags migration, **`PHOTO`**, dropping **`Document`** shared columns.
+
 ## Document date precision — schema foundation (PR 2)
 
 **Decision:** Add **`Document.date_precision`** (`DatePrecision`: `EXACT_DAY`, `MONTH`, `YEAR`, `RANGE`, `UNKNOWN`) with Django default **`UNKNOWN`**. Migration adds the column with that default for **all** existing rows — **no** inference from `date_start`/`date_end` in this PR.
