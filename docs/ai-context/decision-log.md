@@ -89,6 +89,14 @@ Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`s
 
 **Scope (PR3):** Backlog template action links, focused tests, this log entry.
 
+## ArchiveItem — OCR staff action hierarchy on detail pages (PR4)
+
+**Decision:** OCR **document detail** (`/api/ui/documents/<doc_id>/`) and **transcription review detail** (`/api/ui/admin/review/<doc_id>/`) staff toolbars follow the same first-party action hierarchy as the metadata completion backlog (PR3): **`עריכת מטא־דאטה`** is the emphasized first-party metadata path; **בקרת תמלול** / **תצוגת מסמך** remain secondary cross-workflow links; **Django Admin** is a secondary technical escape hatch labeled **`עריכה טכנית (Django Admin)`** (plain `btn`, not primary). Review detail adds the metadata edit link when **`archive_item_id`** exists; no redundant “open review” link on review detail. **`/archive/manage/`** OCR rows use **`עריכת מטא־דאטה`** (MANUAL_TEXT labels unchanged).
+
+**Unchanged:** Metadata edit save behavior, review POST handlers, **`DocumentTextResult`** status/verification semantics, backlog queryset/filters/counts, permissions, OCR/HTR processing, upload API, worker/SQS, **`ArchiveItem`** runtime cutover. **No** delete action for **`OCR_DOCUMENT`**.
+
+**Scope (PR4):** Detail/review-detail/manage-list template action links, focused tests, this log entry.
+
 ## Document date precision — schema foundation (PR 2)
 
 **Decision:** Add **`Document.date_precision`** (`DatePrecision`: `EXACT_DAY`, `MONTH`, `YEAR`, `RANGE`, `UNKNOWN`) with Django default **`UNKNOWN`**. Migration adds the column with that default for **all** existing rows — **no** inference from `date_start`/`date_end` in this PR.

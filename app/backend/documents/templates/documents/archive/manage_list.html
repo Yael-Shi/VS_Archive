@@ -41,7 +41,7 @@
                     <a class="btn" href="{% url 'archive-manage-edit' item_id=item.id %}">עריכה</a>
                     <a class="btn" href="{% url 'archive-manage-delete' item_id=item.id %}">מחיקה</a>
                   {% elif item.item_type == "OCR_DOCUMENT" %}
-                    <a class="btn" href="{% url 'archive-manage-edit' item_id=item.id %}">עריכה</a>
+                    <a class="btn" href="{% url 'archive-manage-edit' item_id=item.id %}">עריכת מטא־דאטה</a>
                   {% else %}
                     —
                   {% endif %}

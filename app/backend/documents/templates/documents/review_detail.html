@@ -12,7 +12,10 @@
         <div class="flex-spacer"></div>
         {# Actions for the current document #}
         <a class="btn" href="/api/ui/documents/{{ doc.id }}/">תצוגת מסמך</a>
-        <a class="btn" href="/admin/documents/document/{{ doc.id }}/change/">עריכה (Django Admin)</a>
+        {% if doc.archive_item_id %}
+          <a class="btn" href="{% url 'archive-manage-edit' item_id=doc.archive_item_id %}">עריכת מטא־דאטה</a>
+        {% endif %}
+        <a class="btn" href="/admin/documents/document/{{ doc.id }}/change/">עריכה טכנית (Django Admin)</a>
       </div>
 
       <div class="spacer"></div>
