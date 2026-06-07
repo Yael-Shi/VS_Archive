@@ -41,23 +41,45 @@ def shared_archive_item_for_document(document: Any):
     return document.archive_item
 
 
+def _split_ocr_document_create_kwargs(document_kwargs: dict) -> tuple[dict, dict]:
+    """Split create kwargs into shared archival fields and Document runtime fields."""
+    runtime_kwargs = dict(document_kwargs)
+    shared_kwargs = {}
+    for name in ARCHIVE_ITEM_SHARED_FIELD_NAMES:
+        if name in runtime_kwargs:
+            shared_kwargs[name] = runtime_kwargs.pop(name)
+    return shared_kwargs, runtime_kwargs
+
+
 @transaction.atomic
 def create_ocr_document(**document_kwargs: Any):
     """
     Create an OCR-backed Document with a linked ArchiveItem (item_type=OCR_DOCUMENT).
 
-    Shared archival fields are copied onto ArchiveItem at create time only.
+    ArchiveItem is canonical at create for the six shared archival fields.
+    Document shared columns receive compatibility mirror values from the created
+    ArchiveItem at insert time. Document remains the OCR/runtime source of truth
+    for processing-specific fields.
     """
     from documents.models import ArchiveItem, Document
 
-    pending = Document(**document_kwargs)
-    archive_values = archive_item_field_values_from_document(pending)
+    shared_kwargs, runtime_kwargs = _split_ocr_document_create_kwargs(document_kwargs)
 
+    pending_item = ArchiveItem(
+        item_type=ArchiveItem.ItemType.OCR_DOCUMENT,
+        **shared_kwargs,
+    )
+    archive_values = archive_item_field_values_from_archive_item(pending_item)
     archive_item = ArchiveItem.objects.create(
         item_type=ArchiveItem.ItemType.OCR_DOCUMENT,
         **archive_values,
     )
-    return Document.objects.create(archive_item=archive_item, **document_kwargs)
+    mirror_values = archive_item_field_values_from_archive_item(archive_item)
+    return Document.objects.create(
+        archive_item=archive_item,
+        **runtime_kwargs,
+        **mirror_values,
+    )
 
 
 @transaction.atomic

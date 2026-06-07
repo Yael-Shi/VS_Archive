@@ -85,7 +85,7 @@ OCR edit form GET seed reads shared fields from **`ArchiveItem`** (via **`shared
 
 **Django Admin `Document`** allows editing shared fields **without** syncing **`ArchiveItem`**. **`ArchiveItemAdmin`** is view-only. Drift can occur when staff use the secondary technical admin path instead of first-party OCR edit.
 
-Upload/create copies shared fields onto both models at create time via **`create_ocr_document`**. The worker does not modify shared fields.
+**`create_ocr_document`** (PR5e) creates **`ArchiveItem`** first as canonical for shared fields; **`Document`** receives mirror values at insert time. Upload API contract unchanged. The worker does not modify shared fields.
 
 ---
 
@@ -258,6 +258,10 @@ Duplicated shared fields on **`Document`** remain as a **compatibility mirror** 
 | **Tests** | Upload create parity tests (existing patterns in `test_archive_item.py`) |
 | **Risk** | **Low–Medium** |
 
+**Implementation (done):** **`create_ocr_document`** splits kwargs via **`_split_ocr_document_create_kwargs`**, resolves shared-field defaults on an unsaved **`ArchiveItem`**, creates **`ArchiveItem`** first, then creates **`Document`** with runtime kwargs plus mirror values from **`archive_item_field_values_from_archive_item`**. No post-create sync UPDATE. Upload API and upload behavior unchanged.
+
+**Unchanged (deferred):** List/backlog/review **filters and search** and backlog **membership** (PR5f); Django Admin shared-field editability (PR5f).
+
 ### PR5f — Backlog/search/filter/admin alignment
 
 | | |
@@ -321,11 +325,15 @@ Run reconciliation **before** read-path and write-path cutover PRs:
 
 - **`update_ocr_document_metadata`** — **`ArchiveItem`** canonical save, then **`sync_document_shared_fields_from_archive_item`** (ArchiveItem → Document mirror).
 - **`sync_archive_item_shared_fields_from_document`** — PR5b reconciliation command and legacy repair only; not used on the canonical OCR edit write path.
-- Upload create copies fields at create time only (no ongoing sync except OCR edit and reconciliation).
+
+### OCR document create (PR5e — current)
+
+- **`create_ocr_document`** — **`ArchiveItem`** canonical create for six shared fields; **`Document`** mirror values set at insert from **`archive_item_field_values_from_archive_item`** (no post-create sync UPDATE).
+- Upload API unchanged; no ongoing sync except OCR edit, create, and reconciliation.
 
 ### Deferred
 
-- **`create_ocr_document`** ArchiveItem-first create ordering (PR5e).
+- List/backlog/search/filter/admin alignment (PR5f).
 - Sync on **explicit staff edit** and **atomic create** only — no background job.
 
 ### Django Admin

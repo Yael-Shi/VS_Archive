@@ -145,6 +145,16 @@ Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`s
 
 **Docs:** `docs/ai-context/ocr-archiveitem-cutover.md` (PR5d implementation note).
 
+## ArchiveItem — OCR_DOCUMENT upload/create alignment (PR5e)
+
+**Decision:** **`create_ocr_document`** creates **`ArchiveItem`** as the canonical holder for the six shared archival fields at insert time. **`Document`** receives compatibility mirror values from the persisted **`ArchiveItem`** via **`archive_item_field_values_from_archive_item`** at **`Document.objects.create`** — no post-create **`sync_document_shared_fields_from_archive_item`** call (avoids an extra UPDATE). **`Document`** remains OCR/runtime source of truth for processing-specific fields.
+
+**Scope (PR5e):** **`create_ocr_document`** refactor and private **`_split_ocr_document_create_kwargs`** in **`archive_items.py`**; focused create/upload parity tests; docs. **No** upload API request/response contract change. **No** **`views.py`** upload validation, S3 verification, presigned URLs, SQS enqueue, or multi-image behavior changes.
+
+**Unchanged (deferred):** List/backlog/review **filters and search** and backlog **membership** → PR5f. Django Admin shared-field editability → PR5f.
+
+**Docs:** `docs/ai-context/ocr-archiveitem-cutover.md` (PR5e implementation note).
+
 ## Document date precision — schema foundation (PR 2)
 
 **Decision:** Add **`Document.date_precision`** (`DatePrecision`: `EXACT_DAY`, `MONTH`, `YEAR`, `RANGE`, `UNKNOWN`) with Django default **`UNKNOWN`**. Migration adds the column with that default for **all** existing rows — **no** inference from `date_start`/`date_end` in this PR.
