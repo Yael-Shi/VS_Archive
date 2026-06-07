@@ -1412,7 +1412,10 @@ def review_text_result_update_text(request, result_id: int):
 
 def document_detail_page(request, doc_id: int):
     is_admin = _is_admin(request.user)
-    detail_qs = Document.objects.select_related("admin_meta").prefetch_related(
+    detail_qs = Document.objects.select_related(
+        "admin_meta",
+        "archive_item",
+    ).prefetch_related(
         "tags_m2m", "text_results", "source_files"
     )
     try:

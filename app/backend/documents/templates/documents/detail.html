@@ -64,6 +64,11 @@
         {% endif %}
       {% endif %}
     </div>
+
+    {% if doc.archive_item %}
+      {% include "documents/archive/partials/source_metadata.html" with item=doc.archive_item %}
+    {% endif %}
+
     <div class="page-lead">
       {% if doc.processing_state_user == "READY" %}
         העיבוד האוטומטי הסתיים והטקסט זמין להצגה ולבדיקה. זה עדיין לא אישור אנושי.
