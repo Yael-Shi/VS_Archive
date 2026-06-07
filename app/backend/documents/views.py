@@ -15,12 +15,17 @@ from .models import ArchiveItem, Document, DocumentSourceFile, DocumentTextResul
 from documents.services.archive_catalog_metadata_validation import (
     parse_ocr_catalog_metadata_form,
 )
+from documents.services.archive_tags_validation import (
+    normalize_tag_names_from_list,
+    parse_ocr_tags_form,
+)
 from documents.services.archive_items import (
     create_manual_text_archive_item,
     create_ocr_document,
     update_manual_text_archive_item,
     update_ocr_document_catalog_metadata,
     update_ocr_document_metadata,
+    update_ocr_document_tags,
 )
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -359,12 +364,7 @@ def _attach_document_tags_and_metadata(doc: Document, tags: list, admin_meta: di
         original_location=str(admin_meta.get("original_location") or ""),
     )
 
-    for raw in tags:
-        if raw is None:
-            continue
-        name = str(raw).strip()
-        if not name:
-            continue
+    for name in normalize_tag_names_from_list(tags):
         tag_obj, _ = Tag.objects.get_or_create(name=name)
         doc.tags_m2m.add(tag_obj)
 
@@ -1432,6 +1432,7 @@ def document_detail_page(request, doc_id: int):
         raise
 
     admin_meta = getattr(doc, "admin_meta", None) if is_admin else None
+    admin_tags = list(doc.tags_m2m.all()) if is_admin else []
 
     bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
     source_preview = build_source_preview(doc, bucket)
@@ -1448,6 +1449,7 @@ def document_detail_page(request, doc_id: int):
         "source_preview_items": source_preview.items,
         "source_preview_unavailable_count": source_preview.non_uploaded_count,
         "admin_meta": admin_meta,
+        "admin_tags": admin_tags,
         "text_presentation": text_presentation,
         "is_admin": is_admin,
     }
@@ -1555,10 +1557,16 @@ def _ocr_catalog_form_data_from_document(document: Document) -> dict:
     }
 
 
+def _ocr_tags_form_data_from_document(document: Document) -> dict:
+    tag_names = [t.name for t in document.tags_m2m.all()]
+    return {"tags": ", ".join(tag_names)}
+
+
 def _ocr_document_edit_form_data_from_document(document: Document) -> dict:
     return {
         **_archive_metadata_form_data_from_document(document),
         **_ocr_catalog_form_data_from_document(document),
+        **_ocr_tags_form_data_from_document(document),
     }
 
 
@@ -1805,6 +1813,7 @@ def _archive_manage_edit_manual_text(request, item: ArchiveItem):
 def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
     doc = (
         Document.objects.select_related("admin_meta")
+        .prefetch_related("tags_m2m")
         .filter(archive_item_id=item.id)
         .first()
     )
@@ -1817,8 +1826,9 @@ def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
     if request.method == "POST":
         parsed_shared, shared_errors = parse_archive_metadata_form(request.POST)
         parsed_catalog, catalog_errors = parse_ocr_catalog_metadata_form(request.POST)
-        form_errors = shared_errors + catalog_errors
-        form_data = {**parsed_shared, **parsed_catalog}
+        parsed_tags, tags_errors = parse_ocr_tags_form(request.POST)
+        form_errors = shared_errors + catalog_errors + tags_errors
+        form_data = {**parsed_shared, **parsed_catalog, **parsed_tags}
         if not form_errors:
             update_ocr_document_metadata(
                 doc,
@@ -1837,6 +1847,7 @@ def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
                 notes=parsed_catalog["notes"],
                 category_event=parsed_catalog["category_event_value"],
             )
+            update_ocr_document_tags(doc, tag_names=parsed_tags["tag_names"])
             return redirect("documents-detail-page", doc_id=doc.id)
 
     return render(

@@ -71,6 +71,16 @@ Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`s
 
 **Routes:** Same **`/archive/manage/<id>/edit/`** as PR1; redirect after save → document detail.
 
+## ArchiveItem — OCR document tag edit UI (PR2b)
+
+**Decision:** Extend the existing staff/admin **`OCR_DOCUMENT`** edit UI at **`/archive/manage/<id>/edit/`** with a comma-separated **`tags`** field. Save semantics are **replace-all**: the submitted tag set replaces **`Document.tags_m2m`**; empty input clears all document tags.
+
+**Persistence:** **`update_ocr_document_tags`** uses **`Tag.objects.get_or_create(name=…)`** per normalized name, then **`document.tags_m2m.set(…)`**. **`Document`** remains OCR runtime source of truth. **No** **`ArchiveItem`** mirror. **No** deletion of unused **`Tag`** rows. Casing is preserved; duplicates in one submit are deduped after trim (first-seen order). Tag name max length **64** is validated on edit with Hebrew errors; tag validation errors block the combined OCR edit form save (shared + catalog + tags).
+
+**Scope (PR2b):** Tag validation/parsing module, service, OCR edit form/templates, optional staff detail display for tags, upload attach helper refactor to shared list normalizer only (behavior unchanged), tests, this log entry. **No** upload API max-length validation. **No** **`language`** / **`text_input_type`** editing. **No** OCR/HTR, upload contract, worker, routing, or **`DocumentTextResult`** changes. **Not** a full **`OCR_DOCUMENT`** cutover. **No** **`PHOTO`** items.
+
+**Routes:** Same **`/archive/manage/<id>/edit/`** as PR1/PR2a; redirect after save → document detail.
+
 ## Document date precision — schema foundation (PR 2)
 
 **Decision:** Add **`Document.date_precision`** (`DatePrecision`: `EXACT_DAY`, `MONTH`, `YEAR`, `RANGE`, `UNKNOWN`) with Django default **`UNKNOWN`**. Migration adds the column with that default for **all** existing rows — **no** inference from `date_start`/`date_end` in this PR.
