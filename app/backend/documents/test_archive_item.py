@@ -885,6 +885,114 @@ class ManualTextArchiveItemTests(TestCase):
         self.assertEqual(item.manual_text_content.body, "new body")
         self.assertEqual(item.visibility, ArchiveItem.Visibility.PRIVATE)
 
+    def test_create_manual_text_post_saves_author_name_and_source_title(self):
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.CREATE_URL,
+            data=self._valid_create_payload(
+                title="Manual with source metadata",
+                body="Body text.",
+                author_name="  Ada Lovelace  ",
+                source_title=" The Times ",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        item = ArchiveItem.objects.get(title="Manual with source metadata")
+        self.assertEqual(item.author_name, "Ada Lovelace")
+        self.assertEqual(item.source_title, "The Times")
+
+    def test_edit_manual_text_post_updates_author_name_and_source_title(self):
+        item = create_manual_text_archive_item(
+            title="Manual source edit",
+            body="Body.",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        item.author_name = "Before author"
+        item.source_title = "Before source"
+        item.save(update_fields=["author_name", "source_title", "updated_at"])
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=item.id),
+            data=self._valid_create_payload(
+                title="Manual source edit",
+                body="Body.",
+                author_name="After author",
+                source_title="After source",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        item.refresh_from_db()
+        self.assertEqual(item.author_name, "After author")
+        self.assertEqual(item.source_title, "After source")
+
+    def test_edit_manual_text_post_can_clear_author_name_and_source_title(self):
+        item = create_manual_text_archive_item(
+            title="Manual source clear",
+            body="Body.",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        item.author_name = "To clear author"
+        item.source_title = "To clear source"
+        item.save(update_fields=["author_name", "source_title", "updated_at"])
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=item.id),
+            data=self._valid_create_payload(
+                title="Manual source clear",
+                body="Body.",
+                author_name="   ",
+                source_title="",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        item.refresh_from_db()
+        self.assertEqual(item.author_name, "")
+        self.assertEqual(item.source_title, "")
+
+    def test_edit_manual_text_get_seeds_author_name_and_source_title(self):
+        item = create_manual_text_archive_item(
+            title="Manual source seed",
+            body="Body.",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        item.author_name = "Seeded author"
+        item.source_title = "Seeded source"
+        item.save(update_fields=["author_name", "source_title", "updated_at"])
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.EDIT_URL_TEMPLATE.format(item_id=item.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'value="Seeded author"')
+        self.assertContains(resp, 'value="Seeded source"')
+
+    def test_over_255_author_name_rejected_on_manual_text_create(self):
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.CREATE_URL,
+            data=self._valid_create_payload(
+                title="Too long author",
+                author_name="a" * 256,
+            ),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "מחבר/ת חייב להיות עד 255 תווים")
+        self.assertFalse(ArchiveItem.objects.filter(title="Too long author").exists())
+
+    def test_over_255_source_title_rejected_on_manual_text_edit(self):
+        item = create_manual_text_archive_item(title="Too long source", body="Body.")
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=item.id),
+            data=self._valid_create_payload(
+                title="Too long source",
+                body="Body.",
+                source_title="s" * 256,
+            ),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "מקור חייב להיות עד 255 תווים")
+        item.refresh_from_db()
+        self.assertEqual(item.source_title, "")
+
     def test_archive_item_admin_remains_view_only(self):
         request = RequestFactory().get("/admin/")
         request.user = User.objects.create_superuser(
@@ -1344,6 +1452,114 @@ class OcrDocumentMetadataEditTests(TestCase):
         html = resp.content.decode()
         edit_href = reverse("archive-manage-edit", kwargs={"item_id": item.id})
         self.assertEqual(self._link_label_for_href(html, edit_href), "עריכה")
+
+    def test_edit_ocr_post_updates_author_name_and_source_title_on_archive_item(self):
+        doc = create_ocr_document(
+            title="OCR source edit",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="OCR source edit",
+                author_name="  יוסף לוי  ",
+                source_title=" דבר ",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        item = doc.archive_item
+        item.refresh_from_db()
+        self.assertEqual(item.author_name, "יוסף לוי")
+        self.assertEqual(item.source_title, "דבר")
+
+    def test_edit_ocr_post_can_clear_author_name_and_source_title(self):
+        doc = create_ocr_document(
+            title="OCR source clear",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
+            author_name="Clear me author",
+            source_title="Clear me source",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="OCR source clear",
+                author_name="   ",
+                source_title="",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        item = doc.archive_item
+        item.refresh_from_db()
+        self.assertEqual(item.author_name, "")
+        self.assertEqual(item.source_title, "")
+
+    def test_edit_ocr_get_seeds_author_name_and_source_title(self):
+        doc = create_ocr_document(
+            title="OCR source seed",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
+            author_name="Seeded OCR author",
+            source_title="Seeded OCR source",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id)
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'value="Seeded OCR author"')
+        self.assertContains(resp, 'value="Seeded OCR source"')
+
+    def test_over_255_author_name_rejected_on_ocr_edit(self):
+        doc = create_ocr_document(
+            title="OCR long author",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="OCR long author",
+                author_name="a" * 256,
+            ),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "מחבר/ת חייב להיות עד 255 תווים")
+        doc.archive_item.refresh_from_db()
+        self.assertEqual(doc.archive_item.author_name, "")
+
+    def test_over_255_source_title_rejected_on_ocr_edit(self):
+        doc = create_ocr_document(
+            title="OCR long source",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
+            source_title="Keep this source",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="OCR long source",
+                source_title="s" * 256,
+            ),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "מקור חייב להיות עד 255 תווים")
+        doc.archive_item.refresh_from_db()
+        self.assertEqual(doc.archive_item.source_title, "Keep this source")
 
     def _link_label_for_href(self, html: str, href: str) -> str:
         marker = f'href="{href}"'

@@ -37,6 +37,23 @@ def parse_metadata_status(raw_value: str | None) -> str:
     return value
 
 
+SOURCE_METADATA_MAX_LENGTH = 255
+
+
+def validate_source_metadata_fields(
+    *,
+    author_name: str,
+    source_title: str,
+) -> list[str]:
+    """Return user-facing validation errors for ArchiveItem source metadata fields."""
+    errors: list[str] = []
+    if len(author_name) > SOURCE_METADATA_MAX_LENGTH:
+        errors.append("מחבר/ת חייב להיות עד 255 תווים")
+    if len(source_title) > SOURCE_METADATA_MAX_LENGTH:
+        errors.append("מקור חייב להיות עד 255 תווים")
+    return errors
+
+
 def validate_archive_metadata_fields(
     *,
     title: str,
@@ -45,6 +62,8 @@ def validate_archive_metadata_fields(
     date_precision: str,
     date_start: date | None,
     date_end: date | None,
+    author_name: str = "",
+    source_title: str = "",
 ) -> list[str]:
     """Return a list of user-facing validation error messages."""
     errors: list[str] = []
@@ -67,6 +86,13 @@ def validate_archive_metadata_fields(
     if date_start and date_end and date_end < date_start:
         errors.append("date_end must not be before date_start")
 
+    errors.extend(
+        validate_source_metadata_fields(
+            author_name=author_name,
+            source_title=source_title,
+        )
+    )
+
     return errors
 
 
@@ -81,6 +107,8 @@ def parse_archive_metadata_form(
         "date_end": (post_data.get("date_end") or "").strip(),
         "date_precision": (post_data.get("date_precision") or "").strip(),
         "metadata_status": (post_data.get("metadata_status") or "").strip(),
+        "author_name": (post_data.get("author_name") or "").strip(),
+        "source_title": (post_data.get("source_title") or "").strip(),
     }
 
     errors: list[str] = []
@@ -108,6 +136,8 @@ def parse_archive_metadata_form(
                 date_precision=date_precision,
                 date_start=date_start,
                 date_end=date_end,
+                author_name=form_data["author_name"],
+                source_title=form_data["source_title"],
             )
         )
 
