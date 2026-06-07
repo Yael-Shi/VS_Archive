@@ -24,6 +24,16 @@ def archive_item_field_values_from_document(document: Any) -> dict[str, Any]:
     }
 
 
+def shared_archive_item_for_document(document: Any):
+    """Return the read source for OCR_DOCUMENT shared archival fields (display only).
+
+    During the ArchiveItem cutover, user-facing OCR document surfaces read
+    ``title``, ``visibility``, ``metadata_status``, and date fields from the
+    linked ``ArchiveItem``. ``Document`` remains the OCR/runtime source of truth.
+    """
+    return document.archive_item
+
+
 @transaction.atomic
 def create_ocr_document(**document_kwargs: Any):
     """

@@ -117,11 +117,11 @@
           <tr>
             <td>
               <div class="cell-title">
-                <a href="/api/ui/documents/{{ d.id }}/">{{ d.title }}</a>
+                <a href="/api/ui/documents/{{ d.id }}/">{{ d.archive_item.title }}</a>
               </div>
 
               <div class="cell-meta">
-                {{ d|document_date_display }}
+                {{ d.archive_item|document_date_display }}
                 {% if is_admin %} · #{{ d.id }}{% endif %}
                 {% if is_admin and d.file_original_name %} · {{ d.file_original_name }}{% endif %}
               </div>
@@ -141,12 +141,12 @@
             </td>
 
             <td>
-              {% metadata_status_badge d.metadata_status %}
+              {% metadata_status_badge d.archive_item.metadata_status %}
             </td>
 
             {% if is_admin %}
               <td>
-                {% if d.visibility == "public" %}
+                {% if d.archive_item.visibility == "public" %}
                   <span class="badge badge-ok">ציבורי</span>
                 {% else %}
                   <span class="badge">פרטי</span>

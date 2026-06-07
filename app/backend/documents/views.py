@@ -22,6 +22,7 @@ from documents.services.archive_tags_validation import (
 from documents.services.archive_items import (
     create_manual_text_archive_item,
     create_ocr_document,
+    shared_archive_item_for_document,
     update_manual_text_archive_item,
     update_ocr_document_catalog_metadata,
     update_ocr_document_metadata,
@@ -160,6 +161,7 @@ def _base_queryset(
     is_admin = _is_admin(user)
     qs = (
         document_queryset_for_user(user)
+        .select_related("archive_item")
         .prefetch_related("tags_m2m")
         .order_by("-created_at")
     )
@@ -215,17 +217,18 @@ def _serialize_doc(d: Document, *, is_admin: bool) -> dict:
             "updated_at": m.updated_at.isoformat() if m.updated_at else None,
         }
 
+    item = shared_archive_item_for_document(d)
     payload = {
         "id": d.id,
-        "title": d.title,
-        "date_start": d.date_start.isoformat() if d.date_start else None,
-        "date_end": d.date_end.isoformat() if d.date_end else None,
+        "title": item.title,
+        "date_start": item.date_start.isoformat() if item.date_start else None,
+        "date_end": item.date_end.isoformat() if item.date_end else None,
         "language": d.language,
         "text_input_type": d.text_input_type,
         "doc_type": d.doc_type,
         "category_event": d.category_event,
         "tags": [t.name for t in d.tags_m2m.all()],
-        "metadata_status": getattr(d, "metadata_status", None),
+        "metadata_status": getattr(item, "metadata_status", None),
         "upload_status": d.upload_status,
         "processing_state_user": d.processing_state_user,
         "created_at": d.created_at.isoformat() if d.created_at else None,
@@ -237,7 +240,7 @@ def _serialize_doc(d: Document, *, is_admin: bool) -> dict:
         payload.update(
             {
                 "admin_meta": admin_meta,
-                "visibility": d.visibility,
+                "visibility": item.visibility,
                 "file_s3_key": d.file_s3_key,
                 "file_original_name": d.file_original_name,
                 "mime_type": d.mime_type,
@@ -1086,7 +1089,7 @@ def admin_backlog_page(request):
     only_missing_admin_meta = (request.GET.get("only_missing_admin_meta") or "").strip() == "1"
 
     base_qs = (
-        Document.objects.select_related("admin_meta")
+        Document.objects.select_related("admin_meta", "archive_item")
         .prefetch_related("tags_m2m")
         .filter(metadata_status=Document.MetadataStatus.NEEDS_COMPLETION)
         .order_by("-created_at")
@@ -1176,7 +1179,9 @@ def review_backlog_page(request):
     total = qs.count()
     # prefetch text_results for attach_review_summaries (batched; avoids N+1).
     docs = list(
-        qs.prefetch_related("text_results")[offset : offset + limit]
+        qs.select_related("archive_item").prefetch_related("text_results")[
+            offset : offset + limit
+        ]
     )
     rows = attach_review_summaries(docs)
 
@@ -1273,7 +1278,7 @@ def review_detail_page(request, doc_id: int):
         return deny
 
     doc = get_object_or_404(
-        Document.objects.select_related("admin_meta").prefetch_related(
+        Document.objects.select_related("admin_meta", "archive_item").prefetch_related(
             "tags_m2m", "text_results", "transkribus_runs", "source_files"
         ),
         id=doc_id,
