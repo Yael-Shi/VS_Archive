@@ -135,6 +135,16 @@ Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`s
 
 **Docs:** `docs/ai-context/ocr-archiveitem-cutover.md` (PR5c implementation note).
 
+## ArchiveItem — OCR_DOCUMENT write-path flip (PR5d)
+
+**Decision:** Staff OCR metadata edit at **`/archive/manage/<archive_item_id>/edit/`** writes the six shared archival fields to linked **`ArchiveItem`** first, then mirrors them onto **`Document`** via **`sync_document_shared_fields_from_archive_item`**. **`ArchiveItem`** is canonical for shared fields; duplicated **`Document`** shared columns are compatibility mirrors only. OCR edit form GET seed reads shared fields from **`ArchiveItem`**.
+
+**Scope (PR5d):** **`update_ocr_document_metadata`** internal flip; **`sync_document_shared_fields_from_archive_item`**; OCR edit form seed in **`views.py`**. Catalog scalar metadata and tags remain **`Document`**-side. **`sync_archive_item_shared_fields_from_document`** unchanged (PR5b reconciliation command).
+
+**Unchanged (deferred):** Upload/create (**`create_ocr_document`**, **`/api/uploads/create/`**) → PR5e. List/backlog/review **filters and search** and backlog **membership** → PR5f. Django Admin shared-field editability → PR5f.
+
+**Docs:** `docs/ai-context/ocr-archiveitem-cutover.md` (PR5d implementation note).
+
 ## Document date precision — schema foundation (PR 2)
 
 **Decision:** Add **`Document.date_precision`** (`DatePrecision`: `EXACT_DAY`, `MONTH`, `YEAR`, `RANGE`, `UNKNOWN`) with Django default **`UNKNOWN`**. Migration adds the column with that default for **all** existing rows — **no** inference from `date_start`/`date_end` in this PR.

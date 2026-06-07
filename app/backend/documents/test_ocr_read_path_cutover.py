@@ -195,14 +195,14 @@ class OcrReadPathCutoverTests(TestCase):
         )
         self.assertEqual(self.client.get(f"/api/ui/documents/{doc.id}/").status_code, 404)
 
-    def test_ocr_edit_form_seed_still_reads_document_shared_fields(self):
+    def test_ocr_edit_form_seed_reads_archive_item_shared_fields(self):
         doc = self._create_drifted_doc()
         self.client.force_login(self.staff)
         resp = self.client.get(self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id))
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
-        self.assertIn('value="Document-side title"', html)
-        self.assertNotIn('value="ArchiveItem-side title"', html)
+        self.assertIn('value="ArchiveItem-side title"', html)
+        self.assertNotIn('value="Document-side title"', html)
 
     def test_manual_text_manage_list_unaffected(self):
         item = create_manual_text_archive_item(
