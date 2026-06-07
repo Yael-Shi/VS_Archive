@@ -1016,6 +1016,26 @@ class OcrDocumentMetadataEditTests(TestCase):
             resp,
             reverse("archive-manage-edit", kwargs={"item_id": doc.archive_item_id}),
         )
+        self.assertContains(resp, "עריכת מטא־דאטה")
+
+    def test_manual_text_manage_list_row_labels_unchanged(self):
+        item = create_manual_text_archive_item(title="Manage list manual", body="Body")
+        self.client.force_login(self.staff)
+        resp = self.client.get(reverse("archive-manage-list"))
+        self.assertContains(resp, reverse("archive-manage-edit", kwargs={"item_id": item.id}))
+        self.assertContains(resp, reverse("archive-manage-delete", kwargs={"item_id": item.id}))
+        html = resp.content.decode()
+        edit_href = reverse("archive-manage-edit", kwargs={"item_id": item.id})
+        self.assertEqual(self._link_label_for_href(html, edit_href), "עריכה")
+
+    def _link_label_for_href(self, html: str, href: str) -> str:
+        marker = f'href="{href}"'
+        href_pos = html.find(marker)
+        self.assertNotEqual(href_pos, -1, f"missing link href={href!r}")
+        tag_end = html.find(">", href_pos)
+        close_start = html.find("</a>", tag_end)
+        self.assertNotEqual(close_start, -1)
+        return html[tag_end + 1 : close_start].strip()
 
 
 class OcrDocumentCatalogMetadataEditTests(TestCase):

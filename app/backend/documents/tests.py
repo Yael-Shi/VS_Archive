@@ -7717,6 +7717,25 @@ class NavigationLabelTests(TestCase):
         defaults.update(kwargs)
         return DocumentTextResult.objects.create(document=doc, **defaults)
 
+    def _link_opening_tag(self, html: str, href: str) -> str:
+        marker = f'href="{href}"'
+        href_pos = html.find(marker)
+        self.assertNotEqual(href_pos, -1, f"missing link href={href!r}")
+        tag_start = html.rfind("<a", 0, href_pos)
+        tag_end = html.find(">", href_pos)
+        self.assertNotEqual(tag_start, -1)
+        self.assertGreater(tag_end, href_pos)
+        return html[tag_start : tag_end + 1]
+
+    def _link_label(self, html: str, href: str) -> str:
+        marker = f'href="{href}"'
+        href_pos = html.find(marker)
+        self.assertNotEqual(href_pos, -1, f"missing link href={href!r}")
+        tag_end = html.find(">", href_pos)
+        close_start = html.find("</a>", tag_end)
+        self.assertNotEqual(close_start, -1)
+        return html[tag_end + 1 : close_start].strip()
+
     def test_global_nav_uses_list_wording_for_admin(self):
         self.client.force_login(self.staff)
         resp = self.client.get("/api/ui/documents/")
@@ -7753,6 +7772,73 @@ class NavigationLabelTests(TestCase):
         self.assertNotContains(resp, "רשימת בקרת תמלול")
         self.assertNotContains(resp, "/api/ui/admin/review/")
 
+    def test_detail_metadata_edit_is_primary_staff_action(self):
+        doc = self._create_document()
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        edit_href = f"/archive/manage/{doc.archive_item_id}/edit/"
+        self.assertEqual(self._link_label(html, edit_href), "עריכת מטא־דאטה")
+        self.assertIn("btn-primary", self._link_opening_tag(html, edit_href))
+
+    def test_detail_review_link_is_secondary_not_primary(self):
+        doc = self._create_document()
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        html = resp.content.decode()
+        review_href = f"/api/ui/admin/review/{doc.id}/"
+        self.assertEqual(self._link_label(html, review_href), "בקרת תמלול למסמך זה")
+        review_tag = self._link_opening_tag(html, review_href)
+        self.assertIn("btn", review_tag)
+        self.assertNotIn("btn-primary", review_tag)
+
+    def test_detail_django_admin_is_technical_secondary(self):
+        doc = self._create_document()
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        html = resp.content.decode()
+        admin_href = f"/admin/documents/document/{doc.id}/change/"
+        self.assertEqual(
+            self._link_label(html, admin_href), "עריכה טכנית (Django Admin)"
+        )
+        admin_tag = self._link_opening_tag(html, admin_href)
+        self.assertIn("btn", admin_tag)
+        self.assertNotIn("btn-primary", admin_tag)
+
+    def test_detail_no_delete_action_for_ocr_document(self):
+        from django.urls import reverse
+
+        doc = self._create_document()
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(
+            resp,
+            reverse("archive-manage-delete", kwargs={"item_id": doc.archive_item_id}),
+        )
+
+    def test_detail_family_user_sees_no_staff_actions(self):
+        from django.contrib.auth.models import Group
+
+        from documents.services.archive_item_access import ARCHIVE_FAMILY_GROUP_NAME
+
+        group, _ = Group.objects.get_or_create(name=ARCHIVE_FAMILY_GROUP_NAME)
+        doc = self._create_document(visibility=Document.Visibility.PRIVATE)
+        family_user = self.user.__class__.objects.create_user(
+            username="nav_family_user",
+            password="test-pass",
+            is_staff=False,
+        )
+        family_user.groups.add(group)
+        self.client.force_login(family_user)
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "חזרה לרשימה")
+        self.assertNotContains(resp, "עריכת מטא־דאטה")
+        self.assertNotContains(resp, "בקרת תמלול למסמך זה")
+        self.assertNotContains(resp, "עריכה טכנית (Django Admin)")
+
     def test_review_detail_has_back_to_review_list_link(self):
         doc = self._create_document()
         self._create_text_result(doc)
@@ -7767,6 +7853,43 @@ class NavigationLabelTests(TestCase):
         self.assertContains(resp, "תצוגת מסמך")
         self.assertContains(resp, f'href="/api/ui/documents/{doc.id}/"')
         self.assertContains(resp, "רשימת השלמת פרטים")
+
+    def test_review_detail_metadata_edit_link_for_staff(self):
+        doc = self._create_document()
+        self._create_text_result(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        edit_href = f"/archive/manage/{doc.archive_item_id}/edit/"
+        self.assertEqual(self._link_label(html, edit_href), "עריכת מטא־דאטה")
+        edit_tag = self._link_opening_tag(html, edit_href)
+        self.assertIn("btn", edit_tag)
+        self.assertNotIn("btn-primary", edit_tag)
+
+    def test_review_detail_django_admin_is_technical_secondary(self):
+        doc = self._create_document()
+        self._create_text_result(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
+        html = resp.content.decode()
+        admin_href = f"/admin/documents/document/{doc.id}/change/"
+        self.assertEqual(
+            self._link_label(html, admin_href), "עריכה טכנית (Django Admin)"
+        )
+        admin_tag = self._link_opening_tag(html, admin_href)
+        self.assertIn("btn", admin_tag)
+        self.assertNotIn("btn-primary", admin_tag)
+
+    def test_review_detail_has_no_redundant_open_review_action(self):
+        doc = self._create_document()
+        self._create_text_result(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "בקרת תמלול למסמך זה")
+        self.assertNotContains(resp, "פתח לבדיקה")
+        self.assertNotContains(resp, "פתח בבקרת תמלול")
 
 
 class ReviewDetailHierarchyTests(SimpleTestCase):
