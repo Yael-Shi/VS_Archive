@@ -107,3 +107,49 @@ def update_manual_text_archive_item(
     content.body = body
     content.save(update_fields=["body", "updated_at"])
     return archive_item
+
+
+def sync_archive_item_shared_fields_from_document(document) -> None:
+    """Mirror shared archival fields from Document onto its linked ArchiveItem."""
+    archive_item = document.archive_item
+    values = archive_item_field_values_from_document(document)
+    for name, value in values.items():
+        setattr(archive_item, name, value)
+    archive_item.save(update_fields=[*ARCHIVE_ITEM_SHARED_FIELD_NAMES, "updated_at"])
+
+
+@transaction.atomic
+def update_ocr_document_metadata(
+    document,
+    *,
+    title: str,
+    visibility: str,
+    date_start=None,
+    date_end=None,
+    date_precision: str,
+    metadata_status: str,
+):
+    """
+    Update shared archival metadata on an OCR-backed Document and sync ArchiveItem.
+
+    Document remains OCR runtime source of truth during the bridge phase.
+    """
+    from documents.models import ArchiveItem
+
+    if document.archive_item.item_type != ArchiveItem.ItemType.OCR_DOCUMENT:
+        raise ValueError("document is not linked to an OCR_DOCUMENT archive item")
+
+    document.title = title
+    document.visibility = visibility
+    document.date_start = date_start
+    document.date_end = date_end
+    document.date_precision = date_precision
+    document.metadata_status = metadata_status
+    document.save(
+        update_fields=[
+            *ARCHIVE_ITEM_SHARED_FIELD_NAMES,
+            "updated_at",
+        ]
+    )
+    sync_archive_item_shared_fields_from_document(document)
+    return document
