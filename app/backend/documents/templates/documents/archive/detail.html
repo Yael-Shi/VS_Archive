@@ -40,6 +40,7 @@
 
     <div class="spacer"></div>
 
+    {% include "documents/archive/partials/source_metadata.html" with item=item %}
     <div class="section-title">תוכן</div>
     <div class="text-block text-block--pre">{{ body|linebreaksbr }}</div>
   </div>

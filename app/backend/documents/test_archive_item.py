@@ -1315,6 +1315,112 @@ class UnifiedArchiveItemCreatePageTests(TestCase):
         self.assertContains(resp, 'name="body"')
 
 
+class ArchiveItemSourceMetadataTests(TestCase):
+    def test_archive_item_stores_author_name_and_source_title(self):
+        item = create_manual_text_archive_item(
+            title="Source metadata storage",
+            body="body",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        item.author_name = "Ada Lovelace"
+        item.source_title = "The Times"
+        item.save(update_fields=["author_name", "source_title", "updated_at"])
+        item.refresh_from_db()
+        self.assertEqual(item.author_name, "Ada Lovelace")
+        self.assertEqual(item.source_title, "The Times")
+
+    def test_manual_text_detail_shows_source_metadata_when_present(self):
+        item = create_manual_text_archive_item(
+            title="Manual with source metadata",
+            body="Typed body text.",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        item.author_name = "רחל כהן"
+        item.source_title = "הארץ"
+        item.save(update_fields=["author_name", "source_title", "updated_at"])
+
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "מחבר/ת")
+        self.assertContains(resp, "רחל כהן")
+        self.assertContains(resp, "מקור:")
+        self.assertContains(resp, "הארץ")
+        self.assertContains(resp, "Typed body text.")
+
+    def test_manual_text_detail_hides_empty_source_metadata_labels(self):
+        item = create_manual_text_archive_item(
+            title="Manual without source metadata",
+            body="Only body text.",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Only body text.")
+        self.assertNotContains(resp, "מחבר/ת")
+        self.assertNotContains(resp, "מקור:")
+
+    def test_ocr_document_detail_shows_source_metadata_when_present(self):
+        doc = create_ocr_document(
+            title="OCR with source metadata",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
+            author_name="יוסף לוי",
+            source_title="דבר",
+        )
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "מחבר/ת")
+        self.assertContains(resp, "יוסף לוי")
+        self.assertContains(resp, "מקור:")
+        self.assertContains(resp, "דבר")
+        self.assertContains(resp, "OCR with source metadata")
+
+    def test_ocr_document_detail_hides_empty_source_metadata_labels(self):
+        doc = create_ocr_document(
+            title="OCR without source metadata",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "OCR without source metadata")
+        self.assertNotContains(resp, "מחבר/ת")
+        self.assertNotContains(resp, "מקור:")
+
+    def test_existing_manual_text_detail_behavior_unchanged_without_source_metadata(self):
+        item = create_manual_text_archive_item(
+            title="Regression manual detail",
+            body="Regression body.",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+            metadata_status=ArchiveItem.MetadataStatus.COMPLETED,
+        )
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Regression manual detail")
+        self.assertContains(resp, "Regression body.")
+        self.assertContains(resp, "טקסט מוקלד")
+
+    def test_existing_ocr_document_detail_behavior_unchanged_without_source_metadata(self):
+        doc = create_ocr_document(
+            title="Regression OCR detail",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        resp = self.client.get(f"/archive/{doc.archive_item_id}/")
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], f"/api/ui/documents/{doc.id}/")
+
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Regression OCR detail")
+        self.assertContains(resp, "טקסט שחולץ")
+
+
 class ArchiveItemPresentationUiTests(TestCase):
     def setUp(self):
         self.staff = User.objects.create_user(
