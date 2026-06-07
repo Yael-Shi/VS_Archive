@@ -115,6 +115,16 @@ Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`s
 
 **Out of scope (cutover series):** OCR/HTR, upload API, worker/SQS, **`DocumentTextResult`** semantics, catalog/tags migration, **`PHOTO`**, dropping **`Document`** shared columns.
 
+## ArchiveItem — OCR_DOCUMENT shared-field reconciliation (PR5b)
+
+**Decision:** Add pre-cutover reconciliation for **`OCR_DOCUMENT`** rows via management command **`reconcile_ocr_shared_fields`**. Default mode is **dry-run** (no writes). **`--apply`** copies shared fields from **`Document`** → linked **`ArchiveItem`** only; **never** mutates **`Document`**.
+
+**Visibility policy:** **`ArchiveItem.visibility`** already controls access. Dry-run always detects and reports visibility drift. Default **`--apply`** reconciles the five non-visibility shared fields only. **`--apply --include-visibility`** is required to copy visibility (explicit opt-in; affects who can view items). **`--include-visibility`** without **`--apply`** raises **`CommandError`**.
+
+**Scope (PR5b):** Service module **`ocr_shared_field_reconciliation.py`**, optional **`field_names`** on **`sync_archive_item_shared_fields_from_document`**, management command, focused tests, docs. **No** read-path or write-path cutover. **No** UI/API/worker/schema changes.
+
+**Docs:** `docs/ai-context/ocr-archiveitem-cutover.md` (PR5b implementation note).
+
 ## Document date precision — schema foundation (PR 2)
 
 **Decision:** Add **`Document.date_precision`** (`DatePrecision`: `EXACT_DAY`, `MONTH`, `YEAR`, `RANGE`, `UNKNOWN`) with Django default **`UNKNOWN`**. Migration adds the column with that default for **all** existing rows — **no** inference from `date_start`/`date_end` in this PR.

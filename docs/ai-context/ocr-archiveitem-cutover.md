@@ -220,6 +220,8 @@ Duplicated shared fields on **`Document`** remain as a **compatibility mirror** 
 | **Tests** | Command dry-run/apply tests; mismatch reporting; idempotency |
 | **Risk** | **Medium** — production data; mitigate with dry-run first |
 
+**Implementation (done):** Command **`python manage.py reconcile_ocr_shared_fields`**. Service **`documents/services/ocr_shared_field_reconciliation.py`**. Default **dry-run**. **`--apply`** reconciles five non-visibility fields (**`title`**, **`metadata_status`**, **`date_start`**, **`date_end`**, **`date_precision`**) from **`Document`** → **`ArchiveItem`**. **`--apply --include-visibility`** additionally copies **`visibility`** (explicit opt-in — affects access). **`--include-visibility`** without **`--apply`** is rejected. Optional **`--document-id`**, **`--json`**. Per-document **`transaction.atomic()`**; idempotent re-run.
+
 ### PR5c — Read-path cutover
 
 | | |
@@ -285,16 +287,19 @@ Duplicated shared fields on **`Document`** remain as a **compatibility mirror** 
 
 Run reconciliation **before** read-path and write-path cutover PRs:
 
-1. **Dry-run** — list rows where any of the six fields differ between **`Document`** and linked **`ArchiveItem`**.
-2. **Apply** — for **`OCR_DOCUMENT`**, copy shared fields from **`Document`** → **`ArchiveItem`** (same semantics as **`sync_archive_item_shared_fields_from_document`**).
-3. **Idempotent** — safe to re-run.
+1. **Dry-run** (default) — `python manage.py reconcile_ocr_shared_fields` lists rows where any of the six fields differ between **`Document`** and linked **`ArchiveItem`**. Optional **`--json`**.
+2. **Apply** — **`--apply`** for **`OCR_DOCUMENT`**, copy non-visibility shared fields from **`Document`** → **`ArchiveItem`**. Optional **`--document-id`** filter.
+3. **Visibility apply** — **`--apply --include-visibility`** copies all six fields including **`visibility`** (explicit; affects access).
+4. **Idempotent** — safe to re-run.
+
+**Visibility policy (resolved):** Dry-run always reports visibility mismatches in a dedicated warning section. Default **`--apply`** **skips** **`visibility`**. Copy visibility only with **`--apply --include-visibility`** after reviewing dry-run output. **`--include-visibility`** without **`--apply`** raises **`CommandError`**.
 
 ### Conflict resolution
 
 | Phase | Winner | Policy |
 |-------|--------|--------|
-| **Pre-cutover reconcile (PR5b)** | **`Document`** for bulk apply | Most staff writes and upload go to **`Document`**; OCR edit already syncs Document → ArchiveItem |
-| **Visibility mismatches** | **Explicit caution** | **`ArchiveItem.visibility`** already drives **access**. Visibility-only mismatches are **high-severity** in dry-run output. Do not bulk-apply visibility without reviewing dry-run report (exact staff-intent policy TBD — see open questions). |
+| **Pre-cutover reconcile (PR5b)** | **`Document`** for bulk apply (non-visibility fields) | Most staff writes and upload go to **`Document`**; OCR edit already syncs Document → ArchiveItem |
+| **Visibility mismatches (PR5b)** | **Opt-in only** | Dry-run reports high-severity visibility drift. Default **`--apply`** skips **`visibility`**. Use **`--apply --include-visibility`** only after reviewing dry-run — copying visibility changes who can view items |
 | **Post write-cutover (PR5d+)** | **`ArchiveItem`** | **`Document`** mirror updated from **`ArchiveItem`** on every canonical write |
 | **Django Admin Document edits** | Prevented (PR5f) | Read-only shared fields eliminate new drift |
 
@@ -363,7 +368,7 @@ Run reconciliation **before** read-path and write-path cutover PRs:
 
 ## 11. Open questions
 
-1. **Visibility conflict policy after dry-run** — When dry-run shows visibility-only mismatch, which value reflects staff intent? Default bulk reconcile from Document may be wrong if access already followed ArchiveItem. Require manual review for visibility mismatches?
+1. ~~**Visibility conflict policy after dry-run**~~ — **Resolved in PR5b:** dry-run reports visibility drift; default **`--apply`** skips visibility; **`--apply --include-visibility`** is explicit opt-in after review.
 2. **When to drop Document shared columns** — After how many releases of ArchiveItem-canonical writes? PR5g requires explicit approval.
 3. **Document list long-term** — Remain OCR operations console (Document-centric queryset) with ArchiveItem reads for shared display, or migrate to ArchiveItem-first list with OCR columns joined?
 4. **Unified catalog metadata** — When to design **`ArchiveItem`**-level catalog for donor/tags/category across **`OCR_DOCUMENT`**, **`MANUAL_TEXT`**, **`PHOTO`**?
