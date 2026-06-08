@@ -1187,3 +1187,25 @@ Closes consistency gaps in the upload completion path: the backend no longer rel
 **Deferred:** PR3 public display; PR4 backfill from legacy OCR fields; PR5+ search and browse pages.
 
 **Docs:** `docs/ai-context/archive-discovery-catalog-design.md`
+
+## Unified Archive Discovery / Catalog Metadata — public display (PR3)
+
+**Decision:** Display **`ArchiveItem`**-level discovery metadata publicly on archive/document detail pages.
+
+**Displayed fields:** **`ArchiveItem.categories`**, **`ArchiveItem.events`**, **`ArchiveItem.tags`**.
+
+**Surfaces:** **`MANUAL_TEXT`** archive detail (**`/archive/<id>/`**) and **`OCR_DOCUMENT`** document detail (**`/api/ui/documents/<id>/`**).
+
+**UI:** Hebrew labels **קטגוריות**, **אירועים**, **תגיות** near title/date/source metadata. Empty labels/sections are hidden.
+
+**OCR transitional rule:** **`OCR_DOCUMENT`** detail prefers **`ArchiveItem`**-level discovery metadata. Legacy **`Document.category_event`** and **`Document.tags_m2m`** are shown only as transitional fallback when **`ArchiveItem`** discovery metadata is empty.
+
+**Access:** **`DocumentMetadata`** remains staff/admin-only and is not exposed to anonymous/public viewers. **No** access-control changes; existing visibility rules still determine who can view the item.
+
+**Helper:** **`archive_item_has_discovery_metadata`** in **`documents/services/archive_item_presentation.py`**. Only trusts prefetch cache when **`categories`**, **`events`**, and **`tags`** are all prefetched; otherwise falls back to DB **`exists()`** checks.
+
+**Scope (PR3):** Reusable discovery-metadata template partial, detail views/templates, prefetch on detail querysets, presentation helper, focused tests, this log entry. **No** search, clickable category/event/tag pages, or backfill.
+
+**Deferred:** PR4 backfill from legacy OCR fields; PR5+ search and browse pages.
+
+**Docs:** `docs/ai-context/archive-discovery-catalog-design.md`
