@@ -11,7 +11,16 @@ from django.http import Http404, HttpResponseBadRequest, JsonResponse, HttpRespo
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from .models import ArchiveItem, Document, DocumentSourceFile, DocumentTextResult, Tag, DocumentMetadata
+from .models import (
+    ArchiveCategory,
+    ArchiveEvent,
+    ArchiveItem,
+    Document,
+    DocumentMetadata,
+    DocumentSourceFile,
+    DocumentTextResult,
+    Tag,
+)
 from documents.services.archive_catalog_metadata_validation import (
     parse_ocr_catalog_metadata_form,
 )
@@ -1683,6 +1692,73 @@ def _submit_manual_text_create(request):
         source_title=parsed["source_title"],
     )
     return redirect("archive-detail", item_id=item.id), parsed, form_errors
+
+
+def _archive_browse_items_queryset(user, **filter_kwargs):
+    return (
+        archive_item_queryset_for_user(user)
+        .filter(**filter_kwargs)
+        .select_related("manual_text_content", "ocr_document")
+        .order_by("-created_at")
+    )
+
+
+def _archive_browse_page_context(*, page_title: str, items) -> dict:
+    return {
+        "page_title": page_title,
+        "items": items,
+    }
+
+
+def archive_category_browse_page(request, category_id: int):
+    try:
+        category = ArchiveCategory.objects.get(id=category_id)
+    except ArchiveCategory.DoesNotExist:
+        raise Http404() from None
+
+    items = _archive_browse_items_queryset(request.user, categories=category)
+    return render(
+        request,
+        "documents/archive/browse.html",
+        context=_archive_browse_page_context(
+            page_title=f"קטגוריה: {category.name}",
+            items=items,
+        ),
+    )
+
+
+def archive_event_browse_page(request, event_id: int):
+    try:
+        event = ArchiveEvent.objects.get(id=event_id)
+    except ArchiveEvent.DoesNotExist:
+        raise Http404() from None
+
+    items = _archive_browse_items_queryset(request.user, events=event)
+    return render(
+        request,
+        "documents/archive/browse.html",
+        context=_archive_browse_page_context(
+            page_title=f"אירוע: {event.name}",
+            items=items,
+        ),
+    )
+
+
+def archive_tag_browse_page(request, tag_id: int):
+    try:
+        tag = Tag.objects.get(id=tag_id)
+    except Tag.DoesNotExist:
+        raise Http404() from None
+
+    items = _archive_browse_items_queryset(request.user, tags=tag)
+    return render(
+        request,
+        "documents/archive/browse.html",
+        context=_archive_browse_page_context(
+            page_title=f"תגית: {tag.name}",
+            items=items,
+        ),
+    )
 
 
 def archive_list_page(request):

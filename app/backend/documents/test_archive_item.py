@@ -3399,6 +3399,282 @@ class ArchiveItemListSearchTests(TestCase):
             self.assertNotContains(resp, "Metadata isolation search item")
 
 
+class ArchiveItemDiscoveryBrowseTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="discovery_browse_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.family_group, _ = Group.objects.get_or_create(
+            name=ARCHIVE_FAMILY_GROUP_NAME
+        )
+
+    def _create_public_item(self, **kwargs) -> ArchiveItem:
+        defaults = {
+            "title": "Public browse item",
+            "body": "Browse test body.",
+            "visibility": ArchiveItem.Visibility.PUBLIC,
+        }
+        defaults.update(kwargs)
+        body = defaults.pop("body")
+        return create_manual_text_archive_item(body=body, **defaults)
+
+    def _create_private_item(self, **kwargs) -> ArchiveItem:
+        defaults = {
+            "title": "Private browse item",
+            "body": "Private browse body.",
+            "visibility": ArchiveItem.Visibility.PRIVATE,
+        }
+        defaults.update(kwargs)
+        body = defaults.pop("body")
+        return create_manual_text_archive_item(body=body, **defaults)
+
+    def _attach_discovery_metadata(self, item: ArchiveItem):
+        category = ArchiveCategory.objects.create(
+            name="Browse category term",
+            slug="browse-category-term",
+        )
+        event = ArchiveEvent.objects.create(
+            name="Browse event term",
+            slug="browse-event-term",
+        )
+        tag = Tag.objects.create(name="browse-tag-term")
+        item.categories.add(category)
+        item.events.add(event)
+        item.tags.add(tag)
+        return category, event, tag
+
+    def test_public_item_category_link_on_detail_page(self):
+        item = self._create_public_item(title="Category link detail")
+        category, _, _ = self._attach_discovery_metadata(item)
+
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(
+            resp,
+            reverse("archive-category-browse", kwargs={"category_id": category.id}),
+        )
+
+    def test_public_item_event_link_on_detail_page(self):
+        item = self._create_public_item(title="Event link detail")
+        _, event, _ = self._attach_discovery_metadata(item)
+
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(
+            resp,
+            reverse("archive-event-browse", kwargs={"event_id": event.id}),
+        )
+
+    def test_public_item_tag_link_on_detail_page(self):
+        item = self._create_public_item(title="Tag link detail")
+        _, _, tag = self._attach_discovery_metadata(item)
+
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(
+            resp,
+            reverse("archive-tag-browse", kwargs={"tag_id": tag.id}),
+        )
+
+    def test_category_browse_shows_public_linked_item_to_anonymous(self):
+        item = self._create_public_item(title="Public category browse visible")
+        category, _, _ = self._attach_discovery_metadata(item)
+
+        resp = self.client.get(
+            reverse("archive-category-browse", kwargs={"category_id": category.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "קטגוריה: Browse category term")
+        self.assertContains(resp, item.title)
+
+    def test_event_browse_shows_public_linked_item_to_anonymous(self):
+        item = self._create_public_item(title="Public event browse visible")
+        _, event, _ = self._attach_discovery_metadata(item)
+
+        resp = self.client.get(
+            reverse("archive-event-browse", kwargs={"event_id": event.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "אירוע: Browse event term")
+        self.assertContains(resp, item.title)
+
+    def test_tag_browse_shows_public_linked_item_to_anonymous(self):
+        item = self._create_public_item(title="Public tag browse visible")
+        _, _, tag = self._attach_discovery_metadata(item)
+
+        resp = self.client.get(
+            reverse("archive-tag-browse", kwargs={"tag_id": tag.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "תגית: browse-tag-term")
+        self.assertContains(resp, item.title)
+
+    def test_category_browse_hides_private_linked_item_from_anonymous(self):
+        item = self._create_private_item(title="Hidden private category browse")
+        category, _, _ = self._attach_discovery_metadata(item)
+
+        resp = self.client.get(
+            reverse("archive-category-browse", kwargs={"category_id": category.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "קטגוריה: Browse category term")
+        self.assertNotContains(resp, item.title)
+
+    def test_event_browse_hides_private_linked_item_from_anonymous(self):
+        item = self._create_private_item(title="Hidden private event browse")
+        _, event, _ = self._attach_discovery_metadata(item)
+
+        resp = self.client.get(
+            reverse("archive-event-browse", kwargs={"event_id": event.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "אירוע: Browse event term")
+        self.assertNotContains(resp, item.title)
+
+    def test_tag_browse_hides_private_linked_item_from_anonymous(self):
+        item = self._create_private_item(title="Hidden private tag browse")
+        _, _, tag = self._attach_discovery_metadata(item)
+
+        resp = self.client.get(
+            reverse("archive-tag-browse", kwargs={"tag_id": tag.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "תגית: browse-tag-term")
+        self.assertNotContains(resp, item.title)
+
+    def test_staff_can_see_private_linked_items_on_browse_pages(self):
+        item = self._create_private_item(title="Staff private browse visible")
+        category, event, tag = self._attach_discovery_metadata(item)
+        self.client.force_login(self.staff)
+
+        category_resp = self.client.get(
+            reverse("archive-category-browse", kwargs={"category_id": category.id})
+        )
+        event_resp = self.client.get(
+            reverse("archive-event-browse", kwargs={"event_id": event.id})
+        )
+        tag_resp = self.client.get(
+            reverse("archive-tag-browse", kwargs={"tag_id": tag.id})
+        )
+
+        self.assertContains(category_resp, item.title)
+        self.assertContains(event_resp, item.title)
+        self.assertContains(tag_resp, item.title)
+
+    def test_browse_page_returns_404_for_missing_category_event_tag(self):
+        missing_category_id = 9_999_001
+        missing_event_id = 9_999_002
+        missing_tag_id = 9_999_003
+
+        self.assertEqual(
+            self.client.get(
+                reverse(
+                    "archive-category-browse",
+                    kwargs={"category_id": missing_category_id},
+                )
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.get(
+                reverse("archive-event-browse", kwargs={"event_id": missing_event_id})
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.get(
+                reverse("archive-tag-browse", kwargs={"tag_id": missing_tag_id})
+            ).status_code,
+            404,
+        )
+
+    def test_browse_page_shows_empty_state_when_no_visible_items(self):
+        category = ArchiveCategory.objects.create(
+            name="Empty browse category",
+            slug="empty-browse-category",
+        )
+        event = ArchiveEvent.objects.create(
+            name="Empty browse event",
+            slug="empty-browse-event",
+        )
+        tag = Tag.objects.create(name="empty-browse-tag")
+
+        private_item = self._create_private_item(title="Only private empty browse")
+        private_item.categories.add(category)
+        private_item.events.add(event)
+        private_item.tags.add(tag)
+
+        category_resp = self.client.get(
+            reverse("archive-category-browse", kwargs={"category_id": category.id})
+        )
+        event_resp = self.client.get(
+            reverse("archive-event-browse", kwargs={"event_id": event.id})
+        )
+        tag_resp = self.client.get(
+            reverse("archive-tag-browse", kwargs={"tag_id": tag.id})
+        )
+
+        for resp in (category_resp, event_resp, tag_resp):
+            self.assertEqual(resp.status_code, 200)
+            self.assertContains(resp, "אין פריטים להצגה.")
+            self.assertNotContains(resp, "Only private empty browse")
+
+    def test_tag_browse_uses_archive_item_tags_not_legacy_document_tags_m2m(self):
+        doc = create_ocr_document(
+            title="Legacy tag browse isolation",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        legacy_tag = Tag.objects.create(name="legacy-only-browse-tag")
+        doc.tags_m2m.add(legacy_tag)
+
+        resp = self.client.get(
+            reverse("archive-tag-browse", kwargs={"tag_id": legacy_tag.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "תגית: legacy-only-browse-tag")
+        self.assertNotContains(resp, doc.title)
+
+    def test_existing_archive_search_still_works_after_browse_pages(self):
+        item = self._create_public_item(title="Search still works browse regression")
+        category = ArchiveCategory.objects.create(
+            name="Search regression category term",
+            slug="search-regression-category-term",
+        )
+        item.categories.add(category)
+
+        resp = self.client.get(
+            reverse("archive-list"), {"q": "search regression category"}
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, item.title)
+
+    def test_browse_urls_are_id_based_not_slug_based(self):
+        category = ArchiveCategory.objects.create(
+            name="Slug unused category",
+            slug="slug-unused-category",
+        )
+        event = ArchiveEvent.objects.create(
+            name="Slug unused event",
+            slug="slug-unused-event",
+        )
+
+        category_resp = self.client.get(
+            reverse("archive-category-browse", kwargs={"category_id": category.id})
+        )
+        event_resp = self.client.get(
+            reverse("archive-event-browse", kwargs={"event_id": event.id})
+        )
+
+        self.assertEqual(category_resp.status_code, 200)
+        self.assertEqual(event_resp.status_code, 200)
+        self.assertNotContains(category_resp, "/archive/categories/slug-unused-category/")
+        self.assertNotContains(event_resp, "/archive/events/slug-unused-event/")
+
+
 class ManualTextArchiveItemDeleteTests(TestCase):
     DELETE_URL_TEMPLATE = "/archive/manage/{item_id}/delete/"
 

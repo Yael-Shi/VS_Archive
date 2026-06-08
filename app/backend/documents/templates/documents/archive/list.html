@@ -62,26 +62,7 @@
     <div class="spacer"></div>
 
     {% if items %}
-      <div class="table-wrap">
-        <table class="table">
-          <thead>
-            <tr>
-              <th>כותרת</th>
-              <th>סוג</th>
-              <th>תאריך</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for item in items %}
-              <tr>
-                <td><a href="{% url 'archive-detail' item_id=item.id %}">{{ item.title }}</a></td>
-                <td>{{ item.item_type|archive_item_type_label }}</td>
-                <td>{{ item|document_date_display }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
+      {% include "documents/archive/partials/item_list_table.html" with items=items %}
     {% elif q %}
       <p class="muted">לא נמצאו פריטים התואמים את החיפוש.</p>
     {% else %}
