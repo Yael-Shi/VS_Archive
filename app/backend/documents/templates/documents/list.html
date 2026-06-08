@@ -48,8 +48,12 @@
         {% if is_admin %}
           <div class="field">
             <label for="filter-visibility">נראות</label>
-            <input id="filter-visibility" type="text" name="visibility" placeholder="private / public" value="{{ visibility }}">
-            <span class="field-hint">private = פרטי · public = ציבורי</span>
+            <select id="filter-visibility" name="visibility">
+              <option value="">הכל</option>
+              {% for v, label in visibility_choices %}
+                <option value="{{ v }}" {% if visibility == v %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
           </div>
         {% endif %}
 

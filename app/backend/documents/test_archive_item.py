@@ -2569,12 +2569,14 @@ class ArchiveNavigationTests(TestCase):
         self.assertNotContains(resp, reverse("archive-manage-list"))
         self.assertNotContains(resp, "ניהול ארכיון")
 
-    def test_archive_manage_list_shows_manual_text_create_for_staff(self):
+    def test_archive_manage_list_shows_single_create_entrypoint_for_staff(self):
         self.client.force_login(self.staff)
         resp = self.client.get(reverse("archive-manage-list"))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, reverse("archive-manage-manual-text-create"))
-        self.assertContains(resp, "יצירת טקסט מוקלד")
+        self.assertContains(resp, reverse("archive-manage-new"))
+        self.assertContains(resp, "יצירת פריט חדש")
+        self.assertNotContains(resp, reverse("archive-manage-manual-text-create"))
+        self.assertNotContains(resp, "יצירת טקסט מוקלד")
 
 
 class UnifiedArchiveItemCreatePageTests(TestCase):
@@ -2760,6 +2762,52 @@ class ArchiveItemSourceMetadataTests(TestCase):
         self.assertContains(resp, "OCR without source metadata")
         self.assertNotContains(resp, "מחבר/ת")
         self.assertNotContains(resp, "מקור:")
+
+    def test_ocr_document_detail_shows_catalog_metadata_for_public_viewer(self):
+        doc = create_ocr_document(
+            title="Catalog metadata OCR detail",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PUBLIC,
+            category_event="חתונה",
+        )
+        doc.tags_m2m.add(Tag.objects.create(name="משפחה"))
+
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "אירוע / קטגוריה")
+        self.assertContains(resp, "חתונה")
+        self.assertContains(resp, "תגיות")
+        self.assertContains(resp, "משפחה")
+        self.assertNotContains(resp, "מטא־דאטה למנהלים")
+
+    def test_ocr_document_detail_shows_catalog_metadata_for_staff_without_admin_only_duplication(
+        self,
+    ):
+        staff = User.objects.create_user(
+            username="catalog_detail_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        doc = create_ocr_document(
+            title="Staff catalog metadata OCR detail",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PUBLIC,
+            category_event="בר מצווה",
+        )
+        doc.tags_m2m.add(Tag.objects.create(name="ירושלים"))
+
+        self.client.force_login(staff)
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "document-catalog-meta")
+        self.assertContains(resp, "בר מצווה")
+        self.assertContains(resp, "ירושלים")
+        self.assertContains(resp, "מטא־דאטה למנהלים")
+        html = resp.content.decode()
+        self.assertEqual(html.count("בר מצווה"), 1)
+        self.assertEqual(html.count("ירושלים"), 1)
 
     def test_existing_manual_text_detail_behavior_unchanged_without_source_metadata(self):
         item = create_manual_text_archive_item(

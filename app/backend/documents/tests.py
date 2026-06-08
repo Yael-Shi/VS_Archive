@@ -7540,6 +7540,16 @@ class StatusLabelPresentationTests(TestCase):
         # raw English enum label.
         self.assertNotContains(resp, "Needs completion")
 
+    def test_list_page_visibility_filter_uses_hebrew_labels_not_raw_english_placeholder(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/documents/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, 'placeholder="private / public"')
+        self.assertNotContains(resp, "private = פרטי")
+        self.assertContains(resp, 'id="filter-visibility"')
+        self.assertContains(resp, ">פרטי<")
+        self.assertContains(resp, ">ציבורי<")
+
     def test_detail_page_ready_uses_processing_completed(self):
         doc = self._create_document()
         self._create_hebrew_text_result(doc)

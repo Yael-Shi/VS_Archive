@@ -1072,6 +1072,7 @@ def documents_list_page(request):
         "next_offset": (offset + limit) if (offset + limit) < total else None,
         "doc_type_choices": Document.DocType.choices,
         "metadata_status_choices": Document.MetadataStatus.choices,
+        "visibility_choices": archive_visibility_ui_choices(),
         "is_admin": is_admin,
     }
 
@@ -1455,7 +1456,7 @@ def document_detail_page(request, doc_id: int):
         raise
 
     admin_meta = getattr(doc, "admin_meta", None) if is_admin else None
-    admin_tags = list(doc.tags_m2m.all()) if is_admin else []
+    document_tags = list(doc.tags_m2m.all())
 
     bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
     source_preview = build_source_preview(doc, bucket)
@@ -1472,7 +1473,7 @@ def document_detail_page(request, doc_id: int):
         "source_preview_items": source_preview.items,
         "source_preview_unavailable_count": source_preview.non_uploaded_count,
         "admin_meta": admin_meta,
-        "admin_tags": admin_tags,
+        "document_tags": document_tags,
         "text_presentation": text_presentation,
         "is_admin": is_admin,
     }
