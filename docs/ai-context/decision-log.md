@@ -1206,6 +1206,20 @@ Closes consistency gaps in the upload completion path: the backend no longer rel
 
 **Scope (PR3):** Reusable discovery-metadata template partial, detail views/templates, prefetch on detail querysets, presentation helper, focused tests, this log entry. **No** search, clickable category/event/tag pages, or backfill.
 
-**Deferred:** PR4 backfill from legacy OCR fields; PR5+ search and browse pages.
+**Deferred:** PR5+ search and browse pages.
+
+**Docs:** `docs/ai-context/archive-discovery-catalog-design.md`
+
+## Unified Archive Discovery / Catalog Metadata — legacy backfill command (PR4)
+
+**Decision:** Add management command **`backfill_archive_discovery_metadata`** to report and optionally backfill **`ArchiveItem`**-level discovery metadata from legacy OCR-side fields.
+
+**User decision (existing data):** For the small number of existing documents currently in the site, any non-blank **`Document.category_event`** value is treated as an **`ArchiveCategory`** name (not an **`ArchiveEvent`**) during this backfill.
+
+**Behavior:** Default **dry-run** (no writes). **`--apply`** links legacy **`Document.tags_m2m`** tags onto **`Document.archive_item.tags`** (reusing existing **`Tag`** rows; add-only, no duplicates) and maps non-blank **`Document.category_event`** to **`ArchiveItem.categories`** via exact-name **`ArchiveCategory`** get/create. **No** **`ArchiveEvent`** rows are created. **No** legacy OCR fields are deleted or cleared; **`DocumentMetadata`** is unchanged.
+
+**Scope (PR4):** Service module, management command, focused tests, this log entry. **No** public/edit UI, search, clickable browse pages, automatic migration, or model changes.
+
+**Deferred:** PR5+ search and browse pages; legacy field cleanup (PR7).
 
 **Docs:** `docs/ai-context/archive-discovery-catalog-design.md`

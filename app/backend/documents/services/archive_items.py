@@ -339,7 +339,8 @@ def _unique_slug_for_model(model, name: str) -> str:
     return slug
 
 
-def _get_or_create_archive_category_by_name(name: str):
+def get_or_create_archive_category_by_name(name: str):
+    """Return an ArchiveCategory by exact name, creating one with a unique slug if needed."""
     from documents.models import ArchiveCategory
 
     try:
@@ -391,7 +392,7 @@ def update_archive_item_discovery_metadata(
     """Replace ArchiveItem discovery categories, events, and tags (replace-all per relation)."""
     category_objs = []
     for name in category_names:
-        category_obj, _ = _get_or_create_archive_category_by_name(name)
+        category_obj, _ = get_or_create_archive_category_by_name(name)
         category_objs.append(category_obj)
 
     event_objs = []
