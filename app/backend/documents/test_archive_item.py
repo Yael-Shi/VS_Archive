@@ -2767,25 +2767,23 @@ class ArchiveItemSourceMetadataTests(TestCase):
         self.assertNotContains(resp, "מחבר/ת")
         self.assertNotContains(resp, "מקור:")
 
-    def test_ocr_document_detail_shows_catalog_metadata_for_public_viewer(self):
+    def test_ocr_document_detail_hides_legacy_category_event_for_public_viewer(self):
         doc = create_ocr_document(
-            title="Catalog metadata OCR detail",
+            title="Legacy category event hidden",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
             visibility=Document.Visibility.PUBLIC,
             category_event="חתונה",
         )
-        doc.tags_m2m.add(Tag.objects.create(name="משפחה"))
 
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "אירוע / קטגוריה")
-        self.assertContains(resp, "חתונה")
-        self.assertContains(resp, "תגיות")
-        self.assertContains(resp, "משפחה")
+        self.assertNotContains(resp, "document-catalog-meta")
+        self.assertNotContains(resp, "אירוע / קטגוריה")
+        self.assertNotContains(resp, "חתונה")
         self.assertNotContains(resp, "מטא־דאטה למנהלים")
 
-    def test_ocr_document_detail_shows_catalog_metadata_for_staff_without_admin_only_duplication(
+    def test_ocr_document_detail_hides_legacy_tags_for_staff_without_public_display(
         self,
     ):
         staff = User.objects.create_user(
@@ -2794,7 +2792,7 @@ class ArchiveItemSourceMetadataTests(TestCase):
             is_staff=True,
         )
         doc = create_ocr_document(
-            title="Staff catalog metadata OCR detail",
+            title="Staff legacy tags hidden",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
             visibility=Document.Visibility.PUBLIC,
@@ -2805,13 +2803,11 @@ class ArchiveItemSourceMetadataTests(TestCase):
         self.client.force_login(staff)
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "document-catalog-meta")
-        self.assertContains(resp, "בר מצווה")
-        self.assertContains(resp, "ירושלים")
+        self.assertNotContains(resp, "document-catalog-meta")
+        self.assertNotContains(resp, "אירוע / קטגוריה")
+        self.assertNotContains(resp, "בר מצווה")
+        self.assertNotContains(resp, "ירושלים")
         self.assertContains(resp, "מטא־דאטה למנהלים")
-        html = resp.content.decode()
-        self.assertEqual(html.count("בר מצווה"), 1)
-        self.assertEqual(html.count("ירושלים"), 1)
 
     def test_existing_manual_text_detail_behavior_unchanged_without_source_metadata(self):
         item = create_manual_text_archive_item(
@@ -2950,25 +2946,40 @@ class ArchiveItemDiscoveryMetadataDisplayTests(TestCase):
         self.assertNotContains(resp, "legacy-doc-tag")
         self.assertNotIn("אירוע / קטגוריה", html)
 
-    def test_ocr_document_detail_shows_legacy_catalog_fallback_when_archive_item_discovery_empty(
+    def test_ocr_document_detail_hides_legacy_category_event_when_archive_item_categories_empty(
         self,
     ):
         doc = create_ocr_document(
-            title="OCR legacy catalog fallback",
+            title="OCR legacy category hidden",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
             visibility=Document.Visibility.PUBLIC,
             category_event="Legacy wedding",
+        )
+
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "archive-discovery-meta")
+        self.assertNotContains(resp, "document-catalog-meta")
+        self.assertNotContains(resp, "אירוע / קטגוריה")
+        self.assertNotContains(resp, "Legacy wedding")
+
+    def test_ocr_document_detail_hides_legacy_tags_when_archive_item_tags_empty(
+        self,
+    ):
+        doc = create_ocr_document(
+            title="OCR legacy tags hidden",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PUBLIC,
         )
         doc.tags_m2m.add(Tag.objects.create(name="legacy-family"))
 
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, "archive-discovery-meta")
-        self.assertContains(resp, "document-catalog-meta")
-        self.assertContains(resp, "אירוע / קטגוריה")
-        self.assertContains(resp, "Legacy wedding")
-        self.assertContains(resp, "legacy-family")
+        self.assertNotContains(resp, "document-catalog-meta")
+        self.assertNotContains(resp, "legacy-family")
 
     def test_anonymous_cannot_see_discovery_metadata_for_private_items(self):
         item = create_manual_text_archive_item(
@@ -3397,6 +3408,23 @@ class ArchiveItemListSearchTests(TestCase):
         ):
             resp = self.client.get(reverse("archive-list"), {"q": term})
             self.assertNotContains(resp, "Metadata isolation search item")
+
+    def test_search_does_not_match_legacy_document_category_event_or_tags(self):
+        doc = create_ocr_document(
+            title="Legacy discovery search isolation item",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            visibility=Document.Visibility.PUBLIC,
+            category_event="unique-legacy-category-event-search-term",
+        )
+        doc.tags_m2m.add(Tag.objects.create(name="unique-legacy-tag-search-term"))
+
+        for term in (
+            "unique-legacy-category-event-search-term",
+            "unique-legacy-tag-search-term",
+        ):
+            resp = self.client.get(reverse("archive-list"), {"q": term})
+            self.assertNotContains(resp, "Legacy discovery search isolation item")
 
 
 class ArchiveItemDiscoveryBrowseTests(TestCase):
