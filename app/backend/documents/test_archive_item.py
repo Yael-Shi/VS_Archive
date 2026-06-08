@@ -3189,6 +3189,18 @@ class ArchiveItemPresentationUiTests(TestCase):
         self.assertContains(resp, "Public manual filter")
         self.assertNotContains(resp, "Private manual filter")
 
+    def test_archive_list_search_input_preserves_q_after_submit(self):
+        create_manual_text_archive_item(
+            title="Search input preserve item",
+            body="x",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        resp = self.client.get(reverse("archive-list"), {"q": "preserve-query"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'name="q"')
+        self.assertContains(resp, 'value="preserve-query"')
+        self.assertContains(resp, "חיפוש בארכיון")
+
     def test_archive_manage_list_shows_hebrew_visibility_and_metadata(self):
         create_manual_text_archive_item(
             title="Manage labels item",
@@ -3227,6 +3239,164 @@ class ArchiveItemPresentationUiTests(TestCase):
         self.assertContains(resp, "הושלם")
         self.assertNotContains(resp, "MANUAL_TEXT")
         self.assertNotContains(resp, "COMPLETED")
+
+
+class ArchiveItemListSearchTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="archive_search_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.family_group, _ = Group.objects.get_or_create(
+            name=ARCHIVE_FAMILY_GROUP_NAME
+        )
+
+    def _create_public_item(self, **kwargs) -> ArchiveItem:
+        defaults = {
+            "title": "Public search item",
+            "body": "Search test body.",
+            "visibility": ArchiveItem.Visibility.PUBLIC,
+        }
+        defaults.update(kwargs)
+        body = defaults.pop("body")
+        return create_manual_text_archive_item(body=body, **defaults)
+
+    def _create_private_item(self, **kwargs) -> ArchiveItem:
+        defaults = {
+            "title": "Private search item",
+            "body": "Private search body.",
+            "visibility": ArchiveItem.Visibility.PRIVATE,
+        }
+        defaults.update(kwargs)
+        body = defaults.pop("body")
+        return create_manual_text_archive_item(body=body, **defaults)
+
+    def test_anonymous_search_finds_public_item_by_title(self):
+        item = self._create_public_item(title="Unique public title search")
+        resp = self.client.get(reverse("archive-list"), {"q": "public title search"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, item.title)
+
+    def test_anonymous_search_finds_public_item_by_author_name(self):
+        item = self._create_public_item(
+            title="Author search item",
+            author_name="Unique author search name",
+        )
+        resp = self.client.get(reverse("archive-list"), {"q": "author search name"})
+        self.assertContains(resp, item.title)
+
+    def test_anonymous_search_finds_public_item_by_source_title(self):
+        item = self._create_public_item(
+            title="Source search item",
+            source_title="Unique source search title",
+        )
+        resp = self.client.get(reverse("archive-list"), {"q": "source search title"})
+        self.assertContains(resp, item.title)
+
+    def test_anonymous_search_finds_public_item_by_category_name(self):
+        item = self._create_public_item(title="Category search item")
+        category = ArchiveCategory.objects.create(
+            name="Unique category search term",
+            slug="unique-category-search-term",
+        )
+        item.categories.add(category)
+        resp = self.client.get(reverse("archive-list"), {"q": "category search term"})
+        self.assertContains(resp, item.title)
+
+    def test_anonymous_search_finds_public_item_by_event_name(self):
+        item = self._create_public_item(title="Event search item")
+        event = ArchiveEvent.objects.create(
+            name="Unique event search term",
+            slug="unique-event-search-term",
+        )
+        item.events.add(event)
+        resp = self.client.get(reverse("archive-list"), {"q": "event search term"})
+        self.assertContains(resp, item.title)
+
+    def test_anonymous_search_finds_public_item_by_tag_name(self):
+        item = self._create_public_item(title="Tag search item")
+        tag = Tag.objects.create(name="unique-tag-search-term")
+        item.tags.add(tag)
+        resp = self.client.get(reverse("archive-list"), {"q": "tag-search-term"})
+        self.assertContains(resp, item.title)
+
+    def test_anonymous_search_does_not_reveal_private_items(self):
+        self._create_private_item(title="Hidden private title search")
+        resp = self.client.get(reverse("archive-list"), {"q": "private title search"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "Hidden private title search")
+
+    def test_staff_search_can_find_private_items(self):
+        item = self._create_private_item(title="Staff private title search")
+        self.client.force_login(self.staff)
+        resp = self.client.get(reverse("archive-list"), {"q": "private title search"})
+        self.assertContains(resp, item.title)
+
+    def test_search_preserves_item_type_filter(self):
+        manual_item = self._create_public_item(title="Search filter manual item")
+        ocr_doc = create_ocr_document(
+            title="Search filter OCR item",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        resp = self.client.get(
+            reverse("archive-list"),
+            {"q": "search filter", "item_type": "manual_text"},
+        )
+        self.assertContains(resp, manual_item.title)
+        self.assertNotContains(resp, ocr_doc.title)
+
+    def test_whitespace_search_query_behaves_like_no_search(self):
+        public_item = self._create_public_item(title="Whitespace search public")
+        self._create_private_item(title="Whitespace search private hidden")
+        resp = self.client.get(reverse("archive-list"), {"q": "   "})
+        self.assertContains(resp, public_item.title)
+        self.assertNotContains(resp, "Whitespace search private hidden")
+
+    def test_search_duplicate_m2m_matches_do_not_duplicate_rows(self):
+        item = self._create_public_item(title="Duplicate m2m search item")
+        category_one = ArchiveCategory.objects.create(
+            name="Shared duplicate search alpha",
+            slug="shared-duplicate-search-alpha",
+        )
+        category_two = ArchiveCategory.objects.create(
+            name="Shared duplicate search beta",
+            slug="shared-duplicate-search-beta",
+        )
+        item.categories.add(category_one, category_two)
+        resp = self.client.get(reverse("archive-list"), {"q": "duplicate search"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            resp.content.decode("utf-8").count("Duplicate m2m search item"),
+            1,
+        )
+
+    def test_search_does_not_match_document_metadata_fields(self):
+        doc = create_ocr_document(
+            title="Metadata isolation search item",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        DocumentMetadata.objects.update_or_create(
+            document=doc,
+            defaults={
+                "donor": "unique-donor-metadata-search-term",
+                "collection": "unique-collection-metadata-search-term",
+                "original_location": "unique-location-metadata-search-term",
+                "notes": "unique-notes-metadata-search-term",
+            },
+        )
+        for term in (
+            "unique-donor-metadata-search-term",
+            "unique-collection-metadata-search-term",
+            "unique-location-metadata-search-term",
+            "unique-notes-metadata-search-term",
+        ):
+            resp = self.client.get(reverse("archive-list"), {"q": term})
+            self.assertNotContains(resp, "Metadata isolation search item")
 
 
 class ManualTextArchiveItemDeleteTests(TestCase):

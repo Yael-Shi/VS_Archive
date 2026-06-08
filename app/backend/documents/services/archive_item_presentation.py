@@ -5,6 +5,8 @@ Stored enum/database values are unchanged; templates and forms map values here.
 
 from __future__ import annotations
 
+from django.db.models import Q, QuerySet
+
 from documents.models import ArchiveItem
 
 ARCHIVE_LIST_ITEM_TYPE_FILTER_ALL = ""
@@ -130,3 +132,26 @@ def normalize_archive_list_item_type_filter(raw: str | None) -> str:
     ):
         return ArchiveItem.ItemType.MANUAL_TEXT
     return ""
+
+
+def normalize_archive_list_search_query(raw: str | None) -> str:
+    """Trim archive list ``q``; empty/whitespace means no search filter."""
+    return (raw or "").strip()
+
+
+def filter_archive_items_by_search_query(
+    queryset: QuerySet[ArchiveItem],
+    search_query: str,
+) -> QuerySet[ArchiveItem]:
+    """Case-insensitive search over ArchiveItem public discovery metadata fields."""
+    q = normalize_archive_list_search_query(search_query)
+    if not q:
+        return queryset
+    return queryset.filter(
+        Q(title__icontains=q)
+        | Q(author_name__icontains=q)
+        | Q(source_title__icontains=q)
+        | Q(categories__name__icontains=q)
+        | Q(events__name__icontains=q)
+        | Q(tags__name__icontains=q)
+    ).distinct()

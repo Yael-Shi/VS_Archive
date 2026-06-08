@@ -7,17 +7,50 @@
     <h1 class="page-title">ארכיון</h1>
     <p class="page-subtitle">פריטי ארכיון לפי הרשאות הצפייה שלך.</p>
 
+    <div class="filter-panel">
+      <div class="section-title">חיפוש בארכיון</div>
+      <p class="filter-panel__help">חיפוש לפי כותרת, מחבר/ת, מקור, קטגוריות, אירועים ותגיות</p>
+
+      <form method="get" class="toolbar">
+        {% if item_type_filter %}
+          <input type="hidden" name="item_type" value="{{ item_type_filter }}">
+        {% endif %}
+
+        <div class="field field--wide">
+          <label for="archive-filter-q">חיפוש בארכיון</label>
+          <input
+            id="archive-filter-q"
+            type="text"
+            name="q"
+            placeholder="חיפוש בארכיון"
+            value="{{ q }}"
+          >
+        </div>
+
+        <div class="field field--actions">
+          <div class="form-actions">
+            <button class="btn btn-primary" type="submit">החלה</button>
+            {% if item_type_filter %}
+              <a class="btn" href="{% url 'archive-list' %}?item_type={{ item_type_filter }}">ניקוי</a>
+            {% else %}
+              <a class="btn" href="{% url 'archive-list' %}">ניקוי</a>
+            {% endif %}
+          </div>
+        </div>
+      </form>
+    </div>
+
     <div class="page-toolbar">
       {% for slug, label in item_type_filter_choices %}
         {% if slug %}
           <a
             class="btn{% if item_type_filter == slug %} btn-primary{% endif %}"
-            href="{% url 'archive-list' %}?item_type={{ slug }}"
+            href="{% url 'archive-list' %}?item_type={{ slug }}{% if q %}&amp;q={{ q|urlencode }}{% endif %}"
           >{{ label }}</a>
         {% else %}
           <a
             class="btn{% if not item_type_filter %} btn-primary{% endif %}"
-            href="{% url 'archive-list' %}"
+            href="{% url 'archive-list' %}{% if q %}?q={{ q|urlencode }}{% endif %}"
           >{{ label }}</a>
         {% endif %}
       {% endfor %}
@@ -49,6 +82,8 @@
           </tbody>
         </table>
       </div>
+    {% elif q %}
+      <p class="muted">לא נמצאו פריטים התואמים את החיפוש.</p>
     {% else %}
       <p class="muted">אין פריטי ארכיון להצגה.</p>
     {% endif %}

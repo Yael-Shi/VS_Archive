@@ -1223,3 +1223,15 @@ Closes consistency gaps in the upload completion path: the backend no longer rel
 **Deferred:** PR5+ search and browse pages; legacy field cleanup (PR7).
 
 **Docs:** `docs/ai-context/archive-discovery-catalog-design.md`
+
+## Unified Archive Discovery / Catalog Metadata — public archive search (PR5)
+
+**Decision:** Add basic query search on **`/archive/`** via **`?q=`** over **`ArchiveItem`**-level public discovery metadata: **`title`**, **`author_name`**, **`source_title`**, and linked **`categories`**, **`events`**, and **`tags`** names (case-insensitive **`icontains`**; M2M joins use **`distinct()`**).
+
+**Access:** Search applies only after the existing **`archive_item_queryset_for_user`** visibility filter. Anonymous users cannot discover private/family-only items through search; staff retain full list visibility. **`DocumentMetadata`** and other OCR-side internal fields are **not** searched or exposed.
+
+**Scope (PR5):** List view search filter, Hebrew search UI on archive list template, presentation helpers, focused tests, this log entry. **No** full-text engine, OCR text search, clickable category/event/tag browse pages, or model/migration changes.
+
+**Deferred:** PR6 clickable category/event/tag browse pages; legacy field cleanup (PR7).
+
+**Docs:** `docs/ai-context/archive-discovery-catalog-design.md`

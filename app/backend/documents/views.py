@@ -86,7 +86,9 @@ from documents.services.archive_item_presentation import (
     archive_manage_item_type_ui_choices,
     archive_metadata_status_ui_choices,
     archive_visibility_ui_choices,
+    filter_archive_items_by_search_query,
     normalize_archive_list_item_type_filter,
+    normalize_archive_list_search_query,
 )
 from documents.services.sqs import send_process_document_message
 from documents.services.text_presentation import get_text_presentation_for_document
@@ -1687,6 +1689,7 @@ def archive_list_page(request):
     item_type_filter = normalize_archive_list_item_type_filter(
         request.GET.get("item_type")
     )
+    search_query = normalize_archive_list_search_query(request.GET.get("q"))
     items = (
         archive_item_queryset_for_user(request.user)
         .select_related("manual_text_content", "ocr_document")
@@ -1694,6 +1697,7 @@ def archive_list_page(request):
     )
     if item_type_filter:
         items = items.filter(item_type=item_type_filter)
+    items = filter_archive_items_by_search_query(items, search_query)
     item_type_filter_slug = ""
     if item_type_filter == ArchiveItem.ItemType.OCR_DOCUMENT:
         item_type_filter_slug = ARCHIVE_ITEM_TYPE_OCR_DOCUMENT
@@ -1707,6 +1711,7 @@ def archive_list_page(request):
             "is_admin": _is_admin(request.user),
             "item_type_filter": item_type_filter_slug,
             "item_type_filter_choices": ARCHIVE_LIST_ITEM_TYPE_FILTER_CHOICES,
+            "q": search_query,
         },
     )
 
