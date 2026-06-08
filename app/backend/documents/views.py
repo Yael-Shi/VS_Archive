@@ -15,6 +15,9 @@ from .models import ArchiveItem, Document, DocumentSourceFile, DocumentTextResul
 from documents.services.archive_catalog_metadata_validation import (
     parse_ocr_catalog_metadata_form,
 )
+from documents.services.archive_discovery_metadata_validation import (
+    parse_archive_item_discovery_metadata_form,
+)
 from documents.services.archive_tags_validation import (
     normalize_tag_names_from_list,
     parse_ocr_tags_form,
@@ -22,7 +25,9 @@ from documents.services.archive_tags_validation import (
 from documents.services.archive_items import (
     create_manual_text_archive_item,
     create_ocr_document,
+    discovery_metadata_form_data_from_item,
     shared_archive_item_for_document,
+    update_archive_item_discovery_metadata,
     update_manual_text_archive_item,
     update_ocr_document_catalog_metadata,
     update_ocr_document_metadata,
@@ -1598,6 +1603,7 @@ def _ocr_document_edit_form_data_from_document(document: Document) -> dict:
         **_archive_metadata_form_data_from_document(document),
         **_ocr_catalog_form_data_from_document(document),
         **_ocr_tags_form_data_from_document(document),
+        **discovery_metadata_form_data_from_item(document.archive_item),
     }
 
 
@@ -1632,6 +1638,7 @@ def _manual_text_form_data_from_item(item: ArchiveItem) -> dict:
             source_title=item.source_title,
         ),
         "body": item.manual_text_content.body,
+        **discovery_metadata_form_data_from_item(item),
     }
 
 
@@ -1799,10 +1806,14 @@ def archive_manage_edit_page(request, item_id: int):
         return deny
 
     try:
-        item = ArchiveItem.objects.select_related(
-            "manual_text_content",
-            "ocr_document",
-        ).get(id=item_id)
+        item = (
+            ArchiveItem.objects.select_related(
+                "manual_text_content",
+                "ocr_document",
+            )
+            .prefetch_related("categories", "events", "tags")
+            .get(id=item_id)
+        )
     except ArchiveItem.DoesNotExist:
         raise Http404() from None
 
@@ -1819,31 +1830,48 @@ def _archive_manage_edit_manual_text(request, item: ArchiveItem):
 
     if request.method == "POST":
         parsed, form_errors = parse_manual_text_form(request.POST)
-        form_data = parsed
+        parsed_discovery, discovery_errors = parse_archive_item_discovery_metadata_form(
+            request.POST,
+            tags_field="tags",
+        )
+        form_errors = form_errors + discovery_errors
+        form_data = {**parsed, **parsed_discovery}
         if not form_errors:
-            update_manual_text_archive_item(
-                item,
-                title=parsed["title"],
-                body=parsed["body"],
-                visibility=parsed["visibility"],
-                date_start=parsed["date_start_value"],
-                date_end=parsed["date_end_value"],
-                date_precision=parsed["date_precision"],
-                metadata_status=parsed["metadata_status"],
-                author_name=parsed["author_name"],
-                source_title=parsed["source_title"],
-            )
+            with transaction.atomic():
+                update_manual_text_archive_item(
+                    item,
+                    title=parsed["title"],
+                    body=parsed["body"],
+                    visibility=parsed["visibility"],
+                    date_start=parsed["date_start_value"],
+                    date_end=parsed["date_end_value"],
+                    date_precision=parsed["date_precision"],
+                    metadata_status=parsed["metadata_status"],
+                    author_name=parsed["author_name"],
+                    source_title=parsed["source_title"],
+                )
+                update_archive_item_discovery_metadata(
+                    item,
+                    category_names=parsed_discovery["category_names"],
+                    event_names=parsed_discovery["event_names"],
+                    tag_names=parsed_discovery["tag_names"],
+                )
             return redirect("archive-detail", item_id=item.id)
 
     return render(
         request,
         "documents/archive/manual_text_form.html",
-        context=_manual_text_form_context(
-            form_data=form_data,
-            form_errors=form_errors,
-            page_title="עריכת טקסט מוקלד",
-            submit_label="עדכון",
-        ),
+        context={
+            **_manual_text_form_context(
+                form_data=form_data,
+                form_errors=form_errors,
+                page_title="עריכת טקסט מוקלד",
+                submit_label="עדכון",
+            ),
+            "show_discovery_metadata": True,
+            "discovery_tags_input_name": "tags",
+            "discovery_tags_input_id": "tags",
+        },
     )
 
 
@@ -1864,8 +1892,17 @@ def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
         parsed_shared, shared_errors = parse_archive_metadata_form(request.POST)
         parsed_catalog, catalog_errors = parse_ocr_catalog_metadata_form(request.POST)
         parsed_tags, tags_errors = parse_ocr_tags_form(request.POST)
-        form_errors = shared_errors + catalog_errors + tags_errors
-        form_data = {**parsed_shared, **parsed_catalog, **parsed_tags}
+        parsed_discovery, discovery_errors = parse_archive_item_discovery_metadata_form(
+            request.POST,
+            tags_field="discovery_tags",
+        )
+        form_errors = shared_errors + catalog_errors + tags_errors + discovery_errors
+        form_data = {
+            **parsed_shared,
+            **parsed_catalog,
+            **parsed_tags,
+            **parsed_discovery,
+        }
         if not form_errors:
             with transaction.atomic():
                 update_ocr_document_metadata(
@@ -1888,17 +1925,28 @@ def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
                     category_event=parsed_catalog["category_event_value"],
                 )
                 update_ocr_document_tags(doc, tag_names=parsed_tags["tag_names"])
+                update_archive_item_discovery_metadata(
+                    item,
+                    category_names=parsed_discovery["category_names"],
+                    event_names=parsed_discovery["event_names"],
+                    tag_names=parsed_discovery["tag_names"],
+                )
             return redirect("documents-detail-page", doc_id=doc.id)
 
     return render(
         request,
         "documents/archive/ocr_document_form.html",
-        context=_archive_metadata_form_context(
-            form_data=form_data,
-            form_errors=form_errors,
-            page_title="עריכת מטא־דאטה",
-            submit_label="עדכון",
-        ),
+        context={
+            **_archive_metadata_form_context(
+                form_data=form_data,
+                form_errors=form_errors,
+                page_title="עריכת מטא־דאטה",
+                submit_label="עדכון",
+            ),
+            "show_discovery_metadata": True,
+            "discovery_tags_input_name": "discovery_tags",
+            "discovery_tags_input_id": "discovery_tags",
+        },
     )
 
 

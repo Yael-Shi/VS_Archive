@@ -27,6 +27,10 @@
     <form method="post">
       {% csrf_token %}
       {% include "documents/archive/manual_text_form_fields.html" %}
+      {% if show_discovery_metadata %}
+        <div class="spacer"></div>
+        {% include "documents/archive/discovery_metadata_form_fields.html" %}
+      {% endif %}
       <div class="spacer"></div>
       <button type="submit" class="btn btn-primary">{{ submit_label }}</button>
     </form>

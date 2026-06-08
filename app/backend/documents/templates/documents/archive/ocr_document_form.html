@@ -28,6 +28,8 @@
       {% csrf_token %}
       {% include "documents/archive/archive_metadata_form_fields.html" %}
       <div class="spacer"></div>
+      {% include "documents/archive/discovery_metadata_form_fields.html" %}
+      <div class="spacer"></div>
       {% include "documents/archive/ocr_catalog_metadata_form_fields.html" %}
       <div class="spacer"></div>
       {% include "documents/archive/ocr_tags_form_fields.html" %}
