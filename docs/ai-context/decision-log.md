@@ -1235,3 +1235,23 @@ Closes consistency gaps in the upload completion path: the backend no longer rel
 **Deferred:** PR6 clickable category/event/tag browse pages; legacy field cleanup (PR7).
 
 **Docs:** `docs/ai-context/archive-discovery-catalog-design.md`
+
+## Unified Archive Discovery / Catalog Metadata — clickable browse pages (PR6)
+
+**Decision:** Add public browse pages for **`ArchiveItem`**-level discovery metadata at ID-based URLs:
+
+- **`/archive/categories/<int:category_id>/`**
+- **`/archive/events/<int:event_id>/`**
+- **`/archive/tags/<int:tag_id>/`**
+
+Category/event/tag names on archive detail pages link to these browse pages. Browse pages list matching archive items after the existing **`archive_item_queryset_for_user`** visibility filter (not raw M2M reverse querysets). Missing category/event/tag ids return **404**. When a taxonomy row exists but the viewer has no visible linked items, the browse page shows an empty state (**`אין פריטים להצגה.`**) without revealing private item titles.
+
+**URL policy (PR6):** Browse URLs are **ID-based** only. **`ArchiveCategory.slug`** and **`ArchiveEvent.slug`** are **not** used for public browse routes in this PR. Human-controlled public slugs (including Hebrew transliteration such as **יהדות מצרים** → **yahadut-mitzraim**) are **deferred** to a future dedicated task because automatic/generated transliteration can be wrong or misleading.
+
+**Access:** Visibility rules unchanged. Anonymous users see only public linked items; staff see all linked items. **`DocumentMetadata`** and legacy OCR **`Document.tags_m2m`** are **not** exposed on browse pages (tag browse filters **`ArchiveItem.tags`** only).
+
+**Scope (PR6):** Browse views/URLs/templates, clickable discovery-metadata partial, shared archive item list table partial, focused tests, this log entry. **No** model/migration changes, slug fields, transliteration, editable slug UI, search-index changes, or legacy OCR field cleanup.
+
+**Deferred:** PR7 legacy OCR discovery field cleanup; human-controlled public slugs for browse URLs.
+
+**Docs:** `docs/ai-context/archive-discovery-catalog-design.md`

@@ -4,6 +4,21 @@ from . import views
 
 urlpatterns = [
     path("", views.archive_list_page, name="archive-list"),
+    path(
+        "categories/<int:category_id>/",
+        views.archive_category_browse_page,
+        name="archive-category-browse",
+    ),
+    path(
+        "events/<int:event_id>/",
+        views.archive_event_browse_page,
+        name="archive-event-browse",
+    ),
+    path(
+        "tags/<int:tag_id>/",
+        views.archive_tag_browse_page,
+        name="archive-tag-browse",
+    ),
     path("manage/", views.archive_manage_list_page, name="archive-manage-list"),
     path(
         "manage/new/",

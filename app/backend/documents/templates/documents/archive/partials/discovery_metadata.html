@@ -2,17 +2,17 @@
   <div class="archive-discovery-meta">
     {% if item.categories.all %}
       <div><strong>קטגוריות:</strong>
-        {% for c in item.categories.all %}{{ c.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+        {% for c in item.categories.all %}<a href="{% url 'archive-category-browse' category_id=c.id %}">{{ c.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
       </div>
     {% endif %}
     {% if item.events.all %}
       <div><strong>אירועים:</strong>
-        {% for e in item.events.all %}{{ e.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+        {% for e in item.events.all %}<a href="{% url 'archive-event-browse' event_id=e.id %}">{{ e.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
       </div>
     {% endif %}
     {% if item.tags.all %}
       <div><strong>תגיות:</strong>
-        {% for t in item.tags.all %}{{ t.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+        {% for t in item.tags.all %}<a href="{% url 'archive-tag-browse' tag_id=t.id %}">{{ t.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
       </div>
     {% endif %}
   </div>
