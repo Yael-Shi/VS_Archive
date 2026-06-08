@@ -100,6 +100,20 @@ def archive_manage_item_type_ui_choices() -> list[tuple[str, str]]:
     ]
 
 
+def archive_item_has_discovery_metadata(archive_item) -> bool:
+    """True when the ArchiveItem has any discovery categories, events, or tags."""
+    if archive_item is None:
+        return False
+    cache = getattr(archive_item, "_prefetched_objects_cache", None)
+    if cache is not None and {"categories", "events", "tags"}.issubset(cache):
+        return bool(cache["categories"]) or bool(cache["events"]) or bool(cache["tags"])
+    return (
+        archive_item.categories.exists()
+        or archive_item.events.exists()
+        or archive_item.tags.exists()
+    )
+
+
 def normalize_archive_list_item_type_filter(raw: str | None) -> str:
     """Return stored ``ArchiveItem.ItemType`` value, or empty string for «all»."""
     value = (raw or "").strip().lower()

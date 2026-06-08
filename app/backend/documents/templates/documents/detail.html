@@ -40,9 +40,11 @@
 
     {% if doc.archive_item %}
       {% include "documents/archive/partials/source_metadata.html" with item=doc.archive_item %}
+      {% include "documents/archive/partials/discovery_metadata.html" with item=doc.archive_item %}
     {% endif %}
 
-    {% if doc.category_event or document_tags %}
+    {# Legacy OCR category_event/tags are transitional fallback until PR4 backfill. #}
+    {% if show_legacy_ocr_catalog_meta %}
       <div class="document-catalog-meta">
         {% if doc.category_event %}
           <div><strong>אירוע / קטגוריה:</strong> {{ doc.category_event }}</div>

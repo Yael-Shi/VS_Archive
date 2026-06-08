@@ -40,6 +40,7 @@ from documents.services.archive_tags_validation import (
 )
 from documents.services.archive_item_access import ARCHIVE_FAMILY_GROUP_NAME
 from documents.services.archive_item_presentation import (
+    archive_item_has_discovery_metadata,
     archive_item_type_label,
     archive_metadata_status_label,
     language_label,
@@ -2842,6 +2843,209 @@ class ArchiveItemSourceMetadataTests(TestCase):
         self.assertContains(resp, "טקסט שחולץ")
 
 
+class ArchiveItemDiscoveryMetadataDisplayTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="discovery_display_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.family_group, _ = Group.objects.get_or_create(
+            name=ARCHIVE_FAMILY_GROUP_NAME
+        )
+
+    def _create_family_user(self, username="discovery_display_family"):
+        user = User.objects.create_user(username=username, password="test-pass")
+        user.groups.add(self.family_group)
+        return user
+
+    def _attach_discovery_metadata(self, item: ArchiveItem) -> None:
+        category, _ = ArchiveCategory.objects.get_or_create(
+            slug="yehudit-mitzraim",
+            defaults={"name": "יהדות מצרים"},
+        )
+        event, _ = ArchiveEvent.objects.get_or_create(
+            slug="khatunat-mishpacha",
+            defaults={"name": "חתונת משפחה"},
+        )
+        tag, _ = Tag.objects.get_or_create(name="משפחה")
+        item.categories.add(category)
+        item.events.add(event)
+        item.tags.add(tag)
+
+    def test_manual_text_detail_shows_discovery_metadata_for_public_item(self):
+        item = create_manual_text_archive_item(
+            title="Manual discovery display",
+            body="Typed discovery body.",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        self._attach_discovery_metadata(item)
+
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "archive-discovery-meta")
+        self.assertContains(resp, "קטגוריות")
+        self.assertContains(resp, "יהדות מצרים")
+        self.assertContains(resp, "אירועים")
+        self.assertContains(resp, "חתונת משפחה")
+        self.assertContains(resp, "תגיות")
+        self.assertContains(resp, "משפחה")
+
+    def test_manual_text_detail_hides_empty_discovery_metadata_labels(self):
+        item = create_manual_text_archive_item(
+            title="Manual without discovery display",
+            body="Only typed body.",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Only typed body.")
+        self.assertNotContains(resp, "archive-discovery-meta")
+        self.assertNotContains(resp, "קטגוריות")
+        self.assertNotContains(resp, "אירועים")
+        self.assertNotContains(resp, "תגיות")
+
+    def test_ocr_document_detail_shows_archive_item_discovery_metadata(self):
+        doc = create_ocr_document(
+            title="OCR discovery display",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        self._attach_discovery_metadata(doc.archive_item)
+
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "archive-discovery-meta")
+        self.assertContains(resp, "קטגוריות")
+        self.assertContains(resp, "יהדות מצרים")
+        self.assertContains(resp, "אירועים")
+        self.assertContains(resp, "חתונת משפחה")
+        self.assertContains(resp, "תגיות")
+        self.assertContains(resp, "משפחה")
+
+    def test_ocr_document_detail_hides_duplicate_legacy_catalog_when_archive_item_has_discovery(
+        self,
+    ):
+        doc = create_ocr_document(
+            title="OCR no duplicate discovery",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PUBLIC,
+            category_event="Legacy event",
+        )
+        doc.tags_m2m.add(Tag.objects.create(name="legacy-doc-tag"))
+        self._attach_discovery_metadata(doc.archive_item)
+
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertContains(resp, "archive-discovery-meta")
+        self.assertContains(resp, "יהדות מצרים")
+        self.assertContains(resp, "חתונת משפחה")
+        self.assertContains(resp, "משפחה")
+        self.assertNotContains(resp, "document-catalog-meta")
+        self.assertNotContains(resp, "Legacy event")
+        self.assertNotContains(resp, "legacy-doc-tag")
+        self.assertNotIn("אירוע / קטגוריה", html)
+
+    def test_ocr_document_detail_shows_legacy_catalog_fallback_when_archive_item_discovery_empty(
+        self,
+    ):
+        doc = create_ocr_document(
+            title="OCR legacy catalog fallback",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PUBLIC,
+            category_event="Legacy wedding",
+        )
+        doc.tags_m2m.add(Tag.objects.create(name="legacy-family"))
+
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "archive-discovery-meta")
+        self.assertContains(resp, "document-catalog-meta")
+        self.assertContains(resp, "אירוע / קטגוריה")
+        self.assertContains(resp, "Legacy wedding")
+        self.assertContains(resp, "legacy-family")
+
+    def test_anonymous_cannot_see_discovery_metadata_for_private_items(self):
+        item = create_manual_text_archive_item(
+            title="Private discovery manual",
+            body="Private body.",
+            visibility=ArchiveItem.Visibility.PRIVATE,
+        )
+        self._attach_discovery_metadata(item)
+
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertEqual(resp.status_code, 404)
+
+        doc = create_ocr_document(
+            title="Private discovery OCR",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PRIVATE,
+        )
+        self._attach_discovery_metadata(doc.archive_item)
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_staff_sees_public_discovery_metadata_and_existing_admin_controls(self):
+        doc = create_ocr_document(
+            title="Staff discovery display",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        self._attach_discovery_metadata(doc.archive_item)
+        DocumentMetadata.objects.create(
+            document=doc,
+            donor="Private donor",
+            collection="Private collection",
+            original_location="Private shelf",
+            notes="Private notes",
+        )
+
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "archive-discovery-meta")
+        self.assertContains(resp, "יהדות מצרים")
+        self.assertContains(resp, "עריכת מטא־דאטה")
+        self.assertContains(resp, "מטא־דאטה למנהלים")
+        self.assertContains(resp, "Private donor")
+        self.assertContains(resp, "Private collection")
+        self.assertContains(resp, "Private shelf")
+        self.assertContains(resp, "Private notes")
+
+    def test_document_metadata_remains_staff_admin_only_for_anonymous(self):
+        doc = create_ocr_document(
+            title="Anonymous admin metadata guard",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        self._attach_discovery_metadata(doc.archive_item)
+        DocumentMetadata.objects.create(
+            document=doc,
+            donor="Hidden donor",
+            collection="Hidden collection",
+            original_location="Hidden location",
+            notes="Hidden notes",
+        )
+
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "archive-discovery-meta")
+        self.assertContains(resp, "יהדות מצרים")
+        self.assertNotContains(resp, "מטא־דאטה למנהלים")
+        self.assertNotContains(resp, "Hidden donor")
+        self.assertNotContains(resp, "Hidden collection")
+        self.assertNotContains(resp, "Hidden location")
+        self.assertNotContains(resp, "Hidden notes")
+
+
 class ArchiveItemPresentationUiTests(TestCase):
     def setUp(self):
         self.staff = User.objects.create_user(
@@ -2877,6 +3081,50 @@ class ArchiveItemPresentationUiTests(TestCase):
         self.assertEqual(language_label("heb"), "עברית")
         self.assertEqual(language_label("he"), "עברית")
         self.assertEqual(language_label("en"), "אנגלית")
+
+    def test_archive_item_has_discovery_metadata_returns_false_for_none(self):
+        self.assertFalse(archive_item_has_discovery_metadata(None))
+
+    def test_archive_item_has_discovery_metadata_uses_full_prefetch_cache(self):
+        item = create_manual_text_archive_item(
+            title="Full prefetch discovery helper",
+            body="Body",
+        )
+        category = ArchiveCategory.objects.create(
+            name="Helper category",
+            slug="helper-category",
+        )
+        item.categories.add(category)
+
+        prefetched = ArchiveItem.objects.prefetch_related(
+            "categories", "events", "tags"
+        ).get(pk=item.pk)
+        self.assertTrue(archive_item_has_discovery_metadata(prefetched))
+
+        empty_item = create_manual_text_archive_item(
+            title="Empty prefetch discovery helper",
+            body="Body",
+        )
+        empty_prefetched = ArchiveItem.objects.prefetch_related(
+            "categories", "events", "tags"
+        ).get(pk=empty_item.pk)
+        self.assertFalse(archive_item_has_discovery_metadata(empty_prefetched))
+
+    def test_archive_item_has_discovery_metadata_ignores_partial_prefetch_cache(self):
+        item = create_manual_text_archive_item(
+            title="Partial prefetch discovery helper",
+            body="Body",
+        )
+        event = ArchiveEvent.objects.create(
+            name="Helper event",
+            slug="helper-event",
+        )
+        item.events.add(event)
+
+        partial_prefetch = ArchiveItem.objects.prefetch_related("categories").get(
+            pk=item.pk
+        )
+        self.assertTrue(archive_item_has_discovery_metadata(partial_prefetch))
 
     def test_archive_list_does_not_expose_raw_item_type_labels(self):
         create_manual_text_archive_item(

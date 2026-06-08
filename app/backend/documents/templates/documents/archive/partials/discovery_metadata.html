@@ -1,0 +1,19 @@
+{% if item.categories.all or item.events.all or item.tags.all %}
+  <div class="archive-discovery-meta">
+    {% if item.categories.all %}
+      <div><strong>קטגוריות:</strong>
+        {% for c in item.categories.all %}{{ c.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+      </div>
+    {% endif %}
+    {% if item.events.all %}
+      <div><strong>אירועים:</strong>
+        {% for e in item.events.all %}{{ e.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+      </div>
+    {% endif %}
+    {% if item.tags.all %}
+      <div><strong>תגיות:</strong>
+        {% for t in item.tags.all %}{{ t.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+      </div>
+    {% endif %}
+  </div>
+{% endif %}
