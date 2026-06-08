@@ -1,5 +1,7 @@
 from django.contrib import admin
 from .models import (
+    ArchiveCategory,
+    ArchiveEvent,
     ArchiveItem,
     Document,
     CorrectionRequest,
@@ -29,6 +31,21 @@ _SHARED_MIRROR_FIELDSET_DESCRIPTION = (
 class TagAdmin(admin.ModelAdmin):
     list_display = ("id", "name", "created_at", "updated_at")
     search_fields = ("name",)
+    ordering = ("name",)
+
+
+@admin.register(ArchiveCategory)
+class ArchiveCategoryAdmin(admin.ModelAdmin):
+    list_display = ("id", "name", "slug", "created_at", "updated_at")
+    search_fields = ("name", "slug")
+    ordering = ("name",)
+
+
+@admin.register(ArchiveEvent)
+class ArchiveEventAdmin(admin.ModelAdmin):
+    list_display = ("id", "name", "slug", "date_precision", "created_at", "updated_at")
+    search_fields = ("name", "slug")
+    list_filter = ("date_precision",)
     ordering = ("name",)
 
 

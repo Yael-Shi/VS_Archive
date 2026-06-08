@@ -1159,3 +1159,13 @@ Closes consistency gaps in the upload completion path: the backend no longer rel
 **Docs:** `docs/ai-context/archive-discovery-catalog-design.md`
 
 **Scope (PR0):** Design doc + this log entry only. **No** models, migrations, templates, search, clickable discovery links, **`category_event`** split, tag migration, **`DocumentMetadata`** implementation changes, **`PHOTO`**, upload/OCR/worker/routing/review changes.
+
+## Unified Archive Discovery / Catalog Metadata — model foundation (PR1)
+
+**Decision:** Add **`ArchiveItem`**-level discovery metadata models and many-to-many links: **`ArchiveCategory`**, **`ArchiveEvent`**, and **`ArchiveItem.tags`** (reusing existing **`Tag`**). **`ArchiveEvent.date_precision`** reuses **`ArchiveItem.DatePrecision`** choices.
+
+**Scope (PR1):** Models + migration + minimal admin + focused tests + this log entry only. **No** edit UI, public display, search, clickable browse pages, backfill/reconciliation, or changes to **`Document.category_event`**, **`Document.tags_m2m`**, or **`DocumentMetadata`**.
+
+**Deferred:** PR2 edit UI; PR3 public display; PR4 backfill from legacy OCR fields; PR5+ search and browse pages.
+
+**Docs:** `docs/ai-context/archive-discovery-catalog-design.md`

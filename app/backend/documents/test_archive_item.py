@@ -10,6 +10,8 @@ from django.urls import reverse
 
 from documents.admin import ArchiveItemAdmin, DocumentAdmin, ManualTextContentAdmin
 from documents.models import (
+    ArchiveCategory,
+    ArchiveEvent,
     ArchiveItem,
     Document,
     DocumentMetadata,
@@ -3202,3 +3204,148 @@ class ManualTextArchiveItemDeleteTests(TestCase):
         resp = self.csrf_client.post(self._delete_url(item.id))
         self.assertEqual(resp.status_code, 403)
         self.assertTrue(ArchiveItem.objects.filter(pk=item.id).exists())
+
+
+class ArchiveItemDiscoveryMetadataFoundationTests(TestCase):
+    def test_archive_category_stores_fields_and_str_returns_name(self):
+        category = ArchiveCategory.objects.create(
+            name="יהדות מצרים",
+            slug="yahadut-mitzrayim",
+            description="Broad topic",
+        )
+        self.assertEqual(category.name, "יהדות מצרים")
+        self.assertEqual(category.slug, "yahadut-mitzrayim")
+        self.assertEqual(category.description, "Broad topic")
+        self.assertEqual(str(category), "יהדות מצרים")
+
+    def test_archive_event_stores_fields_and_str_returns_name(self):
+        date_start = datetime.date(1950, 6, 1)
+        date_end = datetime.date(1950, 6, 2)
+        event = ArchiveEvent.objects.create(
+            name="חתונה של דוד",
+            slug="david-wedding",
+            description="Family wedding",
+            date_start=date_start,
+            date_end=date_end,
+            date_precision=ArchiveItem.DatePrecision.RANGE,
+        )
+        self.assertEqual(event.name, "חתונה של דוד")
+        self.assertEqual(event.slug, "david-wedding")
+        self.assertEqual(event.description, "Family wedding")
+        self.assertEqual(event.date_start, date_start)
+        self.assertEqual(event.date_end, date_end)
+        self.assertEqual(event.date_precision, ArchiveItem.DatePrecision.RANGE)
+        self.assertEqual(str(event), "חתונה של דוד")
+
+    def test_archive_item_can_have_multiple_categories(self):
+        item = create_manual_text_archive_item(title="Multi-category item", body="Body")
+        cat_a = ArchiveCategory.objects.create(name="Topic A", slug="topic-a")
+        cat_b = ArchiveCategory.objects.create(name="Topic B", slug="topic-b")
+        item.categories.add(cat_a, cat_b)
+        self.assertEqual(
+            set(item.categories.values_list("slug", flat=True)),
+            {"topic-a", "topic-b"},
+        )
+
+    def test_one_archive_category_links_to_multiple_archive_items(self):
+        category = ArchiveCategory.objects.create(name="Shared topic", slug="shared-topic")
+        item_one = create_manual_text_archive_item(title="Item one", body="One")
+        item_two = create_ocr_document(
+            title="Item two",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+        ).archive_item
+        item_one.categories.add(category)
+        item_two.categories.add(category)
+        self.assertEqual(category.archive_items.count(), 2)
+        self.assertEqual(
+            set(category.archive_items.values_list("title", flat=True)),
+            {"Item one", "Item two"},
+        )
+
+    def test_archive_item_can_have_zero_one_or_multiple_events(self):
+        item = create_manual_text_archive_item(title="Events item", body="Body")
+        self.assertEqual(item.events.count(), 0)
+
+        event_one = ArchiveEvent.objects.create(name="Event one", slug="event-one")
+        item.events.add(event_one)
+        self.assertEqual(list(item.events.values_list("slug", flat=True)), ["event-one"])
+
+        event_two = ArchiveEvent.objects.create(name="Event two", slug="event-two")
+        item.events.add(event_two)
+        self.assertEqual(
+            set(item.events.values_list("slug", flat=True)),
+            {"event-one", "event-two"},
+        )
+
+    def test_one_archive_event_links_to_multiple_archive_items(self):
+        event = ArchiveEvent.objects.create(name="Shared event", slug="shared-event")
+        manual_item = create_manual_text_archive_item(
+            title="Manual event link",
+            body="Body",
+        )
+        ocr_item = create_ocr_document(
+            title="OCR event link",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        ).archive_item
+        manual_item.events.add(event)
+        ocr_item.events.add(event)
+        self.assertEqual(event.archive_items.count(), 2)
+
+    def test_archive_item_tags_use_archive_item_level_relation(self):
+        item = create_manual_text_archive_item(title="Tagged item", body="Body")
+        tag_a = Tag.objects.create(name="family")
+        tag_b = Tag.objects.create(name="cairo")
+        item.tags.add(tag_a, tag_b)
+        self.assertEqual(
+            set(item.tags.values_list("name", flat=True)),
+            {"family", "cairo"},
+        )
+        self.assertEqual(tag_a.archive_items.get(), item)
+
+    def test_document_tags_m2m_is_separate_from_archive_item_tags(self):
+        doc = create_ocr_document(
+            title="Separate tag relations",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+        )
+        item = doc.archive_item
+        shared_tag = Tag.objects.create(name="shared-label")
+        doc_only_tag = Tag.objects.create(name="doc-only")
+        item_only_tag = Tag.objects.create(name="item-only")
+
+        doc.tags_m2m.add(shared_tag, doc_only_tag)
+        item.tags.add(shared_tag, item_only_tag)
+
+        self.assertEqual(
+            set(doc.tags_m2m.values_list("name", flat=True)),
+            {"shared-label", "doc-only"},
+        )
+        self.assertEqual(
+            set(item.tags.values_list("name", flat=True)),
+            {"shared-label", "item-only"},
+        )
+        self.assertEqual(shared_tag.documents.get(), doc)
+        self.assertEqual(shared_tag.archive_items.get(), item)
+
+    def test_create_ocr_document_does_not_require_discovery_metadata(self):
+        doc = create_ocr_document(
+            title="OCR without discovery metadata",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+        )
+        item = doc.archive_item
+        self.assertEqual(item.categories.count(), 0)
+        self.assertEqual(item.events.count(), 0)
+        self.assertEqual(item.tags.count(), 0)
+
+    def test_create_manual_text_does_not_require_discovery_metadata(self):
+        item = create_manual_text_archive_item(
+            title="Manual without discovery metadata",
+            body="Typed body",
+        )
+        self.assertEqual(item.categories.count(), 0)
+        self.assertEqual(item.events.count(), 0)
+        self.assertEqual(item.tags.count(), 0)
+        self.assertEqual(item.item_type, ArchiveItem.ItemType.MANUAL_TEXT)

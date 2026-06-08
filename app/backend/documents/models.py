@@ -47,11 +47,65 @@ class ArchiveItem(models.Model):
         choices=MetadataStatus.choices,
         default=MetadataStatus.NEEDS_COMPLETION,
     )
+    categories = models.ManyToManyField(
+        "ArchiveCategory",
+        blank=True,
+        related_name="archive_items",
+    )
+    events = models.ManyToManyField(
+        "ArchiveEvent",
+        blank=True,
+        related_name="archive_items",
+    )
+    tags = models.ManyToManyField(
+        "Tag",
+        blank=True,
+        related_name="archive_items",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
         return f"{self.title} ({self.item_type})"
+
+
+class ArchiveCategory(models.Model):
+    """Cross-item archival topic for public discovery (linked via ArchiveItem M2M)."""
+
+    name = models.CharField(max_length=255)
+    slug = models.SlugField(max_length=255, unique=True)
+    description = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class ArchiveEvent(models.Model):
+    """Family/historical occasion for public discovery (linked via ArchiveItem M2M)."""
+
+    name = models.CharField(max_length=255)
+    slug = models.SlugField(max_length=255, unique=True)
+    description = models.TextField(blank=True, default="")
+    date_start = models.DateField(null=True, blank=True)
+    date_end = models.DateField(null=True, blank=True)
+    date_precision = models.CharField(
+        max_length=16,
+        choices=ArchiveItem.DatePrecision.choices,
+        default=ArchiveItem.DatePrecision.UNKNOWN,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
 
 
 class ManualTextContent(models.Model):
