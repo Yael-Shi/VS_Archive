@@ -1,0 +1,17 @@
+<div class="section-title">קטגוריות, אירועים ותגיות</div>
+<p class="page-subtitle">הוסיפי ערכים שיעזרו למצוא פריטים בארכיון. הפרידי בין ערכים בפסיקים.</p>
+
+<div class="field">
+  <label for="categories">קטגוריות</label>
+  <input id="categories" name="categories" type="text" value="{{ form_data.categories }}" placeholder="למשל: יהדות מצרים, הפרשה" />
+</div>
+
+<div class="field">
+  <label for="events">אירועים</label>
+  <input id="events" name="events" type="text" value="{{ form_data.events }}" placeholder="למשל: חתונה של דוד, עליה ממצרים" />
+</div>
+
+<div class="field">
+  <label for="{{ discovery_tags_input_id }}">תגיות</label>
+  <input id="{{ discovery_tags_input_id }}" name="{{ discovery_tags_input_name }}" type="text" value="{{ form_data.discovery_tags }}" placeholder="למשל: משפחה, ירושלים, 1948" />
+</div>

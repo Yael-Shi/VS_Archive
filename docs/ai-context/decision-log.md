@@ -1169,3 +1169,21 @@ Closes consistency gaps in the upload completion path: the backend no longer rel
 **Deferred:** PR2 edit UI; PR3 public display; PR4 backfill from legacy OCR fields; PR5+ search and browse pages.
 
 **Docs:** `docs/ai-context/archive-discovery-catalog-design.md`
+
+## Unified Archive Discovery / Catalog Metadata — edit UI (PR2)
+
+**Decision:** Add first-party staff/admin edit UI for **`ArchiveItem`**-level discovery metadata on **`/archive/manage/<id>/edit/`** for **`MANUAL_TEXT`** and **`OCR_DOCUMENT`**.
+
+**UI:** Comma-separated Hebrew-labeled fields — **קטגוריות**, **אירועים**, **תגיות** — in a user-facing discovery section on the existing archive metadata edit page.
+
+**Persistence:** Replace-all saves on **`ArchiveItem.categories`**, **`ArchiveItem.events`**, and **`ArchiveItem.tags`**. Existing categories/events/tags are reused by exact normalized name; new **`ArchiveCategory`** / **`ArchiveEvent`** rows get generated slugs with numeric suffixes (**`-2`**, **`-3`**, …) on slug collisions. **`ArchiveCategory.name`** and **`ArchiveEvent.name`** are **`unique=True`** (migration **0024**) so exact-name reuse matches DB integrity.
+
+**OCR form field naming:** ArchiveItem discovery tags POST as **`discovery_tags`** on **`OCR_DOCUMENT`** edit to avoid collision with legacy **`tags`** editing for **`Document.tags_m2m`**. **`MANUAL_TEXT`** edit uses **`tags`** for ArchiveItem-level tags.
+
+**Unchanged / transitional:** **`Document.category_event`**, **`Document.tags_m2m`**, and **`DocumentMetadata`** — no writes from this PR; remain OCR-side transitional fields.
+
+**Scope (PR2):** Service helpers, validation, edit templates, migration **0024**, focused tests, this log entry. **No** public display, search, clickable category/event/tag pages, or backfill/reconciliation from legacy OCR fields. **No** **`PHOTO`** items.
+
+**Deferred:** PR3 public display; PR4 backfill from legacy OCR fields; PR5+ search and browse pages.
+
+**Docs:** `docs/ai-context/archive-discovery-catalog-design.md`

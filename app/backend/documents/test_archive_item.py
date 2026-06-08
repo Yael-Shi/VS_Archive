@@ -27,6 +27,7 @@ from documents.services.archive_items import (
     create_ocr_document,
     sync_archive_item_shared_fields_from_document,
     sync_document_shared_fields_from_archive_item,
+    update_archive_item_discovery_metadata,
     update_manual_text_archive_item,
     update_ocr_document_catalog_metadata,
     update_ocr_document_metadata,
@@ -3218,6 +3219,11 @@ class ArchiveItemDiscoveryMetadataFoundationTests(TestCase):
         self.assertEqual(category.description, "Broad topic")
         self.assertEqual(str(category), "יהדות מצרים")
 
+    def test_archive_category_name_is_unique(self):
+        ArchiveCategory.objects.create(name="Unique topic", slug="unique-topic")
+        with self.assertRaises(IntegrityError):
+            ArchiveCategory.objects.create(name="Unique topic", slug="unique-topic-2")
+
     def test_archive_event_stores_fields_and_str_returns_name(self):
         date_start = datetime.date(1950, 6, 1)
         date_end = datetime.date(1950, 6, 2)
@@ -3236,6 +3242,11 @@ class ArchiveItemDiscoveryMetadataFoundationTests(TestCase):
         self.assertEqual(event.date_end, date_end)
         self.assertEqual(event.date_precision, ArchiveItem.DatePrecision.RANGE)
         self.assertEqual(str(event), "חתונה של דוד")
+
+    def test_archive_event_name_is_unique(self):
+        ArchiveEvent.objects.create(name="Unique event", slug="unique-event")
+        with self.assertRaises(IntegrityError):
+            ArchiveEvent.objects.create(name="Unique event", slug="unique-event-2")
 
     def test_archive_item_can_have_multiple_categories(self):
         item = create_manual_text_archive_item(title="Multi-category item", body="Body")
@@ -3349,3 +3360,374 @@ class ArchiveItemDiscoveryMetadataFoundationTests(TestCase):
         self.assertEqual(item.events.count(), 0)
         self.assertEqual(item.tags.count(), 0)
         self.assertEqual(item.item_type, ArchiveItem.ItemType.MANUAL_TEXT)
+
+
+class ArchiveItemDiscoveryMetadataEditTests(TestCase):
+    EDIT_URL_TEMPLATE = "/archive/manage/{item_id}/edit/"
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="discovery_edit_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.family_group, _ = Group.objects.get_or_create(
+            name=ARCHIVE_FAMILY_GROUP_NAME
+        )
+
+    def _create_family_user(self, username="discovery_edit_family"):
+        user = User.objects.create_user(username=username, password="test-pass")
+        user.groups.add(self.family_group)
+        return user
+
+    def _manual_text_payload(self, **overrides):
+        payload = {
+            "title": "Manual discovery",
+            "body": "Body text.",
+            "visibility": ArchiveItem.Visibility.PUBLIC,
+            "metadata_status": ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
+            "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
+            "categories": "",
+            "events": "",
+            "tags": "",
+        }
+        payload.update(overrides)
+        return payload
+
+    def _ocr_metadata_payload(self, **overrides):
+        payload = {
+            "title": "OCR discovery",
+            "visibility": ArchiveItem.Visibility.PUBLIC,
+            "metadata_status": ArchiveItem.MetadataStatus.COMPLETED,
+            "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
+            "donor": "",
+            "collection": "",
+            "original_location": "",
+            "notes": "",
+            "category_event": "",
+            "tags": "",
+            "categories": "",
+            "events": "",
+            "discovery_tags": "",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_manual_text_get_seeds_discovery_metadata(self):
+        item = create_manual_text_archive_item(title="Seed manual", body="Body")
+        cat = ArchiveCategory.objects.create(name="יהדות מצרים", slug="yahadut-mitzrayim")
+        event = ArchiveEvent.objects.create(name="חתונה", slug="hatuna")
+        tag = Tag.objects.create(name="family")
+        item.categories.add(cat)
+        item.events.add(event)
+        item.tags.add(tag)
+
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.EDIT_URL_TEMPLATE.format(item_id=item.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'value="יהדות מצרים"')
+        self.assertContains(resp, 'value="חתונה"')
+        self.assertContains(resp, 'value="family"')
+
+    def test_manual_text_post_creates_and_reuses_discovery_metadata(self):
+        existing_cat = ArchiveCategory.objects.create(
+            name="Existing topic",
+            slug="existing-topic",
+        )
+        existing_event = ArchiveEvent.objects.create(
+            name="Existing event",
+            slug="existing-event",
+        )
+        Tag.objects.create(name="existing-tag")
+
+        item = create_manual_text_archive_item(title="Manual POST discovery", body="Body")
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=item.id),
+            data=self._manual_text_payload(
+                categories="Existing topic, New topic",
+                events="Existing event, New event",
+                tags="existing-tag, new-tag",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        item.refresh_from_db()
+        self.assertEqual(
+            set(item.categories.values_list("name", flat=True)),
+            {"Existing topic", "New topic"},
+        )
+        self.assertEqual(
+            set(item.events.values_list("name", flat=True)),
+            {"Existing event", "New event"},
+        )
+        self.assertEqual(
+            set(item.tags.values_list("name", flat=True)),
+            {"existing-tag", "new-tag"},
+        )
+        self.assertTrue(
+            ArchiveCategory.objects.filter(name="New topic", slug="new-topic").exists()
+        )
+        self.assertTrue(
+            ArchiveEvent.objects.filter(name="New event", slug="new-event").exists()
+        )
+        self.assertEqual(existing_cat.archive_items.get(), item)
+
+    def test_manual_text_post_clears_discovery_metadata(self):
+        item = create_manual_text_archive_item(title="Clear manual", body="Body")
+        item.categories.add(
+            ArchiveCategory.objects.create(name="To clear cat", slug="to-clear-cat")
+        )
+        item.events.add(
+            ArchiveEvent.objects.create(name="To clear event", slug="to-clear-event")
+        )
+        item.tags.add(Tag.objects.create(name="to-clear-tag"))
+
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=item.id),
+            data=self._manual_text_payload(),
+        )
+        self.assertEqual(resp.status_code, 302)
+        item.refresh_from_db()
+        self.assertEqual(item.categories.count(), 0)
+        self.assertEqual(item.events.count(), 0)
+        self.assertEqual(item.tags.count(), 0)
+
+    def test_ocr_get_seeds_discovery_metadata(self):
+        doc = create_ocr_document(
+            title="Seed OCR",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        item = doc.archive_item
+        cat = ArchiveCategory.objects.create(name="OCR category", slug="ocr-category")
+        event = ArchiveEvent.objects.create(name="OCR event", slug="ocr-event")
+        tag = Tag.objects.create(name="ocr-discovery-tag")
+        item.categories.add(cat)
+        item.events.add(event)
+        item.tags.add(tag)
+
+        self.client.force_login(self.staff)
+        resp = self.client.get(
+            self.EDIT_URL_TEMPLATE.format(item_id=item.id)
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'value="OCR category"')
+        self.assertContains(resp, 'value="OCR event"')
+        self.assertContains(resp, 'value="ocr-discovery-tag"')
+
+    def test_ocr_post_saves_discovery_metadata_on_archive_item(self):
+        item = create_ocr_document(
+            title="OCR POST discovery",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        ).archive_item
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=item.id),
+            data=self._ocr_metadata_payload(
+                categories="OCR cat one, OCR cat two",
+                events="OCR event one",
+                discovery_tags="ocr-tag-one, ocr-tag-two",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        item.refresh_from_db()
+        self.assertEqual(
+            set(item.categories.values_list("name", flat=True)),
+            {"OCR cat one", "OCR cat two"},
+        )
+        self.assertEqual(
+            list(item.events.values_list("name", flat=True)),
+            ["OCR event one"],
+        )
+        self.assertEqual(
+            set(item.tags.values_list("name", flat=True)),
+            {"ocr-tag-one", "ocr-tag-two"},
+        )
+
+    def test_ocr_post_does_not_change_document_category_event(self):
+        doc = create_ocr_document(
+            title="OCR category_event guard",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            category_event="Legacy category event",
+        )
+        self.client.force_login(self.staff)
+        self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._ocr_metadata_payload(
+                categories="Archive category",
+                category_event="Legacy category event",
+            ),
+        )
+        doc.refresh_from_db()
+        self.assertEqual(doc.category_event, "Legacy category event")
+
+    def test_ocr_post_does_not_change_document_tags_m2m(self):
+        doc = create_ocr_document(
+            title="OCR doc tags guard",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        doc.tags_m2m.add(Tag.objects.create(name="doc-only-tag"))
+        self.client.force_login(self.staff)
+        self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._ocr_metadata_payload(
+                tags="doc-only-tag",
+                discovery_tags="item-only-tag",
+            ),
+        )
+        doc.refresh_from_db()
+        self.assertEqual(
+            list(doc.tags_m2m.values_list("name", flat=True)),
+            ["doc-only-tag"],
+        )
+        self.assertEqual(
+            list(doc.archive_item.tags.values_list("name", flat=True)),
+            ["item-only-tag"],
+        )
+
+    def test_discovery_validation_error_blocks_ocr_partial_save(self):
+        doc = create_ocr_document(
+            title="Before discovery error",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            category_event="Before event",
+        )
+        doc.tags_m2m.add(Tag.objects.create(name="before-doc-tag"))
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
+            title="ArchiveItem before discovery error",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._ocr_metadata_payload(
+                title="After discovery error",
+                donor="New donor",
+                category_event="After event",
+                tags="after-doc-tag",
+                categories="c" * 256,
+            ),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "קטגוריה חייבת להיות עד 255 תווים")
+        doc.refresh_from_db()
+        item = doc.archive_item
+        item.refresh_from_db()
+        self.assertEqual(doc.title, "Before discovery error")
+        self.assertEqual(item.title, "ArchiveItem before discovery error")
+        self.assertEqual(doc.category_event, "Before event")
+        self.assertEqual(
+            list(doc.tags_m2m.values_list("name", flat=True)),
+            ["before-doc-tag"],
+        )
+        self.assertEqual(item.categories.count(), 0)
+
+    def test_discovery_validation_error_blocks_manual_text_partial_save(self):
+        item = create_manual_text_archive_item(
+            title="Before manual discovery error",
+            body="Original body",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=item.id),
+            data=self._manual_text_payload(
+                title="After manual discovery error",
+                body="New body",
+                events="e" * 256,
+            ),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "אירוע חייב להיות עד 255 תווים")
+        item.refresh_from_db()
+        item.manual_text_content.refresh_from_db()
+        self.assertEqual(item.title, "Before manual discovery error")
+        self.assertEqual(item.manual_text_content.body, "Original body")
+
+    def test_over_255_discovery_tag_rejected_with_hebrew_error(self):
+        item = create_manual_text_archive_item(title="Tag length guard", body="Body")
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=item.id),
+            data=self._manual_text_payload(tags="t" * 65),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "תגית חייבת להיות עד 64 תווים")
+        self.assertEqual(item.tags.count(), 0)
+
+    def test_non_staff_cannot_access_discovery_edit_page(self):
+        manual_item = create_manual_text_archive_item(title="Guard manual", body="Body")
+        ocr_item = create_ocr_document(
+            title="Guard OCR",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+        ).archive_item
+
+        for item_id in (manual_item.id, ocr_item.id):
+            resp = self.client.get(self.EDIT_URL_TEMPLATE.format(item_id=item_id))
+            self.assertIn(resp.status_code, (302, 403))
+
+            self.client.force_login(self._create_family_user(f"family-{item_id}"))
+            resp = self.client.get(self.EDIT_URL_TEMPLATE.format(item_id=item_id))
+            self.assertEqual(resp.status_code, 403)
+            self.client.logout()
+
+    def test_ocr_shared_catalog_and_document_tags_edit_still_work(self):
+        doc = create_ocr_document(
+            title="Combined OCR edit",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._ocr_metadata_payload(
+                title="Combined after",
+                donor="Donor value",
+                category_event="Legacy event",
+                tags="doc-tag",
+                categories="Archive cat",
+                discovery_tags="item-tag",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        doc.refresh_from_db()
+        item = doc.archive_item
+        item.refresh_from_db()
+        self.assertEqual(doc.title, "Combined after")
+        self.assertEqual(item.title, "Combined after")
+        self.assertEqual(doc.admin_meta.donor, "Donor value")
+        self.assertEqual(doc.category_event, "Legacy event")
+        self.assertEqual(list(doc.tags_m2m.values_list("name", flat=True)), ["doc-tag"])
+        self.assertEqual(
+            list(item.categories.values_list("name", flat=True)),
+            ["Archive cat"],
+        )
+        self.assertEqual(list(item.tags.values_list("name", flat=True)), ["item-tag"])
+
+    def test_generated_slugs_are_unique_for_same_slug_base(self):
+        item = create_manual_text_archive_item(title="Slug uniqueness", body="Body")
+        update_archive_item_discovery_metadata(
+            item,
+            category_names=["Topic A"],
+            event_names=["Event A"],
+            tag_names=[],
+        )
+        category_a = ArchiveCategory.objects.get(name="Topic A")
+        event_a = ArchiveEvent.objects.get(name="Event A")
+
+        update_archive_item_discovery_metadata(
+            item,
+            category_names=["Topic A", "topic a"],
+            event_names=["Event A", "event a"],
+            tag_names=[],
+        )
+        category_b = ArchiveCategory.objects.get(name="topic a")
+        event_b = ArchiveEvent.objects.get(name="event a")
+
+        self.assertEqual(category_a.slug, "topic-a")
+        self.assertEqual(category_b.slug, "topic-a-2")
+        self.assertEqual(event_a.slug, "event-a")
+        self.assertEqual(event_b.slug, "event-a-2")

@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from django.db import transaction
+from django.utils.text import slugify
 
 ARCHIVE_ITEM_SHARED_FIELD_NAMES = (
     "title",
@@ -313,3 +314,97 @@ def update_ocr_document_tags(
         tag_objs.append(tag_obj)
     document.tags_m2m.set(tag_objs)
     return document
+
+
+_SLUG_MAX_LENGTH = 255
+_SLUG_FALLBACK_BASE = "item"
+
+
+def _slug_base_from_name(name: str) -> str:
+    slug = slugify(name, allow_unicode=True)
+    if not slug:
+        slug = _SLUG_FALLBACK_BASE
+    return slug[:_SLUG_MAX_LENGTH]
+
+
+def _unique_slug_for_model(model, name: str) -> str:
+    base = _slug_base_from_name(name)
+    slug = base
+    counter = 2
+    while model.objects.filter(slug=slug).exists():
+        suffix = f"-{counter}"
+        max_base_len = _SLUG_MAX_LENGTH - len(suffix)
+        slug = base[:max_base_len] + suffix
+        counter += 1
+    return slug
+
+
+def _get_or_create_archive_category_by_name(name: str):
+    from documents.models import ArchiveCategory
+
+    try:
+        return ArchiveCategory.objects.get(name=name), False
+    except ArchiveCategory.DoesNotExist:
+        slug = _unique_slug_for_model(ArchiveCategory, name)
+        return ArchiveCategory.objects.create(name=name, slug=slug), True
+
+
+def _get_or_create_archive_event_by_name(name: str):
+    from documents.models import ArchiveEvent
+
+    try:
+        return ArchiveEvent.objects.get(name=name), False
+    except ArchiveEvent.DoesNotExist:
+        slug = _unique_slug_for_model(ArchiveEvent, name)
+        return ArchiveEvent.objects.create(name=name, slug=slug), True
+
+
+def _get_or_create_tag_by_name(name: str):
+    from documents.models import Tag
+
+    return Tag.objects.get_or_create(name=name)
+
+
+def discovery_metadata_form_data_from_item(archive_item) -> dict:
+    """Build comma-separated discovery metadata form values from an ArchiveItem."""
+    return {
+        "categories": ", ".join(
+            archive_item.categories.order_by("name").values_list("name", flat=True)
+        ),
+        "events": ", ".join(
+            archive_item.events.order_by("name").values_list("name", flat=True)
+        ),
+        "discovery_tags": ", ".join(
+            archive_item.tags.order_by("name").values_list("name", flat=True)
+        ),
+    }
+
+
+@transaction.atomic
+def update_archive_item_discovery_metadata(
+    archive_item,
+    *,
+    category_names: list[str],
+    event_names: list[str],
+    tag_names: list[str],
+):
+    """Replace ArchiveItem discovery categories, events, and tags (replace-all per relation)."""
+    category_objs = []
+    for name in category_names:
+        category_obj, _ = _get_or_create_archive_category_by_name(name)
+        category_objs.append(category_obj)
+
+    event_objs = []
+    for name in event_names:
+        event_obj, _ = _get_or_create_archive_event_by_name(name)
+        event_objs.append(event_obj)
+
+    tag_objs = []
+    for name in tag_names:
+        tag_obj, _ = _get_or_create_tag_by_name(name)
+        tag_objs.append(tag_obj)
+
+    archive_item.categories.set(category_objs)
+    archive_item.events.set(event_objs)
+    archive_item.tags.set(tag_objs)
+    return archive_item

@@ -72,7 +72,7 @@ class ArchiveItem(models.Model):
 class ArchiveCategory(models.Model):
     """Cross-item archival topic for public discovery (linked via ArchiveItem M2M)."""
 
-    name = models.CharField(max_length=255)
+    name = models.CharField(max_length=255, unique=True)
     slug = models.SlugField(max_length=255, unique=True)
     description = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -88,7 +88,7 @@ class ArchiveCategory(models.Model):
 class ArchiveEvent(models.Model):
     """Family/historical occasion for public discovery (linked via ArchiveItem M2M)."""
 
-    name = models.CharField(max_length=255)
+    name = models.CharField(max_length=255, unique=True)
     slug = models.SlugField(max_length=255, unique=True)
     description = models.TextField(blank=True, default="")
     date_start = models.DateField(null=True, blank=True)
