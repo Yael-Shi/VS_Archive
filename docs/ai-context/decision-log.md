@@ -1255,3 +1255,17 @@ Category/event/tag names on archive detail pages link to these browse pages. Bro
 **Deferred:** PR7 legacy OCR discovery field cleanup; human-controlled public slugs for browse URLs.
 
 **Docs:** `docs/ai-context/archive-discovery-catalog-design.md`
+
+## Unified Archive Discovery / Catalog Metadata — remove public legacy OCR fallback display (PR7a)
+
+**Decision:** Remove the public-facing transitional fallback that displayed legacy **`Document.category_event`** and **`Document.tags_m2m`** on **`OCR_DOCUMENT`** detail when **`ArchiveItem`** discovery metadata was empty.
+
+**Public display/search/browse:** Public users now see **`ArchiveItem`**-level **`categories`**, **`events`**, and **`tags`** only (via the existing discovery-metadata partial on detail pages, **`/archive/?q=`** search, and ID-based browse pages). When **`ArchiveItem`** discovery metadata is empty, public detail pages show no categories/events/tags rather than falling back to legacy OCR fields.
+
+**Legacy fields retained:** **`Document.category_event`** and **`Document.tags_m2m`** remain in the model and database as legacy/internal/transitional OCR-side fields. **No** data was deleted. **No** migrations were added. Staff/admin OCR edit UI and **`DocumentMetadata`** behavior are unchanged.
+
+**Scope (PR7a):** OCR document detail view/template cleanup, focused tests, this log entry. **No** model/migration changes, backfill command changes, search/index changes, browse URL changes, or legacy data deletion.
+
+**Deferred:** Full schema cleanup/removal of **`Document.category_event`** and **`Document.tags_m2m`** (PR7 follow-up).
+
+**Docs:** `docs/ai-context/archive-discovery-catalog-design.md`

@@ -91,7 +91,6 @@ from documents.services.manual_text_validation import parse_manual_text_form
 from documents.services.archive_metadata_validation import parse_archive_metadata_form
 from documents.services.archive_item_presentation import (
     ARCHIVE_LIST_ITEM_TYPE_FILTER_CHOICES,
-    archive_item_has_discovery_metadata,
     archive_manage_item_type_ui_choices,
     archive_metadata_status_ui_choices,
     archive_visibility_ui_choices,
@@ -1461,7 +1460,6 @@ def document_detail_page(request, doc_id: int):
         "admin_meta",
         "archive_item",
     ).prefetch_related(
-        "tags_m2m",
         "text_results",
         "source_files",
         "archive_item__categories",
@@ -1478,12 +1476,6 @@ def document_detail_page(request, doc_id: int):
         raise
 
     admin_meta = getattr(doc, "admin_meta", None) if is_admin else None
-    document_tags = list(doc.tags_m2m.all())
-    archive_item = doc.archive_item
-    has_archive_item_discovery = archive_item_has_discovery_metadata(archive_item)
-    show_legacy_ocr_catalog_meta = not has_archive_item_discovery and (
-        bool(doc.category_event) or bool(document_tags)
-    )
 
     bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
     source_preview = build_source_preview(doc, bucket)
@@ -1500,8 +1492,6 @@ def document_detail_page(request, doc_id: int):
         "source_preview_items": source_preview.items,
         "source_preview_unavailable_count": source_preview.non_uploaded_count,
         "admin_meta": admin_meta,
-        "document_tags": document_tags,
-        "show_legacy_ocr_catalog_meta": show_legacy_ocr_catalog_meta,
         "text_presentation": text_presentation,
         "is_admin": is_admin,
     }
