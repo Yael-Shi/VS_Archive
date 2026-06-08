@@ -1141,3 +1141,21 @@ This section records **operational risks and semantics** for env-gated **Transkr
 ### Rationale
 
 Closes consistency gaps in the upload completion path: the backend no longer relies only on client-reported metadata and object existence; it also verifies the uploaded object's stored S3 **`ContentType`** before accepting completion.
+
+## Unified Archive Discovery / Catalog Metadata — target design (PR0)
+
+**Decision (June 2026):** Add a design document for **Unified Archive Discovery / Catalog Metadata** before implementation. **Key architectural decision:** **`DocumentMetadata`** will **not** become the unified public discovery/catalog metadata model.
+
+**Target direction:**
+
+- Future **cross-item** public discovery metadata (categories, events, tags, and related browse/search dimensions) should be **`ArchiveItem`**-level or **linked to `ArchiveItem`**.
+- **Categories**, **events**, and **tags** are intended as **`ArchiveItem`**-level **many-to-many** relationships from the foundation PR (PR1), not single-value or one-to-one links.
+- **`DocumentMetadata`** remains **`OCR_DOCUMENT`**-side **internal/admin** metadata for now and must not anchor new public discovery features.
+- **`Document.category_event`** and **`Document.tags_m2m`** are **transitional OCR-side** fields until **`ArchiveItem`**-level discovery metadata is implemented and backfilled.
+- **`donor`**, **`collection`**, and **`original_location`** are **private/internal** for now; **`notes`** public vs internal split remains **open**.
+- **`author_name`** / **`source_title`** on **`ArchiveItem`** are public display metadata; clickable filter/browse links are **not decided** now.
+- Every future discovery/search/filter page must use the same access policy as **`/archive/`** (no leakage of hidden items, counts, or internal metadata).
+
+**Docs:** `docs/ai-context/archive-discovery-catalog-design.md`
+
+**Scope (PR0):** Design doc + this log entry only. **No** models, migrations, templates, search, clickable discovery links, **`category_event`** split, tag migration, **`DocumentMetadata`** implementation changes, **`PHOTO`**, upload/OCR/worker/routing/review changes.
