@@ -96,8 +96,21 @@ class TranskribusAdapter:
                 worker_env, pages, document_id=document_id_int
             )
 
+        source_transkribus_run_id = kwargs.pop("source_transkribus_run_id", None)
+        if source_transkribus_run_id is not None:
+            try:
+                source_transkribus_run_id = int(source_transkribus_run_id)
+            except (TypeError, ValueError) as exc:
+                raise EnginePermanentError(
+                    "TranskribusAdapter requires a valid integer "
+                    f"source_transkribus_run_id, got {source_transkribus_run_id!r}"
+                ) from exc
+
         return self._execute_dev_upload(
-            worker_env, pages, document_id=document_id_int
+            worker_env,
+            pages,
+            document_id=document_id_int,
+            source_transkribus_run_id=source_transkribus_run_id,
         )
 
     def _execute_existing_server_document(
@@ -170,6 +183,7 @@ class TranskribusAdapter:
         pages: List[PageImage],
         *,
         document_id: int,
+        source_transkribus_run_id: int | None = None,
     ) -> HtrResult:
         self._validate_upload_dev_config(worker_env)
 
@@ -199,6 +213,29 @@ class TranskribusAdapter:
             )
 
         if recognition_only_retry:
+            if source_transkribus_run_id is not None:
+                try:
+                    source_run = trp.get_upload_run_for_recognition_retry(
+                        run_id=source_transkribus_run_id,
+                        document_id=document_id,
+                        collection_id=collection_id,
+                        model_id=model_id,
+                    )
+                except ValueError as exc:
+                    raise EnginePermanentError(str(exc)) from exc
+                return self._execute_dev_recognition_only(
+                    worker_env=worker_env,
+                    document_id=document_id,
+                    pages=pages,
+                    source_run=source_run,
+                    username=username,
+                    password=password,
+                    bearer=bearer,
+                    collection_id=collection_id,
+                    model_id=model_id,
+                    engine_runtime=engine_runtime,
+                )
+
             source_run = trp.find_reusable_upload_run(
                 document_id=document_id,
                 collection_id=collection_id,

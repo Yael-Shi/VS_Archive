@@ -63,6 +63,55 @@ def _run_is_reusable_for_recognition_retry(run: TranskribusRun) -> bool:
     return True
 
 
+def get_upload_run_for_recognition_retry(
+    *,
+    run_id: int,
+    document_id: int,
+    collection_id: str,
+    model_id: str,
+) -> TranskribusRun:
+    """
+    Load an explicit UPLOAD_CREATED TranskribusRun for recognition-only retry.
+
+    Validates document/collection/model ownership and reusable-run rules.
+    Raises ValueError when the run cannot be used (no rediscovery fallback).
+    """
+    try:
+        run = TranskribusRun.objects.get(pk=run_id)
+    except TranskribusRun.DoesNotExist as exc:
+        raise ValueError(f"TranskribusRun id={run_id} does not exist.") from exc
+
+    if run.document_id != document_id:
+        raise ValueError(
+            f"TranskribusRun id={run_id} belongs to document_id={run.document_id}, "
+            f"not document_id={document_id}."
+        )
+
+    col = str(collection_id).strip()
+    mid = str(model_id).strip()
+    if run.collection_id != col or run.model_id != mid:
+        raise ValueError(
+            f"TranskribusRun id={run_id} collection_id/model_id="
+            f"{run.collection_id!r}/{run.model_id!r} does not match active "
+            f"collection_id/model_id={col!r}/{mid!r}."
+        )
+
+    if run.mode != TranskribusRun.Mode.UPLOAD_CREATED:
+        raise ValueError(
+            f"TranskribusRun id={run_id} mode={run.mode!r} is not UPLOAD_CREATED."
+        )
+
+    if not _run_is_reusable_for_recognition_retry(run):
+        remote = (run.remote_doc_id or "").strip() or "none"
+        pages = (run.pages_query or "").strip() or "none"
+        raise ValueError(
+            f"TranskribusRun id={run_id} is not reusable for recognition-only retry "
+            f"(status={run.status!r}, remote_doc_id={remote}, pages_query={pages})."
+        )
+
+    return run
+
+
 def find_reusable_upload_run(
     *,
     document_id: int,

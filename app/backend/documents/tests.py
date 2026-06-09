@@ -6037,6 +6037,7 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
         *,
         pages: list | None = None,
         worker_env_overrides: dict | None = None,
+        source_transkribus_run_id: int | None = None,
     ):
         from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
         from documents.services.page_extraction import PageImage
@@ -6047,13 +6048,121 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
         if worker_env_overrides:
             overrides.update(worker_env_overrides)
         adapter = TranskribusAdapter()
-        return adapter.execute(
-            pages=pages,
-            language_hint="he",
-            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
-            worker_env=_transkribus_adapter_worker_env(**overrides),
-            document_id=doc.id,
+        execute_kwargs = {
+            "pages": pages,
+            "language_hint": "he",
+            "prompt_variant": DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            "worker_env": _transkribus_adapter_worker_env(**overrides),
+            "document_id": doc.id,
+        }
+        if source_transkribus_run_id is not None:
+            execute_kwargs["source_transkribus_run_id"] = source_transkribus_run_id
+        return adapter.execute(**execute_kwargs)
+
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
+    def test_explicit_source_run_id_uses_exact_run_not_rediscovery(
+        self, m_login, m_upload, m_start, m_complete
+    ):
+        doc = self._create_document()
+        older = self._seed_source_run(
+            doc,
+            status=TranskribusRun.Status.FAILED,
+            remote_doc_id="111",
+            pages_query="1",
+            upload_id=10,
+            ingest_job_id="ingest-old",
         )
+        newer = self._seed_source_run(
+            doc,
+            status=TranskribusRun.Status.FAILED,
+            remote_doc_id="222",
+            pages_query="1",
+            upload_id=11,
+            ingest_job_id="ingest-new",
+        )
+        self.assertLess(older.id, newer.id)
+        m_start.return_value = "recog-explicit"
+        m_complete.return_value = PylaiaTranscriptionOutcome(
+            text="from explicit source run",
+            review_reasons=[],
+            recognition_job_id="recog-explicit",
+        )
+
+        result = self._execute_dev_upload(
+            doc,
+            worker_env_overrides={"transkribus_recognition_only_retry": True},
+            source_transkribus_run_id=older.id,
+        )
+
+        m_upload.assert_not_called()
+        m_start.assert_called_once()
+        self.assertEqual(result.text, "from explicit source run")
+        new_run = (
+            TranskribusRun.objects.filter(document=doc)
+            .order_by("-created_at", "-id")
+            .first()
+        )
+        self.assertEqual(new_run.remote_doc_id, "111")
+        self.assertEqual(new_run.upload_id, 10)
+        self.assertEqual(new_run.ingest_job_id, "ingest-old")
+        older.refresh_from_db()
+        newer.refresh_from_db()
+        self.assertEqual(older.status, TranskribusRun.Status.FAILED)
+        self.assertEqual(newer.status, TranskribusRun.Status.FAILED)
+
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
+    def test_explicit_source_run_id_wrong_document_rejected(
+        self, m_login, m_upload
+    ):
+        from documents.services.htr_adapters.base import EnginePermanentError
+
+        doc = self._create_document()
+        other_doc = self._create_document()
+        other_run = self._seed_source_run(
+            other_doc,
+            status=TranskribusRun.Status.FAILED,
+        )
+
+        with self.assertRaises(EnginePermanentError) as ctx:
+            self._execute_dev_upload(
+                doc,
+                worker_env_overrides={"transkribus_recognition_only_retry": True},
+                source_transkribus_run_id=other_run.id,
+            )
+
+        self.assertIn(f"document_id={other_doc.id}", str(ctx.exception))
+        self.assertIn(f"document_id={doc.id}", str(ctx.exception))
+        m_upload.assert_not_called()
+        m_login.assert_not_called()
+
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
+    def test_explicit_source_run_id_succeeded_run_rejected(
+        self, m_login, m_upload
+    ):
+        from documents.services.htr_adapters.base import EnginePermanentError
+
+        doc = self._create_document()
+        succeeded = self._seed_source_run(
+            doc,
+            status=TranskribusRun.Status.SUCCEEDED,
+        )
+
+        with self.assertRaises(EnginePermanentError) as ctx:
+            self._execute_dev_upload(
+                doc,
+                worker_env_overrides={"transkribus_recognition_only_retry": True},
+                source_transkribus_run_id=succeeded.id,
+            )
+
+        self.assertIn("not reusable for recognition-only retry", str(ctx.exception))
+        self.assertIn(f"TranskribusRun id={succeeded.id}", str(ctx.exception))
+        m_upload.assert_not_called()
+        m_login.assert_not_called()
 
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
