@@ -43,6 +43,20 @@
     {% include "documents/archive/partials/source_metadata.html" with item=item %}
     {% include "documents/archive/partials/discovery_metadata.html" with item=item %}
     <div class="section-title">תוכן</div>
-    <div class="text-block text-block--pre">{{ body|manual_text_body_display }}</div>
+    {% if item.item_type == "PHOTO" %}
+      {% if photo_url %}
+        <figure class="photo-detail">
+          <img
+            class="photo-detail__image"
+            src="{{ photo_url }}"
+            alt="{{ item.title }}"
+          >
+        </figure>
+      {% else %}
+        <p class="muted">התמונה אינה זמינה כרגע.</p>
+      {% endif %}
+    {% else %}
+      <div class="text-block text-block--pre">{{ body|manual_text_body_display }}</div>
+    {% endif %}
   </div>
 {% endblock %}

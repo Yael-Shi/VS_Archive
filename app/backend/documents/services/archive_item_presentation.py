@@ -18,6 +18,7 @@ ARCHIVE_LIST_ITEM_TYPE_FILTER_CHOICES: tuple[tuple[str, str], ...] = (
     (ARCHIVE_LIST_ITEM_TYPE_FILTER_ALL, "הכול"),
     (ARCHIVE_LIST_ITEM_TYPE_FILTER_OCR, "מסמכים סרוקים / PDF"),
     (ARCHIVE_LIST_ITEM_TYPE_FILTER_MANUAL, "טקסטים מוקלדים"),
+    (ARCHIVE_LIST_ITEM_TYPE_FILTER_PHOTO, "תמונות"),
 )
 
 _VISIBILITY_LABELS: dict[str, str] = {
@@ -134,6 +135,11 @@ def normalize_archive_list_item_type_filter(raw: str | None) -> str:
         ArchiveItem.ItemType.MANUAL_TEXT.value.lower(),
     ):
         return ArchiveItem.ItemType.MANUAL_TEXT
+    if value in (
+        ARCHIVE_LIST_ITEM_TYPE_FILTER_PHOTO,
+        ArchiveItem.ItemType.PHOTO.value.lower(),
+    ):
+        return ArchiveItem.ItemType.PHOTO
     return ""
 
 

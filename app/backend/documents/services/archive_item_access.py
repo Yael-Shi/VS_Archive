@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet
 from django.http import Http404
 
-from documents.models import ArchiveItem
+from documents.models import ArchiveItem, PhotoContent
 from documents.services.document_access import is_document_admin
 
 ARCHIVE_FAMILY_GROUP_NAME = "archive_family"
@@ -58,21 +58,33 @@ def archive_item_queryset_for_user(user) -> QuerySet[ArchiveItem]:
     return filter_archive_items_for_user(user, ArchiveItem.objects.all())
 
 
-def exclude_deferred_archive_browse_item_types(
+def filter_browse_renderable_photo_items(
     queryset: QuerySet[ArchiveItem],
 ) -> QuerySet[ArchiveItem]:
-    """Exclude item types not yet rendered on public /archive/ surfaces (PHOTO → PR4)."""
-    return queryset.exclude(item_type=ArchiveItem.ItemType.PHOTO)
+    """
+    Keep non-PHOTO rows; include PHOTO only when linked ``PhotoContent`` is complete.
+
+    PHOTO is renderable on ``/archive/`` surfaces only when:
+    - linked ``PhotoContent`` exists
+    - ``upload_status == UPLOADED``
+    - ``original_file_key`` is non-empty
+    """
+    uploaded_photo = Q(
+        item_type=ArchiveItem.ItemType.PHOTO,
+        photo_content__upload_status=PhotoContent.UploadStatus.UPLOADED,
+        photo_content__original_file_key__gt="",
+    )
+    return queryset.filter(~Q(item_type=ArchiveItem.ItemType.PHOTO) | uploaded_photo)
 
 
 def archive_browse_queryset_for_user(user) -> QuerySet[ArchiveItem]:
     """
     Items currently renderable on ``/archive/`` list, detail, and discovery browse.
 
-    Applies visibility/access via ``archive_item_queryset_for_user``, then excludes
-    deferred item types (PHOTO until PR4 display).
+    Applies visibility/access via ``archive_item_queryset_for_user``. Applies PHOTO
+    upload-completion eligibility via ``filter_browse_renderable_photo_items``.
     """
-    return exclude_deferred_archive_browse_item_types(
+    return filter_browse_renderable_photo_items(
         archive_item_queryset_for_user(user)
     )
 
@@ -86,15 +98,18 @@ def get_viewable_archive_item(
     """
     Return an archive item currently renderable on ``/archive/<id>/``, or raise Http404.
 
-    Applies visibility/access rules and excludes deferred item types such as PHOTO
-    until their archive detail rendering is implemented. Uses 404 for missing ids,
-    unauthorized items, and deferred types.
+    Applies visibility/access rules and PHOTO upload-completion eligibility.
+    Uses 404 for missing ids, unauthorized items, and non-renderable PHOTO rows.
     """
     base = queryset if queryset is not None else ArchiveItem.objects.all()
-    qs = exclude_deferred_archive_browse_item_types(
+    qs = filter_browse_renderable_photo_items(
         filter_archive_items_for_user(user, base)
     )
     try:
-        return qs.select_related("manual_text_content", "ocr_document").get(id=item_id)
+        return qs.select_related(
+            "manual_text_content",
+            "ocr_document",
+            "photo_content",
+        ).get(id=item_id)
     except ArchiveItem.DoesNotExist:
         raise Http404() from None

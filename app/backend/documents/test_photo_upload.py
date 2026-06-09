@@ -389,7 +389,7 @@ class PhotoUploadFlowTests(TestCase):
 
 
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
-class PhotoArchiveBrowseGuardTests(TestCase):
+class PhotoArchiveBrowseEligibilityTests(TestCase):
     def setUp(self):
         self.staff = User.objects.create_user(
             username="photo_guard_staff",
@@ -410,37 +410,53 @@ class PhotoArchiveBrowseGuardTests(TestCase):
             body="body",
             visibility=ArchiveItem.Visibility.PUBLIC,
         )
-        self.photo_item = ArchiveItem.objects.create(
+        self.uploaded_photo_item = ArchiveItem.objects.create(
             item_type=ArchiveItem.ItemType.PHOTO,
-            title="Hidden photo until PR4",
+            title="Uploaded photo in browse",
             visibility=ArchiveItem.Visibility.PUBLIC,
         )
         PhotoContent.objects.create(
-            archive_item=self.photo_item,
+            archive_item=self.uploaded_photo_item,
             original_file_key="photos/99/original.jpg",
-            original_filename="hidden.jpg",
+            original_filename="uploaded.jpg",
             original_mime_type="image/jpeg",
             original_size_bytes=1024,
             upload_status=PhotoContent.UploadStatus.UPLOADED,
             upload_error="",
         )
+        self.pending_photo_item = ArchiveItem.objects.create(
+            item_type=ArchiveItem.ItemType.PHOTO,
+            title="Pending photo hidden from browse",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        PhotoContent.objects.create(
+            archive_item=self.pending_photo_item,
+            original_file_key="photos/100/original.jpg",
+            original_filename="pending.jpg",
+            original_mime_type="image/jpeg",
+            original_size_bytes=0,
+            upload_status=PhotoContent.UploadStatus.PENDING,
+            upload_error="",
+        )
 
-    def test_public_archive_list_excludes_photo_items(self):
+    def test_public_archive_list_includes_uploaded_photo(self):
         resp = self.client.get(reverse("archive-list"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, self.manual_item.title)
-        self.assertNotContains(resp, self.photo_item.title)
+        self.assertContains(resp, self.uploaded_photo_item.title)
+        self.assertNotContains(resp, self.pending_photo_item.title)
 
-    def test_family_user_archive_list_excludes_photo_items(self):
+    def test_family_user_archive_list_includes_uploaded_photo(self):
         self.client.force_login(self.family_user)
         resp = self.client.get(reverse("archive-list"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, self.manual_item.title)
-        self.assertNotContains(resp, self.photo_item.title)
+        self.assertContains(resp, self.uploaded_photo_item.title)
+        self.assertNotContains(resp, self.pending_photo_item.title)
 
-    def test_public_archive_detail_returns_404_for_photo(self):
+    def test_public_archive_detail_returns_404_for_pending_photo(self):
         resp = self.client.get(
-            reverse("archive-detail", kwargs={"item_id": self.photo_item.id})
+            reverse("archive-detail", kwargs={"item_id": self.pending_photo_item.id})
         )
         self.assertEqual(resp.status_code, 404)
 
@@ -448,7 +464,8 @@ class PhotoArchiveBrowseGuardTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(reverse("archive-manage-list"))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, self.photo_item.title)
+        self.assertContains(resp, self.uploaded_photo_item.title)
+        self.assertContains(resp, self.pending_photo_item.title)
 
 
 class ArchiveAccessVsBrowseQuerysetTests(TestCase):
@@ -467,13 +484,32 @@ class ArchiveAccessVsBrowseQuerysetTests(TestCase):
             title="Photo access vs browse",
             visibility=ArchiveItem.Visibility.PUBLIC,
         )
+        self.uploaded_photo_item = ArchiveItem.objects.create(
+            item_type=ArchiveItem.ItemType.PHOTO,
+            title="Uploaded photo browse eligible",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        PhotoContent.objects.create(
+            archive_item=self.uploaded_photo_item,
+            original_file_key="photos/200/original.jpg",
+            original_filename="browse.jpg",
+            original_mime_type="image/jpeg",
+            original_size_bytes=512,
+            upload_status=PhotoContent.UploadStatus.UPLOADED,
+            upload_error="",
+        )
 
     def test_access_queryset_includes_photo_by_visibility_rules(self):
         qs = archive_item_queryset_for_user(self.family_user)
         self.assertTrue(qs.filter(pk=self.photo_item.pk).exists())
+        self.assertTrue(qs.filter(pk=self.uploaded_photo_item.pk).exists())
 
-    def test_browse_queryset_excludes_photo_until_pr4_display(self):
+    def test_browse_queryset_excludes_incomplete_photo(self):
         access_qs = archive_item_queryset_for_user(self.family_user)
         browse_qs = archive_browse_queryset_for_user(self.family_user)
         self.assertTrue(access_qs.filter(pk=self.photo_item.pk).exists())
         self.assertFalse(browse_qs.filter(pk=self.photo_item.pk).exists())
+
+    def test_browse_queryset_includes_uploaded_photo(self):
+        browse_qs = archive_browse_queryset_for_user(self.family_user)
+        self.assertTrue(browse_qs.filter(pk=self.uploaded_photo_item.pk).exists())

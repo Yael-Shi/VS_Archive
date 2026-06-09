@@ -11,7 +11,12 @@
     <tbody>
       {% for item in items %}
         <tr>
-          <td><a href="{% url 'archive-detail' item_id=item.id %}">{{ item.title }}</a></td>
+          <td>
+            <a href="{% url 'archive-detail' item_id=item.id %}">{{ item.title }}</a>
+            {% if item.item_type == "PHOTO" %}
+              <span class="muted"> · תצוגה מקדימה בדף הפריט</span>
+            {% endif %}
+          </td>
           <td>{{ item.item_type|archive_item_type_label }}</td>
           <td>{{ item|document_date_display }}</td>
         </tr>

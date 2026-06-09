@@ -1377,3 +1377,19 @@ Category/event/tag names on archive detail pages link to these browse pages. Bro
 **Deferred (PR4+):** Archive list/detail PHOTO display (presigned GET), edit/delete polish, thumbnail generation — per `docs/ai-context/photo-archive-items.md`.
 
 **Docs:** `docs/ai-context/photo-archive-items.md`
+
+## ArchiveItem — PHOTO public/archive display V1 (PR4)
+
+**Decision:** Show uploaded **`PHOTO`** items on **`/archive/`** list and **`/archive/<id>/`** detail. Reuse existing **`ArchiveItem.visibility`** access rules exactly — no new visibility tier or photo-specific permission layer.
+
+**Browse vs access:** **`archive_item_queryset_for_user`** answers visibility/access only. **`archive_browse_queryset_for_user`** adds PHOTO renderability: linked **`PhotoContent`**, **`upload_status=UPLOADED`**, non-empty **`original_file_key`**. **`PENDING`** / **`FAILED`** PHOTO items return **404** on detail and are omitted from list/discovery browse. Staff **`/archive/manage/`** unchanged (all PHOTO rows regardless of upload status).
+
+**List (V1):** Type label + modest placeholder text; **no** presigned GET per row.
+
+**Detail (V1):** After **`get_viewable_archive_item`**, generate presigned GET via existing **`create_presigned_get`** for **`PhotoContent.original_file_key`** when **`UPLOADS_BUCKET_NAME`** is configured; otherwise safe unavailable message. S3 objects remain private.
+
+**Scope (PR4):** Access/browse queryset eligibility, list/detail templates, presigned GET on detail only, focused tests, minimal doc updates. **No** thumbnails, dimensions, edit/delete, S3 cleanup, OCR/**`Document`**, worker.
+
+**Deferred (PR5+):** Edit/delete polish, thumbnail generation — per `docs/ai-context/photo-archive-items.md`.
+
+**Docs:** `docs/ai-context/photo-archive-items.md`

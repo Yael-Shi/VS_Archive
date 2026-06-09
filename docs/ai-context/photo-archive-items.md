@@ -2,7 +2,7 @@
 
 Design and implementation scope for **`PHOTO`** archive items: one photo per **`ArchiveItem`**, private S3 storage, presigned display, and no OCR/HTR pipeline.
 
-**Status:** Design (PR1) + **model foundation (PR2)** + **staff create/upload V1 (PR3)**. Archive list/detail display remains deferred (PR4).
+**Status:** Design (PR1) + **model foundation (PR2)** + **staff create/upload V1 (PR3)** + **public/archive display V1 (PR4)**. Edit/delete polish remains deferred (PR5).
 
 **Related docs:**
 
@@ -233,7 +233,9 @@ Use existing shared fields only:
 
 **PR3 create-order decision:** Create **`ArchiveItem`** + **`PhotoContent`** **before** client S3 upload (same pattern as OCR **`Document`** `UPLOADING` + predetermined key). Upload lifecycle is explicit via **`upload_status`** / **`upload_error`** — not inferred from size. **Do not** route through **`/api/uploads/*`** or **`create_ocr_document`**.
 
-**PR3 public archive guard:** **`/archive/`** list, detail, and discovery browse exclude **`PHOTO`** until PR4 display (`archive_browse_queryset_for_user`). Staff manage surfaces may reference PHOTO.
+**PR4 browse eligibility:** **`archive_browse_queryset_for_user`** includes **`PHOTO`** only when linked **`PhotoContent.upload_status == UPLOADED`** and **`original_file_key`** is non-empty (visibility/access unchanged). **`PENDING`** / **`FAILED`** PHOTO rows stay hidden from **`/archive/`** list/detail/discovery browse. Staff **`/archive/manage/`** still lists all PHOTO items regardless of upload status.
+
+**PR4 detail display:** After **`get_viewable_archive_item`** permission/eligibility checks, detail generates presigned GET for **`original_file_key`** only (not in list V1). Missing bucket config fails safely on detail (no broken URL).
 
 ---
 
