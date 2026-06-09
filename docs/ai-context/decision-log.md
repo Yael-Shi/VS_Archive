@@ -1319,3 +1319,23 @@ Category/event/tag names on archive detail pages link to these browse pages. Bro
 **Scope (PR3):** Upload form/script, `create_upload` discovery parsing/persistence, focused tests. **No** worker, routing, S3, or upload completion semantics changes.
 
 **Deferred:** Post-upload redirect to archive detail; `/api/ui/upload/` retirement/redirect decision; legacy schema cleanup; **`PHOTO`**; rich text.
+
+## ArchiveItem — PHOTO design / scope (PR1)
+
+**Decision:** Approve V1 design for **`PHOTO`** archive items before implementation. **`PHOTO`** is one photo per **`ArchiveItem`**, backed by a dedicated **`PhotoContent`** model (**not** **`Document`**), with private S3 storage and presigned GET display after **`ArchiveItem.visibility`** checks. **No** OCR/HTR, worker, SQS, **`DocumentTextResult`**, Gemini, or Transkribus.
+
+**Product (V1):** Staff/admin create one image; item appears in **`/archive/`** and **`/archive/<id>/`**; list uses placeholder/icon (not full original); detail shows original via presigned URL. Reuse existing **`ArchiveItem`** shared and discovery metadata fields — no large photo-specific metadata system in V1.
+
+**Access:** PHOTO does **not** introduce a new visibility level or redefine access control. Reuse existing **`ArchiveItem.visibility`** exactly (**`public`** / **`private`** only — no **`FAMILY`** tier). **`public`:** everyone; **`private`:** authenticated **`archive_family`** + staff/admin (**not** staff-only). Helpers in **`archive_item_access.py`**; non-viewable → **404**.
+
+**Model (proposed):** **`PhotoContent`** **`OneToOne`** to **`ArchiveItem`** with **`original_*`** S3/file fields and nullable **`thumbnail_*`** foundation fields (thumbnail generation deferred). S3 keys under **`photos/{photo_content_id}/original.{ext}`** with reserved **`thumb_400.{ext}`** path.
+
+**Upload (recommended):** PHOTO-specific create/upload flow — **do not** reuse OCR **`/api/uploads/*`** → **`create_ocr_document`** pipeline. Reuse shared validation, presigned S3 helpers, HeadObject verification, and **`ArchiveItem`** services where appropriate.
+
+**S3 delete (recommended):** Best-effort delete of private objects on staff PHOTO delete; finalize policy in PR5 if not implemented earlier.
+
+**Implementation:** Deferred to **PR2+** per `docs/ai-context/photo-archive-items.md`. **Not** implemented in PR1.
+
+**Docs:** `docs/ai-context/photo-archive-items.md`
+
+**Out of scope (V1):** Multi-photo albums, thumbnail generation, image transforms, OCR-on-photo, face/people tagging, comments, public upload, rich text, legacy **`Document`** cleanup.
