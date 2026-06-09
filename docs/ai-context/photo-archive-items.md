@@ -2,7 +2,7 @@
 
 Design and implementation scope for **`PHOTO`** archive items: one photo per **`ArchiveItem`**, private S3 storage, presigned display, and no OCR/HTR pipeline.
 
-**Status:** Design (PR1) + **model foundation (PR2)** + **staff create/upload V1 (PR3)** + **public/archive display V1 (PR4)** + **staff metadata edit/delete V1 (PR5)**. Thumbnail generation and re-upload/retry remain deferred.
+**Status:** Design (PR1) + **model foundation (PR2)** + **staff create/upload V1 (PR3)** + **public/archive display V1 (PR4)** + **staff metadata edit/delete V1 (PR5)** + **staff manage status clarity (PR6)**. Thumbnail generation and re-upload/retry remain deferred.
 
 **Related docs:**
 
@@ -238,6 +238,8 @@ Use existing shared fields only:
 **PR4 detail display:** After **`get_viewable_archive_item`** permission/eligibility checks, detail generates presigned GET for **`original_file_key`** only (not in list V1). Missing bucket config fails safely on detail (no broken URL).
 
 **PR5 staff manage edit/delete:** Staff/admin edit PHOTO shared **`ArchiveItem`** metadata at **`/archive/manage/<id>/edit/`** (title, visibility, dates, metadata status, author/source, categories/events/tags). **No** file replace/re-upload on edit. Successful edit redirects to **`/archive/manage/`** (not public detail — non-uploaded PHOTO may 404 on **`/archive/<id>/`**). Staff/admin delete at **`/archive/manage/<id>/delete/`** (GET confirmation, POST-only delete) removes **`ArchiveItem`** + **`PhotoContent`** DB rows and redirects to **`/archive/manage/`**. **S3 object cleanup is deferred** — no delete-object call in PR5; orphaned private S3 keys require a future cleanup runbook/job.
+
+**PR6 staff manage status clarity:** **`/archive/manage/`** PHOTO rows show Hebrew upload-status label and archive-renderability signal (uploaded + non-empty key). PHOTO edit/delete pages add staff-only guidance: metadata-only edit, no file replacement, public archive after successful upload; delete removes DB rows only with deferred S3 cleanup. Helpers in **`documents/services/photo_presentation.py`**. **No** presigned GET in manage list, thumbnails, or behavior changes to public browse.
 
 ---
 
