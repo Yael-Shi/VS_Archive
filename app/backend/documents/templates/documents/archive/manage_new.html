@@ -56,14 +56,19 @@
       </form>
     {% elif item_type == "ocr_document" %}
       <div class="spacer"></div>
-      <div class="card">
-        <p>
-          <strong>מסמך סרוק / PDF</strong> — העלאת מסמך לעיבוד טקסט דרך זרימת ההעלאה הקיימת.
-          לאחר ההעלאה נוצר פריט ארכיון מסוג מסמך סרוק.
-        </p>
-        <div class="spacer"></div>
-        <a class="btn btn-primary" href="{% url 'upload-page' %}">המשך להעלאת מסמך</a>
-      </div>
+      <p class="page-subtitle">
+        <strong>מסמך סרוק / PDF</strong> — העלאת מסמך לעיבוד טקסט.
+        לאחר ההעלאה נוצר פריט ארכיון מסוג מסמך סרוק.
+      </p>
+      <div class="spacer"></div>
+      {% include "documents/upload/_upload_form.html" %}
+      <div class="spacer"></div>
+      <p class="field-hint">
+        <a href="{% url 'upload-page' %}">פתיחה בדף העלאה נפרד</a>
+      </p>
     {% endif %}
   </div>
+  {% if item_type == "ocr_document" %}
+    {% include "documents/upload/_upload_script.html" %}
+  {% endif %}
 {% endblock %}

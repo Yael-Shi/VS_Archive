@@ -1505,6 +1505,14 @@ def document_detail_page(request, doc_id: int):
     return render(request, "documents/detail.html", context)
 
 
+def _upload_form_context() -> dict:
+    return {
+        "doc_type_choices": Document.DocType.choices,
+        "text_input_type_choices": Document.TextInputType.choices,
+        "date_precision_choices": DATE_PRECISION_UI_CHOICES,
+    }
+
+
 @login_required
 def upload_page(request):
     deny = _require_admin_page(request)
@@ -1513,11 +1521,7 @@ def upload_page(request):
     return render(
         request,
         "documents/upload.html",
-        context={
-            "doc_type_choices": Document.DocType.choices,
-            "text_input_type_choices": Document.TextInputType.choices,
-            "date_precision_choices": DATE_PRECISION_UI_CHOICES,
-        },
+        context=_upload_form_context(),
     )
 
 
@@ -1866,6 +1870,8 @@ def archive_manage_new_page(request):
     }
     if item_type == ARCHIVE_ITEM_TYPE_MANUAL_TEXT:
         context.update(_manual_text_discovery_metadata_form_context())
+    elif item_type == ARCHIVE_ITEM_TYPE_OCR_DOCUMENT:
+        context.update(_upload_form_context())
     return render(
         request,
         "documents/archive/manage_new.html",
