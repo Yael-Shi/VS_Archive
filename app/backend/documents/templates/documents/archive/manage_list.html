@@ -36,7 +36,7 @@
                 <td>{{ item.visibility|archive_visibility_label }}</td>
                 <td>{{ item.metadata_status|archive_metadata_status_label }}</td>
                 <td>
-                  {% if item.item_type == "MANUAL_TEXT" %}
+                  {% if item.item_type == "MANUAL_TEXT" or item.item_type == "PHOTO" %}
                     <a class="btn" href="{% url 'archive-manage-edit' item_id=item.id %}">עריכה</a>
                     <a class="btn" href="{% url 'archive-manage-delete' item_id=item.id %}">מחיקה</a>
                   {% elif item.item_type == "OCR_DOCUMENT" %}

@@ -35,6 +35,7 @@ from documents.services.archive_items import (
     shared_archive_item_for_document,
     update_archive_item_discovery_metadata,
     update_manual_text_archive_item,
+    update_photo_archive_item_metadata,
     update_ocr_document_catalog_metadata,
     update_ocr_document_metadata,
 )
@@ -1825,6 +1826,22 @@ def _manual_text_form_data_from_item(item: ArchiveItem) -> dict:
     }
 
 
+def _photo_form_data_from_item(item: ArchiveItem) -> dict:
+    return {
+        **_archive_metadata_form_data(
+            title=item.title,
+            visibility=item.visibility,
+            date_start=item.date_start,
+            date_end=item.date_end,
+            date_precision=item.date_precision,
+            metadata_status=item.metadata_status,
+            author_name=item.author_name,
+            source_title=item.source_title,
+        ),
+        **discovery_metadata_form_data_from_item(item),
+    }
+
+
 def _archive_item_type_choices() -> list[tuple[str, str]]:
     return archive_manage_item_type_ui_choices()
 
@@ -2123,6 +2140,7 @@ def archive_manage_edit_page(request, item_id: int):
             ArchiveItem.objects.select_related(
                 "manual_text_content",
                 "ocr_document",
+                "photo_content",
             )
             .prefetch_related("categories", "events", "tags")
             .get(id=item_id)
@@ -2134,6 +2152,8 @@ def archive_manage_edit_page(request, item_id: int):
         return _archive_manage_edit_manual_text(request, item)
     if item.item_type == ArchiveItem.ItemType.OCR_DOCUMENT:
         return _archive_manage_edit_ocr_document(request, item)
+    if item.item_type == ArchiveItem.ItemType.PHOTO:
+        return _archive_manage_edit_photo(request, item)
     raise Http404()
 
 
@@ -2179,6 +2199,55 @@ def _archive_manage_edit_manual_text(request, item: ArchiveItem):
                 form_data=form_data,
                 form_errors=form_errors,
                 page_title="עריכת טקסט מוקלד",
+                submit_label="עדכון",
+            ),
+            **_manual_text_discovery_metadata_form_context(),
+        },
+    )
+
+
+def _archive_manage_edit_photo(request, item: ArchiveItem):
+    form_errors: list[str] = []
+    form_data = _photo_form_data_from_item(item)
+
+    if request.method == "POST":
+        parsed_shared, shared_errors = parse_archive_metadata_form(request.POST)
+        parsed_discovery, discovery_errors = parse_archive_item_discovery_metadata_form(
+            request.POST,
+            tags_field="tags",
+        )
+        form_errors = shared_errors + discovery_errors
+        form_data = {**parsed_shared, **parsed_discovery}
+        if not form_errors:
+            with transaction.atomic():
+                update_photo_archive_item_metadata(
+                    item,
+                    title=parsed_shared["title"],
+                    visibility=parsed_shared["visibility"],
+                    date_start=parsed_shared["date_start_value"],
+                    date_end=parsed_shared["date_end_value"],
+                    date_precision=parsed_shared["date_precision"],
+                    metadata_status=parsed_shared["metadata_status"],
+                    author_name=parsed_shared["author_name"],
+                    source_title=parsed_shared["source_title"],
+                )
+                update_archive_item_discovery_metadata(
+                    item,
+                    category_names=parsed_discovery["category_names"],
+                    event_names=parsed_discovery["event_names"],
+                    tag_names=parsed_discovery["tag_names"],
+                )
+            return redirect("archive-manage-list")
+
+    return render(
+        request,
+        "documents/archive/photo_form.html",
+        context={
+            "item": item,
+            **_archive_metadata_form_context(
+                form_data=form_data,
+                form_errors=form_errors,
+                page_title="עריכת תמונה",
                 submit_label="עדכון",
             ),
             **_manual_text_discovery_metadata_form_context(),
@@ -2263,9 +2332,15 @@ def archive_manage_delete_page(request, item_id: int):
         return deny
 
     try:
-        item = ArchiveItem.objects.select_related("manual_text_content").get(
+        item = ArchiveItem.objects.select_related(
+            "manual_text_content",
+            "photo_content",
+        ).get(
             id=item_id,
-            item_type=ArchiveItem.ItemType.MANUAL_TEXT,
+            item_type__in=(
+                ArchiveItem.ItemType.MANUAL_TEXT,
+                ArchiveItem.ItemType.PHOTO,
+            ),
         )
     except ArchiveItem.DoesNotExist:
         raise Http404() from None
@@ -2275,8 +2350,13 @@ def archive_manage_delete_page(request, item_id: int):
             item.delete()
         return redirect("archive-manage-list")
 
+    if item.item_type == ArchiveItem.ItemType.PHOTO:
+        template_name = "documents/archive/photo_delete_confirm.html"
+    else:
+        template_name = "documents/archive/manual_text_delete_confirm.html"
+
     return render(
         request,
-        "documents/archive/manual_text_delete_confirm.html",
+        template_name,
         context={"item": item},
     )

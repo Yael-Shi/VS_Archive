@@ -1393,3 +1393,19 @@ Category/event/tag names on archive detail pages link to these browse pages. Bro
 **Deferred (PR5+):** Edit/delete polish, thumbnail generation — per `docs/ai-context/photo-archive-items.md`.
 
 **Docs:** `docs/ai-context/photo-archive-items.md`
+
+## ArchiveItem — PHOTO staff metadata edit + delete V1 (PR5)
+
+**Decision:** Add first-party staff/admin PHOTO management polish on existing archive manage routes. Reuse **`parse_archive_metadata_form`**, **`update_archive_item_discovery_metadata`**, and shared metadata form fields — **no** separate PHOTO metadata path.
+
+**Edit:** **`/archive/manage/<id>/edit/`** for **`item_type=PHOTO`** updates **`ArchiveItem`** shared fields + discovery M2M only via **`update_photo_archive_item_metadata`**. **Does not** change **`PhotoContent.original_file_key`**, upload status, or image bytes. **No** re-upload UI. Redirect after save → **`/archive/manage/`** (not public detail — **`PENDING`**/**`FAILED`** PHOTO may be non-renderable on **`/archive/<id>/`**).
+
+**Delete:** **`/archive/manage/<id>/delete/`** for **`PHOTO`** and **`MANUAL_TEXT`** only (OCR unchanged — still **404**). GET shows confirmation; POST deletes **`ArchiveItem`** (cascades **`PhotoContent`**) and redirects to **`/archive/manage/`**. Staff/admin only.
+
+**S3 cleanup:** **Deferred.** PR5 deletes DB rows only. No existing safe project-wide S3 delete-object helper; orphaned private photo keys are a known follow-up (operational cleanup runbook/job).
+
+**Scope (PR5):** Service, edit/delete views/templates, manage list + detail staff actions, focused tests, minimal doc updates. **No** re-upload/retry after **`FAILED`**, thumbnails, dimensions, captions, OCR/**`Document`**, worker/SQS, visibility changes.
+
+**Deferred:** S3 object delete on PHOTO delete, re-upload/retry, thumbnail generation — per `docs/ai-context/photo-archive-items.md`.
+
+**Docs:** `docs/ai-context/photo-archive-items.md`

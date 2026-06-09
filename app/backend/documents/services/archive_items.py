@@ -174,6 +174,49 @@ def update_manual_text_archive_item(
     return archive_item
 
 
+@transaction.atomic
+def update_photo_archive_item_metadata(
+    archive_item,
+    *,
+    title: str,
+    visibility: str,
+    date_start=None,
+    date_end=None,
+    date_precision: str,
+    metadata_status: str,
+    author_name: str = "",
+    source_title: str = "",
+):
+    """
+    Update shared ArchiveItem metadata for a PHOTO item.
+
+    Does not modify PhotoContent file fields, create Document rows, or enqueue
+    processing.
+    """
+    from documents.models import ArchiveItem
+
+    if archive_item.item_type != ArchiveItem.ItemType.PHOTO:
+        raise ValueError("archive item is not PHOTO")
+
+    archive_item.title = title
+    archive_item.visibility = visibility
+    archive_item.date_start = date_start
+    archive_item.date_end = date_end
+    archive_item.date_precision = date_precision
+    archive_item.metadata_status = metadata_status
+    archive_item.author_name = author_name
+    archive_item.source_title = source_title
+    archive_item.save(
+        update_fields=[
+            *ARCHIVE_ITEM_SHARED_FIELD_NAMES,
+            "author_name",
+            "source_title",
+            "updated_at",
+        ]
+    )
+    return archive_item
+
+
 def sync_archive_item_shared_fields_from_document(
     document,
     *,

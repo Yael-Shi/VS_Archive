@@ -2,7 +2,7 @@
 
 Design and implementation scope for **`PHOTO`** archive items: one photo per **`ArchiveItem`**, private S3 storage, presigned display, and no OCR/HTR pipeline.
 
-**Status:** Design (PR1) + **model foundation (PR2)** + **staff create/upload V1 (PR3)** + **public/archive display V1 (PR4)**. Edit/delete polish remains deferred (PR5).
+**Status:** Design (PR1) + **model foundation (PR2)** + **staff create/upload V1 (PR3)** + **public/archive display V1 (PR4)** + **staff metadata edit/delete V1 (PR5)**. Thumbnail generation and re-upload/retry remain deferred.
 
 **Related docs:**
 
@@ -236,6 +236,8 @@ Use existing shared fields only:
 **PR4 browse eligibility:** **`archive_browse_queryset_for_user`** includes **`PHOTO`** only when linked **`PhotoContent.upload_status == UPLOADED`** and **`original_file_key`** is non-empty (visibility/access unchanged). **`PENDING`** / **`FAILED`** PHOTO rows stay hidden from **`/archive/`** list/detail/discovery browse. Staff **`/archive/manage/`** still lists all PHOTO items regardless of upload status.
 
 **PR4 detail display:** After **`get_viewable_archive_item`** permission/eligibility checks, detail generates presigned GET for **`original_file_key`** only (not in list V1). Missing bucket config fails safely on detail (no broken URL).
+
+**PR5 staff manage edit/delete:** Staff/admin edit PHOTO shared **`ArchiveItem`** metadata at **`/archive/manage/<id>/edit/`** (title, visibility, dates, metadata status, author/source, categories/events/tags). **No** file replace/re-upload on edit. Successful edit redirects to **`/archive/manage/`** (not public detail — non-uploaded PHOTO may 404 on **`/archive/<id>/`**). Staff/admin delete at **`/archive/manage/<id>/delete/`** (GET confirmation, POST-only delete) removes **`ArchiveItem`** + **`PhotoContent`** DB rows and redirects to **`/archive/manage/`**. **S3 object cleanup is deferred** — no delete-object call in PR5; orphaned private S3 keys require a future cleanup runbook/job.
 
 ---
 
