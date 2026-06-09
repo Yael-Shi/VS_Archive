@@ -33,6 +33,11 @@ urlpatterns = [
         views.document_detail_page,
         name="documents-detail-page",
     ),
+    path(
+        "ui/documents/<int:doc_id>/ocr-reprocess/",
+        views.document_ocr_reprocess,
+        name="documents-ocr-reprocess",
+    ),
     path("ui/upload/", views.upload_page, name="upload-page"),
     path("ui/admin/backlog/", views.admin_backlog_page, name="admin-backlog-page"),
     path("ui/admin/review/", views.review_backlog_page, name="review-backlog-page"),

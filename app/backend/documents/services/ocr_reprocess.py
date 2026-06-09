@@ -78,6 +78,14 @@ def validate_document_for_ocr_reprocess(doc: Document) -> None:
         )
 
 
+def is_ocr_reprocess_ui_eligible(doc: Document) -> bool:
+    try:
+        validate_document_for_ocr_reprocess(doc)
+    except OcrReprocessError:
+        return False
+    return True
+
+
 def _has_succeeded_transkribus_upload_run(
     *,
     document_id: int,
