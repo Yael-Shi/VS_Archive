@@ -7,6 +7,7 @@ from .models import (
     CorrectionRequest,
     DocumentTextResult,
     ManualTextContent,
+    PhotoContent,
     Tag,
     DocumentMetadata,
     TranskribusRun,
@@ -119,6 +120,43 @@ class ManualTextContentAdmin(admin.ModelAdmin):
     search_fields = ("archive_item__title", "body")
     ordering = ("-created_at",)
     readonly_fields = ("archive_item", "body", "created_at", "updated_at")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(PhotoContent)
+class PhotoContentAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "archive_item",
+        "original_filename",
+        "original_mime_type",
+        "created_at",
+        "updated_at",
+    )
+    search_fields = ("archive_item__title", "original_filename", "original_file_key")
+    ordering = ("-created_at",)
+    readonly_fields = (
+        "archive_item",
+        "original_file_key",
+        "original_filename",
+        "original_mime_type",
+        "original_size_bytes",
+        "width",
+        "height",
+        "thumbnail_file_key",
+        "thumbnail_mime_type",
+        "thumbnail_size_bytes",
+        "created_at",
+        "updated_at",
+    )
 
     def has_add_permission(self, request):
         return False

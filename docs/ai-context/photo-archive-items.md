@@ -2,7 +2,7 @@
 
 Design and implementation scope for **`PHOTO`** archive items: one photo per **`ArchiveItem`**, private S3 storage, presigned display, and no OCR/HTR pipeline.
 
-**Status:** Design only (PR1). **Does not change runtime behavior.**
+**Status:** Design (PR1) + **model foundation (PR2)**. Upload, display, and staff create flows remain deferred.
 
 **Related docs:**
 
@@ -13,7 +13,7 @@ Design and implementation scope for **`PHOTO`** archive items: one photo per **`
 
 **Key code references (current behavior):**
 
-- `documents/models.py` — **`ArchiveItem`**, **`ManualTextContent`**; **`PHOTO`** enum exists but has no backing model yet
+- `documents/models.py` — **`ArchiveItem`**, **`ManualTextContent`**, **`PhotoContent`**
 - `documents/services/archive_item_access.py` — visibility access control for **`/archive/`**
 - `documents/services/archive_items.py` — create/edit helpers for **`OCR_DOCUMENT`** and **`MANUAL_TEXT`**
 - `documents/services/upload_validation.py` — MIME/extension validation (OCR upload today)
@@ -80,9 +80,9 @@ ArchiveItem (item_type=PHOTO)
 
 ---
 
-## 3. Proposed PhotoContent fields
+## 3. PhotoContent fields
 
-Proposed Django model shape (implementation in PR2):
+**Status:** Model + migration implemented in **PR2** (foundation only). Upload, S3, and display remain deferred.
 
 | Field | Type | Notes |
 |-------|------|-------|
@@ -101,7 +101,7 @@ Proposed Django model shape (implementation in PR2):
 
 **Thumbnail foundation:** Thumbnail columns may be added in PR2 as nullable fields even though V1 does not generate thumbnails. Alternatively, thumbnail columns may be deferred to a later migration — **but** the S3 key convention and model design must not block adding them later. Do not store thumbnails inline in the DB.
 
-**Validation invariant:** **`ArchiveItem.item_type`** must be **`PHOTO`** when a **`PhotoContent`** row exists. Create services should enforce this (same pattern as **`ManualTextContent`** + **`MANUAL_TEXT`**).
+**Validation invariant:** **`ArchiveItem.item_type`** must be **`PHOTO`** when a **`PhotoContent`** row exists. **`PhotoContent.clean()`** enforces this on **`full_clean()`**; create/update services in later PRs should enforce it at write time (same pattern as **`ManualTextContent`** + **`MANUAL_TEXT`**).
 
 ---
 
