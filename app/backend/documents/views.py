@@ -1867,13 +1867,18 @@ def _submit_manual_text_create(request):
     return redirect("archive-detail", item_id=item.id), form_data, form_errors
 
 
-def _archive_browse_items_queryset(user, **filter_kwargs):
-    return (
-        archive_browse_queryset_for_user(user)
-        .filter(**filter_kwargs)
-        .select_related("manual_text_content", "ocr_document")
-        .order_by("-created_at")
+def _archive_browse_select_related(queryset):
+    return queryset.select_related(
+        "manual_text_content",
+        "ocr_document",
+        "photo_content",
     )
+
+
+def _archive_browse_items_queryset(user, **filter_kwargs):
+    return _archive_browse_select_related(
+        archive_browse_queryset_for_user(user).filter(**filter_kwargs)
+    ).order_by("-created_at")
 
 
 def _archive_browse_page_context(*, page_title: str, items) -> dict:
@@ -1939,11 +1944,9 @@ def archive_list_page(request):
         request.GET.get("item_type")
     )
     search_query = normalize_archive_list_search_query(request.GET.get("q"))
-    items = (
+    items = _archive_browse_select_related(
         archive_browse_queryset_for_user(request.user)
-        .select_related("manual_text_content", "ocr_document")
-        .order_by("-created_at")
-    )
+    ).order_by("-created_at")
     if item_type_filter:
         items = items.filter(item_type=item_type_filter)
     items = filter_archive_items_by_search_query(items, search_query)
@@ -1952,6 +1955,8 @@ def archive_list_page(request):
         item_type_filter_slug = ARCHIVE_ITEM_TYPE_OCR_DOCUMENT
     elif item_type_filter == ArchiveItem.ItemType.MANUAL_TEXT:
         item_type_filter_slug = ARCHIVE_ITEM_TYPE_MANUAL_TEXT
+    elif item_type_filter == ArchiveItem.ItemType.PHOTO:
+        item_type_filter_slug = ARCHIVE_ITEM_TYPE_PHOTO
     return render(
         request,
         "documents/archive/list.html",
@@ -1975,18 +1980,49 @@ def archive_detail_page(request, item_id: int):
             raise Http404()
         return redirect("documents-detail-page", doc_id=doc.id)
 
-    if item.item_type != ArchiveItem.ItemType.MANUAL_TEXT:
-        raise Http404()
+    if item.item_type == ArchiveItem.ItemType.MANUAL_TEXT:
+        return render(
+            request,
+            "documents/archive/detail.html",
+            context={
+                "item": item,
+                "body": item.manual_text_content.body,
+                "photo_url": None,
+                "is_admin": _is_admin(request.user),
+            },
+        )
 
-    return render(
-        request,
-        "documents/archive/detail.html",
-        context={
-            "item": item,
-            "body": item.manual_text_content.body,
-            "is_admin": _is_admin(request.user),
-        },
-    )
+    if item.item_type == ArchiveItem.ItemType.PHOTO:
+        photo_content = getattr(item, "photo_content", None)
+        if (
+            photo_content is None
+            or photo_content.upload_status != PhotoContent.UploadStatus.UPLOADED
+            or not (photo_content.original_file_key or "").strip()
+        ):
+            raise Http404()
+
+        photo_url = None
+        bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
+        if bucket:
+            photo_url = create_presigned_get(
+                bucket=bucket,
+                key=photo_content.original_file_key,
+                expires_in=3600,
+            )
+
+        return render(
+            request,
+            "documents/archive/detail.html",
+            context={
+                "item": item,
+                "body": None,
+                "photo_url": photo_url,
+                "photo_content": photo_content,
+                "is_admin": _is_admin(request.user),
+            },
+        )
+
+    raise Http404()
 
 
 @login_required
