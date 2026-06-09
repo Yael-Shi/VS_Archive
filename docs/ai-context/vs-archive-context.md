@@ -8,7 +8,7 @@ VS-Archive is a Django backend project for managing historical family documents.
 - **`OCR_DOCUMENT`:** **`Document`** remains runtime source of truth during the bridge for OCR/processing fields and document-centric list/detail/review/upload paths. Shared **`ArchiveItem`** fields are copied at create/backfill; **PR1+** OCR metadata edit at **`/archive/manage/<id>/edit/`** performs explicit edit-time sync of the six shared fields from **`Document`** to **`ArchiveItem`**. Full source-of-truth cutover is **not** implemented yet — see **`docs/ai-context/ocr-archiveitem-cutover.md`**. Outside create, OCR edit, and reconciliation, do not assume **`ArchiveItem`** copies stay current after **`Document`** edits (e.g. Django Admin **`Document`** changes do not sync).
 - **`MANUAL_TEXT`:** **`ArchiveItem`** + **`ManualTextContent`** are runtime source of truth. Staff/admin create/edit via **`/archive/manage/new/manual-text/`** and **`/archive/manage/<id>/edit/`**. No **`Document`**, no OCR/HTR, no SQS. Body is **not** in **`DocumentTextResult`**.
 - **`ArchiveItem.visibility`** is the access-control source of truth for all **`ArchiveItem`** types (`public` / `private`). **`private`** means private family archive content (visible to authenticated **`archive_family`** group members and staff/admin), not staff-only content. Helpers in **`archive_item_access.py`**. **`Document.visibility`** remains a temporary bridge field; OCR document list/detail access uses **`document.archive_item.visibility`**. Family invitation/account-management is deferred.
-- **`PHOTO`** archive items are **not** implemented yet (`PHOTO` remains enum-only).
+- **`PHOTO`** archive items are **not** implemented yet (`PHOTO` remains enum-only). Design/scope: **`docs/ai-context/photo-archive-items.md`** (PR1 docs only; implementation PR2+). Planned PHOTO work reuses existing **`public`** / **`private`** visibility only — no new access model.
 - Documents may be uploaded as IMAGE or PDF.
 - Documents have metadata (`language`, `text_input_type`, etc.).
 - OCR/HTR extracts text into `DocumentTextResult` rows.
@@ -74,6 +74,7 @@ Non-Hebrew documents may remain **`PARTIAL`** because `HEBREW_TEXT` (translation
 ## Where to read more
 
 - `docs/ai-context/decision-log.md` — durable decisions, Transkribus PR history, operational boundaries.
+- `docs/ai-context/photo-archive-items.md` — PHOTO item design/scope (planned; not implemented).
 - `.cursor/rules/architecture.mdc` — layer boundaries and contracts for code changes.
 
 ## Near-term roadmap
