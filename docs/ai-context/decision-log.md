@@ -1269,3 +1269,15 @@ Category/event/tag names on archive detail pages link to these browse pages. Bro
 **Deferred:** Full schema cleanup/removal of **`Document.category_event`** and **`Document.tags_m2m`** (PR7 follow-up).
 
 **Docs:** `docs/ai-context/archive-discovery-catalog-design.md`
+
+## Manual text UX — create discovery metadata and safe URL linkify (QA follow-up)
+
+**Decision:** Extend manual text creation to support **`ArchiveItem`**-level discovery metadata in one flow, and safely linkify **`http://`** / **`https://`** URLs in manual text body on the public detail page.
+
+**Manual text create:** **`/archive/manage/new/manual-text/`** and the manual-text branch of **`/archive/manage/new/`** now include the same categories/events/tags fields as manual text edit. Create POST reuses **`parse_archive_item_discovery_metadata_form`** and **`update_archive_item_discovery_metadata`**; submitted discovery values are preserved when validation fails. **No** legacy OCR **`Document.category_event`** / **`Document.tags_m2m`** fields.
+
+**Manual text body display:** Plain text remains stored in **`ManualTextContent.body`**. Detail rendering uses **`manual_text_body_display`** (escape → line breaks → safe http/https linkify with **`target="_blank"`** / **`rel="noopener noreferrer"`**). **No** rich text editing, **no** HTML storage, **no** arbitrary HTML rendering.
+
+**Scope:** Views/templates/services/templatetags, focused tests, this log entry. **No** models, migrations, OCR/worker/status changes, or OCR text formatting changes.
+
+**Deferred:** Full rich text formatting/editor design.
