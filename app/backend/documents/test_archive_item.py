@@ -1180,10 +1180,10 @@ class OcrDocumentMetadataEditTests(TestCase):
         self.assertEqual(admin_meta.collection, "POST collection")
         self.assertEqual(admin_meta.original_location, "POST location")
         self.assertEqual(admin_meta.notes, "POST notes")
-        self.assertEqual(doc.category_event, "After event")
+        self.assertEqual(doc.category_event, "Before event")
         self.assertEqual(
             list(doc.tags_m2m.values_list("name", flat=True)),
-            ["after-tag"],
+            ["before-tag"],
         )
 
     def test_visibility_change_affects_archive_access(self):
@@ -1262,7 +1262,7 @@ class OcrDocumentMetadataEditTests(TestCase):
         )
         self.assertEqual(resp.status_code, 403)
 
-    def test_shared_validation_error_blocks_catalog_and_tags(self):
+    def test_shared_validation_error_blocks_catalog(self):
         doc = create_ocr_document(
             title="Before shared error",
             doc_type=Document.DocType.IMAGE,
@@ -1604,7 +1604,9 @@ class OcrDocumentCatalogMetadataEditTests(TestCase):
             "collection": "",
             "original_location": "",
             "notes": "",
-            "category_event": "",
+            "categories": "",
+            "events": "",
+            "discovery_tags": "",
         }
         payload.update(overrides)
         return payload
@@ -1615,7 +1617,6 @@ class OcrDocumentCatalogMetadataEditTests(TestCase):
             "collection": "ארכיון משפחתי",
             "original_location": "ירושלים",
             "notes": "הערה פנימית",
-            "category_event": "חתונה",
         }
         payload.update(overrides)
         return payload
@@ -1643,12 +1644,14 @@ class OcrDocumentCatalogMetadataEditTests(TestCase):
         self.assertContains(resp, 'name="collection"')
         self.assertContains(resp, 'name="original_location"')
         self.assertContains(resp, 'name="notes"')
-        self.assertContains(resp, 'name="category_event"')
+        self.assertNotContains(resp, 'name="category_event"')
+        self.assertContains(resp, 'name="categories"')
+        self.assertContains(resp, 'name="events"')
+        self.assertContains(resp, 'name="discovery_tags"')
         self.assertContains(resp, "Donor A")
         self.assertContains(resp, "Collection B")
         self.assertContains(resp, "Tel Aviv")
         self.assertContains(resp, "Some notes")
-        self.assertContains(resp, "בר מצווה")
 
     def test_staff_post_saves_catalog_metadata(self):
         doc = create_ocr_document(
@@ -1671,7 +1674,7 @@ class OcrDocumentCatalogMetadataEditTests(TestCase):
         self.assertEqual(admin_meta.collection, "ארכיון משפחתי")
         self.assertEqual(admin_meta.original_location, "ירושלים")
         self.assertEqual(admin_meta.notes, "הערה פנימית")
-        self.assertEqual(doc.category_event, "חתונה")
+        self.assertIsNone(doc.category_event)
 
     def test_post_creates_document_metadata_when_missing(self):
         doc = create_ocr_document(
@@ -1720,7 +1723,7 @@ class OcrDocumentCatalogMetadataEditTests(TestCase):
         self.assertEqual(doc.admin_meta.collection, "ארכיון משפחתי")
         self.assertEqual(doc.admin_meta.original_location, "ירושלים")
         self.assertEqual(doc.admin_meta.notes, "הערה פנימית")
-        self.assertEqual(doc.category_event, "חתונה")
+        self.assertEqual(doc.category_event, "Before event")
 
     def test_clearing_catalog_fields_persists_empty_values(self):
         doc = create_ocr_document(
@@ -1746,7 +1749,7 @@ class OcrDocumentCatalogMetadataEditTests(TestCase):
         self.assertEqual(doc.admin_meta.collection, "")
         self.assertEqual(doc.admin_meta.original_location, "")
         self.assertEqual(doc.admin_meta.notes, "")
-        self.assertIsNone(doc.category_event)
+        self.assertEqual(doc.category_event, "Event to clear")
 
     def test_donor_max_length_rejected(self):
         doc = create_ocr_document(
@@ -1799,24 +1802,22 @@ class OcrDocumentCatalogMetadataEditTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "מיקום מקורי חייב להיות עד 255 תווים")
 
-    def test_category_event_max_length_rejected(self):
+    def test_ocr_edit_get_hides_legacy_category_event_field(self):
         doc = create_ocr_document(
-            title="Category length",
+            title="Hide category event",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
+            category_event="Legacy event value",
         )
         self.client.force_login(self.staff)
-        resp = self.client.post(
-            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
-            data=self._valid_metadata_payload(
-                title="Category length",
-                category_event="x" * 256,
-            ),
+        resp = self.client.get(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id)
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "אירוע / קטגוריה חייב להיות עד 255 תווים")
+        self.assertNotContains(resp, 'name="category_event"')
+        self.assertNotContains(resp, "אירוע / קטגוריה")
 
-    def test_catalog_validation_error_blocks_shared_and_tags(self):
+    def test_catalog_validation_error_blocks_shared_and_discovery(self):
         doc = create_ocr_document(
             title="Before catalog error",
             doc_type=Document.DocType.IMAGE,
@@ -1827,19 +1828,21 @@ class OcrDocumentCatalogMetadataEditTests(TestCase):
             metadata_status=ArchiveItem.MetadataStatus.COMPLETED,
         )
         doc.tags_m2m.add(Tag.objects.create(name="keep-tag"))
+        item = doc.archive_item
+        cat = ArchiveCategory.objects.create(name="Keep cat", slug="keep-cat")
+        item.categories.add(cat)
         self.client.force_login(self.staff)
         resp = self.client.post(
             self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
             data=self._valid_metadata_payload(
                 title="After catalog error",
                 donor="x" * 256,
-                tags="new-tag",
+                categories="New cat",
             ),
         )
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "תורם/ת חייב להיות עד 255 תווים")
         doc.refresh_from_db()
-        item = doc.archive_item
         item.refresh_from_db()
         self.assertEqual(doc.title, "Before catalog error")
         self.assertEqual(item.title, "ArchiveItem before catalog error")
@@ -1848,6 +1851,10 @@ class OcrDocumentCatalogMetadataEditTests(TestCase):
         self.assertEqual(
             list(doc.tags_m2m.values_list("name", flat=True)),
             ["keep-tag"],
+        )
+        self.assertEqual(
+            list(item.categories.values_list("name", flat=True)),
+            ["Keep cat"],
         )
 
     def test_anonymous_cannot_edit_catalog_metadata(self):
@@ -2089,13 +2096,14 @@ class OcrDocumentTagsEditTests(TestCase):
             "collection": "",
             "original_location": "",
             "notes": "",
-            "category_event": "",
-            "tags": "",
+            "categories": "",
+            "events": "",
+            "discovery_tags": "",
         }
         payload.update(overrides)
         return payload
 
-    def test_staff_get_ocr_edit_form_shows_tags_field_and_prefill(self):
+    def test_staff_get_ocr_edit_form_hides_legacy_tags_field(self):
         doc = create_ocr_document(
             title="Tags prefill",
             doc_type=Document.DocType.IMAGE,
@@ -2109,101 +2117,37 @@ class OcrDocumentTagsEditTests(TestCase):
             self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id)
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'name="tags"')
-        self.assertContains(resp, "משפחה, ירושלים")
+        self.assertNotContains(resp, 'id="tags"')
+        self.assertNotContains(resp, 'name="tags"')
+        self.assertContains(resp, 'name="discovery_tags"')
 
-    def test_staff_post_saves_tags(self):
+    def test_staff_post_ignores_legacy_tags_field(self):
         doc = create_ocr_document(
             title="Tags save",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
-        )
-        self.client.force_login(self.staff)
-        resp = self.client.post(
-            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
-            data=self._valid_metadata_payload(
-                title="Tags save",
-                tags="משפחה, 1948",
-            ),
-        )
-        self.assertEqual(resp.status_code, 302)
-        doc.refresh_from_db()
-        self.assertEqual(
-            list(doc.tags_m2m.order_by("name").values_list("name", flat=True)),
-            ["1948", "משפחה"],
-        )
-
-    def test_staff_post_replaces_tags(self):
-        doc = create_ocr_document(
-            title="Tags replace",
-            doc_type=Document.DocType.IMAGE,
-            text_input_type=Document.TextInputType.HANDWRITTEN,
-        )
-        old_tag = Tag.objects.create(name="old-tag")
-        doc.tags_m2m.add(old_tag)
-        self.client.force_login(self.staff)
-        self.client.post(
-            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
-            data=self._valid_metadata_payload(
-                title="Tags replace",
-                tags="new-tag",
-            ),
-        )
-        doc.refresh_from_db()
-        self.assertEqual(
-            list(doc.tags_m2m.values_list("name", flat=True)),
-            ["new-tag"],
-        )
-        self.assertTrue(Tag.objects.filter(name="old-tag").exists())
-
-    def test_staff_post_clears_tags(self):
-        doc = create_ocr_document(
-            title="Tags clear",
-            doc_type=Document.DocType.IMAGE,
-            text_input_type=Document.TextInputType.HANDWRITTEN,
-        )
-        doc.tags_m2m.add(Tag.objects.create(name="to-clear"))
-        self.client.force_login(self.staff)
-        self.client.post(
-            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
-            data=self._valid_metadata_payload(title="Tags clear", tags=""),
-        )
-        doc.refresh_from_db()
-        self.assertFalse(doc.tags_m2m.exists())
-
-    def test_tag_validation_error_blocks_partial_save(self):
-        doc = create_ocr_document(
-            title="Before tag error",
-            doc_type=Document.DocType.IMAGE,
-            text_input_type=Document.TextInputType.HANDWRITTEN,
-            category_event="Before event",
-        )
-        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
-            title="ArchiveItem before tag error",
-            visibility=ArchiveItem.Visibility.PUBLIC,
         )
         doc.tags_m2m.add(Tag.objects.create(name="keep-me"))
         self.client.force_login(self.staff)
         resp = self.client.post(
             self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
             data=self._valid_metadata_payload(
-                title="After tag error",
-                category_event="After event",
-                tags="x" * 65,
+                title="Tags save",
+                tags="משפחה, 1948",
+                discovery_tags="item-tag",
             ),
         )
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "תגית חייבת להיות עד 64 תווים")
+        self.assertEqual(resp.status_code, 302)
         doc.refresh_from_db()
         item = doc.archive_item
         item.refresh_from_db()
-        self.assertEqual(doc.title, "Before tag error")
-        self.assertEqual(item.title, "ArchiveItem before tag error")
-        self.assertEqual(item.visibility, ArchiveItem.Visibility.PUBLIC)
-        self.assertEqual(doc.category_event, "Before event")
         self.assertEqual(
             list(doc.tags_m2m.values_list("name", flat=True)),
             ["keep-me"],
+        )
+        self.assertEqual(
+            list(item.tags.values_list("name", flat=True)),
+            ["item-tag"],
         )
 
     def test_anonymous_cannot_edit_tags(self):
@@ -2263,64 +2207,6 @@ class OcrDocumentTagsEditTests(TestCase):
         self.assertEqual(resp.status_code, 403)
         doc.refresh_from_db()
         self.assertFalse(doc.tags_m2m.exists())
-
-    def test_tags_edit_does_not_change_document_text_results(self):
-        doc = create_ocr_document(
-            title="Tags result guard",
-            doc_type=Document.DocType.IMAGE,
-            text_input_type=Document.TextInputType.HANDWRITTEN,
-        )
-        result = DocumentTextResult.objects.create(
-            document=doc,
-            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
-            engine="test-engine",
-            status=DocumentTextResult.Status.NEEDS_REVIEW,
-            text="unchanged transcript",
-        )
-        self.client.force_login(self.staff)
-        self.client.post(
-            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
-            data=self._valid_metadata_payload(
-                title="Tags result guard",
-                tags="tag-a",
-            ),
-        )
-        result.refresh_from_db()
-        self.assertEqual(result.text, "unchanged transcript")
-        self.assertEqual(result.status, DocumentTextResult.Status.NEEDS_REVIEW)
-        self.assertEqual(result.engine, "test-engine")
-
-    def test_tags_edit_does_not_change_ocr_processing_fields(self):
-        doc = create_ocr_document(
-            title="Tags processing guard",
-            doc_type=Document.DocType.PDF,
-            text_input_type=Document.TextInputType.PRINTED,
-            language=Document.Language.ENGLISH,
-            upload_status=Document.UploadStatus.UPLOADED,
-            file_s3_key="uploads/tags-guard.pdf",
-            file_original_name="tags-guard.pdf",
-            mime_type="application/pdf",
-        )
-        before = {
-            "doc_type": doc.doc_type,
-            "text_input_type": doc.text_input_type,
-            "language": doc.language,
-            "upload_status": doc.upload_status,
-            "file_s3_key": doc.file_s3_key,
-            "file_original_name": doc.file_original_name,
-            "mime_type": doc.mime_type,
-        }
-        self.client.force_login(self.staff)
-        self.client.post(
-            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
-            data=self._valid_metadata_payload(
-                title="Tags processing guard",
-                tags="tag-a",
-            ),
-        )
-        doc.refresh_from_db()
-        for field, value in before.items():
-            self.assertEqual(getattr(doc, field), value)
 
     def test_update_ocr_document_tags_service_sets_and_reuses_tags(self):
         doc = create_ocr_document(
@@ -4397,20 +4283,22 @@ class ArchiveItemDiscoveryMetadataEditTests(TestCase):
             self.assertEqual(resp.status_code, 403)
             self.client.logout()
 
-    def test_ocr_shared_catalog_and_document_tags_edit_still_work(self):
+    def test_ocr_shared_catalog_and_discovery_metadata_edit_still_work(self):
         doc = create_ocr_document(
             title="Combined OCR edit",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
+            category_event="Legacy event",
         )
+        doc.tags_m2m.add(Tag.objects.create(name="doc-only-tag"))
         self.client.force_login(self.staff)
         resp = self.client.post(
             self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
             data=self._ocr_metadata_payload(
                 title="Combined after",
                 donor="Donor value",
-                category_event="Legacy event",
-                tags="doc-tag",
+                category_event="Tampered event",
+                tags="tampered-doc-tag",
                 categories="Archive cat",
                 discovery_tags="item-tag",
             ),
@@ -4423,7 +4311,10 @@ class ArchiveItemDiscoveryMetadataEditTests(TestCase):
         self.assertEqual(item.title, "Combined after")
         self.assertEqual(doc.admin_meta.donor, "Donor value")
         self.assertEqual(doc.category_event, "Legacy event")
-        self.assertEqual(list(doc.tags_m2m.values_list("name", flat=True)), ["doc-tag"])
+        self.assertEqual(
+            list(doc.tags_m2m.values_list("name", flat=True)),
+            ["doc-only-tag"],
+        )
         self.assertEqual(
             list(item.categories.values_list("name", flat=True)),
             ["Archive cat"],

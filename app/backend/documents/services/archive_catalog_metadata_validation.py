@@ -10,7 +10,6 @@ _FIELD_LABELS_HE: dict[str, str] = {
     "donor": "תורם/ת",
     "collection": "אוסף",
     "original_location": "מיקום מקורי",
-    "category_event": "אירוע / קטגוריה",
 }
 
 
@@ -31,15 +30,11 @@ def parse_ocr_catalog_metadata_form(
     notes_raw = post_data.get("notes")
     notes = "" if notes_raw is None else str(notes_raw)
 
-    category_event_raw = (post_data.get("category_event") or "").strip()
-    category_event = category_event_raw or None
-
     errors: list[str] = []
     for field_name, value in (
         ("donor", donor),
         ("collection", collection),
         ("original_location", original_location),
-        ("category_event", category_event_raw),
     ):
         _validate_max_length(field_name, value, errors)
 
@@ -48,7 +43,5 @@ def parse_ocr_catalog_metadata_form(
         "collection": collection,
         "original_location": original_location,
         "notes": notes,
-        "category_event": category_event_raw,
-        "category_event_value": category_event,
     }
     return parsed, errors
