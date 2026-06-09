@@ -2562,13 +2562,53 @@ class UnifiedArchiveItemCreatePageTests(TestCase):
         self.assertContains(resp, "title is required")
         self.assertContains(resp, 'name="body"')
 
-    def test_ocr_document_option_links_to_upload_page(self):
+    def test_ocr_document_branch_renders_upload_form(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.NEW_URL, {"item_type": "ocr_document"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'id="uploadForm"')
+        self.assertContains(resp, "העלאת מסמך לעיבוד טקסט")
+        self.assertNotContains(resp, "OCR/HTR")
+
+    def test_ocr_document_branch_includes_key_upload_fields(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.NEW_URL, {"item_type": "ocr_document"})
+        self.assertEqual(resp.status_code, 200)
+        for needle in (
+            'name="file" type="file" multiple',
+            'id="title"',
+            'id="doc_type"',
+            'id="text_input_type"',
+        ):
+            self.assertContains(resp, needle)
+
+    def test_ocr_document_branch_renders_csrf_token_in_upload_form(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.NEW_URL, {"item_type": "ocr_document"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'name="csrfmiddlewaretoken"')
+        form_start = resp.content.index(b'id="uploadForm"')
+        csrf_pos = resp.content.index(b'name="csrfmiddlewaretoken"', form_start)
+        nav_pos = resp.content.index(b"nav-shell")
+        self.assertGreater(csrf_pos, form_start)
+        self.assertGreater(csrf_pos, nav_pos)
+
+    def test_ocr_document_branch_js_references_upload_endpoints(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.NEW_URL, {"item_type": "ocr_document"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "/api/uploads/create/")
+        self.assertContains(resp, "/complete/")
+        self.assertContains(resp, "/parts/")
+        self.assertContains(resp, "/finalize/")
+        self.assertContains(resp, "X-CSRFToken")
+        self.assertContains(resp, "getCsrfToken")
+
+    def test_ocr_document_branch_keeps_secondary_upload_page_link(self):
         self.client.force_login(self.staff)
         resp = self.client.get(self.NEW_URL, {"item_type": "ocr_document"})
         self.assertContains(resp, reverse("upload-page"))
-        self.assertContains(resp, "המשך להעלאת מסמך")
-        self.assertContains(resp, "העלאת מסמך לעיבוד טקסט")
-        self.assertNotContains(resp, "OCR/HTR")
+        self.assertContains(resp, "פתיחה בדף העלאה נפרד")
 
     def test_existing_manual_text_route_still_works(self):
         self.client.force_login(self.staff)
