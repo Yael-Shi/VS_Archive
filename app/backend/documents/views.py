@@ -27,7 +27,6 @@ from documents.services.archive_catalog_metadata_validation import (
 from documents.services.archive_discovery_metadata_validation import (
     parse_archive_item_discovery_metadata_form,
 )
-from documents.services.archive_tags_validation import normalize_tag_names_from_list
 from documents.services.archive_items import (
     create_manual_text_archive_item,
     create_ocr_document,
@@ -322,6 +321,26 @@ def _verify_uploaded_s3_object_metadata(
     return None
 
 
+def _json_value_as_discovery_string(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return ", ".join(str(v).strip() for v in value if str(v).strip())
+    return str(value)
+
+
+def _parse_create_upload_discovery_metadata(payload: dict):
+    form_data = {
+        "categories": _json_value_as_discovery_string(payload.get("categories")),
+        "events": _json_value_as_discovery_string(payload.get("events")),
+        "discovery_tags": _json_value_as_discovery_string(payload.get("discovery_tags")),
+    }
+    return parse_archive_item_discovery_metadata_form(
+        form_data,
+        tags_field="discovery_tags",
+    )
+
+
 def _parse_create_upload_common(payload: dict):
     title = (payload.get("title") or "").strip()
     if not title:
@@ -331,9 +350,7 @@ def _parse_create_upload_common(payload: dict):
     date_end_raw = payload.get("date_end")
     language = (payload.get("language") or "").strip() or None
     text_input_type_raw = payload.get("text_input_type")
-    category_event = (payload.get("category_event") or "").strip() or None
     visibility = (payload.get("visibility") or "private").strip()
-    tags = payload.get("tags", None)
     admin_meta = payload.get("admin_meta", None)
 
     try:
@@ -343,11 +360,6 @@ def _parse_create_upload_common(payload: dict):
         date_precision = parse_date_precision(payload.get("date_precision"))
     except ValueError as e:
         return None, _bad(str(e))
-
-    if tags is None:
-        tags = []
-    if not isinstance(tags, list):
-        return None, _bad("tags must be a list")
 
     if admin_meta is None:
         admin_meta = {}
@@ -366,6 +378,10 @@ def _parse_create_upload_common(payload: dict):
     if source_errors:
         return None, _bad(source_errors[0])
 
+    parsed_discovery, discovery_errors = _parse_create_upload_discovery_metadata(payload)
+    if discovery_errors:
+        return None, _bad(discovery_errors[0])
+
     return {
         "title": title,
         "date_start": ds,
@@ -373,16 +389,15 @@ def _parse_create_upload_common(payload: dict):
         "date_precision": date_precision,
         "language": language,
         "text_input_type": text_input_type,
-        "category_event": category_event,
         "visibility": visibility,
-        "tags": tags,
         "admin_meta": admin_meta,
         "author_name": author_name,
         "source_title": source_title,
+        "discovery_metadata": parsed_discovery,
     }, None
 
 
-def _attach_document_tags_and_metadata(doc: Document, tags: list, admin_meta: dict) -> None:
+def _attach_document_admin_metadata(doc: Document, admin_meta: dict) -> None:
     DocumentMetadata.objects.create(
         document=doc,
         notes=str(admin_meta.get("notes") or ""),
@@ -391,9 +406,14 @@ def _attach_document_tags_and_metadata(doc: Document, tags: list, admin_meta: di
         original_location=str(admin_meta.get("original_location") or ""),
     )
 
-    for name in normalize_tag_names_from_list(tags):
-        tag_obj, _ = Tag.objects.get_or_create(name=name)
-        doc.tags_m2m.add(tag_obj)
+
+def _apply_upload_discovery_metadata(doc: Document, discovery_metadata: dict) -> None:
+    update_archive_item_discovery_metadata(
+        doc.archive_item,
+        category_names=discovery_metadata["category_names"],
+        event_names=discovery_metadata["event_names"],
+        tag_names=discovery_metadata["tag_names"],
+    )
 
 
 def _create_multi_image_upload(request, payload: dict, common: dict):
@@ -474,14 +494,14 @@ def _create_multi_image_upload(request, payload: dict, common: dict):
         date_precision=common["date_precision"],
         language=common["language"],
         text_input_type=common["text_input_type"],
-        category_event=common["category_event"],
         visibility=common["visibility"],
         author_name=common["author_name"],
         source_title=common["source_title"],
         upload_status=Document.UploadStatus.UPLOADING,
         expected_source_file_count=file_count,
     )
-    _attach_document_tags_and_metadata(doc, common["tags"], common["admin_meta"])
+    _attach_document_admin_metadata(doc, common["admin_meta"])
+    _apply_upload_discovery_metadata(doc, common["discovery_metadata"])
 
     uploads = []
     for order_index, file_meta in enumerate(parsed_files):
@@ -560,7 +580,6 @@ def _create_single_file_upload(request, payload: dict, common: dict):
         date_precision=common["date_precision"],
         language=common["language"],
         text_input_type=common["text_input_type"],
-        category_event=common["category_event"],
         visibility=common["visibility"],
         author_name=common["author_name"],
         source_title=common["source_title"],
@@ -569,7 +588,8 @@ def _create_single_file_upload(request, payload: dict, common: dict):
         mime_type=mime_type,
         size_bytes=size_bytes if isinstance(size_bytes, int) else None,
     )
-    _attach_document_tags_and_metadata(doc, common["tags"], common["admin_meta"])
+    _attach_document_admin_metadata(doc, common["admin_meta"])
+    _apply_upload_discovery_metadata(doc, common["discovery_metadata"])
 
     ext = mime_type_to_extension(mime_type)
     key = f"documents/{doc.id}/original.{ext}"
@@ -1510,6 +1530,13 @@ def _upload_form_context() -> dict:
         "doc_type_choices": Document.DocType.choices,
         "text_input_type_choices": Document.TextInputType.choices,
         "date_precision_choices": DATE_PRECISION_UI_CHOICES,
+        "form_data": {
+            "categories": "",
+            "events": "",
+            "discovery_tags": "",
+        },
+        "discovery_tags_input_name": "discovery_tags",
+        "discovery_tags_input_id": "discovery_tags",
     }
 
 

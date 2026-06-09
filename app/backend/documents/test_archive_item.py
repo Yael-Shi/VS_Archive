@@ -2582,6 +2582,29 @@ class UnifiedArchiveItemCreatePageTests(TestCase):
         ):
             self.assertContains(resp, needle)
 
+    def test_ocr_document_branch_hides_legacy_discovery_fields(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.NEW_URL, {"item_type": "ocr_document"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, 'name="category_event"')
+        self.assertNotContains(resp, 'id="category_event"')
+        self.assertNotContains(resp, 'name="tags"')
+
+    def test_ocr_document_branch_renders_archive_item_discovery_metadata_fields(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.NEW_URL, {"item_type": "ocr_document"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "קטגוריות, אירועים ותגיות")
+        for needle in (
+            'id="categories"',
+            'id="events"',
+            'id="discovery_tags"',
+            'name="categories"',
+            'name="events"',
+            'name="discovery_tags"',
+        ):
+            self.assertContains(resp, needle)
+
     def test_ocr_document_branch_renders_csrf_token_in_upload_form(self):
         self.client.force_login(self.staff)
         resp = self.client.get(self.NEW_URL, {"item_type": "ocr_document"})

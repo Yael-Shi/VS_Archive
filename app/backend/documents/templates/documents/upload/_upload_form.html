@@ -102,15 +102,8 @@
             </div>
           </div>
 
-          <div class="field">
-            <label for="category_event">קטגוריה / אירוע</label>
-            <input id="category_event" name="category_event" type="text" />
-          </div>
-
-          <div class="field">
-            <label for="tags">תגיות (מופרדות בפסיקים)</label>
-            <input id="tags" name="tags" type="text" placeholder="למשל: משפחה, ירושלים, 1948" />
-          </div>
+          <div class="spacer"></div>
+          {% include "documents/archive/discovery_metadata_form_fields.html" %}
 
           <div class="form-actions form-actions--spaced">
             <button id="submitBtn" class="btn btn-primary" type="submit">העלאה</button>
