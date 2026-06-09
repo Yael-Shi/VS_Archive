@@ -2050,7 +2050,7 @@ def archive_manage_list_page(request):
 
     items = (
         ArchiveItem.objects.all()
-        .select_related("manual_text_content", "ocr_document")
+        .select_related("manual_text_content", "ocr_document", "photo_content")
         .order_by("-created_at")
     )
     return render(

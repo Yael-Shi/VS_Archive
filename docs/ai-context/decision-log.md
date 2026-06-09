@@ -1409,3 +1409,17 @@ Category/event/tag names on archive detail pages link to these browse pages. Bro
 **Deferred:** S3 object delete on PHOTO delete, re-upload/retry, thumbnail generation — per `docs/ai-context/photo-archive-items.md`.
 
 **Docs:** `docs/ai-context/photo-archive-items.md`
+
+## ArchiveItem — PHOTO staff manage status clarity (PR6)
+
+**Decision:** Improve staff **`/archive/manage/`** clarity for PHOTO upload and public-archive renderability without changing behavior.
+
+**Manage list:** PHOTO rows show Hebrew **`PhotoContent.upload_status`** label and a separate archive-renderability signal. Renderable when **`upload_status=UPLOADED`** and **`original_file_key`** is non-empty (matches **`filter_browse_renderable_photo_items`** upload/key checks; visibility still shown in its own column). Non-PHOTO rows show **—** in those columns.
+
+**Edit/delete copy:** PHOTO edit page states metadata-only / no file replacement / public archive after successful upload. PHOTO delete confirmation states DB-row delete and deferred S3 cleanup.
+
+**Helpers:** **`documents/services/photo_presentation.py`** — **`photo_upload_status_label`**, **`photo_is_archive_renderable`**, and related staff labels.
+
+**Scope (PR6):** Templates, presentation helpers, focused tests, minimal doc updates. **No** thumbnails, presigned GET in manage list, S3 delete, re-upload, model/migration changes.
+
+**Docs:** `docs/ai-context/photo-archive-items.md`
