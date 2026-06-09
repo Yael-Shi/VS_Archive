@@ -1286,12 +1286,36 @@ Category/event/tag names on archive detail pages link to these browse pages. Bro
 
 **Decision:** Add a design/audit note for integrating OCR PDF/image upload into the unified archive create-item experience at **`/archive/manage/new/`**, without changing upload behavior in this PR.
 
-**Current state:** **`MANUAL_TEXT`** is created inline on the unified page. **`ocr_document`** selection shows a bridge card linking to the legacy upload page **`/api/ui/upload/`** (`upload_page` → `documents/upload.html`). Presigned S3 upload logic is an **inline script** in that template (no separate JS file). Upload APIs under **`/api/uploads/*`** (`create`, `complete`, `parts/.../complete`, `finalize`) and server-side MIME/S3/CSRF verification remain the authoritative implementation.
+**Superseded by:** PR1–PR3 implementation entries below. PR0 described pre-implementation state (bridge card, inline script in `upload.html`).
 
-**Target direction:** Future PRs reuse the existing upload form/script as composable partials, show OCR upload in the unified create shell, and keep the **same endpoints and JS behavior** until tests and manual QA prove parity. Copy/navigation polish and ArchiveItem discovery metadata on OCR create are deferred follow-ups.
-
-**Scope (this PR):** Documentation only — `docs/ai-context/unified-ocr-upload-flow.md`, this log entry.
-
-**Out of scope:** Unified OCR upload UI implementation; upload route/API/JS/S3/worker/OCR/HTR changes; **`PHOTO`**; rich text.
+**Scope (PR0):** Documentation only — `docs/ai-context/unified-ocr-upload-flow.md`, this log entry.
 
 **Docs:** `docs/ai-context/unified-ocr-upload-flow.md`
+
+## Unified OCR upload flow — reusable upload partials (PR1)
+
+**Decision:** Extract the existing OCR upload page into reusable template partials without changing runtime upload behavior.
+
+**Current behavior:** `documents/templates/documents/upload/_upload_form.html` holds the upload form and admin-metadata column; `documents/templates/documents/upload/_upload_script.html` is the **single source of truth** for presigned S3 upload JavaScript. `documents/upload.html` remains the `/api/ui/upload/` shell and includes both partials.
+
+**Scope (PR1):** Template extraction + comments + existing upload page tests. **No** endpoint, JS logic, redirect, upload API, S3, worker, or OCR/HTR changes.
+
+## Unified OCR upload flow — embed in unified create page (PR2)
+
+**Decision:** Embed the OCR upload UI inline on **`/archive/manage/new/?item_type=ocr_document`** using the same upload partials and the same `/api/uploads/*` client flow.
+
+**Current behavior:** Unified OCR branch includes `_upload_form.html` and `_upload_script.html`. Shared `views._upload_form_context()` supplies template context to both `upload_page` and the unified OCR branch. **`/api/ui/upload/`** remains available as a fallback/secondary page (also using the same partials). Manual text create on the unified page is unchanged.
+
+**Scope (PR2):** `manage_new.html`, `views._upload_form_context`, unified create tests. **No** duplicate presigned JS, **no** upload API/JS/S3/worker/OCR behavior changes.
+
+## Unified OCR upload flow — ArchiveItem discovery metadata on OCR create (PR3)
+
+**Decision:** Align first-party OCR upload discovery metadata with **`ArchiveItem`**-level categories/events/tags for **newly uploaded** OCR documents only.
+
+**Current behavior:** Upload form uses `discovery_metadata_form_fields.html` (`categories`, `events`, `discovery_tags`). Upload JS sends those fields in create-upload JSON. `create_upload` parses them via `parse_archive_item_discovery_metadata_form` and persists to the linked `ArchiveItem` through `update_archive_item_discovery_metadata`. First-party UI no longer sends legacy `category_event` or `Document.tags_m2m` tags; legacy JSON in create payload is tolerated/ignored and not written to `Document`. Applies to single-file and multi-image create flows.
+
+**Forward-only:** No backfill, no migrations, no schema cleanup, no modification of existing documents. `Document.category_event` and `Document.tags_m2m` remain for old/transitional data.
+
+**Scope (PR3):** Upload form/script, `create_upload` discovery parsing/persistence, focused tests. **No** worker, routing, S3, or upload completion semantics changes.
+
+**Deferred:** Post-upload redirect to archive detail; `/api/ui/upload/` retirement/redirect decision; legacy schema cleanup; **`PHOTO`**; rich text.
