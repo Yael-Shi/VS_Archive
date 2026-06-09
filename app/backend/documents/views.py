@@ -27,10 +27,7 @@ from documents.services.archive_catalog_metadata_validation import (
 from documents.services.archive_discovery_metadata_validation import (
     parse_archive_item_discovery_metadata_form,
 )
-from documents.services.archive_tags_validation import (
-    normalize_tag_names_from_list,
-    parse_ocr_tags_form,
-)
+from documents.services.archive_tags_validation import normalize_tag_names_from_list
 from documents.services.archive_items import (
     create_manual_text_archive_item,
     create_ocr_document,
@@ -40,7 +37,6 @@ from documents.services.archive_items import (
     update_manual_text_archive_item,
     update_ocr_document_catalog_metadata,
     update_ocr_document_metadata,
-    update_ocr_document_tags,
 )
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -1602,20 +1598,13 @@ def _ocr_catalog_form_data_from_document(document: Document) -> dict:
         "collection": admin_meta.collection if admin_meta else "",
         "original_location": admin_meta.original_location if admin_meta else "",
         "notes": admin_meta.notes if admin_meta else "",
-        "category_event": document.category_event or "",
     }
-
-
-def _ocr_tags_form_data_from_document(document: Document) -> dict:
-    tag_names = [t.name for t in document.tags_m2m.all()]
-    return {"tags": ", ".join(tag_names)}
 
 
 def _ocr_document_edit_form_data_from_document(document: Document) -> dict:
     return {
         **_archive_metadata_form_data_from_document(document),
         **_ocr_catalog_form_data_from_document(document),
-        **_ocr_tags_form_data_from_document(document),
         **discovery_metadata_form_data_from_item(document.archive_item),
     }
 
@@ -1990,7 +1979,6 @@ def _archive_manage_edit_manual_text(request, item: ArchiveItem):
 def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
     doc = (
         Document.objects.select_related("archive_item", "admin_meta")
-        .prefetch_related("tags_m2m")
         .filter(archive_item_id=item.id)
         .first()
     )
@@ -2003,16 +1991,14 @@ def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
     if request.method == "POST":
         parsed_shared, shared_errors = parse_archive_metadata_form(request.POST)
         parsed_catalog, catalog_errors = parse_ocr_catalog_metadata_form(request.POST)
-        parsed_tags, tags_errors = parse_ocr_tags_form(request.POST)
         parsed_discovery, discovery_errors = parse_archive_item_discovery_metadata_form(
             request.POST,
             tags_field="discovery_tags",
         )
-        form_errors = shared_errors + catalog_errors + tags_errors + discovery_errors
+        form_errors = shared_errors + catalog_errors + discovery_errors
         form_data = {
             **parsed_shared,
             **parsed_catalog,
-            **parsed_tags,
             **parsed_discovery,
         }
         if not form_errors:
@@ -2034,9 +2020,7 @@ def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
                     collection=parsed_catalog["collection"],
                     original_location=parsed_catalog["original_location"],
                     notes=parsed_catalog["notes"],
-                    category_event=parsed_catalog["category_event_value"],
                 )
-                update_ocr_document_tags(doc, tag_names=parsed_tags["tag_names"])
                 update_archive_item_discovery_metadata(
                     item,
                     category_names=parsed_discovery["category_names"],

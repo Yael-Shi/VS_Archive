@@ -256,6 +256,9 @@ def update_ocr_document_metadata(
     return document
 
 
+_CATEGORY_EVENT_UNCHANGED = object()
+
+
 @transaction.atomic
 def update_ocr_document_catalog_metadata(
     document,
@@ -264,7 +267,7 @@ def update_ocr_document_catalog_metadata(
     collection: str,
     original_location: str,
     notes: str,
-    category_event: str | None,
+    category_event: str | None | object = _CATEGORY_EVENT_UNCHANGED,
 ):
     """
     Update OCR catalog scalar metadata on Document and DocumentMetadata.
@@ -276,8 +279,11 @@ def update_ocr_document_catalog_metadata(
     if document.archive_item.item_type != ArchiveItem.ItemType.OCR_DOCUMENT:
         raise ValueError("document is not linked to an OCR_DOCUMENT archive item")
 
-    document.category_event = category_event
-    document.save(update_fields=["category_event", "updated_at"])
+    update_fields = ["updated_at"]
+    if category_event is not _CATEGORY_EVENT_UNCHANGED:
+        document.category_event = category_event
+        update_fields.insert(0, "category_event")
+    document.save(update_fields=update_fields)
 
     DocumentMetadata.objects.update_or_create(
         document=document,
