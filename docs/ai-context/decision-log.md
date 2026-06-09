@@ -1353,3 +1353,27 @@ Category/event/tag names on archive detail pages link to these browse pages. Bro
 **Deferred (PR3+):** Staff create/upload, presigned PUT/GET, archive list/detail PHOTO rendering, thumbnail generation, S3 delete on item delete — per `docs/ai-context/photo-archive-items.md`.
 
 **Docs:** `docs/ai-context/photo-archive-items.md` (PR2 status note)
+
+## ArchiveItem — PHOTO staff create/upload V1 (PR3)
+
+**Decision:** Staff/admin create one **`PHOTO`** item via a **PHOTO-specific** flow — **not** OCR **`/api/uploads/*`** or **`create_ocr_document`**. Reuse shared image MIME/extension validation, presigned S3 PUT, and HeadObject **`ContentType`** verification.
+
+**Create-order:** Create **`ArchiveItem`** + **`PhotoContent`** **before** client S3 upload (mirrors OCR **`Document`** `UPLOADING` + predetermined key). Explicit upload state on **`PhotoContent`**: **`upload_status`** (`PENDING` / `UPLOADED` / `FAILED`) + **`upload_error`**. Create sets **`PENDING`**; successful finalize after HeadObject sets **`UPLOADED`**; client/validation/verification failures set **`FAILED`** with safe **`upload_error`**. Retryable AWS HeadObject failures return **502** and leave **`PENDING`** (retry-safe).
+
+**Size source of truth:** Persist **`original_size_bytes`** from S3 HeadObject **`ContentLength`** only — not client **`file_size`**.
+
+**Public archive guard (PR3):** **`/archive/`** list/detail/discovery browse exclude **`PHOTO`** via **`archive_browse_queryset_for_user`** / **`exclude_deferred_archive_browse_item_types`** until PR4 display. Staff **`/archive/manage/`** still lists PHOTO items.
+
+**Endpoints:** **`POST /api/photo-uploads/create/`**, **`POST /api/photo-uploads/<photo_content_id>/complete/`** (staff only). UI branch: **`/archive/manage/new/?item_type=photo`**.
+
+**S3 keys:** **`photos/{photo_content_id}/original.{ext}`** (canonical ext from validated MIME). Private bucket only; no presigned GET in PR3.
+
+**Finalize idempotency:** Repeat complete on **`upload_status=UPLOADED`** returns current state without S3 re-verify or field overwrite.
+
+**Deferred:** Re-upload/retry after **`upload_status=FAILED`** (not implemented in PR3).
+
+**Scope (PR3):** Service + API + unified create UI branch + discovery metadata on create + focused tests + minimal doc updates. **No** **`Document`**, worker, SQS, archive list/detail rendering, thumbnails, dimensions, edit/delete, visibility changes.
+
+**Deferred (PR4+):** Archive list/detail PHOTO display (presigned GET), edit/delete polish, thumbnail generation — per `docs/ai-context/photo-archive-items.md`.
+
+**Docs:** `docs/ai-context/photo-archive-items.md`

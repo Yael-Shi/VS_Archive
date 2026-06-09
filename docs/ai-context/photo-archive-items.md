@@ -2,7 +2,7 @@
 
 Design and implementation scope for **`PHOTO`** archive items: one photo per **`ArchiveItem`**, private S3 storage, presigned display, and no OCR/HTR pipeline.
 
-**Status:** Design (PR1) + **model foundation (PR2)**. Upload, display, and staff create flows remain deferred.
+**Status:** Design (PR1) + **model foundation (PR2)** + **staff create/upload V1 (PR3)**. Archive list/detail display remains deferred (PR4).
 
 **Related docs:**
 
@@ -90,7 +90,9 @@ ArchiveItem (item_type=PHOTO)
 | **`original_file_key`** | **`CharField`** | Private S3 object key for the uploaded original |
 | **`original_filename`** | **`CharField`** | Client/original filename for display/audit |
 | **`original_mime_type`** | **`CharField`** | Validated MIME type (e.g. `image/jpeg`) |
-| **`original_size_bytes`** | **`PositiveBigIntegerField`** | Size after upload verification |
+| **`original_size_bytes`** | **`PositiveBigIntegerField`** | Size from S3 HeadObject **`ContentLength`** after finalize |
+| **`upload_status`** | **`CharField`** | **`PENDING`** / **`UPLOADED`** / **`FAILED`** (PR3) |
+| **`upload_error`** | **`CharField`** | Safe error text when **`upload_status=FAILED`** |
 | **`width`** | **`PositiveIntegerField`, nullable** | Optional; may be populated at upload or deferred |
 | **`height`** | **`PositiveIntegerField`, nullable** | Optional; may be populated at upload or deferred |
 | **`thumbnail_file_key`** | **`CharField`, nullable** | **Future** — not populated in V1 |
@@ -222,15 +224,16 @@ Use existing shared fields only:
   - **`parse_archive_item_discovery_metadata_form`** / **`update_archive_item_discovery_metadata`** — if discovery fields are on the create form (consistent with OCR PR3)
 - **Avoid** duplicating security logic poorly; **avoid** branching OCR upload views/services with many **`if photo`** paths.
 
-**Suggested flow (PR3):**
+**Implemented flow (PR3):**
 
-1. Staff submit create form (metadata + file selection) on unified manage-new PHOTO branch.
-2. Backend creates **`ArchiveItem`** (`PHOTO`) + **`PhotoContent`** row (or creates rows after upload — order decided in PR3; prefer create metadata first or single transactional finalize after S3 verify).
-3. Backend returns presigned PUT for **`photos/{id}/original.{ext}`**.
-4. Client uploads to S3.
-5. Backend finalize step: HeadObject, validate size/MIME, persist **`original_*`** fields, mark item ready for display.
+1. Staff open **`/archive/manage/new/?item_type=photo`** and submit metadata + one image file.
+2. **`POST /api/photo-uploads/create/`** validates MIME/extension, creates **`ArchiveItem`** (`PHOTO`) + **`PhotoContent`** with **`upload_status=PENDING`**, applies discovery metadata, returns presigned PUT for **`photos/{photo_content_id}/original.{ext}`**.
+3. Browser uploads to private S3 via presigned PUT.
+4. **`POST /api/photo-uploads/<photo_content_id>/complete/`** runs HeadObject, verifies S3 **`ContentType`** matches expected MIME, persists **`original_size_bytes`** from S3 **`ContentLength`**, sets **`upload_status=UPLOADED`**. Validation/verification/client failures set **`upload_status=FAILED`** + **`upload_error`**. Retryable AWS failures return **502** and leave **`PENDING`**.
 
-Exact endpoint shapes (reuse `/api/uploads/*` vs new `/api/photo-uploads/*` vs archive-only POST) are an **implementation detail for PR3** — the constraint is **no OCR Document creation**.
+**PR3 create-order decision:** Create **`ArchiveItem`** + **`PhotoContent`** **before** client S3 upload (same pattern as OCR **`Document`** `UPLOADING` + predetermined key). Upload lifecycle is explicit via **`upload_status`** / **`upload_error`** — not inferred from size. **Do not** route through **`/api/uploads/*`** or **`create_ocr_document`**.
+
+**PR3 public archive guard:** **`/archive/`** list, detail, and discovery browse exclude **`PHOTO`** until PR4 display (`archive_browse_queryset_for_user`). Staff manage surfaces may reference PHOTO.
 
 ---
 
@@ -256,7 +259,7 @@ Exact endpoint shapes (reuse `/api/uploads/*` vs new `/api/photo-uploads/*` vs a
 |----|--------|
 | **PR1** (this doc) | Design/scope documentation only |
 | **PR2** | **`PhotoContent`** model + migration + admin (view-only) + focused model tests; **no** upload UI |
-| **PR3** | Staff create/upload V1 — one photo, private S3, MIME/extension/ContentType validation, **`ArchiveItem`** + discovery metadata on create |
+| **PR3** | Staff create/upload V1 — one photo, private S3, MIME/extension/ContentType validation, **`ArchiveItem`** + discovery metadata on create (**implemented**) |
 | **PR4** | **`/archive/`** list + **`/archive/<id>/`** detail for PHOTO — visibility checks, presigned GET on detail, list placeholder/icon |
 | **PR5** | Edit/delete polish — shared metadata edit, staff delete, S3 deletion policy if not done in PR3 |
 | **Later** | Thumbnail generation (`thumb_400`), gallery polish, multi-photo albums, captions, advanced metadata |

@@ -3,7 +3,12 @@ from unittest.mock import patch
 from botocore.exceptions import ClientError
 from django.test import SimpleTestCase
 
-from documents.s3 import S3HeadObjectResult, head_s3_object, s3_object_exists
+from documents.s3 import (
+    S3HeadObjectResult,
+    head_s3_object,
+    photo_mime_to_s3_extension,
+    s3_object_exists,
+)
 from documents.services.upload_validation import (
     normalize_upload_mime_type,
     upload_mime_types_match,
@@ -18,15 +23,17 @@ class S3HeadObjectTests(SimpleTestCase):
         )
 
     @patch("documents.s3.get_s3_client")
-    def test_returns_exists_with_content_type(self, mock_get_client):
+    def test_returns_exists_with_content_type_and_length(self, mock_get_client):
         mock_get_client.return_value.head_object.return_value = {
             "ContentType": "image/jpeg; charset=binary",
+            "ContentLength": 4096,
         }
 
         result = head_s3_object("bucket", "documents/1/original.jpg")
 
         self.assertTrue(result.exists)
         self.assertEqual(result.content_type, "image/jpeg; charset=binary")
+        self.assertEqual(result.content_length, 4096)
         mock_get_client.return_value.head_object.assert_called_once_with(
             Bucket="bucket",
             Key="documents/1/original.jpg",
@@ -82,6 +89,15 @@ class S3ObjectExistsTests(SimpleTestCase):
         mock_head.return_value = S3HeadObjectResult(exists=False)
 
         self.assertFalse(s3_object_exists("bucket", "missing/key"))
+
+
+class PhotoMimeToS3ExtensionTests(SimpleTestCase):
+    def test_returns_canonical_extension_for_allowed_mime(self):
+        self.assertEqual(photo_mime_to_s3_extension("image/jpeg"), "jpg")
+
+    def test_raises_for_unsupported_mime(self):
+        with self.assertRaises(ValueError):
+            photo_mime_to_s3_extension("image/gif")
 
 
 class UploadMimeNormalizationTests(SimpleTestCase):

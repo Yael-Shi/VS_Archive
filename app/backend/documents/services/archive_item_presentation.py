@@ -12,6 +12,7 @@ from documents.models import ArchiveItem
 ARCHIVE_LIST_ITEM_TYPE_FILTER_ALL = ""
 ARCHIVE_LIST_ITEM_TYPE_FILTER_OCR = "ocr_document"
 ARCHIVE_LIST_ITEM_TYPE_FILTER_MANUAL = "manual_text"
+ARCHIVE_LIST_ITEM_TYPE_FILTER_PHOTO = "photo"
 
 ARCHIVE_LIST_ITEM_TYPE_FILTER_CHOICES: tuple[tuple[str, str], ...] = (
     (ARCHIVE_LIST_ITEM_TYPE_FILTER_ALL, "הכול"),
@@ -32,6 +33,7 @@ _ARCHIVE_METADATA_STATUS_LABELS: dict[str, str] = {
 _ARCHIVE_ITEM_TYPE_LABELS: dict[str, str] = {
     ArchiveItem.ItemType.OCR_DOCUMENT.value: "מסמך סרוק / PDF",
     ArchiveItem.ItemType.MANUAL_TEXT.value: "טקסט מוקלד",
+    ArchiveItem.ItemType.PHOTO.value: "תמונה",
 }
 
 _LANGUAGE_LABELS: dict[str, str] = {
@@ -99,6 +101,7 @@ def archive_manage_item_type_ui_choices() -> list[tuple[str, str]]:
     return [
         (ARCHIVE_LIST_ITEM_TYPE_FILTER_MANUAL, archive_item_type_label(ArchiveItem.ItemType.MANUAL_TEXT)),
         (ARCHIVE_LIST_ITEM_TYPE_FILTER_OCR, archive_item_type_label(ArchiveItem.ItemType.OCR_DOCUMENT)),
+        (ARCHIVE_LIST_ITEM_TYPE_FILTER_PHOTO, archive_item_type_label(ArchiveItem.ItemType.PHOTO)),
     ]
 
 

@@ -49,8 +49,32 @@ def filter_archive_items_for_user(
 
 
 def archive_item_queryset_for_user(user) -> QuerySet[ArchiveItem]:
-    """Base queryset of archive items visible in list/detail for ``user``."""
+    """
+    Visibility/access-filtered queryset of all ``ArchiveItem`` rows for ``user``.
+
+    Includes every item type the user may access by visibility rules (e.g. PHOTO).
+    Does not imply the item is renderable on ``/archive/`` browse/detail surfaces.
+    """
     return filter_archive_items_for_user(user, ArchiveItem.objects.all())
+
+
+def exclude_deferred_archive_browse_item_types(
+    queryset: QuerySet[ArchiveItem],
+) -> QuerySet[ArchiveItem]:
+    """Exclude item types not yet rendered on public /archive/ surfaces (PHOTO → PR4)."""
+    return queryset.exclude(item_type=ArchiveItem.ItemType.PHOTO)
+
+
+def archive_browse_queryset_for_user(user) -> QuerySet[ArchiveItem]:
+    """
+    Items currently renderable on ``/archive/`` list, detail, and discovery browse.
+
+    Applies visibility/access via ``archive_item_queryset_for_user``, then excludes
+    deferred item types (PHOTO until PR4 display).
+    """
+    return exclude_deferred_archive_browse_item_types(
+        archive_item_queryset_for_user(user)
+    )
 
 
 def get_viewable_archive_item(
@@ -60,12 +84,16 @@ def get_viewable_archive_item(
     queryset: QuerySet[ArchiveItem] | None = None,
 ) -> ArchiveItem:
     """
-    Return an archive item the user may view, or raise Http404.
+    Return an archive item currently renderable on ``/archive/<id>/``, or raise Http404.
 
-    Uses 404 for both missing ids and unauthorized items.
+    Applies visibility/access rules and excludes deferred item types such as PHOTO
+    until their archive detail rendering is implemented. Uses 404 for missing ids,
+    unauthorized items, and deferred types.
     """
     base = queryset if queryset is not None else ArchiveItem.objects.all()
-    qs = filter_archive_items_for_user(user, base)
+    qs = exclude_deferred_archive_browse_item_types(
+        filter_archive_items_for_user(user, base)
+    )
     try:
         return qs.select_related("manual_text_content", "ocr_document").get(id=item_id)
     except ArchiveItem.DoesNotExist:

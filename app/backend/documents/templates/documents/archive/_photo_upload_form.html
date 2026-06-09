@@ -1,0 +1,24 @@
+{# PHOTO create/upload form for unified /archive/manage/new/?item_type=photo #}
+<div id="msg" class="msg" role="status" aria-live="polite"></div>
+
+<div class="card card--pad-lg">
+  <div class="section-title">תמונה + פרטי ארכיון</div>
+
+  <form id="photoUploadForm">
+    {% csrf_token %}
+    <div class="field">
+      <label for="file">קובץ תמונה *</label>
+      <input id="file" name="file" type="file" accept="image/jpeg,image/png,image/tiff,image/webp,.jpg,.jpeg,.png,.tif,.tiff,.webp" required />
+      <div class="field-hint">תמונה אחת בלבד (JPEG, PNG, TIFF, WebP).</div>
+    </div>
+
+    {% include "documents/archive/archive_metadata_form_fields.html" %}
+
+    <div class="spacer"></div>
+    {% include "documents/archive/discovery_metadata_form_fields.html" %}
+
+    <div class="form-actions form-actions--spaced">
+      <button id="submitBtn" class="btn btn-primary" type="submit">העלאת תמונה</button>
+    </div>
+  </form>
+</div>

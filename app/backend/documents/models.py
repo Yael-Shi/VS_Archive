@@ -128,6 +128,11 @@ class ManualTextContent(models.Model):
 class PhotoContent(models.Model):
     """Image file metadata for PHOTO archive items (not OCR/Document-backed)."""
 
+    class UploadStatus(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        UPLOADED = "UPLOADED", "Uploaded"
+        FAILED = "FAILED", "Failed"
+
     archive_item = models.OneToOneField(
         ArchiveItem,
         on_delete=models.CASCADE,
@@ -136,7 +141,13 @@ class PhotoContent(models.Model):
     original_file_key = models.CharField(max_length=1024)
     original_filename = models.CharField(max_length=512)
     original_mime_type = models.CharField(max_length=128)
-    original_size_bytes = models.PositiveBigIntegerField()
+    original_size_bytes = models.PositiveBigIntegerField(default=0)
+    upload_status = models.CharField(
+        max_length=16,
+        choices=UploadStatus.choices,
+        default=UploadStatus.PENDING,
+    )
+    upload_error = models.CharField(max_length=512, blank=True, default="")
     width = models.PositiveIntegerField(null=True, blank=True)
     height = models.PositiveIntegerField(null=True, blank=True)
     thumbnail_file_key = models.CharField(max_length=1024, blank=True, default="")

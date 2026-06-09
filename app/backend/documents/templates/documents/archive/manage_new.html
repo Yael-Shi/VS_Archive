@@ -8,7 +8,7 @@
     </div>
 
     <h1 class="page-title">{{ page_title }}</h1>
-    <p class="page-subtitle">בחרו סוג פריט חדש. פריטי תמונה בלבד (ללא טקסט) יתווספו בעתיד.</p>
+    <p class="page-subtitle">בחרו סוג פריט חדש ליצירה.</p>
 
     <div class="spacer"></div>
 
@@ -66,9 +66,18 @@
       <p class="field-hint">
         <a href="{% url 'upload-page' %}">פתיחה בדף העלאה נפרד</a>
       </p>
+    {% elif item_type == "photo" %}
+      <div class="spacer"></div>
+      <p class="page-subtitle">
+        <strong>תמונה</strong> — העלאת תמונה אחת לארכיון (ללא עיבוד טקסט).
+      </p>
+      <div class="spacer"></div>
+      {% include "documents/archive/_photo_upload_form.html" %}
     {% endif %}
   </div>
   {% if item_type == "ocr_document" %}
     {% include "documents/upload/_upload_script.html" %}
+  {% elif item_type == "photo" %}
+    {% include "documents/archive/_photo_upload_script.html" %}
   {% endif %}
 {% endblock %}
