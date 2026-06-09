@@ -1281,3 +1281,17 @@ Category/event/tag names on archive detail pages link to these browse pages. Bro
 **Scope:** Views/templates/services/templatetags, focused tests, this log entry. **No** models, migrations, OCR/worker/status changes, or OCR text formatting changes.
 
 **Deferred:** Full rich text formatting/editor design.
+
+## Unified OCR upload flow — design / audit (PR0)
+
+**Decision:** Add a design/audit note for integrating OCR PDF/image upload into the unified archive create-item experience at **`/archive/manage/new/`**, without changing upload behavior in this PR.
+
+**Current state:** **`MANUAL_TEXT`** is created inline on the unified page. **`ocr_document`** selection shows a bridge card linking to the legacy upload page **`/api/ui/upload/`** (`upload_page` → `documents/upload.html`). Presigned S3 upload logic is an **inline script** in that template (no separate JS file). Upload APIs under **`/api/uploads/*`** (`create`, `complete`, `parts/.../complete`, `finalize`) and server-side MIME/S3/CSRF verification remain the authoritative implementation.
+
+**Target direction:** Future PRs reuse the existing upload form/script as composable partials, show OCR upload in the unified create shell, and keep the **same endpoints and JS behavior** until tests and manual QA prove parity. Copy/navigation polish and ArchiveItem discovery metadata on OCR create are deferred follow-ups.
+
+**Scope (this PR):** Documentation only — `docs/ai-context/unified-ocr-upload-flow.md`, this log entry.
+
+**Out of scope:** Unified OCR upload UI implementation; upload route/API/JS/S3/worker/OCR/HTR changes; **`PHOTO`**; rich text.
+
+**Docs:** `docs/ai-context/unified-ocr-upload-flow.md`
