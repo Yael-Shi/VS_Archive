@@ -46,6 +46,7 @@ from documents.services.archive_item_presentation import (
     language_label,
     visibility_label,
 )
+from documents.services.manual_text_body_display import format_manual_text_body_for_display
 
 
 def assert_ocr_shared_fields_match(test_case, doc: Document) -> None:
@@ -869,7 +870,7 @@ class ManualTextArchiveItemTests(TestCase):
         )
         resp = self.client.get(f"/archive/{item.id}/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "line one<br>line two")
+        self.assertContains(resp, "line one<br />line two", html=True)
 
     def test_update_manual_text_archive_item_service(self):
         item = create_manual_text_archive_item(title="Service edit", body="old")
@@ -4453,3 +4454,295 @@ class ArchiveItemDiscoveryMetadataEditTests(TestCase):
         self.assertEqual(category_b.slug, "topic-a-2")
         self.assertEqual(event_a.slug, "event-a")
         self.assertEqual(event_b.slug, "event-a-2")
+
+
+class ManualTextCreateDiscoveryMetadataTests(TestCase):
+    CREATE_URL = "/archive/manage/new/manual-text/"
+    UNIFIED_CREATE_URL = "/archive/manage/new/"
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="manual_create_discovery_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+
+    def _create_payload(self, **overrides):
+        payload = {
+            "title": "Create discovery item",
+            "body": "Created body text.",
+            "visibility": ArchiveItem.Visibility.PUBLIC,
+            "metadata_status": ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
+            "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
+            "categories": "",
+            "events": "",
+            "tags": "",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_manual_text_create_form_renders_discovery_metadata_fields(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.CREATE_URL)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'name="categories"')
+        self.assertContains(resp, 'name="events"')
+        self.assertContains(resp, 'name="tags"')
+        self.assertContains(resp, "קטגוריות, אירועים ותגיות")
+
+    def test_unified_manage_new_get_renders_discovery_metadata_fields(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.UNIFIED_CREATE_URL, {"item_type": "manual_text"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'name="title"')
+        self.assertContains(resp, 'name="body"')
+        self.assertContains(resp, 'name="categories"')
+        self.assertContains(resp, 'name="events"')
+        self.assertContains(resp, 'name="tags"')
+        self.assertContains(resp, "קטגוריות, אירועים ותגיות")
+
+    def test_unified_manage_new_post_saves_discovery_metadata(self):
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.UNIFIED_CREATE_URL,
+            data=self._create_payload(
+                item_type="manual_text",
+                title="Unified create with discovery",
+                categories="Unified category",
+                events="Unified event",
+                tags="unified-tag",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        item = ArchiveItem.objects.get(title="Unified create with discovery")
+        self.assertEqual(item.item_type, ArchiveItem.ItemType.MANUAL_TEXT)
+        self.assertEqual(
+            list(item.categories.values_list("name", flat=True)),
+            ["Unified category"],
+        )
+        self.assertEqual(
+            list(item.events.values_list("name", flat=True)),
+            ["Unified event"],
+        )
+        self.assertEqual(
+            list(item.tags.values_list("name", flat=True)),
+            ["unified-tag"],
+        )
+
+    def test_create_manual_text_with_categories_saves_archive_item_categories(self):
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.CREATE_URL,
+            data=self._create_payload(
+                title="Create with categories",
+                categories="Topic one, Topic two",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        item = ArchiveItem.objects.get(title="Create with categories")
+        self.assertEqual(
+            set(item.categories.values_list("name", flat=True)),
+            {"Topic one", "Topic two"},
+        )
+
+    def test_create_manual_text_with_events_saves_archive_item_events(self):
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.CREATE_URL,
+            data=self._create_payload(
+                title="Create with events",
+                events="Wedding, Bar mitzvah",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        item = ArchiveItem.objects.get(title="Create with events")
+        self.assertEqual(
+            set(item.events.values_list("name", flat=True)),
+            {"Wedding", "Bar mitzvah"},
+        )
+
+    def test_create_manual_text_with_tags_saves_archive_item_tags(self):
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.CREATE_URL,
+            data=self._create_payload(
+                title="Create with tags",
+                tags="family, jerusalem",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        item = ArchiveItem.objects.get(title="Create with tags")
+        self.assertEqual(
+            set(item.tags.values_list("name", flat=True)),
+            {"family", "jerusalem"},
+        )
+
+    def test_created_discovery_metadata_appears_on_detail_page(self):
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.CREATE_URL,
+            data=self._create_payload(
+                title="Create detail metadata",
+                categories="Detail category",
+                events="Detail event",
+                tags="detail-tag",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        item = ArchiveItem.objects.get(title="Create detail metadata")
+        detail_resp = self.client.get(f"/archive/{item.id}/")
+        self.assertContains(detail_resp, "Detail category")
+        self.assertContains(detail_resp, "Detail event")
+        self.assertContains(detail_resp, "detail-tag")
+
+    def test_created_discovery_metadata_is_searchable(self):
+        self.client.force_login(self.staff)
+        self.client.post(
+            self.CREATE_URL,
+            data=self._create_payload(
+                title="Searchable create metadata",
+                categories="Unique create category search",
+            ),
+        )
+        resp = self.client.get(reverse("archive-list"), {"q": "create category search"})
+        self.assertContains(resp, "Searchable create metadata")
+
+    def test_created_discovery_metadata_browse_page_works(self):
+        self.client.force_login(self.staff)
+        self.client.post(
+            self.CREATE_URL,
+            data=self._create_payload(
+                title="Browse create metadata",
+                categories="Browse create category term",
+            ),
+        )
+        item = ArchiveItem.objects.get(title="Browse create metadata")
+        category = item.categories.get()
+        resp = self.client.get(
+            reverse("archive-category-browse", kwargs={"category_id": category.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "קטגוריה: Browse create category term")
+        self.assertContains(resp, item.title)
+
+    def test_create_validation_failure_preserves_discovery_metadata_fields(self):
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.CREATE_URL,
+            data=self._create_payload(
+                title="",
+                categories="Preserved category",
+                events="Preserved event",
+                tags="preserved-tag",
+            ),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'value="Preserved category"')
+        self.assertContains(resp, 'value="Preserved event"')
+        self.assertContains(resp, 'value="preserved-tag"')
+        self.assertFalse(ArchiveItem.objects.filter(events__name="Preserved event").exists())
+
+    def test_existing_manual_text_edit_discovery_metadata_still_works(self):
+        item = create_manual_text_archive_item(title="Edit still works", body="Body")
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            f"/archive/manage/{item.id}/edit/",
+            data={
+                "title": "Edit still works",
+                "body": "Body",
+                "visibility": ArchiveItem.Visibility.PUBLIC,
+                "metadata_status": ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
+                "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
+                "categories": "Edited category",
+                "events": "",
+                "tags": "",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        item.refresh_from_db()
+        self.assertEqual(
+            list(item.categories.values_list("name", flat=True)),
+            ["Edited category"],
+        )
+
+
+class ManualTextBodyLinkifyTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="manual_text_linkify_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+
+    def _create_public_item(self, body: str) -> ArchiveItem:
+        return create_manual_text_archive_item(
+            title="Linkify test item",
+            body=body,
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+
+    def test_https_url_renders_clickable_link_on_detail_page(self):
+        item = self._create_public_item("See https://example.com for details.")
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(
+            resp,
+            '<a href="https://example.com" target="_blank" rel="noopener noreferrer">https://example.com</a>',
+            html=True,
+        )
+
+    def test_http_url_renders_clickable_link_on_detail_page(self):
+        item = self._create_public_item("Visit http://example.com today.")
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertContains(
+            resp,
+            '<a href="http://example.com" target="_blank" rel="noopener noreferrer">http://example.com</a>',
+            html=True,
+        )
+
+    def test_plain_text_and_line_breaks_remain_readable(self):
+        item = self._create_public_item("Line one\nLine two\nNo URL here.")
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertContains(resp, "Line one<br />Line two<br />No URL here.", html=True)
+
+    def test_html_script_input_is_escaped_not_rendered(self):
+        item = self._create_public_item('<script>alert("xss")</script>')
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertContains(
+            resp,
+            "&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;",
+            html=True,
+        )
+        self.assertNotContains(resp, "<script>", html=True)
+
+    def test_javascript_scheme_is_not_linkified(self):
+        item = self._create_public_item("javascript:alert(1)")
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertContains(
+            resp,
+            '<div class="text-block text-block--pre">javascript:alert(1)</div>',
+            html=True,
+        )
+
+    def test_body_without_urls_renders_normally(self):
+        item = self._create_public_item("Plain memoir text only.")
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertContains(
+            resp,
+            '<div class="text-block text-block--pre">Plain memoir text only.</div>',
+            html=True,
+        )
+
+
+class ManualTextBodyDisplayServiceTests(SimpleTestCase):
+    def test_format_manual_text_body_linkifies_https_url(self):
+        rendered = format_manual_text_body_for_display("See https://example.com.")
+        self.assertIn(
+            '<a href="https://example.com" target="_blank" rel="noopener noreferrer">'
+            "https://example.com</a>",
+            rendered,
+        )
+
+    def test_format_manual_text_body_escapes_html_before_linkify(self):
+        rendered = format_manual_text_body_for_display('<b>not bold</b>')
+        self.assertEqual(rendered, "&lt;b&gt;not bold&lt;/b&gt;")

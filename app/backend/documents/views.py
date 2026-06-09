@@ -1635,6 +1635,17 @@ def _empty_manual_text_form_data() -> dict:
     return {
         **_empty_archive_metadata_form_data(),
         "body": "",
+        "categories": "",
+        "events": "",
+        "discovery_tags": "",
+    }
+
+
+def _manual_text_discovery_metadata_form_context() -> dict:
+    return {
+        "show_discovery_metadata": True,
+        "discovery_tags_input_name": "tags",
+        "discovery_tags_input_id": "tags",
     }
 
 
@@ -1668,20 +1679,33 @@ def _normalized_archive_item_type(raw: str | None) -> str:
 
 def _submit_manual_text_create(request):
     parsed, form_errors = parse_manual_text_form(request.POST)
-    if form_errors:
-        return None, parsed, form_errors
-    item = create_manual_text_archive_item(
-        title=parsed["title"],
-        body=parsed["body"],
-        visibility=parsed["visibility"],
-        date_start=parsed["date_start_value"],
-        date_end=parsed["date_end_value"],
-        date_precision=parsed["date_precision"],
-        metadata_status=parsed["metadata_status"],
-        author_name=parsed["author_name"],
-        source_title=parsed["source_title"],
+    parsed_discovery, discovery_errors = parse_archive_item_discovery_metadata_form(
+        request.POST,
+        tags_field="tags",
     )
-    return redirect("archive-detail", item_id=item.id), parsed, form_errors
+    form_errors = form_errors + discovery_errors
+    form_data = {**parsed, **parsed_discovery}
+    if form_errors:
+        return None, form_data, form_errors
+    with transaction.atomic():
+        item = create_manual_text_archive_item(
+            title=parsed["title"],
+            body=parsed["body"],
+            visibility=parsed["visibility"],
+            date_start=parsed["date_start_value"],
+            date_end=parsed["date_end_value"],
+            date_precision=parsed["date_precision"],
+            metadata_status=parsed["metadata_status"],
+            author_name=parsed["author_name"],
+            source_title=parsed["source_title"],
+        )
+        update_archive_item_discovery_metadata(
+            item,
+            category_names=parsed_discovery["category_names"],
+            event_names=parsed_discovery["event_names"],
+            tag_names=parsed_discovery["tag_names"],
+        )
+    return redirect("archive-detail", item_id=item.id), form_data, form_errors
 
 
 def _archive_browse_items_queryset(user, **filter_kwargs):
@@ -1841,19 +1865,22 @@ def archive_manage_new_page(request):
         if success_redirect:
             return success_redirect
 
+    context = {
+        "item_type": item_type,
+        "item_type_choices": _archive_item_type_choices(),
+        **_manual_text_form_context(
+            form_data=form_data,
+            form_errors=form_errors,
+            page_title="יצירת פריט חדש",
+            submit_label="שמירה",
+        ),
+    }
+    if item_type == ARCHIVE_ITEM_TYPE_MANUAL_TEXT:
+        context.update(_manual_text_discovery_metadata_form_context())
     return render(
         request,
         "documents/archive/manage_new.html",
-        context={
-            "item_type": item_type,
-            "item_type_choices": _archive_item_type_choices(),
-            **_manual_text_form_context(
-                form_data=form_data,
-                form_errors=form_errors,
-                page_title="יצירת פריט חדש",
-                submit_label="שמירה",
-            ),
-        },
+        context=context,
     )
 
 
@@ -1874,12 +1901,15 @@ def archive_manage_manual_text_create_page(request):
     return render(
         request,
         "documents/archive/manual_text_form.html",
-        context=_manual_text_form_context(
-            form_data=form_data,
-            form_errors=form_errors,
-            page_title="יצירת טקסט מוקלד",
-            submit_label="שמירה",
-        ),
+        context={
+            **_manual_text_form_context(
+                form_data=form_data,
+                form_errors=form_errors,
+                page_title="יצירת טקסט מוקלד",
+                submit_label="שמירה",
+            ),
+            **_manual_text_discovery_metadata_form_context(),
+        },
     )
 
 
@@ -1952,9 +1982,7 @@ def _archive_manage_edit_manual_text(request, item: ArchiveItem):
                 page_title="עריכת טקסט מוקלד",
                 submit_label="עדכון",
             ),
-            "show_discovery_metadata": True,
-            "discovery_tags_input_name": "tags",
-            "discovery_tags_input_id": "tags",
+            **_manual_text_discovery_metadata_form_context(),
         },
     )
 

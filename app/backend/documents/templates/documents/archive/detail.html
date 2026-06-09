@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load document_date_display archive_labels %}
+{% load document_date_display archive_labels text_presentation %}
 {% block title %}VSArchive - {{ item.title }}{% endblock %}
 
 {% block content %}
@@ -43,6 +43,6 @@
     {% include "documents/archive/partials/source_metadata.html" with item=item %}
     {% include "documents/archive/partials/discovery_metadata.html" with item=item %}
     <div class="section-title">תוכן</div>
-    <div class="text-block text-block--pre">{{ body|linebreaksbr }}</div>
+    <div class="text-block text-block--pre">{{ body|manual_text_body_display }}</div>
   </div>
 {% endblock %}
