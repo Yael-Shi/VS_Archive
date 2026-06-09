@@ -182,6 +182,26 @@ class OcrReprocessUiTests(TestCase):
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.FAILED)
 
     @patch("documents.views.validate_required_env")
+    @patch("documents.services.ocr_reprocess.send_process_document_message")
+    def test_post_enqueue_failure_redirects_with_error_and_keeps_failed_state(
+        self, mock_enqueue, mock_validate_env
+    ):
+        doc = _failed_ocr_document()
+        mock_validate_env.return_value = _worker_env_config()
+        mock_enqueue.side_effect = RuntimeError("sqs down for test")
+
+        self.client.force_login(self.staff)
+        resp = self.client.post(self._reprocess_url(doc.id), follow=True)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.request["PATH_INFO"], self._detail_url(doc.id))
+        messages = [str(m) for m in get_messages(resp.wsgi_request)]
+        self.assertEqual(len(messages), 1)
+        self.assertIn("sqs down for test", messages[0])
+        doc.refresh_from_db()
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.FAILED)
+
+    @patch("documents.views.validate_required_env")
     @patch("documents.views.apply_ocr_reprocess")
     def test_post_service_error_redirects_with_error_message(
         self, mock_apply, mock_validate_env

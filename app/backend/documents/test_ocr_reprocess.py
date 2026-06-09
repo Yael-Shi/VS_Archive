@@ -93,6 +93,28 @@ class OcrReprocessServiceTests(TestCase):
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.FAILED)
 
     @patch("documents.services.ocr_reprocess.send_process_document_message")
+    def test_apply_enqueue_failure_rolls_back_processing_state(self, mock_enqueue):
+        doc = _failed_ocr_document()
+        _seed_transkribus_run(
+            doc,
+            status=TranskribusRun.Status.FAILED,
+            remote_doc_id=None,
+            error_code="TRANSKRIBUS_UPLOAD_FAILED",
+        )
+        mock_enqueue.side_effect = RuntimeError("sqs down for test")
+
+        with self.assertRaises(OcrReprocessError) as ctx:
+            apply_ocr_reprocess(
+                doc.id,
+                collection_id=COLLECTION_ID,
+                model_id=MODEL_ID,
+            )
+
+        self.assertIn("sqs down for test", str(ctx.exception))
+        doc.refresh_from_db()
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.FAILED)
+
+    @patch("documents.services.ocr_reprocess.send_process_document_message")
     def test_apply_normal_sets_processing_and_enqueues_default_payload(
         self, mock_enqueue
     ):

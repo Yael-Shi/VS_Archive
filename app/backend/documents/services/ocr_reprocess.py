@@ -166,17 +166,24 @@ def apply_ocr_reprocess(
             doc.upload_error = None
         doc.save(update_fields=["processing_state_user", "upload_error", "updated_at"])
 
-    if assessment.retry_mode == OcrRetryMode.TRANSKRIBUS_RECOGNITION_ONLY:
-        if assessment.source_transkribus_run_id is None:
+        try:
+            if assessment.retry_mode == OcrRetryMode.TRANSKRIBUS_RECOGNITION_ONLY:
+                if assessment.source_transkribus_run_id is None:
+                    raise OcrReprocessError(
+                        f"Document id={document_id} recognition-only reprocess requires "
+                        "source_transkribus_run_id but none was classified."
+                    )
+                send_process_document_message(
+                    document_id,
+                    ocr_retry_mode=OcrRetryMode.TRANSKRIBUS_RECOGNITION_ONLY.value,
+                    source_transkribus_run_id=assessment.source_transkribus_run_id,
+                )
+            else:
+                send_process_document_message(document_id)
+        except OcrReprocessError:
+            raise
+        except Exception as exc:
             raise OcrReprocessError(
-                f"Document id={document_id} recognition-only reprocess requires "
-                "source_transkribus_run_id but none was classified."
-            )
-        send_process_document_message(
-            document_id,
-            ocr_retry_mode=OcrRetryMode.TRANSKRIBUS_RECOGNITION_ONLY.value,
-            source_transkribus_run_id=assessment.source_transkribus_run_id,
-        )
-    else:
-        send_process_document_message(document_id)
+                f"Failed to enqueue document id={document_id} for OCR reprocess: {exc}"
+            ) from exc
     return assessment
