@@ -249,12 +249,13 @@
     const date_precision = document.getElementById("date_precision").value || "UNKNOWN";
     const language = document.getElementById("language").value || "";
     const text_input_type = document.getElementById("text_input_type").value || "";
-    const category_event = document.getElementById("category_event").value.trim() || "";
     const visibility = document.getElementById("visibility").value || "private";
     const author_name = document.getElementById("author_name").value.trim();
     const source_title = document.getElementById("source_title").value.trim();
 
-    const tagsRaw = document.getElementById("tags").value;
+    const categoriesRaw = document.getElementById("categories").value;
+    const eventsRaw = document.getElementById("events").value;
+    const discoveryTagsRaw = document.getElementById("discovery_tags").value;
 
     const donor = document.getElementById("donor").value.trim();
     const collection = document.getElementById("collection").value.trim();
@@ -267,16 +268,20 @@
       return;
     }
 
-    const tags = parseTags(tagsRaw);
+    const categories = parseTags(categoriesRaw);
+    const events = parseTags(eventsRaw);
+    const discovery_tags = parseTags(discoveryTagsRaw);
     const admin_meta = { donor, collection, original_location, notes };
 
-    const meta = { title, text_input_type, visibility, tags, admin_meta, date_precision };
+    const meta = { title, text_input_type, visibility, admin_meta, date_precision };
     if (date_start) meta.date_start = date_start;
     if (date_end) meta.date_end = date_end;
     if (language) meta.language = language;
-    if (category_event) meta.category_event = category_event;
     if (author_name) meta.author_name = author_name;
     if (source_title) meta.source_title = source_title;
+    if (categories.length) meta.categories = categories;
+    if (events.length) meta.events = events;
+    if (discovery_tags.length) meta.discovery_tags = discovery_tags;
 
     submitBtn.disabled = true;
 

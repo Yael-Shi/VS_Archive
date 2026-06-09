@@ -3858,6 +3858,109 @@ class UploadApiTests(TestCase):
         self.assertEqual(doc.archive_item.author_name, "דוד בן-גוריון")
         self.assertEqual(doc.archive_item.source_title, "מגילת העצמאות")
 
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_create_upload_saves_archive_item_discovery_metadata(self, _mock_put):
+        resp = self._post_create(
+            self._base_create_payload(
+                categories=["יהדות מצרים", "הפרשה"],
+                events=["חתונה של דוד"],
+                discovery_tags=["משפחה", "ירושלים"],
+            )
+        )
+        self.assertEqual(resp.status_code, 201)
+        doc = Document.objects.get(id=resp.json()["document_id"])
+        item = doc.archive_item
+        self.assertEqual(
+            list(item.categories.order_by("name").values_list("name", flat=True)),
+            ["הפרשה", "יהדות מצרים"],
+        )
+        self.assertEqual(
+            list(item.events.order_by("name").values_list("name", flat=True)),
+            ["חתונה של דוד"],
+        )
+        self.assertEqual(
+            list(item.tags.order_by("name").values_list("name", flat=True)),
+            ["ירושלים", "משפחה"],
+        )
+        self.assertIsNone(doc.category_event)
+        self.assertEqual(list(doc.tags_m2m.values_list("name", flat=True)), [])
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_multi_image_create_saves_archive_item_discovery_metadata(self, _mock_put):
+        resp = self._post_create(
+            self._multi_files_payload(
+                categories="קטגוריה אחת",
+                events="אירוע אחד",
+                discovery_tags=["תגית-א", "תגית-ב"],
+            )
+        )
+        self.assertEqual(resp.status_code, 201)
+        doc = Document.objects.get(id=resp.json()["document_id"])
+        item = doc.archive_item
+        self.assertEqual(
+            list(item.categories.values_list("name", flat=True)),
+            ["קטגוריה אחת"],
+        )
+        self.assertEqual(
+            list(item.events.values_list("name", flat=True)),
+            ["אירוע אחד"],
+        )
+        self.assertEqual(
+            list(item.tags.order_by("name").values_list("name", flat=True)),
+            ["תגית-א", "תגית-ב"],
+        )
+        self.assertIsNone(doc.category_event)
+        self.assertEqual(list(doc.tags_m2m.values_list("name", flat=True)), [])
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_create_upload_does_not_set_legacy_document_discovery_fields(
+        self, _mock_put
+    ):
+        resp = self._post_create(
+            self._base_create_payload(
+                category_event="Legacy event",
+                tags=["legacy-tag"],
+                categories=["Archive category"],
+                discovery_tags=["archive-tag"],
+            )
+        )
+        self.assertEqual(resp.status_code, 201)
+        doc = Document.objects.get(id=resp.json()["document_id"])
+        self.assertIsNone(doc.category_event)
+        self.assertEqual(list(doc.tags_m2m.values_list("name", flat=True)), [])
+        self.assertEqual(
+            list(doc.archive_item.categories.values_list("name", flat=True)),
+            ["Archive category"],
+        )
+        self.assertEqual(
+            list(doc.archive_item.tags.values_list("name", flat=True)),
+            ["archive-tag"],
+        )
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_create_upload_saves_admin_meta(self, _mock_put):
+        resp = self._post_create(
+            self._base_create_payload(
+                admin_meta={
+                    "donor": "יעל שיפמן",
+                    "collection": "ארכיון משפחתי",
+                    "original_location": "ירושלים",
+                    "notes": "הערות פנימיות",
+                }
+            )
+        )
+        self.assertEqual(resp.status_code, 201)
+        doc = Document.objects.get(id=resp.json()["document_id"])
+        meta = doc.admin_meta
+        self.assertEqual(meta.donor, "יעל שיפמן")
+        self.assertEqual(meta.collection, "ארכיון משפחתי")
+        self.assertEqual(meta.original_location, "ירושלים")
+        self.assertEqual(meta.notes, "הערות פנימיות")
+
     @patch("documents.views.create_presigned_put", return_value="https://example/upload")
     @patch("documents.views.send_process_document_message")
     def test_single_file_complete_still_enqueues_and_dual_writes(
@@ -7382,9 +7485,27 @@ class UploadPageTemplateTests(TestCase):
             'id="language"',
             'id="visibility"',
             'id="date_precision"',
-            'id="tags"',
+            'id="categories"',
+            'id="events"',
+            'id="discovery_tags"',
         ):
             self.assertContains(resp, needle)
+
+    def test_upload_page_hides_legacy_discovery_fields(self):
+        resp = self._get_page()
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, 'name="category_event"')
+        self.assertNotContains(resp, 'id="category_event"')
+        self.assertNotContains(resp, 'name="tags"')
+
+    def test_upload_page_renders_archive_item_discovery_metadata_section(self):
+        resp = self._get_page()
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "קטגוריות, אירועים ותגיות")
+        self.assertContains(resp, 'name="categories"')
+        self.assertContains(resp, 'name="events"')
+        self.assertContains(resp, 'name="discovery_tags"')
+        self.assertContains(resp, "discovery_tags")
 
     def test_upload_page_renders_hebrew_date_precision_labels(self):
         resp = self._get_page()
