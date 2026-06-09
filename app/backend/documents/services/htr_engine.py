@@ -14,6 +14,7 @@ def transcribe_pages(
     text_input_type: Optional[str],
     *,
     route: Optional[OcrRouteConfig] = None,
+    source_transkribus_run_id: int | None = None,
     **kwargs,
 ) -> HtrResult:
     """
@@ -26,6 +27,8 @@ def transcribe_pages(
         language_hint, text_input_type
     )
     adapter = get_htr_adapter(selected.engine_key)
+    if source_transkribus_run_id is not None:
+        kwargs["source_transkribus_run_id"] = source_transkribus_run_id
     return adapter.execute(
         pages=pages,
         language_hint=language_hint,
