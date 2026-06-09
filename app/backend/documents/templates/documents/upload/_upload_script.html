@@ -1,0 +1,315 @@
+{# Single source of truth for presigned S3 upload JS. Include once per page that hosts #uploadForm. #}
+<script>
+  const MULTI_IMAGE_MIN_FILES = 2;
+  const MULTI_IMAGE_MAX_FILES = 30;
+
+  const form = document.getElementById("uploadForm");
+  const msgEl = document.getElementById("msg");
+  const submitBtn = document.getElementById("submitBtn");
+
+  const fileEl = document.getElementById("file");
+  const docTypeEl = document.getElementById("doc_type");
+  const selectedFilesEl = document.getElementById("selectedFiles");
+
+  function setMessage(kind, text) {
+    msgEl.className = "msg";
+    if (kind === "error") msgEl.classList.add("msg-error");
+    else if (kind === "ok") msgEl.classList.add("msg-ok");
+    msgEl.textContent = text || "";
+  }
+
+  function parseTags(raw) {
+    return (raw || "")
+      .split(",")
+      .map(s => s.trim())
+      .filter(Boolean);
+  }
+
+  function getCsrfToken() {
+    const input = document.querySelector("#uploadForm input[name=csrfmiddlewaretoken]");
+    if (input && input.value) {
+      return input.value;
+    }
+    const name = "csrftoken";
+    if (!document.cookie) return "";
+    for (const part of document.cookie.split(";")) {
+      const cookie = part.trim();
+      if (cookie.startsWith(name + "=")) {
+        return decodeURIComponent(cookie.substring(name.length + 1));
+      }
+    }
+    return "";
+  }
+
+  async function jsonFetch(url, options) {
+    const headers = Object.assign(
+      {"Content-Type": "application/json", "X-CSRFToken": getCsrfToken()},
+      (options && options.headers) || {}
+    );
+    const res = await fetch(url, Object.assign({}, options || {}, {headers}));
+    const text = await res.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch (_) {}
+    if (!res.ok) {
+      const err = (data && (data.error || data.detail)) ? (data.error || data.detail) : text;
+      throw new Error(`HTTP ${res.status}: ${err}`);
+    }
+    return data;
+  }
+
+  function isImageFile(f) {
+    return (f.type || "").toLowerCase().startsWith("image/");
+  }
+
+  function applyFileInputMode() {
+    const dt = docTypeEl.value;
+
+    if (dt === "IMAGE") {
+      fileEl.setAttribute("accept", "image/*");
+    } else if (dt === "PDF") {
+      fileEl.setAttribute("accept", "application/pdf");
+    } else {
+      fileEl.setAttribute("accept", "application/pdf,image/*");
+    }
+    // `capture` conflicts with multi-select; multi-image upload needs gallery
+    // multi-pick, so we do not force camera capture on this input.
+    fileEl.removeAttribute("capture");
+  }
+
+  function renderSelectedFiles() {
+    const files = Array.from(fileEl.files || []);
+    selectedFilesEl.innerHTML = "";
+    // Only the multi-image case has a meaningful page order to show.
+    if (files.length < MULTI_IMAGE_MIN_FILES) return;
+    files.forEach((f, i) => {
+      const li = document.createElement("li");
+      li.textContent = `עמוד ${i + 1}: ${f.name}`;
+      selectedFilesEl.appendChild(li);
+    });
+  }
+
+  applyFileInputMode();
+  docTypeEl.addEventListener("change", () => applyFileInputMode());
+
+  async function runSingleFileUpload(file, doc_type, meta) {
+    setMessage("ok", "יוצרת מסמך…");
+
+    const mime_type = file.type || "application/octet-stream";
+    const createPayload = Object.assign({}, meta, {
+      doc_type,
+      original_name: file.name,
+      mime_type,
+      size_bytes: file.size
+    });
+
+    const created = await jsonFetch("/api/uploads/create/", {
+      method: "POST",
+      body: JSON.stringify(createPayload)
+    });
+
+    const documentId = created.document_id;
+    const uploadUrl = created.upload_url;
+    if (!documentId || !uploadUrl) {
+      throw new Error("Create response missing document_id or upload_url");
+    }
+
+    setMessage("ok", `מעלה ל-S3… (מסמך #${documentId})`);
+
+    const putRes = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: {"Content-Type": mime_type},
+      body: file
+    });
+    if (!putRes.ok) {
+      const putText = await putRes.text().catch(() => "");
+      throw new Error(`S3 PUT failed: HTTP ${putRes.status} ${putText}`);
+    }
+
+    setMessage("ok", "מסיימת העלאה…");
+
+    await jsonFetch(`/api/uploads/${documentId}/complete/`, {
+      method: "POST",
+      body: JSON.stringify({ success: true, file_size: file.size, file_mime: mime_type })
+    });
+
+    setMessage("ok", "בוצע. מעבירה לעמוד המסמך…");
+    window.location.href = `/api/ui/documents/${documentId}/`;
+  }
+
+  async function reportPartFailure(documentId, orderIndex, message) {
+    // Best-effort: mark this part (and therefore the upload) FAILED on the backend.
+    // V1 failed-part policy is terminal; there is no per-part retry/replace.
+    try {
+      await jsonFetch(`/api/uploads/${documentId}/parts/${orderIndex}/complete/`, {
+        method: "POST",
+        body: JSON.stringify({ success: false, error: message })
+      });
+    } catch (_) {
+      // Already in a failure path; ignore secondary errors.
+    }
+  }
+
+  async function runMultiImageUpload(files, meta) {
+    if (files.length > MULTI_IMAGE_MAX_FILES) {
+      throw new Error(`ניתן להעלות עד ${MULTI_IMAGE_MAX_FILES} תמונות במסמך אחד.`);
+    }
+    if (files.some((f) => !isImageFile(f))) {
+      throw new Error("בהעלאת ריבוי קבצים יש לבחור תמונות בלבד. PDF יש להעלות כקובץ יחיד.");
+    }
+
+    setMessage("ok", "יוצרת מסמך…");
+
+    const createPayload = Object.assign({}, meta, {
+      doc_type: "IMAGE",
+      files: files.map((f) => ({
+        original_name: f.name,
+        mime_type: f.type || "image/*",
+        size_bytes: f.size
+      }))
+    });
+
+    const created = await jsonFetch("/api/uploads/create/", {
+      method: "POST",
+      body: JSON.stringify(createPayload)
+    });
+
+    const documentId = created.document_id;
+    const uploads = Array.isArray(created.uploads) ? created.uploads : null;
+    if (!documentId || !uploads || uploads.length !== files.length) {
+      throw new Error("Create response missing document_id or uploads[]");
+    }
+
+    const total = files.length;
+    const restartMsg = "ההעלאה מרובת־התמונות נכשלה ויש להתחיל העלאה חדשה (אין ניסיון חוזר לעמוד בודד בגרסה זו).";
+
+    for (let i = 0; i < uploads.length; i++) {
+      const entry = uploads[i];
+      const orderIndex = entry.order_index;
+      const file = files[orderIndex];
+      const mime_type = file.type || entry.mime_type || "image/*";
+
+      setMessage("ok", `מעלה עמוד ${orderIndex + 1} מתוך ${total}…`);
+
+      let putRes;
+      try {
+        putRes = await fetch(entry.upload_url, {
+          method: "PUT",
+          headers: {"Content-Type": mime_type},
+          body: file
+        });
+      } catch (netErr) {
+        await reportPartFailure(documentId, orderIndex, `network error: ${netErr}`);
+        throw new Error(`העלאת עמוד ${orderIndex + 1} נכשלה. ${restartMsg}`);
+      }
+      if (!putRes.ok) {
+        const putText = await putRes.text().catch(() => "");
+        await reportPartFailure(documentId, orderIndex, `S3 PUT failed: HTTP ${putRes.status} ${putText}`);
+        throw new Error(`העלאת עמוד ${orderIndex + 1} נכשלה. ${restartMsg}`);
+      }
+
+      setMessage("ok", `מאשרת עמוד ${orderIndex + 1} מתוך ${total}…`);
+      try {
+        await jsonFetch(`/api/uploads/${documentId}/parts/${orderIndex}/complete/`, {
+          method: "POST",
+          body: JSON.stringify({ success: true, file_size: file.size, file_mime: mime_type })
+        });
+      } catch (completeErr) {
+        await reportPartFailure(documentId, orderIndex, `part complete failed: ${completeErr && completeErr.message ? completeErr.message : completeErr}`);
+        throw new Error(`אישור עמוד ${orderIndex + 1} נכשל. ${restartMsg}`);
+      }
+    }
+
+    setMessage("ok", "מסיימת מסמך…");
+    await jsonFetch(`/api/uploads/${documentId}/finalize/`, {
+      method: "POST",
+      body: JSON.stringify({ success: true })
+    });
+
+    setMessage("ok", "בוצע. מעבירה לעמוד המסמך…");
+    window.location.href = `/api/ui/documents/${documentId}/`;
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    setMessage("", "");
+
+    const files = Array.from(fileEl.files || []);
+    if (files.length === 0) {
+      setMessage("error", "חובה לבחור קובץ.");
+      return;
+    }
+
+    const isMulti = files.length >= MULTI_IMAGE_MIN_FILES;
+
+    const title = document.getElementById("title").value.trim();
+    const doc_type = docTypeEl.value;
+
+    const date_start = document.getElementById("date_start").value || null;
+    const date_end = document.getElementById("date_end").value || null;
+    const date_precision = document.getElementById("date_precision").value || "UNKNOWN";
+    const language = document.getElementById("language").value || "";
+    const text_input_type = document.getElementById("text_input_type").value || "";
+    const category_event = document.getElementById("category_event").value.trim() || "";
+    const visibility = document.getElementById("visibility").value || "private";
+    const author_name = document.getElementById("author_name").value.trim();
+    const source_title = document.getElementById("source_title").value.trim();
+
+    const tagsRaw = document.getElementById("tags").value;
+
+    const donor = document.getElementById("donor").value.trim();
+    const collection = document.getElementById("collection").value.trim();
+    const original_location = document.getElementById("original_location").value.trim();
+    const notes = document.getElementById("notes").value.trim();
+
+    // Multi-image forces doc_type=IMAGE, so doc_type is only required for single-file.
+    if (!title || !text_input_type || (!isMulti && !doc_type)) {
+      setMessage("error", "נא למלא שדות חובה: כותרת + סוג מסמך + סוג טקסט.");
+      return;
+    }
+
+    const tags = parseTags(tagsRaw);
+    const admin_meta = { donor, collection, original_location, notes };
+
+    const meta = { title, text_input_type, visibility, tags, admin_meta, date_precision };
+    if (date_start) meta.date_start = date_start;
+    if (date_end) meta.date_end = date_end;
+    if (language) meta.language = language;
+    if (category_event) meta.category_event = category_event;
+    if (author_name) meta.author_name = author_name;
+    if (source_title) meta.source_title = source_title;
+
+    submitBtn.disabled = true;
+
+    try {
+      if (isMulti) {
+        await runMultiImageUpload(files, meta);
+      } else {
+        await runSingleFileUpload(files[0], doc_type, meta);
+      }
+    } catch (err) {
+      setMessage("error", String(err && err.message ? err.message : err));
+      submitBtn.disabled = false;
+    }
+  });
+
+  fileEl.addEventListener("change", () => {
+    const files = Array.from(fileEl.files || []);
+    renderSelectedFiles();
+
+    if (files.length >= MULTI_IMAGE_MIN_FILES) {
+      // Multi-image V1 is image-only; force IMAGE so the field stays valid/consistent.
+      docTypeEl.value = "IMAGE";
+      applyFileInputMode();
+      return;
+    }
+
+    const f = files[0];
+    if (!f) return;
+    if (!docTypeEl.value) {
+      const mt = (f.type || "").toLowerCase();
+      if (mt === "application/pdf") docTypeEl.value = "PDF";
+      else if (mt.startsWith("image/")) docTypeEl.value = "IMAGE";
+    }
+    applyFileInputMode();
+  });
+</script>

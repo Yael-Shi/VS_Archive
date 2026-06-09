@@ -1,0 +1,148 @@
+{# Reusable OCR upload form + admin metadata column. Include from upload.html or future unified create flows. #}
+    <div id="msg" class="msg" role="status" aria-live="polite"></div>
+
+    <div class="two-col">
+      <div class="card card--pad-lg">
+        <div class="section-title">קובץ + פרטים בסיסיים</div>
+
+        <form id="uploadForm">
+          {% csrf_token %}
+          <div class="field">
+            <label for="file">קובץ *</label>
+            <input id="file" name="file" type="file" multiple required />
+            <div class="field-hint">
+              ניתן לבחור כמה תמונות יחד בחלון הבחירה (Ctrl/Cmd, או לחיצה ארוכה בנייד).
+            </div>
+            <div class="field-hint">
+              קובץ אחד = העלאה רגילה (תמונה או PDF).<br />
+              2–30 תמונות = מסמך אחד מרובה עמודים לפי סדר הבחירה.<br />
+              ריבוי קבצים תומך בתמונות בלבד.<br />
+              PDF יש להעלות כקובץ יחיד.
+            </div>
+            <ul id="selectedFiles" class="field-hint selected-files-list"></ul>
+          </div>
+
+          <div class="field">
+            <label for="title">כותרת *</label>
+            <input id="title" name="title" type="text" required />
+          </div>
+
+          <div class="meta-grid">
+            <div class="field">
+              <label for="author_name">מחבר/ת</label>
+              <input id="author_name" name="author_name" type="text" />
+            </div>
+            <div class="field">
+              <label for="source_title">מקור</label>
+              <input id="source_title" name="source_title" type="text" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="doc_type">סוג מסמך *</label>
+            <select id="doc_type" name="doc_type" required>
+              <option value="" selected disabled>בחרי…</option>
+              {% for v, label in doc_type_choices %}
+                <option value="{{ v }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+            <div class="field-hint">שאר המטא־דאטה ניתן להשלים בהמשך.</div>
+          </div>
+
+          <div class="meta-grid">
+            <div class="field">
+              <label for="date_start">תאריך התחלה</label>
+              <input id="date_start" name="date_start" type="date" />
+            </div>
+            <div class="field">
+              <label for="date_end">תאריך סיום</label>
+              <input id="date_end" name="date_end" type="date" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="date_precision">דיוק תאריך</label>
+            <select id="date_precision" name="date_precision">
+              {% for value, label in date_precision_choices %}
+                <option value="{{ value }}"{% if value == "UNKNOWN" %} selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="meta-grid">
+            <div class="field">
+              <label for="language">שפה</label>
+              <select id="language" name="language">
+                <option value="" selected>(לא ידוע)</option>
+                <option value="he">עברית (he)</option>
+                <option value="en">אנגלית (en)</option>
+                <option value="fr">צרפתית (fr)</option>
+                <option value="ar">ערבית (ar)</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="text_input_type">סוג טקסט *</label>
+              <select id="text_input_type" name="text_input_type" required>
+                <option value="" selected disabled>בחרי…</option>
+                {% for v, label in text_input_type_choices %}
+                  <option value="{{ v }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <div class="meta-grid">
+            <div class="field">
+              <label for="visibility">נראות</label>
+              <select id="visibility" name="visibility">
+                <option value="private" selected>פרטי (private)</option>
+                <option value="public">ציבורי (public)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="category_event">קטגוריה / אירוע</label>
+            <input id="category_event" name="category_event" type="text" />
+          </div>
+
+          <div class="field">
+            <label for="tags">תגיות (מופרדות בפסיקים)</label>
+            <input id="tags" name="tags" type="text" placeholder="למשל: משפחה, ירושלים, 1948" />
+          </div>
+
+          <div class="form-actions form-actions--spaced">
+            <button id="submitBtn" class="btn btn-primary" type="submit">העלאה</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card card--pad-lg">
+        <div class="section-title">מטא־דאטה למנהלים (אופציונלי)</div>
+
+        <div class="field">
+          <label for="donor">תורם</label>
+          <input id="donor" name="donor" type="text" placeholder="למשל: יעל שיפמן" />
+        </div>
+
+        <div class="field">
+          <label for="collection">אוסף</label>
+          <input id="collection" name="collection" type="text" placeholder="למשל: ארכיון משפחתי" />
+        </div>
+
+        <div class="field">
+          <label for="original_location">מיקום מקור</label>
+          <input id="original_location" name="original_location" type="text" placeholder="למשל: ירושלים" />
+        </div>
+
+        <div class="field">
+          <label for="notes">הערות</label>
+          <textarea id="notes" name="notes" placeholder="הערות פנימיות..."></textarea>
+        </div>
+
+        <div class="field-hint">
+          הערה: גם אם תשאירי ריק, אפשר להשלים אחר־כך.
+        </div>
+      </div>
+    </div>
