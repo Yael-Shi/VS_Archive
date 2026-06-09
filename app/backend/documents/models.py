@@ -1,5 +1,6 @@
 import uuid
 
+from django.core.exceptions import ValidationError
 from django.db import models, transaction
 
 
@@ -122,6 +123,44 @@ class ManualTextContent(models.Model):
 
     def __str__(self) -> str:
         return f"ManualTextContent(archive_item_id={self.archive_item_id})"
+
+
+class PhotoContent(models.Model):
+    """Image file metadata for PHOTO archive items (not OCR/Document-backed)."""
+
+    archive_item = models.OneToOneField(
+        ArchiveItem,
+        on_delete=models.CASCADE,
+        related_name="photo_content",
+    )
+    original_file_key = models.CharField(max_length=1024)
+    original_filename = models.CharField(max_length=512)
+    original_mime_type = models.CharField(max_length=128)
+    original_size_bytes = models.PositiveBigIntegerField()
+    width = models.PositiveIntegerField(null=True, blank=True)
+    height = models.PositiveIntegerField(null=True, blank=True)
+    thumbnail_file_key = models.CharField(max_length=1024, blank=True, default="")
+    thumbnail_mime_type = models.CharField(max_length=128, blank=True, default="")
+    thumbnail_size_bytes = models.PositiveBigIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def clean(self) -> None:
+        super().clean()
+        if (
+            self.archive_item_id
+            and self.archive_item.item_type != ArchiveItem.ItemType.PHOTO
+        ):
+            raise ValidationError(
+                {
+                    "archive_item": (
+                        "PhotoContent requires ArchiveItem with item_type=PHOTO."
+                    )
+                }
+            )
+
+    def __str__(self) -> str:
+        return f"PhotoContent(archive_item_id={self.archive_item_id})"
 
 
 class DocumentQuerySet(models.QuerySet):

@@ -1339,3 +1339,17 @@ Category/event/tag names on archive detail pages link to these browse pages. Bro
 **Docs:** `docs/ai-context/photo-archive-items.md`
 
 **Out of scope (V1):** Multi-photo albums, thumbnail generation, image transforms, OCR-on-photo, face/people tagging, comments, public upload, rich text, legacy **`Document`** cleanup.
+
+## ArchiveItem — PHOTO model foundation (PR2)
+
+**Decision:** Add **`PhotoContent`** as the dedicated backing model for **`PHOTO`** archive items. **`ArchiveItem`** + **`PhotoContent`** are the runtime source of truth for PHOTO items (same pattern as **`MANUAL_TEXT`** + **`ManualTextContent`**). **No** **`Document`**, OCR/HTR, worker, SQS, upload, presigned URLs, or archive display in this PR.
+
+**Model:** **`PhotoContent`** — `OneToOneField` to **`ArchiveItem`** (`related_name="photo_content"`, `on_delete=CASCADE`); **`original_*`** file metadata fields; nullable/blank **`width`**, **`height`**, and **`thumbnail_*`** foundation fields (thumbnail generation deferred). **`PhotoContent.clean()`** rejects non-**`PHOTO`** **`ArchiveItem`** links on **`full_clean()`**.
+
+**Admin:** **`PhotoContentAdmin`** is view-only (add/change/delete disabled), matching **`ManualTextContentAdmin`**.
+
+**Scope (PR2):** Model, migration **0025**, admin registration, focused model/admin tests, minimal doc updates. **No** data backfill. **No** create/upload service, S3, templates, or visibility changes.
+
+**Deferred (PR3+):** Staff create/upload, presigned PUT/GET, archive list/detail PHOTO rendering, thumbnail generation, S3 delete on item delete — per `docs/ai-context/photo-archive-items.md`.
+
+**Docs:** `docs/ai-context/photo-archive-items.md` (PR2 status note)
