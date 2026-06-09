@@ -19,6 +19,7 @@ from .models import (
     DocumentMetadata,
     DocumentSourceFile,
     DocumentTextResult,
+    PhotoContent,
     Tag,
 )
 from documents.services.archive_catalog_metadata_validation import (
@@ -75,6 +76,7 @@ from documents.services.document_access import (
     is_document_admin,
 )
 from documents.services.archive_item_access import (
+    archive_browse_queryset_for_user,
     archive_item_queryset_for_user,
     get_viewable_archive_item,
 )
@@ -84,6 +86,11 @@ from documents.services.archive_item_validation import (
 )
 from documents.services.manual_text_validation import parse_manual_text_form
 from documents.services.archive_metadata_validation import parse_archive_metadata_form
+from documents.services.photo_upload import (
+    create_photo_upload_plan,
+    finalize_photo_upload,
+    parse_create_photo_upload_metadata,
+)
 from documents.services.archive_item_presentation import (
     ARCHIVE_LIST_ITEM_TYPE_FILTER_CHOICES,
     archive_manage_item_type_ui_choices,
@@ -100,8 +107,13 @@ logger = logging.getLogger(__name__)
 
 ARCHIVE_ITEM_TYPE_MANUAL_TEXT = "manual_text"
 ARCHIVE_ITEM_TYPE_OCR_DOCUMENT = "ocr_document"
+ARCHIVE_ITEM_TYPE_PHOTO = "photo"
 _VALID_ARCHIVE_ITEM_CREATE_TYPES = frozenset(
-    {ARCHIVE_ITEM_TYPE_MANUAL_TEXT, ARCHIVE_ITEM_TYPE_OCR_DOCUMENT}
+    {
+        ARCHIVE_ITEM_TYPE_MANUAL_TEXT,
+        ARCHIVE_ITEM_TYPE_OCR_DOCUMENT,
+        ARCHIVE_ITEM_TYPE_PHOTO,
+    }
 )
 
 
@@ -1024,6 +1036,117 @@ def upload_finalize(request, doc_id: int):
     return _finalize_response(doc)
 
 
+@login_required
+def create_photo_upload(request):
+    deny = _require_admin(request)
+    if deny:
+        return deny
+
+    if request.method != "POST":
+        return JsonResponse({"error": "POST only"}, status=405)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return JsonResponse({"error": "invalid json"}, status=400)
+
+    parsed, err = parse_create_photo_upload_metadata(payload)
+    if err:
+        return JsonResponse({"error": err}, status=400)
+
+    bucket, bucket_err = _uploads_bucket_or_error()
+    if bucket_err:
+        return bucket_err
+
+    archive_item, photo_content, upload_url = create_photo_upload_plan(
+        bucket=bucket,
+        title=parsed["title"],
+        visibility=parsed["visibility"],
+        date_start=parsed["date_start"],
+        date_end=parsed["date_end"],
+        date_precision=parsed["date_precision"],
+        metadata_status=parsed["metadata_status"],
+        author_name=parsed["author_name"],
+        source_title=parsed["source_title"],
+        original_name=parsed["original_name"],
+        mime_type=parsed["mime_type"],
+        discovery_metadata=parsed["discovery_metadata"],
+    )
+
+    return JsonResponse(
+        {
+            "archive_item_id": archive_item.id,
+            "photo_content_id": photo_content.id,
+            "s3_key": photo_content.original_file_key,
+            "upload_url": upload_url,
+            "upload_status": photo_content.upload_status,
+        },
+        status=201,
+    )
+
+
+@login_required
+def photo_upload_complete(request, photo_content_id: int):
+    deny = _require_admin(request)
+    if deny:
+        return deny
+
+    if request.method != "POST":
+        return JsonResponse({"error": "POST only"}, status=405)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return JsonResponse({"error": "invalid json"}, status=400)
+
+    try:
+        photo_content = PhotoContent.objects.select_related("archive_item").get(
+            id=photo_content_id
+        )
+    except PhotoContent.DoesNotExist:
+        return JsonResponse({"error": "not found"}, status=404)
+
+    if photo_content.archive_item.item_type != ArchiveItem.ItemType.PHOTO:
+        return JsonResponse({"error": "not a photo upload"}, status=400)
+
+    success = bool(payload.get("success"))
+    file_mime = (payload.get("file_mime") or "").strip() or None
+    client_error = (payload.get("error") or "").strip() or None
+
+    bucket, bucket_err = _uploads_bucket_or_error()
+    if bucket_err:
+        return bucket_err
+
+    photo_content, verify_err = finalize_photo_upload(
+        photo_content,
+        bucket=bucket,
+        success=success,
+        file_mime=file_mime,
+        client_error=client_error,
+    )
+
+    body = {
+        "archive_item_id": photo_content.archive_item_id,
+        "photo_content_id": photo_content.id,
+        "upload_status": photo_content.upload_status,
+        "upload_error": photo_content.upload_error,
+        "upload_complete": (
+            photo_content.upload_status == PhotoContent.UploadStatus.UPLOADED
+        ),
+        "original_size_bytes": photo_content.original_size_bytes,
+    }
+
+    if verify_err:
+        body["error"] = verify_err.message
+        return JsonResponse(body, status=verify_err.status)
+
+    if not success:
+        body["error"] = photo_content.upload_error or "upload failed"
+        return JsonResponse(body, status=200)
+
+    return JsonResponse(body, status=200)
+
+
 def documents_list_api(request):
     q = request.GET.get("q", "") or ""
     upload_status = (request.GET.get("upload_status") or "").strip()
@@ -1540,6 +1663,22 @@ def _upload_form_context() -> dict:
     }
 
 
+def _photo_upload_form_context() -> dict:
+    return {
+        "date_precision_choices": DATE_PRECISION_UI_CHOICES,
+        "visibility_choices": archive_visibility_ui_choices(),
+        "metadata_status_choices": archive_metadata_status_ui_choices(),
+        "form_data": {
+            **_empty_archive_metadata_form_data(),
+            "categories": "",
+            "events": "",
+            "discovery_tags": "",
+        },
+        "discovery_tags_input_name": "discovery_tags",
+        "discovery_tags_input_id": "discovery_tags",
+    }
+
+
 @login_required
 def upload_page(request):
     deny = _require_admin_page(request)
@@ -1730,7 +1869,7 @@ def _submit_manual_text_create(request):
 
 def _archive_browse_items_queryset(user, **filter_kwargs):
     return (
-        archive_item_queryset_for_user(user)
+        archive_browse_queryset_for_user(user)
         .filter(**filter_kwargs)
         .select_related("manual_text_content", "ocr_document")
         .order_by("-created_at")
@@ -1801,7 +1940,7 @@ def archive_list_page(request):
     )
     search_query = normalize_archive_list_search_query(request.GET.get("q"))
     items = (
-        archive_item_queryset_for_user(request.user)
+        archive_browse_queryset_for_user(request.user)
         .select_related("manual_text_content", "ocr_document")
         .order_by("-created_at")
     )
@@ -1899,6 +2038,8 @@ def archive_manage_new_page(request):
         context.update(_manual_text_discovery_metadata_form_context())
     elif item_type == ARCHIVE_ITEM_TYPE_OCR_DOCUMENT:
         context.update(_upload_form_context())
+    elif item_type == ARCHIVE_ITEM_TYPE_PHOTO:
+        context.update(_photo_upload_form_context())
     return render(
         request,
         "documents/archive/manage_new.html",

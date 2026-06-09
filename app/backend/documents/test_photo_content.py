@@ -22,6 +22,8 @@ def _photo_content_defaults(**overrides) -> dict:
         "original_filename": "scan.jpg",
         "original_mime_type": "image/jpeg",
         "original_size_bytes": 2048,
+        "upload_status": PhotoContent.UploadStatus.UPLOADED,
+        "upload_error": "",
     }
     values.update(overrides)
     return values

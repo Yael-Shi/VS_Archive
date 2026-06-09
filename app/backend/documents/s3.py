@@ -33,6 +33,28 @@ def build_document_source_file_s3_key(
     return f"documents/{document_id}/source/{order_index}.{ext}"
 
 
+_PHOTO_MIME_TO_S3_EXTENSION: dict[str, str] = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/tiff": "tiff",
+    "image/webp": "webp",
+}
+
+
+def photo_mime_to_s3_extension(mime_type: str) -> str:
+    """Canonical S3 key extension for validated photo MIME types."""
+    mime = (mime_type or "").strip().lower().split(";", 1)[0].strip()
+    try:
+        return _PHOTO_MIME_TO_S3_EXTENSION[mime]
+    except KeyError as exc:
+        raise ValueError(f"unsupported photo mime type: {mime_type!r}") from exc
+
+
+def build_photo_original_s3_key(photo_content_id: int, mime_type: str) -> str:
+    ext = photo_mime_to_s3_extension(mime_type)
+    return f"photos/{photo_content_id}/original.{ext}"
+
+
 def create_presigned_put(
     bucket: str,
     key: str,
@@ -72,6 +94,7 @@ def create_presigned_get(
 class S3HeadObjectResult:
     exists: bool
     content_type: Optional[str] = None
+    content_length: Optional[int] = None
 
 
 def head_s3_object(bucket: str, key: str) -> S3HeadObjectResult:
@@ -96,7 +119,20 @@ def head_s3_object(bucket: str, key: str) -> S3HeadObjectResult:
     else:
         content_type = None
 
-    return S3HeadObjectResult(exists=True, content_type=content_type)
+    content_length = resp.get("ContentLength")
+    if content_length is not None:
+        try:
+            content_length = int(content_length)
+        except (TypeError, ValueError):
+            content_length = None
+        if content_length is not None and content_length < 0:
+            content_length = None
+
+    return S3HeadObjectResult(
+        exists=True,
+        content_type=content_type,
+        content_length=content_length,
+    )
 
 
 def s3_object_exists(bucket: str, key: str) -> bool:
