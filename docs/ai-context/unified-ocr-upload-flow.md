@@ -1,23 +1,25 @@
-# Unified OCR Upload Flow — Design / Audit
+# Unified OCR Upload Flow
 
-Design and audit note for a future **unified OCR upload experience** inside the archive create-item flow. This document records **current behavior**, **target UX**, **risks**, and a **small-PR implementation plan**. It does **not** change runtime behavior.
+Reference note for the **completed** unified OCR upload experience inside the archive create-item flow. This document records **current behavior**, the **PR1–PR3 implementation history**, **risks/non-negotiables**, and **deferred follow-ups**.
 
-**Status:** Design only (audit PR). **Implementation deferred** to follow-up PRs.
+**Status:** **Completed** (PR0 design/audit → PR1 partial extraction → PR2 unified embed → PR3 ArchiveItem discovery metadata). Manual QA and focused automated tests passed before PHOTO work.
 
 **Related docs:**
 
 - `docs/ai-context/decision-log.md` — durable decisions and PR history
 - `docs/ai-context/ocr-archiveitem-cutover.md` — OCR shared-field source-of-truth cutover (separate concern)
 - `docs/ai-context/archive-discovery-catalog-design.md` — ArchiveItem discovery metadata direction
-- `docs/ai-context/multi-image-documents-design.md` — multi-image modeling notes (upload is already implemented)
+- `docs/ai-context/multi-image-documents-design.md` — multi-image modeling notes
 
 **Key code references (current behavior):**
 
-- `documents/templates/documents/archive/manage_new.html` — unified create entrypoint; OCR branch bridges to upload page
-- `documents/views.py` — `archive_manage_new_page`, `upload_page`, `create_upload`, `upload_complete`, `upload_part_complete`, `upload_finalize`
-- `documents/templates/documents/upload.html` — upload form + **inline** presigned-upload JavaScript
+- `documents/templates/documents/archive/manage_new.html` — unified create entrypoint; OCR branch embeds upload partials inline
+- `documents/templates/documents/upload/_upload_form.html` — reusable OCR upload form + admin metadata column
+- `documents/templates/documents/upload/_upload_script.html` — **single source of truth** for presigned S3 upload JavaScript
+- `documents/templates/documents/upload.html` — `/api/ui/upload/` shell; includes form + script partials
+- `documents/views.py` — `archive_manage_new_page`, `_upload_form_context`, `upload_page`, `create_upload`, `upload_complete`, `upload_part_complete`, `upload_finalize`
 - `documents/urls.py` — upload API routes under `/api/`
-- `documents/services/archive_items.py` — `create_ocr_document` (creates linked `ArchiveItem` + `Document`)
+- `documents/services/archive_items.py` — `create_ocr_document`, `update_archive_item_discovery_metadata`
 - `documents/services/upload_validation.py` — MIME/extension validation
 - `documents/services/source_files.py` — multi-image helpers and limits (`MULTI_IMAGE_MIN_FILES=2`, `MULTI_IMAGE_MAX_FILES=30`)
 
@@ -27,32 +29,32 @@ Design and audit note for a future **unified OCR upload experience** inside the 
 
 ### Purpose
 
-Staff already start new archive items at **`/archive/manage/new/`**. **Manual text** can be created inline on that page. **OCR documents** (PDF / text image) still redirect staff to the legacy upload page. This note defines how to **integrate OCR upload into the unified create flow** without forking upload behavior, duplicating sensitive S3/JS logic, or touching OCR processing.
+Staff start new archive items at **`/archive/manage/new/`**. **Manual text** is created inline on that page. **OCR documents** (PDF / text image) are now created on the **same unified page** when staff select **מסמך סרוק / PDF** — the upload form and presigned-upload script are embedded inline via shared partials. **`/api/ui/upload/`** remains available as a fallback/secondary upload page using the same partials.
 
-### In scope (this design)
+All upload flows call the **same** `/api/uploads/*` endpoints with the **same** client behavior. OCR processing, S3 verification, and worker enqueue semantics were not changed by the UI-integration PRs.
 
-- Audit of current OCR upload bridge and endpoints
-- Target unified UX direction
-- Risks and non-negotiables for future implementation
-- Small, reviewable PR sequence
-- Manual QA / test checklist for follow-up PRs
+### Completed (PR1–PR3)
 
-### Out of scope (this design PR and the planned UI-integration series)
+- Reusable upload form/script partials extracted from the former monolithic upload page
+- OCR upload embedded in `/archive/manage/new/?item_type=ocr_document`
+- Shared `_upload_form_context()` for upload page and unified OCR branch
+- ArchiveItem discovery metadata (categories / events / discovery_tags) on **new** OCR uploads
+- First-party upload UI no longer sends legacy `category_event` or `Document.tags_m2m` tags
 
-- Implementing unified OCR upload UI
-- Moving or renaming upload routes
-- Changing upload JavaScript behavior
-- Changing upload API contracts, S3/CORS, presigned URL generation, MIME validation, S3 HeadObject verification, or ContentType checks
-- Changing upload completion, multi-image part/finalize semantics, worker, SQS, OCR/HTR routing, Gemini, Transkribus, `DocumentTextResult`, review/status, permissions, or production infra
+### Out of scope (still deferred)
+
 - **`PHOTO`** item implementation
 - Rich text editing
+- Legacy schema cleanup (`Document.category_event`, `Document.tags_m2m` removal)
+- Backfill of existing OCR documents to ArchiveItem discovery metadata from legacy fields
+- Upload API contract changes, S3/CORS changes, worker/OCR/HTR/routing changes
 - Unmanaged local JSON files such as `web_task.json` or `worker_task.json`
 
 ---
 
-## 2. Current flow (audit)
+## 2. Current flow
 
-### 2.1 Unified create entrypoint
+### 2.1 Unified create entrypoint (primary OCR path)
 
 | Surface | Route | View | Template |
 |---------|-------|------|----------|
@@ -60,37 +62,44 @@ Staff already start new archive items at **`/archive/manage/new/`**. **Manual te
 
 Staff choose item type via GET form (`item_type` query param). Supported slugs (not stored enum values):
 
-| `item_type` slug | Stored `ArchiveItem.item_type` | Create behavior today |
-|------------------|--------------------------------|------------------------|
+| `item_type` slug | Stored `ArchiveItem.item_type` | Create behavior |
+|------------------|--------------------------------|-----------------|
 | `manual_text` | `MANUAL_TEXT` | Inline POST form on same page |
-| `ocr_document` | `OCR_DOCUMENT` | **Bridge card only** — link to legacy upload page |
+| `ocr_document` | `OCR_DOCUMENT` | **Inline upload form + script partials** on same page |
 
 When staff select **OCR document**:
 
 1. Page re-renders with `item_type=ocr_document`.
-2. Template shows explanatory copy and a primary button **"המשך להעלאת מסמך"**.
-3. Button links to **`{% url 'upload-page' %}`** → **`/api/ui/upload/`**.
-4. No upload form, no presigned JS, and no metadata fields appear on the unified page.
+2. Template shows explanatory copy and includes **`_upload_form.html`** + **`_upload_script.html`**.
+3. Upload POST targets remain **`/api/uploads/*`** (absolute paths in the script partial).
+4. A secondary link **"פתיחה בדף העלאה נפרד"** points to **`/api/ui/upload/`** for staff who prefer the standalone upload page.
+5. Toolbar **"חזרה לניהול"** links back to archive manage (unified chrome).
 
-There is also a dedicated manual-text route **`/archive/manage/new/manual-text/`** (legacy alias); OCR has **no** equivalent dedicated create route beyond the unified page bridge.
+Manual text also has a dedicated legacy alias route **`/archive/manage/new/manual-text/`**; OCR has no separate dedicated create route beyond the unified page.
 
-### 2.2 Legacy upload page (actual OCR upload UI)
+### 2.2 Secondary upload page (fallback)
 
 | Surface | Route | View | Template |
 |---------|-------|------|----------|
 | Upload page | `/api/ui/upload/` | `upload_page` | `documents/upload.html` |
 
 - Requires staff/admin (`_require_admin_page`).
+- Renders the **same** `_upload_form.html` and `_upload_script.html` partials as the unified OCR branch.
 - "Back" link goes to **`/api/ui/documents/`** (document list), not `/archive/manage/`.
 - After successful upload, JS redirects to **`/api/ui/documents/<document_id>/`**.
 
-Other entrypoints to the same upload page still exist (e.g. document list **"העלאת מסמך חדש"** in `documents/list.html`).
+Other entrypoints to this page still exist (e.g. document list **"העלאת מסמך חדש"** in `documents/list.html`).
 
-### 2.3 Upload JavaScript location
+### 2.3 Upload UI partials (single source of truth)
 
-**There is no separate `.js` file.** All presigned-upload logic lives in an **inline `<script>` block** at the bottom of `documents/upload.html` (approximately lines 164–477).
+Presigned-upload logic is **not** duplicated in `upload.html`. It lives in one template partial:
 
-Functions in that script:
+| Partial | Role |
+|---------|------|
+| `documents/upload/_upload_form.html` | File input, shared/bibliographic metadata, OCR fields, discovery metadata fields, admin-meta column |
+| `documents/upload/_upload_script.html` | Presigned S3 upload JavaScript — include **once** per page hosting `#uploadForm` |
+
+Functions in the script partial:
 
 | Function | Role |
 |----------|------|
@@ -100,7 +109,9 @@ Functions in that script:
 | `runMultiImageUpload()` | Multi-image: create → per-part S3 PUT → part complete → finalize |
 | `reportPartFailure()` | Best-effort failed part reporting for multi-image |
 
-Constants duplicated in template JS: `MULTI_IMAGE_MIN_FILES = 2`, `MULTI_IMAGE_MAX_FILES = 30` (server constants live in `documents/services/source_files.py`).
+Constants in template JS: `MULTI_IMAGE_MIN_FILES = 2`, `MULTI_IMAGE_MAX_FILES = 30` (server constants live in `documents/services/source_files.py`).
+
+`views._upload_form_context()` supplies shared template context (doc type choices, date precision choices, empty discovery form data, `discovery_tags` input id/name) to both `upload_page` and the unified OCR branch.
 
 ### 2.4 Upload API endpoints
 
@@ -118,6 +129,7 @@ All routes are mounted under **`/api/`** (`vs_archive/urls.py` → `documents.ur
 ```
 Browser                          Backend                         S3
    | POST /api/uploads/create/  -> create_ocr_document + presigned PUT URL
+   |                               + ArchiveItem discovery metadata (if provided)
    | PUT presigned URL          ->                               object stored
    | POST .../complete/         -> HeadObject + ContentType check -> enqueue PROCESS_DOCUMENT
 ```
@@ -132,6 +144,7 @@ Complete payload: `{ success: true, file_size, file_mime }`.
 Browser                          Backend                         S3
    | POST /api/uploads/create/  -> create_ocr_document (expected_source_file_count=N)
    |                               + DocumentSourceFile rows + N presigned URLs
+   |                               + ArchiveItem discovery metadata (if provided)
    | for each order_index:
    |   PUT presigned URL        ->                               part stored
    |   POST .../parts/{i}/complete/ -> HeadObject + ContentType check per part
@@ -142,7 +155,7 @@ Create payload includes `files[]` (no top-level single-file fields). Each entry:
 
 Multi-image rejects `POST .../complete/` with 400 ("use part completion and finalize endpoints").
 
-### 2.5 Server-side validation and verification (must remain intact)
+### 2.5 Server-side validation and verification
 
 | Layer | Location | What it enforces |
 |-------|----------|------------------|
@@ -152,22 +165,32 @@ Multi-image rejects `POST .../complete/` with 400 ("use part completion and fina
 | CSRF | Django middleware + client `X-CSRFToken` on JSON POSTs | Required on all upload API POSTs |
 | Auth | `_require_admin` on upload APIs; `_require_admin_page` on upload page | Staff/admin only |
 
-Failures return explicit HTTP statuses (400 for validation/missing object/mismatch; 502 for S3 HeadObject errors). These behaviors are heavily covered in `documents/tests.py`.
+Failures return explicit HTTP statuses (400 for validation/missing object/mismatch; 502 for S3 HeadObject errors). Covered in `documents/tests.py` (`UploadApiTests`) and template tests (`UploadPageTemplateTests`, `UnifiedArchiveItemCreatePageTests`).
 
 ### 2.6 Metadata collected at upload create time
 
-The upload form collects:
+The first-party upload form collects:
 
 | Field | Persisted to | Notes |
 |-------|--------------|-------|
 | `title`, `visibility`, `date_start`, `date_end`, `date_precision` | `ArchiveItem` (canonical) + `Document` mirror via `create_ocr_document` | Shared archival fields |
 | `author_name`, `source_title` | `ArchiveItem` only | Bibliographic metadata |
 | `language`, `text_input_type`, `doc_type` | `Document` | OCR/runtime routing inputs |
-| `category_event` | `Document.category_event` | **Legacy** OCR-side field |
-| `tags` (comma-separated → list) | `Document.tags_m2m` | **Legacy** OCR-side tags |
+| `categories` (list or comma-separated string) | `ArchiveItem.categories` | Via `update_archive_item_discovery_metadata` |
+| `events` (list or comma-separated string) | `ArchiveItem.events` | Same service |
+| `discovery_tags` (list or comma-separated string) | `ArchiveItem.tags` | Same service; UI field id/name is `discovery_tags` |
 | `admin_meta` (`donor`, `collection`, `original_location`, `notes`) | `DocumentMetadata` | Staff catalog metadata |
 
-**Gap vs unified manual-text create:** manual text create/edit on `/archive/manage/new/` uses **`ArchiveItem`** discovery metadata (categories / events / tags via `discovery_metadata_form_fields.html` and `update_archive_item_discovery_metadata`). The upload page does **not** collect ArchiveItem discovery metadata today. A future unified OCR create flow should plan to align discovery metadata with manual text **only after** a separate design/implementation decision — not as part of the first UI-integration PR.
+**Legacy fields (schema still exists; first-party upload no longer sends them):**
+
+| Field | Schema | Current upload behavior |
+|-------|--------|-------------------------|
+| `category_event` | `Document.category_event` | **Not** set by `create_upload` for new first-party uploads. Legacy JSON in create payload is tolerated/ignored. |
+| `tags` | `Document.tags_m2m` | **Not** set by `create_upload` for new first-party uploads. Legacy JSON in create payload is tolerated/ignored. |
+
+**Forward-only:** No backfill, no migration, and no modification of existing documents were part of PR3. Older OCR documents may still have legacy `Document.category_event` / `Document.tags_m2m` values from prior uploads or edit flows.
+
+Discovery metadata on the upload form uses the same shared partial as manual text create: `documents/archive/discovery_metadata_form_fields.html`.
 
 ### 2.7 ArchiveItem and processing enqueue
 
@@ -175,7 +198,8 @@ The upload form collects:
 
 1. Creates `ArchiveItem` with `item_type=OCR_DOCUMENT` and shared + bibliographic fields.
 2. Creates linked `Document` with runtime/upload fields and shared-field mirrors.
-3. Attaches legacy tags and `DocumentMetadata` via `_attach_document_tags_and_metadata`.
+3. Attaches `DocumentMetadata` from `admin_meta` when provided.
+4. Applies ArchiveItem discovery metadata via `_apply_upload_discovery_metadata` → `update_archive_item_discovery_metadata` when categories/events/discovery_tags are present in the create payload.
 
 On successful **single** `upload_complete` or **multi** `upload_finalize`:
 
@@ -185,178 +209,96 @@ On successful **single** `upload_complete` or **multi** `upload_finalize`:
 
 ---
 
-## 3. Future desired UX
+## 3. Implementation history (PR1–PR3)
 
-### 3.1 Product goal
+### PR1 — Extract reusable upload UI partials ✅ **Completed**
 
-Staff start at **`/archive/manage/new/`** and choose **"מסמך סרוק / PDF"**. The experience should feel like **one create-item flow** (same chrome, navigation, and metadata patterns as manual text) — **not** a confusing hop to a separate `/api/ui/...` mini-app.
+- Split former monolithic `documents/upload.html` into `_upload_form.html` and `_upload_script.html`.
+- `/api/ui/upload/` shell unchanged in behavior; now includes partials.
+- No endpoint, JS logic, or redirect changes.
 
-### 3.2 Capabilities that must remain supported
+### PR2 — Embed OCR upload in unified create page ✅ **Completed**
 
-| Capability | Current support | Future unified flow |
-|------------|-----------------|---------------------|
-| Single image upload | Yes | Must keep |
-| PDF upload | Yes | Must keep |
-| Multi-image logical document (2–30 images) | Yes | Must keep |
-| Title | Yes | Must keep |
-| Visibility | Yes | Must keep |
-| Date / date_precision | Yes | Must keep |
-| author_name / source_title | Yes | Must keep |
-| language / text_input_type / doc_type | Yes (OCR-specific) | Must keep on OCR path |
-| ArchiveItem discovery metadata | **No** on upload; **Yes** on manual text create | Add when explicitly scoped; align with `archive-discovery-catalog-design.md` |
-| Post-create redirect | Document detail `/api/ui/documents/<id>/` | May later offer archive-oriented redirect; **not required for first integration PR** |
+- Replaced bridge-only OCR card with inline includes of upload partials in `manage_new.html`.
+- Added shared `views._upload_form_context()`.
+- Unified page toolbar uses archive-manage navigation; secondary link to `/api/ui/upload/` retained.
+- Same `/api/uploads/*` endpoints and script partial; no duplicate presigned logic.
 
-### 3.3 UX integration options (non-binding)
+### PR3 — ArchiveItem discovery metadata on OCR create ✅ **Completed**
 
-Preferred direction: **reuse the existing upload form + inline JS unchanged**, embedded or linked from the unified page shell — not a rewrite.
-
-Possible patterns (choose in implementation PRs):
-
-- **Include** `upload.html` form/script sections as documented partials from a shared template.
-- **Same page, same endpoints:** unified page renders file/metadata fields + includes the existing script block verbatim.
-- **Progressive disclosure:** item-type selector stays on unified page; OCR branch expands inline rather than navigating away.
-
-Navigation polish (back links to `/archive/manage/`, consistent page titles) belongs in a late PR after behavior parity is proven.
+- First-party upload UI uses `categories`, `events`, `discovery_tags` (shared discovery form partial).
+- Upload JS sends those fields in create-upload JSON; `create_upload` parses and persists to linked `ArchiveItem`.
+- Legacy `category_event` / `tags` removed from first-party upload UI; legacy JSON tolerated but not written to `Document`.
+- Forward-only: no backfill, no migrations, no schema cleanup, no existing document changes.
 
 ---
 
-## 4. Risks and non-negotiables
+## 4. Risks and non-negotiables (still apply)
 
-| Risk | Mitigation |
-|------|------------|
-| Duplicate upload JS in two places | Single source of truth: extract/include from `upload.html` (or one static JS asset) — never copy-paste the presigned flow |
-| Fork upload API behavior | All flows must call the **same** `/api/uploads/*` endpoints with the **same** payloads |
-| Bypass CSRF | Keep `{% csrf_token %}` in form; keep `jsonFetch` / `X-CSRFToken` unchanged |
-| Bypass MIME/extension validation | Do not add alternate create paths; server validators stay authoritative |
-| Bypass S3 HeadObject / ContentType verification | Do not add "trust client" shortcuts on complete/part/finalize |
-| Break multi-image upload | Preserve `files[]` create shape, part loop, terminal failure policy, and finalize gate |
-| Touch OCR routing/worker | UI integration PRs must not modify `run_worker.py`, routing, adapters, SQS enqueue semantics, or Transkribus/Gemini |
-| Drift between upload metadata and archive create patterns | Track ArchiveItem discovery metadata gap explicitly; do not silently keep legacy `category_event` / `Document.tags_m2m` as the long-term unified create path |
-
----
-
-## 5. Proposed implementation plan (small PRs)
-
-Adjust sequencing if a PR proves risky; **behavior parity before polish**.
-
-### PR1 — Extract / document reusable upload UI building blocks (no behavior change)
-
-**Goal:** Make the existing upload UI composable without changing what staff see today.
-
-Suggested work:
-
-- Split `documents/upload.html` into clearly named partials (e.g. form fields, admin-meta column, inline script block).
-- Keep **`/api/ui/upload/`** rendering the same combined output (include partials).
-- Add a short comment in template or this doc pointing to the partials as the **only** upload JS source.
-- Tests: existing upload page tests still pass; optional snapshot/assertion that partial includes are wired.
-
-**Do not:** change endpoints, JS logic, or redirect targets.
-
-### PR2 — Integrated shell on unified create page (still same endpoints + JS)
-
-**Goal:** Selecting OCR on `/archive/manage/new/` shows the upload UI **in context** (unified page header/toolbar) while executing the **same** inline script and API calls.
-
-Suggested work:
-
-- Replace the bridge-only card with an include of the upload partials inside `manage_new.html` OCR branch.
-- Unified toolbar: "back to manage" instead of/in addition to document-list back link.
-- Keep upload POST targets as `/api/uploads/*` (absolute paths as today).
-
-**Do not:** duplicate script; do not embed a second copy of presigned logic.
-
-### PR3 — Embed/move UI only after parity proof
-
-**Goal:** Optional cleanup once PR2 manual QA and automated tests show no regressions.
-
-Possible work:
-
-- Redirect `/api/ui/upload/` to unified create OCR branch **only if** product wants a single URL (would be an explicit product decision + redirect PR).
-- Or keep both URLs rendering the same partials indefinitely.
-
-**Do not:** change upload API or S3 behavior.
-
-### PR4 — Copy, navigation, and metadata alignment polish
-
-**Goal:** Product polish and archive-first navigation.
-
-Possible work:
-
-- Hebrew copy consistency with manual text create.
-- Post-upload redirect to archive manage or `/archive/<archive_item_id>/` (if desired).
-- **Separate sub-effort (may be its own PR):** ArchiveItem discovery metadata on OCR create (categories/events/tags), replacing legacy upload-only `category_event` / `Document.tags_m2m` input — requires explicit scope per `archive-discovery-catalog-design.md`.
-
-### PRs explicitly deferred beyond this series
-
-- OCR shared-field cutover follow-ups (`ocr-archiveitem-cutover.md`)
-- Upload API contract changes
-- Worker / OCR/HTR changes
-- PHOTO create flow
+| Risk | Mitigation (implemented) |
+|------|--------------------------|
+| Duplicate upload JS in two places | Single partial: `_upload_script.html` — included, never copy-pasted |
+| Fork upload API behavior | All surfaces call the same `/api/uploads/*` endpoints |
+| Bypass CSRF | `{% csrf_token %}` in form; `jsonFetch` / `X-CSRFToken` unchanged |
+| Bypass MIME/extension validation | Server validators remain authoritative on create and complete/part |
+| Bypass S3 HeadObject / ContentType verification | No client-trust shortcuts on complete/part/finalize |
+| Break multi-image upload | `files[]` create shape, part loop, terminal failure policy, finalize gate preserved |
+| Touch OCR routing/worker in UI PRs | PR1–PR3 did not modify worker, routing, adapters, or SQS semantics |
+| Drift between upload and manual-text discovery patterns | PR3 aligned new OCR uploads to ArchiveItem discovery metadata |
 
 ---
 
-## 6. Tests and manual QA (for future implementation PRs)
+## 5. Tests and QA
 
-### Automated (existing coverage to keep green)
+### Automated coverage (green after PR1–PR3)
 
-`documents/tests.py` already covers much of:
+Focused suites:
 
-- Upload page access control
-- Create/upload complete/part/finalize success and failure paths
-- CSRF expectations on JSON POSTs
-- MIME mismatch at create and complete
-- S3 missing object, missing ContentType, ContentType mismatch (including charset suffix and `image/jpg` alias)
-- Multi-image ordering, part failure terminal policy, finalize gating
-- `create_ocr_document` / ArchiveItem linkage
+- `documents.tests.UploadPageTemplateTests` — upload page partial wiring, discovery fields, legacy field absence, JS endpoints
+- `documents.tests.UploadApiTests` — create/complete/part/finalize, MIME/S3, multi-image, discovery persistence, legacy field non-persistence
+- `documents.test_archive_item.UnifiedArchiveItemCreatePageTests` — unified OCR branch renders same partials and discovery fields
 
-Future UI PRs should run targeted upload tests plus `documents/test_archive_item.py` unified create tests.
-
-### Manual QA checklist
+### Manual QA checklist (passed before PHOTO)
 
 | Scenario | Expected |
 |----------|----------|
 | Single image upload | Document + ArchiveItem created; redirect; processing enqueued |
 | PDF upload | Same; `doc_type=PDF` |
 | Multi-image upload (2+ images) | All parts complete; finalize enqueues once |
-| CSRF failure | API POST rejected when token missing/invalid |
-| MIME mismatch (client vs allowed set) | Create or complete returns 400 with explicit error |
-| S3 missing object at complete | 400 `s3 object not found`; no enqueue |
-| S3 ContentType mismatch | 400 `s3 content type mismatch`; no enqueue |
-| date / date_precision persistence | Values on `ArchiveItem` and `Document` mirror after create |
-| author_name / source_title persistence | Values on `ArchiveItem` |
-| visibility / access | `ArchiveItem.visibility` governs view access |
-| ArchiveItem created | `item_type=OCR_DOCUMENT`, linked to `Document` |
-| Document processing | SQS job enqueued; worker path unchanged |
-| Unified page UX | OCR choice does not require unexplained navigation away from archive manage context |
+| Discovery metadata on create | categories/events/discovery_tags on `ArchiveItem`; not on legacy Document fields |
+| Unified page UX | OCR choice shows inline upload without required navigation away |
+| Fallback upload page | `/api/ui/upload/` works with same form/script behavior |
 
 ---
 
-## 7. Current vs target (summary diagram)
+## 6. Current flow (diagram)
 
 ```mermaid
 flowchart LR
-  subgraph today [Today]
-    A["/archive/manage/new/"] -->|item_type=manual_text| B[Inline form POST]
-    A -->|item_type=ocr_document| C[Bridge link]
-    C --> D["/api/ui/upload/"]
-    D --> E["Inline JS → /api/uploads/*"]
-    E --> F["/api/ui/documents/:id/"]
+  subgraph unified [Unified create — primary]
+    A["/archive/manage/new/"] -->|item_type=manual_text| B[Inline manual-text POST]
+    A -->|item_type=ocr_document| C[Same page: _upload_form + _upload_script partials]
+    C --> D["/api/uploads/*"]
+    D --> E["/api/ui/documents/:id/"]
   end
 
-  subgraph target [Target]
-    G["/archive/manage/new/"] -->|manual_text| H[Inline form POST]
-    G -->|ocr_document| I[Same page: reused upload partial + same JS]
-    I --> J["Same /api/uploads/* endpoints"]
-    J --> K[Document detail or archive redirect TBD]
+  subgraph fallback [Secondary upload page]
+    F["/api/ui/upload/"] --> G[Same _upload_form + _upload_script partials]
+    G --> D
   end
 ```
 
 ---
 
-## 8. Open questions (for product/engineering before PR2+)
+## 7. Deferred / open items
 
-1. Should post-upload redirect move from document detail to **`/archive/<archive_item_id>/`**?
-2. When should OCR create adopt **ArchiveItem discovery metadata** fields (categories/events/tags) instead of legacy upload `category_event` / `Document.tags_m2m`?
-3. Should **`/api/ui/upload/`** remain a supported URL indefinitely (bookmarks, list page button) or redirect to unified create?
-4. Should OCR create collect **`metadata_status`** on create (manual text already does)?
+These are **not** blockers for PHOTO work:
 
-These questions do not block this docs-only audit PR, but they should be revisited before UI integration work begins.
+1. **Post-upload redirect** — still goes to **`/api/ui/documents/<document_id>/`**. Archive-item detail redirect (`/archive/<archive_item_id>/`) is a future product decision.
+2. **`/api/ui/upload/` longevity** — page remains supported (bookmarks, document list button, unified-page secondary link). Retirement or redirect to unified create is an explicit future product decision.
+3. **Upload page back link** — fallback page still links to document list, not archive manage.
+4. **`metadata_status` on OCR create** — manual text create collects it; OCR upload create does not (deferred).
+5. **Legacy schema cleanup** — `Document.category_event` and `Document.tags_m2m` remain for old/transitional data; no backfill from legacy fields to ArchiveItem discovery metadata in this series.
+6. **`PHOTO`** item create flow — not implemented.
+7. **Rich text** — not implemented.
+8. OCR shared-field cutover follow-ups (`ocr-archiveitem-cutover.md`) — separate concern.
