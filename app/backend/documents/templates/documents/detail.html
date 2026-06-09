@@ -3,6 +3,15 @@
 {% block title %}VSArchive - {{ doc.archive_item.title }}{% endblock %}
 
 {% block content %}
+  {% if messages %}
+    <div class="spacer"></div>
+    {% for message in messages %}
+      <div class="alert{% if message.tags == 'error' %} alert-danger{% endif %}">
+        {{ message }}
+      </div>
+    {% endfor %}
+  {% endif %}
+
   <div class="card card--pad-lg">
     <div class="page-toolbar">
       {# Global navigation (lists/backlogs) #}
@@ -20,6 +29,16 @@
           <a class="btn btn-primary" href="{% url 'archive-manage-edit' item_id=doc.archive_item_id %}">עריכת מטא־דאטה</a>
         {% endif %}
         <a class="btn" href="/api/ui/admin/review/{{ doc.id }}/">בקרת תמלול למסמך זה</a>
+        {% if show_ocr_reprocess_action %}
+          <form
+            method="post"
+            action="{% url 'documents-ocr-reprocess' doc_id=doc.id %}"
+            class="inline-form"
+          >
+            {% csrf_token %}
+            <button type="submit" class="btn">נסה עיבוד מחדש</button>
+          </form>
+        {% endif %}
         <a class="btn" href="/admin/documents/document/{{ doc.id }}/change/">עריכה טכנית (Django Admin)</a>
       {% endif %}
     </div>

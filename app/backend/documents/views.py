@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Optional
 
 from django.conf import settings
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.db.models import Q
@@ -100,6 +101,12 @@ from documents.services.archive_item_presentation import (
     filter_archive_items_by_search_query,
     normalize_archive_list_item_type_filter,
     normalize_archive_list_search_query,
+)
+from documents.services.env_validation import EnvConfigError, validate_required_env
+from documents.services.ocr_reprocess import (
+    OcrReprocessError,
+    apply_ocr_reprocess,
+    is_ocr_reprocess_ui_eligible,
 )
 from documents.services.sqs import send_process_document_message
 from documents.services.text_presentation import get_text_presentation_for_document
@@ -1634,6 +1641,7 @@ def document_detail_page(request, doc_id: int):
         "admin_meta": admin_meta,
         "text_presentation": text_presentation,
         "is_admin": is_admin,
+        "show_ocr_reprocess_action": is_admin and is_ocr_reprocess_ui_eligible(doc),
     }
 
     logger.info(
@@ -1647,6 +1655,49 @@ def document_detail_page(request, doc_id: int):
     )
 
     return render(request, "documents/detail.html", context)
+
+
+@login_required
+@require_POST
+def document_ocr_reprocess(request, doc_id: int):
+    deny = _require_admin(request)
+    if deny:
+        return deny
+
+    doc = get_object_or_404(
+        Document.objects.select_related("archive_item"),
+        id=doc_id,
+    )
+    try:
+        worker_env = validate_required_env()
+    except EnvConfigError as exc:
+        messages.error(request, f"שגיאת תצורה: {exc}")
+        return redirect("documents-detail-page", doc_id=doc.id)
+
+    collection_id = worker_env.transkribus_collection_id or ""
+    model_id = worker_env.transkribus_model_id or ""
+
+    try:
+        assessment = apply_ocr_reprocess(
+            doc.id,
+            collection_id=collection_id,
+            model_id=model_id,
+        )
+    except OcrReprocessError as exc:
+        messages.error(request, str(exc))
+        return redirect("documents-detail-page", doc_id=doc.id)
+
+    messages.success(
+        request,
+        f"בוצע תזמון עיבוד מחדש. מצב: {assessment.retry_mode.value}.",
+    )
+    logger.info(
+        "document_ocr_reprocess user=%s doc_id=%s retry_mode=%s",
+        getattr(request.user, "username", None),
+        doc.id,
+        assessment.retry_mode.value,
+    )
+    return redirect("documents-detail-page", doc_id=doc.id)
 
 
 def _upload_form_context() -> dict:
