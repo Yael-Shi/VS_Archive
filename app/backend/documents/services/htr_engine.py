@@ -1,11 +1,19 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
+from documents.models import DocumentTextResult
 from documents.services.htr_adapters.base import HtrResult
 from documents.services.htr_adapters.registry import get_htr_adapter
-from documents.services.ocr_routing import OcrRouteConfig, select_ocr_route
+from documents.services.ocr_routing import (
+    OcrRouteConfig,
+    gemini_model_candidates,
+    select_ocr_route,
+)
 from documents.services.page_extraction import PageImage
+
+if TYPE_CHECKING:
+    from documents.services.env_validation import WorkerEnvConfig
 
 
 def transcribe_pages(
@@ -29,6 +37,20 @@ def transcribe_pages(
     adapter = get_htr_adapter(selected.engine_key)
     if source_transkribus_run_id is not None:
         kwargs["source_transkribus_run_id"] = source_transkribus_run_id
+    worker_env: Optional["WorkerEnvConfig"] = kwargs.get("worker_env")
+    if (
+        selected.engine_key == DocumentTextResult.OcrEngineKey.GEMINI
+        and worker_env is not None
+        and "model_candidates" not in kwargs
+    ):
+        kwargs["model_candidates"] = list(
+            gemini_model_candidates(
+                selected,
+                language=language_hint,
+                text_input_type=text_input_type,
+                gemini_hebrew_printed_model=worker_env.gemini_hebrew_printed_model,
+            )
+        )
     return adapter.execute(
         pages=pages,
         language_hint=language_hint,

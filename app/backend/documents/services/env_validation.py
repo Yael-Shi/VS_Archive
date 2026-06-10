@@ -180,6 +180,7 @@ class WorkerEnvConfig:
     transkribus_force_reprocess: bool = field(default=False)
     transkribus_recognition_only_retry: bool = field(default=False)
     enable_transkribus_hebrew_handwritten: bool = field(default=False)
+    gemini_hebrew_printed_model: str = field(default="gemini-3.1-flash-lite")
 
 
 def validate_required_env() -> WorkerEnvConfig:
@@ -246,6 +247,7 @@ def validate_required_env() -> WorkerEnvConfig:
     enable_transkribus_hebrew_handwritten = _get_bool(
         "ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN", default=False
     )
+    gemini_hebrew_printed_model = _get("GEMINI_HEBREW_PRINTED_MODEL") or "gemini-3.1-flash-lite"
 
     if enable_hybrid_htr and not (transkribus_api_token or (transkribus_username and transkribus_password)):
         raise EnvConfigError("ENABLE_HYBRID_HTR is true but Transkribus credentials missing.")
@@ -288,4 +290,5 @@ def validate_required_env() -> WorkerEnvConfig:
         transkribus_force_reprocess=transkribus_force_reprocess,
         transkribus_recognition_only_retry=transkribus_recognition_only_retry,
         enable_transkribus_hebrew_handwritten=enable_transkribus_hebrew_handwritten,
+        gemini_hebrew_printed_model=gemini_hebrew_printed_model,
     )

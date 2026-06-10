@@ -48,6 +48,36 @@ HEBREW_HANDWRITTEN_TRANSKRIBUS_ROUTE = OcrRouteConfig(
     prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
 )
 
+DEFAULT_GEMINI_MODEL_CANDIDATES = ("gemini-2.0-flash", "gemini-1.5-flash")
+
+
+def gemini_model_candidates(
+    route: OcrRouteConfig,
+    *,
+    language: str | None,
+    text_input_type: str | None,
+    gemini_hebrew_printed_model: str,
+) -> tuple[str, ...]:
+    """
+    Resolve Gemini model candidates for a selected OCR route.
+
+    Route-specific overrides live here so a future explicit
+    (language, text_input_type) matrix can extend this helper without
+    embedding language logic in GeminiAdapter.
+    """
+    if route.engine_key != DocumentTextResult.OcrEngineKey.GEMINI:
+        return DEFAULT_GEMINI_MODEL_CANDIDATES
+
+    lang = (language or "").strip().lower()
+    text_type = (text_input_type or "").strip().upper()
+    if (
+        lang == Document.Language.HEBREW
+        and text_type == Document.TextInputType.PRINTED
+    ):
+        return (gemini_hebrew_printed_model,)
+
+    return DEFAULT_GEMINI_MODEL_CANDIDATES
+
 
 def _env_bool(name: str, *, default: bool = False) -> bool:
     raw = os.getenv(name)
