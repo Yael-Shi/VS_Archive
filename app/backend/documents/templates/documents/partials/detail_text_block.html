@@ -10,17 +10,6 @@
       <div class="detail-text-block__body">
         <pre>{{ block.text }}</pre>
       </div>
-
-      {% if not is_admin %}
-        <details class="review-details review-details--secondary">
-          <summary>תמלול אוטומטי</summary>
-          <div class="review-details-body">
-            <div class="muted text-sm">
-              הטקסט חולץ אוטומטית ועדיין לא אושר. ייתכנו בו שגיאות.
-            </div>
-          </div>
-        </details>
-      {% endif %}
     {% else %}
       <div class="muted">{{ meta.empty_message }}</div>
     {% endif %}

@@ -28,17 +28,34 @@
 
     <div class="spacer"></div>
 
-    <div class="badge-row">
-      <span class="badge">{{ item.item_type|archive_item_type_label }}</span>
-      {% if is_admin %}
-        <span class="badge{% if item.visibility == 'public' %} badge-ok{% endif %}">
-          {{ item.visibility|archive_visibility_label }}
-        </span>
-        <span class="badge">{{ item.metadata_status|archive_metadata_status_label }}</span>
-      {% endif %}
-    </div>
-
-    <div class="spacer"></div>
+    {% if item.item_type == "PHOTO" %}
+      <details class="review-details review-details--secondary">
+        <summary>פרטים</summary>
+        <div class="review-details-body">
+          <div class="badge-row">
+            <span class="badge">{{ item.item_type|archive_item_type_label }}</span>
+            {% if is_admin %}
+              <span class="badge{% if item.visibility == 'public' %} badge-ok{% endif %}">
+                {{ item.visibility|archive_visibility_label }}
+              </span>
+              <span class="badge">{{ item.metadata_status|archive_metadata_status_label }}</span>
+            {% endif %}
+          </div>
+        </div>
+      </details>
+      <div class="spacer"></div>
+    {% else %}
+      <div class="badge-row">
+        <span class="badge">{{ item.item_type|archive_item_type_label }}</span>
+        {% if is_admin %}
+          <span class="badge{% if item.visibility == 'public' %} badge-ok{% endif %}">
+            {{ item.visibility|archive_visibility_label }}
+          </span>
+          <span class="badge">{{ item.metadata_status|archive_metadata_status_label }}</span>
+        {% endif %}
+      </div>
+      <div class="spacer"></div>
+    {% endif %}
 
     {% if item.item_type != "PHOTO" %}
       {% include "documents/archive/partials/source_metadata.html" with item=item %}
@@ -47,12 +64,8 @@
       {% include "documents/archive/partials/photo_metadata_display.html" with photo_content=photo_content %}
     {% endif %}
     {% include "documents/archive/partials/discovery_metadata.html" with item=item %}
-    {% if item.item_type == "PHOTO" %}
-      <div class="section-title">תמונה</div>
-    {% elif item.item_type == "MANUAL_TEXT" %}
+    {% if item.item_type == "MANUAL_TEXT" %}
       <div class="section-title">טקסט</div>
-    {% else %}
-      <div class="section-title">תוכן</div>
     {% endif %}
     {% if item.item_type == "PHOTO" %}
       {% if photo_url %}
