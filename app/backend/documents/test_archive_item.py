@@ -2447,6 +2447,34 @@ class ArchiveNavigationTests(TestCase):
         self.assertNotContains(resp, reverse("archive-manage-list"))
         self.assertNotContains(resp, "ניהול ארכיון")
 
+    def test_global_nav_shows_django_admin_link_for_staff(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(reverse("public-home"))
+        self.assertContains(resp, 'href="/admin/"')
+        self.assertContains(resp, "ניהול מערכת")
+
+    def test_global_nav_hides_django_admin_link_for_anonymous(self):
+        resp = self.client.get(reverse("public-home"))
+        self.assertNotContains(resp, 'href="/admin/"')
+        self.assertNotContains(resp, "ניהול מערכת")
+
+    def test_global_nav_hides_django_admin_link_for_family_user(self):
+        self.client.force_login(self._create_family_user())
+        resp = self.client.get(reverse("public-home"))
+        self.assertNotContains(resp, 'href="/admin/"')
+        self.assertNotContains(resp, "ניהול מערכת")
+
+    def test_global_nav_hides_django_admin_link_for_non_staff_authenticated_user(self):
+        user = User.objects.create_user(
+            username="archive_nav_django_admin_user",
+            password="test-pass",
+            is_staff=False,
+        )
+        self.client.force_login(user)
+        resp = self.client.get(reverse("public-home"))
+        self.assertNotContains(resp, 'href="/admin/"')
+        self.assertNotContains(resp, "ניהול מערכת")
+
     def test_archive_list_page_shows_manage_toolbar_for_staff(self):
         self.client.force_login(self.staff)
         resp = self.client.get(reverse("archive-list"))
