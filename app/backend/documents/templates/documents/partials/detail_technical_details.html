@@ -1,0 +1,49 @@
+{% load status_labels %}
+<details class="review-details review-details--secondary">
+  <summary>פרטים טכניים</summary>
+  <div class="review-details-body">
+    <div class="badge-row">
+      {% upload_status_badge doc.upload_status %}
+      {% processing_state_badge doc.processing_state_user %}
+
+      <span class="badge">{{ doc.doc_type }}</span>
+
+      {% if doc.language %}
+        <span class="badge">{{ doc.language }}</span>
+      {% else %}
+        <span class="badge">שפה: לא ידוע</span>
+      {% endif %}
+
+      {% if is_admin %}
+        {% if doc.archive_item.visibility == "public" %}
+          <span class="badge badge-ok">ציבורי</span>
+        {% else %}
+          <span class="badge">פרטי</span>
+        {% endif %}
+      {% endif %}
+    </div>
+
+    {% if doc.processing_state_user == "READY" or doc.processing_state_user == "PROCESSING" %}
+      <div class="spacer-sm"></div>
+      <div class="page-lead">
+        {% if doc.processing_state_user == "READY" %}
+          העיבוד האוטומטי הסתיים והטקסט זמין להצגה ולבדיקה. זה עדיין לא אישור אנושי.
+        {% elif doc.processing_state_user == "PROCESSING" %}
+          העיבוד האוטומטי עדיין רץ. הטקסט המלא יוצג לאחר סיום העיבוד.
+        {% endif %}
+      </div>
+    {% endif %}
+
+    {% if is_admin %}
+      {% if text_presentation.show_source and text_presentation.source %}
+        <div class="spacer-sm"></div>
+        {% include "documents/partials/detail_technical_text_result.html" with block=text_presentation.source %}
+      {% endif %}
+
+      {% if text_presentation.show_hebrew and text_presentation.hebrew %}
+        <div class="spacer-sm"></div>
+        {% include "documents/partials/detail_technical_text_result.html" with block=text_presentation.hebrew %}
+      {% endif %}
+    {% endif %}
+  </div>
+</details>

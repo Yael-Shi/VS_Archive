@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load status_labels document_date_display %}
+{% load document_date_display %}
 {% block title %}VSArchive - {{ doc.archive_item.title }}{% endblock %}
 
 {% block content %}
@@ -64,38 +64,7 @@
 
     <div class="spacer"></div>
 
-    {# ===== Status row (technical / processing — secondary) ===== #}
-    <div class="badge-row">
-
-      {# Upload + processing-readiness badges (centralized in status_labels) #}
-      {% upload_status_badge doc.upload_status %}
-      {% processing_state_badge doc.processing_state_user %}
-
-      <span class="badge">{{ doc.doc_type }}</span>
-
-      {% if doc.language %}
-        <span class="badge">{{ doc.language }}</span>
-      {% else %}
-        <span class="badge">שפה: לא ידוע</span>
-      {% endif %}
-
-      {# visibility is admin-only operational; do not show to non-admin #}
-      {% if is_admin %}
-        {% if doc.archive_item.visibility == "public" %}
-          <span class="badge badge-ok">ציבורי</span>
-        {% else %}
-          <span class="badge">פרטי</span>
-        {% endif %}
-      {% endif %}
-    </div>
-
-    <div class="page-lead">
-      {% if doc.processing_state_user == "READY" %}
-        העיבוד האוטומטי הסתיים והטקסט זמין להצגה ולבדיקה. זה עדיין לא אישור אנושי.
-      {% elif doc.processing_state_user == "PROCESSING" %}
-        העיבוד האוטומטי עדיין רץ. הטקסט המלא יוצג לאחר סיום העיבוד.
-      {% endif %}
-    </div>
+    {% include "documents/partials/detail_technical_details.html" with doc=doc text_presentation=text_presentation is_admin=is_admin %}
 
     {# ===== Upload error (admin-only details) ===== #}
     {% if doc.upload_status == "FAILED" %}
@@ -171,7 +140,7 @@
             {% endif %}
             {% if is_admin and item.original_name %}
               <details class="review-details review-details--secondary">
-                <summary>פרטים טכניים</summary>
+                <summary>פרטי קובץ מקור</summary>
                 <div class="review-details-body">
                   <div class="muted text-sm">
                     <strong>שם קובץ מקור:</strong> {{ item.original_name }}
