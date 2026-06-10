@@ -1,6 +1,6 @@
 {% load status_labels %}
 <details class="review-details review-details--secondary">
-  <summary>פרטים טכניים</summary>
+  <summary>פרטים</summary>
   <div class="review-details-body">
     <div class="badge-row">
       {% upload_status_badge doc.upload_status %}
@@ -27,7 +27,7 @@
       <div class="spacer-sm"></div>
       <div class="page-lead">
         {% if doc.processing_state_user == "READY" %}
-          העיבוד האוטומטי הסתיים והטקסט זמין להצגה ולבדיקה. זה עדיין לא אישור אנושי.
+          הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות.
         {% elif doc.processing_state_user == "PROCESSING" %}
           העיבוד האוטומטי עדיין רץ. הטקסט המלא יוצג לאחר סיום העיבוד.
         {% endif %}
