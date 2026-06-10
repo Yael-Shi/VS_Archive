@@ -1391,7 +1391,7 @@ def review_backlog_page(request):
         "prev_offset": max(0, offset - limit),
         "next_offset": (offset + limit) if (offset + limit) < total else None,
         "language_choices": Document.Language.choices,
-        "text_input_type_choices": Document.TextInputType.choices,
+        "text_input_type_choices": TEXT_INPUT_TYPE_UI_CHOICES,
         "processing_state_choices": Document.ProcessingState.choices,
         "engine_key_choices": DocumentTextResult.OcrEngineKey.choices,
         "result_type_choices": DocumentTextResult.ResultType.choices,

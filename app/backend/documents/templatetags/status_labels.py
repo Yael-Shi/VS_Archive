@@ -17,6 +17,7 @@ from typing import Tuple
 from django import template
 
 from documents.models import Document, DocumentTextResult
+from documents.services.archive_item_validation import TEXT_INPUT_TYPE_UI_CHOICES
 
 register = template.Library()
 
@@ -39,6 +40,8 @@ _METADATA_STATUS: dict[str, Tuple[str, str]] = {
     Document.MetadataStatus.NEEDS_COMPLETION.value: ("דורש השלמת פרטים", "badge-warn"),
     Document.MetadataStatus.COMPLETED.value: ("פרטים הושלמו", "badge-ok"),
 }
+
+_TEXT_INPUT_TYPE: dict[str, str] = dict(TEXT_INPUT_TYPE_UI_CHOICES)
 
 _VERIFICATION_STATUS: dict[str, Tuple[str, str]] = {
     DocumentTextResult.VerificationStatus.VERIFIED.value: ("אושר אנושית", "badge-ok"),
@@ -81,6 +84,12 @@ def metadata_status_label(value) -> str:
 @register.filter
 def verification_status_label(value) -> str:
     return _resolve(_VERIFICATION_STATUS, value)[0]
+
+
+@register.filter
+def text_input_type_label(value) -> str:
+    key = str(value or "")
+    return _TEXT_INPUT_TYPE.get(key, key)
 
 
 # --- badge inclusion tags (label + tone, shared markup) ----------------------
