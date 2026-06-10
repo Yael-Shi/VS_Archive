@@ -8033,6 +8033,14 @@ class StatusLabelFilterTests(SimpleTestCase):
         self.assertEqual(verification_status_label("VERIFIED"), "אושר אנושית")
         self.assertEqual(verification_status_label("REJECTED"), "נדחה בבקרה")
 
+    def test_text_input_type_labels_match_upload_ui_choices(self):
+        from documents.templatetags.status_labels import text_input_type_label
+
+        self.assertEqual(text_input_type_label("HANDWRITTEN"), "כתב יד")
+        self.assertEqual(text_input_type_label("PRINTED"), "מודפס")
+        self.assertNotEqual(text_input_type_label("HANDWRITTEN"), "Handwritten")
+        self.assertNotEqual(text_input_type_label("PRINTED"), "Printed")
+
 
 class StatusLabelPresentationTests(TestCase):
     """PR1 — pages render the centralized labels (no raw-enum/legacy leakage)."""
@@ -8145,6 +8153,46 @@ class StatusLabelPresentationTests(TestCase):
         # render centralized Hebrew labels, not raw English enum choice labels.
         self.assertNotContains(resp, ">Ready<")
         self.assertNotContains(resp, ">Unverified<")
+
+    def test_review_backlog_page_renders_hebrew_text_input_type_filter_labels(self):
+        doc = self._create_document(text_input_type=Document.TextInputType.PRINTED)
+        self._create_hebrew_text_result(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/admin/review/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'id="filter-text-input-type"')
+        for label in ("כתב יד", "מודפס"):
+            self.assertContains(resp, label)
+        self.assertNotContains(resp, ">Handwritten<")
+        self.assertNotContains(resp, ">Printed<")
+        self.assertContains(resp, 'value="HANDWRITTEN"')
+        self.assertContains(resp, 'value="PRINTED"')
+
+    def test_review_backlog_text_input_type_filter_preserves_query_values(self):
+        from documents.services.review_backlog import documents_in_review_backlog
+
+        handwritten = self._create_document(text_input_type=Document.TextInputType.HANDWRITTEN)
+        printed = self._create_document(
+            title="Printed review doc",
+            text_input_type=Document.TextInputType.PRINTED,
+        )
+        self._create_hebrew_text_result(handwritten)
+        self._create_hebrew_text_result(printed)
+        self.client.force_login(self.staff)
+        resp = self.client.get(
+            "/api/ui/admin/review/",
+            {"text_input_type": Document.TextInputType.PRINTED},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "מודפס")
+        self.assertContains(resp, printed.archive_item.title)
+        self.assertNotContains(resp, handwritten.archive_item.title)
+        ids = set(
+            documents_in_review_backlog(
+                text_input_type=Document.TextInputType.PRINTED,
+            ).values_list("id", flat=True)
+        )
+        self.assertEqual(ids, {printed.id})
 
     def test_review_detail_uses_centralized_labels_and_keeps_raw_debug(self):
         doc = self._create_document()

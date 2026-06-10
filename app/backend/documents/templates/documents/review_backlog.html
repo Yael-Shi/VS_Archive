@@ -44,9 +44,7 @@
           <select id="filter-text-input-type" name="text_input_type">
             <option value="">הכל</option>
             {% for v, label in text_input_type_choices %}
-              <option value="{{ v }}" {% if text_input_type == v %}selected{% endif %}>
-                {% if v == "HANDWRITTEN" %}כתב יד{% elif v == "PRINTED" %}דפוס{% else %}{{ label }}{% endif %}
-              </option>
+              <option value="{{ v }}" {% if text_input_type == v %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
           </select>
         </div>
@@ -113,8 +111,7 @@
 
           {% if text_input_type %}
             <span class="filter-chip">
-              <span class="filter-chip__key">קלט:</span>
-              {% if text_input_type == "HANDWRITTEN" %}כתב יד{% elif text_input_type == "PRINTED" %}דפוס{% else %}{{ text_input_type }}{% endif %}
+              <span class="filter-chip__key">קלט:</span> {{ text_input_type|text_input_type_label }}
             </span>
           {% endif %}
 
@@ -174,9 +171,7 @@
               </div>
             </td>
             <td>{% if doc.language %}{{ doc.language }}{% else %}<span class="muted">—</span>{% endif %}</td>
-            <td>
-              {% if doc.text_input_type == "HANDWRITTEN" %}כתב יד{% elif doc.text_input_type == "PRINTED" %}דפוס{% else %}{{ doc.text_input_type }}{% endif %}
-            </td>
+            <td>{{ doc.text_input_type|text_input_type_label }}</td>
             <td>
               {% processing_state_badge doc.processing_state_user %}
             </td>
