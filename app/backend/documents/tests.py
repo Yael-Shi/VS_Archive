@@ -7934,6 +7934,17 @@ class UploadPageTemplateTests(TestCase):
         self.assertContains(resp, 'getElementById("date_precision")')
         self.assertContains(resp, "date_precision")
 
+    def test_upload_page_renders_hebrew_text_input_type_labels(self):
+        resp = self._get_page()
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "סוג טקסט")
+        for label in ("כתב יד", "מודפס"):
+            self.assertContains(resp, label)
+        self.assertNotContains(resp, "Handwritten")
+        self.assertNotContains(resp, "Printed")
+        self.assertContains(resp, 'value="HANDWRITTEN"')
+        self.assertContains(resp, 'value="PRINTED"')
+
     def test_upload_page_js_references_multi_image_endpoints(self):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)

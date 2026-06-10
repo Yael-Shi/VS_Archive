@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from documents.models import ArchiveItem
+from documents.models import ArchiveItem, Document
 
 DATE_PRECISION_UI_CHOICES = (
     (ArchiveItem.DatePrecision.UNKNOWN, "ללא תאריך"),
@@ -10,6 +10,11 @@ DATE_PRECISION_UI_CHOICES = (
     (ArchiveItem.DatePrecision.MONTH, "חודש"),
     (ArchiveItem.DatePrecision.EXACT_DAY, "יום מדויק"),
     (ArchiveItem.DatePrecision.RANGE, "טווח"),
+)
+
+TEXT_INPUT_TYPE_UI_CHOICES = (
+    (Document.TextInputType.HANDWRITTEN, "כתב יד"),
+    (Document.TextInputType.PRINTED, "מודפס"),
 )
 
 
