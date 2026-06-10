@@ -262,6 +262,72 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         )
         self.assertEqual(Document.objects.count(), before)
 
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value=PRESIGNED_URL,
+    )
+    def test_photo_detail_displays_non_empty_metadata(self, _mock_presigned_get):
+        photo = self.public_uploaded.photo_content
+        photo.description = "Family picnic"
+        photo.location = "Jerusalem"
+        photo.context = "Summer outing"
+        photo.people_present = "Grandpa, Grandma"
+        photo.notes = "From album page 2"
+        photo.save()
+
+        resp = self.client.get(
+            reverse("archive-detail", kwargs={"item_id": self.public_uploaded.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "תיאור / כיתוב:")
+        self.assertContains(resp, "Family picnic")
+        self.assertContains(resp, "מיקום:")
+        self.assertContains(resp, "Jerusalem")
+        self.assertContains(resp, "הקשר / נסיבות:")
+        self.assertContains(resp, "Summer outing")
+        self.assertContains(resp, "נוכחים בתמונה:")
+        self.assertContains(resp, "Grandpa, Grandma")
+        self.assertContains(resp, "הערות נוספות:")
+        self.assertContains(resp, "From album page 2")
+
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value=PRESIGNED_URL,
+    )
+    def test_photo_detail_does_not_render_empty_metadata_labels(self, _mock_presigned_get):
+        photo = self.public_uploaded.photo_content
+        photo.description = "Only caption filled"
+        photo.save()
+
+        resp = self.client.get(
+            reverse("archive-detail", kwargs={"item_id": self.public_uploaded.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "תיאור / כיתוב:")
+        self.assertContains(resp, "Only caption filled")
+        self.assertNotContains(resp, "מיקום:")
+        self.assertNotContains(resp, "הקשר / נסיבות:")
+        self.assertNotContains(resp, "נוכחים בתמונה:")
+        self.assertNotContains(resp, "הערות נוספות:")
+
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value=PRESIGNED_URL,
+    )
+    def test_photo_detail_does_not_show_author_or_source_labels(self, _mock_presigned_get):
+        self.public_uploaded.author_name = "Hidden author"
+        self.public_uploaded.source_title = "Hidden source"
+        self.public_uploaded.save()
+
+        resp = self.client.get(
+            reverse("archive-detail", kwargs={"item_id": self.public_uploaded.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "מחבר/ת:")
+        self.assertNotContains(resp, "Hidden author")
+        self.assertNotContains(resp, "מקור:")
+        self.assertNotContains(resp, "Hidden source")
+
 
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
 class PhotoArchiveDiscoveryBrowseTests(TestCase):

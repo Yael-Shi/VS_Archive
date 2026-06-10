@@ -90,6 +90,18 @@ class PhotoContentModelTests(TestCase):
         self.assertIsNone(content.width)
         self.assertIsNone(content.height)
 
+    def test_photo_metadata_fields_exist_and_default_blank(self):
+        archive_item = _create_photo_archive_item()
+        content = PhotoContent.objects.create(
+            archive_item=archive_item,
+            **_photo_content_defaults(),
+        )
+        self.assertEqual(content.description, "")
+        self.assertEqual(content.location, "")
+        self.assertEqual(content.context, "")
+        self.assertEqual(content.people_present, "")
+        self.assertEqual(content.notes, "")
+
     def test_no_document_is_required_for_photo_content(self):
         archive_item = _create_photo_archive_item()
         PhotoContent.objects.create(

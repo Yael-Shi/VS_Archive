@@ -184,8 +184,11 @@ def update_photo_archive_item_metadata(
     date_end=None,
     date_precision: str,
     metadata_status: str,
-    author_name: str = "",
-    source_title: str = "",
+    description: str = "",
+    location: str = "",
+    context: str = "",
+    people_present: str = "",
+    notes: str = "",
 ):
     """
     Update shared ArchiveItem metadata for a PHOTO item.
@@ -204,13 +207,26 @@ def update_photo_archive_item_metadata(
     archive_item.date_end = date_end
     archive_item.date_precision = date_precision
     archive_item.metadata_status = metadata_status
-    archive_item.author_name = author_name
-    archive_item.source_title = source_title
     archive_item.save(
         update_fields=[
             *ARCHIVE_ITEM_SHARED_FIELD_NAMES,
-            "author_name",
-            "source_title",
+            "updated_at",
+        ]
+    )
+
+    photo_content = archive_item.photo_content
+    photo_content.description = description
+    photo_content.location = location
+    photo_content.context = context
+    photo_content.people_present = people_present
+    photo_content.notes = notes
+    photo_content.save(
+        update_fields=[
+            "description",
+            "location",
+            "context",
+            "people_present",
+            "notes",
             "updated_at",
         ]
     )

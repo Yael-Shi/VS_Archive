@@ -32,7 +32,7 @@
 
     <form method="post">
       {% csrf_token %}
-      {% include "documents/archive/archive_metadata_form_fields.html" %}
+      {% include "documents/archive/photo_metadata_form_fields.html" %}
       {% if show_discovery_metadata %}
         <div class="spacer"></div>
         {% include "documents/archive/discovery_metadata_form_fields.html" %}

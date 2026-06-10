@@ -64,8 +64,11 @@ class PhotoManageEditTests(TestCase):
             "visibility": ArchiveItem.Visibility.PUBLIC,
             "metadata_status": ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
             "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
-            "author_name": "",
-            "source_title": "",
+            "description": "",
+            "location": "",
+            "context": "",
+            "people_present": "",
+            "notes": "",
             "categories": "",
             "events": "",
             "tags": "",
@@ -79,6 +82,11 @@ class PhotoManageEditTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "עריכת תמונה")
         self.assertContains(resp, "ללא החלפת קובץ התמונה")
+        self.assertContains(resp, "תיאור קצר")
+        self.assertContains(resp, 'name="description"')
+        self.assertContains(resp, 'name="location"')
+        self.assertNotContains(resp, 'name="author_name"')
+        self.assertNotContains(resp, 'name="source_title"')
         self.assertNotContains(resp, 'name="body"')
 
     def test_anonymous_cannot_open_photo_edit_page(self):
@@ -127,19 +135,26 @@ class PhotoManageEditTests(TestCase):
         self.assertEqual(self.photo_item.date_end.isoformat(), "1940-05-31")
         self.assertEqual(self.photo_item.date_precision, ArchiveItem.DatePrecision.RANGE)
 
-    def test_staff_can_update_photo_source_metadata(self):
+    def test_staff_can_update_photo_metadata(self):
         self.client.force_login(self.staff)
         resp = self.client.post(
             self.EDIT_URL_TEMPLATE.format(item_id=self.photo_item.id),
             data=self._photo_edit_payload(
-                author_name="  Photo author  ",
-                source_title=" Family album ",
+                description="  Wedding day caption  ",
+                location=" Cairo ",
+                context="Family gathering\nafter ceremony",
+                people_present=" Uncle Moshe, Aunt Rivka ",
+                notes="Scanned from album page 3",
             ),
         )
         self.assertEqual(resp.status_code, 302)
-        self.photo_item.refresh_from_db()
-        self.assertEqual(self.photo_item.author_name, "Photo author")
-        self.assertEqual(self.photo_item.source_title, "Family album")
+        self.photo_item.photo_content.refresh_from_db()
+        photo = self.photo_item.photo_content
+        self.assertEqual(photo.description, "Wedding day caption")
+        self.assertEqual(photo.location, "Cairo")
+        self.assertEqual(photo.context, "Family gathering\nafter ceremony")
+        self.assertEqual(photo.people_present, "Uncle Moshe, Aunt Rivka")
+        self.assertEqual(photo.notes, "Scanned from album page 3")
 
     def test_staff_can_update_photo_discovery_metadata(self):
         existing_cat = ArchiveCategory.objects.create(

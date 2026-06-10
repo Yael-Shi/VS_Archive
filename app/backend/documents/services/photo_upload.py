@@ -21,6 +21,7 @@ from documents.services.upload_validation import (
     upload_mime_types_match,
     validate_image_upload_metadata,
 )
+from documents.services.photo_metadata_validation import photo_metadata_from_mapping
 
 _UPLOAD_ERROR_MAX_LENGTH = 512
 
@@ -91,11 +92,14 @@ def create_photo_upload_plan(
     date_end,
     date_precision: str,
     metadata_status: str,
-    author_name: str,
-    source_title: str,
     original_name: str,
     mime_type: str,
     discovery_metadata: dict[str, list[str]],
+    description: str = "",
+    location: str = "",
+    context: str = "",
+    people_present: str = "",
+    notes: str = "",
 ) -> tuple[ArchiveItem, PhotoContent, str]:
     """
     Create PHOTO ArchiveItem + pending PhotoContent and return a presigned PUT URL.
@@ -112,8 +116,6 @@ def create_photo_upload_plan(
         date_end=date_end,
         date_precision=date_precision,
         metadata_status=metadata_status,
-        author_name=author_name,
-        source_title=source_title,
     )
     photo_content = PhotoContent.objects.create(
         archive_item=archive_item,
@@ -123,6 +125,11 @@ def create_photo_upload_plan(
         original_size_bytes=0,
         upload_status=PhotoContent.UploadStatus.PENDING,
         upload_error="",
+        description=description,
+        location=location,
+        context=context,
+        people_present=people_present,
+        notes=notes,
     )
     s3_key = build_photo_original_s3_key(photo_content.id, normalized_mime)
     photo_content.original_file_key = s3_key
@@ -241,7 +248,6 @@ def parse_create_photo_upload_metadata(payload: dict[str, Any]) -> tuple[dict | 
         parse_metadata_status,
         parse_optional_date,
         validate_archive_metadata_fields,
-        validate_source_metadata_fields,
     )
 
     try:
@@ -252,15 +258,6 @@ def parse_create_photo_upload_metadata(payload: dict[str, Any]) -> tuple[dict | 
     except ValueError as exc:
         return None, str(exc)
 
-    author_name = (payload.get("author_name") or "").strip()
-    source_title = (payload.get("source_title") or "").strip()
-    source_errors = validate_source_metadata_fields(
-        author_name=author_name,
-        source_title=source_title,
-    )
-    if source_errors:
-        return None, source_errors[0]
-
     field_errors = validate_archive_metadata_fields(
         title=title,
         visibility=visibility,
@@ -268,8 +265,6 @@ def parse_create_photo_upload_metadata(payload: dict[str, Any]) -> tuple[dict | 
         date_precision=date_precision,
         date_start=date_start,
         date_end=date_end,
-        author_name=author_name,
-        source_title=source_title,
     )
     if field_errors:
         return None, field_errors[0]
@@ -300,6 +295,8 @@ def parse_create_photo_upload_metadata(payload: dict[str, Any]) -> tuple[dict | 
     if metadata_err:
         return None, metadata_err
 
+    photo_metadata = photo_metadata_from_mapping(payload)
+
     return {
         "title": title,
         "visibility": visibility,
@@ -307,9 +304,8 @@ def parse_create_photo_upload_metadata(payload: dict[str, Any]) -> tuple[dict | 
         "date_end": date_end,
         "date_precision": date_precision,
         "metadata_status": metadata_status,
-        "author_name": author_name,
-        "source_title": source_title,
         "original_name": original_name,
         "mime_type": normalize_upload_mime_type(mime_type),
         "discovery_metadata": parsed_discovery,
+        **photo_metadata,
     }, None
