@@ -39,7 +39,6 @@ class TextPresentation:
     hebrew_meta: TextBlockDisplayMeta
     show_source: bool
     show_hebrew: bool
-    identical_source_and_hebrew: bool
 
 
 def _is_hebrew_language(doc: Document) -> bool:
@@ -177,14 +176,21 @@ def get_text_presentation_for_document(doc: Document) -> TextPresentation:
 
     source_meta = text_block_display_meta(doc, "SOURCE_TEXT")
     hebrew_meta = text_block_display_meta(doc, "HEBREW_TEXT")
-    show_source = "SOURCE_TEXT" in expected or source is not None
-    show_hebrew = "HEBREW_TEXT" in expected or hebrew is not None
 
-    identical_source_and_hebrew = False
-    if show_source and show_hebrew and source and hebrew:
-        source_text = (source.text or "").strip()
-        hebrew_text = (hebrew.text or "").strip()
-        identical_source_and_hebrew = bool(source_text) and source_text == hebrew_text
+    if _is_hebrew_language(doc):
+        # Display-only: one panel for Hebrew docs — prefer HEBREW_TEXT, else SOURCE_TEXT.
+        if hebrew is not None:
+            show_source = False
+            show_hebrew = True
+        elif source is not None:
+            show_source = True
+            show_hebrew = False
+        else:
+            show_source = "SOURCE_TEXT" in expected
+            show_hebrew = "HEBREW_TEXT" in expected and not show_source
+    else:
+        show_source = "SOURCE_TEXT" in expected or source is not None
+        show_hebrew = "HEBREW_TEXT" in expected or hebrew is not None
 
     return TextPresentation(
         source=source,
@@ -195,5 +201,4 @@ def get_text_presentation_for_document(doc: Document) -> TextPresentation:
         hebrew_meta=hebrew_meta,
         show_source=show_source,
         show_hebrew=show_hebrew,
-        identical_source_and_hebrew=identical_source_and_hebrew,
     )

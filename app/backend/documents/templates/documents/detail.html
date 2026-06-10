@@ -122,18 +122,17 @@
 
       {% if text_presentation.missing %}
         <div class="page-lead">
-          {% if doc.processing_state_user == "PROCESSING" %}
-            בעיבוד… חסר: <code>{{ text_presentation.missing|join:", " }}</code>
+          {% if is_admin %}
+            {% if doc.processing_state_user == "PROCESSING" %}
+              בעיבוד… חסר: <code>{{ text_presentation.missing|join:", " }}</code>
+            {% else %}
+              חסרים פלטים: <code>{{ text_presentation.missing|join:", " }}</code>
+            {% endif %}
+          {% elif doc.processing_state_user == "PROCESSING" %}
+            הטקסט עדיין בעיבוד.
           {% else %}
-            חסרים פלטים: <code>{{ text_presentation.missing|join:", " }}</code>
+            הטקסט עדיין לא זמין.
           {% endif %}
-        </div>
-        <div class="spacer-sm"></div>
-      {% endif %}
-
-      {% if text_presentation.identical_source_and_hebrew %}
-        <div class="page-lead">
-          שני מקטעים אלו עשויים להכיל טקסט זהה — כל אחד מייצג תפקיד שונה (חילוץ מקור לעומת טקסט לבדיקה).
         </div>
         <div class="spacer-sm"></div>
       {% endif %}
@@ -163,12 +162,22 @@
         {% for item in source_preview_items %}
           <div class="source-preview-page viewer">
             <div class="muted text-sm source-preview-page__label">
-              עמוד {{ item.display_number }}{% if item.original_name %} — {{ item.original_name }}{% endif %}
+              עמוד {{ item.display_number }}
             </div>
             {% if item.url %}
               <img src="{{ item.url }}" alt="עמוד {{ item.display_number }}" />
             {% else %}
               <div class="muted">לא ניתן לטעון תצוגה מקדימה לעמוד זה.</div>
+            {% endif %}
+            {% if is_admin and item.original_name %}
+              <details class="review-details review-details--secondary">
+                <summary>פרטים טכניים</summary>
+                <div class="review-details-body">
+                  <div class="muted text-sm">
+                    <strong>שם קובץ מקור:</strong> {{ item.original_name }}
+                  </div>
+                </div>
+              </details>
             {% endif %}
           </div>
         {% endfor %}

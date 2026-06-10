@@ -6695,15 +6695,46 @@ class SourcePreviewTests(TestCase):
         resp = self.client.get(self._detail_url(doc.id))
         self.assertEqual(resp.status_code, 200)
         body = resp.content.decode()
-        self.assertIn("עמוד 1 — page-0.png", body)
-        self.assertIn("עמוד 2 — page-1.png", body)
-        self.assertIn("עמוד 3 — page-2.png", body)
+        self.assertIn("עמוד 1", body)
+        self.assertIn("עמוד 2", body)
+        self.assertIn("עמוד 3", body)
+        self.assertIn("page-0.png", body)
+        self.assertIn("page-1.png", body)
+        self.assertIn("page-2.png", body)
         # ordered by order_index
         self.assertLess(body.index("עמוד 1"), body.index("עמוד 2"))
         self.assertLess(body.index("עמוד 2"), body.index("עמוד 3"))
         # multi-image documents do not generate the legacy single content_url
         mock_view_get.assert_not_called()
         self.assertEqual(mock_helper_get.call_count, 3)
+
+    @patch("documents.views.create_presigned_get")
+    @patch("documents.services.source_files.create_presigned_get")
+    def test_multi_image_detail_hides_source_filenames_for_viewers(
+        self, mock_helper_get, mock_view_get
+    ):
+        from django.contrib.auth.models import User
+
+        mock_helper_get.side_effect = lambda **kw: f"https://example/{kw['key']}"
+        viewer = User.objects.create_user(
+            username="preview_viewer",
+            password="test-pass",
+            is_staff=False,
+        )
+        doc = self._multi_image_doc(count=3, language=Document.Language.HEBREW)
+        doc.archive_item.visibility = Document.Visibility.PUBLIC
+        doc.archive_item.save(update_fields=["visibility"])
+        for i in range(3):
+            self._add_source(doc, i)
+        self.client.force_login(viewer)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertIn("עמוד 1", body)
+        self.assertNotIn("page-0.png", body)
+        self.assertNotIn("page-1.png", body)
+        self.assertNotIn("page-2.png", body)
+        mock_view_get.assert_not_called()
 
     @patch("documents.views.create_presigned_get")
     @patch("documents.services.source_files.create_presigned_get")
@@ -7795,8 +7826,13 @@ class StatusLabelPresentationTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        # Human-review axis stays distinct from processing readiness.
-        self.assertContains(resp, "ממתין לבדיקה אנושית")
+        # Processing readiness and human approval stay distinct on the detail page.
+        self.assertContains(resp, "עיבוד הושלם")
+        self.assertContains(resp, "זה עדיין לא אישור אנושי")
+        self.assertContains(resp, "פרטים טכניים")
+        self.assertContains(resp, "UNVERIFIED")
+        self.assertNotContains(resp, "ממתין לבדיקה אנושית")
+        self.assertNotContains(resp, "מוכן")
 
     def test_admin_backlog_page_ready_uses_processing_completed(self):
         self._create_document(
@@ -8292,6 +8328,11 @@ class DocumentDetailTextGroupingTests(TestCase):
             password="test-pass",
             is_staff=True,
         )
+        self.viewer = User.objects.create_user(
+            username="detail_text_viewer",
+            password="test-pass",
+            is_staff=False,
+        )
 
     def _create_document(self, **kwargs):
         defaults = {
@@ -8321,7 +8362,7 @@ class DocumentDetailTextGroupingTests(TestCase):
     def _detail_url(self, doc_id: int) -> str:
         return f"/api/ui/documents/{doc_id}/"
 
-    def test_hebrew_detail_renders_source_text_when_persisted(self):
+    def test_hebrew_detail_prefers_single_hebrew_text_panel(self):
         doc = self._create_document()
         self._create_text_result(
             doc,
@@ -8336,13 +8377,13 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(self._detail_url(doc.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "תמלול מקור")
         self.assertContains(resp, "טקסט עברי לבדיקה")
-        self.assertContains(resp, "טקסט מקור עברי", count=2)
-        self.assertContains(resp, "SOURCE_TEXT")
+        self.assertNotContains(resp, "תמלול מקור")
+        self.assertContains(resp, "טקסט מקור עברי", count=1)
         self.assertContains(resp, "HEBREW_TEXT")
+        self.assertNotContains(resp, "SOURCE_TEXT")
 
-    def test_hebrew_detail_uses_distinct_labels_and_descriptions(self):
+    def test_hebrew_detail_uses_hebrew_text_label_when_both_rows_exist(self):
         doc = self._create_document()
         self._create_text_result(
             doc,
@@ -8357,27 +8398,27 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(self._detail_url(doc.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "הטקסט כפי שחולץ אוטומטית מן המסמך.")
-        self.assertContains(resp, "הטקסט העברי שמיועד לבדיקה, עריכה ואישור.")
+        self.assertContains(resp, "טקסט עברי לבדיקה")
+        self.assertNotContains(resp, "הטקסט העברי שמיועד לבדיקה, עריכה ואישור.")
+        self.assertNotContains(resp, "תמלול מקור")
         self.assertNotContains(resp, "תמלול מקור (עברית כפי שחולצה)")
 
-    def test_hebrew_identical_blocks_show_role_explanation(self):
+    def test_hebrew_detail_falls_back_to_source_text_when_hebrew_missing(self):
         doc = self._create_document()
-        shared = "טקסט משותף לבדיקה"
         self._create_text_result(
             doc,
             result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
-            text=shared,
-        )
-        self._create_text_result(
-            doc,
-            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
-            text=shared,
+            text="טקסט מקור בלבד",
         )
         self.client.force_login(self.staff)
         resp = self.client.get(self._detail_url(doc.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "שני מקטעים אלו עשויים להכיל טקסט זהה")
+        self.assertContains(resp, "תמלול מקור")
+        self.assertNotContains(resp, "טקסט עברי לבדיקה")
+        self.assertContains(resp, "טקסט מקור בלבד")
+        self.assertContains(resp, "SOURCE_TEXT")
+        # Missing HEBREW_TEXT may still appear in the admin missing-output note.
+        self.assertContains(resp, "חסרים פלטים: <code>HEBREW_TEXT</code>")
 
     def test_non_hebrew_detail_preserves_source_and_translation_sections(self):
         doc = self._create_document(language=Document.Language.ENGLISH)
@@ -8390,7 +8431,7 @@ class DocumentDetailTextGroupingTests(TestCase):
         resp = self.client.get(self._detail_url(doc.id))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "תמלול מקור")
-        self.assertContains(resp, "טקסט בשפת המקור כפי שחולץ אוטומטית.")
+        self.assertNotContains(resp, "טקסט בשפת המקור כפי שחולץ אוטומטית.")
         self.assertContains(resp, "תרגום לעברית")
         self.assertContains(resp, "אין תרגום לעברית עדיין.")
         self.assertContains(resp, "English source line")
@@ -8423,17 +8464,36 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(self._detail_url(doc.id))
         self.assertEqual(resp.status_code, 200)
-        # User-facing labels (headings), not raw enum names.
-        self.assertContains(resp, "תמלול מקור")
         self.assertContains(resp, "טקסט עברי לבדיקה")
-        # Raw enums remain in collapsed technical details.
         self.assertContains(resp, "פרטים טכניים")
         self.assertContains(resp, "<details")
-        self.assertContains(resp, "SOURCE_TEXT")
         self.assertContains(resp, "HEBREW_TEXT")
+        self.assertNotContains(resp, "SOURCE_TEXT")
         self.assertContains(resp, "NEEDS_REVIEW")
         self.assertContains(resp, "UNVERIFIED")
         self.assertContains(resp, "transkribus-pylaia:1")
+        self.assertNotContains(resp, "ממתין לבדיקה אנושית")
+
+    def test_viewer_detail_hides_internal_text_labels_and_shows_auto_disclaimer(self):
+        doc = self._create_document(visibility=Document.Visibility.PUBLIC)
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="טקסט לצופה",
+        )
+        self.client.force_login(self.viewer)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "תמלול")
+        self.assertContains(resp, "טקסט לצופה")
+        self.assertContains(resp, "תמלול אוטומטי")
+        self.assertContains(resp, "הטקסט חולץ אוטומטית ועדיין לא אושר. ייתכנו בו שגיאות.")
+        self.assertNotContains(resp, "HEBREW_TEXT")
+        self.assertNotContains(resp, "SOURCE_TEXT")
+        self.assertNotContains(resp, "NEEDS_REVIEW")
+        self.assertNotContains(resp, "UNVERIFIED")
+        self.assertNotContains(resp, "transkribus-pylaia:1")
+        self.assertNotContains(resp, "טקסט עברי לבדיקה")
 
 
 class TextBlockDisplayMetaTests(SimpleTestCase):
@@ -8466,7 +8526,7 @@ class TextBlockDisplayMetaTests(SimpleTestCase):
 class TextPresentationHelperTests(TestCase):
     """DB-backed tests for document detail text presentation helpers."""
 
-    def test_get_text_presentation_identical_flag(self):
+    def test_get_text_presentation_hebrew_prefers_single_hebrew_panel(self):
         from documents.services.text_presentation import get_text_presentation_for_document
 
         doc = create_ocr_document(
@@ -8496,9 +8556,32 @@ class TextPresentationHelperTests(TestCase):
         )
 
         presentation = get_text_presentation_for_document(doc)
-        self.assertTrue(presentation.show_source)
+        self.assertFalse(presentation.show_source)
         self.assertTrue(presentation.show_hebrew)
-        self.assertTrue(presentation.identical_source_and_hebrew)
+
+    def test_get_text_presentation_hebrew_falls_back_to_source_panel(self):
+        from documents.services.text_presentation import get_text_presentation_for_document
+
+        doc = create_ocr_document(
+            title="Presentation helper fallback doc",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            language=Document.Language.HEBREW,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.READY,
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="engine-a",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="מקור בלבד",
+        )
+
+        presentation = get_text_presentation_for_document(doc)
+        self.assertTrue(presentation.show_source)
+        self.assertFalse(presentation.show_hebrew)
 
 
 class DocumentVisibilityAccessControlTests(TestCase):
