@@ -367,6 +367,7 @@ Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`s
 - **Hebrew handwritten requires Transkribus.** In `select_ocr_route`, `language=he` + `HANDWRITTEN` returns **`engine_key=TRANSKRIBUS`** only when **`ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN=true`**.
 - If **`ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN=false`** (default), Hebrew handwritten routing fails fast with a clear configuration error. It does **not** fall back to Gemini.
 - All other valid pairs → **Gemini** from `OCR_ROUTES`.
+- **Hebrew printed (`he` + `PRINTED`)** remains **Gemini** with **`prompt_variant=printed`**. Model selection is route-specific via **`GEMINI_HEBREW_PRINTED_MODEL`** (default **`gemini-3.1-flash-lite`**, single candidate; no automatic fallback to **`gemini-2.0-flash`** in this step). Resolved in **`ocr_routing.gemini_model_candidates`** and injected by **`htr_engine.transcribe_pages`** when **`worker_env`** is present.
 - **No** Gemini→Transkribus fallback. **No** Transkribus→Gemini fallback. **No** hybrid OCR routing. **`ENABLE_HYBRID_HTR`** only gates credential validation in env loading, not engine selection.
 - This routing change does **not** change the OCR review lifecycle: automatic worker success still persists **`DocumentTextResult.status=NEEDS_REVIEW`** and **`verification_status=UNVERIFIED`**.
 
@@ -1423,3 +1424,17 @@ Category/event/tag names on archive detail pages link to these browse pages. Bro
 **Scope (PR6):** Templates, presentation helpers, focused tests, minimal doc updates. **No** thumbnails, presigned GET in manage list, S3 delete, re-upload, model/migration changes.
 
 **Docs:** `docs/ai-context/photo-archive-items.md`
+
+## OCR/HTR — Hebrew printed Gemini model config
+
+### Decision
+
+- **`language=he`** + **`text_input_type=PRINTED`** continues to route to **Gemini** with **`prompt_variant=printed`** (unchanged **`OCR_ROUTES`** entry).
+- **`GEMINI_HEBREW_PRINTED_MODEL`** (default **`gemini-3.1-flash-lite`**) on **`WorkerEnvConfig.gemini_hebrew_printed_model`** selects the Gemini runtime model for that pair only.
+- **`ocr_routing.gemini_model_candidates`** resolves model candidates by route + language + text input type. **`htr_engine.transcribe_pages`** passes **`model_candidates`** into **`GeminiAdapter`** when **`worker_env`** is present. **`GeminiAdapter`** stays generic.
+- Hebrew printed uses a **single** model candidate by default (**no** automatic **`gemini-2.0-flash`** fallback in this PR). Other Gemini routes keep **`("gemini-2.0-flash", "gemini-1.5-flash")`**.
+- **No** changes to Hebrew handwritten / Transkribus routing, prompts, **`DocumentTextResult`** schema, or processing-state rollup.
+
+### Deferred
+
+- Full explicit **`(language, text_input_type)` → model/prompt** matrix on **`OcrRouteConfig`**; additional per-route env overrides beyond Hebrew printed.

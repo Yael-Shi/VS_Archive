@@ -33,7 +33,13 @@ from documents.services.htr_adapters.gemini_adapter import GeminiAdapter
 from documents.services.htr_adapters.registry import get_htr_adapter
 from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
 from documents.services.htr_engine import transcribe_pages
-from documents.services.ocr_routing import OcrRouteConfig, OCR_ROUTES, select_ocr_route
+from documents.services.ocr_routing import (
+    DEFAULT_GEMINI_MODEL_CANDIDATES,
+    OcrRouteConfig,
+    OCR_ROUTES,
+    gemini_model_candidates,
+    select_ocr_route,
+)
 
 
 class HtrDispatcherTests(SimpleTestCase):
@@ -66,6 +72,196 @@ class HtrDispatcherTests(SimpleTestCase):
             language_hint="en",
             prompt_variant="printed",
             min_text_length=10,
+        )
+
+    @patch("documents.services.htr_engine.get_htr_adapter")
+    @patch("documents.services.htr_engine.select_ocr_route")
+    def test_hebrew_printed_with_worker_env_passes_route_model_candidates(
+        self, mock_select_route, mock_get_adapter
+    ):
+        from documents.services.env_validation import WorkerEnvConfig
+
+        mock_select_route.return_value = OcrRouteConfig(
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+        )
+        adapter = Mock()
+        adapter.execute.return_value = HtrResult(
+            text="ok",
+            engine_name="gemini-3.1-flash-lite",
+        )
+        mock_get_adapter.return_value = adapter
+        worker_env = WorkerEnvConfig(
+            gemini_api_key="k",
+            gemini_confidence_threshold=0.7,
+            min_text_length=20,
+            max_retries=3,
+            retry_delay_seconds_1=30,
+            retry_delay_seconds_2=300,
+            report_window_start="00:00",
+            report_send_time="08:00",
+            free_tier_alert_pct=80,
+            gemini_free_daily_request_limit=1500,
+            gemini_free_daily_image_limit=1000,
+            transkribus_free_monthly_credits=500,
+            enable_hybrid_htr=False,
+            enable_daily_report=False,
+            smtp_host=None,
+            smtp_port=None,
+            smtp_username=None,
+            smtp_password=None,
+            default_from_email=None,
+            transkribus_api_token=None,
+            transkribus_username=None,
+            transkribus_password=None,
+            gemini_temperature=0.2,
+            gemini_top_k=40,
+            gemini_top_p=0.95,
+            gemini_max_output_tokens=2048,
+            gemini_double_pass=False,
+            gemini_consistency_min_ratio=0.7,
+            gemini_hebrew_printed_model="gemini-3.1-flash-lite",
+        )
+
+        transcribe_pages(
+            pages=[],
+            language_hint="he",
+            text_input_type=Document.TextInputType.PRINTED,
+            worker_env=worker_env,
+        )
+
+        adapter.execute.assert_called_once_with(
+            pages=[],
+            language_hint="he",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            worker_env=worker_env,
+            model_candidates=["gemini-3.1-flash-lite"],
+        )
+
+    @patch("documents.services.htr_engine.get_htr_adapter")
+    @patch("documents.services.htr_engine.select_ocr_route")
+    def test_explicit_model_candidates_not_overwritten_for_hebrew_printed(
+        self, mock_select_route, mock_get_adapter
+    ):
+        from documents.services.env_validation import WorkerEnvConfig
+
+        mock_select_route.return_value = OcrRouteConfig(
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+        )
+        adapter = Mock()
+        adapter.execute.return_value = HtrResult(
+            text="ok",
+            engine_name="caller-chosen-model",
+        )
+        mock_get_adapter.return_value = adapter
+        worker_env = WorkerEnvConfig(
+            gemini_api_key="k",
+            gemini_confidence_threshold=0.7,
+            min_text_length=20,
+            max_retries=3,
+            retry_delay_seconds_1=30,
+            retry_delay_seconds_2=300,
+            report_window_start="00:00",
+            report_send_time="08:00",
+            free_tier_alert_pct=80,
+            gemini_free_daily_request_limit=1500,
+            gemini_free_daily_image_limit=1000,
+            transkribus_free_monthly_credits=500,
+            enable_hybrid_htr=False,
+            enable_daily_report=False,
+            smtp_host=None,
+            smtp_port=None,
+            smtp_username=None,
+            smtp_password=None,
+            default_from_email=None,
+            transkribus_api_token=None,
+            transkribus_username=None,
+            transkribus_password=None,
+            gemini_temperature=0.2,
+            gemini_top_k=40,
+            gemini_top_p=0.95,
+            gemini_max_output_tokens=2048,
+            gemini_double_pass=False,
+            gemini_consistency_min_ratio=0.7,
+            gemini_hebrew_printed_model="gemini-3.1-flash-lite",
+        )
+        explicit_candidates = ["caller-chosen-model"]
+
+        transcribe_pages(
+            pages=[],
+            language_hint="he",
+            text_input_type=Document.TextInputType.PRINTED,
+            worker_env=worker_env,
+            model_candidates=explicit_candidates,
+        )
+
+        adapter.execute.assert_called_once_with(
+            pages=[],
+            language_hint="he",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            worker_env=worker_env,
+            model_candidates=explicit_candidates,
+        )
+
+    @patch("documents.services.htr_engine.get_htr_adapter")
+    @patch("documents.services.htr_engine.select_ocr_route")
+    def test_english_printed_with_worker_env_keeps_default_model_candidates(
+        self, mock_select_route, mock_get_adapter
+    ):
+        from documents.services.env_validation import WorkerEnvConfig
+
+        mock_select_route.return_value = OcrRouteConfig(
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+        )
+        adapter = Mock()
+        adapter.execute.return_value = HtrResult(text="ok", engine_name="gemini-2.0-flash")
+        mock_get_adapter.return_value = adapter
+        worker_env = WorkerEnvConfig(
+            gemini_api_key="k",
+            gemini_confidence_threshold=0.7,
+            min_text_length=20,
+            max_retries=3,
+            retry_delay_seconds_1=30,
+            retry_delay_seconds_2=300,
+            report_window_start="00:00",
+            report_send_time="08:00",
+            free_tier_alert_pct=80,
+            gemini_free_daily_request_limit=1500,
+            gemini_free_daily_image_limit=1000,
+            transkribus_free_monthly_credits=500,
+            enable_hybrid_htr=False,
+            enable_daily_report=False,
+            smtp_host=None,
+            smtp_port=None,
+            smtp_username=None,
+            smtp_password=None,
+            default_from_email=None,
+            transkribus_api_token=None,
+            transkribus_username=None,
+            transkribus_password=None,
+            gemini_temperature=0.2,
+            gemini_top_k=40,
+            gemini_top_p=0.95,
+            gemini_max_output_tokens=2048,
+            gemini_double_pass=False,
+            gemini_consistency_min_ratio=0.7,
+        )
+
+        transcribe_pages(
+            pages=[],
+            language_hint="en",
+            text_input_type=Document.TextInputType.PRINTED,
+            worker_env=worker_env,
+        )
+
+        adapter.execute.assert_called_once_with(
+            pages=[],
+            language_hint="en",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            worker_env=worker_env,
+            model_candidates=list(DEFAULT_GEMINI_MODEL_CANDIDATES),
         )
 
     @patch("documents.services.htr_engine.get_htr_adapter")
@@ -2681,6 +2877,29 @@ class WorkerEnvConfigTests(SimpleTestCase):
             cfg = validate_required_env()
 
         self.assertFalse(cfg.enable_transkribus_hebrew_handwritten)
+
+    def test_validate_required_env_defaults_gemini_hebrew_printed_model(self):
+        with patch.dict(
+            os.environ,
+            {"GEMINI_API_KEY": "test-gemini-key"},
+            clear=True,
+        ):
+            cfg = validate_required_env()
+
+        self.assertEqual(cfg.gemini_hebrew_printed_model, "gemini-3.1-flash-lite")
+
+    def test_validate_required_env_gemini_hebrew_printed_model_override(self):
+        with patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": "test-gemini-key",
+                "GEMINI_HEBREW_PRINTED_MODEL": "custom-hebrew-printed-model",
+            },
+            clear=True,
+        ):
+            cfg = validate_required_env()
+
+        self.assertEqual(cfg.gemini_hebrew_printed_model, "custom-hebrew-printed-model")
 
 
 def _worker_env_for_dev_transkribus_upload_command(**overrides):
@@ -6434,6 +6653,47 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
                 document=doc, mode=TranskribusRun.Mode.EXISTING_SERVER
             ).exists()
         )
+
+
+class GeminiModelCandidatesTests(SimpleTestCase):
+    def test_hebrew_printed_gemini_route_uses_configured_single_model(self):
+        route = OcrRouteConfig(
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+        )
+        candidates = gemini_model_candidates(
+            route,
+            language="he",
+            text_input_type=Document.TextInputType.PRINTED,
+            gemini_hebrew_printed_model="gemini-3.1-flash-lite",
+        )
+        self.assertEqual(candidates, ("gemini-3.1-flash-lite",))
+
+    def test_hebrew_printed_gemini_route_respects_env_override_model(self):
+        route = OcrRouteConfig(
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+        )
+        candidates = gemini_model_candidates(
+            route,
+            language="he",
+            text_input_type=Document.TextInputType.PRINTED,
+            gemini_hebrew_printed_model="custom-model",
+        )
+        self.assertEqual(candidates, ("custom-model",))
+
+    def test_non_hebrew_printed_gemini_route_keeps_default_candidates(self):
+        route = OcrRouteConfig(
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+        )
+        candidates = gemini_model_candidates(
+            route,
+            language="en",
+            text_input_type=Document.TextInputType.PRINTED,
+            gemini_hebrew_printed_model="gemini-3.1-flash-lite",
+        )
+        self.assertEqual(candidates, DEFAULT_GEMINI_MODEL_CANDIDATES)
 
 
 class OcrRoutingTranskribusHebrewHandwrittenTests(SimpleTestCase):
