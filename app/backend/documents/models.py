@@ -148,6 +148,11 @@ class PhotoContent(models.Model):
         default=UploadStatus.PENDING,
     )
     upload_error = models.CharField(max_length=512, blank=True, default="")
+    description = models.TextField(blank=True, default="")
+    location = models.TextField(blank=True, default="")
+    context = models.TextField(blank=True, default="")
+    people_present = models.TextField(blank=True, default="")
+    notes = models.TextField(blank=True, default="")
     width = models.PositiveIntegerField(null=True, blank=True)
     height = models.PositiveIntegerField(null=True, blank=True)
     thumbnail_file_key = models.CharField(max_length=1024, blank=True, default="")

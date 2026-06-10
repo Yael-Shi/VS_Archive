@@ -1,0 +1,17 @@
+{% if photo_content %}
+  {% if photo_content.description %}
+    <div><strong>תיאור / כיתוב:</strong> {{ photo_content.description|linebreaksbr }}</div>
+  {% endif %}
+  {% if photo_content.location %}
+    <div><strong>מיקום:</strong> {{ photo_content.location }}</div>
+  {% endif %}
+  {% if photo_content.context %}
+    <div><strong>הקשר / נסיבות:</strong> {{ photo_content.context|linebreaksbr }}</div>
+  {% endif %}
+  {% if photo_content.people_present %}
+    <div><strong>נוכחים בתמונה:</strong> {{ photo_content.people_present|linebreaksbr }}</div>
+  {% endif %}
+  {% if photo_content.notes %}
+    <div><strong>הערות נוספות:</strong> {{ photo_content.notes|linebreaksbr }}</div>
+  {% endif %}
+{% endif %}

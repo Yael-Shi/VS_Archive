@@ -93,6 +93,11 @@ from documents.services.photo_upload import (
     finalize_photo_upload,
     parse_create_photo_upload_metadata,
 )
+from documents.services.photo_metadata_validation import (
+    empty_photo_metadata_form_data,
+    photo_metadata_form_data_from_content,
+    parse_photo_staff_metadata_form,
+)
 from documents.services.archive_item_presentation import (
     ARCHIVE_LIST_ITEM_TYPE_FILTER_CHOICES,
     archive_manage_item_type_ui_choices,
@@ -1074,11 +1079,14 @@ def create_photo_upload(request):
         date_end=parsed["date_end"],
         date_precision=parsed["date_precision"],
         metadata_status=parsed["metadata_status"],
-        author_name=parsed["author_name"],
-        source_title=parsed["source_title"],
         original_name=parsed["original_name"],
         mime_type=parsed["mime_type"],
         discovery_metadata=parsed["discovery_metadata"],
+        description=parsed["description"],
+        location=parsed["location"],
+        context=parsed["context"],
+        people_present=parsed["people_present"],
+        notes=parsed["notes"],
     )
 
     return JsonResponse(
@@ -1722,6 +1730,7 @@ def _photo_upload_form_context() -> dict:
         "metadata_status_choices": archive_metadata_status_ui_choices(),
         "form_data": {
             **_empty_archive_metadata_form_data(),
+            **empty_photo_metadata_form_data(),
             "categories": "",
             "events": "",
             "discovery_tags": "",
@@ -1878,6 +1887,7 @@ def _manual_text_form_data_from_item(item: ArchiveItem) -> dict:
 
 
 def _photo_form_data_from_item(item: ArchiveItem) -> dict:
+    photo_content = getattr(item, "photo_content", None)
     return {
         **_archive_metadata_form_data(
             title=item.title,
@@ -1886,9 +1896,8 @@ def _photo_form_data_from_item(item: ArchiveItem) -> dict:
             date_end=item.date_end,
             date_precision=item.date_precision,
             metadata_status=item.metadata_status,
-            author_name=item.author_name,
-            source_title=item.source_title,
         ),
+        **photo_metadata_form_data_from_content(photo_content),
         **discovery_metadata_form_data_from_item(item),
     }
 
@@ -2262,25 +2271,28 @@ def _archive_manage_edit_photo(request, item: ArchiveItem):
     form_data = _photo_form_data_from_item(item)
 
     if request.method == "POST":
-        parsed_shared, shared_errors = parse_archive_metadata_form(request.POST)
+        parsed, form_errors = parse_photo_staff_metadata_form(request.POST)
         parsed_discovery, discovery_errors = parse_archive_item_discovery_metadata_form(
             request.POST,
             tags_field="tags",
         )
-        form_errors = shared_errors + discovery_errors
-        form_data = {**parsed_shared, **parsed_discovery}
+        form_errors = form_errors + discovery_errors
+        form_data = {**parsed, **parsed_discovery}
         if not form_errors:
             with transaction.atomic():
                 update_photo_archive_item_metadata(
                     item,
-                    title=parsed_shared["title"],
-                    visibility=parsed_shared["visibility"],
-                    date_start=parsed_shared["date_start_value"],
-                    date_end=parsed_shared["date_end_value"],
-                    date_precision=parsed_shared["date_precision"],
-                    metadata_status=parsed_shared["metadata_status"],
-                    author_name=parsed_shared["author_name"],
-                    source_title=parsed_shared["source_title"],
+                    title=parsed["title"],
+                    visibility=parsed["visibility"],
+                    date_start=parsed["date_start_value"],
+                    date_end=parsed["date_end_value"],
+                    date_precision=parsed["date_precision"],
+                    metadata_status=parsed["metadata_status"],
+                    description=parsed["description"],
+                    location=parsed["location"],
+                    context=parsed["context"],
+                    people_present=parsed["people_present"],
+                    notes=parsed["notes"],
                 )
                 update_archive_item_discovery_metadata(
                     item,

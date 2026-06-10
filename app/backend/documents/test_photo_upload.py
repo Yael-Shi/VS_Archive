@@ -41,6 +41,10 @@ class PhotoUploadAccessTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'id="photoUploadForm"')
         self.assertContains(resp, "/api/photo-uploads/create/")
+        self.assertContains(resp, "תיאור קצר")
+        self.assertContains(resp, 'name="description"')
+        self.assertNotContains(resp, 'name="author_name"')
+        self.assertNotContains(resp, 'name="source_title"')
 
     def test_non_staff_cannot_access_photo_create_branch(self):
         user = User.objects.create_user(
@@ -177,8 +181,6 @@ class PhotoUploadFlowTests(TestCase):
             "metadata_status": ArchiveItem.MetadataStatus.COMPLETED,
             "date_precision": ArchiveItem.DatePrecision.YEAR,
             "date_start": "1950-01-01",
-            "author_name": "Unknown",
-            "source_title": "Family album",
             "categories": "Weddings, Cairo",
             "events": "Uncle's wedding",
             "discovery_tags": "family, 1950",
@@ -309,6 +311,30 @@ class PhotoUploadFlowTests(TestCase):
             set(item.tags.values_list("name", flat=True)),
             {"1950", "family"},
         )
+
+    @patch("documents.views.send_process_document_message")
+    def test_photo_metadata_saved_on_create(self, mock_enqueue):
+        resp = self.client.post(
+            self.CREATE_URL,
+            data=json.dumps(
+                self._valid_create_payload(
+                    description="  Bride and groom  ",
+                    location=" Tel Aviv ",
+                    context="Outdoor reception",
+                    people_present=" Cousin Yael ",
+                    notes="Color scan",
+                )
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        photo = PhotoContent.objects.get(id=resp.json()["photo_content_id"])
+        self.assertEqual(photo.description, "Bride and groom")
+        self.assertEqual(photo.location, "Tel Aviv")
+        self.assertEqual(photo.context, "Outdoor reception")
+        self.assertEqual(photo.people_present, "Cousin Yael")
+        self.assertEqual(photo.notes, "Color scan")
+        mock_enqueue.assert_not_called()
 
     @patch("documents.views.send_process_document_message")
     def test_s3_content_type_mismatch_marks_failed(self, mock_enqueue):
