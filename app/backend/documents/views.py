@@ -84,6 +84,7 @@ from documents.services.archive_item_access import (
 )
 from documents.services.archive_item_validation import (
     DATE_PRECISION_UI_CHOICES,
+    TEXT_INPUT_TYPE_UI_CHOICES,
     parse_date_precision,
 )
 from documents.services.manual_text_validation import parse_manual_text_form
@@ -1711,7 +1712,7 @@ def document_ocr_reprocess(request, doc_id: int):
 def _upload_form_context() -> dict:
     return {
         "doc_type_choices": Document.DocType.choices,
-        "text_input_type_choices": Document.TextInputType.choices,
+        "text_input_type_choices": TEXT_INPUT_TYPE_UI_CHOICES,
         "date_precision_choices": DATE_PRECISION_UI_CHOICES,
         "form_data": {
             "categories": "",
