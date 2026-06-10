@@ -257,6 +257,18 @@
     const eventsRaw = document.getElementById("events").value;
     const discoveryTagsRaw = document.getElementById("discovery_tags").value;
 
+    function readSelectedIds(selectId) {
+      const el = document.getElementById(selectId);
+      if (!el) return [];
+      return Array.from(el.selectedOptions)
+        .map((option) => parseInt(option.value, 10))
+        .filter((id) => !Number.isNaN(id));
+    }
+
+    const selected_categories = readSelectedIds("selected_categories");
+    const selected_events = readSelectedIds("selected_events");
+    const selected_tags = readSelectedIds("selected_tags");
+
     const donor = document.getElementById("donor").value.trim();
     const collection = document.getElementById("collection").value.trim();
     const original_location = document.getElementById("original_location").value.trim();
@@ -279,6 +291,9 @@
     if (language) meta.language = language;
     if (author_name) meta.author_name = author_name;
     if (source_title) meta.source_title = source_title;
+    if (selected_categories.length) meta.selected_categories = selected_categories;
+    if (selected_events.length) meta.selected_events = selected_events;
+    if (selected_tags.length) meta.selected_tags = selected_tags;
     if (categories.length) meta.categories = categories;
     if (events.length) meta.events = events;
     if (discovery_tags.length) meta.discovery_tags = discovery_tags;

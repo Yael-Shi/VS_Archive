@@ -5,7 +5,7 @@ from django.contrib.auth.models import Group, User
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from documents.models import ArchiveItem, Document, PhotoContent
+from documents.models import ArchiveCategory, ArchiveItem, Document, PhotoContent, Tag
 from documents.services.archive_item_access import (
     ARCHIVE_FAMILY_GROUP_NAME,
     archive_browse_queryset_for_user,
@@ -311,6 +311,43 @@ class PhotoUploadFlowTests(TestCase):
             set(item.tags.values_list("name", flat=True)),
             {"1950", "family"},
         )
+
+    @patch("documents.views.send_process_document_message")
+    def test_discovery_metadata_saved_from_selected_ids_and_new_names(self, mock_enqueue):
+        existing_cat = ArchiveCategory.objects.create(
+            name="Existing upload category",
+            slug="existing-upload-category",
+        )
+        existing_tag = Tag.objects.create(name="existing-upload-tag")
+
+        resp = self.client.post(
+            self.CREATE_URL,
+            data=json.dumps(
+                self._valid_create_payload(
+                    selected_categories=[existing_cat.id],
+                    selected_tags=[existing_tag.id],
+                    categories="Brand new upload category",
+                    events="Brand new upload event",
+                    discovery_tags="brand-new-upload-tag",
+                )
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        item = ArchiveItem.objects.get(id=resp.json()["archive_item_id"])
+        self.assertEqual(
+            set(item.categories.values_list("name", flat=True)),
+            {"Existing upload category", "Brand new upload category"},
+        )
+        self.assertEqual(
+            list(item.events.values_list("name", flat=True)),
+            ["Brand new upload event"],
+        )
+        self.assertEqual(
+            set(item.tags.values_list("name", flat=True)),
+            {"existing-upload-tag", "brand-new-upload-tag"},
+        )
+        mock_enqueue.assert_not_called()
 
     @patch("documents.views.send_process_document_message")
     def test_photo_metadata_saved_on_create(self, mock_enqueue):

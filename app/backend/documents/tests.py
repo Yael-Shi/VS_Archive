@@ -4125,6 +4125,43 @@ class UploadApiTests(TestCase):
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
     @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    def test_create_upload_saves_discovery_metadata_from_selected_ids_and_new_names(
+        self, _mock_put
+    ):
+        from documents.models import ArchiveCategory, Tag
+
+        existing_cat = ArchiveCategory.objects.create(
+            name="Existing OCR upload category",
+            slug="existing-ocr-upload-category",
+        )
+        existing_tag = Tag.objects.create(name="existing-ocr-upload-tag")
+
+        resp = self._post_create(
+            self._base_create_payload(
+                selected_categories=[existing_cat.id],
+                selected_tags=[existing_tag.id],
+                categories="New OCR upload category",
+                events="New OCR upload event",
+                discovery_tags="new-ocr-upload-tag",
+            )
+        )
+        self.assertEqual(resp.status_code, 201)
+        item = Document.objects.get(id=resp.json()["document_id"]).archive_item
+        self.assertEqual(
+            set(item.categories.values_list("name", flat=True)),
+            {"Existing OCR upload category", "New OCR upload category"},
+        )
+        self.assertEqual(
+            list(item.events.values_list("name", flat=True)),
+            ["New OCR upload event"],
+        )
+        self.assertEqual(
+            set(item.tags.values_list("name", flat=True)),
+            {"existing-ocr-upload-tag", "new-ocr-upload-tag"},
+        )
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
     def test_multi_image_create_saves_archive_item_discovery_metadata(self, _mock_put):
         resp = self._post_create(
             self._multi_files_payload(
