@@ -1,26 +1,26 @@
 <div class="detail-text-block">
-  <div class="detail-text-block__title">{{ meta.label }}</div>
-  <div class="muted text-sm page-lead">{{ meta.description }}</div>
-
   {% if block %}
-    <div class="badge-row">
-      {% include "documents/partials/review_status_badge.html" with verification_status=block.verification_status %}
-    </div>
-
-    {% if is_admin and block.status == "FAILED" %}
-      <div class="spacer-sm"></div>
-      <div class="muted text-sm">
-        <strong>error_code:</strong> <code>{{ block.error_code }}</code><br/>
-        <strong>details:</strong> {{ block.error_details }}
-      </div>
+    {% if is_admin %}
+      <div class="detail-text-block__title">{{ meta.label }}</div>
+    {% elif block.text %}
+      <div class="detail-text-block__title">תמלול</div>
     {% endif %}
-
-    <div class="spacer-sm"></div>
 
     {% if block.text %}
       <div class="detail-text-block__body">
         <pre>{{ block.text }}</pre>
       </div>
+
+      {% if not is_admin %}
+        <details class="review-details review-details--secondary">
+          <summary>תמלול אוטומטי</summary>
+          <div class="review-details-body">
+            <div class="muted text-sm">
+              הטקסט חולץ אוטומטית ועדיין לא אושר. ייתכנו בו שגיאות.
+            </div>
+          </div>
+        </details>
+      {% endif %}
     {% else %}
       <div class="muted">{{ meta.empty_message }}</div>
     {% endif %}
@@ -36,6 +36,13 @@
             <span class="badge">{{ block.engine }}</span>
             <span class="muted">{{ block.created_at }}</span>
           </div>
+          {% if block.status == "FAILED" %}
+            <div class="spacer-sm"></div>
+            <div class="muted text-sm">
+              <strong>error_code:</strong> <code>{{ block.error_code }}</code><br/>
+              <strong>details:</strong> {{ block.error_details }}
+            </div>
+          {% endif %}
         </div>
       </details>
     {% endif %}
