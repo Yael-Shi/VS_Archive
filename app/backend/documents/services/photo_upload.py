@@ -241,6 +241,7 @@ def parse_create_photo_upload_metadata(payload: dict[str, Any]) -> tuple[dict | 
         return None, "visibility must be private or public"
 
     from documents.services.archive_discovery_metadata_validation import (
+        empty_discovery_metadata_form_fields,
         parse_archive_item_discovery_metadata_form,
     )
     from documents.services.archive_item_validation import parse_date_precision
@@ -270,9 +271,13 @@ def parse_create_photo_upload_metadata(payload: dict[str, Any]) -> tuple[dict | 
         return None, field_errors[0]
 
     form_data = {
+        **empty_discovery_metadata_form_fields(),
         "categories": _json_value_as_discovery_string(payload.get("categories")),
         "events": _json_value_as_discovery_string(payload.get("events")),
         "discovery_tags": _json_value_as_discovery_string(payload.get("discovery_tags")),
+        "selected_categories": payload.get("selected_categories"),
+        "selected_events": payload.get("selected_events"),
+        "selected_tags": payload.get("selected_tags"),
     }
     parsed_discovery, discovery_errors = parse_archive_item_discovery_metadata_form(
         form_data,

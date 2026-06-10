@@ -27,6 +27,8 @@ from documents.services.archive_catalog_metadata_validation import (
     parse_ocr_catalog_metadata_form,
 )
 from documents.services.archive_discovery_metadata_validation import (
+    discovery_metadata_option_querysets,
+    empty_discovery_metadata_form_fields,
     parse_archive_item_discovery_metadata_form,
 )
 from documents.services.archive_items import (
@@ -357,9 +359,13 @@ def _json_value_as_discovery_string(value) -> str:
 
 def _parse_create_upload_discovery_metadata(payload: dict):
     form_data = {
+        **empty_discovery_metadata_form_fields(),
         "categories": _json_value_as_discovery_string(payload.get("categories")),
         "events": _json_value_as_discovery_string(payload.get("events")),
         "discovery_tags": _json_value_as_discovery_string(payload.get("discovery_tags")),
+        "selected_categories": payload.get("selected_categories"),
+        "selected_events": payload.get("selected_events"),
+        "selected_tags": payload.get("selected_tags"),
     }
     return parse_archive_item_discovery_metadata_form(
         form_data,
@@ -1714,13 +1720,10 @@ def _upload_form_context() -> dict:
         "doc_type_choices": Document.DocType.choices,
         "text_input_type_choices": TEXT_INPUT_TYPE_UI_CHOICES,
         "date_precision_choices": DATE_PRECISION_UI_CHOICES,
-        "form_data": {
-            "categories": "",
-            "events": "",
-            "discovery_tags": "",
-        },
+        "form_data": empty_discovery_metadata_form_fields(),
         "discovery_tags_input_name": "discovery_tags",
         "discovery_tags_input_id": "discovery_tags",
+        **discovery_metadata_option_querysets(),
     }
 
 
@@ -1732,12 +1735,11 @@ def _photo_upload_form_context() -> dict:
         "form_data": {
             **_empty_archive_metadata_form_data(),
             **empty_photo_metadata_form_data(),
-            "categories": "",
-            "events": "",
-            "discovery_tags": "",
+            **empty_discovery_metadata_form_fields(),
         },
         "discovery_tags_input_name": "discovery_tags",
         "discovery_tags_input_id": "discovery_tags",
+        **discovery_metadata_option_querysets(),
     }
 
 
@@ -1856,9 +1858,7 @@ def _empty_manual_text_form_data() -> dict:
     return {
         **_empty_archive_metadata_form_data(),
         "body": "",
-        "categories": "",
-        "events": "",
-        "discovery_tags": "",
+        **empty_discovery_metadata_form_fields(),
     }
 
 
@@ -1867,6 +1867,15 @@ def _manual_text_discovery_metadata_form_context() -> dict:
         "show_discovery_metadata": True,
         "discovery_tags_input_name": "tags",
         "discovery_tags_input_id": "tags",
+        **discovery_metadata_option_querysets(),
+    }
+
+
+def _ocr_discovery_metadata_form_context() -> dict:
+    return {
+        "discovery_tags_input_name": "discovery_tags",
+        "discovery_tags_input_id": "discovery_tags",
+        **discovery_metadata_option_querysets(),
     }
 
 
@@ -2383,8 +2392,7 @@ def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
                 submit_label="עדכון",
             ),
             "show_discovery_metadata": True,
-            "discovery_tags_input_name": "discovery_tags",
-            "discovery_tags_input_id": "discovery_tags",
+            **_ocr_discovery_metadata_form_context(),
         },
     )
 

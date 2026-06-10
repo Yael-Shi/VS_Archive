@@ -4125,9 +4125,22 @@ class ArchiveItemDiscoveryMetadataEditTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(self.EDIT_URL_TEMPLATE.format(item_id=item.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'value="יהדות מצרים"')
-        self.assertContains(resp, 'value="חתונה"')
-        self.assertContains(resp, 'value="family"')
+        self.assertContains(
+            resp,
+            f'<option value="{cat.id}" selected>{cat.name}</option>',
+            html=True,
+        )
+        self.assertContains(
+            resp,
+            f'<option value="{event.id}" selected>{event.name}</option>',
+            html=True,
+        )
+        self.assertContains(
+            resp,
+            f'<option value="{tag.id}" selected>{tag.name}</option>',
+            html=True,
+        )
+        self.assertNotContains(resp, 'value="יהדות מצרים"')
 
     def test_manual_text_post_creates_and_reuses_discovery_metadata(self):
         existing_cat = ArchiveCategory.objects.create(
@@ -4212,9 +4225,62 @@ class ArchiveItemDiscoveryMetadataEditTests(TestCase):
             self.EDIT_URL_TEMPLATE.format(item_id=item.id)
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'value="OCR category"')
-        self.assertContains(resp, 'value="OCR event"')
-        self.assertContains(resp, 'value="ocr-discovery-tag"')
+        self.assertContains(
+            resp,
+            f'<option value="{cat.id}" selected>{cat.name}</option>',
+            html=True,
+        )
+        self.assertContains(
+            resp,
+            f'<option value="{event.id}" selected>{event.name}</option>',
+            html=True,
+        )
+        self.assertContains(
+            resp,
+            f'<option value="{tag.id}" selected>{tag.name}</option>',
+            html=True,
+        )
+        self.assertNotContains(resp, 'value="OCR category"')
+
+    def test_manual_text_post_selected_existing_and_new_typed_values_together(self):
+        existing_cat = ArchiveCategory.objects.create(
+            name="Selected topic",
+            slug="selected-topic",
+        )
+        existing_event = ArchiveEvent.objects.create(
+            name="Selected event",
+            slug="selected-event",
+        )
+        existing_tag = Tag.objects.create(name="selected-tag")
+
+        item = create_manual_text_archive_item(title="Combined manual discovery", body="Body")
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=item.id),
+            data={
+                **self._manual_text_payload(),
+                "selected_categories": [str(existing_cat.id)],
+                "selected_events": [str(existing_event.id)],
+                "selected_tags": [str(existing_tag.id)],
+                "categories": "New typed topic",
+                "events": "New typed event",
+                "tags": "new-typed-tag",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        item.refresh_from_db()
+        self.assertEqual(
+            set(item.categories.values_list("name", flat=True)),
+            {"Selected topic", "New typed topic"},
+        )
+        self.assertEqual(
+            set(item.events.values_list("name", flat=True)),
+            {"Selected event", "New typed event"},
+        )
+        self.assertEqual(
+            set(item.tags.values_list("name", flat=True)),
+            {"selected-tag", "new-typed-tag"},
+        )
 
     def test_ocr_post_saves_discovery_metadata_on_archive_item(self):
         item = create_ocr_document(
@@ -4608,21 +4674,60 @@ class ManualTextCreateDiscoveryMetadataTests(TestCase):
         self.assertContains(resp, item.title)
 
     def test_create_validation_failure_preserves_discovery_metadata_fields(self):
+        existing_cat = ArchiveCategory.objects.create(
+            name="Preserved selected category",
+            slug="preserved-selected-category",
+        )
         self.client.force_login(self.staff)
         resp = self.client.post(
             self.CREATE_URL,
-            data=self._create_payload(
-                title="",
-                categories="Preserved category",
-                events="Preserved event",
-                tags="preserved-tag",
-            ),
+            data={
+                **self._create_payload(title=""),
+                "selected_categories": [str(existing_cat.id)],
+                "categories": "Preserved new category",
+                "events": "Preserved event",
+                "tags": "preserved-tag",
+            },
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'value="Preserved category"')
+        self.assertContains(
+            resp,
+            f'<option value="{existing_cat.id}" selected>{existing_cat.name}</option>',
+            html=True,
+        )
+        self.assertContains(resp, 'value="Preserved new category"')
         self.assertContains(resp, 'value="Preserved event"')
         self.assertContains(resp, 'value="preserved-tag"')
         self.assertFalse(ArchiveItem.objects.filter(events__name="Preserved event").exists())
+
+    def test_create_selected_existing_and_new_typed_values_together(self):
+        existing_cat = ArchiveCategory.objects.create(
+            name="Create selected category",
+            slug="create-selected-category",
+        )
+        existing_tag = Tag.objects.create(name="create-selected-tag")
+
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.CREATE_URL,
+            data={
+                **self._create_payload(title="Create selected and new"),
+                "selected_categories": [str(existing_cat.id)],
+                "selected_tags": [str(existing_tag.id)],
+                "categories": "Create new category",
+                "tags": "create-new-tag",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        item = ArchiveItem.objects.get(title="Create selected and new")
+        self.assertEqual(
+            set(item.categories.values_list("name", flat=True)),
+            {"Create selected category", "Create new category"},
+        )
+        self.assertEqual(
+            set(item.tags.values_list("name", flat=True)),
+            {"create-selected-tag", "create-new-tag"},
+        )
 
     def test_existing_manual_text_edit_discovery_metadata_still_works(self):
         item = create_manual_text_archive_item(title="Edit still works", body="Body")

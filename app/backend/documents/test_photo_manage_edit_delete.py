@@ -165,16 +165,20 @@ class PhotoManageEditTests(TestCase):
             name="Photo event",
             slug="photo-event",
         )
-        Tag.objects.create(name="photo-tag")
+        existing_tag = Tag.objects.create(name="photo-tag")
 
         self.client.force_login(self.staff)
         resp = self.client.post(
             self.EDIT_URL_TEMPLATE.format(item_id=self.photo_item.id),
-            data=self._photo_edit_payload(
-                categories="Photo topic, New photo topic",
-                events="Photo event, New photo event",
-                tags="photo-tag, new-photo-tag",
-            ),
+            data={
+                **self._photo_edit_payload(),
+                "selected_categories": [str(existing_cat.id)],
+                "selected_events": [str(existing_event.id)],
+                "selected_tags": [str(existing_tag.id)],
+                "categories": "New photo topic",
+                "events": "New photo event",
+                "tags": "new-photo-tag",
+            },
         )
         self.assertEqual(resp.status_code, 302)
         self.photo_item.refresh_from_db()
@@ -189,6 +193,29 @@ class PhotoManageEditTests(TestCase):
         self.assertEqual(
             set(self.photo_item.tags.values_list("name", flat=True)),
             {"photo-tag", "new-photo-tag"},
+        )
+
+    def test_photo_edit_get_preselects_existing_discovery_metadata(self):
+        existing_cat = ArchiveCategory.objects.create(
+            name="Photo preselect category",
+            slug="photo-preselect-category",
+        )
+        existing_tag = Tag.objects.create(name="photo-preselect-tag")
+        self.photo_item.categories.add(existing_cat)
+        self.photo_item.tags.add(existing_tag)
+
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.EDIT_URL_TEMPLATE.format(item_id=self.photo_item.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(
+            resp,
+            f'<option value="{existing_cat.id}" selected>{existing_cat.name}</option>',
+            html=True,
+        )
+        self.assertContains(
+            resp,
+            f'<option value="{existing_tag.id}" selected>{existing_tag.name}</option>',
+            html=True,
         )
 
     def test_uploaded_photo_edit_redirects_to_archive_manage_list(self):

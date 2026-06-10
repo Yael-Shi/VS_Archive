@@ -1,17 +1,50 @@
 <div class="section-title">קטגוריות, אירועים ותגיות</div>
-<p class="page-subtitle">הוסיפי ערכים שיעזרו למצוא פריטים בארכיון. הפרידי בין ערכים בפסיקים.</p>
+<p class="page-subtitle">בחרי ערכים קיימים או הוסיפי חדשים כדי לעזור למצוא פריטים בארכיון.</p>
 
 <div class="field">
-  <label for="categories">קטגוריות</label>
+  <label for="selected_categories">קטגוריות קיימות</label>
+  <select id="selected_categories" name="selected_categories" multiple size="6">
+    {% for category in discovery_all_categories %}
+      <option value="{{ category.id }}"{% if category.id in form_data.selected_category_ids %} selected{% endif %}>{{ category.name }}</option>
+    {% endfor %}
+  </select>
+  <div class="field-hint">אפשר לבחור כמה ערכים קיימים.</div>
+</div>
+
+<div class="field">
+  <label for="categories">הוספת קטגוריות חדשות</label>
   <input id="categories" name="categories" type="text" value="{{ form_data.categories }}" placeholder="למשל: יהדות מצרים, הפרשה" />
+  <div class="field-hint">להוספת ערכים חדשים, הפרידי בפסיקים.</div>
 </div>
 
 <div class="field">
-  <label for="events">אירועים</label>
+  <label for="selected_events">אירועים קיימים</label>
+  <select id="selected_events" name="selected_events" multiple size="6">
+    {% for event in discovery_all_events %}
+      <option value="{{ event.id }}"{% if event.id in form_data.selected_event_ids %} selected{% endif %}>{{ event.name }}</option>
+    {% endfor %}
+  </select>
+  <div class="field-hint">אפשר לבחור כמה ערכים קיימים.</div>
+</div>
+
+<div class="field">
+  <label for="events">הוספת אירועים חדשים</label>
   <input id="events" name="events" type="text" value="{{ form_data.events }}" placeholder="למשל: חתונה של דוד, עליה ממצרים" />
+  <div class="field-hint">להוספת ערכים חדשים, הפרידי בפסיקים.</div>
 </div>
 
 <div class="field">
-  <label for="{{ discovery_tags_input_id }}">תגיות</label>
+  <label for="selected_tags">תגיות קיימות</label>
+  <select id="selected_tags" name="selected_tags" multiple size="6">
+    {% for tag in discovery_all_tags %}
+      <option value="{{ tag.id }}"{% if tag.id in form_data.selected_tag_ids %} selected{% endif %}>{{ tag.name }}</option>
+    {% endfor %}
+  </select>
+  <div class="field-hint">אפשר לבחור כמה ערכים קיימים.</div>
+</div>
+
+<div class="field">
+  <label for="{{ discovery_tags_input_id }}">הוספת תגיות חדשות</label>
   <input id="{{ discovery_tags_input_id }}" name="{{ discovery_tags_input_name }}" type="text" value="{{ form_data.discovery_tags }}" placeholder="למשל: משפחה, ירושלים, 1948" />
+  <div class="field-hint">להוספת ערכים חדשים, הפרידי בפסיקים.</div>
 </div>

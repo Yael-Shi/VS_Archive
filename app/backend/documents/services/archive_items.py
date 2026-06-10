@@ -432,16 +432,21 @@ def _get_or_create_tag_by_name(name: str):
 
 
 def discovery_metadata_form_data_from_item(archive_item) -> dict:
-    """Build comma-separated discovery metadata form values from an ArchiveItem."""
+    """Build discovery metadata form values from an ArchiveItem (selected IDs, empty new-text)."""
+    from documents.services.archive_discovery_metadata_validation import (
+        empty_discovery_metadata_form_fields,
+    )
+
     return {
-        "categories": ", ".join(
-            archive_item.categories.order_by("name").values_list("name", flat=True)
+        **empty_discovery_metadata_form_fields(),
+        "selected_category_ids": list(
+            archive_item.categories.order_by("name").values_list("id", flat=True)
         ),
-        "events": ", ".join(
-            archive_item.events.order_by("name").values_list("name", flat=True)
+        "selected_event_ids": list(
+            archive_item.events.order_by("name").values_list("id", flat=True)
         ),
-        "discovery_tags": ", ".join(
-            archive_item.tags.order_by("name").values_list("name", flat=True)
+        "selected_tag_ids": list(
+            archive_item.tags.order_by("name").values_list("id", flat=True)
         ),
     }
 

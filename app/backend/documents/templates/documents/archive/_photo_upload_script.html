@@ -44,12 +44,20 @@
     return data;
   }
 
+  function readSelectedIds(selectId) {
+    const el = document.getElementById(selectId);
+    if (!el) return [];
+    return Array.from(el.selectedOptions)
+      .map((option) => parseInt(option.value, 10))
+      .filter((id) => !Number.isNaN(id));
+  }
+
   function readFormMeta() {
     const get = (id) => {
       const el = document.getElementById(id);
       return el ? (el.value || "").trim() : "";
     };
-    return {
+    const meta = {
       title: get("title"),
       description: get("description"),
       location: get("location"),
@@ -65,6 +73,13 @@
       events: get("events"),
       discovery_tags: get("discovery_tags"),
     };
+    const selected_categories = readSelectedIds("selected_categories");
+    const selected_events = readSelectedIds("selected_events");
+    const selected_tags = readSelectedIds("selected_tags");
+    if (selected_categories.length) meta.selected_categories = selected_categories;
+    if (selected_events.length) meta.selected_events = selected_events;
+    if (selected_tags.length) meta.selected_tags = selected_tags;
+    return meta;
   }
 
   form.addEventListener("submit", async (ev) => {
