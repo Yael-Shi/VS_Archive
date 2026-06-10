@@ -47,7 +47,13 @@
       {% include "documents/archive/partials/photo_metadata_display.html" with photo_content=photo_content %}
     {% endif %}
     {% include "documents/archive/partials/discovery_metadata.html" with item=item %}
-    <div class="section-title">תוכן</div>
+    {% if item.item_type == "PHOTO" %}
+      <div class="section-title">תמונה</div>
+    {% elif item.item_type == "MANUAL_TEXT" %}
+      <div class="section-title">טקסט</div>
+    {% else %}
+      <div class="section-title">תוכן</div>
+    {% endif %}
     {% if item.item_type == "PHOTO" %}
       {% if photo_url %}
         <figure class="photo-detail">

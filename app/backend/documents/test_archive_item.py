@@ -3596,7 +3596,7 @@ class ArchiveItemDiscoveryBrowseTests(TestCase):
 
         for resp in (category_resp, event_resp, tag_resp):
             self.assertEqual(resp.status_code, 200)
-            self.assertContains(resp, "אין פריטים להצגה.")
+            self.assertContains(resp, "אין פריטי ארכיון להצגה.")
             self.assertNotContains(resp, "Only private empty browse")
 
     def test_tag_browse_uses_archive_item_tags_not_legacy_document_tags_m2m(self):

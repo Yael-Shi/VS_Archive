@@ -151,7 +151,8 @@ class PhotoManageListStatusClarityTests(TestCase):
     def test_manage_list_shows_photo_upload_status_labels_in_correct_rows(self):
         resp = self._manage_list_response()
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "סטטוס העלאה")
+        self.assertContains(resp, "סטטוס העלאת תמונה")
+        self.assertContains(resp, "תצוגת תמונה בארכיון")
         html = resp.content.decode()
 
         uploaded_row = self._row_html_for_title(html, self.uploaded.title)
@@ -238,7 +239,7 @@ class PhotoManageCopyClarityTests(TestCase):
             reverse("archive-manage-delete", kwargs={"item_id": self.photo_item.id}),
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "תמחק את רשומת פריט התמונה ממסד הנתונים")
+        self.assertContains(resp, "תמחק את פריט הארכיון (תמונה) ממסד הנתונים")
         self.assertContains(resp, "ניקוי הקובץ השמור ב-S3 נדחה")
         self.assertContains(resp, "אינה מוחקת את אובייקט התמונה מהאחסון")
 
