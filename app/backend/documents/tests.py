@@ -1778,6 +1778,24 @@ class GeminiAdapterTests(SimpleTestCase):
         self.assertEqual(kwargs["max_output_tokens"], 2048)
 
     @patch("documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini")
+    def test_document_id_not_forwarded_to_gemini_engine(self, mock_gemini_transcribe):
+        mock_gemini_transcribe.return_value = GeminiResult(
+            text="text",
+            engine_name="gemini-2.0-flash",
+        )
+        adapter = GeminiAdapter()
+
+        adapter.execute(
+            pages=[],
+            language_hint="he",
+            prompt_variant="printed",
+            document_id=42,
+        )
+
+        kwargs = mock_gemini_transcribe.call_args.kwargs
+        self.assertNotIn("document_id", kwargs)
+
+    @patch("documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini")
     def test_success_uses_first_model(self, mock_gemini_transcribe):
         mock_gemini_transcribe.return_value = GeminiResult(
             text="text",

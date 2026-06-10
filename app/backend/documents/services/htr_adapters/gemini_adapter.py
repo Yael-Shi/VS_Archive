@@ -25,6 +25,7 @@ class GeminiAdapter:
         **kwargs,
     ) -> HtrResult:
         worker_env: Optional["WorkerEnvConfig"] = kwargs.pop("worker_env", None)
+        kwargs.pop("document_id", None)
 
         model_candidates = kwargs.pop(
             "model_candidates",
