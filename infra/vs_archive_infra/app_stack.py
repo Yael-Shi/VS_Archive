@@ -11,7 +11,6 @@ from aws_cdk import aws_secretsmanager as secretsmanager
 from aws_cdk import aws_ssm as ssm
 from aws_cdk import aws_servicediscovery as servicediscovery
 from aws_cdk import aws_logs as logs
-from aws_cdk import aws_applicationautoscaling as scaling
 from aws_cdk import aws_efs as efs
 from aws_cdk import aws_route53 as route53
 from aws_cdk import aws_route53_targets as route53_targets
@@ -142,7 +141,7 @@ class VsArchiveAppStack(Stack):
 
         pg_container.add_port_mappings(ecs.PortMapping(container_port=5432))
 
-        pg_svc = ecs.FargateService(
+        ecs.FargateService(
             self,
             f"{cfg.prefix}-pg-svc",
             cluster=cluster,
@@ -342,7 +341,7 @@ class VsArchiveAppStack(Stack):
             },
         )
 
-        worker_svc = ecs.FargateService(
+        ecs.FargateService(
             self,
             f"{cfg.prefix}-worker-svc",
             cluster=cluster,
@@ -411,18 +410,3 @@ class VsArchiveAppStack(Stack):
             zone=zone,
             target=route53.RecordTarget.from_alias(route53_targets.LoadBalancerTarget(alb)),
         )
-
-        for svc in [web_svc, worker_svc, pg_svc]:
-            scaling_target = svc.auto_scale_task_count(min_capacity=0, max_capacity=1)
-            scaling_target.scale_on_schedule(
-                f"{svc.node.id}-NightlyStop",
-                schedule=scaling.Schedule.cron(minute="0", hour="21"),
-                min_capacity=0,
-                max_capacity=0,
-            )
-            scaling_target.scale_on_schedule(
-                f"{svc.node.id}-MorningStart",
-                schedule=scaling.Schedule.cron(minute="30", hour="6"),
-                min_capacity=1,
-                max_capacity=1,
-            )
