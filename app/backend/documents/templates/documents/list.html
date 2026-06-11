@@ -5,7 +5,7 @@
 {% block content %}
   <div class="card page-header">
     <h1 class="page-title">מסמכים</h1>
-    <p class="page-subtitle">רשימת כל המסמכים במערכת. ניתן לסנן לפי חיפוש, סוג קובץ וסטטוס מטא־דאטה. מציג {{ docs|length }} מתוך {{ total }} מסמכים.</p>
+    <p class="page-subtitle">רשימת כל המסמכים במערכת. ניתן לסנן לפי חיפוש, סוג קובץ והשלמת פרטים. מציג {{ docs|length }} מתוך {{ total }} מסמכים.</p>
 
     <div class="filter-panel">
       <div class="section-title">סינון מסמכים</div>
@@ -30,7 +30,7 @@
         </div>
 
         <div class="field">
-          <label for="filter-metadata-status">סטטוס מטא־דאטה</label>
+          <label for="filter-metadata-status">השלמת פרטים</label>
           <select id="filter-metadata-status" name="metadata_status">
             <option value="">הכל</option>
             {% for v, label in metadata_status_choices %}
@@ -41,8 +41,12 @@
 
         <div class="field">
           <label for="filter-upload-status">סטטוס העלאה</label>
-          <input id="filter-upload-status" type="text" name="upload_status" placeholder="UPLOADED / UPLOADING / FAILED" value="{{ upload_status }}">
-          <span class="field-hint">ערכים טכניים — לסינון מדויק</span>
+          <select id="filter-upload-status" name="upload_status">
+            <option value="">הכל</option>
+            {% for v, label in upload_status_choices %}
+              <option value="{{ v }}" {% if upload_status == v %}selected{% endif %}>{{ v|upload_status_label }}</option>
+            {% endfor %}
+          </select>
         </div>
 
         {% if is_admin %}
@@ -81,7 +85,7 @@
           {% endif %}
 
           {% if metadata_status %}
-            <span class="filter-chip"><span class="filter-chip__key">סטטוס מטא־דאטה:</span> {{ metadata_status|metadata_status_label }}</span>
+            <span class="filter-chip"><span class="filter-chip__key">השלמת פרטים:</span> {{ metadata_status|metadata_status_label }}</span>
           {% endif %}
 
           {% if upload_status %}
@@ -137,7 +141,7 @@
             </td>
 
             <td>
-              {% if d.language %}{{ d.language }}{% else %}<span class="muted">לא ידוע</span>{% endif %}
+              {% if d.language %}{{ d.language|language_label }}{% else %}<span class="muted">לא ידוע</span>{% endif %}
             </td>
 
             <td>

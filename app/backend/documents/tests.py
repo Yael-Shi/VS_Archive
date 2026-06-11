@@ -7325,8 +7325,13 @@ class ReviewUiTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get("/api/ui/admin/review/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "SOURCE_TEXT")
-        self.assertContains(resp, "HEBREW_TEXT")
+        self.assertContains(resp, "תמלול מקור")
+        self.assertContains(resp, "טקסט עברי")
+        self.assertContains(resp, 'value="SOURCE_TEXT"')
+        self.assertContains(resp, 'value="HEBREW_TEXT"')
+        self.assertContains(resp, "Transkribus")
+        _assert_raw_enum_not_in_visible_badge_text(self, resp, "SOURCE_TEXT")
+        _assert_raw_enum_not_in_visible_badge_text(self, resp, "HEBREW_TEXT")
         self.assertContains(resp, "<strong>2</strong>")
 
     def test_review_detail_shows_text_result_metadata(self):
@@ -7339,12 +7344,19 @@ class ReviewUiTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "NEEDS_REVIEW")
-        self.assertContains(resp, "UNVERIFIED")
+        self.assertContains(resp, "ממתין לבקרת תמלול")
+        self.assertContains(resp, "טרם אושר")
+        self.assertContains(resp, "טקסט עברי")
         self.assertContains(resp, "TRANSKRIBUS")
-        self.assertContains(resp, "AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW")
+        self.assertContains(resp, "נדרשת בקרת תמלול אנושית")
+        self.assertContains(resp, "טקסט קצר מדי")
         self.assertContains(resp, "טקסט עברי לבדיקה")
         self.assertContains(resp, "שורת בדיקה")
+        _assert_raw_enum_not_in_visible_badge_text(self, resp, "NEEDS_REVIEW")
+        _assert_raw_enum_not_in_visible_badge_text(self, resp, "UNVERIFIED")
+        _assert_raw_enum_not_in_visible_badge_text(
+            self, resp, "AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW"
+        )
 
     def test_review_detail_shows_transkribus_run(self):
         doc = self._create_document()
@@ -8025,15 +8037,14 @@ class StatusLabelFilterTests(SimpleTestCase):
     apart across pages. Enum values/semantics are unchanged.
     """
 
-    def test_processing_state_label_ready_is_processing_completed(self):
+    def test_processing_state_label_ready_is_ready_for_viewing(self):
         from documents.templatetags.status_labels import processing_state_label
 
-        self.assertEqual(processing_state_label("READY"), "עיבוד הושלם")
+        self.assertEqual(processing_state_label("READY"), "מוכן לצפייה")
 
-    def test_processing_state_label_ready_is_not_legacy_moochan(self):
+    def test_processing_state_label_ready_is_not_bare_moochan(self):
         from documents.templatetags.status_labels import processing_state_label
 
-        # "מוכן" wrongly implied human approval; it must no longer label READY.
         self.assertNotEqual(processing_state_label("READY"), "מוכן")
 
     def test_processing_state_labels_for_other_states(self):
@@ -8058,7 +8069,7 @@ class StatusLabelFilterTests(SimpleTestCase):
     def test_metadata_status_labels_are_hebrew(self):
         from documents.templatetags.status_labels import metadata_status_label
 
-        self.assertEqual(metadata_status_label("NEEDS_COMPLETION"), "דורש השלמת פרטים")
+        self.assertEqual(metadata_status_label("NEEDS_COMPLETION"), "דרושה השלמת פרטים")
         self.assertEqual(metadata_status_label("COMPLETED"), "פרטים הושלמו")
         # Regression: the raw English label must not be user-facing.
         self.assertNotEqual(metadata_status_label("NEEDS_COMPLETION"), "Needs completion")
@@ -8066,9 +8077,24 @@ class StatusLabelFilterTests(SimpleTestCase):
     def test_verification_status_labels_are_separate_from_processing(self):
         from documents.templatetags.status_labels import verification_status_label
 
-        self.assertEqual(verification_status_label("UNVERIFIED"), "ממתין לבדיקה אנושית")
-        self.assertEqual(verification_status_label("VERIFIED"), "אושר אנושית")
+        self.assertEqual(verification_status_label("UNVERIFIED"), "טרם אושר")
+        self.assertEqual(verification_status_label("VERIFIED"), "אושר")
         self.assertEqual(verification_status_label("REJECTED"), "נדחה בבקרה")
+
+    def test_text_result_status_labels_are_hebrew(self):
+        from documents.templatetags.status_labels import text_result_status_label
+
+        self.assertEqual(text_result_status_label("NEEDS_REVIEW"), "ממתין לבקרת תמלול")
+        self.assertEqual(text_result_status_label("FAILED"), "עיבוד נכשל")
+
+    def test_review_reason_labels_map_known_codes(self):
+        from documents.templatetags.status_labels import review_reason_label
+
+        self.assertEqual(
+            review_reason_label("AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW"),
+            "נדרשת בקרת תמלול אנושית",
+        )
+        self.assertNotEqual(review_reason_label("AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW"), "AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW")
 
     def test_text_input_type_labels_match_upload_ui_choices(self):
         from documents.templatetags.status_labels import text_input_type_label
@@ -8117,20 +8143,20 @@ class StatusLabelPresentationTests(TestCase):
         defaults.update(kwargs)
         return DocumentTextResult.objects.create(document=doc, **defaults)
 
-    def test_list_page_ready_uses_processing_completed_not_moochan(self):
+    def test_list_page_ready_uses_ready_for_viewing_label(self):
         self._create_document()
         self.client.force_login(self.staff)
         resp = self.client.get("/api/ui/documents/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "עיבוד הושלם")
-        self.assertNotContains(resp, "מוכן")
+        self.assertContains(resp, "מוכן לצפייה")
+        self.assertNotContains(resp, ">READY<")
 
     def test_list_page_metadata_status_is_hebrew(self):
         self._create_document(metadata_status=Document.MetadataStatus.NEEDS_COMPLETION)
         self.client.force_login(self.staff)
         resp = self.client.get("/api/ui/documents/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "דורש השלמת פרטים")
+        self.assertContains(resp, "דרושה השלמת פרטים")
         # Neither the badge nor the metadata_status filter <option> may show the
         # raw English enum label.
         self.assertNotContains(resp, "Needs completion")
@@ -8145,14 +8171,34 @@ class StatusLabelPresentationTests(TestCase):
         self.assertContains(resp, ">פרטי<")
         self.assertContains(resp, ">ציבורי<")
 
-    def test_detail_page_ready_uses_processing_completed(self):
+    def test_list_page_upload_status_filter_is_select_with_hebrew_labels(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/documents/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'id="filter-upload-status"')
+        self.assertContains(resp, "<select")
+        self.assertContains(resp, ">הועלה<")
+        self.assertContains(resp, ">בהעלאה<")
+        self.assertContains(resp, ">העלאה נכשלה<")
+        self.assertContains(resp, 'value="UPLOADED"')
+        self.assertNotContains(resp, "ניתן להזין את הערך הפנימי")
+
+        resp = self.client.get(
+            "/api/ui/documents/",
+            {"upload_status": Document.UploadStatus.UPLOADING},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'value="UPLOADING" selected')
+        self.assertContains(resp, "בהעלאה")
+
+    def test_detail_page_ready_uses_ready_for_viewing_label(self):
         doc = self._create_document()
         self._create_hebrew_text_result(doc)
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "עיבוד הושלם")
-        self.assertNotContains(resp, "מוכן")
+        self.assertContains(resp, "מוכן לצפייה")
+        self.assertNotContains(resp, ">READY<")
 
     def test_detail_page_verification_label_separate_from_processing(self):
         doc = self._create_document()
@@ -8161,31 +8207,32 @@ class StatusLabelPresentationTests(TestCase):
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
         # Processing readiness and human approval stay distinct on the detail page.
-        self.assertContains(resp, "עיבוד הושלם")
+        self.assertContains(resp, "מוכן לצפייה")
         self.assertContains(resp, "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות.")
         self.assertContains(resp, "פרטים")
-        self.assertContains(resp, "UNVERIFIED")
-        self.assertNotContains(resp, "ממתין לבדיקה אנושית")
-        self.assertNotContains(resp, "מוכן")
+        self.assertContains(resp, "טרם אושר")
+        self.assertContains(resp, "ממתין לבקרת תמלול")
+        _assert_raw_enum_not_in_visible_badge_text(self, resp, "UNVERIFIED")
+        _assert_raw_enum_not_in_visible_badge_text(self, resp, "NEEDS_REVIEW")
 
-    def test_admin_backlog_page_ready_uses_processing_completed(self):
+    def test_admin_backlog_page_ready_uses_ready_for_viewing_label(self):
         self._create_document(
             metadata_status=Document.MetadataStatus.NEEDS_COMPLETION,
         )
         self.client.force_login(self.staff)
         resp = self.client.get("/api/ui/admin/backlog/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "עיבוד הושלם")
-        self.assertNotContains(resp, "מוכן")
+        self.assertContains(resp, "מוכן לצפייה")
+        self.assertNotContains(resp, ">READY<")
 
-    def test_review_backlog_page_ready_uses_processing_completed(self):
+    def test_review_backlog_page_ready_uses_ready_for_viewing_label(self):
         doc = self._create_document()
         self._create_hebrew_text_result(doc)
         self.client.force_login(self.staff)
         resp = self.client.get("/api/ui/admin/review/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "עיבוד הושלם")
-        self.assertNotContains(resp, "מוכן")
+        self.assertContains(resp, "מוכן לצפייה")
+        self.assertNotContains(resp, ">READY<")
         # The processing_state_user and verification_status filter <option>s must
         # render centralized Hebrew labels, not raw English enum choice labels.
         self.assertNotContains(resp, ">Ready<")
@@ -8231,21 +8278,19 @@ class StatusLabelPresentationTests(TestCase):
         )
         self.assertEqual(ids, {printed.id})
 
-    def test_review_detail_uses_centralized_labels_and_keeps_raw_debug(self):
+    def test_review_detail_uses_centralized_hebrew_labels_in_technical_details(self):
         doc = self._create_document()
         self._create_hebrew_text_result(doc)
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        # User-facing labels are centralized...
-        self.assertContains(resp, "עיבוד הושלם")
-        self.assertContains(resp, "ממתין לבדיקה אנושית")
-        self.assertNotContains(resp, "מוכן")
-        # ...legacy verification wording is gone...
+        self.assertContains(resp, "מוכן לצפייה")
+        self.assertContains(resp, "טרם אושר")
+        self.assertContains(resp, "ממתין לבקרת תמלול")
+        self.assertContains(resp, "טקסט עברי")
         self.assertNotContains(resp, "לא מאומת")
-        # ...but raw enums remain available in the collapsed technical details.
-        self.assertContains(resp, "NEEDS_REVIEW")
-        self.assertContains(resp, "UNVERIFIED")
+        _assert_raw_enum_not_in_visible_badge_text(self, resp, "NEEDS_REVIEW")
+        _assert_raw_enum_not_in_visible_badge_text(self, resp, "UNVERIFIED")
 
     def test_review_detail_verified_row_shows_human_approved_label(self):
         doc = self._create_document()
@@ -8256,7 +8301,7 @@ class StatusLabelPresentationTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "אושר אנושית")
+        self.assertContains(resp, "אושר")
 
 
 class AdminBacklogMetadataEditLinkTests(TestCase):
@@ -8691,6 +8736,18 @@ class ReviewDetailHierarchyTests(SimpleTestCase):
         self.assertIn("בדיקה", desc)
 
 
+def _assert_raw_enum_not_in_visible_badge_text(test_case, response, raw_enum: str) -> None:
+    """Raw enum values in form ``value=`` attributes are OK; badge text must be Hebrew."""
+    html = response.content.decode()
+    for tone in ("", "badge-warn", "badge-ok", "badge-bad"):
+        css_class = "badge" if not tone else f"badge {tone}"
+        test_case.assertNotIn(
+            f'<span class="{css_class}">{raw_enum}</span>',
+            html,
+            msg=f"raw enum {raw_enum!r} must not appear as visible badge text",
+        )
+
+
 class DocumentDetailTextGroupingTests(TestCase):
     """Document detail text-result grouping and labeling (presentation-only)."""
 
@@ -8754,8 +8811,8 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertContains(resp, "טקסט עברי לבדיקה")
         self.assertNotContains(resp, "תמלול מקור")
         self.assertContains(resp, "טקסט מקור עברי", count=1)
-        self.assertContains(resp, "HEBREW_TEXT")
-        self.assertNotContains(resp, "SOURCE_TEXT")
+        _assert_raw_enum_not_in_visible_badge_text(self, resp, "HEBREW_TEXT")
+        _assert_raw_enum_not_in_visible_badge_text(self, resp, "SOURCE_TEXT")
 
     def test_hebrew_detail_uses_hebrew_text_label_when_both_rows_exist(self):
         doc = self._create_document()
@@ -8790,9 +8847,10 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertContains(resp, "תמלול מקור")
         self.assertNotContains(resp, "טקסט עברי לבדיקה")
         self.assertContains(resp, "טקסט מקור בלבד")
-        self.assertContains(resp, "SOURCE_TEXT")
-        # Missing HEBREW_TEXT may still appear in the admin missing-output note.
-        self.assertContains(resp, "חסרים פלטים: <code>HEBREW_TEXT</code>")
+        self.assertContains(resp, "חסרים פלטים:")
+        self.assertContains(resp, "טקסט עברי")
+        _assert_raw_enum_not_in_visible_badge_text(self, resp, "SOURCE_TEXT")
+        _assert_raw_enum_not_in_visible_badge_text(self, resp, "HEBREW_TEXT")
 
     def test_non_hebrew_detail_preserves_source_and_translation_sections(self):
         doc = self._create_document(language=Document.Language.ENGLISH)
@@ -8820,16 +8878,13 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(self._detail_url(doc.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "HEBREW_TEXT")
+        self.assertContains(resp, "חסרים פלטים:")
+        self.assertContains(resp, "טקסט עברי")
         self.assertContains(resp, "אין תרגום לעברית עדיין.")
+        _assert_raw_enum_not_in_visible_badge_text(self, resp, "HEBREW_TEXT")
 
-    def test_detail_technical_details_remain_collapsed_with_raw_enums(self):
+    def test_detail_technical_details_remain_collapsed_with_hebrew_labels(self):
         doc = self._create_document()
-        self._create_text_result(
-            doc,
-            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
-            text="שורת מקור",
-        )
         self._create_text_result(
             doc,
             result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
@@ -8841,12 +8896,14 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertContains(resp, "טקסט עברי לבדיקה")
         self.assertContains(resp, "פרטים")
         self.assertContains(resp, "<details")
-        self.assertContains(resp, "HEBREW_TEXT")
-        self.assertNotContains(resp, "SOURCE_TEXT")
-        self.assertContains(resp, "NEEDS_REVIEW")
-        self.assertContains(resp, "UNVERIFIED")
+        self.assertContains(resp, "טקסט עברי")
+        self.assertContains(resp, "ממתין לבקרת תמלול")
+        self.assertContains(resp, "טרם אושר")
         self.assertContains(resp, "transkribus-pylaia:1")
-        self.assertNotContains(resp, "ממתין לבדיקה אנושית")
+        _assert_raw_enum_not_in_visible_badge_text(self, resp, "HEBREW_TEXT")
+        _assert_raw_enum_not_in_visible_badge_text(self, resp, "SOURCE_TEXT")
+        _assert_raw_enum_not_in_visible_badge_text(self, resp, "NEEDS_REVIEW")
+        _assert_raw_enum_not_in_visible_badge_text(self, resp, "UNVERIFIED")
 
     def test_viewer_detail_hides_internal_text_labels_and_shows_auto_disclaimer(self):
         doc = self._create_document(visibility=Document.Visibility.PUBLIC)
@@ -8863,10 +8920,10 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertContains(resp, "פרטים")
         self.assertContains(resp, "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות.")
         self.assertNotContains(resp, "תמלול אוטומטי")
-        self.assertNotContains(resp, "HEBREW_TEXT")
-        self.assertNotContains(resp, "SOURCE_TEXT")
-        self.assertNotContains(resp, "NEEDS_REVIEW")
-        self.assertNotContains(resp, "UNVERIFIED")
+        _assert_raw_enum_not_in_visible_badge_text(self, resp, "HEBREW_TEXT")
+        _assert_raw_enum_not_in_visible_badge_text(self, resp, "SOURCE_TEXT")
+        _assert_raw_enum_not_in_visible_badge_text(self, resp, "NEEDS_REVIEW")
+        _assert_raw_enum_not_in_visible_badge_text(self, resp, "UNVERIFIED")
         self.assertNotContains(resp, "transkribus-pylaia:1")
         self.assertNotContains(resp, "טקסט עברי לבדיקה")
 

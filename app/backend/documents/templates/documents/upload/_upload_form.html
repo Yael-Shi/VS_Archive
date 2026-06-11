@@ -1,3 +1,4 @@
+{% load status_labels %}
 {# Reusable OCR upload form + admin metadata column. Include from upload.html or future unified create flows. #}
     <div id="msg" class="msg" role="status" aria-live="polite"></div>
 
@@ -43,7 +44,7 @@
             <select id="doc_type" name="doc_type" required>
               <option value="" selected disabled>בחרי…</option>
               {% for v, label in doc_type_choices %}
-                <option value="{{ v }}">{{ label }}</option>
+                <option value="{{ v }}">{{ v|doc_type_label }}</option>
               {% endfor %}
             </select>
             <div class="field-hint">שאר המטא־דאטה ניתן להשלים בהמשך.</div>
@@ -74,10 +75,10 @@
               <label for="language">שפה</label>
               <select id="language" name="language">
                 <option value="" selected>(לא ידוע)</option>
-                <option value="he">עברית (he)</option>
-                <option value="en">אנגלית (en)</option>
-                <option value="fr">צרפתית (fr)</option>
-                <option value="ar">ערבית (ar)</option>
+                <option value="he">עברית</option>
+                <option value="en">אנגלית</option>
+                <option value="fr">צרפתית</option>
+                <option value="ar">ערבית</option>
               </select>
             </div>
 
@@ -96,8 +97,8 @@
             <div class="field">
               <label for="visibility">נראות</label>
               <select id="visibility" name="visibility">
-                <option value="private" selected>פרטי (private)</option>
-                <option value="public">ציבורי (public)</option>
+                <option value="private" selected>פרטי</option>
+                <option value="public">ציבורי</option>
               </select>
             </div>
           </div>

@@ -7,7 +7,7 @@
     <h1 class="page-title">רשימת בקרת תמלול</h1>
     <p class="page-subtitle">מסמכים עם תמלול אוטומטי שדורשים בדיקה, עריכה ואישור אנושי לפני שימוש כטקסט מאושר. זו רשימה נפרדת מהשלמת פרטי קטלוג.</p>
 
-    <div class="backlog-explainer">«עיבוד הושלם» פירושו שהפלט האוטומטי זמין לצפייה — לא שהטקסט אושר אנושית. סטטוס אימות (ממתין / אושר / נדחה) הוא שכבה נפרדת.</div>
+    <div class="backlog-explainer">«מוכן לצפייה» פירושו שהפלט האוטומטי זמין לצפייה — לא שהטקסט אושר אנושית. סטטוס אימות (טרם אושר / אושר / נדחה) הוא שכבה נפרדת.</div>
 
     <div class="page-toolbar">
       <a class="btn" href="/api/ui/documents/">חזרה למסמכים</a>
@@ -34,7 +34,7 @@
           <select id="filter-language" name="language">
             <option value="">הכל</option>
             {% for v, label in language_choices %}
-              <option value="{{ v }}" {% if language == v %}selected{% endif %}>{{ v }} — {{ label }}</option>
+              <option value="{{ v }}" {% if language == v %}selected{% endif %}>{{ v|language_label }}</option>
             {% endfor %}
           </select>
         </div>
@@ -64,7 +64,7 @@
           <select id="filter-engine-key" name="engine_key">
             <option value="">הכל</option>
             {% for v, label in engine_key_choices %}
-              <option value="{{ v }}" {% if engine_key == v %}selected{% endif %}>{{ v }}</option>
+              <option value="{{ v }}" {% if engine_key == v %}selected{% endif %}>{{ v|engine_key_label }}</option>
             {% endfor %}
           </select>
         </div>
@@ -74,7 +74,7 @@
           <select id="filter-result-type" name="result_type">
             <option value="">הכל</option>
             {% for v, label in result_type_choices %}
-              <option value="{{ v }}" {% if result_type == v %}selected{% endif %}>{{ v }}</option>
+              <option value="{{ v }}" {% if result_type == v %}selected{% endif %}>{{ v|result_type_label }}</option>
             {% endfor %}
           </select>
         </div>
@@ -106,7 +106,7 @@
           {% endif %}
 
           {% if language %}
-            <span class="filter-chip"><span class="filter-chip__key">שפה:</span> {{ language }}</span>
+            <span class="filter-chip"><span class="filter-chip__key">שפה:</span> {{ language|language_label }}</span>
           {% endif %}
 
           {% if text_input_type %}
@@ -120,11 +120,11 @@
           {% endif %}
 
           {% if engine_key %}
-            <span class="filter-chip"><span class="filter-chip__key">מנוע:</span> {{ engine_key }}</span>
+            <span class="filter-chip"><span class="filter-chip__key">מנוע:</span> {{ engine_key|engine_key_label }}</span>
           {% endif %}
 
           {% if result_type %}
-            <span class="filter-chip"><span class="filter-chip__key">סוג תוצאה:</span> {{ result_type }}</span>
+            <span class="filter-chip"><span class="filter-chip__key">סוג תוצאה:</span> {{ result_type|result_type_label }}</span>
           {% endif %}
 
           {% if verification_status %}
@@ -170,7 +170,7 @@
                 · עודכן {{ doc.updated_at }}
               </div>
             </td>
-            <td>{% if doc.language %}{{ doc.language }}{% else %}<span class="muted">—</span>{% endif %}</td>
+            <td>{% if doc.language %}{{ doc.language|language_label }}{% else %}<span class="muted">—</span>{% endif %}</td>
             <td>{{ doc.text_input_type|text_input_type_label }}</td>
             <td>
               {% processing_state_badge doc.processing_state_user %}
@@ -178,20 +178,26 @@
             <td><strong>{{ summary.pending_count }}</strong></td>
             <td class="text-sm">
               {% if summary.result_types %}
-                <div><strong>סוג:</strong> {{ summary.result_types|join:", " }}</div>
+                <div><strong>סוג:</strong>
+                  {% for rt in summary.result_types %}{{ rt|result_type_label }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                </div>
               {% endif %}
               {% if summary.engine_keys %}
-                <div><strong>מנוע:</strong> {{ summary.engine_keys|join:", " }}</div>
+                <div><strong>מנוע:</strong>
+                  {% for ek in summary.engine_keys %}{{ ek|engine_key_label }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                </div>
               {% endif %}
               {% if summary.verification_statuses %}
-                <div class="muted">{{ summary.verification_statuses|join:", " }}</div>
+                <div class="muted">
+                  {% for vs in summary.verification_statuses %}{{ vs|verification_status_label }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                </div>
               {% endif %}
             </td>
             <td class="text-sm">
               {% if summary.review_reasons %}
                 <div class="badge-row">
                   {% for reason in summary.review_reasons|slice:":4" %}
-                    <span class="badge">{{ reason }}</span>
+                    <span class="badge">{{ reason|review_reason_label }}</span>
                   {% endfor %}
                   {% if summary.review_reasons|length > 4 %}
                     <span class="muted">+{{ summary.review_reasons|length|add:"-4" }}</span>

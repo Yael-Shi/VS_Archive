@@ -1260,6 +1260,7 @@ def documents_list_page(request):
         "next_offset": (offset + limit) if (offset + limit) < total else None,
         "doc_type_choices": Document.DocType.choices,
         "metadata_status_choices": Document.MetadataStatus.choices,
+        "upload_status_choices": Document.UploadStatus.choices,
         "visibility_choices": archive_visibility_ui_choices(),
         "is_admin": is_admin,
     }

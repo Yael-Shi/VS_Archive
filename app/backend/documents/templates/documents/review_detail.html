@@ -35,13 +35,13 @@
         <summary>פרטי מסמך ומשמעות סטטוסים</summary>
         <div class="review-details-body">
           <div class="badge-row badge-row--tight-bottom">
-            <span class="badge">{{ doc.language|default:"שפה לא ידועה" }}</span>
-            <span class="badge">{{ doc.text_input_type }}</span>
-            <span class="badge">{{ doc.doc_type }}</span>
+            <span class="badge">{% if doc.language %}{{ doc.language|language_label }}{% else %}שפה לא ידועה{% endif %}</span>
+            <span class="badge">{{ doc.text_input_type|text_input_type_label }}</span>
+            <span class="badge">{{ doc.doc_type|doc_type_label }}</span>
           </div>
           <ul>
-            <li><strong>עיבוד הושלם</strong> — העיבוד האוטומטי הסתיים והטקסט זמין להצגה ולבדיקה.</li>
-            <li><strong>ממתין לבדיקה אנושית</strong> — התמלול נוצר אוטומטית ודורש אימות ידני.</li>
+            <li><strong>מוכן לצפייה</strong> — העיבוד האוטומטי הסתיים והטקסט זמין להצגה ולבדיקה.</li>
+            <li><strong>טרם אושר</strong> — התמלול נוצר אוטומטית ודורש אימות ידני.</li>
             <li><strong>אושר / נדחה</strong> — תוצאת האימות הידני.</li>
           </ul>
         </div>
@@ -186,9 +186,9 @@
               <summary>פרטים טכניים</summary>
               <div class="review-details-body">
                 <div class="badge-row badge-row--tight-bottom">
-                  <span class="badge">{{ card.row.result_type }}</span>
-                  <span class="badge">{{ card.row.status }}</span>
-                  <span class="badge">{{ card.row.verification_status }}</span>
+                  <span class="badge">{{ card.row.result_type|result_type_label }}</span>
+                  <span class="badge">{{ card.row.status|text_result_status_label }}</span>
+                  <span class="badge">{{ card.row.verification_status|verification_status_label }}</span>
                   <span class="badge">{{ card.row.engine_key }}</span>
                   <span class="badge">{{ card.row.engine }}</span>
                   {% if card.row.prompt_variant %}
@@ -206,7 +206,7 @@
                     <div style="font-weight: 700;">סיבות בדיקה</div>
                     <div class="badge-row">
                       {% for reason in card.review_reasons %}
-                        <span class="badge">{{ reason }}</span>
+                        <span class="badge">{{ reason|review_reason_label }}</span>
                       {% endfor %}
                     </div>
                   </div>
@@ -214,8 +214,8 @@
 
                 {% if card.row.status == "FAILED" %}
                   <div style="margin-top: 8px;">
-                    <strong>error_code:</strong> <code>{{ card.row.error_code }}</code><br/>
-                    <strong>details:</strong> {{ card.row.error_details }}
+                    <strong>קוד שגיאה:</strong> <code>{{ card.row.error_code }}</code><br/>
+                    <strong>פרטים:</strong> {{ card.row.error_details }}
                   </div>
                 {% endif %}
               </div>

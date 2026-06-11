@@ -41,7 +41,7 @@
         <div class="spacer"></div>
       {% endif %}
 
-      <p class="page-subtitle">פריט ארכיון מסוג טקסט מוקלד — ללא העלאת קובץ.</p>
+      <p class="page-subtitle">פריט ארכיון מסוג טקסט — ללא העלאת קובץ.</p>
 
       <form method="post">
         {% csrf_token %}
@@ -57,8 +57,8 @@
     {% elif item_type == "ocr_document" %}
       <div class="spacer"></div>
       <p class="page-subtitle">
-        <strong>מסמך סרוק / PDF</strong> — העלאת מסמך לעיבוד טקסט.
-        לאחר ההעלאה נוצר פריט ארכיון מסוג מסמך סרוק.
+        <strong>מסמך</strong> — העלאת מסמך סרוק או PDF לעיבוד טקסט.
+        לאחר ההעלאה נוצר פריט ארכיון מסוג מסמך.
       </p>
       <div class="spacer"></div>
       {% include "documents/upload/_upload_form.html" %}
