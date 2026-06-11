@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - ניהול גישת משפחה{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <h1 class="page-title">ניהול גישת משפחה</h1>
+    <p class="page-subtitle">הוספה והסרה של גישת משפחה למשתמשים קיימים — לצוות בלבד.</p>
+
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-manage-list' %}">חזרה לניהול ארכיון</a>
+    </div>
+
+    {% if messages %}
+      <div class="spacer"></div>
+      {% for message in messages %}
+        <div class="alert{% if message.tags == 'error' %} alert-danger{% elif message.tags == 'success' %} alert-ok{% endif %}">
+          {{ message }}
+        </div>
+      {% endfor %}
+    {% endif %}
+
+    <div class="spacer"></div>
+
+    {% if group_missing %}
+      <div class="alert alert-danger">
+        <div class="alert-title">הגדרת גישת משפחה חסרה</div>
+        <p class="text-readable">לא ניתן לנהל גישת משפחה לפני השלמת ההגדרה במערכת.</p>
+        <p class="muted text-sm">הסבר טכני לצוות: הקבוצה <code>archive_family</code> לא נמצאה ב-Django.</p>
+      </div>
+    {% else %}
+      <form method="get" class="toolbar">
+        <div class="field field--grow">
+          <label for="family-access-search">חיפוש</label>
+          <input
+            id="family-access-search"
+            type="search"
+            name="q"
+            value="{{ search_query }}"
+            placeholder="שם משתמש, דוא״ל, שם פרטי או שם משפחה"
+          />
+        </div>
+        <div class="field field--actions">
+          <div class="form-actions">
+            <button type="submit" class="btn">חיפוש</button>
+            {% if search_query %}
+              <a class="btn" href="{% url 'archive-manage-family-access' %}">ניקוי</a>
+            {% endif %}
+          </div>
+        </div>
+      </form>
+
+      <div class="spacer"></div>
+
+      {% if users %}
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>שם משתמש</th>
+                <th>דוא״ל</th>
+                <th>שם מלא</th>
+                <th>פעיל</th>
+                <th>צוות</th>
+                <th>מנהל</th>
+                <th>גישת משפחה</th>
+                <th>פעולה</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for user in users %}
+                <tr>
+                  <td>{{ user.username }}</td>
+                  <td>
+                    {% if user.has_usable_email %}
+                      {{ user.email }}
+                    {% else %}
+                      חסר דוא״ל
+                    {% endif %}
+                  </td>
+                  <td>{{ user.get_full_name|default:"—" }}</td>
+                  <td>{% if user.is_active %}כן{% else %}לא{% endif %}</td>
+                  <td>{% if user.is_staff %}כן{% else %}לא{% endif %}</td>
+                  <td>{% if user.is_superuser %}כן{% else %}לא{% endif %}</td>
+                  <td>{% if user.has_family_access %}כן{% else %}לא{% endif %}</td>
+                  <td>
+                    {% if user.is_staff or user.is_superuser %}
+                      <span class="muted">לצוות יש גישה מלאה</span>
+                    {% elif user.has_family_access %}
+                      <form method="post" class="inline-form table-actions">
+                        {% csrf_token %}
+                        <input type="hidden" name="user_id" value="{{ user.id }}" />
+                        <input type="hidden" name="q" value="{{ search_query }}" />
+                        <button type="submit" name="action" value="remove" class="btn">הסר גישת משפחה</button>
+                      </form>
+                    {% elif user.has_usable_email %}
+                      <form method="post" class="inline-form table-actions">
+                        {% csrf_token %}
+                        <input type="hidden" name="user_id" value="{{ user.id }}" />
+                        <input type="hidden" name="q" value="{{ search_query }}" />
+                        <button type="submit" name="action" value="add" class="btn btn-primary">הוסף גישת משפחה</button>
+                      </form>
+                    {% else %}
+                      <span class="muted">יש להוסיף דוא״ל לפני מתן גישת משפחה</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">לא נמצאו משתמשים{% if search_query %} לחיפוש "{{ search_query }}"{% endif %}.</p>
+      {% endif %}
+    {% endif %}
+  </div>
+{% endblock %}

@@ -40,5 +40,10 @@ urlpatterns = [
         views.archive_manage_delete_page,
         name="archive-manage-delete",
     ),
+    path(
+        "manage/family-access/",
+        views.archive_manage_family_access_page,
+        name="archive-manage-family-access",
+    ),
     path("<int:item_id>/", views.archive_detail_page, name="archive-detail"),
 ]
