@@ -6,10 +6,15 @@ from typing import Optional
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import BooleanField, Case, Exists, OuterRef, Q, Value, When
+from django.db.models.functions import Length, Trim
 from django.http import Http404, HttpResponseBadRequest, JsonResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils.http import urlencode
 from django.views.decorators.http import require_POST
 
 from .models import (
@@ -80,6 +85,7 @@ from documents.services.document_access import (
     is_document_admin,
 )
 from documents.services.archive_item_access import (
+    ARCHIVE_FAMILY_GROUP_NAME,
     archive_browse_queryset_for_user,
     archive_item_queryset_for_user,
     get_viewable_archive_item,
@@ -187,6 +193,10 @@ def _require_admin_page(request):
     if not _is_admin(request.user):
         return render(request, "public/forbidden.html", status=403)
     return None
+
+
+def _user_has_usable_email(user) -> bool:
+    return bool((getattr(user, "email", "") or "").strip())
 
 
 def _base_queryset(
@@ -2393,6 +2403,96 @@ def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
             ),
             "show_discovery_metadata": True,
             **_ocr_discovery_metadata_form_context(),
+        },
+    )
+
+
+@login_required
+def archive_manage_family_access_page(request):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    User = get_user_model()
+
+    try:
+        family_group = Group.objects.get(name=ARCHIVE_FAMILY_GROUP_NAME)
+    except Group.DoesNotExist:
+        return render(
+            request,
+            "documents/archive/manage_family_access.html",
+            context={
+                "group_missing": True,
+                "users": User.objects.none(),
+                "search_query": "",
+            },
+        )
+
+    search_query = (request.GET.get("q") or request.POST.get("q") or "").strip()
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        if action not in ("add", "remove"):
+            return HttpResponseBadRequest("פעולה לא תקינה.")
+
+        user_id_raw = request.POST.get("user_id")
+        try:
+            target_user_id = int(user_id_raw)
+        except (TypeError, ValueError):
+            return HttpResponseBadRequest("מזהה משתמש לא תקין.")
+
+        target_user = get_object_or_404(User, pk=target_user_id)
+
+        if target_user.is_staff or target_user.is_superuser:
+            return HttpResponseBadRequest("לא ניתן לשנות גישת משפחה למשתמשי צוות או מנהלים.")
+
+        if action == "add":
+            if not _user_has_usable_email(target_user):
+                return HttpResponseBadRequest(
+                    "לא ניתן להוסיף גישת משפחה למשתמש ללא דוא״ל."
+                )
+            target_user.groups.add(family_group)
+            messages.success(request, "גישת המשפחה נוספה למשתמש.")
+        else:
+            target_user.groups.remove(family_group)
+            messages.success(request, "גישת המשפחה הוסרה מהמשתמש.")
+
+        redirect_url = reverse("archive-manage-family-access")
+        if search_query:
+            redirect_url = f"{redirect_url}?{urlencode({'q': search_query})}"
+        return redirect(redirect_url)
+
+    family_membership = Group.objects.filter(
+        pk=family_group.pk,
+        user=OuterRef("pk"),
+    )
+    users = (
+        User.objects.annotate(has_family_access=Exists(family_membership))
+        .annotate(_trimmed_email_len=Length(Trim("email")))
+        .annotate(
+            has_usable_email=Case(
+                When(_trimmed_email_len__gt=0, then=Value(True)),
+                default=Value(False),
+                output_field=BooleanField(),
+            )
+        )
+        .order_by("username")
+    )
+    if search_query:
+        users = users.filter(
+            Q(username__icontains=search_query)
+            | Q(email__icontains=search_query)
+            | Q(first_name__icontains=search_query)
+            | Q(last_name__icontains=search_query)
+        )
+
+    return render(
+        request,
+        "documents/archive/manage_family_access.html",
+        context={
+            "group_missing": False,
+            "users": users,
+            "search_query": search_query,
         },
     )
 

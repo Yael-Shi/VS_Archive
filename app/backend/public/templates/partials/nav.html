@@ -16,6 +16,7 @@
       {# קישורי Admin בלבד #}
       {% if user.is_staff or user.is_superuser %}
         <a class="btn btn-link" href="{% url 'archive-manage-list' %}">ניהול ארכיון</a>
+        <a class="btn btn-link" href="{% url 'archive-manage-family-access' %}">ניהול גישת משפחה</a>
         <a class="btn btn-link" href="{% url 'archive-manage-new' %}">יצירת פריט חדש</a>
         <a class="btn btn-link" href="/api/ui/admin/backlog/">רשימת השלמת פרטים</a>
         <a class="btn btn-link" href="/api/ui/admin/review/">רשימת בקרת תמלול</a>

@@ -642,6 +642,12 @@ textarea {
   color: var(--danger);
 }
 
+.alert-ok {
+  border-color: rgba(45, 107, 74, 0.28);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
 .msg {
   margin-top: var(--space-3);
   padding: var(--space-3) var(--space-4);
