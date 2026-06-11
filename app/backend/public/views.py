@@ -1,8 +1,15 @@
 import logging
 
+from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
-from django.shortcuts import render
+from django.shortcuts import redirect, render
+from django.urls import reverse
 
+from public.services.registration import (
+    RegistrationFieldValues,
+    process_registration,
+    user_has_family_access,
+)
 from public.services.public_content import (
     EDITABLE_PUBLIC_BLOCKS,
     get_all_public_content,
@@ -20,8 +27,68 @@ def _is_staff_user(user) -> bool:
     )
 
 
+def _empty_registration_field_values() -> dict[str, str]:
+    return RegistrationFieldValues(
+        first_name="",
+        last_name="",
+        email="",
+    ).as_dict()
+
+
 def home(request):
     return render(request, "public/home.html")
+
+
+def register(request):
+    if request.user.is_authenticated:
+        if user_has_family_access(request.user):
+            return redirect(reverse("archive-list"))
+        return redirect(reverse("pending-approval"))
+
+    field_values = _empty_registration_field_values()
+    form_errors: list[str] = []
+
+    if request.method == "POST":
+        result = process_registration(request=request, post_data=request.POST)
+        field_values = (
+            result.field_values.as_dict()
+            if result.field_values is not None
+            else field_values
+        )
+
+        if result.honeypot_triggered:
+            return render(
+                request,
+                "registration/register.html",
+                {
+                    "form_errors": [],
+                    "field_values": _empty_registration_field_values(),
+                },
+            )
+
+        if result.user is not None:
+            login(request, result.user)
+            return redirect(reverse("pending-approval"))
+
+        if result.errors:
+            form_errors = result.errors
+
+    return render(
+        request,
+        "registration/register.html",
+        {
+            "form_errors": form_errors,
+            "field_values": field_values,
+        },
+    )
+
+
+@login_required
+def pending_approval(request):
+    if user_has_family_access(request.user):
+        return redirect(reverse("archive-list"))
+
+    return render(request, "registration/pending_approval.html")
 
 
 def about(request):
