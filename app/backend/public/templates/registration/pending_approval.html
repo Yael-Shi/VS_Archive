@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - ממתין לאישור{% endblock %}
+
+{% block content %}
+  <div class="card card--narrow page-header">
+    <h1 class="page-title">החשבון ממתין לאישור</h1>
+    <p class="page-subtitle text-readable">
+      ההרשמה התקבלה. צוות הארכיון יבדוק את הבקשה ויוסיף גישה לתוכן המשפחתי לאחר האישור.
+    </p>
+    <p class="muted text-readable">
+      בינתיים ניתן לצפות בתוכן הציבורי בארכיון. לאחר האישור תוכלו לצפות גם בתוכן המשפחתי.
+    </p>
+
+    <div class="form-actions form-actions--spaced">
+      <a class="btn btn-primary" href="{% url 'archive-list' %}">לארכיון</a>
+      <a class="btn" href="/">חזרה לדף הבית</a>
+    </div>
+  </div>
+{% endblock %}

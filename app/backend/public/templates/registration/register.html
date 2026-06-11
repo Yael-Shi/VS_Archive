@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - הרשמה{% endblock %}
+
+{% block content %}
+  <div class="card card--narrow page-header">
+    <h1 class="page-title">הרשמה</h1>
+    <p class="page-subtitle">יצירת חשבון חדש לארכיון. לאחר ההרשמה נדרש אישור צוות לפני גישה לתוכן המשפחתי.</p>
+
+    {% if form_errors %}
+      <div class="spacer"></div>
+      <div class="alert alert-danger">
+        <ul class="text-readable">
+          {% for error in form_errors %}
+            <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    <form method="post" action="" class="spacer">
+      {% csrf_token %}
+
+      <div class="field">
+        <label for="register-first-name">שם פרטי</label>
+        <input
+          id="register-first-name"
+          type="text"
+          name="first_name"
+          value="{{ field_values.first_name }}"
+          autocomplete="given-name"
+          required
+        />
+      </div>
+
+      <div class="field">
+        <label for="register-last-name">שם משפחה</label>
+        <input
+          id="register-last-name"
+          type="text"
+          name="last_name"
+          value="{{ field_values.last_name }}"
+          autocomplete="family-name"
+          required
+        />
+      </div>
+
+      <div class="field">
+        <label for="register-email">דוא״ל</label>
+        <input
+          id="register-email"
+          type="email"
+          name="email"
+          value="{{ field_values.email }}"
+          autocomplete="email"
+          required
+        />
+      </div>
+
+      <div class="field">
+        <label for="register-password1">סיסמה</label>
+        <input
+          id="register-password1"
+          type="password"
+          name="password1"
+          autocomplete="new-password"
+          required
+        />
+      </div>
+
+      <div class="field">
+        <label for="register-password2">אימות סיסמה</label>
+        <input
+          id="register-password2"
+          type="password"
+          name="password2"
+          autocomplete="new-password"
+          required
+        />
+      </div>
+
+      {# Honeypot — hidden from users; basic registration abuse protection. #}
+      <div class="registration-honeypot" aria-hidden="true">
+        <label for="register-company-name">שם חברה</label>
+        <input
+          id="register-company-name"
+          type="text"
+          name="company_name"
+          tabindex="-1"
+          autocomplete="off"
+        />
+      </div>
+
+      <div class="form-actions form-actions--spaced">
+        <button class="btn btn-primary" type="submit">הרשמה</button>
+        <a class="btn" href="{% url 'login' %}">יש לכם חשבון? התחברות</a>
+        <a class="btn" href="/">חזרה לדף הבית</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}
