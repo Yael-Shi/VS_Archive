@@ -2559,9 +2559,9 @@ class UnifiedArchiveItemCreatePageTests(TestCase):
         resp = self.client.get(self.NEW_URL)
         self.assertContains(resp, 'name="item_type"')
         self.assertContains(resp, 'value="manual_text"')
-        self.assertContains(resp, "טקסט מוקלד")
+        self.assertContains(resp, "טקסט")
         self.assertContains(resp, 'value="ocr_document"')
-        self.assertContains(resp, "מסמך סרוק / PDF")
+        self.assertContains(resp, "מסמך")
         self.assertNotContains(resp, "OCR document")
 
     def test_unified_page_shows_manual_text_form_when_type_selected(self):
@@ -2595,7 +2595,10 @@ class UnifiedArchiveItemCreatePageTests(TestCase):
         resp = self.client.get(self.NEW_URL, {"item_type": "ocr_document"})
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'id="uploadForm"')
-        self.assertContains(resp, "העלאת מסמך לעיבוד טקסט")
+        self.assertContains(resp, "העלאת מסמך סרוק או PDF לעיבוד טקסט")
+        self.assertContains(resp, 'value="IMAGE"')
+        self.assertContains(resp, "תמונה")
+        self.assertNotContains(resp, ">Image<")
         self.assertNotContains(resp, "OCR/HTR")
 
     def test_ocr_document_branch_includes_key_upload_fields(self):
@@ -2798,7 +2801,7 @@ class ArchiveItemSourceMetadataTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Regression manual detail")
         self.assertContains(resp, "Regression body.")
-        self.assertContains(resp, "טקסט מוקלד")
+        self.assertContains(resp, "טקסט")
 
     def test_existing_ocr_document_detail_behavior_unchanged_without_source_metadata(self):
         doc = create_ocr_document(
@@ -3056,16 +3059,16 @@ class ArchiveItemPresentationUiTests(TestCase):
         self.assertEqual(visibility_label("private"), "פרטי")
         self.assertEqual(
             archive_metadata_status_label("NEEDS_COMPLETION"),
-            "דורש השלמת פרטים",
+            "דרושה השלמת פרטים",
         )
-        self.assertEqual(archive_metadata_status_label("COMPLETED"), "הושלם")
+        self.assertEqual(archive_metadata_status_label("COMPLETED"), "פרטים הושלמו")
         self.assertEqual(
             archive_item_type_label(ArchiveItem.ItemType.OCR_DOCUMENT),
-            "מסמך סרוק / PDF",
+            "מסמך",
         )
         self.assertEqual(
             archive_item_type_label(ArchiveItem.ItemType.MANUAL_TEXT),
-            "טקסט מוקלד",
+            "טקסט",
         )
         self.assertEqual(language_label("heb"), "עברית")
         self.assertEqual(language_label("he"), "עברית")
@@ -3130,8 +3133,8 @@ class ArchiveItemPresentationUiTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(reverse("archive-list"))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "מסמך סרוק / PDF")
-        self.assertContains(resp, "טקסט מוקלד")
+        self.assertContains(resp, "מסמך")
+        self.assertContains(resp, "טקסט")
         self.assertNotContains(resp, "OCR document")
         self.assertNotContains(resp, "Manual text")
 
@@ -3139,8 +3142,8 @@ class ArchiveItemPresentationUiTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(reverse("archive-list"))
         self.assertContains(resp, "הכול")
-        self.assertContains(resp, "מסמכים סרוקים / PDF")
-        self.assertContains(resp, "טקסטים מוקלדים")
+        self.assertContains(resp, "מסמכים")
+        self.assertContains(resp, "טקסטים")
         self.assertNotContains(resp, "מסמכים (OCR)")
 
     def test_archive_list_item_type_filter_limits_results(self):
@@ -3200,7 +3203,7 @@ class ArchiveItemPresentationUiTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(reverse("archive-manage-list"))
         self.assertContains(resp, "פרטי")
-        self.assertContains(resp, "דורש השלמת פרטים")
+        self.assertContains(resp, "דרושה השלמת פרטים")
         self.assertNotContains(resp, "Private")
         self.assertNotContains(resp, "Needs completion")
 
@@ -3209,8 +3212,8 @@ class ArchiveItemPresentationUiTests(TestCase):
         resp = self.client.get("/archive/manage/new/manual-text/")
         self.assertContains(resp, "ציבורי")
         self.assertContains(resp, "פרטי")
-        self.assertContains(resp, "דורש השלמת פרטים")
-        self.assertContains(resp, "הושלם")
+        self.assertContains(resp, "דרושה השלמת פרטים")
+        self.assertContains(resp, "פרטים הושלמו")
         self.assertNotContains(resp, ">Public<")
         self.assertNotContains(resp, "Completed")
 
@@ -3223,9 +3226,9 @@ class ArchiveItemPresentationUiTests(TestCase):
         )
         self.client.force_login(self.staff)
         resp = self.client.get(f"/archive/{item.id}/")
-        self.assertContains(resp, "טקסט מוקלד")
+        self.assertContains(resp, "טקסט")
         self.assertContains(resp, "ציבורי")
-        self.assertContains(resp, "הושלם")
+        self.assertContains(resp, "פרטים הושלמו")
         self.assertNotContains(resp, "MANUAL_TEXT")
         self.assertNotContains(resp, "COMPLETED")
 

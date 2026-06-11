@@ -102,7 +102,8 @@ class ArchiveFamilyAccessManagePageTests(TestCase):
         resp = self.client.get(self.URL)
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "הגדרת גישת משפחה חסרה")
-        self.assertContains(resp, "archive_family")
+        self.assertContains(resp, "קבוצת גישת המשפחה לא הוגדרה במערכת")
+        self.assertNotContains(resp, "archive_family")
 
     def test_invalid_post_action_returns_400_and_changes_nothing(self):
         self.client.force_login(self.staff)

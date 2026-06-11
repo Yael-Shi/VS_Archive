@@ -16,8 +16,8 @@ ARCHIVE_LIST_ITEM_TYPE_FILTER_PHOTO = "photo"
 
 ARCHIVE_LIST_ITEM_TYPE_FILTER_CHOICES: tuple[tuple[str, str], ...] = (
     (ARCHIVE_LIST_ITEM_TYPE_FILTER_ALL, "הכול"),
-    (ARCHIVE_LIST_ITEM_TYPE_FILTER_OCR, "מסמכים סרוקים / PDF"),
-    (ARCHIVE_LIST_ITEM_TYPE_FILTER_MANUAL, "טקסטים מוקלדים"),
+    (ARCHIVE_LIST_ITEM_TYPE_FILTER_OCR, "מסמכים"),
+    (ARCHIVE_LIST_ITEM_TYPE_FILTER_MANUAL, "טקסטים"),
     (ARCHIVE_LIST_ITEM_TYPE_FILTER_PHOTO, "תמונות"),
 )
 
@@ -27,13 +27,13 @@ _VISIBILITY_LABELS: dict[str, str] = {
 }
 
 _ARCHIVE_METADATA_STATUS_LABELS: dict[str, str] = {
-    ArchiveItem.MetadataStatus.NEEDS_COMPLETION.value: "דורש השלמת פרטים",
-    ArchiveItem.MetadataStatus.COMPLETED.value: "הושלם",
+    ArchiveItem.MetadataStatus.NEEDS_COMPLETION.value: "דרושה השלמת פרטים",
+    ArchiveItem.MetadataStatus.COMPLETED.value: "פרטים הושלמו",
 }
 
 _ARCHIVE_ITEM_TYPE_LABELS: dict[str, str] = {
-    ArchiveItem.ItemType.OCR_DOCUMENT.value: "מסמך סרוק / PDF",
-    ArchiveItem.ItemType.MANUAL_TEXT.value: "טקסט מוקלד",
+    ArchiveItem.ItemType.OCR_DOCUMENT.value: "מסמך",
+    ArchiveItem.ItemType.MANUAL_TEXT.value: "טקסט",
     ArchiveItem.ItemType.PHOTO.value: "תמונה",
 }
 

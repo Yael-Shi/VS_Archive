@@ -6,10 +6,10 @@
       {% upload_status_badge doc.upload_status %}
       {% processing_state_badge doc.processing_state_user %}
 
-      <span class="badge">{{ doc.doc_type }}</span>
+      <span class="badge">{{ doc.doc_type|doc_type_label }}</span>
 
       {% if doc.language %}
-        <span class="badge">{{ doc.language }}</span>
+        <span class="badge">{{ doc.language|language_label }}</span>
       {% else %}
         <span class="badge">שפה: לא ידוע</span>
       {% endif %}

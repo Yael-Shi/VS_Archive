@@ -63,7 +63,7 @@
   </div>
 
   <div class="field">
-    <label for="metadata_status">סטטוס מטא־דאטה</label>
+    <label for="metadata_status">השלמת פרטים</label>
     <select id="metadata_status" name="metadata_status">
       {% for value, label in metadata_status_choices %}
         <option value="{{ value }}" {% if form_data.metadata_status == value %}selected{% endif %}>
