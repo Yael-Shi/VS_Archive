@@ -21,6 +21,10 @@ class OcrRetryMode(str, Enum):
     TRANSKRIBUS_RECOGNITION_ONLY = "transkribus_recognition_only"
 
 
+OCR_RETRY_MODE_PAYLOAD_KEY = "ocr_retry_mode"
+SOURCE_TRANSKRIBUS_RUN_ID_PAYLOAD_KEY = "source_transkribus_run_id"
+
+
 @dataclass(frozen=True)
 class OcrReprocessAssessment:
     document_id: int
