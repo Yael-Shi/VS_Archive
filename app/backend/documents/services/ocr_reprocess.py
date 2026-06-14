@@ -86,6 +86,35 @@ def is_ocr_reprocess_ui_eligible(doc: Document) -> bool:
     return True
 
 
+def _is_hebrew_handwritten(doc: Document) -> bool:
+    return (
+        doc.language == Document.Language.HEBREW
+        and doc.text_input_type == Document.TextInputType.HANDWRITTEN
+    )
+
+
+def _transkribus_reprocess_config_present(collection_id: str, model_id: str) -> bool:
+    return bool(str(collection_id).strip()) and bool(str(model_id).strip())
+
+
+def _validate_transkribus_reprocess_config(
+    doc: Document,
+    *,
+    collection_id: str,
+    model_id: str,
+) -> None:
+    if not _is_hebrew_handwritten(doc):
+        return
+    if _transkribus_reprocess_config_present(collection_id, model_id):
+        return
+    raise OcrReprocessError(
+        f"Document id={doc.id} is Hebrew handwritten and requires "
+        "TRANSKRIBUS_COLLECTION_ID and TRANSKRIBUS_MODEL_ID for OCR reprocess "
+        "assessment, but one or both are missing in this environment. "
+        "Cannot safely classify retry mode without them."
+    )
+
+
 def _has_succeeded_transkribus_upload_run(
     *,
     document_id: int,
@@ -139,6 +168,11 @@ def assess_ocr_reprocess(
 ) -> OcrReprocessAssessment:
     doc = _get_document(document_id)
     validate_document_for_ocr_reprocess(doc)
+    _validate_transkribus_reprocess_config(
+        doc,
+        collection_id=collection_id,
+        model_id=model_id,
+    )
     return classify_ocr_retry_mode(
         document_id=document_id,
         collection_id=collection_id,

@@ -23,6 +23,8 @@ from documents.services.ocr_reprocess import (
 
 COLLECTION_ID = "col"
 MODEL_ID = "42"
+PROD_COLLECTION_ID = "2339723"
+PROD_MODEL_ID = "564149"
 
 _TRANSKRIBUS_WORKER_ENV_FIELDS = {
     "transkribus_api_token": "tok",
@@ -137,6 +139,83 @@ class OcrReprocessServiceTests(TestCase):
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.PROCESSING)
         self.assertIsNone(doc.upload_error)
         mock_enqueue.assert_called_once_with(doc.id)
+
+    def test_missing_transkribus_config_blocks_misclassification_as_normal_reenqueue(self):
+        doc = _failed_ocr_document()
+        _seed_transkribus_run(
+            doc,
+            status=TranskribusRun.Status.FAILED,
+            remote_doc_id="16842456",
+            pages_query="1-2",
+            error_code="TRANSKRIBUS_RECOGNITION_FAILED",
+        )
+        TranskribusRun.objects.filter(document=doc).update(
+            collection_id=PROD_COLLECTION_ID,
+            model_id=PROD_MODEL_ID,
+        )
+
+        with self.assertRaises(OcrReprocessError) as ctx:
+            assess_ocr_reprocess(
+                doc.id,
+                collection_id="",
+                model_id="",
+            )
+
+        self.assertIn("TRANSKRIBUS_COLLECTION_ID", str(ctx.exception))
+        self.assertIn("TRANSKRIBUS_MODEL_ID", str(ctx.exception))
+        self.assertNotIn("normal_reenqueue", str(ctx.exception))
+
+    @patch("documents.services.ocr_reprocess.send_process_document_message")
+    def test_apply_missing_transkribus_config_does_not_enqueue(self, mock_enqueue):
+        doc = _failed_ocr_document()
+        _seed_transkribus_run(
+            doc,
+            status=TranskribusRun.Status.FAILED,
+            remote_doc_id="16842456",
+            pages_query="1-2",
+            error_code="TRANSKRIBUS_RECOGNITION_FAILED",
+        )
+        TranskribusRun.objects.filter(document=doc).update(
+            collection_id=PROD_COLLECTION_ID,
+            model_id=PROD_MODEL_ID,
+        )
+
+        with self.assertRaises(OcrReprocessError):
+            apply_ocr_reprocess(
+                doc.id,
+                collection_id="",
+                model_id="",
+            )
+
+        mock_enqueue.assert_not_called()
+        doc.refresh_from_db()
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.FAILED)
+
+    def test_prod_collection_model_classifies_recognition_only(self):
+        doc = _failed_ocr_document()
+        source = _seed_transkribus_run(
+            doc,
+            status=TranskribusRun.Status.FAILED,
+            remote_doc_id="16842456",
+            pages_query="1-2",
+            error_code="TRANSKRIBUS_RECOGNITION_FAILED",
+        )
+        TranskribusRun.objects.filter(document=doc).update(
+            collection_id=PROD_COLLECTION_ID,
+            model_id=PROD_MODEL_ID,
+        )
+        source.refresh_from_db()
+
+        assessment = assess_ocr_reprocess(
+            doc.id,
+            collection_id=PROD_COLLECTION_ID,
+            model_id=PROD_MODEL_ID,
+        )
+
+        self.assertEqual(
+            assessment.retry_mode, OcrRetryMode.TRANSKRIBUS_RECOGNITION_ONLY
+        )
+        self.assertEqual(assessment.source_transkribus_run_id, source.id)
 
     def test_dry_run_recognition_failure_classifies_recognition_only(self):
         doc = _failed_ocr_document()
