@@ -1,17 +1,34 @@
 {% if photo_content %}
-  {% if photo_content.description %}
-    <div><strong>תיאור / כיתוב:</strong> {{ photo_content.description|linebreaksbr }}</div>
-  {% endif %}
-  {% if photo_content.location %}
-    <div><strong>מיקום:</strong> {{ photo_content.location }}</div>
-  {% endif %}
-  {% if photo_content.context %}
-    <div><strong>הקשר / נסיבות:</strong> {{ photo_content.context|linebreaksbr }}</div>
-  {% endif %}
-  {% if photo_content.people_present %}
-    <div><strong>נוכחים בתמונה:</strong> {{ photo_content.people_present|linebreaksbr }}</div>
-  {% endif %}
-  {% if photo_content.notes %}
-    <div><strong>הערות נוספות:</strong> {{ photo_content.notes|linebreaksbr }}</div>
-  {% endif %}
+  <div class="archive-detail-meta-block archive-detail-meta-block--photo">
+    {% if photo_content.description %}
+      <div class="archive-detail-meta-row">
+        <strong class="archive-detail-meta-label">תיאור / כיתוב:</strong>
+        <span class="archive-detail-meta-value">{{ photo_content.description|linebreaksbr }}</span>
+      </div>
+    {% endif %}
+    {% if photo_content.location %}
+      <div class="archive-detail-meta-row">
+        <strong class="archive-detail-meta-label">מיקום:</strong>
+        <span class="archive-detail-meta-value">{{ photo_content.location }}</span>
+      </div>
+    {% endif %}
+    {% if photo_content.context %}
+      <div class="archive-detail-meta-row">
+        <strong class="archive-detail-meta-label">הקשר / נסיבות:</strong>
+        <span class="archive-detail-meta-value">{{ photo_content.context|linebreaksbr }}</span>
+      </div>
+    {% endif %}
+    {% if photo_content.people_present %}
+      <div class="archive-detail-meta-row">
+        <strong class="archive-detail-meta-label">נוכחים בתמונה:</strong>
+        <span class="archive-detail-meta-value">{{ photo_content.people_present|linebreaksbr }}</span>
+      </div>
+    {% endif %}
+    {% if photo_content.notes %}
+      <div class="archive-detail-meta-row">
+        <strong class="archive-detail-meta-label">הערות נוספות:</strong>
+        <span class="archive-detail-meta-value">{{ photo_content.notes|linebreaksbr }}</span>
+      </div>
+    {% endif %}
+  </div>
 {% endif %}

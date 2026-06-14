@@ -1,18 +1,27 @@
 {% if item.categories.all or item.events.all or item.tags.all %}
-  <div class="archive-discovery-meta">
+  <div class="archive-discovery-meta archive-detail-meta-block archive-detail-meta-block--discovery">
     {% if item.categories.all %}
-      <div><strong>קטגוריות:</strong>
-        {% for c in item.categories.all %}<a href="{% url 'archive-category-browse' category_id=c.id %}">{{ c.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
+      <div class="archive-detail-meta-row">
+        <strong class="archive-detail-meta-label">קטגוריות:</strong>
+        <span class="archive-detail-meta-value">
+          {% for c in item.categories.all %}<a href="{% url 'archive-category-browse' category_id=c.id %}">{{ c.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
+        </span>
       </div>
     {% endif %}
     {% if item.events.all %}
-      <div><strong>אירועים:</strong>
-        {% for e in item.events.all %}<a href="{% url 'archive-event-browse' event_id=e.id %}">{{ e.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
+      <div class="archive-detail-meta-row">
+        <strong class="archive-detail-meta-label">אירועים:</strong>
+        <span class="archive-detail-meta-value">
+          {% for e in item.events.all %}<a href="{% url 'archive-event-browse' event_id=e.id %}">{{ e.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
+        </span>
       </div>
     {% endif %}
     {% if item.tags.all %}
-      <div><strong>תגיות:</strong>
-        {% for t in item.tags.all %}<a href="{% url 'archive-tag-browse' tag_id=t.id %}">{{ t.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
+      <div class="archive-detail-meta-row">
+        <strong class="archive-detail-meta-label">תגיות:</strong>
+        <span class="archive-detail-meta-value">
+          {% for t in item.tags.all %}<a href="{% url 'archive-tag-browse' tag_id=t.id %}">{{ t.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
+        </span>
       </div>
     {% endif %}
   </div>
