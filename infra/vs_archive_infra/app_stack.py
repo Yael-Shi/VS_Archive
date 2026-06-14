@@ -243,6 +243,16 @@ class VsArchiveAppStack(Stack):
                 "DB_PASSWORD": ecs.Secret.from_secrets_manager(db_secret, "password"),
                 "GEMINI_API_KEY": ecs.Secret.from_secrets_manager(gemini_secret),
                 "DJANGO_SECRET_KEY": ecs.Secret.from_secrets_manager(django_secret_key),
+                # OCR reprocess assessment (staff UI) must match worker Transkribus routing config.
+                "ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": ecs.Secret.from_ssm_parameter(
+                    transkribus_enable_hebrew_handwritten_param
+                ),
+                "TRANSKRIBUS_COLLECTION_ID": ecs.Secret.from_ssm_parameter(
+                    transkribus_collection_id_param
+                ),
+                "TRANSKRIBUS_MODEL_ID": ecs.Secret.from_ssm_parameter(
+                    transkribus_model_id_param
+                ),
             },
         ).add_port_mappings(ecs.PortMapping(container_port=8000))
 
