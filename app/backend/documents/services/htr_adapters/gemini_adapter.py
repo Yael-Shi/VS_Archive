@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, List, Optional
 
 from documents.services.gemini_engine import GeminiError, transcribe_pages_with_gemini
+from documents.services.gemini_models import DEFAULT_GEMINI_MODEL_CANDIDATES
 from documents.services.htr_adapters.base import (
     EnginePermanentError,
     EngineRetryableError,
@@ -29,7 +30,7 @@ class GeminiAdapter:
 
         model_candidates = kwargs.pop(
             "model_candidates",
-            ["gemini-2.0-flash", "gemini-1.5-flash"],
+            list(DEFAULT_GEMINI_MODEL_CANDIDATES),
         )
         if not model_candidates:
             raise EnginePermanentError("No Gemini model candidates configured.")

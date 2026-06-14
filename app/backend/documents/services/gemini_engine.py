@@ -13,6 +13,7 @@ from google import genai
 from google.genai import types
 
 from documents.models import DocumentTextResult
+from documents.services.gemini_models import DEFAULT_GEMINI_MODEL
 from documents.services.page_extraction import PageImage
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ class GeminiError(RuntimeError):
 class GeminiResult:
     text: str
     needs_review: bool = False
-    engine_name: str = "gemini-2.0-flash"
+    engine_name: str = DEFAULT_GEMINI_MODEL
     review_reasons: List[str] = field(default_factory=list)
 
 
@@ -132,7 +133,7 @@ def transcribe_pages_with_gemini(
     language_hint: Optional[str],
     *,
     prompt_variant: str,
-    model_name: str = "gemini-2.0-flash",
+    model_name: str = DEFAULT_GEMINI_MODEL,
     min_text_length: int = 20,
     double_pass: bool = False,
     consistency_min_ratio: float = 0.85,

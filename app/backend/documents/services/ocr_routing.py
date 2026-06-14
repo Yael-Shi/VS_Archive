@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 
 from documents.models import Document, DocumentTextResult
+from documents.services.gemini_models import DEFAULT_GEMINI_MODEL_CANDIDATES
 
 
 @dataclass(frozen=True)
@@ -47,9 +48,6 @@ HEBREW_HANDWRITTEN_TRANSKRIBUS_ROUTE = OcrRouteConfig(
     engine_key=DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
     prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
 )
-
-DEFAULT_GEMINI_MODEL_CANDIDATES = ("gemini-2.0-flash", "gemini-1.5-flash")
-
 
 def gemini_model_candidates(
     route: OcrRouteConfig,
