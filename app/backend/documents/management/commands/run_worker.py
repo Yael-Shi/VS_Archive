@@ -18,6 +18,11 @@ from documents.services.env_validation import EnvConfigError, WorkerEnvConfig, v
 from documents.services.expected_outputs import expected_result_types_for_document
 from documents.services.htr_adapters.base import UnsupportedEngineError
 from documents.services.htr_engine import transcribe_pages
+from documents.services.ocr_reprocess import (
+    OCR_RETRY_MODE_PAYLOAD_KEY,
+    OcrRetryMode,
+    SOURCE_TRANSKRIBUS_RUN_ID_PAYLOAD_KEY,
+)
 from documents.services.ocr_routing import OcrRouteConfig, select_ocr_route
 from documents.services.page_extraction import extract_pages, source_file_bytes_to_page
 from documents.services.source_files import (
@@ -30,7 +35,6 @@ logger = logging.getLogger(__name__)
 
 UNRESOLVED_ROUTE_METADATA = "UNRESOLVED"
 AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW = "AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW"
-OCR_RETRY_MODE_TRANSKRIBUS_RECOGNITION_ONLY = "transkribus_recognition_only"
 
 
 def _dedupe_strings_preserve_order(items: List[str]) -> List[str]:
@@ -122,14 +126,20 @@ class Command(BaseCommand):
             self.stderr.write(f"SQS delete error: {e}")
 
     def _is_invalid_ocr_retry_mode(self, payload: Dict[str, Any]) -> bool:
-        if "ocr_retry_mode" not in payload:
+        if OCR_RETRY_MODE_PAYLOAD_KEY not in payload:
             return False
-        return payload.get("ocr_retry_mode") != OCR_RETRY_MODE_TRANSKRIBUS_RECOGNITION_ONLY
+        return (
+            payload.get(OCR_RETRY_MODE_PAYLOAD_KEY)
+            != OcrRetryMode.TRANSKRIBUS_RECOGNITION_ONLY.value
+        )
 
     def _recognition_only_payload_error(self, payload: Dict[str, Any]) -> Optional[str]:
-        if payload.get("ocr_retry_mode") != OCR_RETRY_MODE_TRANSKRIBUS_RECOGNITION_ONLY:
+        if (
+            payload.get(OCR_RETRY_MODE_PAYLOAD_KEY)
+            != OcrRetryMode.TRANSKRIBUS_RECOGNITION_ONLY.value
+        ):
             return None
-        run_id = payload.get("source_transkribus_run_id")
+        run_id = payload.get(SOURCE_TRANSKRIBUS_RUN_ID_PAYLOAD_KEY)
         if run_id is None:
             return "source_transkribus_run_id is required for transkribus_recognition_only"
         if not isinstance(run_id, int):
@@ -140,7 +150,10 @@ class Command(BaseCommand):
         return None
 
     def _effective_worker_env(self, payload: Dict[str, Any]) -> WorkerEnvConfig:
-        if payload.get("ocr_retry_mode") == OCR_RETRY_MODE_TRANSKRIBUS_RECOGNITION_ONLY:
+        if (
+            payload.get(OCR_RETRY_MODE_PAYLOAD_KEY)
+            == OcrRetryMode.TRANSKRIBUS_RECOGNITION_ONLY.value
+        ):
             return replace(
                 self._cfg,
                 transkribus_recognition_only_retry=True,
@@ -163,7 +176,7 @@ class Command(BaseCommand):
             return True
 
         if self._is_invalid_ocr_retry_mode(payload):
-            retry_mode = payload.get("ocr_retry_mode")
+            retry_mode = payload.get(OCR_RETRY_MODE_PAYLOAD_KEY)
             self.stderr.write(
                 self.style.ERROR(
                     f"Invalid ocr_retry_mode for doc {document_id}: {retry_mode!r}"
@@ -187,8 +200,10 @@ class Command(BaseCommand):
                 "invalid recognition-only PROCESS_DOCUMENT payload",
                 extra={
                     "document_id": document_id,
-                    "ocr_retry_mode": payload.get("ocr_retry_mode"),
-                    "source_transkribus_run_id": payload.get("source_transkribus_run_id"),
+                    OCR_RETRY_MODE_PAYLOAD_KEY: payload.get(OCR_RETRY_MODE_PAYLOAD_KEY),
+                    SOURCE_TRANSKRIBUS_RUN_ID_PAYLOAD_KEY: payload.get(
+                        SOURCE_TRANSKRIBUS_RUN_ID_PAYLOAD_KEY
+                    ),
                     "error": recognition_only_error,
                 },
             )
@@ -250,14 +265,19 @@ class Command(BaseCommand):
 
             route = select_ocr_route(doc.language, doc.text_input_type)
             source_transkribus_run_id: int | None = None
-            if payload.get("ocr_retry_mode") == OCR_RETRY_MODE_TRANSKRIBUS_RECOGNITION_ONLY:
+            if (
+                payload.get(OCR_RETRY_MODE_PAYLOAD_KEY)
+                == OcrRetryMode.TRANSKRIBUS_RECOGNITION_ONLY.value
+            ):
                 if route.engine_key != DocumentTextResult.OcrEngineKey.TRANSKRIBUS:
                     raise RuntimeError(
                         f"transkribus_recognition_only retry requested for "
                         f"document_id={document_id} but selected OCR route is "
                         f"{route.engine_key}"
                     )
-                source_transkribus_run_id = payload.get("source_transkribus_run_id")
+                source_transkribus_run_id = payload.get(
+                    SOURCE_TRANSKRIBUS_RUN_ID_PAYLOAD_KEY
+                )
             htr_result = transcribe_pages(
                 pages=pages,
                 language_hint=doc.language,
