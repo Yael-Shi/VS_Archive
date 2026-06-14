@@ -11,6 +11,10 @@ from documents.services.htr_adapters.base import (
     EngineRetryableError,
     HtrResult,
 )
+from documents.services.htr_adapters.transkribus_error_codes import (
+    TRANSKRIBUS_RECOGNITION_FAILED_ERROR_CODE,
+    TRANSKRIBUS_UPLOAD_FAILED_ERROR_CODE,
+)
 from documents.services.page_extraction import PageImage
 from documents.services import transkribus_run_persistence as trp
 
@@ -165,14 +169,14 @@ class TranskribusAdapter:
         except tr.TranskribusRetryableError as exc:
             trp.mark_failed(
                 run,
-                error_code="TRANSKRIBUS_RECOGNITION_FAILED",
+                error_code=TRANSKRIBUS_RECOGNITION_FAILED_ERROR_CODE,
                 error_details=str(exc),
             )
             raise EngineRetryableError(str(exc)) from exc
         except tr.TranskribusPermanentError as exc:
             trp.mark_failed(
                 run,
-                error_code="TRANSKRIBUS_RECOGNITION_FAILED",
+                error_code=TRANSKRIBUS_RECOGNITION_FAILED_ERROR_CODE,
                 error_details=str(exc),
             )
             raise EnginePermanentError(str(exc)) from exc
@@ -356,14 +360,14 @@ class TranskribusAdapter:
         except tr.TranskribusRetryableError as exc:
             trp.mark_failed(
                 run,
-                error_code="TRANSKRIBUS_RECOGNITION_FAILED",
+                error_code=TRANSKRIBUS_RECOGNITION_FAILED_ERROR_CODE,
                 error_details=str(exc),
             )
             raise EngineRetryableError(str(exc)) from exc
         except tr.TranskribusPermanentError as exc:
             trp.mark_failed(
                 run,
-                error_code="TRANSKRIBUS_RECOGNITION_FAILED",
+                error_code=TRANSKRIBUS_RECOGNITION_FAILED_ERROR_CODE,
                 error_details=str(exc),
             )
             raise EnginePermanentError(str(exc)) from exc
@@ -423,17 +427,17 @@ class TranskribusAdapter:
                 )
         except tr.TranskribusRetryableError as exc:
             error_code = (
-                "TRANSKRIBUS_UPLOAD_FAILED"
+                TRANSKRIBUS_UPLOAD_FAILED_ERROR_CODE
                 if run.status == TranskribusRun.Status.STARTED
-                else "TRANSKRIBUS_RECOGNITION_FAILED"
+                else TRANSKRIBUS_RECOGNITION_FAILED_ERROR_CODE
             )
             trp.mark_failed(run, error_code=error_code, error_details=str(exc))
             raise EngineRetryableError(str(exc)) from exc
         except tr.TranskribusPermanentError as exc:
             error_code = (
-                "TRANSKRIBUS_UPLOAD_FAILED"
+                TRANSKRIBUS_UPLOAD_FAILED_ERROR_CODE
                 if run.status == TranskribusRun.Status.STARTED
-                else "TRANSKRIBUS_RECOGNITION_FAILED"
+                else TRANSKRIBUS_RECOGNITION_FAILED_ERROR_CODE
             )
             trp.mark_failed(run, error_code=error_code, error_details=str(exc))
             raise EnginePermanentError(str(exc)) from exc
