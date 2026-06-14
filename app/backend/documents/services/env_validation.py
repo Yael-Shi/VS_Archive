@@ -5,6 +5,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from documents.services.gemini_models import DEFAULT_HEBREW_PRINTED_GEMINI_MODEL
+
 
 class EnvConfigError(RuntimeError):
     """Raised when required environment variables are missing/invalid."""
@@ -180,7 +182,7 @@ class WorkerEnvConfig:
     transkribus_force_reprocess: bool = field(default=False)
     transkribus_recognition_only_retry: bool = field(default=False)
     enable_transkribus_hebrew_handwritten: bool = field(default=False)
-    gemini_hebrew_printed_model: str = field(default="gemini-3.1-flash-lite")
+    gemini_hebrew_printed_model: str = field(default=DEFAULT_HEBREW_PRINTED_GEMINI_MODEL)
 
 
 def validate_required_env() -> WorkerEnvConfig:
@@ -247,7 +249,9 @@ def validate_required_env() -> WorkerEnvConfig:
     enable_transkribus_hebrew_handwritten = _get_bool(
         "ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN", default=False
     )
-    gemini_hebrew_printed_model = _get("GEMINI_HEBREW_PRINTED_MODEL") or "gemini-3.1-flash-lite"
+    gemini_hebrew_printed_model = (
+        _get("GEMINI_HEBREW_PRINTED_MODEL") or DEFAULT_HEBREW_PRINTED_GEMINI_MODEL
+    )
 
     if enable_hybrid_htr and not (transkribus_api_token or (transkribus_username and transkribus_password)):
         raise EnvConfigError("ENABLE_HYBRID_HTR is true but Transkribus credentials missing.")
