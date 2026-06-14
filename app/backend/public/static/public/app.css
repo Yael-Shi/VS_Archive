@@ -875,6 +875,19 @@ textarea {
   margin: 0;
 }
 
+.nav-staff-panel {
+  border-color: var(--border-subtle);
+  background: var(--surface-muted);
+}
+
+.nav-staff-header {
+  margin-bottom: var(--space-2);
+}
+
+.nav-staff-links {
+  margin-inline-start: 0;
+}
+
 /* Technical / debug — deliberately subdued */
 
 pre {
