@@ -24,6 +24,10 @@ from documents.services.ocr_reprocess import (
     SOURCE_TRANSKRIBUS_RUN_ID_PAYLOAD_KEY,
 )
 from documents.services.ocr_routing import OcrRouteConfig, select_ocr_route
+from documents.services.review_reasons import (
+    AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW,
+    NEEDS_REVIEW_FLAG,
+)
 from documents.services.page_extraction import extract_pages, source_file_bytes_to_page
 from documents.services.source_files import (
     MultiImageSourceFilesError,
@@ -34,7 +38,6 @@ from documents.services.source_files import (
 logger = logging.getLogger(__name__)
 
 UNRESOLVED_ROUTE_METADATA = "UNRESOLVED"
-AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW = "AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW"
 
 
 def _dedupe_strings_preserve_order(items: List[str]) -> List[str]:
@@ -355,7 +358,7 @@ class Command(BaseCommand):
         if include_automatic_policy:
             reasons.append(AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW)
         if adapter_needs_review:
-            reasons.append("NEEDS_REVIEW_FLAG")
+            reasons.append(NEEDS_REVIEW_FLAG)
 
         stripped = (text or "").strip()
         if len(stripped) < self._cfg.min_text_length:
