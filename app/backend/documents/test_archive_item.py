@@ -2422,12 +2422,15 @@ class ArchiveNavigationTests(TestCase):
         resp = self.client.get(reverse("public-home"))
         self.assertNotContains(resp, reverse("archive-manage-list"))
         self.assertNotContains(resp, "ניהול ארכיון")
+        self.assertNotContains(resp, "nav-staff-panel")
 
     def test_global_nav_shows_manage_link_for_staff(self):
         self.client.force_login(self.staff)
         resp = self.client.get(reverse("public-home"))
         self.assertContains(resp, reverse("archive-manage-list"))
         self.assertContains(resp, "ניהול ארכיון")
+        self.assertContains(resp, 'class="card nav-shell nav-staff-panel"')
+        self.assertContains(resp, 'class="nav-staff-header section-title">ניהול</div>')
 
     def test_global_nav_hides_manage_link_for_family_user(self):
         self.client.force_login(self._create_family_user())
@@ -2435,6 +2438,7 @@ class ArchiveNavigationTests(TestCase):
         self.assertContains(resp, reverse("archive-list"))
         self.assertNotContains(resp, reverse("archive-manage-list"))
         self.assertNotContains(resp, "ניהול ארכיון")
+        self.assertNotContains(resp, "nav-staff-panel")
 
     def test_global_nav_hides_manage_link_for_non_staff_authenticated_user(self):
         user = User.objects.create_user(
@@ -2446,6 +2450,7 @@ class ArchiveNavigationTests(TestCase):
         resp = self.client.get(reverse("public-home"))
         self.assertNotContains(resp, reverse("archive-manage-list"))
         self.assertNotContains(resp, "ניהול ארכיון")
+        self.assertNotContains(resp, "nav-staff-panel")
 
     def test_global_nav_shows_django_admin_link_for_staff(self):
         self.client.force_login(self.staff)

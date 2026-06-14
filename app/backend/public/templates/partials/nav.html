@@ -6,24 +6,13 @@
 
     <div class="nav-links">
       <a class="btn btn-link" href="/">דף הבית</a>
-      <a class="btn btn-link" href="/about/">אודות</a>
       <a class="btn btn-link" href="{% url 'archive-list' %}">ארכיון</a>
+      <a class="btn btn-link" href="/about/">אודות</a>
     </div>
 
     <div class="nav-spacer"></div>
 
     {% if user.is_authenticated %}
-      {# קישורי Admin בלבד #}
-      {% if user.is_staff or user.is_superuser %}
-        <a class="btn btn-link" href="{% url 'archive-manage-list' %}">ניהול ארכיון</a>
-        <a class="btn btn-link" href="{% url 'archive-manage-family-access' %}">ניהול גישת משפחה</a>
-        <a class="btn btn-link" href="{% url 'archive-manage-new' %}">יצירת פריט חדש</a>
-        <a class="btn btn-link" href="/api/ui/admin/backlog/">רשימת השלמת פרטים</a>
-        <a class="btn btn-link" href="/api/ui/admin/review/">רשימת בקרת תמלול</a>
-        <a class="btn btn-link" href="{% url 'public-content-edit' %}">עריכת תוכן ציבורי</a>
-        <a class="btn btn-link" href="/admin/">ניהול מערכת</a>
-      {% endif %}
-
       <span class="muted nav-user">
         היי, {{ user.username }}
       </span>
@@ -40,5 +29,23 @@
     {% endif %}
   </div>
 </div>
+
+{% if user.is_authenticated %}
+  {% if user.is_staff or user.is_superuser %}
+    <div class="spacer-sm"></div>
+    <div class="card nav-shell nav-staff-panel">
+      <div class="nav-staff-header section-title">ניהול</div>
+      <div class="nav-links nav-staff-links">
+        <a class="btn btn-link" href="{% url 'archive-manage-list' %}">ניהול ארכיון</a>
+        <a class="btn btn-link" href="{% url 'archive-manage-new' %}">יצירת פריט חדש</a>
+        <a class="btn btn-link" href="/api/ui/admin/backlog/">רשימת השלמת פרטים</a>
+        <a class="btn btn-link" href="/api/ui/admin/review/">רשימת בקרת תמלול</a>
+        <a class="btn btn-link" href="{% url 'archive-manage-family-access' %}">ניהול גישת משפחה</a>
+        <a class="btn btn-link" href="{% url 'public-content-edit' %}">עריכת תוכן ציבורי</a>
+        <a class="btn btn-link" href="/admin/">ניהול מערכת</a>
+      </div>
+    </div>
+  {% endif %}
+{% endif %}
 
 <div class="spacer"></div>
