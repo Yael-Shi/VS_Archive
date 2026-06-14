@@ -5,6 +5,16 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from documents.services.gemini_defaults import (
+    DEFAULT_GEMINI_CONFIDENCE_THRESHOLD,
+    DEFAULT_GEMINI_CONSISTENCY_MIN_RATIO,
+    DEFAULT_GEMINI_FREE_DAILY_IMAGE_LIMIT,
+    DEFAULT_GEMINI_FREE_DAILY_REQUEST_LIMIT,
+    DEFAULT_GEMINI_MAX_OUTPUT_TOKENS,
+    DEFAULT_GEMINI_TEMPERATURE,
+    DEFAULT_GEMINI_TOP_K,
+    DEFAULT_GEMINI_TOP_P,
+)
 from documents.services.gemini_models import DEFAULT_HEBREW_PRINTED_GEMINI_MODEL
 
 
@@ -191,7 +201,10 @@ def validate_required_env() -> WorkerEnvConfig:
 
     gemini_api_key = _require("GEMINI_API_KEY")
     gemini_confidence_threshold = _get_float(
-        "GEMINI_CONFIDENCE_THRESHOLD", default=0.7, min_value=0.0, max_value=1.0
+        "GEMINI_CONFIDENCE_THRESHOLD",
+        default=DEFAULT_GEMINI_CONFIDENCE_THRESHOLD,
+        min_value=0.0,
+        max_value=1.0,
     )
     
     min_text_length = _get_int("MIN_TEXT_LENGTH", default=20, min_value=0)
@@ -204,19 +217,33 @@ def validate_required_env() -> WorkerEnvConfig:
     report_send_time = _get("REPORT_SEND_TIME") or "08:00"
 
     free_tier_alert_pct = _get_int("FREE_TIER_ALERT_PCT", default=80, min_value=1, max_value=100)
-    gemini_free_daily_request_limit = _get_int("GEMINI_FREE_DAILY_REQUEST_LIMIT", default=1500)
-    gemini_free_daily_image_limit = _get_int("GEMINI_FREE_DAILY_IMAGE_LIMIT", default=1000)
+    gemini_free_daily_request_limit = _get_int(
+        "GEMINI_FREE_DAILY_REQUEST_LIMIT", default=DEFAULT_GEMINI_FREE_DAILY_REQUEST_LIMIT
+    )
+    gemini_free_daily_image_limit = _get_int(
+        "GEMINI_FREE_DAILY_IMAGE_LIMIT", default=DEFAULT_GEMINI_FREE_DAILY_IMAGE_LIMIT
+    )
     transkribus_free_monthly_credits = _get_int("TRANSKRIBUS_FREE_MONTHLY_CREDITS", default=500)
 
     # --- Gemini Hardening (Defaults adjusted for HTR) ---
-    gemini_temperature = _get_float("GEMINI_TEMPERATURE", default=0.2, min_value=0.0, max_value=2.0)
-    gemini_top_k = _get_int("GEMINI_TOP_K", default=40, min_value=1, max_value=64)
-    gemini_top_p = _get_float("GEMINI_TOP_P", default=0.95, min_value=0.0, max_value=1.0)
-    gemini_max_output_tokens = _get_int("GEMINI_MAX_OUTPUT_TOKENS", default=2048)
+    gemini_temperature = _get_float(
+        "GEMINI_TEMPERATURE", default=DEFAULT_GEMINI_TEMPERATURE, min_value=0.0, max_value=2.0
+    )
+    gemini_top_k = _get_int(
+        "GEMINI_TOP_K", default=DEFAULT_GEMINI_TOP_K, min_value=1, max_value=64
+    )
+    gemini_top_p = _get_float(
+        "GEMINI_TOP_P", default=DEFAULT_GEMINI_TOP_P, min_value=0.0, max_value=1.0
+    )
+    gemini_max_output_tokens = _get_int(
+        "GEMINI_MAX_OUTPUT_TOKENS", default=DEFAULT_GEMINI_MAX_OUTPUT_TOKENS
+    )
     
     # For handwriting, False as the default to avoid disqualifications for minor inconsistencies
     gemini_double_pass = _get_bool("GEMINI_DOUBLE_PASS", default=False)
-    gemini_consistency_min_ratio = _get_float("GEMINI_CONSISTENCY_MIN_RATIO", default=0.7)
+    gemini_consistency_min_ratio = _get_float(
+        "GEMINI_CONSISTENCY_MIN_RATIO", default=DEFAULT_GEMINI_CONSISTENCY_MIN_RATIO
+    )
 
     # --- Email & Transkribus (Keep original logic) ---
     smtp_host = _get("SMTP_HOST")
