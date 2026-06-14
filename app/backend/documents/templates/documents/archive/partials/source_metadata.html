@@ -1,8 +1,16 @@
 {% if item.author_name or item.source_title %}
-  {% if item.author_name %}
-    <div><strong>מחבר/ת:</strong> {{ item.author_name }}</div>
-  {% endif %}
-  {% if item.source_title %}
-    <div><strong>מקור:</strong> {{ item.source_title }}</div>
-  {% endif %}
+  <div class="archive-detail-meta-block archive-detail-meta-block--source">
+    {% if item.author_name %}
+      <div class="archive-detail-meta-row">
+        <strong class="archive-detail-meta-label">מחבר/ת:</strong>
+        <span class="archive-detail-meta-value">{{ item.author_name }}</span>
+      </div>
+    {% endif %}
+    {% if item.source_title %}
+      <div class="archive-detail-meta-row">
+        <strong class="archive-detail-meta-label">מקור:</strong>
+        <span class="archive-detail-meta-value">{{ item.source_title }}</span>
+      </div>
+    {% endif %}
+  </div>
 {% endif %}
