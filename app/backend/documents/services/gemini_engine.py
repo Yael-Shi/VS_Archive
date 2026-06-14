@@ -13,6 +13,11 @@ from google import genai
 from google.genai import types
 
 from documents.models import DocumentTextResult
+from documents.services.gemini_defaults import (
+    DEFAULT_GEMINI_TEMPERATURE,
+    DEFAULT_GEMINI_TOP_K,
+    DEFAULT_GEMINI_TOP_P,
+)
 from documents.services.gemini_models import DEFAULT_GEMINI_MODEL
 from documents.services.page_extraction import PageImage
 
@@ -137,9 +142,9 @@ def transcribe_pages_with_gemini(
     min_text_length: int = 20,
     double_pass: bool = False,
     consistency_min_ratio: float = 0.85,
-    temperature: float = 0.2,
-    top_k: int = 40,
-    top_p: float = 0.95,
+    temperature: float = DEFAULT_GEMINI_TEMPERATURE,
+    top_k: int = DEFAULT_GEMINI_TOP_K,
+    top_p: float = DEFAULT_GEMINI_TOP_P,
     max_output_tokens: Optional[int] = 8192,
 ) -> GeminiResult:
     prompt_base = _PROMPT_BY_VARIANT.get(prompt_variant)
