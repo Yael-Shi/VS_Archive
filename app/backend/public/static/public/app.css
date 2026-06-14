@@ -92,6 +92,19 @@ body {
   background-image: linear-gradient(180deg, var(--bg) 0%, var(--bg-accent) 100%);
   background-attachment: fixed;
   line-height: var(--line-normal);
+  overflow-x: clip;
+}
+
+img,
+video,
+embed,
+object {
+  max-width: 100%;
+  height: auto;
+}
+
+iframe {
+  max-width: 100%;
 }
 
 a {
@@ -832,7 +845,10 @@ textarea {
 .nav-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-3);
+  row-gap: var(--space-2);
+  min-width: 0;
 }
 
 .nav-brand {
@@ -862,7 +878,16 @@ textarea {
 }
 
 .nav-spacer {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.nav-auth {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
 .nav-user {
@@ -1635,6 +1660,82 @@ pre {
 
 .site-footer a {
   color: var(--accent-muted);
+  overflow-wrap: anywhere;
+}
+
+/* Responsive — public mobile foundation (home, about, nav, footer) */
+
+@media (max-width: 768px) {
+  .container {
+    padding-inline: var(--space-3);
+    padding-block: var(--space-4) var(--space-6);
+  }
+
+  .nav-shell {
+    padding: var(--space-3);
+  }
+
+  .nav-row {
+    gap: var(--space-2);
+  }
+
+  .nav-brand {
+    flex: 0 1 auto;
+  }
+
+  .nav-links {
+    margin-inline-start: 0;
+    flex: 1 1 auto;
+  }
+
+  .nav-spacer {
+    flex-basis: 100%;
+    flex-grow: 0;
+    height: 0;
+    overflow: hidden;
+  }
+
+  .nav-auth {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+
+  .nav-row .btn-link,
+  .nav-row .btn-danger {
+    min-height: 44px;
+    padding: 10px 12px;
+  }
+
+  .nav-staff-links .btn-link {
+    min-height: 44px;
+    padding: 10px 12px;
+    white-space: normal;
+    text-align: start;
+  }
+
+  .site-footer {
+    margin-top: var(--space-6);
+    padding-top: var(--space-4);
+    padding-inline: var(--space-1);
+  }
+
+  .site-footer p {
+    margin-bottom: var(--space-3);
+  }
+}
+
+@media (max-width: 480px) {
+  .container {
+    padding-inline: var(--space-3);
+  }
+
+  .page-title {
+    font-size: var(--font-lg);
+  }
+
+  .nav-brand {
+    font-size: var(--font-md);
+  }
 }
 
 /* Responsive */

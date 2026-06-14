@@ -10,23 +10,25 @@
       <a class="btn btn-link" href="/about/">אודות</a>
     </div>
 
-    <div class="nav-spacer"></div>
+    <div class="nav-spacer" aria-hidden="true"></div>
 
-    {% if user.is_authenticated %}
-      <span class="muted nav-user">
-        היי, {{ user.username }}
-      </span>
+    <div class="nav-auth">
+      {% if user.is_authenticated %}
+        <span class="muted nav-user">
+          היי, {{ user.username }}
+        </span>
 
-      <form action="/accounts/logout/" method="post" class="nav-form">
-        {% csrf_token %}
-        <button type="submit" class="btn btn-danger">
-          התנתקות
-        </button>
-      </form>
-    {% else %}
-      <a class="btn btn-link" href="{% url 'public-register' %}">הרשמה</a>
-      <a class="btn btn-link" href="/accounts/login/">התחברות</a>
-    {% endif %}
+        <form action="/accounts/logout/" method="post" class="nav-form">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-danger">
+            התנתקות
+          </button>
+        </form>
+      {% else %}
+        <a class="btn btn-link" href="{% url 'public-register' %}">הרשמה</a>
+        <a class="btn btn-link" href="/accounts/login/">התחברות</a>
+      {% endif %}
+    </div>
   </div>
 </div>
 
