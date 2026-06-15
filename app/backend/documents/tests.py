@@ -22,7 +22,12 @@ from documents.models import Document, DocumentSourceFile, DocumentTextResult, T
 from documents.services.archive_items import create_ocr_document
 from documents.services.env_validation import validate_required_env
 from documents.services.transkribus_engine import PylaiaTranscriptionOutcome
-from documents.services.gemini_engine import GeminiError, GeminiResult
+from documents.services.gemini_engine import (
+    GeminiError,
+    GeminiResult,
+    _HTR_EXPERT_PROMPT,
+    _PRINTED_TEXT_PROMPT,
+)
 from documents.services.htr_adapters.base import (
     EnginePermanentError,
     EngineRetryableError,
@@ -6690,6 +6695,27 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
                 document=doc, mode=TranskribusRun.Mode.EXISTING_SERVER
             ).exists()
         )
+
+
+# These tests intentionally inspect internal prompt constants to guard
+# archival OCR behavior without adding production-only accessors.
+class GeminiEnginePromptTests(SimpleTestCase):
+    def test_printed_prompt_includes_archival_transcription_guardrails(self):
+        guardrails = (
+            "Do NOT silently omit visible words",
+            "Preserve typos",
+            "Do NOT add Hebrew vowel marks",
+            "Do NOT omit readable URLs",
+            "Ignore purely decorative UI icons",
+        )
+        for phrase in guardrails:
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, _PRINTED_TEXT_PROMPT)
+
+    def test_handwritten_prompt_unchanged(self):
+        self.assertIn("expert paleographer and historian", _HTR_EXPERT_PROMPT)
+        self.assertIn("This is handwritten text", _HTR_EXPERT_PROMPT)
+        self.assertNotIn("Do NOT silently omit visible words", _HTR_EXPERT_PROMPT)
 
 
 class GeminiModelCandidatesTests(SimpleTestCase):
