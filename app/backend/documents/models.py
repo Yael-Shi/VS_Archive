@@ -509,6 +509,14 @@ class TranscriptionEditSuggestion(models.Model):
         blank=True,
         related_name="submitted_transcription_edit_suggestions",
     )
+    approved_text = models.TextField(null=True, blank=True)
+    applied_text_result = models.ForeignKey(
+        DocumentTextResult,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="applied_transcription_edit_suggestions",
+    )
 
     class Meta:
         ordering = ["-created_at"]

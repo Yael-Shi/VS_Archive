@@ -81,4 +81,14 @@ urlpatterns = [
         views.transcription_suggestion_detail_page,
         name="transcription-suggestion-detail",
     ),
+    path(
+        "ui/admin/transcription-suggestions/<int:suggestion_id>/approve/",
+        views.transcription_suggestion_approve,
+        name="transcription-suggestion-approve",
+    ),
+    path(
+        "ui/admin/transcription-suggestions/<int:suggestion_id>/reject/",
+        views.transcription_suggestion_reject,
+        name="transcription-suggestion-reject",
+    ),
 ]

@@ -138,6 +138,11 @@ from documents.services.transcription_edit_suggestions import (
     suggestion_status_label,
     texts_are_equivalent,
 )
+from documents.services.transcription_suggestion_review import (
+    TranscriptionSuggestionReviewError,
+    approve_suggestion,
+    reject_suggestion,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1900,13 +1905,12 @@ def transcription_suggestion_detail_page(request, suggestion_id: int):
         suggestion.current_text_snapshot,
         suggestion.suggested_text,
     )
-
-    logger.info(
-        "transcription_suggestion_detail_page user=%s suggestion_id=%s document_id=%s",
-        getattr(request.user, "username", None),
-        suggestion.id,
-        doc.id,
+    live_text = get_displayed_transcription_text(doc)
+    live_text_changed = not texts_are_equivalent(
+        live_text,
+        suggestion.current_text_snapshot,
     )
+
     return render(
         request,
         "documents/transcription_suggestion_detail.html",
@@ -1918,8 +1922,62 @@ def transcription_suggestion_detail_page(request, suggestion_id: int):
             "source_preview_unavailable_count": source_preview.non_uploaded_count,
             "diff_html": diff_html,
             "status_label": suggestion_status_label(suggestion.status),
+            "live_text": live_text,
+            "live_text_changed": live_text_changed,
         },
     )
+
+
+@login_required
+@require_POST
+def transcription_suggestion_approve(request, suggestion_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    detail_url = reverse(
+        "transcription-suggestion-detail",
+        kwargs={"suggestion_id": suggestion_id},
+    )
+    approved_text = request.POST.get("approved_text")
+    if approved_text is None:
+        messages.error(request, "יש להזין טקסט מאושר.")
+        return redirect(detail_url)
+
+    try:
+        approve_suggestion(
+            suggestion_id,
+            approved_text=approved_text,
+            reviewer=request.user,
+        )
+    except TranscriptionEditSuggestion.DoesNotExist:
+        raise Http404()
+    except TranscriptionSuggestionReviewError as exc:
+        messages.error(request, str(exc))
+
+    return redirect(detail_url)
+
+
+@login_required
+@require_POST
+def transcription_suggestion_reject(request, suggestion_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    detail_url = reverse(
+        "transcription-suggestion-detail",
+        kwargs={"suggestion_id": suggestion_id},
+    )
+
+    try:
+        reject_suggestion(suggestion_id, reviewer=request.user)
+    except TranscriptionEditSuggestion.DoesNotExist:
+        raise Http404()
+    except TranscriptionSuggestionReviewError as exc:
+        messages.error(request, str(exc))
+
+    return redirect(detail_url)
 
 
 @login_required

@@ -9,8 +9,16 @@ from django.urls import reverse
 from documents.models import Document, DocumentTextResult, TranscriptionEditSuggestion
 from documents.services.archive_item_access import ARCHIVE_FAMILY_GROUP_NAME
 from documents.services.archive_items import create_ocr_document
-from documents.services.text_presentation import get_displayed_transcription_text
+from documents.services.text_presentation import (
+    get_displayed_transcription_text,
+    resolve_displayed_transcription_result,
+)
 from documents.services.transcription_edit_suggestions import render_transcription_diff_html
+from documents.services.transcription_suggestion_review import (
+    TranscriptionSuggestionReviewError,
+    approve_suggestion,
+    reject_suggestion,
+)
 from public.services.registration import HONEYPOT_FIELD_NAME
 
 
@@ -456,3 +464,457 @@ class TranscriptionEditSuggestionStaffUiTests(TestCase):
         resp = self.client.get(reverse("documents-list-page"))
         self.assertContains(resp, "הצעות תיקון לתעתוקים")
         self.assertContains(resp, self._backlog_url())
+
+
+@override_settings(UPLOADS_BUCKET_NAME="")
+class TranscriptionEditSuggestionReviewTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="suggestion_review_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.viewer = User.objects.create_user(
+            username="suggestion_review_viewer",
+            password="test-pass",
+            is_staff=False,
+        )
+
+    def _create_hebrew_doc(self, *, title: str = "Hebrew review doc") -> Document:
+        return create_ocr_document(
+            title=title,
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            language=Document.Language.HEBREW,
+            visibility=Document.Visibility.PUBLIC,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.READY,
+            file_s3_key="documents/30/original.jpg",
+            mime_type="image/jpeg",
+        )
+
+    def _create_english_doc(self, *, title: str = "English review doc") -> Document:
+        return create_ocr_document(
+            title=title,
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            visibility=Document.Visibility.PUBLIC,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.READY,
+            file_s3_key="documents/31/original.jpg",
+            mime_type="image/jpeg",
+        )
+
+    def _create_text_result(
+        self,
+        doc: Document,
+        *,
+        result_type: str,
+        text: str,
+        engine: str = "engine-a",
+    ) -> DocumentTextResult:
+        return DocumentTextResult.objects.create(
+            document=doc,
+            result_type=result_type,
+            engine=engine,
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            text=text,
+        )
+
+    def _create_suggestion(
+        self,
+        doc: Document,
+        *,
+        current_text_snapshot: str = "טקסט בסיס",
+        suggested_text: str = "טקסט מתוקן",
+        status: str = TranscriptionEditSuggestion.Status.PENDING,
+    ) -> TranscriptionEditSuggestion:
+        return TranscriptionEditSuggestion.objects.create(
+            document=doc,
+            current_text_snapshot=current_text_snapshot,
+            suggested_text=suggested_text,
+            submitter_name="מציע/ה",
+            status=status,
+        )
+
+    def _detail_url(self, suggestion_id: int) -> str:
+        return reverse(
+            "transcription-suggestion-detail",
+            kwargs={"suggestion_id": suggestion_id},
+        )
+
+    def _approve_url(self, suggestion_id: int) -> str:
+        return reverse(
+            "transcription-suggestion-approve",
+            kwargs={"suggestion_id": suggestion_id},
+        )
+
+    def _reject_url(self, suggestion_id: int) -> str:
+        return reverse(
+            "transcription-suggestion-reject",
+            kwargs={"suggestion_id": suggestion_id},
+        )
+
+    def test_staff_approve_updates_displayed_text(self):
+        doc = self._create_hebrew_doc()
+        row = self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="טקסט בסיס",
+        )
+        suggestion = self._create_suggestion(doc)
+
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self._approve_url(suggestion.id),
+            {"approved_text": "טקסט מאושר"},
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], self._detail_url(suggestion.id))
+
+        row.refresh_from_db()
+        self.assertEqual(row.text, "טקסט מאושר")
+
+    def test_staff_approve_sets_verification_status_verified(self):
+        doc = self._create_hebrew_doc()
+        row = self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="טקסט בסיס",
+        )
+        suggestion = self._create_suggestion(doc)
+
+        self.client.force_login(self.staff)
+        self.client.post(
+            self._approve_url(suggestion.id),
+            {"approved_text": "טקסט מאושר"},
+        )
+
+        row.refresh_from_db()
+        self.assertEqual(
+            row.verification_status,
+            DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        self.assertEqual(row.status, DocumentTextResult.Status.NEEDS_REVIEW)
+
+    def test_partial_approve_stores_approved_text(self):
+        doc = self._create_hebrew_doc()
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="טקסט בסיס",
+        )
+        suggestion = self._create_suggestion(doc, suggested_text="טקסט מתוקן")
+
+        approve_suggestion(
+            suggestion.id,
+            approved_text="גרסה סופית שונה",
+            reviewer=self.staff,
+        )
+
+        suggestion.refresh_from_db()
+        self.assertEqual(suggestion.approved_text, "גרסה סופית שונה")
+        self.assertEqual(suggestion.status, TranscriptionEditSuggestion.Status.APPROVED)
+        self.assertEqual(suggestion.reviewed_by, self.staff)
+        self.assertIsNotNone(suggestion.reviewed_at)
+        self.assertIsNotNone(suggestion.applied_text_result_id)
+
+    def test_reject_marks_suggestion_rejected_without_mutating_text_result(self):
+        doc = self._create_hebrew_doc()
+        row = self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="טקסט בסיס",
+        )
+        suggestion = self._create_suggestion(doc)
+
+        self.client.force_login(self.staff)
+        resp = self.client.post(self._reject_url(suggestion.id))
+        self.assertEqual(resp.status_code, 302)
+
+        suggestion.refresh_from_db()
+        row.refresh_from_db()
+        self.assertEqual(suggestion.status, TranscriptionEditSuggestion.Status.REJECTED)
+        self.assertEqual(suggestion.reviewed_by, self.staff)
+        self.assertIsNotNone(suggestion.reviewed_at)
+        self.assertEqual(row.text, "טקסט בסיס")
+        self.assertEqual(
+            row.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
+
+    def test_non_staff_cannot_approve_or_reject(self):
+        doc = self._create_hebrew_doc()
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="טקסט בסיס",
+        )
+        suggestion = self._create_suggestion(doc)
+        self.client.force_login(self.viewer)
+
+        self.assertEqual(
+            self.client.post(
+                self._approve_url(suggestion.id),
+                {"approved_text": "טקסט"},
+            ).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.post(self._reject_url(suggestion.id)).status_code,
+            403,
+        )
+
+    def test_already_reviewed_suggestion_cannot_be_approved_or_rejected_again(self):
+        doc = self._create_hebrew_doc()
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="טקסט בסיס",
+        )
+        suggestion = self._create_suggestion(
+            doc,
+            status=TranscriptionEditSuggestion.Status.APPROVED,
+        )
+
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self._approve_url(suggestion.id),
+            {"approved_text": "טקסט"},
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertContains(
+            self.client.get(self._detail_url(suggestion.id)),
+            "ההצעה כבר נבדקה.",
+        )
+
+        suggestion.status = TranscriptionEditSuggestion.Status.REJECTED
+        suggestion.save(update_fields=["status"])
+        resp = self.client.post(self._reject_url(suggestion.id))
+        self.assertEqual(resp.status_code, 302)
+
+    def test_empty_approved_text_rejected(self):
+        doc = self._create_hebrew_doc()
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="טקסט בסיס",
+        )
+        suggestion = self._create_suggestion(doc)
+
+        with self.assertRaises(TranscriptionSuggestionReviewError):
+            approve_suggestion(
+                suggestion.id,
+                approved_text="   ",
+                reviewer=self.staff,
+            )
+
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self._approve_url(suggestion.id),
+            {"approved_text": "   "},
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertContains(
+            self.client.get(self._detail_url(suggestion.id)),
+            "יש להזין טקסט מאושר.",
+        )
+
+    def test_hebrew_approval_targets_hebrew_text_when_displayed(self):
+        doc = self._create_hebrew_doc()
+        hebrew_row = self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="עברית",
+        )
+        source_row = self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="מקור",
+            engine="engine-b",
+        )
+        suggestion = self._create_suggestion(
+            doc,
+            current_text_snapshot="עברית",
+            suggested_text="עברית מתוקנת",
+        )
+
+        approve_suggestion(
+            suggestion.id,
+            approved_text="עברית מאושרת",
+            reviewer=self.staff,
+        )
+
+        hebrew_row.refresh_from_db()
+        source_row.refresh_from_db()
+        self.assertEqual(hebrew_row.text, "עברית מאושרת")
+        self.assertEqual(source_row.text, "מקור")
+        self.assertEqual(
+            resolve_displayed_transcription_result(doc),
+            hebrew_row,
+        )
+
+    def test_non_hebrew_approval_targets_source_text_when_displayed(self):
+        doc = self._create_english_doc()
+        source_row = self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="Hello",
+            engine="engine-a",
+        )
+        hebrew_row = self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="שלום",
+            engine="engine-a",
+        )
+        suggestion = self._create_suggestion(
+            doc,
+            current_text_snapshot="Hello",
+            suggested_text="Hello fixed",
+        )
+
+        approve_suggestion(
+            suggestion.id,
+            approved_text="Hello approved",
+            reviewer=self.staff,
+        )
+
+        source_row.refresh_from_db()
+        hebrew_row.refresh_from_db()
+        self.assertEqual(source_row.text, "Hello approved")
+        self.assertEqual(hebrew_row.text, "שלום")
+        self.assertEqual(
+            resolve_displayed_transcription_result(doc),
+            source_row,
+        )
+
+    def test_hebrew_dual_row_sync_updates_both_rows_for_same_engine(self):
+        doc = self._create_hebrew_doc()
+        hebrew_row = self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="עברית",
+            engine="engine-a",
+        )
+        source_row = self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="עברית",
+            engine="engine-a",
+        )
+        suggestion = self._create_suggestion(doc)
+
+        approve_suggestion(
+            suggestion.id,
+            approved_text="עברית מאושרת",
+            reviewer=self.staff,
+        )
+
+        hebrew_row.refresh_from_db()
+        source_row.refresh_from_db()
+        self.assertEqual(hebrew_row.text, "עברית מאושרת")
+        self.assertEqual(source_row.text, "עברית מאושרת")
+        self.assertEqual(
+            hebrew_row.verification_status,
+            DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        self.assertEqual(
+            source_row.verification_status,
+            DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+
+    def test_detail_shows_live_text_drift_warning(self):
+        doc = self._create_hebrew_doc()
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="טקסט מעודכן באתר",
+        )
+        suggestion = self._create_suggestion(
+            doc,
+            current_text_snapshot="טקסט ישן",
+            suggested_text="טקסט מתוקן",
+        )
+
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(suggestion.id))
+        self.assertContains(resp, "תעתוק נוכחי באתר")
+        self.assertContains(resp, "התעתוק באתר השתנה מאז שליחת ההצעה.")
+        self.assertContains(resp, "טקסט מעודכן באתר")
+
+    def test_document_detail_shows_approved_text_after_approval(self):
+        doc = self._create_hebrew_doc()
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="טקסט בסיס",
+        )
+        suggestion = self._create_suggestion(doc)
+
+        approve_suggestion(
+            suggestion.id,
+            approved_text="טקסט שמוצג באתר",
+            reviewer=self.staff,
+        )
+
+        resp = self.client.get(
+            reverse("documents-detail-page", kwargs={"doc_id": doc.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "טקסט שמוצג באתר")
+
+    def test_get_displayed_transcription_text_reflects_approved_text(self):
+        doc = self._create_hebrew_doc()
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="טקסט בסיס",
+        )
+        suggestion = self._create_suggestion(doc)
+
+        approve_suggestion(
+            suggestion.id,
+            approved_text="טקסט מאושר",
+            reviewer=self.staff,
+        )
+
+        self.assertEqual(get_displayed_transcription_text(doc), "טקסט מאושר")
+
+    def test_reviewed_suggestion_detail_is_read_only(self):
+        doc = self._create_hebrew_doc()
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="טקסט בסיס",
+        )
+        suggestion = self._create_suggestion(doc)
+        approve_suggestion(
+            suggestion.id,
+            approved_text="טקסט מאושר",
+            reviewer=self.staff,
+        )
+
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(suggestion.id))
+        self.assertContains(resp, "טקסט מאושר")
+        self.assertNotContains(resp, "אישור גרסה זו")
+        self.assertNotContains(resp, "דחיית ההצעה")
+
+    def test_reject_via_service(self):
+        doc = self._create_hebrew_doc()
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="טקסט בסיס",
+        )
+        suggestion = self._create_suggestion(doc)
+
+        reject_suggestion(suggestion.id, reviewer=self.staff)
+
+        suggestion.refresh_from_db()
+        self.assertEqual(suggestion.status, TranscriptionEditSuggestion.Status.REJECTED)
+        self.assertEqual(suggestion.reviewed_by, self.staff)
