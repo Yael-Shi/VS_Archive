@@ -1,5 +1,6 @@
 import uuid
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 
@@ -468,6 +469,54 @@ class ProcessingMetric(models.Model):
         return (
             f"ProcessingMetric(doc={self.document_id}, stage={self.stage}, "
             f"name={self.name}, status={self.status})"
+        )
+
+
+class TranscriptionEditSuggestion(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        APPROVED = "APPROVED", "Approved"
+        REJECTED = "REJECTED", "Rejected"
+
+    document = models.ForeignKey(
+        Document,
+        on_delete=models.CASCADE,
+        related_name="transcription_edit_suggestions",
+    )
+    current_text_snapshot = models.TextField()
+    suggested_text = models.TextField()
+    submitter_name = models.CharField(max_length=255)
+    submitter_email = models.EmailField(blank=True, default="")
+    submitter_note = models.TextField(blank=True, default="")
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_transcription_edit_suggestions",
+    )
+    submitter_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="submitted_transcription_edit_suggestions",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return (
+            f"TranscriptionEditSuggestion(id={self.id}, document_id={self.document_id}, "
+            f"status={self.status})"
         )
 
 
