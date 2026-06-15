@@ -204,9 +204,11 @@ def get_text_presentation_for_document(doc: Document) -> TextPresentation:
     )
 
 
-def get_displayed_transcription_text(doc: Document) -> str:
+def resolve_displayed_transcription_result(
+    doc: Document,
+) -> Optional[DocumentTextResult]:
     """
-    Plain text shown as the primary OCR transcription on the document detail page.
+    DocumentTextResult row backing get_displayed_transcription_text().
 
     Hebrew documents prefer displayable HEBREW_TEXT, then SOURCE_TEXT.
     Non-Hebrew documents prefer SOURCE_TEXT, then HEBREW_TEXT.
@@ -214,16 +216,23 @@ def get_displayed_transcription_text(doc: Document) -> str:
     if _is_hebrew_language(doc):
         hebrew_obj = _latest_displayable(doc, "HEBREW_TEXT")
         if hebrew_obj:
-            return hebrew_obj.text or ""
-        source_obj = _latest_displayable(doc, "SOURCE_TEXT")
-        if source_obj:
-            return source_obj.text or ""
-        return ""
+            return hebrew_obj
+        return _latest_displayable(doc, "SOURCE_TEXT")
 
     source_obj = _latest_displayable(doc, "SOURCE_TEXT")
     if source_obj:
-        return source_obj.text or ""
-    hebrew_obj = _latest_displayable(doc, "HEBREW_TEXT")
-    if hebrew_obj:
-        return hebrew_obj.text or ""
-    return ""
+        return source_obj
+    return _latest_displayable(doc, "HEBREW_TEXT")
+
+
+def get_displayed_transcription_text(doc: Document) -> str:
+    """
+    Plain text shown as the primary OCR transcription on the document detail page.
+
+    Hebrew documents prefer displayable HEBREW_TEXT, then SOURCE_TEXT.
+    Non-Hebrew documents prefer SOURCE_TEXT, then HEBREW_TEXT.
+    """
+    row = resolve_displayed_transcription_result(doc)
+    if row is None:
+        return ""
+    return row.text or ""

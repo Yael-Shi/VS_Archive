@@ -18,6 +18,15 @@
       </div>
     </header>
 
+    {% if messages %}
+      <div class="spacer"></div>
+      {% for message in messages %}
+        <div class="alert{% if message.tags == 'error' %} alert-danger{% endif %}">
+          {{ message }}
+        </div>
+      {% endfor %}
+    {% endif %}
+
     <div class="spacer"></div>
 
     <div class="card card--pad-lg">
@@ -35,6 +44,17 @@
       <div class="spacer-sm"></div>
       <div><strong>תאריך שליחה:</strong> {{ suggestion.created_at|date:"Y-m-d H:i" }}</div>
       <div><strong>סטטוס:</strong> {{ status_label }}</div>
+      {% if suggestion.reviewed_at %}
+        <div><strong>תאריך בדיקה:</strong> {{ suggestion.reviewed_at|date:"Y-m-d H:i" }}</div>
+      {% endif %}
+      {% if suggestion.reviewed_by %}
+        <div><strong>נבדק/ה על ידי:</strong> {{ suggestion.reviewed_by.username }}</div>
+      {% endif %}
+      {% if suggestion.status == "APPROVED" and suggestion.approved_text %}
+        <div class="spacer-sm"></div>
+        <div><strong>טקסט שאושר:</strong></div>
+        <pre class="transcription-suggestion-text">{{ suggestion.approved_text }}</pre>
+      {% endif %}
     </div>
 
     <div class="spacer"></div>
@@ -94,6 +114,51 @@
         <div class="section-title">הבדלים מודגשים</div>
         <div class="spacer-sm"></div>
         <pre class="transcription-diff transcription-suggestion-diff">{{ diff_html|safe }}</pre>
+
+        <div class="spacer"></div>
+
+        <div class="section-title">תעתוק נוכחי באתר</div>
+        <div class="spacer-sm"></div>
+        {% if live_text_changed %}
+          <div class="alert alert-danger">
+            התעתוק באתר השתנה מאז שליחת ההצעה.
+          </div>
+          <div class="spacer-sm"></div>
+        {% endif %}
+        <pre class="transcription-suggestion-text">{{ live_text }}</pre>
+
+        {% if suggestion.status == "PENDING" %}
+          <div class="spacer"></div>
+
+          <div class="section-title">אישור סופי</div>
+          <div class="spacer-sm"></div>
+          <form
+            method="post"
+            action="{% url 'transcription-suggestion-approve' suggestion_id=suggestion.id %}"
+            class="transcription-suggestion-approve-form"
+          >
+            {% csrf_token %}
+            <textarea
+              class="review-textarea transcription-suggestion-approved-text"
+              name="approved_text"
+              rows="12"
+            >{{ suggestion.suggested_text }}</textarea>
+            <div class="review-zone-actions review-zone-actions--spaced">
+              <button class="btn btn-primary" type="submit">אישור גרסה זו</button>
+            </div>
+          </form>
+
+          <div class="spacer"></div>
+
+          <form
+            method="post"
+            action="{% url 'transcription-suggestion-reject' suggestion_id=suggestion.id %}"
+            class="inline-form"
+          >
+            {% csrf_token %}
+            <button class="btn" type="submit">דחיית ההצעה</button>
+          </form>
+        {% endif %}
       </div>
     </div>
   </div>
