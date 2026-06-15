@@ -7962,9 +7962,13 @@ class UploadPageTemplateTests(TestCase):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "לבחור כמה תמונות יחד")
-        self.assertContains(resp, "מסמך אחד מרובה עמודים לפי סדר הבחירה")
+        self.assertContains(resp, "2–30 תמונות / עמודים / חלקים = מסמך אחד לפי סדר הבחירה")
         self.assertContains(resp, "ריבוי קבצים תומך בתמונות בלבד")
         self.assertContains(resp, "PDF יש להעלות כקובץ יחיד")
+        self.assertContains(resp, "מומלץ להעלות כמה תמונות חלקיות לפי סדר הקריאה")
+        self.assertContains(resp, "סדר ההעלאה קובע את סדר התעתוק")
+        self.assertContains(resp, "מהטור הימני לשמאלי")
+        self.assertContains(resp, "המערכת תתעתק כל תמונה לפי הסדר ותחבר את הטקסט")
 
     def test_upload_page_still_renders_key_metadata_fields(self):
         resp = self._get_page()
