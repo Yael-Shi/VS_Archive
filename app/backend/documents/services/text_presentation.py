@@ -202,3 +202,28 @@ def get_text_presentation_for_document(doc: Document) -> TextPresentation:
         show_source=show_source,
         show_hebrew=show_hebrew,
     )
+
+
+def get_displayed_transcription_text(doc: Document) -> str:
+    """
+    Plain text shown as the primary OCR transcription on the document detail page.
+
+    Hebrew documents prefer displayable HEBREW_TEXT, then SOURCE_TEXT.
+    Non-Hebrew documents prefer SOURCE_TEXT, then HEBREW_TEXT.
+    """
+    if _is_hebrew_language(doc):
+        hebrew_obj = _latest_displayable(doc, "HEBREW_TEXT")
+        if hebrew_obj:
+            return hebrew_obj.text or ""
+        source_obj = _latest_displayable(doc, "SOURCE_TEXT")
+        if source_obj:
+            return source_obj.text or ""
+        return ""
+
+    source_obj = _latest_displayable(doc, "SOURCE_TEXT")
+    if source_obj:
+        return source_obj.text or ""
+    hebrew_obj = _latest_displayable(doc, "HEBREW_TEXT")
+    if hebrew_obj:
+        return hebrew_obj.text or ""
+    return ""

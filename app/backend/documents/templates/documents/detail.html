@@ -124,6 +124,11 @@
         {% if text_presentation.show_hebrew %}
           {% include "documents/partials/detail_text_block.html" with meta=text_presentation.hebrew_meta block=text_presentation.hebrew is_admin=is_admin %}
         {% endif %}
+
+        {% if displayed_transcription_text %}
+          <div class="spacer"></div>
+          <a class="btn" href="{% url 'transcription-suggestion-new' doc_id=doc.id %}">הצע/י תיקון לתעתוק</a>
+        {% endif %}
       </div>
 
       {# ===== Right: File viewer + admin metadata ===== #}

@@ -38,6 +38,16 @@ urlpatterns = [
         views.document_ocr_reprocess,
         name="documents-ocr-reprocess",
     ),
+    path(
+        "ui/documents/<int:doc_id>/transcription-suggestions/new/",
+        views.transcription_suggestion_form,
+        name="transcription-suggestion-new",
+    ),
+    path(
+        "ui/documents/<int:doc_id>/transcription-suggestions/thanks/",
+        views.transcription_suggestion_thanks,
+        name="transcription-suggestion-thanks",
+    ),
     path("ui/upload/", views.upload_page, name="upload-page"),
     path("ui/admin/backlog/", views.admin_backlog_page, name="admin-backlog-page"),
     path("ui/admin/review/", views.review_backlog_page, name="review-backlog-page"),
@@ -60,5 +70,15 @@ urlpatterns = [
         "ui/admin/review/text-results/<int:result_id>/text/",
         views.review_text_result_update_text,
         name="review-text-result-update-text",
+    ),
+    path(
+        "ui/admin/transcription-suggestions/",
+        views.transcription_suggestion_backlog_page,
+        name="transcription-suggestion-backlog",
+    ),
+    path(
+        "ui/admin/transcription-suggestions/<int:suggestion_id>/",
+        views.transcription_suggestion_detail_page,
+        name="transcription-suggestion-detail",
     ),
 ]

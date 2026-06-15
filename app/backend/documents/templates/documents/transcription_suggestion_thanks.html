@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - תודה · {{ doc.archive_item.title }}{% endblock %}
+
+{% block content %}
+  <div class="card card--pad-lg card--narrow">
+    <h1 class="page-title">תודה</h1>
+    <p class="page-lead">תודה, הצעת התיקון נשלחה לבדיקה.</p>
+    <div class="spacer"></div>
+    <a class="btn btn-primary" href="{% url 'documents-detail-page' doc_id=doc.id %}">חזרה למסמך</a>
+  </div>
+{% endblock %}

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - הצעות תיקון לתעתוקים{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <h1 class="page-title">הצעות תיקון לתעתוקים</h1>
+    <p class="page-subtitle">הצעות תיקון שנשלחו על ידי צופים למסמכי OCR. כל שורה היא הצעה אחת.</p>
+
+    <div class="page-toolbar">
+      <a class="btn" href="/api/ui/documents/">חזרה למסמכים</a>
+      <a class="btn" href="/api/ui/admin/review/">רשימת בקרת תמלול</a>
+      <a class="btn" href="/api/ui/admin/backlog/">רשימת השלמת פרטים</a>
+    </div>
+
+    <div class="spacer"></div>
+
+    {% if suggestions %}
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>מסמך</th>
+              <th>שם המציע/ה</th>
+              <th>דוא״ל</th>
+              <th>הערה</th>
+              <th>תאריך</th>
+              <th>סטטוס</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in suggestions %}
+              <tr>
+                <td>
+                  {% if row.document.archive_item %}
+                    <a href="{% url 'documents-detail-page' doc_id=row.document.id %}">
+                      {{ row.document.archive_item.title }}
+                    </a>
+                  {% else %}
+                    <span class="muted">מסמך #{{ row.document.id }}</span>
+                  {% endif %}
+                </td>
+                <td>{{ row.submitter_name }}</td>
+                <td>
+                  {% if row.submitter_email %}
+                    {{ row.submitter_email }}
+                  {% else %}
+                    <span class="muted">—</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if row.submitter_note %}
+                    <span class="badge">יש הערה</span>
+                  {% else %}
+                    <span class="muted">—</span>
+                  {% endif %}
+                </td>
+                <td>{{ row.created_at|date:"Y-m-d H:i" }}</td>
+                <td>
+                  {% if row.status == "PENDING" %}
+                    <span class="badge badge-warn">ממתין לבדיקה</span>
+                  {% elif row.status == "APPROVED" %}
+                    <span class="badge badge-ok">אושר</span>
+                  {% elif row.status == "REJECTED" %}
+                    <span class="badge badge-bad">נדחה</span>
+                  {% else %}
+                    <span class="badge">{{ row.status }}</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <a class="btn" href="{% url 'transcription-suggestion-detail' suggestion_id=row.id %}">פרטים</a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">אין הצעות תיקון לתעתוקים כרגע.</p>
+    {% endif %}
+  </div>
+{% endblock %}

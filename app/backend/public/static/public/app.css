@@ -911,6 +911,7 @@ textarea {
 
 .nav-staff-links {
   margin-inline-start: 0;
+  flex-wrap: wrap;
 }
 
 /* Technical / debug — deliberately subdued */
@@ -1834,6 +1835,23 @@ pre {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+.transcription-suggestion-text,
+.transcription-suggestion-note,
+.transcription-suggestion-diff {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.transcription-diff-del {
+  background: var(--danger-soft);
+  text-decoration: line-through;
+}
+
+.transcription-diff-ins {
+  background: var(--ok-soft);
+  text-decoration: none;
 }
 
 /* Responsive — public archive list & browse (item list partial) */

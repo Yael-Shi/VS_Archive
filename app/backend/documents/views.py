@@ -9,7 +9,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.db import transaction
-from django.db.models import BooleanField, Case, Exists, OuterRef, Q, Value, When
+from django.db.models import BooleanField, Case, Exists, IntegerField, OuterRef, Q, Value, When
 from django.db.models.functions import Length, Trim
 from django.http import Http404, HttpResponseBadRequest, JsonResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
@@ -27,6 +27,7 @@ from .models import (
     DocumentTextResult,
     PhotoContent,
     Tag,
+    TranscriptionEditSuggestion,
 )
 from documents.services.archive_catalog_metadata_validation import (
     parse_ocr_catalog_metadata_form,
@@ -123,7 +124,20 @@ from documents.services.ocr_reprocess import (
     is_ocr_reprocess_ui_eligible,
 )
 from documents.services.sqs import send_process_document_message
-from documents.services.text_presentation import get_text_presentation_for_document
+from documents.services.text_presentation import (
+    get_displayed_transcription_text,
+    get_text_presentation_for_document,
+)
+from documents.services.transcription_edit_suggestions import (
+    IDENTICAL_TEXT_ERROR,
+    NAME_REQUIRED_ERROR,
+    SUGGESTED_TEXT_REQUIRED_ERROR,
+    is_honeypot_triggered,
+    normalize_transcription_text,
+    render_transcription_diff_html,
+    suggestion_status_label,
+    texts_are_equivalent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1658,6 +1672,7 @@ def document_detail_page(request, doc_id: int):
         content_url = create_presigned_get(bucket=bucket, key=doc.file_s3_key, expires_in=3600)
 
     text_presentation = get_text_presentation_for_document(doc)
+    displayed_transcription_text = get_displayed_transcription_text(doc)
 
     context = {
         "doc": doc,
@@ -1666,6 +1681,7 @@ def document_detail_page(request, doc_id: int):
         "source_preview_unavailable_count": source_preview.non_uploaded_count,
         "admin_meta": admin_meta,
         "text_presentation": text_presentation,
+        "displayed_transcription_text": displayed_transcription_text,
         "is_admin": is_admin,
         "show_ocr_reprocess_action": is_admin and is_ocr_reprocess_ui_eligible(doc),
     }
@@ -1681,6 +1697,229 @@ def document_detail_page(request, doc_id: int):
     )
 
     return render(request, "documents/detail.html", context)
+
+
+def _suggestion_form_queryset():
+    return Document.objects.select_related("archive_item").prefetch_related(
+        "text_results",
+        "source_files",
+    )
+
+
+def _load_transcription_suggestion_document(request, doc_id: int) -> tuple[Document, str]:
+    try:
+        doc = get_viewable_document(
+            request.user,
+            doc_id,
+            queryset=_suggestion_form_queryset(),
+        )
+    except Http404:
+        raise
+
+    archive_item = doc.archive_item
+    if (
+        archive_item is None
+        or archive_item.item_type != ArchiveItem.ItemType.OCR_DOCUMENT
+    ):
+        raise Http404()
+
+    displayed_text = get_displayed_transcription_text(doc)
+    if not normalize_transcription_text(displayed_text):
+        raise Http404()
+
+    return doc, displayed_text
+
+
+def _transcription_suggestion_source_context(doc: Document) -> dict:
+    bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
+    source_preview = build_source_preview(doc, bucket)
+    content_url = None
+    if not is_multi_image_document(doc) and bucket and doc.file_s3_key:
+        content_url = create_presigned_get(bucket=bucket, key=doc.file_s3_key, expires_in=3600)
+    return {
+        "content_url": content_url,
+        "source_preview_items": source_preview.items,
+        "source_preview_unavailable_count": source_preview.non_uploaded_count,
+    }
+
+
+def _empty_suggestion_field_values() -> dict[str, str]:
+    return {
+        "submitter_name": "",
+        "submitter_email": "",
+        "submitter_note": "",
+        "suggested_text": "",
+    }
+
+
+def transcription_suggestion_form(request, doc_id: int):
+    try:
+        doc, displayed_text = _load_transcription_suggestion_document(request, doc_id)
+    except Http404:
+        raise
+
+    form_errors: list[str] = []
+    field_values = _empty_suggestion_field_values()
+    field_values["suggested_text"] = displayed_text
+
+    if request.method == "POST":
+        field_values = {
+            "submitter_name": (request.POST.get("submitter_name") or "").strip(),
+            "submitter_email": (request.POST.get("submitter_email") or "").strip(),
+            "submitter_note": (request.POST.get("submitter_note") or "").strip(),
+            "suggested_text": request.POST.get("suggested_text") or "",
+        }
+
+        if is_honeypot_triggered(request.POST):
+            return redirect(
+                reverse("transcription-suggestion-thanks", kwargs={"doc_id": doc.id})
+            )
+
+        if not field_values["submitter_name"]:
+            form_errors.append(NAME_REQUIRED_ERROR)
+        if not normalize_transcription_text(field_values["suggested_text"]):
+            form_errors.append(SUGGESTED_TEXT_REQUIRED_ERROR)
+        elif texts_are_equivalent(displayed_text, field_values["suggested_text"]):
+            form_errors.append(IDENTICAL_TEXT_ERROR)
+
+        if not form_errors:
+            submitter_user = (
+                request.user
+                if getattr(request.user, "is_authenticated", False)
+                else None
+            )
+            TranscriptionEditSuggestion.objects.create(
+                document=doc,
+                current_text_snapshot=displayed_text,
+                suggested_text=field_values["suggested_text"],
+                submitter_name=field_values["submitter_name"],
+                submitter_email=field_values["submitter_email"],
+                submitter_note=field_values["submitter_note"],
+                submitter_user=submitter_user,
+            )
+            return redirect(
+                reverse("transcription-suggestion-thanks", kwargs={"doc_id": doc.id})
+            )
+
+    context = {
+        "doc": doc,
+        "displayed_text": displayed_text,
+        "form_errors": form_errors,
+        "field_values": field_values,
+        **_transcription_suggestion_source_context(doc),
+    }
+    return render(request, "documents/transcription_suggestion_form.html", context)
+
+
+def transcription_suggestion_thanks(request, doc_id: int):
+    try:
+        doc = get_viewable_document(
+            request.user,
+            doc_id,
+            queryset=Document.objects.select_related("archive_item"),
+        )
+    except Http404:
+        raise
+
+    archive_item = doc.archive_item
+    if (
+        archive_item is None
+        or archive_item.item_type != ArchiveItem.ItemType.OCR_DOCUMENT
+    ):
+        raise Http404()
+
+    return render(
+        request,
+        "documents/transcription_suggestion_thanks.html",
+        {"doc": doc},
+    )
+
+
+@login_required
+def transcription_suggestion_backlog_page(request):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    suggestions = list(
+        TranscriptionEditSuggestion.objects.select_related(
+            "document",
+            "document__archive_item",
+            "submitter_user",
+            "reviewed_by",
+        )
+        .annotate(
+            pending_first=Case(
+                When(
+                    status=TranscriptionEditSuggestion.Status.PENDING,
+                    then=Value(0),
+                ),
+                default=Value(1),
+                output_field=IntegerField(),
+            )
+        )
+        .order_by("pending_first", "-created_at")
+    )
+
+    logger.info(
+        "transcription_suggestion_backlog_page user=%s returned=%s",
+        getattr(request.user, "username", None),
+        len(suggestions),
+    )
+    return render(
+        request,
+        "documents/transcription_suggestion_backlog.html",
+        {"suggestions": suggestions},
+    )
+
+
+@login_required
+def transcription_suggestion_detail_page(request, suggestion_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    suggestion = get_object_or_404(
+        TranscriptionEditSuggestion.objects.select_related(
+            "document",
+            "document__archive_item",
+            "submitter_user",
+            "reviewed_by",
+        ).prefetch_related("document__source_files"),
+        id=suggestion_id,
+    )
+    doc = suggestion.document
+
+    bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
+    source_preview = build_source_preview(doc, bucket)
+    content_url = None
+    if not is_multi_image_document(doc) and bucket and doc.file_s3_key:
+        content_url = create_presigned_get(bucket=bucket, key=doc.file_s3_key, expires_in=3600)
+
+    diff_html = render_transcription_diff_html(
+        suggestion.current_text_snapshot,
+        suggestion.suggested_text,
+    )
+
+    logger.info(
+        "transcription_suggestion_detail_page user=%s suggestion_id=%s document_id=%s",
+        getattr(request.user, "username", None),
+        suggestion.id,
+        doc.id,
+    )
+    return render(
+        request,
+        "documents/transcription_suggestion_detail.html",
+        {
+            "suggestion": suggestion,
+            "doc": doc,
+            "content_url": content_url,
+            "source_preview_items": source_preview.items,
+            "source_preview_unavailable_count": source_preview.non_uploaded_count,
+            "diff_html": diff_html,
+            "status_label": suggestion_status_label(suggestion.status),
+        },
+    )
 
 
 @login_required
