@@ -55,6 +55,36 @@ _HANDWRITTEN_LATIN_PROMPT = (
     '{"text": "...", "has_unclear": false, "unclear_count": 0}\n'
 )
 
+_HEBREW_TRANSLATION_PROMPT = (
+    "You are a careful Hebrew translator for historical archival documents.\n"
+    "\n"
+    "TASK:\n"
+    "Translate the source transcription into Hebrew.\n"
+    "\n"
+    "RULES:\n"
+    "\n"
+    "* Translate the source text faithfully into Hebrew.\n"
+    "* Translate closely to the source wording, syntax, structure, and level of clarity, even if the Hebrew is somewhat awkward.\n"
+    "* When the source sentence is awkward, incomplete, or grammatically broken, keep the Hebrew sentence similarly awkward or incomplete rather than repairing it.\n"
+    "* Do not summarize, shorten, expand, explain, or add historical context.\n"
+    "* Do not polish the Hebrew into elegant modern prose.\n"
+    "* Preserve all names, dates, places, institutions, numbers, lists, headings, paragraph structure, and uncertainty markers such as [?] and [UNCLEAR].\n"
+    "* Do not silently fix factual mistakes in the source. Translate what the source says.\n"
+    "* If the source contains spelling mistakes, grammar mistakes, awkward syntax, or non-standard wording, keep the Hebrew close to the source and preserve the awkwardness where possible.\n"
+    "* Do not invent artificial Hebrew spelling mistakes just to imitate source spelling mistakes.\n"
+    "* If an important source error or odd form cannot be reflected naturally in Hebrew, add [כך במקור] only when necessary.\n"
+    "* Preserve original line breaks and list structure as much as practical.\n"
+    "* If the source includes English and French, translate both into Hebrew.\n"
+    "* Keep the output in Hebrew only, except for names, abbreviations, or unclear source tokens that should remain as written.\n"
+    "* Output only a valid JSON object. Do not output markdown or comments.\n"
+    "\n"
+    "OUTPUT FORMAT:\n"
+    '{"text": "...", "has_unclear": false, "unclear_count": 0}\n'
+    "\n"
+    "SOURCE TEXT:\n"
+    "{{source_text}}\n"
+)
+
 _PRINTED_TEXT_PROMPT = (
     "You are an OCR assistant for printed historical archival documents.\n"
     "TASK: Transcribe the meaningful printed text from the image as faithfully as possible.\n"
@@ -222,4 +252,70 @@ def transcribe_pages_with_gemini(
         needs_review=any_review,
         engine_name=model_name,
         review_reasons=engine_reasons,
+    )
+
+
+def translate_text_to_hebrew_with_gemini(
+    source_text: str,
+    language_hint: Optional[str],
+    *,
+    model_name: str = DEFAULT_GEMINI_MODEL,
+    min_text_length: int = 20,
+    temperature: float = DEFAULT_GEMINI_TEMPERATURE,
+    top_k: int = DEFAULT_GEMINI_TOP_K,
+    top_p: float = DEFAULT_GEMINI_TOP_P,
+    max_output_tokens: Optional[int] = 8192,
+) -> GeminiResult:
+    stripped_source = (source_text or "").strip()
+    if not stripped_source:
+        raise GeminiError("Cannot translate empty source text")
+
+    prompt = _HEBREW_TRANSLATION_PROMPT.replace("{{source_text}}", stripped_source)
+    if language_hint:
+        prompt += f"\nSource language hint: {language_hint}."
+
+    api_key = _get_api_key()
+    client = _create_client(api_key)
+
+    success = False
+    attempts = 0
+    data: Dict[str, Any] = {}
+
+    while not success and attempts < 2:
+        try:
+            resp = client.models.generate_content(
+                model=model_name,
+                contents=[types.Part.from_text(text=prompt)],
+                config=types.GenerateContentConfig(
+                    temperature=temperature,
+                    top_k=top_k,
+                    top_p=top_p,
+                    max_output_tokens=max_output_tokens,
+                ),
+            )
+            data = _parse_page_json_strict(resp.text, page_index=0)
+            success = True
+        except GeminiError:
+            raise
+        except Exception as e:
+            err_str = str(e).upper()
+            if any(x in err_str for x in ["429", "RESOURCE_EXHAUSTED", "QUOTA"]):
+                if "LIMIT: 0" in err_str:
+                    raise GeminiError(f"QUOTA_EXHAUSTED: {model_name}")
+                time.sleep(5)
+                attempts += 1
+            else:
+                raise GeminiError(f"Gemini API Error: {e}")
+
+    if not success:
+        raise GeminiError(f"QUOTA_EXHAUSTED: {model_name} after retries")
+
+    text = data["text"].strip()
+    needs_review = len(text) < min_text_length or bool(data.get("has_unclear"))
+
+    return GeminiResult(
+        text=text,
+        needs_review=needs_review,
+        engine_name=model_name,
+        review_reasons=[],
     )

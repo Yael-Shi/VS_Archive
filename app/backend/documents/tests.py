@@ -26,6 +26,7 @@ from documents.services.gemini_engine import (
     GeminiError,
     GeminiResult,
     _HANDWRITTEN_LATIN_PROMPT,
+    _HEBREW_TRANSLATION_PROMPT,
     _PRINTED_TEXT_PROMPT,
 )
 from documents.services.htr_adapters.base import (
@@ -2069,7 +2070,16 @@ class RunWorkerBehaviorTests(TestCase):
             gemini_temperature=0.2,
             gemini_top_k=40,
             gemini_top_p=0.95,
+            gemini_max_output_tokens=8192,
         )
+        self._translation_patcher = patch(
+            "documents.management.commands.run_worker.translate_text_to_hebrew_with_gemini",
+            return_value=GeminiResult(
+                text="translated hebrew text long enough",
+                engine_name="gemini-2.0-flash",
+            ),
+        )
+        self.mock_translate = self._translation_patcher.start()
         self.doc = create_ocr_document(
             title="Doc",
             doc_type=Document.DocType.PDF,
@@ -2079,6 +2089,9 @@ class RunWorkerBehaviorTests(TestCase):
             file_s3_key="doc.pdf",
             mime_type="application/pdf",
         )
+
+    def tearDown(self):
+        self._translation_patcher.stop()
 
     def _message(self) -> dict:
         return {
@@ -2090,7 +2103,7 @@ class RunWorkerBehaviorTests(TestCase):
     @patch("documents.management.commands.run_worker.get_object_bytes")
     @patch("documents.management.commands.run_worker.extract_pages")
     @patch("documents.management.commands.run_worker.transcribe_pages")
-    def test_gemini_success_persists_needs_review_policy_non_hebrew_stays_partial(
+    def test_non_hebrew_success_persists_source_text_and_generated_hebrew_text(
         self,
         mock_transcribe,
         mock_extract_pages,
@@ -2134,6 +2147,75 @@ class RunWorkerBehaviorTests(TestCase):
             DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
         )
         self.assertIn("worker_env", call_kw)
+        self.mock_translate.assert_called_once_with(
+            "recognized text",
+            self.doc.language,
+            model_name="gemini-2.0-flash",
+            min_text_length=5,
+            temperature=0.2,
+            top_k=40,
+            top_p=0.95,
+            max_output_tokens=8192,
+        )
+        hebrew = DocumentTextResult.objects.get(
+            document=self.doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="gemini-2.0-flash",
+        )
+        self.assertEqual(hebrew.status, DocumentTextResult.Status.NEEDS_REVIEW)
+        self.assertEqual(
+            hebrew.verification_status, DocumentTextResult.VerificationStatus.UNVERIFIED
+        )
+        self.assertEqual(hebrew.text, "translated hebrew text long enough")
+        self.assertEqual(hebrew.engine_key, DocumentTextResult.OcrEngineKey.GEMINI)
+        self.assertEqual(
+            hebrew.prompt_variant, DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION
+        )
+        self.doc.refresh_from_db()
+        self.assertEqual(self.doc.processing_state_user, Document.ProcessingState.READY)
+
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    def test_non_hebrew_translation_failure_preserves_source_text_and_failed_hebrew_text(
+        self,
+        mock_transcribe,
+        mock_extract_pages,
+        mock_get_object_bytes,
+    ):
+        mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
+        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_transcribe.return_value = HtrResult(
+            text="recognized text",
+            needs_review=False,
+            engine_name="gemini-2.0-flash",
+            review_reasons=[],
+        )
+        self.mock_translate.side_effect = GeminiError("Gemini API Error: timeout")
+
+        self.assertTrue(self.command._process_message(self._message()))
+
+        source = DocumentTextResult.objects.get(
+            document=self.doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="gemini-2.0-flash",
+        )
+        self.assertEqual(source.status, DocumentTextResult.Status.NEEDS_REVIEW)
+        self.assertEqual(source.text, "recognized text")
+        self.assertIsNone(source.error_code)
+
+        hebrew = DocumentTextResult.objects.get(
+            document=self.doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="gemini-2.0-flash",
+        )
+        self.assertEqual(hebrew.status, DocumentTextResult.Status.FAILED)
+        self.assertIsNone(hebrew.text)
+        self.assertEqual(hebrew.error_code, "HEBREW_TRANSLATION_FAILED")
+        self.assertIn("timeout", hebrew.error_details or "")
+        self.assertEqual(
+            hebrew.prompt_variant, DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION
+        )
         self.doc.refresh_from_db()
         self.assertEqual(self.doc.processing_state_user, Document.ProcessingState.PARTIAL)
 
@@ -2260,6 +2342,7 @@ class RunWorkerBehaviorTests(TestCase):
             "Body": json.dumps({"type": "PROCESS_DOCUMENT", "document_id": he_doc.id})
         }
         self.assertTrue(self.command._process_message(msg))
+        self.mock_translate.assert_not_called()
 
         he_doc.refresh_from_db()
         self.assertEqual(he_doc.processing_state_user, Document.ProcessingState.READY)
@@ -2638,6 +2721,17 @@ class MultiImageWorkerTests(TestCase):
             gemini_top_p=0.95,
             gemini_max_output_tokens=8192,
         )
+        self._translation_patcher = patch(
+            "documents.management.commands.run_worker.translate_text_to_hebrew_with_gemini",
+            return_value=GeminiResult(
+                text="translated hebrew text long enough",
+                engine_name="gemini-2.0-flash",
+            ),
+        )
+        self.mock_translate = self._translation_patcher.start()
+
+    def tearDown(self):
+        self._translation_patcher.stop()
 
     def _make_doc(self, *, language, text_input_type, expected_count):
         return create_ocr_document(
@@ -2726,9 +2820,15 @@ class MultiImageWorkerTests(TestCase):
         )
         self.assertEqual(result.status, DocumentTextResult.Status.NEEDS_REVIEW)
         self.assertEqual(result.text, "combined text")
+        hebrew = DocumentTextResult.objects.get(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="gemini-2.0-flash",
+        )
+        self.assertEqual(hebrew.status, DocumentTextResult.Status.NEEDS_REVIEW)
+        self.assertEqual(hebrew.text, "translated hebrew text long enough")
         doc.refresh_from_db()
-        # Non-Hebrew: HEBREW_TEXT missing -> PARTIAL (intentional current policy).
-        self.assertEqual(doc.processing_state_user, Document.ProcessingState.PARTIAL)
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.READY)
 
     @patch("documents.management.commands.run_worker.get_object_bytes")
     @patch("documents.management.commands.run_worker.transcribe_pages")
@@ -6724,6 +6824,17 @@ class GeminiEnginePromptTests(SimpleTestCase):
         self.assertIn("Output only a valid JSON object", _HANDWRITTEN_LATIN_PROMPT)
         self.assertNotIn("printed historical archival documents", _HANDWRITTEN_LATIN_PROMPT)
         self.assertNotIn("Hebrew words", _HANDWRITTEN_LATIN_PROMPT)
+
+    def test_hebrew_translation_prompt_includes_archival_guardrails(self):
+        guardrails = (
+            "Translate the source text faithfully into Hebrew",
+            "Do not summarize, shorten, expand, explain, or add historical context",
+            "uncertainty markers such as [?] and [UNCLEAR]",
+            "keep the Hebrew sentence similarly awkward or incomplete",
+        )
+        for phrase in guardrails:
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, _HEBREW_TRANSLATION_PROMPT)
 
 
 class GeminiModelCandidatesTests(SimpleTestCase):
