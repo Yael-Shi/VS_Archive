@@ -25,7 +25,7 @@ from documents.services.transkribus_engine import PylaiaTranscriptionOutcome
 from documents.services.gemini_engine import (
     GeminiError,
     GeminiResult,
-    _HTR_EXPERT_PROMPT,
+    _HANDWRITTEN_LATIN_PROMPT,
     _PRINTED_TEXT_PROMPT,
 )
 from documents.services.htr_adapters.base import (
@@ -6712,10 +6712,18 @@ class GeminiEnginePromptTests(SimpleTestCase):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, _PRINTED_TEXT_PROMPT)
 
-    def test_handwritten_prompt_unchanged(self):
-        self.assertIn("expert paleographer and historian", _HTR_EXPERT_PROMPT)
-        self.assertIn("This is handwritten text", _HTR_EXPERT_PROMPT)
-        self.assertNotIn("Do NOT silently omit visible words", _HTR_EXPERT_PROMPT)
+    def test_handwritten_latin_prompt_preserves_archival_text(self):
+        self.assertIn("expert paleographer and historian", _HANDWRITTEN_LATIN_PROMPT)
+        self.assertIn("Latin script", _HANDWRITTEN_LATIN_PROMPT)
+        self.assertIn("typically English or French", _HANDWRITTEN_LATIN_PROMPT)
+        self.assertIn("Transcribe what is written", _HANDWRITTEN_LATIN_PROMPT)
+        self.assertIn(
+            "Do not correct spelling, grammar, capitalization, punctuation, or wording",
+            _HANDWRITTEN_LATIN_PROMPT,
+        )
+        self.assertIn("Output only a valid JSON object", _HANDWRITTEN_LATIN_PROMPT)
+        self.assertNotIn("printed historical archival documents", _HANDWRITTEN_LATIN_PROMPT)
+        self.assertNotIn("Hebrew words", _HANDWRITTEN_LATIN_PROMPT)
 
 
 class GeminiModelCandidatesTests(SimpleTestCase):

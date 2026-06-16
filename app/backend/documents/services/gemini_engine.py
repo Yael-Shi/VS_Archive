@@ -35,17 +35,23 @@ class GeminiResult:
     review_reasons: List[str] = field(default_factory=list)
 
 
-_HTR_EXPERT_PROMPT = (
+_HANDWRITTEN_LATIN_PROMPT = (
     "You are an expert paleographer and historian.\n"
-    "TASK: Transcribe the text from the image as accurately as possible.\n"
+    "TASK: Transcribe the handwritten text in the image as faithfully as possible.\n"
     "RULES:\n"
-    "- This is handwritten text. Use linguistic and historical context to decipher difficult words.\n"
-    "- If a word is partially legible, provide your best educated guess.\n"
-    "- If a word is completely illegible, output the token [UNCLEAR].\n"
-    "- Preserve line breaks and original structure.\n"
-    "- Do NOT summarize, explain, or fix grammar. Output ONLY the transcription.\n"
+    "- The text is in Latin script, typically English or French, and may include a mix of both.\n"
+    "- Transcribe what is written, not what the writer probably meant.\n"
+    "- Preserve wording, spelling, grammar, punctuation, capitalization, line breaks, dates, names, places, abbreviations, and unusual forms exactly as seen.\n"
+    "- Do not correct spelling, grammar, capitalization, punctuation, or wording.\n"
+    "- Do not modernize, normalize, smooth into clean prose, rewrite, summarize, translate, or explain.\n"
+    "- Preserve visible meaningful marks: hyphens, dashes, apostrophes, quotation marks, commas, periods, parentheses, slashes, page numbers, headings, insertions, crossings-out, marginal notes, and visible corrections.\n"
+    "- Do not add punctuation or capitalization that is not visible in the source.\n"
+    "- If a word is partly legible or uncertain, give your best reading and mark it inline with [?]. Use [?] readily for names, places, institutions, unusual words, and doubtful readings.\n"
+    "- If a word is completely illegible, use [UNCLEAR].\n"
+    "- Do not present doubtful readings as certain.\n"
+    "- Output only a valid JSON object. Do not output markdown or comments.\n"
     "\n"
-    "OUTPUT FORMAT (MUST be valid JSON):\n"
+    "OUTPUT FORMAT:\n"
     '{"text": "...", "has_unclear": false, "unclear_count": 0}\n'
 )
 
@@ -73,7 +79,7 @@ _PRINTED_TEXT_PROMPT = (
 )
 
 _PROMPT_BY_VARIANT = {
-    DocumentTextResult.OcrPromptVariant.HANDWRITTEN: _HTR_EXPERT_PROMPT,
+    DocumentTextResult.OcrPromptVariant.HANDWRITTEN: _HANDWRITTEN_LATIN_PROMPT,
     DocumentTextResult.OcrPromptVariant.PRINTED: _PRINTED_TEXT_PROMPT,
 }
 
