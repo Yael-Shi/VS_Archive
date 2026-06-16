@@ -8667,20 +8667,23 @@ class NavigationLabelTests(TestCase):
         self.assertNotContains(resp, "בקרת תעתוק למסמך זה")
         self.assertNotContains(resp, "עריכה טכנית (Django Admin)")
 
-    def test_review_detail_has_back_to_review_list_link(self):
+    def test_review_detail_omits_duplicate_global_navigation_links(self):
         doc = self._create_document()
         self._create_text_result(doc)
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "חזרה לרשימת בקרת תעתוק")
-        # The old ambiguous "back" label is gone.
+
+        # Global review/backlog navigation lives in the staff management panel,
+        # not duplicated inside the review-detail document header.
+        self.assertNotContains(resp, "חזרה לרשימת בקרת תעתוק")
         self.assertNotContains(resp, "חזרה לבקרת תעתוק<")
-        # Global list + current-document links keep their original hrefs.
-        self.assertContains(resp, 'href="/api/ui/admin/review/"')
+
+        # Current-document actions remain available in the review header.
         self.assertContains(resp, "תצוגת מסמך")
         self.assertContains(resp, f'href="/api/ui/documents/{doc.id}/"')
-        self.assertContains(resp, "רשימת השלמת פרטים")
+        self.assertContains(resp, "עריכת מטא־דאטה")
+        self.assertContains(resp, "עריכה טכנית (Django Admin)")
 
     def test_review_detail_metadata_edit_link_for_staff(self):
         doc = self._create_document()
