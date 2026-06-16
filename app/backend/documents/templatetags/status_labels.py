@@ -46,13 +46,13 @@ _METADATA_STATUS: dict[str, Tuple[str, str]] = {
 _TEXT_INPUT_TYPE: dict[str, str] = dict(TEXT_INPUT_TYPE_UI_CHOICES)
 
 _TEXT_RESULT_STATUS: dict[str, Tuple[str, str]] = {
-    DocumentTextResult.Status.NEEDS_REVIEW.value: ("ממתין לבקרת תמלול", "badge-warn"),
+    DocumentTextResult.Status.NEEDS_REVIEW.value: ("ממתין לבקרת תעתוק", "badge-warn"),
     DocumentTextResult.Status.SUCCEEDED.value: ("הושלם", "badge-ok"),
     DocumentTextResult.Status.FAILED.value: ("עיבוד נכשל", "badge-bad"),
 }
 
 _RESULT_TYPE: dict[str, str] = {
-    DocumentTextResult.ResultType.SOURCE_TEXT.value: "תמלול מקור",
+    DocumentTextResult.ResultType.SOURCE_TEXT.value: "תעתוק מקור",
     DocumentTextResult.ResultType.HEBREW_TEXT.value: "טקסט עברי",
 }
 
@@ -67,7 +67,7 @@ _ENGINE_KEY: dict[str, str] = {
 }
 
 _REVIEW_REASON: dict[str, str] = {
-    AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW: "נדרשת בקרת תמלול אנושית",
+    AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW: "נדרשת בקרת תעתוק אנושית",
     NEEDS_REVIEW_FLAG: "סימון חוסר ודאות מהמנוע",
     "MIN_TEXT_LENGTH": "טקסט קצר מדי",
     "HAS_UNCLEAR": "יש קטעים לא ברורים",

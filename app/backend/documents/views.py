@@ -1448,12 +1448,12 @@ def review_backlog_page(request):
 def _review_result_type_label(doc: Document, result_type: str) -> str:
     if doc.language == Document.Language.HEBREW:
         if result_type == DocumentTextResult.ResultType.SOURCE_TEXT:
-            return "תמלול מקור (עברית כפי שחולצה)"
+            return "תעתוק מקור (עברית כפי שחולצה)"
         if result_type == DocumentTextResult.ResultType.HEBREW_TEXT:
             return "טקסט עברי לבדיקה"
 
     if result_type == DocumentTextResult.ResultType.SOURCE_TEXT:
-        return "תמלול מקור"
+        return "תעתוק מקור"
     if result_type == DocumentTextResult.ResultType.HEBREW_TEXT:
         return "טקסט עברי"
     return result_type
@@ -1484,10 +1484,10 @@ def _review_non_actionable_reason(row: DocumentTextResult) -> Optional[str]:
         return None
 
     if row.verification_status == DocumentTextResult.VerificationStatus.VERIFIED:
-        return "התמלול כבר אושר אנושית — אין פעולות בקרה זמינות במסך זה."
+        return "התעתוק כבר אושר אנושית — אין פעולות בקרה זמינות במסך זה."
 
     if row.status == DocumentTextResult.Status.FAILED:
-        return "תמלול זה נכשל בעיבוד — לא ניתן לבדוק או לאשר."
+        return "תעתוק זה נכשל בעיבוד — לא ניתן לבדוק או לאשר."
 
     if not (row.text or "").strip():
         return "אין טקסט זמין לבדיקה."
