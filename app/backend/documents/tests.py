@@ -7290,7 +7290,7 @@ class ReviewUiTests(TestCase):
         resp = self.client.get("/api/ui/admin/review/")
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, str(doc.id))
-        self.assertContains(resp, "בקרת תמלול")
+        self.assertContains(resp, "בקרת תעתוק")
 
     def test_review_backlog_excludes_verified_pending_status(self):
         doc = self._create_document()
@@ -7351,7 +7351,7 @@ class ReviewUiTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get("/api/ui/admin/review/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "תמלול מקור")
+        self.assertContains(resp, "תעתוק מקור")
         self.assertContains(resp, "טקסט עברי")
         self.assertContains(resp, 'value="SOURCE_TEXT"')
         self.assertContains(resp, 'value="HEBREW_TEXT"')
@@ -7370,11 +7370,11 @@ class ReviewUiTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "ממתין לבקרת תמלול")
+        self.assertContains(resp, "ממתין לבקרת תעתוק")
         self.assertContains(resp, "טרם אושר")
         self.assertContains(resp, "טקסט עברי")
         self.assertContains(resp, "TRANSKRIBUS")
-        self.assertContains(resp, "נדרשת בקרת תמלול אנושית")
+        self.assertContains(resp, "נדרשת בקרת תעתוק אנושית")
         self.assertContains(resp, "טקסט קצר מדי")
         self.assertContains(resp, "טקסט עברי לבדיקה")
         self.assertContains(resp, "שורת בדיקה")
@@ -7648,8 +7648,8 @@ class ReviewUiTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "אשר תמלול")
-        self.assertContains(resp, "דחה תמלול")
+        self.assertContains(resp, "אשר תעתוק")
+        self.assertContains(resp, "דחה תעתוק")
 
     def test_review_detail_rejected_pending_shows_verify_only(self):
         doc = self._create_document()
@@ -7660,8 +7660,8 @@ class ReviewUiTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "אשר תמלול")
-        self.assertNotContains(resp, "דחה תמלול")
+        self.assertContains(resp, "אשר תעתוק")
+        self.assertNotContains(resp, "דחה תעתוק")
 
     def test_review_detail_no_actions_for_verified(self):
         doc = self._create_document()
@@ -7671,7 +7671,7 @@ class ReviewUiTests(TestCase):
         )
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
-        self.assertNotContains(resp, "אשר תמלול")
+        self.assertNotContains(resp, "אשר תעתוק")
         self.assertNotContains(resp, "/verify/")
 
     def test_staff_can_edit_pending_unverified_text(self):
@@ -7864,10 +7864,10 @@ class ReviewUiTests(TestCase):
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "מסמך מקור")
-        self.assertContains(resp, "בדיקת תמלול")
+        self.assertContains(resp, "בדיקת תעתוק")
         self.assertContains(resp, "איך לבדוק:")
-        self.assertContains(resp, "משווים בין קובץ המקור לתמלול")
-        self.assertContains(resp, "אימות תמלול")
+        self.assertContains(resp, "משווים בין קובץ המקור לתעתוק")
+        self.assertContains(resp, "אימות תעתוק")
         self.assertContains(resp, "פרטים טכניים")
 
     def test_review_detail_verified_shows_non_actionable_reason(self):
@@ -7879,8 +7879,8 @@ class ReviewUiTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "התמלול כבר אושר אנושית")
-        self.assertNotContains(resp, "אשר תמלול")
+        self.assertContains(resp, "התעתוק כבר אושר אנושית")
+        self.assertNotContains(resp, "אשר תעתוק")
 
     def test_review_detail_failed_row_shows_non_actionable_reason(self):
         doc = self._create_document()
@@ -7894,7 +7894,7 @@ class ReviewUiTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "תמלול זה נכשל בעיבוד")
+        self.assertContains(resp, "תעתוק זה נכשל בעיבוד")
 
     def test_review_detail_transkribus_in_collapsible_section(self):
         doc = self._create_document()
@@ -8114,7 +8114,7 @@ class StatusLabelFilterTests(SimpleTestCase):
     def test_text_result_status_labels_are_hebrew(self):
         from documents.templatetags.status_labels import text_result_status_label
 
-        self.assertEqual(text_result_status_label("NEEDS_REVIEW"), "ממתין לבקרת תמלול")
+        self.assertEqual(text_result_status_label("NEEDS_REVIEW"), "ממתין לבקרת תעתוק")
         self.assertEqual(text_result_status_label("FAILED"), "עיבוד נכשל")
 
     def test_review_reason_labels_map_known_codes(self):
@@ -8122,7 +8122,7 @@ class StatusLabelFilterTests(SimpleTestCase):
 
         self.assertEqual(
             review_reason_label("AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW"),
-            "נדרשת בקרת תמלול אנושית",
+            "נדרשת בקרת תעתוק אנושית",
         )
         self.assertNotEqual(review_reason_label("AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW"), "AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW")
 
@@ -8241,7 +8241,7 @@ class StatusLabelPresentationTests(TestCase):
         self.assertContains(resp, "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות.")
         self.assertContains(resp, "פרטים")
         self.assertContains(resp, "טרם אושר")
-        self.assertContains(resp, "ממתין לבקרת תמלול")
+        self.assertContains(resp, "ממתין לבקרת תעתוק")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "UNVERIFIED")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "NEEDS_REVIEW")
 
@@ -8316,7 +8316,7 @@ class StatusLabelPresentationTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "מוכן לצפייה")
         self.assertContains(resp, "טרם אושר")
-        self.assertContains(resp, "ממתין לבקרת תמלול")
+        self.assertContains(resp, "ממתין לבקרת תעתוק")
         self.assertContains(resp, "טקסט עברי")
         self.assertNotContains(resp, "לא מאומת")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "NEEDS_REVIEW")
@@ -8568,7 +8568,7 @@ class NavigationLabelTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get("/api/ui/documents/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "רשימת בקרת תמלול")
+        self.assertContains(resp, "רשימת בקרת תעתוק")
         self.assertContains(resp, "רשימת השלמת פרטים")
         self.assertContains(resp, 'href="/api/ui/admin/review/"')
         self.assertContains(resp, 'href="/api/ui/admin/backlog/"')
@@ -8579,10 +8579,10 @@ class NavigationLabelTests(TestCase):
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
         # Global list link and current-document action use distinct labels...
-        self.assertContains(resp, "רשימת בקרת תמלול")
-        self.assertContains(resp, "בקרת תמלול למסמך זה")
+        self.assertContains(resp, "רשימת בקרת תעתוק")
+        self.assertContains(resp, "בקרת תעתוק למסמך זה")
         # ...the old ambiguous label is gone...
-        self.assertNotContains(resp, "בדיקת תמלול למסמך זה")
+        self.assertNotContains(resp, "בדיקת תעתוק למסמך זה")
         # ...and both still point at their original, distinct hrefs.
         self.assertContains(resp, 'href="/api/ui/admin/review/"')
         self.assertContains(resp, f'href="/api/ui/admin/review/{doc.id}/"')
@@ -8596,8 +8596,8 @@ class NavigationLabelTests(TestCase):
         # Non-admin keeps the global "back to list" link...
         self.assertContains(resp, "חזרה לרשימה")
         # ...but admin navigation/actions stay hidden (gating unchanged).
-        self.assertNotContains(resp, "בקרת תמלול למסמך זה")
-        self.assertNotContains(resp, "רשימת בקרת תמלול")
+        self.assertNotContains(resp, "בקרת תעתוק למסמך זה")
+        self.assertNotContains(resp, "רשימת בקרת תעתוק")
         self.assertNotContains(resp, "/api/ui/admin/review/")
 
     def test_detail_metadata_edit_is_primary_staff_action(self):
@@ -8616,7 +8616,7 @@ class NavigationLabelTests(TestCase):
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
         html = resp.content.decode()
         review_href = f"/api/ui/admin/review/{doc.id}/"
-        self.assertEqual(self._link_label(html, review_href), "בקרת תמלול למסמך זה")
+        self.assertEqual(self._link_label(html, review_href), "בקרת תעתוק למסמך זה")
         review_tag = self._link_opening_tag(html, review_href)
         self.assertIn("btn", review_tag)
         self.assertNotIn("btn-primary", review_tag)
@@ -8664,7 +8664,7 @@ class NavigationLabelTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "חזרה לרשימה")
         self.assertNotContains(resp, "עריכת מטא־דאטה")
-        self.assertNotContains(resp, "בקרת תמלול למסמך זה")
+        self.assertNotContains(resp, "בקרת תעתוק למסמך זה")
         self.assertNotContains(resp, "עריכה טכנית (Django Admin)")
 
     def test_review_detail_has_back_to_review_list_link(self):
@@ -8673,9 +8673,9 @@ class NavigationLabelTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "חזרה לרשימת בקרת תמלול")
+        self.assertContains(resp, "חזרה לרשימת בקרת תעתוק")
         # The old ambiguous "back" label is gone.
-        self.assertNotContains(resp, "חזרה לבקרת תמלול<")
+        self.assertNotContains(resp, "חזרה לבקרת תעתוק<")
         # Global list + current-document links keep their original hrefs.
         self.assertContains(resp, 'href="/api/ui/admin/review/"')
         self.assertContains(resp, "תצוגת מסמך")
@@ -8715,9 +8715,9 @@ class NavigationLabelTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, "בקרת תמלול למסמך זה")
+        self.assertNotContains(resp, "בקרת תעתוק למסמך זה")
         self.assertNotContains(resp, "פתח לבדיקה")
-        self.assertNotContains(resp, "פתח בבקרת תמלול")
+        self.assertNotContains(resp, "פתח בבקרת תעתוק")
 
 
 class ReviewDetailHierarchyTests(SimpleTestCase):
@@ -8839,7 +8839,7 @@ class DocumentDetailTextGroupingTests(TestCase):
         resp = self.client.get(self._detail_url(doc.id))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "טקסט עברי לבדיקה")
-        self.assertNotContains(resp, "תמלול מקור")
+        self.assertNotContains(resp, "תעתוק מקור")
         self.assertContains(resp, "טקסט מקור עברי", count=1)
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "HEBREW_TEXT")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "SOURCE_TEXT")
@@ -8861,8 +8861,8 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "טקסט עברי לבדיקה")
         self.assertNotContains(resp, "הטקסט העברי שמיועד לבדיקה, עריכה ואישור.")
-        self.assertNotContains(resp, "תמלול מקור")
-        self.assertNotContains(resp, "תמלול מקור (עברית כפי שחולצה)")
+        self.assertNotContains(resp, "תעתוק מקור")
+        self.assertNotContains(resp, "תעתוק מקור (עברית כפי שחולצה)")
 
     def test_hebrew_detail_falls_back_to_source_text_when_hebrew_missing(self):
         doc = self._create_document()
@@ -8874,7 +8874,7 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(self._detail_url(doc.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "תמלול מקור")
+        self.assertContains(resp, "תעתוק מקור")
         self.assertNotContains(resp, "טקסט עברי לבדיקה")
         self.assertContains(resp, "טקסט מקור בלבד")
         self.assertContains(resp, "חסרים פלטים:")
@@ -8892,7 +8892,7 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(self._detail_url(doc.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "תמלול מקור")
+        self.assertContains(resp, "תעתוק מקור")
         self.assertNotContains(resp, "טקסט בשפת המקור כפי שחולץ אוטומטית.")
         self.assertContains(resp, "תרגום לעברית")
         self.assertContains(resp, "אין תרגום לעברית עדיין.")
@@ -8927,7 +8927,7 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertContains(resp, "פרטים")
         self.assertContains(resp, "<details")
         self.assertContains(resp, "טקסט עברי")
-        self.assertContains(resp, "ממתין לבקרת תמלול")
+        self.assertContains(resp, "ממתין לבקרת תעתוק")
         self.assertContains(resp, "טרם אושר")
         self.assertContains(resp, "transkribus-pylaia:1")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "HEBREW_TEXT")
@@ -8945,11 +8945,11 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.client.force_login(self.viewer)
         resp = self.client.get(self._detail_url(doc.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "תמלול")
+        self.assertContains(resp, "תעתוק")
         self.assertContains(resp, "טקסט לצופה")
         self.assertContains(resp, "פרטים")
         self.assertContains(resp, "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות.")
-        self.assertNotContains(resp, "תמלול אוטומטי")
+        self.assertNotContains(resp, "תעתוק אוטומטי")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "HEBREW_TEXT")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "SOURCE_TEXT")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "NEEDS_REVIEW")
@@ -8966,7 +8966,7 @@ class TextBlockDisplayMetaTests(SimpleTestCase):
 
         doc = Document(language=Document.Language.HEBREW)
         meta = text_block_display_meta(doc, "SOURCE_TEXT")
-        self.assertEqual(meta.label, "תמלול מקור")
+        self.assertEqual(meta.label, "תעתוק מקור")
         self.assertEqual(meta.description, "הטקסט כפי שחולץ אוטומטית מן המסמך.")
 
     def test_hebrew_hebrew_text(self):

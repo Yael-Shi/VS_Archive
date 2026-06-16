@@ -18,7 +18,7 @@ _REVIEWABLE_TEXT_Q = (
 
 
 def review_pending_text_result_filter() -> Q:
-    """Rows that belong in the בקרת תמלול backlog."""
+    """Rows that belong in the בקרת תעתוק backlog."""
     return Q(
         status=DocumentTextResult.Status.NEEDS_REVIEW,
         verification_status__in=(
@@ -144,7 +144,7 @@ def is_review_pending_text_result(row: DocumentTextResult) -> bool:
 
 def is_review_editable_text_result(row: DocumentTextResult) -> bool:
     """
-    Whether staff may overwrite ``DocumentTextResult.text`` from בקרת תמלול.
+    Whether staff may overwrite ``DocumentTextResult.text`` from בקרת תעתוק.
 
     Currently matches ``is_review_pending_text_result`` (NEEDS_REVIEW, UNVERIFIED
     or REJECTED, non-empty text). A future explicit reopen/edit workflow may

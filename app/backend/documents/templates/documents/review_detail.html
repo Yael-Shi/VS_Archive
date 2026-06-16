@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% load status_labels %}
-{% block title %}VSArchive - בקרת תמלול · {{ doc.archive_item.title }}{% endblock %}
+{% block title %}VSArchive - בקרת תעתוק · {{ doc.archive_item.title }}{% endblock %}
 
 {% block content %}
   <div class="review-page">
     <header class="card review-header">
       <div class="review-header-toolbar">
         {# Global navigation (lists/backlogs) #}
-        <a class="btn" href="/api/ui/admin/review/">חזרה לרשימת בקרת תמלול</a>
+        <a class="btn" href="/api/ui/admin/review/">חזרה לרשימת בקרת תעתוק</a>
         <a class="btn" href="/api/ui/admin/backlog/">רשימת השלמת פרטים</a>
         <div class="flex-spacer"></div>
         {# Actions for the current document #}
@@ -22,7 +22,7 @@
 
       <h1 class="page-title">{{ doc.archive_item.title }}</h1>
       <div class="page-lead">
-        בקרת תמלול · מסמך #{{ doc.id }}
+        בקרת תעתוק · מסמך #{{ doc.id }}
         {% if doc.file_original_name %} · {{ doc.file_original_name }}{% endif %}
       </div>
 
@@ -41,7 +41,7 @@
           </div>
           <ul>
             <li><strong>מוכן לצפייה</strong> — העיבוד האוטומטי הסתיים והטקסט זמין להצגה ולבדיקה.</li>
-            <li><strong>טרם אושר</strong> — התמלול נוצר אוטומטית ודורש אימות ידני.</li>
+            <li><strong>טרם אושר</strong> — התעתוק נוצר אוטומטית ודורש אימות ידני.</li>
             <li><strong>אושר / נדחה</strong> — תוצאת האימות הידני.</li>
           </ul>
         </div>
@@ -54,7 +54,7 @@
       <aside class="card review-source-panel">
         <div class="section-title">1. מסמך מקור</div>
         <div class="muted review-source-note">
-          יש להשוות את התמלול מול העמודים לפי הסדר. אין כרגע התאמה אוטומטית בין שורות בטקסט לעמודים.
+          יש להשוות את התעתוק מול העמודים לפי הסדר. אין כרגע התאמה אוטומטית בין שורות בטקסט לעמודים.
         </div>
 
         {% if source_preview_items or source_preview_unavailable_count %}
@@ -113,7 +113,7 @@
 
       <main class="card review-transcription-panel">
         <div class="review-panel-head">
-          <div class="section-title">2. בדיקת תמלול</div>
+          <div class="section-title">2. בדיקת תעתוק</div>
           {% if text_result_cards %}
             <div class="muted text-sm">{{ text_result_cards|length }} תוצאות</div>
           {% endif %}
@@ -121,7 +121,7 @@
 
         <div class="review-guidance" role="note">
           <strong>איך לבדוק:</strong>
-          משווים בין קובץ המקור לתמלול. אם צריך, עורכים את הטקסט. לאחר מכן מאשרים או דוחים את תוצאת התמלול.
+          משווים בין קובץ המקור לתעתוק. אם צריך, עורכים את הטקסט. לאחר מכן מאשרים או דוחים את תוצאת התעתוק.
         </div>
 
         {% for card in text_result_cards %}
@@ -159,18 +159,18 @@
             {# Primary workflow: approve / reject #}
             {% if card.is_pending_review %}
               <div class="review-zone review-zone--primary">
-                <div class="review-zone-title">אימות תמלול</div>
+                <div class="review-zone-title">אימות תעתוק</div>
                 <div class="review-zone-actions">
                   {% if card.row.verification_status != "VERIFIED" %}
                     <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/verify/" class="inline-form">
                       {% csrf_token %}
-                      <button class="btn btn-primary" type="submit">אשר תמלול</button>
+                      <button class="btn btn-primary" type="submit">אשר תעתוק</button>
                     </form>
                   {% endif %}
                   {% if card.row.verification_status != "REJECTED" %}
                     <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/reject/" class="inline-form">
                       {% csrf_token %}
-                      <button class="btn" type="submit">דחה תמלול</button>
+                      <button class="btn" type="submit">דחה תעתוק</button>
                     </form>
                   {% endif %}
                 </div>
@@ -222,7 +222,7 @@
             </details>
           </article>
         {% empty %}
-          <div class="muted">אין תוצאות תמלול למסמך זה.</div>
+          <div class="muted">אין תוצאות תעתוק למסמך זה.</div>
         {% endfor %}
 
         {% if latest_transkribus_run %}

@@ -53,14 +53,14 @@ def text_block_display_meta(doc: Document, result_type: ResultTypeStr) -> TextBl
     if result_type == "SOURCE_TEXT":
         if is_hebrew_doc:
             return TextBlockDisplayMeta(
-                label="תמלול מקור",
+                label="תעתוק מקור",
                 description="הטקסט כפי שחולץ אוטומטית מן המסמך.",
-                empty_message="אין תמלול מקור להצגה.",
+                empty_message="אין תעתוק מקור להצגה.",
             )
         return TextBlockDisplayMeta(
-            label="תמלול מקור",
+            label="תעתוק מקור",
             description="טקסט בשפת המקור כפי שחולץ אוטומטית.",
-            empty_message="אין תמלול מקור עדיין.",
+            empty_message="אין תעתוק מקור עדיין.",
         )
 
     if result_type == "HEBREW_TEXT":
@@ -68,7 +68,7 @@ def text_block_display_meta(doc: Document, result_type: ResultTypeStr) -> TextBl
             return TextBlockDisplayMeta(
                 label="טקסט עברי לבדיקה",
                 description="הטקסט העברי שמיועד לבדיקה, עריכה ואישור.",
-                empty_message="אין תמלול לעברית עדיין.",
+                empty_message="אין תעתוק לעברית עדיין.",
             )
         return TextBlockDisplayMeta(
             label="תרגום לעברית",

@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% load status_labels %}
-{% block title %}VSArchive - רשימת בקרת תמלול{% endblock %}
+{% block title %}VSArchive - רשימת בקרת תעתוק{% endblock %}
 
 {% block content %}
   <div class="card page-header">
-    <h1 class="page-title">רשימת בקרת תמלול</h1>
-    <p class="page-subtitle">מסמכים עם תמלול אוטומטי שדורשים בדיקה, עריכה ואישור אנושי לפני שימוש כטקסט מאושר. זו רשימה נפרדת מהשלמת פרטי קטלוג.</p>
+    <h1 class="page-title">רשימת בקרת תעתוק</h1>
+    <p class="page-subtitle">מסמכים עם תעתוק אוטומטי שדורשים בדיקה, עריכה ואישור אנושי לפני שימוש כטקסט מאושר. זו רשימה נפרדת מהשלמת פרטי קטלוג.</p>
 
     <div class="backlog-explainer">«מוכן לצפייה» פירושו שהפלט האוטומטי זמין לצפייה — לא שהטקסט אושר אנושית. סטטוס אימות (טרם אושר / אושר / נדחה) הוא שכבה נפרדת.</div>
 
@@ -20,7 +20,7 @@
     <div class="spacer"></div>
 
     <div class="filter-panel">
-      <div class="section-title">סינון רשימת בקרת תמלול</div>
+      <div class="section-title">סינון רשימת בקרת תעתוק</div>
       <p class="filter-panel__help">סננו לפי שפה, סוג קלט, מצב עיבוד, מנוע OCR, סוג תוצאה או סטטוס אימות. לחצו «החל סינון» להחלה, או «ניקוי» לאיפוס.</p>
 
       <form method="get" class="toolbar">
@@ -222,7 +222,7 @@
                   <p>אין מסמכים התואמים את הסינון הנוכחי. נסו לשנות את הפילטרים או לנקות אותם.</p>
                   <a class="btn" href="/api/ui/admin/review/">ניקוי פילטרים</a>
                 {% else %}
-                  <p>כרגע אין מסמכים הממתינים לבקרת תמלול.</p>
+                  <p>כרגע אין מסמכים הממתינים לבקרת תעתוק.</p>
                 {% endif %}
               </div>
             </td>

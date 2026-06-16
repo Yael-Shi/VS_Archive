@@ -19,7 +19,7 @@
         <a class="btn" href="/api/ui/documents/">חזרה לרשימה</a>
         {% if is_admin %}
           <a class="btn" href="/api/ui/admin/backlog/">רשימת השלמת פרטים</a>
-          <a class="btn" href="/api/ui/admin/review/">רשימת בקרת תמלול</a>
+          <a class="btn" href="/api/ui/admin/review/">רשימת בקרת תעתוק</a>
         {% endif %}
 
         <div class="flex-spacer"></div>
@@ -29,7 +29,7 @@
           {% if doc.archive_item_id %}
             <a class="btn btn-primary" href="{% url 'archive-manage-edit' item_id=doc.archive_item_id %}">עריכת מטא־דאטה</a>
           {% endif %}
-          <a class="btn" href="/api/ui/admin/review/{{ doc.id }}/">בקרת תמלול למסמך זה</a>
+          <a class="btn" href="/api/ui/admin/review/{{ doc.id }}/">בקרת תעתוק למסמך זה</a>
           {% if show_ocr_reprocess_action %}
             <form
               method="post"
