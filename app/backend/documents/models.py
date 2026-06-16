@@ -333,6 +333,7 @@ class DocumentTextResult(models.Model):
     class OcrPromptVariant(models.TextChoices):
         HANDWRITTEN = "handwritten", "Handwritten"
         PRINTED = "printed", "Printed"
+        HEBREW_TRANSLATION = "hebrew_translation", "Hebrew translation"
 
     class ResultType(models.TextChoices):
         SOURCE_TEXT = "SOURCE_TEXT", "Source text"

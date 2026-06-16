@@ -16,6 +16,8 @@ from documents.models import Document, DocumentTextResult
 from documents.s3 import get_object_bytes
 from documents.services.env_validation import EnvConfigError, WorkerEnvConfig, validate_required_env
 from documents.services.expected_outputs import expected_result_types_for_document
+from documents.services.gemini_engine import translate_text_to_hebrew_with_gemini
+from documents.services.gemini_models import DEFAULT_GEMINI_MODEL
 from documents.services.htr_adapters.base import UnsupportedEngineError
 from documents.services.htr_engine import transcribe_pages
 from documents.services.ocr_reprocess import (
@@ -409,6 +411,66 @@ class Command(BaseCommand):
                     "review_reasons": json.dumps(review_reasons),
                 },
             )
+
+        if not is_he:
+            self._save_non_hebrew_hebrew_translation(doc, engine, htr.text)
+
+    def _save_non_hebrew_hebrew_translation(
+        self,
+        doc: Document,
+        engine: str,
+        source_text: str,
+    ):
+        try:
+            translation = translate_text_to_hebrew_with_gemini(
+                source_text,
+                doc.language,
+                model_name=DEFAULT_GEMINI_MODEL,
+                min_text_length=self._cfg.min_text_length,
+                temperature=self._cfg.gemini_temperature,
+                top_k=self._cfg.gemini_top_k,
+                top_p=self._cfg.gemini_top_p,
+                max_output_tokens=self._cfg.gemini_max_output_tokens,
+            )
+        except Exception as e:
+            DocumentTextResult.objects.update_or_create(
+                document=doc,
+                result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+                engine=engine,
+                defaults={
+                    "status": DocumentTextResult.Status.FAILED,
+                    "text": None,
+                    "engine_key": DocumentTextResult.OcrEngineKey.GEMINI,
+                    "prompt_variant": DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+                    "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
+                    "error_code": "HEBREW_TRANSLATION_FAILED",
+                    "error_details": str(e),
+                    "review_reasons": "",
+                },
+            )
+            return
+
+        review_reasons = self._derive_review_reasons(
+            translation.text,
+            translation.needs_review,
+            translation.review_reasons,
+            include_automatic_policy=True,
+        )
+        DocumentTextResult.objects.update_or_create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine=engine,
+            defaults={
+                "status": DocumentTextResult.Status.NEEDS_REVIEW,
+                "text": translation.text,
+                "engine_key": DocumentTextResult.OcrEngineKey.GEMINI,
+                "prompt_variant": DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+                "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
+                "error_code": None,
+                "error_details": None,
+                "review_reasons": json.dumps(review_reasons),
+            },
+        )
 
     def _save_ocr_failure(self, doc, engine, is_he, details):
         route_metadata = self._route_metadata_for_failure(doc)
