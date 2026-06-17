@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
-FALLBACK_GEMINI_MODEL = "gemini-1.5-flash"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+FALLBACK_GEMINI_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_GEMINI_MODEL_CANDIDATES = (DEFAULT_GEMINI_MODEL, FALLBACK_GEMINI_MODEL)
 DEFAULT_HEBREW_PRINTED_GEMINI_MODEL = "gemini-3.1-flash-lite"
+
+LATIN_HANDWRITTEN_GEMINI_MODEL = "gemini-2.5-pro"
+LATIN_PRINTED_GEMINI_MODEL = "gemini-2.5-flash"
