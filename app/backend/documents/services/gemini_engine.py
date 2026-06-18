@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import time
-import logging
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional
@@ -22,6 +22,7 @@ from documents.services.gemini_models import DEFAULT_GEMINI_MODEL
 from documents.services.page_extraction import PageImage
 
 logger = logging.getLogger(__name__)
+
 
 class GeminiError(RuntimeError):
     pass
@@ -49,10 +50,8 @@ _HANDWRITTEN_LATIN_PROMPT = (
     "- If a word is partly legible or uncertain, give your best reading and mark it inline with [?]. Use [?] readily for names, places, institutions, unusual words, and doubtful readings.\n"
     "- If a word is completely illegible, use [UNCLEAR].\n"
     "- Do not present doubtful readings as certain.\n"
-    "- Output only a valid JSON object. Do not output markdown or comments.\n"
-    "\n"
-    "OUTPUT FORMAT:\n"
-    '{"text": "...", "has_unclear": false, "unclear_count": 0}\n'
+    "- Output only the transcription text.\n"
+    "- Do not output JSON, markdown, comments, explanations, labels, or introductory text.\n"
 )
 
 _HEBREW_TRANSLATION_PROMPT = (
@@ -76,10 +75,8 @@ _HEBREW_TRANSLATION_PROMPT = (
     "* Preserve original line breaks and list structure as much as practical.\n"
     "* If the source includes English and French, translate both into Hebrew.\n"
     "* Keep the output in Hebrew only, except for names, abbreviations, or unclear source tokens that should remain as written.\n"
-    "* Output only a valid JSON object. Do not output markdown or comments.\n"
-    "\n"
-    "OUTPUT FORMAT:\n"
-    '{"text": "...", "has_unclear": false, "unclear_count": 0}\n'
+    "* Output only the Hebrew translation text.\n"
+    "* Do not output JSON, markdown, comments, explanations, labels, or introductory text.\n"
     "\n"
     "SOURCE TEXT:\n"
     "{{source_text}}\n"
@@ -114,6 +111,8 @@ _PROMPT_BY_VARIANT = {
 }
 
 _REQUIRED_KEYS = ("text", "has_unclear", "unclear_count")
+_TRANSLATION_CHUNK_MAX_CHARS = 2200
+_MIN_TRANSLATION_LENGTH_RATIO = 0.20
 
 _LATIN_LANGUAGE_HINTS = frozenset(
     {"en", "eng", "english", "fr", "fra", "fre", "french"}
@@ -126,6 +125,16 @@ def _is_latin_language_hint(language_hint: Optional[str]) -> bool:
     if not language_hint:
         return False
     return language_hint.strip().lower() in _LATIN_LANGUAGE_HINTS
+
+
+def _uses_plain_text_transcription(
+    prompt_variant: str,
+    language_hint: Optional[str],
+) -> bool:
+    return (
+        prompt_variant == DocumentTextResult.OcrPromptVariant.HANDWRITTEN
+        and _is_latin_language_hint(language_hint)
+    )
 
 
 def _get_api_key() -> str:
@@ -141,11 +150,107 @@ def _create_client(api_key: str) -> genai.Client:
         http_options=types.HttpOptions(api_version="v1"),
     )
 
+
 def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip())
 
+
 def _similarity_ratio(a: str, b: str) -> float:
     return SequenceMatcher(None, _normalize(a), _normalize(b)).ratio()
+
+
+def _is_retryable_gemini_response_error(exc: Exception) -> bool:
+    message = str(exc).upper()
+    return any(
+        token in message
+        for token in (
+            "JSON PARSE ERROR",
+            "EMPTY RESPONSE",
+        )
+    )
+
+
+def _plain_text_response_to_page_data(raw: str, *, page_index: int) -> Dict[str, Any]:
+    text = (raw or "").strip()
+    if not text:
+        raise GeminiError(f"Gemini returned empty response on page {page_index}")
+
+    return {
+        "text": text,
+        "has_unclear": "[UNCLEAR]" in text or "[?]" in text,
+        "unclear_count": text.count("[UNCLEAR]") + text.count("[?]"),
+    }
+
+
+def _split_oversized_block(block: str, *, max_chars: int) -> List[str]:
+    parts: List[str] = []
+    current = ""
+
+    for line in block.splitlines(keepends=True):
+        if current and len(current) + len(line) > max_chars:
+            parts.append(current.strip())
+            current = ""
+
+        if len(line) > max_chars:
+            if current.strip():
+                parts.append(current.strip())
+                current = ""
+
+            for start in range(0, len(line), max_chars):
+                part = line[start : start + max_chars].strip()
+                if part:
+                    parts.append(part)
+            continue
+
+        current += line
+
+    if current.strip():
+        parts.append(current.strip())
+
+    return parts
+
+
+def _split_text_for_translation(
+    source_text: str,
+    *,
+    max_chars: int = _TRANSLATION_CHUNK_MAX_CHARS,
+) -> List[str]:
+    stripped = (source_text or "").strip()
+    if not stripped:
+        return []
+
+    chunks: List[str] = []
+    current_blocks: List[str] = []
+    current_len = 0
+
+    for block in re.split(r"\n\s*\n", stripped):
+        block = block.strip()
+        if not block:
+            continue
+
+        if len(block) > max_chars:
+            if current_blocks:
+                chunks.append("\n\n".join(current_blocks).strip())
+                current_blocks = []
+                current_len = 0
+
+            chunks.extend(_split_oversized_block(block, max_chars=max_chars))
+            continue
+
+        projected_len = current_len + len(block) + (2 if current_blocks else 0)
+        if current_blocks and projected_len > max_chars:
+            chunks.append("\n\n".join(current_blocks).strip())
+            current_blocks = [block]
+            current_len = len(block)
+        else:
+            current_blocks.append(block)
+            current_len = projected_len
+
+    if current_blocks:
+        chunks.append("\n\n".join(current_blocks).strip())
+
+    return [chunk for chunk in chunks if chunk]
+
 
 def _parse_page_json_strict(raw: str, *, page_index: int) -> Dict[str, Any]:
     raw = (raw or "").strip()
@@ -159,31 +264,27 @@ def _parse_page_json_strict(raw: str, *, page_index: int) -> Dict[str, Any]:
         else:
             raw = raw.replace("```json", "").replace("```", "").strip()
 
-    if raw.startswith("{") and not raw.endswith("}"):
-        logger.warning(f"Detected truncated JSON on page {page_index}, attempting to close it.")
-        current = raw.rstrip()
-        if not current.endswith('"'):
-            current += '"'
-        if not current.endswith('}'):
-            current += '}'
-        raw = current
-
     try:
         data = json.loads(raw, strict=False)
     except Exception as e:
-        logger.error(f"JSON Parse Error on page {page_index}: {e}. Raw: {raw[:100]}...")
+        logger.error(
+            "JSON Parse Error on page %s: %s. Raw: %s...",
+            page_index,
+            e,
+            raw[:2000],
+        )
         raise GeminiError(f"JSON Parse Error on page {page_index}: {e}")
 
     # Validation and defaults
-    for k in _REQUIRED_KEYS:
-        if k not in data:
-            if k == "text":
-                data[k] = ""
-            elif k == "has_unclear":
-                data[k] = False
+    for key in _REQUIRED_KEYS:
+        if key not in data:
+            if key == "text":
+                data[key] = ""
+            elif key == "has_unclear":
+                data[key] = False
             else:
-                data[k] = 0
-    
+                data[key] = 0
+
     return data
 
 
@@ -211,10 +312,7 @@ def transcribe_pages_with_gemini(
     client = _create_client(api_key)
 
     effective_temperature = temperature
-    if (
-        prompt_variant == DocumentTextResult.OcrPromptVariant.HANDWRITTEN
-        and _is_latin_language_hint(language_hint)
-    ):
+    if _uses_plain_text_transcription(prompt_variant, language_hint):
         effective_temperature = 0.0
 
     texts: List[str] = []
@@ -228,14 +326,17 @@ def transcribe_pages_with_gemini(
 
         success = False
         attempts = 0
-        
+
         while not success and attempts < 2:
             try:
                 resp = client.models.generate_content(
                     model=model_name,
                     contents=[
                         types.Part.from_text(text=prompt),
-                        types.Part.from_bytes(data=page.image_bytes, mime_type=page.mime_type or "image/png"),
+                        types.Part.from_bytes(
+                            data=page.image_bytes,
+                            mime_type=page.mime_type or "image/png",
+                        ),
                     ],
                     config=types.GenerateContentConfig(
                         temperature=effective_temperature,
@@ -244,7 +345,18 @@ def transcribe_pages_with_gemini(
                         max_output_tokens=max_output_tokens,
                     ),
                 )
-                data = _parse_page_json_strict(resp.text, page_index=page.page_index)
+
+                if _uses_plain_text_transcription(prompt_variant, language_hint):
+                    data = _plain_text_response_to_page_data(
+                        resp.text,
+                        page_index=page.page_index,
+                    )
+                else:
+                    data = _parse_page_json_strict(
+                        resp.text,
+                        page_index=page.page_index,
+                    )
+
                 success = True
             except Exception as e:
                 err_str = str(e).upper()
@@ -253,8 +365,20 @@ def transcribe_pages_with_gemini(
                         raise GeminiError(f"QUOTA_EXHAUSTED: {model_name}")
                     time.sleep(5)
                     attempts += 1
-                else:
-                    raise GeminiError(f"Gemini API Error: {e}")
+                    continue
+
+                if isinstance(e, GeminiError) and _is_retryable_gemini_response_error(e):
+                    attempts += 1
+                    if attempts < 2:
+                        logger.warning(
+                            "Retrying Gemini response format failure on page %s with model %s: %s",
+                            page.page_index,
+                            model_name,
+                            e,
+                        )
+                        continue
+
+                raise GeminiError(f"Gemini API Error: {e}")
 
         if not success:
             raise GeminiError(f"QUOTA_EXHAUSTED: {model_name} after retries")
@@ -287,51 +411,81 @@ def translate_text_to_hebrew_with_gemini(
     if not stripped_source:
         raise GeminiError("Cannot translate empty source text")
 
-    prompt = _HEBREW_TRANSLATION_PROMPT.replace("{{source_text}}", stripped_source)
-    if language_hint:
-        prompt += f"\nSource language hint: {language_hint}."
+    chunks = _split_text_for_translation(stripped_source)
+    if not chunks:
+        raise GeminiError("Cannot translate empty source text")
 
     api_key = _get_api_key()
     client = _create_client(api_key)
 
-    success = False
-    attempts = 0
-    data: Dict[str, Any] = {}
+    translated_chunks: List[str] = []
+    needs_review = False
 
-    while not success and attempts < 2:
-        try:
-            resp = client.models.generate_content(
-                model=model_name,
-                contents=[types.Part.from_text(text=prompt)],
-                config=types.GenerateContentConfig(
-                    temperature=temperature,
-                    top_k=top_k,
-                    top_p=top_p,
-                    max_output_tokens=max_output_tokens,
-                ),
-            )
-            data = _parse_page_json_strict(resp.text, page_index=0)
-            success = True
-        except GeminiError:
-            raise
-        except Exception as e:
-            err_str = str(e).upper()
-            if any(x in err_str for x in ["429", "RESOURCE_EXHAUSTED", "QUOTA"]):
-                if "LIMIT: 0" in err_str:
-                    raise GeminiError(f"QUOTA_EXHAUSTED: {model_name}")
-                time.sleep(5)
-                attempts += 1
-            else:
+    for index, chunk in enumerate(chunks, start=1):
+        prompt = _HEBREW_TRANSLATION_PROMPT.replace("{{source_text}}", chunk)
+        if language_hint:
+            prompt += f"\nSource language hint: {language_hint}."
+
+        success = False
+        attempts = 0
+        data: Dict[str, Any] = {}
+
+        while not success and attempts < 2:
+            try:
+                resp = client.models.generate_content(
+                    model=model_name,
+                    contents=[types.Part.from_text(text=prompt)],
+                    config=types.GenerateContentConfig(
+                        temperature=temperature,
+                        top_k=top_k,
+                        top_p=top_p,
+                        max_output_tokens=max_output_tokens,
+                    ),
+                )
+                data = _plain_text_response_to_page_data(resp.text, page_index=index)
+                success = True
+            except GeminiError as e:
+                if _is_retryable_gemini_response_error(e):
+                    attempts += 1
+                    if attempts < 2:
+                        logger.warning(
+                            "Retrying Gemini translation response format failure on chunk %s/%s with model %s: %s",
+                            index,
+                            len(chunks),
+                            model_name,
+                            e,
+                        )
+                        continue
+                raise
+            except Exception as e:
+                err_str = str(e).upper()
+                if any(x in err_str for x in ["429", "RESOURCE_EXHAUSTED", "QUOTA"]):
+                    if "LIMIT: 0" in err_str:
+                        raise GeminiError(f"QUOTA_EXHAUSTED: {model_name}")
+                    time.sleep(5)
+                    attempts += 1
+                    continue
+
                 raise GeminiError(f"Gemini API Error: {e}")
 
-    if not success:
-        raise GeminiError(f"QUOTA_EXHAUSTED: {model_name} after retries")
+        if not success:
+            raise GeminiError(f"QUOTA_EXHAUSTED: {model_name} after retries")
 
-    text = data["text"].strip()
-    needs_review = len(text) < min_text_length or bool(data.get("has_unclear"))
+        translated_text = data["text"].strip()
+        translated_chunks.append(translated_text)
+        if len(translated_text) < min_text_length or bool(data.get("has_unclear")):
+            needs_review = True
+
+    combined_text = "\n\n".join(translated_chunks).strip()
+    min_expected_length = int(len(stripped_source) * _MIN_TRANSLATION_LENGTH_RATIO)
+    if len(stripped_source) >= 1000 and len(combined_text) < max(min_text_length, min_expected_length):
+        raise GeminiError(
+            "Gemini Hebrew translation output appears truncated: "
+            f"source_length={len(stripped_source)}, translation_length={len(combined_text)}"
+        )
 
     return GeminiResult(
-        text=text,
+        text=combined_text,
         needs_review=needs_review,
         engine_name=model_name,
         review_reasons=[],

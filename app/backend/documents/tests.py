@@ -218,7 +218,7 @@ class HtrDispatcherTests(SimpleTestCase):
 
     @patch("documents.services.htr_engine.get_htr_adapter")
     @patch("documents.services.htr_engine.select_ocr_route")
-    def test_english_printed_with_worker_env_keeps_default_model_candidates(
+    def test_english_printed_with_worker_env_uses_latin_printed_model_candidate(
         self, mock_select_route, mock_get_adapter
     ):
         from documents.services.env_validation import WorkerEnvConfig
@@ -273,7 +273,7 @@ class HtrDispatcherTests(SimpleTestCase):
             language_hint="en",
             prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
             worker_env=worker_env,
-            model_candidates=list(DEFAULT_GEMINI_MODEL_CANDIDATES),
+            model_candidates=[LATIN_PRINTED_GEMINI_MODEL],
         )
 
     @patch("documents.services.htr_engine.get_htr_adapter")
@@ -6830,7 +6830,8 @@ class GeminiEnginePromptTests(SimpleTestCase):
             "Do not correct spelling, grammar, capitalization, punctuation, or wording",
             _HANDWRITTEN_LATIN_PROMPT,
         )
-        self.assertIn("Output only a valid JSON object", _HANDWRITTEN_LATIN_PROMPT)
+        self.assertIn("Output only the transcription text", _HANDWRITTEN_LATIN_PROMPT)
+        self.assertIn("Do not output JSON", _HANDWRITTEN_LATIN_PROMPT)
         self.assertNotIn("printed historical archival documents", _HANDWRITTEN_LATIN_PROMPT)
         self.assertNotIn("Hebrew words", _HANDWRITTEN_LATIN_PROMPT)
 
