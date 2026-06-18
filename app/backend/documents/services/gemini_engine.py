@@ -115,8 +115,18 @@ _PROMPT_BY_VARIANT = {
 
 _REQUIRED_KEYS = ("text", "has_unclear", "unclear_count")
 
+_LATIN_LANGUAGE_HINTS = frozenset(
+    {"en", "eng", "english", "fr", "fra", "fre", "french"}
+)
+
 
 # ------------------------------------------------------------------ helpers
+
+def _is_latin_language_hint(language_hint: Optional[str]) -> bool:
+    if not language_hint:
+        return False
+    return language_hint.strip().lower() in _LATIN_LANGUAGE_HINTS
+
 
 def _get_api_key() -> str:
     key = (os.getenv("GEMINI_API_KEY") or "").strip()
@@ -200,6 +210,13 @@ def transcribe_pages_with_gemini(
     api_key = _get_api_key()
     client = _create_client(api_key)
 
+    effective_temperature = temperature
+    if (
+        prompt_variant == DocumentTextResult.OcrPromptVariant.HANDWRITTEN
+        and _is_latin_language_hint(language_hint)
+    ):
+        effective_temperature = 0.0
+
     texts: List[str] = []
     any_review = False
     engine_reasons: List[str] = []
@@ -221,7 +238,7 @@ def transcribe_pages_with_gemini(
                         types.Part.from_bytes(data=page.image_bytes, mime_type=page.mime_type or "image/png"),
                     ],
                     config=types.GenerateContentConfig(
-                        temperature=temperature,
+                        temperature=effective_temperature,
                         top_k=top_k,
                         top_p=top_p,
                         max_output_tokens=max_output_tokens,

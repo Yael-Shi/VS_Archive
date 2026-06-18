@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 
 from documents.models import Document, DocumentTextResult
+from documents.services import gemini_models
 from documents.services.gemini_models import DEFAULT_GEMINI_MODEL_CANDIDATES
 
 
@@ -68,11 +69,18 @@ def gemini_model_candidates(
 
     lang = (language or "").strip().lower()
     text_type = (text_input_type or "").strip().upper()
+
     if (
         lang == Document.Language.HEBREW
         and text_type == Document.TextInputType.PRINTED
     ):
         return (gemini_hebrew_printed_model,)
+
+    if lang in (Document.Language.ENGLISH, Document.Language.FRENCH):
+        if text_type == Document.TextInputType.HANDWRITTEN:
+            return (gemini_models.LATIN_HANDWRITTEN_GEMINI_MODEL,)
+        elif text_type == Document.TextInputType.PRINTED:
+            return (gemini_models.LATIN_PRINTED_GEMINI_MODEL,)
 
     return DEFAULT_GEMINI_MODEL_CANDIDATES
 

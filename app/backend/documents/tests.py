@@ -28,7 +28,9 @@ from documents.services.gemini_engine import (
     _HANDWRITTEN_LATIN_PROMPT,
     _HEBREW_TRANSLATION_PROMPT,
     _PRINTED_TEXT_PROMPT,
+    transcribe_pages_with_gemini,
 )
+from documents.services.page_extraction import PageImage
 from documents.services.htr_adapters.base import (
     EnginePermanentError,
     EngineRetryableError,
@@ -39,8 +41,12 @@ from documents.services.htr_adapters.gemini_adapter import GeminiAdapter
 from documents.services.htr_adapters.registry import get_htr_adapter
 from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
 from documents.services.htr_engine import transcribe_pages
-from documents.services.ocr_routing import (
+from documents.services.gemini_models import (
     DEFAULT_GEMINI_MODEL_CANDIDATES,
+    LATIN_HANDWRITTEN_GEMINI_MODEL,
+    LATIN_PRINTED_GEMINI_MODEL,
+)
+from documents.services.ocr_routing import (
     OcrRouteConfig,
     OCR_ROUTES,
     gemini_model_candidates,
@@ -2001,7 +2007,7 @@ class GeminiAdapterTests(SimpleTestCase):
     def test_success_uses_first_model(self, mock_gemini_transcribe):
         mock_gemini_transcribe.return_value = GeminiResult(
             text="text",
-            engine_name="gemini-2.0-flash",
+            engine_name=DEFAULT_GEMINI_MODEL_CANDIDATES[0],
         )
         adapter = GeminiAdapter()
 
@@ -2009,18 +2015,21 @@ class GeminiAdapterTests(SimpleTestCase):
             pages=[],
             language_hint="en",
             prompt_variant="printed",
-            model_candidates=["gemini-2.0-flash", "gemini-1.5-flash"],
+            model_candidates=list(DEFAULT_GEMINI_MODEL_CANDIDATES),
         )
 
-        self.assertEqual(result.engine_name, "gemini-2.0-flash")
+        self.assertEqual(result.engine_name, DEFAULT_GEMINI_MODEL_CANDIDATES[0])
         self.assertEqual(mock_gemini_transcribe.call_count, 1)
-        self.assertEqual(mock_gemini_transcribe.call_args.kwargs["model_name"], "gemini-2.0-flash")
+        self.assertEqual(
+            mock_gemini_transcribe.call_args.kwargs["model_name"],
+            DEFAULT_GEMINI_MODEL_CANDIDATES[0],
+        )
 
     @patch("documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini")
     def test_quota_failure_falls_back_to_next_model(self, mock_gemini_transcribe):
         mock_gemini_transcribe.side_effect = [
-            GeminiError("QUOTA_EXHAUSTED: gemini-2.0-flash"),
-            GeminiResult(text="text", engine_name="gemini-1.5-flash"),
+            GeminiError(f"QUOTA_EXHAUSTED: {DEFAULT_GEMINI_MODEL_CANDIDATES[0]}"),
+            GeminiResult(text="text", engine_name=DEFAULT_GEMINI_MODEL_CANDIDATES[1]),
         ]
         adapter = GeminiAdapter()
 
@@ -2028,10 +2037,10 @@ class GeminiAdapterTests(SimpleTestCase):
             pages=[],
             language_hint="en",
             prompt_variant="printed",
-            model_candidates=["gemini-2.0-flash", "gemini-1.5-flash"],
+            model_candidates=list(DEFAULT_GEMINI_MODEL_CANDIDATES),
         )
 
-        self.assertEqual(result.engine_name, "gemini-1.5-flash")
+        self.assertEqual(result.engine_name, DEFAULT_GEMINI_MODEL_CANDIDATES[1])
         self.assertEqual(mock_gemini_transcribe.call_count, 2)
 
     @patch("documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini")
@@ -2056,7 +2065,7 @@ class GeminiAdapterTests(SimpleTestCase):
                 pages=[],
                 language_hint="en",
                 prompt_variant="printed",
-                model_candidates=["gemini-2.0-flash", "gemini-1.5-flash"],
+                model_candidates=list(DEFAULT_GEMINI_MODEL_CANDIDATES),
             )
 
 
@@ -6836,6 +6845,59 @@ class GeminiEnginePromptTests(SimpleTestCase):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, _HEBREW_TRANSLATION_PROMPT)
 
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_latin_handwritten_transcription_uses_zero_temperature(
+        self, _mock_get_key, mock_create_client
+    ):
+        mock_client = Mock()
+        mock_client.models.generate_content.return_value = SimpleNamespace(
+            text='{"text": "hello world hello world", "has_unclear": false, "unclear_count": 0}',
+        )
+        mock_create_client.return_value = mock_client
+        pages = [PageImage(page_index=1, image_bytes=b"png", mime_type="image/png")]
+
+        for language_hint in ("en", "english", "fr", "french"):
+            with self.subTest(language_hint=language_hint):
+                mock_client.models.generate_content.reset_mock()
+                transcribe_pages_with_gemini(
+                    pages,
+                    language_hint,
+                    prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+                    temperature=0.11,
+                )
+                config = mock_client.models.generate_content.call_args.kwargs["config"]
+                self.assertEqual(config.temperature, 0.0)
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_non_latin_or_printed_transcription_keeps_passed_temperature(
+        self, _mock_get_key, mock_create_client
+    ):
+        mock_client = Mock()
+        mock_client.models.generate_content.return_value = SimpleNamespace(
+            text='{"text": "hello world hello world", "has_unclear": false, "unclear_count": 0}',
+        )
+        mock_create_client.return_value = mock_client
+        pages = [PageImage(page_index=1, image_bytes=b"png", mime_type="image/png")]
+        cases = (
+            ("he", DocumentTextResult.OcrPromptVariant.HANDWRITTEN),
+            ("en", DocumentTextResult.OcrPromptVariant.PRINTED),
+            (None, DocumentTextResult.OcrPromptVariant.HANDWRITTEN),
+        )
+
+        for language_hint, prompt_variant in cases:
+            with self.subTest(language_hint=language_hint, prompt_variant=prompt_variant):
+                mock_client.models.generate_content.reset_mock()
+                transcribe_pages_with_gemini(
+                    pages,
+                    language_hint,
+                    prompt_variant=prompt_variant,
+                    temperature=0.11,
+                )
+                config = mock_client.models.generate_content.call_args.kwargs["config"]
+                self.assertEqual(config.temperature, 0.11)
+
 
 class GeminiModelCandidatesTests(SimpleTestCase):
     def test_hebrew_printed_gemini_route_uses_configured_single_model(self):
@@ -6864,7 +6926,33 @@ class GeminiModelCandidatesTests(SimpleTestCase):
         )
         self.assertEqual(candidates, ("custom-model",))
 
-    def test_non_hebrew_printed_gemini_route_keeps_default_candidates(self):
+    def test_english_handwritten_gemini_route_uses_latin_handwritten_model(self):
+        route = OcrRouteConfig(
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+        )
+        candidates = gemini_model_candidates(
+            route,
+            language="en",
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            gemini_hebrew_printed_model="gemini-3.1-flash-lite",
+        )
+        self.assertEqual(candidates, (LATIN_HANDWRITTEN_GEMINI_MODEL,))
+
+    def test_french_handwritten_gemini_route_uses_latin_handwritten_model(self):
+        route = OcrRouteConfig(
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+        )
+        candidates = gemini_model_candidates(
+            route,
+            language="fr",
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            gemini_hebrew_printed_model="gemini-3.1-flash-lite",
+        )
+        self.assertEqual(candidates, (LATIN_HANDWRITTEN_GEMINI_MODEL,))
+
+    def test_english_printed_gemini_route_uses_latin_printed_model(self):
         route = OcrRouteConfig(
             engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
             prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
@@ -6872,6 +6960,32 @@ class GeminiModelCandidatesTests(SimpleTestCase):
         candidates = gemini_model_candidates(
             route,
             language="en",
+            text_input_type=Document.TextInputType.PRINTED,
+            gemini_hebrew_printed_model="gemini-3.1-flash-lite",
+        )
+        self.assertEqual(candidates, (LATIN_PRINTED_GEMINI_MODEL,))
+
+    def test_french_printed_gemini_route_uses_latin_printed_model(self):
+        route = OcrRouteConfig(
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+        )
+        candidates = gemini_model_candidates(
+            route,
+            language="fr",
+            text_input_type=Document.TextInputType.PRINTED,
+            gemini_hebrew_printed_model="gemini-3.1-flash-lite",
+        )
+        self.assertEqual(candidates, (LATIN_PRINTED_GEMINI_MODEL,))
+
+    def test_default_gemini_candidates_for_non_latin_routes(self):
+        route = OcrRouteConfig(
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+        )
+        candidates = gemini_model_candidates(
+            route,
+            language="ar",
             text_input_type=Document.TextInputType.PRINTED,
             gemini_hebrew_printed_model="gemini-3.1-flash-lite",
         )
