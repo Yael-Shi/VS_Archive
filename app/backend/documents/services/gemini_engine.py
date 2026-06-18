@@ -238,6 +238,7 @@ def transcribe_pages_with_gemini(
                         types.Part.from_bytes(data=page.image_bytes, mime_type=page.mime_type or "image/png"),
                     ],
                     config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
                         temperature=effective_temperature,
                         top_k=top_k,
                         top_p=top_p,
@@ -304,6 +305,7 @@ def translate_text_to_hebrew_with_gemini(
                 model=model_name,
                 contents=[types.Part.from_text(text=prompt)],
                 config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
                     temperature=temperature,
                     top_k=top_k,
                     top_p=top_p,

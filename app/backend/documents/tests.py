@@ -2158,8 +2158,8 @@ class RunWorkerBehaviorTests(TestCase):
         self.assertIn("worker_env", call_kw)
         self.mock_translate.assert_called_once_with(
             "recognized text",
-            self.doc.language,
-            model_name="gemini-2.0-flash",
+            "en",
+            model_name=DEFAULT_GEMINI_MODEL_CANDIDATES[0],
             min_text_length=5,
             temperature=0.2,
             top_k=40,
