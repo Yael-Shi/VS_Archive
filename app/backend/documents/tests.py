@@ -27,6 +27,7 @@ from documents.services.gemini_engine import (
     GeminiResult,
     _HANDWRITTEN_LATIN_PROMPT,
     _HEBREW_TRANSLATION_PROMPT,
+    _PRINTED_LATIN_PROMPT,
     _PRINTED_TEXT_PROMPT,
     transcribe_pages_with_gemini,
     translate_text_to_hebrew_with_gemini,
@@ -6822,6 +6823,18 @@ class GeminiEnginePromptTests(SimpleTestCase):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, _PRINTED_TEXT_PROMPT)
 
+    def test_printed_latin_prompt_uses_plain_text_archival_transcription(self):
+        self.assertIn("printed historical archival documents", _PRINTED_LATIN_PROMPT)
+        self.assertIn("typically English or French", _PRINTED_LATIN_PROMPT)
+        self.assertIn(
+            "Transcribe the entire visible page from top to bottom",
+            _PRINTED_LATIN_PROMPT,
+        )
+        self.assertIn("Output only the transcription text", _PRINTED_LATIN_PROMPT)
+        self.assertIn("Do not output JSON", _PRINTED_LATIN_PROMPT)
+        self.assertNotIn("OUTPUT FORMAT", _PRINTED_LATIN_PROMPT)
+        self.assertNotIn("Hebrew words", _PRINTED_LATIN_PROMPT)
+
     def test_handwritten_latin_prompt_preserves_archival_text(self):
         self.assertIn("expert paleographer and historian", _HANDWRITTEN_LATIN_PROMPT)
         self.assertIn("Latin script", _HANDWRITTEN_LATIN_PROMPT)
@@ -6888,7 +6901,44 @@ class GeminiEnginePromptTests(SimpleTestCase):
 
     @patch("documents.services.gemini_engine._create_client")
     @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
-    def test_non_latin_or_printed_transcription_keeps_passed_temperature(
+    def test_latin_printed_transcription_uses_plain_text_v1beta_without_thinking(
+        self, _mock_get_key, mock_create_client
+    ):
+        mock_client = Mock()
+        mock_client.models.generate_content.return_value = SimpleNamespace(
+            text='Printed text with "quoted words" and line breaks.',
+            candidates=[SimpleNamespace(finish_reason="STOP")],
+        )
+        mock_create_client.return_value = mock_client
+        pages = [PageImage(page_index=1, image_bytes=b"png", mime_type="image/png")]
+
+        for language_hint in ("en", "english", "fr", "french"):
+            with self.subTest(language_hint=language_hint):
+                mock_client.models.generate_content.reset_mock()
+                mock_create_client.reset_mock()
+
+                result = transcribe_pages_with_gemini(
+                    pages,
+                    language_hint,
+                    prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+                    temperature=0.11,
+                )
+
+                self.assertEqual(
+                    result.text,
+                    'Printed text with "quoted words" and line breaks.',
+                )
+                mock_create_client.assert_called_once_with(
+                    "test-key",
+                    api_version="v1beta",
+                )
+                config = mock_client.models.generate_content.call_args.kwargs["config"]
+                self.assertEqual(config.temperature, 0.0)
+                self.assertEqual(config.thinking_config.thinking_budget, 0)
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_non_latin_transcription_keeps_passed_temperature_and_json(
         self, _mock_get_key, mock_create_client
     ):
         mock_client = Mock()
@@ -6899,7 +6949,8 @@ class GeminiEnginePromptTests(SimpleTestCase):
         pages = [PageImage(page_index=1, image_bytes=b"png", mime_type="image/png")]
         cases = (
             ("he", DocumentTextResult.OcrPromptVariant.HANDWRITTEN),
-            ("en", DocumentTextResult.OcrPromptVariant.PRINTED),
+            ("he", DocumentTextResult.OcrPromptVariant.PRINTED),
+            ("ar", DocumentTextResult.OcrPromptVariant.PRINTED),
             (None, DocumentTextResult.OcrPromptVariant.HANDWRITTEN),
         )
 
@@ -6922,6 +6973,37 @@ class GeminiEnginePromptTests(SimpleTestCase):
                 config = mock_client.models.generate_content.call_args.kwargs["config"]
                 self.assertEqual(config.temperature, 0.11)
                 self.assertIsNone(config.thinking_config)
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_latin_printed_retries_after_max_tokens_and_succeeds(
+        self, _mock_get_key, mock_create_client
+    ):
+        mock_client = Mock()
+        mock_client.models.generate_content.side_effect = [
+            SimpleNamespace(
+                text="partial printed transcription",
+                candidates=[SimpleNamespace(finish_reason="MAX_TOKENS")],
+            ),
+            SimpleNamespace(
+                text="complete printed transcription after retry",
+                candidates=[SimpleNamespace(finish_reason="STOP")],
+            ),
+        ]
+        mock_create_client.return_value = mock_client
+        pages = [PageImage(page_index=1, image_bytes=b"png", mime_type="image/png")]
+
+        result = transcribe_pages_with_gemini(
+            pages,
+            "en",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+        )
+
+        self.assertEqual(
+            result.text,
+            "complete printed transcription after retry",
+        )
+        self.assertEqual(mock_client.models.generate_content.call_count, 2)
 
     @patch("documents.services.gemini_engine._create_client")
     @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")

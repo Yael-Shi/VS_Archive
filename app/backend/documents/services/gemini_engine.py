@@ -55,6 +55,24 @@ _HANDWRITTEN_LATIN_PROMPT = (
     "- Do not output JSON, markdown, comments, explanations, labels, or introductory text.\n"
 )
 
+
+_PRINTED_LATIN_PROMPT = (
+    "You are an OCR assistant for printed historical archival documents.\n"
+    "TASK: Transcribe the printed text in the image as faithfully as possible.\n"
+    "RULES:\n"
+    "- The text is in Latin script, typically English or French, and may include a mix of both.\n"
+    "- Transcribe the entire visible page from top to bottom; do not stop after the first section or paragraph.\n"
+    "- Preserve the original reading order, line breaks, headings, paragraphs, footnotes, page numbers, punctuation, spelling, capitalization, dates, names, places, abbreviations, and unusual forms exactly as seen.\n"
+    "- Preserve visible hyphenation, quotations, marginal notes, footer lines, URLs, email headers, and visible corrections.\n"
+    "- Do not correct spelling, grammar, punctuation, capitalization, wording, or factual mistakes.\n"
+    "- Do not modernize, normalize, rewrite, summarize, translate, explain, or add context.\n"
+    "- If a word is partly legible or uncertain, give your best reading and mark it inline with [?].\n"
+    "- If text is completely unreadable, use [UNCLEAR].\n"
+    "- Ignore purely decorative UI icons, toolbar buttons, and browser controls unless they contain meaningful printed text.\n"
+    "- Output only the transcription text.\n"
+    "- Do not output JSON, markdown, comments, explanations, labels, or introductory text.\n"
+)
+
 _HEBREW_TRANSLATION_PROMPT = (
     "You are a careful Hebrew translator for historical archival documents.\n"
     "\n"
@@ -134,7 +152,11 @@ def _uses_plain_text_transcription(
     language_hint: Optional[str],
 ) -> bool:
     return (
-        prompt_variant == DocumentTextResult.OcrPromptVariant.HANDWRITTEN
+        prompt_variant
+        in (
+            DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            DocumentTextResult.OcrPromptVariant.PRINTED,
+        )
         and _is_latin_language_hint(language_hint)
     )
 
@@ -343,14 +365,21 @@ def transcribe_pages_with_gemini(
     top_p: float = DEFAULT_GEMINI_TOP_P,
     max_output_tokens: Optional[int] = 8192,
 ) -> GeminiResult:
-    prompt_base = _PROMPT_BY_VARIANT.get(prompt_variant)
-    if prompt_base is None:
-        raise GeminiError(f"Unsupported Gemini prompt_variant: {prompt_variant!r}")
-
     uses_plain_text_transcription = _uses_plain_text_transcription(
         prompt_variant,
         language_hint,
     )
+
+    if (
+        prompt_variant == DocumentTextResult.OcrPromptVariant.PRINTED
+        and _is_latin_language_hint(language_hint)
+    ):
+        prompt_base = _PRINTED_LATIN_PROMPT
+    else:
+        prompt_base = _PROMPT_BY_VARIANT.get(prompt_variant)
+
+    if prompt_base is None:
+        raise GeminiError(f"Unsupported Gemini prompt_variant: {prompt_variant!r}")
 
     api_key = _get_api_key()
     client = _create_client(
