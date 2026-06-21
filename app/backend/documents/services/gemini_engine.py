@@ -41,6 +41,7 @@ _HANDWRITTEN_LATIN_PROMPT = (
     "TASK: Transcribe the handwritten text in the image as faithfully as possible.\n"
     "RULES:\n"
     "- The text is in Latin script, typically English or French, and may include a mix of both.\n"
+    "- Transcribe the entire visible page from top to bottom; do not stop after the first section or paragraph.\n"
     "- Transcribe what is written, not what the writer probably meant.\n"
     "- Preserve wording, spelling, grammar, punctuation, capitalization, line breaks, dates, names, places, abbreviations, and unusual forms exactly as seen.\n"
     "- Do not correct spelling, grammar, capitalization, punctuation, or wording.\n"
@@ -143,6 +144,7 @@ def _get_api_key() -> str:
     if not key:
         raise GeminiError("Missing GEMINI_API_KEY")
     return key
+
 
 def _create_client(
     api_key: str,
@@ -345,12 +347,29 @@ def transcribe_pages_with_gemini(
     if prompt_base is None:
         raise GeminiError(f"Unsupported Gemini prompt_variant: {prompt_variant!r}")
 
-    api_key = _get_api_key()
-    client = _create_client(api_key)
+    uses_plain_text_transcription = _uses_plain_text_transcription(
+        prompt_variant,
+        language_hint,
+    )
 
-    effective_temperature = temperature
-    if _uses_plain_text_transcription(prompt_variant, language_hint):
-        effective_temperature = 0.0
+    api_key = _get_api_key()
+    client = _create_client(
+        api_key,
+        api_version="v1beta" if uses_plain_text_transcription else "v1",
+    )
+
+    effective_temperature = 0.0 if uses_plain_text_transcription else temperature
+
+    config_kwargs: Dict[str, Any] = {
+        "temperature": effective_temperature,
+        "top_k": top_k,
+        "top_p": top_p,
+        "max_output_tokens": max_output_tokens,
+    }
+    if uses_plain_text_transcription:
+        config_kwargs["thinking_config"] = types.ThinkingConfig(
+            thinking_budget=0,
+        )
 
     texts: List[str] = []
     any_review = False
@@ -375,54 +394,88 @@ def transcribe_pages_with_gemini(
                             mime_type=page.mime_type or "image/png",
                         ),
                     ],
-                    config=types.GenerateContentConfig(
-                        temperature=effective_temperature,
-                        top_k=top_k,
-                        top_p=top_p,
-                        max_output_tokens=max_output_tokens,
-                    ),
+                    config=types.GenerateContentConfig(**config_kwargs),
                 )
 
-                if _uses_plain_text_transcription(prompt_variant, language_hint):
+                finish_reason = _extract_finish_reason(resp)
+                output_text = (resp.text or "").strip()
+                logger.info(
+                    "Gemini transcription page completed: "
+                    "page=%s output_length=%s finish_reason=%s model=%s",
+                    page.page_index,
+                    len(output_text),
+                    finish_reason,
+                    model_name,
+                )
+
+                if (
+                    uses_plain_text_transcription
+                    and finish_reason
+                    and "MAX_TOKENS" in finish_reason.upper()
+                ):
+                    attempts += 1
+                    if attempts < 2:
+                        logger.warning(
+                            "Retrying truncated Gemini transcription page %s "
+                            "after MAX_TOKENS with model %s",
+                            page.page_index,
+                            model_name,
+                        )
+                        continue
+
+                    raise GeminiError(
+                        "Gemini transcription page reached MAX_TOKENS after retry: "
+                        f"page_index={page.page_index}, "
+                        f"output_length={len(output_text)}, "
+                        f"finish_reason={finish_reason}, "
+                        f"model={model_name}"
+                    )
+
+                if uses_plain_text_transcription:
                     data = _plain_text_response_to_page_data(
-                        resp.text,
+                        output_text,
                         page_index=page.page_index,
                     )
                 else:
                     data = _parse_page_json_strict(
-                        resp.text,
+                        output_text,
                         page_index=page.page_index,
                     )
 
                 success = True
-            except Exception as e:
-                err_str = str(e).upper()
-                if any(x in err_str for x in ["429", "RESOURCE_EXHAUSTED", "QUOTA"]):
+            except GeminiError as exc:
+                if _is_retryable_gemini_response_error(exc):
+                    attempts += 1
+                    if attempts < 2:
+                        logger.warning(
+                            "Retrying Gemini response format failure on page %s "
+                            "with model %s: %s",
+                            page.page_index,
+                            model_name,
+                            exc,
+                        )
+                        continue
+                raise
+            except Exception as exc:
+                err_str = str(exc).upper()
+                if any(
+                    token in err_str
+                    for token in ("429", "RESOURCE_EXHAUSTED", "QUOTA")
+                ):
                     if "LIMIT: 0" in err_str:
                         raise GeminiError(f"QUOTA_EXHAUSTED: {model_name}")
                     time.sleep(5)
                     attempts += 1
                     continue
 
-                if isinstance(e, GeminiError) and _is_retryable_gemini_response_error(e):
-                    attempts += 1
-                    if attempts < 2:
-                        logger.warning(
-                            "Retrying Gemini response format failure on page %s with model %s: %s",
-                            page.page_index,
-                            model_name,
-                            e,
-                        )
-                        continue
-
-                raise GeminiError(f"Gemini API Error: {e}")
+                raise GeminiError(f"Gemini API Error: {exc}")
 
         if not success:
             raise GeminiError(f"QUOTA_EXHAUSTED: {model_name} after retries")
 
-        text = data["text"].strip()
-        texts.append(text)
-        if len(text) < min_text_length or data.get("has_unclear"):
+        page_text = data["text"].strip()
+        texts.append(page_text)
+        if len(page_text) < min_text_length or data.get("has_unclear"):
             any_review = True
 
     return GeminiResult(
