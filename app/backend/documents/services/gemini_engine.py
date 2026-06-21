@@ -63,6 +63,7 @@ _HEBREW_TRANSLATION_PROMPT = (
     "RULES:\n"
     "\n"
     "* The source below is an excerpt from a longer document. Translate the entire excerpt faithfully; omit nothing.\n"
+    "* The <source_excerpt> tags are delimiters only. Do not translate, copy, or mention them in the output.\n"
     "* Translate the source text faithfully into Hebrew.\n"
     "* Translate closely to the source wording, syntax, structure, and level of clarity, even if the Hebrew is somewhat awkward.\n"
     "* When the source sentence is awkward, incomplete, or grammatically broken, keep the Hebrew sentence similarly awkward or incomplete rather than repairing it.\n"
@@ -143,11 +144,14 @@ def _get_api_key() -> str:
         raise GeminiError("Missing GEMINI_API_KEY")
     return key
 
-
-def _create_client(api_key: str) -> genai.Client:
+def _create_client(
+    api_key: str,
+    *,
+    api_version: str = "v1",
+) -> genai.Client:
     return genai.Client(
         api_key=api_key,
-        http_options=types.HttpOptions(api_version="v1"),
+        http_options=types.HttpOptions(api_version=api_version),
     )
 
 
@@ -278,7 +282,7 @@ def _build_hebrew_translation_prompt(
     chunk: str,
     language_hint: Optional[str],
 ) -> str:
-    wrapped_chunk = f"SOURCE EXCERPT:\n{chunk}\nEND OF SOURCE EXCERPT"
+    wrapped_chunk = f"<source_excerpt>\n{chunk}\n</source_excerpt>"
     prompt = _HEBREW_TRANSLATION_PROMPT.replace("{{source_text}}", wrapped_chunk)
     if language_hint:
         prompt += f"\nSource language hint: {language_hint}."
@@ -458,7 +462,7 @@ def translate_text_to_hebrew_with_gemini(
     )
 
     api_key = _get_api_key()
-    client = _create_client(api_key)
+    client = _create_client(api_key, api_version="v1beta")
 
     translated_chunks: List[str] = []
     needs_review = False
