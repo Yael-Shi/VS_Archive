@@ -62,6 +62,7 @@ _HEBREW_TRANSLATION_PROMPT = (
     "\n"
     "RULES:\n"
     "\n"
+    "* The source below is an excerpt from a longer document. Translate the entire excerpt faithfully; omit nothing.\n"
     "* Translate the source text faithfully into Hebrew.\n"
     "* Translate closely to the source wording, syntax, structure, and level of clarity, even if the Hebrew is somewhat awkward.\n"
     "* When the source sentence is awkward, incomplete, or grammatically broken, keep the Hebrew sentence similarly awkward or incomplete rather than repairing it.\n"
@@ -78,7 +79,6 @@ _HEBREW_TRANSLATION_PROMPT = (
     "* Output only the Hebrew translation text.\n"
     "* Do not output JSON, markdown, comments, explanations, labels, or introductory text.\n"
     "\n"
-    "SOURCE TEXT:\n"
     "{{source_text}}\n"
 )
 
@@ -252,6 +252,39 @@ def _split_text_for_translation(
     return [chunk for chunk in chunks if chunk]
 
 
+def _extract_finish_reason(resp: Any) -> Optional[str]:
+    candidates = getattr(resp, "candidates", None)
+    if not candidates:
+        return None
+    finish_reason = getattr(candidates[0], "finish_reason", None)
+    if finish_reason is None:
+        return None
+    return str(finish_reason)
+
+
+def _is_translation_chunk_truncated(
+    source_chunk: str,
+    translated_text: str,
+    *,
+    min_text_length: int,
+) -> bool:
+    if len(source_chunk) < 1000:
+        return False
+    min_expected_length = int(len(source_chunk) * _MIN_TRANSLATION_LENGTH_RATIO)
+    return len(translated_text) < max(min_text_length, min_expected_length)
+
+
+def _build_hebrew_translation_prompt(
+    chunk: str,
+    language_hint: Optional[str],
+) -> str:
+    wrapped_chunk = f"SOURCE EXCERPT:\n{chunk}\nEND OF SOURCE EXCERPT"
+    prompt = _HEBREW_TRANSLATION_PROMPT.replace("{{source_text}}", wrapped_chunk)
+    if language_hint:
+        prompt += f"\nSource language hint: {language_hint}."
+    return prompt
+
+
 def _parse_page_json_strict(raw: str, *, page_index: int) -> Dict[str, Any]:
     raw = (raw or "").strip()
     if not raw:
@@ -402,7 +435,7 @@ def translate_text_to_hebrew_with_gemini(
     *,
     model_name: str = DEFAULT_GEMINI_MODEL,
     min_text_length: int = 20,
-    temperature: float = DEFAULT_GEMINI_TEMPERATURE,
+    temperature: float = 0.0,
     top_k: int = DEFAULT_GEMINI_TOP_K,
     top_p: float = DEFAULT_GEMINI_TOP_P,
     max_output_tokens: Optional[int] = 8192,
@@ -415,6 +448,15 @@ def translate_text_to_hebrew_with_gemini(
     if not chunks:
         raise GeminiError("Cannot translate empty source text")
 
+    chunk_lengths = [len(chunk) for chunk in chunks]
+    logger.info(
+        "Gemini Hebrew translation starting: source_length=%s chunk_count=%s chunk_lengths=%s model=%s",
+        len(stripped_source),
+        len(chunks),
+        chunk_lengths,
+        model_name,
+    )
+
     api_key = _get_api_key()
     client = _create_client(api_key)
 
@@ -422,56 +464,98 @@ def translate_text_to_hebrew_with_gemini(
     needs_review = False
 
     for index, chunk in enumerate(chunks, start=1):
-        prompt = _HEBREW_TRANSLATION_PROMPT.replace("{{source_text}}", chunk)
-        if language_hint:
-            prompt += f"\nSource language hint: {language_hint}."
-
-        success = False
-        attempts = 0
+        chunk_source_len = len(chunk)
+        truncation_retries = 0
+        translated_text = ""
         data: Dict[str, Any] = {}
 
-        while not success and attempts < 2:
-            try:
-                resp = client.models.generate_content(
-                    model=model_name,
-                    contents=[types.Part.from_text(text=prompt)],
-                    config=types.GenerateContentConfig(
-                        temperature=temperature,
-                        top_k=top_k,
-                        top_p=top_p,
-                        max_output_tokens=max_output_tokens,
-                    ),
-                )
-                data = _plain_text_response_to_page_data(resp.text, page_index=index)
-                success = True
-            except GeminiError as e:
-                if _is_retryable_gemini_response_error(e):
-                    attempts += 1
-                    if attempts < 2:
-                        logger.warning(
-                            "Retrying Gemini translation response format failure on chunk %s/%s with model %s: %s",
-                            index,
-                            len(chunks),
-                            model_name,
-                            e,
-                        )
+        while True:
+            prompt = _build_hebrew_translation_prompt(chunk, language_hint)
+
+            success = False
+            attempts = 0
+            finish_reason: Optional[str] = None
+
+            while not success and attempts < 2:
+                try:
+                    resp = client.models.generate_content(
+                        model=model_name,
+                        contents=[types.Part.from_text(text=prompt)],
+                        config=types.GenerateContentConfig(
+                            temperature=temperature,
+                            top_k=top_k,
+                            top_p=top_p,
+                            max_output_tokens=max_output_tokens,
+                        ),
+                    )
+                    data = _plain_text_response_to_page_data(resp.text, page_index=index)
+                    finish_reason = _extract_finish_reason(resp)
+                    success = True
+                except GeminiError as e:
+                    if _is_retryable_gemini_response_error(e):
+                        attempts += 1
+                        if attempts < 2:
+                            logger.warning(
+                                "Retrying Gemini translation response format failure on chunk %s/%s with model %s: %s",
+                                index,
+                                len(chunks),
+                                model_name,
+                                e,
+                            )
+                            continue
+                    raise
+                except Exception as e:
+                    err_str = str(e).upper()
+                    if any(x in err_str for x in ["429", "RESOURCE_EXHAUSTED", "QUOTA"]):
+                        if "LIMIT: 0" in err_str:
+                            raise GeminiError(f"QUOTA_EXHAUSTED: {model_name}")
+                        time.sleep(5)
+                        attempts += 1
                         continue
-                raise
-            except Exception as e:
-                err_str = str(e).upper()
-                if any(x in err_str for x in ["429", "RESOURCE_EXHAUSTED", "QUOTA"]):
-                    if "LIMIT: 0" in err_str:
-                        raise GeminiError(f"QUOTA_EXHAUSTED: {model_name}")
-                    time.sleep(5)
-                    attempts += 1
+
+                    raise GeminiError(f"Gemini API Error: {e}")
+
+            if not success:
+                raise GeminiError(f"QUOTA_EXHAUSTED: {model_name} after retries")
+
+            translated_text = data["text"].strip()
+            logger.info(
+                "Gemini Hebrew translation chunk %s/%s: source_length=%s output_length=%s finish_reason=%s model=%s",
+                index,
+                len(chunks),
+                chunk_source_len,
+                len(translated_text),
+                finish_reason,
+                model_name,
+            )
+
+            if _is_translation_chunk_truncated(
+                chunk,
+                translated_text,
+                min_text_length=min_text_length,
+            ):
+                if truncation_retries < 1:
+                    truncation_retries += 1
+                    logger.warning(
+                        "Gemini Hebrew translation chunk %s/%s appears truncated; retrying once: source_length=%s output_length=%s model=%s",
+                        index,
+                        len(chunks),
+                        chunk_source_len,
+                        len(translated_text),
+                        model_name,
+                    )
                     continue
 
-                raise GeminiError(f"Gemini API Error: {e}")
+                raise GeminiError(
+                    "Gemini Hebrew translation chunk appears truncated after retry: "
+                    f"chunk_index={index}/{len(chunks)}, "
+                    f"source_length={chunk_source_len}, "
+                    f"translation_length={len(translated_text)}, "
+                    f"finish_reason={finish_reason}, "
+                    f"model={model_name}"
+                )
+            break
 
-        if not success:
-            raise GeminiError(f"QUOTA_EXHAUSTED: {model_name} after retries")
-
-        translated_text = data["text"].strip()
         translated_chunks.append(translated_text)
         if len(translated_text) < min_text_length or bool(data.get("has_unclear")):
             needs_review = True
