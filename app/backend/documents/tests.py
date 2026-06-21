@@ -6997,6 +6997,7 @@ class GeminiEnginePromptTests(SimpleTestCase):
             pages,
             "en",
             prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            max_output_tokens=2048,
         )
 
         self.assertEqual(
@@ -7004,6 +7005,63 @@ class GeminiEnginePromptTests(SimpleTestCase):
             "complete printed transcription after retry",
         )
         self.assertEqual(mock_client.models.generate_content.call_count, 2)
+
+        first_config = (
+            mock_client.models.generate_content.call_args_list[0]
+            .kwargs["config"]
+        )
+        retry_config = (
+            mock_client.models.generate_content.call_args_list[1]
+            .kwargs["config"]
+        )
+        self.assertEqual(first_config.max_output_tokens, 2048)
+        self.assertEqual(retry_config.max_output_tokens, 8192)
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_latin_printed_raises_after_repeated_max_tokens_with_escalated_limit(
+        self, _mock_get_key, mock_create_client
+    ):
+        mock_client = Mock()
+        mock_client.models.generate_content.side_effect = [
+            SimpleNamespace(
+                text="partial printed first attempt",
+                candidates=[SimpleNamespace(finish_reason="MAX_TOKENS")],
+            ),
+            SimpleNamespace(
+                text="partial printed second attempt",
+                candidates=[SimpleNamespace(finish_reason="MAX_TOKENS")],
+            ),
+        ]
+        mock_create_client.return_value = mock_client
+        pages = [PageImage(page_index=4, image_bytes=b"png", mime_type="image/png")]
+
+        with self.assertRaises(GeminiError) as ctx:
+            transcribe_pages_with_gemini(
+                pages,
+                "en",
+                prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+                model_name="test-model",
+                max_output_tokens=2048,
+            )
+
+        message = str(ctx.exception)
+        self.assertIn("page_index=4", message)
+        self.assertIn("MAX_TOKENS", message)
+        self.assertIn("max_output_tokens=8192", message)
+        self.assertIn("model=test-model", message)
+        self.assertEqual(mock_client.models.generate_content.call_count, 2)
+
+        first_config = (
+            mock_client.models.generate_content.call_args_list[0]
+            .kwargs["config"]
+        )
+        retry_config = (
+            mock_client.models.generate_content.call_args_list[1]
+            .kwargs["config"]
+        )
+        self.assertEqual(first_config.max_output_tokens, 2048)
+        self.assertEqual(retry_config.max_output_tokens, 8192)
 
     @patch("documents.services.gemini_engine._create_client")
     @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
@@ -7028,10 +7086,22 @@ class GeminiEnginePromptTests(SimpleTestCase):
             pages,
             "fr",
             prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            max_output_tokens=2048,
         )
 
         self.assertEqual(result.text, "complete transcription after retry")
         self.assertEqual(mock_client.models.generate_content.call_count, 2)
+
+        first_config = (
+            mock_client.models.generate_content.call_args_list[0]
+            .kwargs["config"]
+        )
+        retry_config = (
+            mock_client.models.generate_content.call_args_list[1]
+            .kwargs["config"]
+        )
+        self.assertEqual(first_config.max_output_tokens, 2048)
+        self.assertEqual(retry_config.max_output_tokens, 8192)
 
     @patch("documents.services.gemini_engine._create_client")
     @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
@@ -7058,11 +7128,13 @@ class GeminiEnginePromptTests(SimpleTestCase):
                 "fr",
                 prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
                 model_name="test-model",
+                max_output_tokens=2048,
             )
 
         message = str(ctx.exception)
         self.assertIn("page_index=1", message)
         self.assertIn("MAX_TOKENS", message)
+        self.assertIn("max_output_tokens=8192", message)
         self.assertIn("model=test-model", message)
         self.assertEqual(mock_client.models.generate_content.call_count, 2)
 

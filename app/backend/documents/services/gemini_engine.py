@@ -133,6 +133,7 @@ _PROMPT_BY_VARIANT = {
 _REQUIRED_KEYS = ("text", "has_unclear", "unclear_count")
 _TRANSLATION_CHUNK_MAX_CHARS = 2200
 _MIN_TRANSLATION_LENGTH_RATIO = 0.20
+_LATIN_TRANSCRIPTION_RETRY_MIN_OUTPUT_TOKENS = 8192
 
 _LATIN_LANGUAGE_HINTS = frozenset(
     {"en", "eng", "english", "fr", "fra", "fre", "french"}
@@ -411,9 +412,15 @@ def transcribe_pages_with_gemini(
 
         success = False
         attempts = 0
+        attempt_max_output_tokens = max_output_tokens
 
         while not success and attempts < 2:
             try:
+                attempt_config_kwargs = dict(config_kwargs)
+                attempt_config_kwargs["max_output_tokens"] = (
+                    attempt_max_output_tokens
+                )
+
                 resp = client.models.generate_content(
                     model=model_name,
                     contents=[
@@ -423,7 +430,9 @@ def transcribe_pages_with_gemini(
                             mime_type=page.mime_type or "image/png",
                         ),
                     ],
-                    config=types.GenerateContentConfig(**config_kwargs),
+                    config=types.GenerateContentConfig(
+                        **attempt_config_kwargs
+                    ),
                 )
 
                 finish_reason = _extract_finish_reason(resp)
@@ -444,12 +453,20 @@ def transcribe_pages_with_gemini(
                 ):
                     attempts += 1
                     if attempts < 2:
+                        retry_max_output_tokens = max(
+                            _LATIN_TRANSCRIPTION_RETRY_MIN_OUTPUT_TOKENS,
+                            attempt_max_output_tokens or 0,
+                        )
                         logger.warning(
                             "Retrying truncated Gemini transcription page %s "
-                            "after MAX_TOKENS with model %s",
+                            "after MAX_TOKENS with model %s: "
+                            "max_output_tokens=%s -> %s",
                             page.page_index,
                             model_name,
+                            attempt_max_output_tokens,
+                            retry_max_output_tokens,
                         )
+                        attempt_max_output_tokens = retry_max_output_tokens
                         continue
 
                     raise GeminiError(
@@ -457,6 +474,7 @@ def transcribe_pages_with_gemini(
                         f"page_index={page.page_index}, "
                         f"output_length={len(output_text)}, "
                         f"finish_reason={finish_reason}, "
+                        f"max_output_tokens={attempt_max_output_tokens}, "
                         f"model={model_name}"
                     )
 
