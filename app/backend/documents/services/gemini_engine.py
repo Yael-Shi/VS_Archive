@@ -69,6 +69,8 @@ _PRINTED_LATIN_PROMPT = (
     "- If a word is partly legible or uncertain, give your best reading and mark it inline with [?].\n"
     "- If text is completely unreadable, use [UNCLEAR].\n"
     "- Ignore purely decorative UI icons, toolbar buttons, and browser controls unless they contain meaningful printed text.\n"
+    "- Stop immediately after the last visible meaningful text on the page.\n"
+    "- Do not repeat text, continue with blank lines, or generate padding after the page content.\n"
     "- Output only the transcription text.\n"
     "- Do not output JSON, markdown, comments, explanations, labels, or introductory text.\n"
 )
@@ -281,14 +283,45 @@ def _split_text_for_translation(
     return [chunk for chunk in chunks if chunk]
 
 
-def _extract_finish_reason(resp: Any) -> Optional[str]:
+def _first_response_candidate(resp: Any) -> Any:
     candidates = getattr(resp, "candidates", None)
     if not candidates:
         return None
-    finish_reason = getattr(candidates[0], "finish_reason", None)
+    return candidates[0]
+
+
+def _extract_finish_reason(resp: Any) -> Optional[str]:
+    candidate = _first_response_candidate(resp)
+    finish_reason = getattr(candidate, "finish_reason", None)
     if finish_reason is None:
         return None
     return str(finish_reason)
+
+
+def _extract_finish_message(resp: Any) -> Optional[str]:
+    candidate = _first_response_candidate(resp)
+    finish_message = getattr(candidate, "finish_message", None)
+    if finish_message is None:
+        return None
+
+    normalized = re.sub(r"\s+", " ", str(finish_message)).strip()
+    if not normalized:
+        return None
+    return normalized[:500]
+
+
+def _extract_response_usage(resp: Any) -> Dict[str, Optional[int]]:
+    usage = getattr(resp, "usage_metadata", None)
+    return {
+        "prompt_token_count": getattr(usage, "prompt_token_count", None),
+        "candidates_token_count": getattr(
+            usage,
+            "candidates_token_count",
+            None,
+        ),
+        "thoughts_token_count": getattr(usage, "thoughts_token_count", None),
+        "total_token_count": getattr(usage, "total_token_count", None),
+    }
 
 
 def _is_translation_chunk_truncated(
@@ -436,13 +469,33 @@ def transcribe_pages_with_gemini(
                 )
 
                 finish_reason = _extract_finish_reason(resp)
-                output_text = (resp.text or "").strip()
+                finish_message = _extract_finish_message(resp)
+                usage = _extract_response_usage(resp)
+
+                raw_output_text = resp.text or ""
+                output_text = raw_output_text.strip()
+                trailing_whitespace_chars = (
+                    len(raw_output_text) - len(raw_output_text.rstrip())
+                )
+
                 logger.info(
                     "Gemini transcription page completed: "
-                    "page=%s output_length=%s finish_reason=%s model=%s",
+                    "page=%s raw_output_length=%s output_length=%s "
+                    "trailing_whitespace_chars=%s finish_reason=%s "
+                    "finish_message=%r prompt_token_count=%s "
+                    "candidates_token_count=%s thoughts_token_count=%s "
+                    "total_token_count=%s max_output_tokens=%s model=%s",
                     page.page_index,
+                    len(raw_output_text),
                     len(output_text),
+                    trailing_whitespace_chars,
                     finish_reason,
+                    finish_message,
+                    usage["prompt_token_count"],
+                    usage["candidates_token_count"],
+                    usage["thoughts_token_count"],
+                    usage["total_token_count"],
+                    attempt_max_output_tokens,
                     model_name,
                 )
 
@@ -460,11 +513,24 @@ def transcribe_pages_with_gemini(
                         logger.warning(
                             "Retrying truncated Gemini transcription page %s "
                             "after MAX_TOKENS with model %s: "
-                            "max_output_tokens=%s -> %s",
+                            "max_output_tokens=%s -> %s "
+                            "raw_output_length=%s output_length=%s "
+                            "trailing_whitespace_chars=%s "
+                            "finish_message=%r prompt_token_count=%s "
+                            "candidates_token_count=%s "
+                            "thoughts_token_count=%s total_token_count=%s",
                             page.page_index,
                             model_name,
                             attempt_max_output_tokens,
                             retry_max_output_tokens,
+                            len(raw_output_text),
+                            len(output_text),
+                            trailing_whitespace_chars,
+                            finish_message,
+                            usage["prompt_token_count"],
+                            usage["candidates_token_count"],
+                            usage["thoughts_token_count"],
+                            usage["total_token_count"],
                         )
                         attempt_max_output_tokens = retry_max_output_tokens
                         continue
@@ -472,8 +538,15 @@ def transcribe_pages_with_gemini(
                     raise GeminiError(
                         "Gemini transcription page reached MAX_TOKENS after retry: "
                         f"page_index={page.page_index}, "
+                        f"raw_output_length={len(raw_output_text)}, "
                         f"output_length={len(output_text)}, "
+                        f"trailing_whitespace_chars={trailing_whitespace_chars}, "
                         f"finish_reason={finish_reason}, "
+                        f"finish_message={finish_message!r}, "
+                        f"prompt_token_count={usage['prompt_token_count']}, "
+                        f"candidates_token_count={usage['candidates_token_count']}, "
+                        f"thoughts_token_count={usage['thoughts_token_count']}, "
+                        f"total_token_count={usage['total_token_count']}, "
                         f"max_output_tokens={attempt_max_output_tokens}, "
                         f"model={model_name}"
                     )

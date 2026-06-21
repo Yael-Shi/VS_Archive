@@ -6830,6 +6830,14 @@ class GeminiEnginePromptTests(SimpleTestCase):
             "Transcribe the entire visible page from top to bottom",
             _PRINTED_LATIN_PROMPT,
         )
+        self.assertIn(
+            "Stop immediately after the last visible meaningful text",
+            _PRINTED_LATIN_PROMPT,
+        )
+        self.assertIn(
+            "Do not repeat text, continue with blank lines, or generate padding",
+            _PRINTED_LATIN_PROMPT,
+        )
         self.assertIn("Output only the transcription text", _PRINTED_LATIN_PROMPT)
         self.assertIn("Do not output JSON", _PRINTED_LATIN_PROMPT)
         self.assertNotIn("OUTPUT FORMAT", _PRINTED_LATIN_PROMPT)
@@ -6976,6 +6984,55 @@ class GeminiEnginePromptTests(SimpleTestCase):
 
     @patch("documents.services.gemini_engine._create_client")
     @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_latin_printed_logs_response_lengths_and_usage_metadata(
+        self, _mock_get_key, mock_create_client
+    ):
+        raw_text = "complete printed text   \n\n"
+        mock_client = Mock()
+        mock_client.models.generate_content.return_value = SimpleNamespace(
+            text=raw_text,
+            candidates=[
+                SimpleNamespace(
+                    finish_reason="STOP",
+                    finish_message="Natural stop",
+                )
+            ],
+            usage_metadata=SimpleNamespace(
+                prompt_token_count=321,
+                candidates_token_count=45,
+                thoughts_token_count=0,
+                total_token_count=366,
+            ),
+        )
+        mock_create_client.return_value = mock_client
+        pages = [PageImage(page_index=2, image_bytes=b"png", mime_type="image/png")]
+
+        with self.assertLogs(
+            "documents.services.gemini_engine",
+            level="INFO",
+        ) as captured:
+            result = transcribe_pages_with_gemini(
+                pages,
+                "en",
+                prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+                max_output_tokens=2048,
+            )
+
+        self.assertEqual(result.text, "complete printed text")
+        log_output = "\n".join(captured.output)
+        self.assertIn(f"raw_output_length={len(raw_text)}", log_output)
+        self.assertIn("output_length=21", log_output)
+        self.assertIn("trailing_whitespace_chars=5", log_output)
+        self.assertIn("finish_reason=STOP", log_output)
+        self.assertIn("finish_message='Natural stop'", log_output)
+        self.assertIn("prompt_token_count=321", log_output)
+        self.assertIn("candidates_token_count=45", log_output)
+        self.assertIn("thoughts_token_count=0", log_output)
+        self.assertIn("total_token_count=366", log_output)
+        self.assertIn("max_output_tokens=2048", log_output)
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
     def test_latin_printed_retries_after_max_tokens_and_succeeds(
         self, _mock_get_key, mock_create_client
     ):
@@ -7029,8 +7086,19 @@ class GeminiEnginePromptTests(SimpleTestCase):
                 candidates=[SimpleNamespace(finish_reason="MAX_TOKENS")],
             ),
             SimpleNamespace(
-                text="partial printed second attempt",
-                candidates=[SimpleNamespace(finish_reason="MAX_TOKENS")],
+                text="partial printed second attempt   \n\n",
+                candidates=[
+                    SimpleNamespace(
+                        finish_reason="MAX_TOKENS",
+                        finish_message="Maximum output tokens reached",
+                    )
+                ],
+                usage_metadata=SimpleNamespace(
+                    prompt_token_count=730,
+                    candidates_token_count=8192,
+                    thoughts_token_count=0,
+                    total_token_count=8922,
+                ),
             ),
         ]
         mock_create_client.return_value = mock_client
@@ -7048,6 +7116,17 @@ class GeminiEnginePromptTests(SimpleTestCase):
         message = str(ctx.exception)
         self.assertIn("page_index=4", message)
         self.assertIn("MAX_TOKENS", message)
+        self.assertIn("raw_output_length=35", message)
+        self.assertIn("output_length=30", message)
+        self.assertIn("trailing_whitespace_chars=5", message)
+        self.assertIn(
+            "finish_message='Maximum output tokens reached'",
+            message,
+        )
+        self.assertIn("prompt_token_count=730", message)
+        self.assertIn("candidates_token_count=8192", message)
+        self.assertIn("thoughts_token_count=0", message)
+        self.assertIn("total_token_count=8922", message)
         self.assertIn("max_output_tokens=8192", message)
         self.assertIn("model=test-model", message)
         self.assertEqual(mock_client.models.generate_content.call_count, 2)
