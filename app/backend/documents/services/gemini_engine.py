@@ -486,6 +486,7 @@ def translate_text_to_hebrew_with_gemini(
                             top_k=top_k,
                             top_p=top_p,
                             max_output_tokens=max_output_tokens,
+                            thinking_config=types.ThinkingConfig(thinking_budget=0),
                         ),
                     )
                     data = _plain_text_response_to_page_data(resp.text, page_index=index)

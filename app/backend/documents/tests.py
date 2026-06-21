@@ -6984,6 +6984,7 @@ class GeminiHebrewTranslationTests(SimpleTestCase):
 
         config = mock_client.models.generate_content.call_args.kwargs["config"]
         self.assertEqual(config.temperature, 0.0)
+        self.assertEqual(config.thinking_config.thinking_budget, 0)
 
 
 class GeminiModelCandidatesTests(SimpleTestCase):
