@@ -6966,8 +6966,8 @@ class GeminiHebrewTranslationTests(SimpleTestCase):
         translate_text_to_hebrew_with_gemini(source_text, "en")
 
         prompt = mock_client.models.generate_content.call_args.kwargs["contents"][0].text
-        self.assertIn("SOURCE EXCERPT:", prompt)
-        self.assertIn("END OF SOURCE EXCERPT", prompt)
+        self.assertIn("<source_excerpt>", prompt)
+        self.assertIn("</source_excerpt>", prompt)
         self.assertIn(source_text, prompt)
 
     @patch("documents.services.gemini_engine._create_client")
@@ -6985,6 +6985,10 @@ class GeminiHebrewTranslationTests(SimpleTestCase):
         config = mock_client.models.generate_content.call_args.kwargs["config"]
         self.assertEqual(config.temperature, 0.0)
         self.assertEqual(config.thinking_config.thinking_budget, 0)
+        mock_create_client.assert_called_once_with(
+            "test-key",
+            api_version="v1beta",
+        )
 
 
 class GeminiModelCandidatesTests(SimpleTestCase):
