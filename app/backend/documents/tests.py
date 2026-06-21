@@ -29,6 +29,7 @@ from documents.services.gemini_engine import (
     _HEBREW_TRANSLATION_PROMPT,
     _PRINTED_TEXT_PROMPT,
     transcribe_pages_with_gemini,
+    translate_text_to_hebrew_with_gemini,
 )
 from documents.services.page_extraction import PageImage
 from documents.services.htr_adapters.base import (
@@ -6837,6 +6838,8 @@ class GeminiEnginePromptTests(SimpleTestCase):
 
     def test_hebrew_translation_prompt_includes_archival_guardrails(self):
         guardrails = (
+            "excerpt from a longer document",
+            "Translate the entire excerpt faithfully; omit nothing",
             "Translate the source text faithfully into Hebrew",
             "Do not summarize, shorten, expand, explain, or add historical context",
             "uncertainty markers such as [?] and [UNCLEAR]",
@@ -6898,6 +6901,89 @@ class GeminiEnginePromptTests(SimpleTestCase):
                 )
                 config = mock_client.models.generate_content.call_args.kwargs["config"]
                 self.assertEqual(config.temperature, 0.11)
+
+
+class GeminiHebrewTranslationTests(SimpleTestCase):
+    def _long_source_text(self, char_count: int = 1500) -> str:
+        return ("word " * (char_count // 5)).strip()
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_translation_retries_truncated_chunk_and_succeeds(
+        self, _mock_get_key, mock_create_client
+    ):
+        source_text = self._long_source_text()
+        mock_client = Mock()
+        mock_client.models.generate_content.side_effect = [
+            SimpleNamespace(text="x" * 100),
+            SimpleNamespace(text="י" * 400),
+        ]
+        mock_create_client.return_value = mock_client
+
+        result = translate_text_to_hebrew_with_gemini(source_text, "en")
+
+        self.assertEqual(len(result.text), 400)
+        self.assertEqual(mock_client.models.generate_content.call_count, 2)
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_translation_raises_when_chunk_stays_truncated_after_retry(
+        self, _mock_get_key, mock_create_client
+    ):
+        source_text = self._long_source_text()
+        mock_client = Mock()
+        mock_client.models.generate_content.side_effect = [
+            SimpleNamespace(text="x" * 100),
+            SimpleNamespace(text="y" * 100),
+        ]
+        mock_create_client.return_value = mock_client
+
+        with self.assertRaises(GeminiError) as ctx:
+            translate_text_to_hebrew_with_gemini(
+            source_text,
+            "en",
+            model_name="test-model",
+        )
+
+        message = str(ctx.exception)
+        self.assertIn("chunk_index=1/1", message)
+        self.assertIn(f"source_length={len(source_text)}", message)
+        self.assertIn("translation_length=100", message)
+        self.assertIn("finish_reason=None", message)
+        self.assertIn("model=test-model", message)
+        self.assertEqual(mock_client.models.generate_content.call_count, 2)
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_translation_prompt_wraps_source_with_excerpt_markers(
+        self, _mock_get_key, mock_create_client
+    ):
+        source_text = self._long_source_text()
+        mock_client = Mock()
+        mock_client.models.generate_content.return_value = SimpleNamespace(text="י" * 400)
+        mock_create_client.return_value = mock_client
+
+        translate_text_to_hebrew_with_gemini(source_text, "en")
+
+        prompt = mock_client.models.generate_content.call_args.kwargs["contents"][0].text
+        self.assertIn("SOURCE EXCERPT:", prompt)
+        self.assertIn("END OF SOURCE EXCERPT", prompt)
+        self.assertIn(source_text, prompt)
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_translation_uses_zero_temperature_by_default(
+        self, _mock_get_key, mock_create_client
+    ):
+        source_text = self._long_source_text()
+        mock_client = Mock()
+        mock_client.models.generate_content.return_value = SimpleNamespace(text="י" * 400)
+        mock_create_client.return_value = mock_client
+
+        translate_text_to_hebrew_with_gemini(source_text, "en")
+
+        config = mock_client.models.generate_content.call_args.kwargs["config"]
+        self.assertEqual(config.temperature, 0.0)
 
 
 class GeminiModelCandidatesTests(SimpleTestCase):
