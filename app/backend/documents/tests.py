@@ -6828,6 +6828,10 @@ class GeminiEnginePromptTests(SimpleTestCase):
         self.assertIn("typically English or French", _HANDWRITTEN_LATIN_PROMPT)
         self.assertIn("Transcribe what is written", _HANDWRITTEN_LATIN_PROMPT)
         self.assertIn(
+            "Transcribe the entire visible page from top to bottom",
+            _HANDWRITTEN_LATIN_PROMPT,
+        )
+        self.assertIn(
             "Do not correct spelling, grammar, capitalization, punctuation, or wording",
             _HANDWRITTEN_LATIN_PROMPT,
         )
@@ -6851,12 +6855,13 @@ class GeminiEnginePromptTests(SimpleTestCase):
 
     @patch("documents.services.gemini_engine._create_client")
     @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
-    def test_latin_handwritten_transcription_uses_zero_temperature(
+    def test_latin_handwritten_transcription_uses_v1beta_without_thinking(
         self, _mock_get_key, mock_create_client
     ):
         mock_client = Mock()
         mock_client.models.generate_content.return_value = SimpleNamespace(
-            text='{"text": "hello world hello world", "has_unclear": false, "unclear_count": 0}',
+            text="hello world hello world",
+            candidates=[SimpleNamespace(finish_reason="STOP")],
         )
         mock_create_client.return_value = mock_client
         pages = [PageImage(page_index=1, image_bytes=b"png", mime_type="image/png")]
@@ -6864,14 +6869,22 @@ class GeminiEnginePromptTests(SimpleTestCase):
         for language_hint in ("en", "english", "fr", "french"):
             with self.subTest(language_hint=language_hint):
                 mock_client.models.generate_content.reset_mock()
+                mock_create_client.reset_mock()
+
                 transcribe_pages_with_gemini(
                     pages,
                     language_hint,
                     prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
                     temperature=0.11,
                 )
+
+                mock_create_client.assert_called_once_with(
+                    "test-key",
+                    api_version="v1beta",
+                )
                 config = mock_client.models.generate_content.call_args.kwargs["config"]
                 self.assertEqual(config.temperature, 0.0)
+                self.assertEqual(config.thinking_config.thinking_budget, 0)
 
     @patch("documents.services.gemini_engine._create_client")
     @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
@@ -6893,14 +6906,83 @@ class GeminiEnginePromptTests(SimpleTestCase):
         for language_hint, prompt_variant in cases:
             with self.subTest(language_hint=language_hint, prompt_variant=prompt_variant):
                 mock_client.models.generate_content.reset_mock()
+                mock_create_client.reset_mock()
+
                 transcribe_pages_with_gemini(
                     pages,
                     language_hint,
                     prompt_variant=prompt_variant,
                     temperature=0.11,
                 )
+
+                mock_create_client.assert_called_once_with(
+                    "test-key",
+                    api_version="v1",
+                )
                 config = mock_client.models.generate_content.call_args.kwargs["config"]
                 self.assertEqual(config.temperature, 0.11)
+                self.assertIsNone(config.thinking_config)
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_latin_handwritten_retries_after_max_tokens_and_succeeds(
+        self, _mock_get_key, mock_create_client
+    ):
+        mock_client = Mock()
+        mock_client.models.generate_content.side_effect = [
+            SimpleNamespace(
+                text="partial transcription",
+                candidates=[SimpleNamespace(finish_reason="MAX_TOKENS")],
+            ),
+            SimpleNamespace(
+                text="complete transcription after retry",
+                candidates=[SimpleNamespace(finish_reason="STOP")],
+            ),
+        ]
+        mock_create_client.return_value = mock_client
+        pages = [PageImage(page_index=1, image_bytes=b"png", mime_type="image/png")]
+
+        result = transcribe_pages_with_gemini(
+            pages,
+            "fr",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+        )
+
+        self.assertEqual(result.text, "complete transcription after retry")
+        self.assertEqual(mock_client.models.generate_content.call_count, 2)
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_latin_handwritten_raises_after_repeated_max_tokens(
+        self, _mock_get_key, mock_create_client
+    ):
+        mock_client = Mock()
+        mock_client.models.generate_content.side_effect = [
+            SimpleNamespace(
+                text="partial first attempt",
+                candidates=[SimpleNamespace(finish_reason="MAX_TOKENS")],
+            ),
+            SimpleNamespace(
+                text="partial second attempt",
+                candidates=[SimpleNamespace(finish_reason="MAX_TOKENS")],
+            ),
+        ]
+        mock_create_client.return_value = mock_client
+        pages = [PageImage(page_index=1, image_bytes=b"png", mime_type="image/png")]
+
+        with self.assertRaises(GeminiError) as ctx:
+            transcribe_pages_with_gemini(
+                pages,
+                "fr",
+                prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+                model_name="test-model",
+            )
+
+        message = str(ctx.exception)
+        self.assertIn("page_index=1", message)
+        self.assertIn("MAX_TOKENS", message)
+        self.assertIn("model=test-model", message)
+        self.assertEqual(mock_client.models.generate_content.call_count, 2)
 
 
 class GeminiHebrewTranslationTests(SimpleTestCase):
