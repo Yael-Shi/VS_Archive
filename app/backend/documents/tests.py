@@ -4541,19 +4541,19 @@ class UploadApiTests(TestCase):
         self.assertIn("single-file", resp.content.decode())
 
     def test_multi_image_create_rejects_more_than_max_files(self):
-        resp = self._post_create(self._multi_files_payload(count=31))
+        resp = self._post_create(self._multi_files_payload(count=36))
         self.assertEqual(resp.status_code, 400)
-        self.assertIn("at most 30 images", resp.content.decode())
+        self.assertIn("at most 35 images", resp.content.decode())
 
     @patch("documents.views.create_presigned_put")
     def test_multi_image_create_accepts_max_files(self, mock_put):
         mock_put.side_effect = lambda **kwargs: f"https://example/{kwargs['key']}"
 
-        resp = self._post_create(self._multi_files_payload(count=30))
+        resp = self._post_create(self._multi_files_payload(count=35))
         self.assertEqual(resp.status_code, 201)
         body = resp.json()
-        self.assertEqual(body["expected_source_file_count"], 30)
-        self.assertEqual(len(body["uploads"]), 30)
+        self.assertEqual(body["expected_source_file_count"], 35)
+        self.assertEqual(len(body["uploads"]), 35)
 
     def test_multi_image_create_rejects_non_image_mime(self):
         payload = self._multi_files_payload(count=2)
@@ -8602,7 +8602,7 @@ class UploadPageTemplateTests(TestCase):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "לבחור כמה תמונות יחד")
-        self.assertContains(resp, "2–30 תמונות / עמודים / חלקים = מסמך אחד לפי סדר הבחירה")
+        self.assertContains(resp, "2–35 תמונות / עמודים / חלקים = מסמך אחד לפי סדר הבחירה")
         self.assertContains(resp, "ריבוי קבצים תומך בתמונות בלבד")
         self.assertContains(resp, "PDF יש להעלות כקובץ יחיד")
         self.assertContains(resp, "מומלץ להעלות כמה תמונות חלקיות לפי סדר הקריאה")
