@@ -14,7 +14,7 @@ from documents.services.upload_validation import (
 logger = logging.getLogger(__name__)
 
 MULTI_IMAGE_MIN_FILES = 2
-MULTI_IMAGE_MAX_FILES = 30
+MULTI_IMAGE_MAX_FILES = 35
 
 
 class MultiImageSourceFilesError(ValueError):
