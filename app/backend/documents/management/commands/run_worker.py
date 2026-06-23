@@ -456,6 +456,15 @@ class Command(BaseCommand):
             translation.review_reasons,
             include_automatic_policy=True,
         )
+        source_revision = (
+            DocumentTextResult.objects.filter(
+                document=doc,
+                result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+                engine=engine,
+            )
+            .values_list("source_revision", flat=True)
+            .first()
+        )
         DocumentTextResult.objects.update_or_create(
             document=doc,
             result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
@@ -469,6 +478,7 @@ class Command(BaseCommand):
                 "error_code": None,
                 "error_details": None,
                 "review_reasons": json.dumps(review_reasons),
+                "based_on_source_revision": source_revision,
             },
         )
 

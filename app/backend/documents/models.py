@@ -368,6 +368,10 @@ class DocumentTextResult(models.Model):
 
     text = models.TextField(null=True, blank=True)
 
+    # Monotonic revision for SOURCE_TEXT; paired HEBREW_TEXT tracks via based_on_source_revision.
+    source_revision = models.PositiveIntegerField(default=1)
+    based_on_source_revision = models.PositiveIntegerField(null=True, blank=True)
+
     error_code = models.CharField(max_length=64, null=True, blank=True)
     error_details = models.TextField(null=True, blank=True)
 
@@ -389,6 +393,38 @@ class DocumentTextResult(models.Model):
                 name="uniq_document_resulttype_engine",
             )
         ]
+
+
+class DocumentTextResultEdit(models.Model):
+    class EditType(models.TextChoices):
+        SOURCE_TEXT = "SOURCE_TEXT", "Source text"
+        HEBREW_TEXT = "HEBREW_TEXT", "Hebrew text"
+
+    text_result = models.ForeignKey(
+        DocumentTextResult,
+        on_delete=models.CASCADE,
+        related_name="edits",
+    )
+    editor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="document_text_result_edits",
+    )
+    edited_at = models.DateTimeField(auto_now_add=True)
+    old_text = models.TextField()
+    new_text = models.TextField()
+    edit_type = models.CharField(max_length=32, choices=EditType.choices)
+
+    class Meta:
+        ordering = ["-edited_at"]
+
+    def __str__(self) -> str:
+        return (
+            f"DocumentTextResultEdit(id={self.id}, result_id={self.text_result_id}, "
+            f"edit_type={self.edit_type})"
+        )
 
 
 class ProcessingMetric(models.Model):

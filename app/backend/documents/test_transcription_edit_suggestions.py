@@ -19,6 +19,7 @@ from documents.services.transcription_suggestion_review import (
     approve_suggestion,
     reject_suggestion,
 )
+from documents.services.verified_text_result_edit import is_hebrew_translation_stale
 from public.services.registration import HONEYPOT_FIELD_NAME
 
 
@@ -513,6 +514,8 @@ class TranscriptionEditSuggestionReviewTests(TestCase):
         result_type: str,
         text: str,
         engine: str = "engine-a",
+        source_revision: int = 1,
+        based_on_source_revision: int | None = None,
     ) -> DocumentTextResult:
         return DocumentTextResult.objects.create(
             document=doc,
@@ -522,7 +525,30 @@ class TranscriptionEditSuggestionReviewTests(TestCase):
             prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
             status=DocumentTextResult.Status.NEEDS_REVIEW,
             text=text,
+            source_revision=source_revision,
+            based_on_source_revision=based_on_source_revision,
         )
+
+    def _create_hebrew_paired_results(
+        self,
+        doc: Document,
+        *,
+        text: str,
+        engine: str = "engine-a",
+    ) -> tuple[DocumentTextResult, DocumentTextResult]:
+        source = self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text=text,
+            engine=engine,
+        )
+        hebrew = self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text=text,
+            engine=engine,
+        )
+        return source, hebrew
 
     def _create_suggestion(
         self,
@@ -560,11 +586,7 @@ class TranscriptionEditSuggestionReviewTests(TestCase):
 
     def test_staff_approve_updates_displayed_text(self):
         doc = self._create_hebrew_doc()
-        row = self._create_text_result(
-            doc,
-            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
-            text="טקסט בסיס",
-        )
+        _, row = self._create_hebrew_paired_results(doc, text="טקסט בסיס")
         suggestion = self._create_suggestion(doc)
 
         self.client.force_login(self.staff)
@@ -580,11 +602,7 @@ class TranscriptionEditSuggestionReviewTests(TestCase):
 
     def test_staff_approve_sets_verification_status_verified(self):
         doc = self._create_hebrew_doc()
-        row = self._create_text_result(
-            doc,
-            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
-            text="טקסט בסיס",
-        )
+        _, row = self._create_hebrew_paired_results(doc, text="טקסט בסיס")
         suggestion = self._create_suggestion(doc)
 
         self.client.force_login(self.staff)
@@ -602,11 +620,7 @@ class TranscriptionEditSuggestionReviewTests(TestCase):
 
     def test_partial_approve_stores_approved_text(self):
         doc = self._create_hebrew_doc()
-        self._create_text_result(
-            doc,
-            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
-            text="טקסט בסיס",
-        )
+        self._create_hebrew_paired_results(doc, text="טקסט בסיס")
         suggestion = self._create_suggestion(doc, suggested_text="טקסט מתוקן")
 
         approve_suggestion(
@@ -725,16 +739,9 @@ class TranscriptionEditSuggestionReviewTests(TestCase):
 
     def test_hebrew_approval_targets_hebrew_text_when_displayed(self):
         doc = self._create_hebrew_doc()
-        hebrew_row = self._create_text_result(
+        source_row, hebrew_row = self._create_hebrew_paired_results(
             doc,
-            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
             text="עברית",
-        )
-        source_row = self._create_text_result(
-            doc,
-            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
-            text="מקור",
-            engine="engine-b",
         )
         suggestion = self._create_suggestion(
             doc,
@@ -751,7 +758,7 @@ class TranscriptionEditSuggestionReviewTests(TestCase):
         hebrew_row.refresh_from_db()
         source_row.refresh_from_db()
         self.assertEqual(hebrew_row.text, "עברית מאושרת")
-        self.assertEqual(source_row.text, "מקור")
+        self.assertEqual(source_row.text, "עברית מאושרת")
         self.assertEqual(
             resolve_displayed_transcription_result(doc),
             hebrew_row,
@@ -827,6 +834,130 @@ class TranscriptionEditSuggestionReviewTests(TestCase):
             DocumentTextResult.VerificationStatus.VERIFIED,
         )
 
+    def test_non_hebrew_source_suggestion_increments_revision_and_makes_hebrew_stale(
+        self,
+    ):
+        doc = self._create_english_doc()
+        source_row = self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="Hello",
+            engine="engine-a",
+            source_revision=1,
+        )
+        hebrew_row = self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="שלום",
+            engine="engine-a",
+            based_on_source_revision=1,
+        )
+        suggestion = self._create_suggestion(
+            doc,
+            current_text_snapshot="Hello",
+            suggested_text="Hello fixed",
+        )
+
+        approve_suggestion(
+            suggestion.id,
+            approved_text="Hello approved",
+            reviewer=self.staff,
+        )
+
+        source_row.refresh_from_db()
+        hebrew_row.refresh_from_db()
+        self.assertEqual(source_row.text, "Hello approved")
+        self.assertEqual(source_row.source_revision, 2)
+        self.assertEqual(hebrew_row.text, "שלום")
+        self.assertEqual(hebrew_row.based_on_source_revision, 1)
+        self.assertTrue(is_hebrew_translation_stale(hebrew_row, source_row))
+
+    def test_hebrew_suggestion_updates_both_rows_and_synchronizes_revisions(self):
+        doc = self._create_hebrew_doc()
+        source_row, hebrew_row = self._create_hebrew_paired_results(
+            doc,
+            text="עברית",
+            engine="engine-a",
+        )
+        suggestion = self._create_suggestion(doc)
+
+        approve_suggestion(
+            suggestion.id,
+            approved_text="עברית מאושרת",
+            reviewer=self.staff,
+        )
+
+        source_row.refresh_from_db()
+        hebrew_row.refresh_from_db()
+        self.assertEqual(source_row.text, "עברית מאושרת")
+        self.assertEqual(hebrew_row.text, "עברית מאושרת")
+        self.assertEqual(source_row.source_revision, 2)
+        self.assertEqual(hebrew_row.based_on_source_revision, 2)
+
+    def test_hebrew_suggestion_fails_when_paired_row_missing(self):
+        doc = self._create_hebrew_doc()
+        hebrew_row = self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="עברית",
+        )
+        suggestion = self._create_suggestion(doc)
+
+        with self.assertRaises(TranscriptionSuggestionReviewError):
+            approve_suggestion(
+                suggestion.id,
+                approved_text="עברית מאושרת",
+                reviewer=self.staff,
+            )
+
+        hebrew_row.refresh_from_db()
+        self.assertEqual(hebrew_row.text, "עברית")
+        self.assertEqual(
+            hebrew_row.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
+        suggestion.refresh_from_db()
+        self.assertEqual(suggestion.status, TranscriptionEditSuggestion.Status.PENDING)
+
+    def test_non_hebrew_hebrew_displayed_approval_links_to_current_source_revision(
+        self,
+    ):
+        doc = self._create_english_doc()
+        source_row = self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="",
+            engine="engine-a",
+            source_revision=3,
+        )
+        hebrew_row = self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="תרגום מוצג",
+            engine="engine-a",
+        )
+        suggestion = self._create_suggestion(
+            doc,
+            current_text_snapshot="תרגום מוצג",
+            suggested_text="תרגום מתוקן",
+        )
+
+        approve_suggestion(
+            suggestion.id,
+            approved_text="תרגום מאושר",
+            reviewer=self.staff,
+        )
+
+        hebrew_row.refresh_from_db()
+        source_row.refresh_from_db()
+        self.assertEqual(
+            resolve_displayed_transcription_result(doc),
+            hebrew_row,
+        )
+        self.assertEqual(hebrew_row.text, "תרגום מאושר")
+        self.assertEqual(hebrew_row.based_on_source_revision, 3)
+        self.assertEqual(source_row.source_revision, 3)
+
     def test_detail_shows_live_text_drift_warning(self):
         doc = self._create_hebrew_doc()
         self._create_text_result(
@@ -848,11 +979,7 @@ class TranscriptionEditSuggestionReviewTests(TestCase):
 
     def test_document_detail_shows_approved_text_after_approval(self):
         doc = self._create_hebrew_doc()
-        self._create_text_result(
-            doc,
-            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
-            text="טקסט בסיס",
-        )
+        self._create_hebrew_paired_results(doc, text="טקסט בסיס")
         suggestion = self._create_suggestion(doc)
 
         approve_suggestion(
@@ -869,11 +996,7 @@ class TranscriptionEditSuggestionReviewTests(TestCase):
 
     def test_get_displayed_transcription_text_reflects_approved_text(self):
         doc = self._create_hebrew_doc()
-        self._create_text_result(
-            doc,
-            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
-            text="טקסט בסיס",
-        )
+        self._create_hebrew_paired_results(doc, text="טקסט בסיס")
         suggestion = self._create_suggestion(doc)
 
         approve_suggestion(
@@ -886,11 +1009,7 @@ class TranscriptionEditSuggestionReviewTests(TestCase):
 
     def test_reviewed_suggestion_detail_is_read_only(self):
         doc = self._create_hebrew_doc()
-        self._create_text_result(
-            doc,
-            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
-            text="טקסט בסיס",
-        )
+        self._create_hebrew_paired_results(doc, text="טקסט בסיס")
         suggestion = self._create_suggestion(doc)
         approve_suggestion(
             suggestion.id,
