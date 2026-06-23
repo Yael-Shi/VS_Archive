@@ -7248,6 +7248,40 @@ class GeminiHebrewTranslationTests(SimpleTestCase):
     def _long_source_text(self, char_count: int = 1500) -> str:
         return ("word " * (char_count // 5)).strip()
 
+    def _short_source_text(self, char_count: int = 80) -> str:
+        sentence = (
+            "This is a short archival note about a person named John Smith. "
+        )
+        return (sentence * max(1, char_count // len(sentence)))[:char_count].strip()
+
+    def _multi_chunk_source_text(self) -> str:
+        chunk_one = self._long_source_text(1500)
+        chunk_two = self._long_source_text(1500)
+        return f"{chunk_one}\n\n{chunk_two}"
+
+    @staticmethod
+    def _translation_response(
+        text: str,
+        *,
+        finish_reason: str = "STOP",
+        finish_message: Optional[str] = None,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            text=text,
+            candidates=[
+                SimpleNamespace(
+                    finish_reason=finish_reason,
+                    finish_message=finish_message,
+                )
+            ],
+            usage_metadata=SimpleNamespace(
+                prompt_token_count=100,
+                candidates_token_count=len(text),
+                thoughts_token_count=0,
+                total_token_count=100 + len(text),
+            ),
+        )
+
     @patch("documents.services.gemini_engine._create_client")
     @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
     def test_translation_retries_truncated_chunk_and_succeeds(
@@ -7256,14 +7290,126 @@ class GeminiHebrewTranslationTests(SimpleTestCase):
         source_text = self._long_source_text()
         mock_client = Mock()
         mock_client.models.generate_content.side_effect = [
-            SimpleNamespace(text="x" * 100),
-            SimpleNamespace(text="י" * 400),
+            self._translation_response("x" * 100, finish_reason="STOP"),
+            self._translation_response("י" * 400, finish_reason="STOP"),
+        ]
+        mock_create_client.return_value = mock_client
+
+        result = translate_text_to_hebrew_with_gemini(
+            source_text,
+            "en",
+            max_output_tokens=2048,
+        )
+
+        self.assertEqual(len(result.text), 400)
+        self.assertEqual(mock_client.models.generate_content.call_count, 2)
+        retry_config = (
+            mock_client.models.generate_content.call_args_list[1]
+            .kwargs["config"]
+        )
+        self.assertEqual(retry_config.max_output_tokens, 8192)
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_translation_retries_max_tokens_even_when_ratio_passes(
+        self, _mock_get_key, mock_create_client
+    ):
+        source_text = self._long_source_text()
+        mock_client = Mock()
+        mock_client.models.generate_content.side_effect = [
+            self._translation_response("י" * 400, finish_reason="MAX_TOKENS"),
+            self._translation_response("י" * 500, finish_reason="STOP"),
+        ]
+        mock_create_client.return_value = mock_client
+
+        result = translate_text_to_hebrew_with_gemini(
+            source_text,
+            "en",
+            max_output_tokens=2048,
+        )
+
+        self.assertEqual(len(result.text), 500)
+        self.assertEqual(mock_client.models.generate_content.call_count, 2)
+        retry_config = (
+            mock_client.models.generate_content.call_args_list[1]
+            .kwargs["config"]
+        )
+        self.assertEqual(retry_config.max_output_tokens, 8192)
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_translation_max_tokens_retry_returns_only_successful_output(
+        self, _mock_get_key, mock_create_client
+    ):
+        source_text = self._long_source_text()
+        mock_client = Mock()
+        mock_client.models.generate_content.side_effect = [
+            self._translation_response("partial-" * 20, finish_reason="MAX_TOKENS"),
+            self._translation_response("complete-" * 50, finish_reason="STOP"),
         ]
         mock_create_client.return_value = mock_client
 
         result = translate_text_to_hebrew_with_gemini(source_text, "en")
 
-        self.assertEqual(len(result.text), 400)
+        self.assertEqual(result.text, "complete-" * 50)
+        self.assertNotIn("partial-", result.text)
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_translation_raises_after_repeated_max_tokens(
+        self, _mock_get_key, mock_create_client
+    ):
+        source_text = self._long_source_text()
+        mock_client = Mock()
+        mock_client.models.generate_content.side_effect = [
+            self._translation_response("partial-" * 20, finish_reason="MAX_TOKENS"),
+            self._translation_response(
+                "still-partial-" * 20,
+                finish_reason="MAX_TOKENS",
+                finish_message="Maximum output tokens reached",
+            ),
+        ]
+        mock_create_client.return_value = mock_client
+
+        with self.assertRaises(GeminiError) as ctx:
+            translate_text_to_hebrew_with_gemini(
+                source_text,
+                "en",
+                model_name="test-model",
+                max_output_tokens=2048,
+            )
+
+        message = str(ctx.exception)
+        self.assertIn("chunk_index=1/1", message)
+        self.assertIn("MAX_TOKENS", message)
+        self.assertIn("max_output_tokens=8192", message)
+        self.assertIn("truncation_retry=True", message)
+        self.assertIn("model=test-model", message)
+        self.assertEqual(mock_client.models.generate_content.call_count, 2)
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_translation_max_tokens_finish_reason_enum_string_is_detected(
+        self, _mock_get_key, mock_create_client
+    ):
+        source_text = self._long_source_text()
+        mock_client = Mock()
+        mock_client.models.generate_content.side_effect = [
+            SimpleNamespace(
+                text="partial-" * 20,
+                candidates=[
+                    SimpleNamespace(
+                        finish_reason="FinishReason.MAX_TOKENS",
+                    )
+                ],
+            ),
+            self._translation_response("complete-" * 50, finish_reason="STOP"),
+        ]
+        mock_create_client.return_value = mock_client
+
+        result = translate_text_to_hebrew_with_gemini(source_text, "en")
+
+        self.assertEqual(result.text, "complete-" * 50)
         self.assertEqual(mock_client.models.generate_content.call_count, 2)
 
     @patch("documents.services.gemini_engine._create_client")
@@ -7274,25 +7420,116 @@ class GeminiHebrewTranslationTests(SimpleTestCase):
         source_text = self._long_source_text()
         mock_client = Mock()
         mock_client.models.generate_content.side_effect = [
-            SimpleNamespace(text="x" * 100),
-            SimpleNamespace(text="y" * 100),
+            self._translation_response("x" * 100, finish_reason="STOP"),
+            self._translation_response("y" * 100, finish_reason="STOP"),
         ]
         mock_create_client.return_value = mock_client
 
         with self.assertRaises(GeminiError) as ctx:
             translate_text_to_hebrew_with_gemini(
-            source_text,
-            "en",
-            model_name="test-model",
-        )
+                source_text,
+                "en",
+                model_name="test-model",
+                max_output_tokens=2048,
+            )
 
         message = str(ctx.exception)
         self.assertIn("chunk_index=1/1", message)
         self.assertIn(f"source_length={len(source_text)}", message)
         self.assertIn("translation_length=100", message)
-        self.assertIn("finish_reason=None", message)
+        self.assertIn("finish_reason=STOP", message)
+        self.assertIn("max_output_tokens=8192", message)
+        self.assertIn("truncation_retry=True", message)
         self.assertIn("model=test-model", message)
         self.assertEqual(mock_client.models.generate_content.call_count, 2)
+        retry_config = (
+            mock_client.models.generate_content.call_args_list[1]
+            .kwargs["config"]
+        )
+        self.assertEqual(retry_config.max_output_tokens, 8192)
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_translation_short_source_max_tokens_is_always_retried(
+        self, _mock_get_key, mock_create_client
+    ):
+        source_text = self._long_source_text(500)
+        mock_client = Mock()
+        mock_client.models.generate_content.side_effect = [
+            self._translation_response("י" * 200, finish_reason="MAX_TOKENS"),
+            self._translation_response("י" * 220, finish_reason="STOP"),
+        ]
+        mock_create_client.return_value = mock_client
+
+        result = translate_text_to_hebrew_with_gemini(
+            source_text,
+            "en",
+            max_output_tokens=2048,
+        )
+
+        self.assertEqual(len(result.text), 220)
+        self.assertEqual(mock_client.models.generate_content.call_count, 2)
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_translation_legitimate_short_source_succeeds(
+        self, _mock_get_key, mock_create_client
+    ):
+        source_text = self._short_source_text(80)
+        hebrew_text = "זהו תרגום עברי קצר וסביר למסמך קצר."
+        mock_client = Mock()
+        mock_client.models.generate_content.return_value = self._translation_response(
+            hebrew_text,
+            finish_reason="STOP",
+        )
+        mock_create_client.return_value = mock_client
+
+        result = translate_text_to_hebrew_with_gemini(source_text, "en")
+
+        self.assertEqual(result.text, hebrew_text)
+        mock_client.models.generate_content.assert_called_once()
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_translation_multi_chunk_preserves_order_and_joins_successful_chunks(
+        self, _mock_get_key, mock_create_client
+    ):
+        source_text = self._multi_chunk_source_text()
+        mock_client = Mock()
+        mock_client.models.generate_content.side_effect = [
+            self._translation_response("א" * 400, finish_reason="STOP"),
+            self._translation_response("x" * 100, finish_reason="STOP"),
+            self._translation_response("ב" * 400, finish_reason="STOP"),
+        ]
+        mock_create_client.return_value = mock_client
+
+        result = translate_text_to_hebrew_with_gemini(
+            source_text,
+            "en",
+            max_output_tokens=2048,
+        )
+
+        self.assertEqual(result.text, ("א" * 400) + "\n\n" + ("ב" * 400))
+        self.assertEqual(mock_client.models.generate_content.call_count, 3)
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_translation_multi_chunk_failure_does_not_return_partial_combined_text(
+        self, _mock_get_key, mock_create_client
+    ):
+        source_text = self._multi_chunk_source_text()
+        mock_client = Mock()
+        mock_client.models.generate_content.side_effect = [
+            self._translation_response("א" * 400, finish_reason="STOP"),
+            self._translation_response("x" * 100, finish_reason="STOP"),
+            self._translation_response("y" * 100, finish_reason="STOP"),
+        ]
+        mock_create_client.return_value = mock_client
+
+        with self.assertRaises(GeminiError):
+            translate_text_to_hebrew_with_gemini(source_text, "en")
+
+        self.assertEqual(mock_client.models.generate_content.call_count, 3)
 
     @patch("documents.services.gemini_engine._create_client")
     @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
@@ -7301,15 +7538,40 @@ class GeminiHebrewTranslationTests(SimpleTestCase):
     ):
         source_text = self._long_source_text()
         mock_client = Mock()
-        mock_client.models.generate_content.return_value = SimpleNamespace(text="י" * 400)
+        mock_client.models.generate_content.return_value = self._translation_response(
+            "י" * 400,
+            finish_reason="STOP",
+        )
         mock_create_client.return_value = mock_client
 
-        translate_text_to_hebrew_with_gemini(source_text, "en")
+        result = translate_text_to_hebrew_with_gemini(source_text, "en")
 
         prompt = mock_client.models.generate_content.call_args.kwargs["contents"][0].text
         self.assertIn("<source_excerpt>", prompt)
         self.assertIn("</source_excerpt>", prompt)
         self.assertIn(source_text, prompt)
+        self.assertNotIn("<source_excerpt>", result.text)
+        self.assertNotIn("</source_excerpt>", result.text)
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_translation_strips_source_excerpt_delimiters_from_model_output(
+        self, _mock_get_key, mock_create_client
+    ):
+        source_text = self._long_source_text()
+        hebrew_text = "י" * 400
+        mock_client = Mock()
+        mock_client.models.generate_content.return_value = self._translation_response(
+            f"<source_excerpt>\n{hebrew_text}\n</source_excerpt>",
+            finish_reason="STOP",
+        )
+        mock_create_client.return_value = mock_client
+
+        result = translate_text_to_hebrew_with_gemini(source_text, "en")
+
+        self.assertIn(hebrew_text, result.text)
+        self.assertNotIn("<source_excerpt>", result.text)
+        self.assertNotIn("</source_excerpt>", result.text)
 
     @patch("documents.services.gemini_engine._create_client")
     @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
@@ -7318,7 +7580,10 @@ class GeminiHebrewTranslationTests(SimpleTestCase):
     ):
         source_text = self._long_source_text()
         mock_client = Mock()
-        mock_client.models.generate_content.return_value = SimpleNamespace(text="י" * 400)
+        mock_client.models.generate_content.return_value = self._translation_response(
+            "י" * 400,
+            finish_reason="STOP",
+        )
         mock_create_client.return_value = mock_client
 
         translate_text_to_hebrew_with_gemini(source_text, "en")

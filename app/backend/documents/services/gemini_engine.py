@@ -135,7 +135,7 @@ _PROMPT_BY_VARIANT = {
 _REQUIRED_KEYS = ("text", "has_unclear", "unclear_count")
 _TRANSLATION_CHUNK_MAX_CHARS = 2200
 _MIN_TRANSLATION_LENGTH_RATIO = 0.20
-_LATIN_TRANSCRIPTION_RETRY_MIN_OUTPUT_TOKENS = 8192
+_TRUNCATION_RETRY_MIN_OUTPUT_TOKENS = 8192
 
 _LATIN_LANGUAGE_HINTS = frozenset(
     {"en", "eng", "english", "fr", "fra", "fre", "french"}
@@ -298,6 +298,16 @@ def _extract_finish_reason(resp: Any) -> Optional[str]:
     return str(finish_reason)
 
 
+def _is_max_tokens_finish_reason(finish_reason: Optional[str]) -> bool:
+    if not finish_reason:
+        return False
+    return "MAX_TOKENS" in finish_reason.upper()
+
+
+def _escalated_max_output_tokens(current: Optional[int]) -> int:
+    return max(_TRUNCATION_RETRY_MIN_OUTPUT_TOKENS, current or 0)
+
+
 def _extract_finish_message(resp: Any) -> Optional[str]:
     candidate = _first_response_candidate(resp)
     finish_message = getattr(candidate, "finish_message", None)
@@ -324,16 +334,56 @@ def _extract_response_usage(resp: Any) -> Dict[str, Optional[int]]:
     }
 
 
+def _translation_min_expected_length(
+    source_length: int,
+    *,
+    min_text_length: int,
+) -> Optional[int]:
+    """
+    Minimum expected Hebrew length for ratio-based truncation checks.
+
+    Returns None when the source is too short for a reliable ratio heuristic
+    (sources under 1000 chars rely on MAX_TOKENS and min_text_length instead).
+    """
+    if source_length < 1000:
+        return None
+
+    return max(min_text_length, int(source_length * _MIN_TRANSLATION_LENGTH_RATIO))
+
+
 def _is_translation_chunk_truncated(
     source_chunk: str,
     translated_text: str,
     *,
     min_text_length: int,
 ) -> bool:
-    if len(source_chunk) < 1000:
+    if len(translated_text) < min_text_length:
+        return True
+
+    min_expected_length = _translation_min_expected_length(
+        len(source_chunk),
+        min_text_length=min_text_length,
+    )
+    if min_expected_length is None:
         return False
-    min_expected_length = int(len(source_chunk) * _MIN_TRANSLATION_LENGTH_RATIO)
-    return len(translated_text) < max(min_text_length, min_expected_length)
+
+    return len(translated_text) < min_expected_length
+
+
+def _is_combined_translation_truncated(
+    source_length: int,
+    combined_translation_length: int,
+    *,
+    min_text_length: int,
+) -> bool:
+    min_expected_length = _translation_min_expected_length(
+        source_length,
+        min_text_length=min_text_length,
+    )
+    if min_expected_length is None:
+        return False
+
+    return combined_translation_length < min_expected_length
 
 
 def _build_hebrew_translation_prompt(
@@ -345,6 +395,26 @@ def _build_hebrew_translation_prompt(
     if language_hint:
         prompt += f"\nSource language hint: {language_hint}."
     return prompt
+
+
+_SOURCE_EXCERPT_OPEN_TAG = "<source_excerpt>"
+_SOURCE_EXCERPT_CLOSE_TAG = "</source_excerpt>"
+
+
+def _strip_outer_source_excerpt_wrapper(text: str) -> str:
+    """
+    Remove model-echoed outer <source_excerpt> wrapper tags only.
+
+    Inner occurrences of the tag strings are preserved.
+    """
+    stripped = (text or "").strip()
+    if not stripped.startswith(_SOURCE_EXCERPT_OPEN_TAG):
+        return stripped
+    if not stripped.endswith(_SOURCE_EXCERPT_CLOSE_TAG):
+        return stripped
+
+    inner = stripped[len(_SOURCE_EXCERPT_OPEN_TAG) : -len(_SOURCE_EXCERPT_CLOSE_TAG)]
+    return inner.strip()
 
 
 def _parse_page_json_strict(raw: str, *, page_index: int) -> Dict[str, Any]:
@@ -501,14 +571,12 @@ def transcribe_pages_with_gemini(
 
                 if (
                     uses_plain_text_transcription
-                    and finish_reason
-                    and "MAX_TOKENS" in finish_reason.upper()
+                    and _is_max_tokens_finish_reason(finish_reason)
                 ):
                     attempts += 1
                     if attempts < 2:
-                        retry_max_output_tokens = max(
-                            _LATIN_TRANSCRIPTION_RETRY_MIN_OUTPUT_TOKENS,
-                            attempt_max_output_tokens or 0,
+                        retry_max_output_tokens = _escalated_max_output_tokens(
+                            attempt_max_output_tokens
                         )
                         logger.warning(
                             "Retrying truncated Gemini transcription page %s "
@@ -642,16 +710,19 @@ def translate_text_to_hebrew_with_gemini(
 
     for index, chunk in enumerate(chunks, start=1):
         chunk_source_len = len(chunk)
-        truncation_retries = 0
+        chunk_max_output_tokens = max_output_tokens
         translated_text = ""
         data: Dict[str, Any] = {}
 
-        while True:
+        for truncation_pass in range(2):
+            is_truncation_retry = truncation_pass == 1
             prompt = _build_hebrew_translation_prompt(chunk, language_hint)
 
             success = False
             attempts = 0
             finish_reason: Optional[str] = None
+            finish_message: Optional[str] = None
+            usage: Dict[str, Optional[int]] = {}
 
             while not success and attempts < 2:
                 try:
@@ -662,12 +733,17 @@ def translate_text_to_hebrew_with_gemini(
                             temperature=temperature,
                             top_k=top_k,
                             top_p=top_p,
-                            max_output_tokens=max_output_tokens,
+                            max_output_tokens=chunk_max_output_tokens,
                             thinking_config=types.ThinkingConfig(thinking_budget=0),
                         ),
                     )
-                    data = _plain_text_response_to_page_data(resp.text, page_index=index)
                     finish_reason = _extract_finish_reason(resp)
+                    finish_message = _extract_finish_message(resp)
+                    usage = _extract_response_usage(resp)
+                    data = _plain_text_response_to_page_data(
+                        resp.text,
+                        page_index=index,
+                    )
                     success = True
                 except GeminiError as e:
                     if _is_retryable_gemini_response_error(e):
@@ -696,31 +772,53 @@ def translate_text_to_hebrew_with_gemini(
             if not success:
                 raise GeminiError(f"QUOTA_EXHAUSTED: {model_name} after retries")
 
-            translated_text = data["text"].strip()
+            translated_text = _strip_outer_source_excerpt_wrapper(data["text"])
+            max_tokens_truncated = _is_max_tokens_finish_reason(finish_reason)
+            ratio_truncated = _is_translation_chunk_truncated(
+                chunk,
+                translated_text,
+                min_text_length=min_text_length,
+            )
+
             logger.info(
-                "Gemini Hebrew translation chunk %s/%s: source_length=%s output_length=%s finish_reason=%s model=%s",
+                "Gemini Hebrew translation chunk %s/%s: source_length=%s output_length=%s "
+                "finish_reason=%s finish_message=%r max_output_tokens=%s "
+                "truncation_retry=%s prompt_token_count=%s candidates_token_count=%s "
+                "thoughts_token_count=%s total_token_count=%s model=%s",
                 index,
                 len(chunks),
                 chunk_source_len,
                 len(translated_text),
                 finish_reason,
+                finish_message,
+                chunk_max_output_tokens,
+                is_truncation_retry,
+                usage.get("prompt_token_count"),
+                usage.get("candidates_token_count"),
+                usage.get("thoughts_token_count"),
+                usage.get("total_token_count"),
                 model_name,
             )
 
-            if _is_translation_chunk_truncated(
-                chunk,
-                translated_text,
-                min_text_length=min_text_length,
-            ):
-                if truncation_retries < 1:
-                    truncation_retries += 1
+            if max_tokens_truncated or ratio_truncated:
+                if truncation_pass == 0:
+                    chunk_max_output_tokens = _escalated_max_output_tokens(
+                        chunk_max_output_tokens
+                    )
                     logger.warning(
-                        "Gemini Hebrew translation chunk %s/%s appears truncated; retrying once: source_length=%s output_length=%s model=%s",
+                        "Retrying truncated Gemini Hebrew translation chunk %s/%s "
+                        "with model %s: max_output_tokens=%s finish_reason=%s "
+                        "finish_message=%r source_length=%s output_length=%s "
+                        "truncation_retry=%s",
                         index,
                         len(chunks),
+                        model_name,
+                        chunk_max_output_tokens,
+                        finish_reason,
+                        finish_message,
                         chunk_source_len,
                         len(translated_text),
-                        model_name,
+                        True,
                     )
                     continue
 
@@ -730,6 +828,13 @@ def translate_text_to_hebrew_with_gemini(
                     f"source_length={chunk_source_len}, "
                     f"translation_length={len(translated_text)}, "
                     f"finish_reason={finish_reason}, "
+                    f"finish_message={finish_message!r}, "
+                    f"max_output_tokens={chunk_max_output_tokens}, "
+                    f"truncation_retry={is_truncation_retry}, "
+                    f"prompt_token_count={usage.get('prompt_token_count')}, "
+                    f"candidates_token_count={usage.get('candidates_token_count')}, "
+                    f"thoughts_token_count={usage.get('thoughts_token_count')}, "
+                    f"total_token_count={usage.get('total_token_count')}, "
                     f"model={model_name}"
                 )
             break
@@ -739,11 +844,16 @@ def translate_text_to_hebrew_with_gemini(
             needs_review = True
 
     combined_text = "\n\n".join(translated_chunks).strip()
-    min_expected_length = int(len(stripped_source) * _MIN_TRANSLATION_LENGTH_RATIO)
-    if len(stripped_source) >= 1000 and len(combined_text) < max(min_text_length, min_expected_length):
+    if _is_combined_translation_truncated(
+        len(stripped_source),
+        len(combined_text),
+        min_text_length=min_text_length,
+    ):
         raise GeminiError(
             "Gemini Hebrew translation output appears truncated: "
-            f"source_length={len(stripped_source)}, translation_length={len(combined_text)}"
+            f"source_length={len(stripped_source)}, "
+            f"translation_length={len(combined_text)}, "
+            f"model={model_name}"
         )
 
     return GeminiResult(
