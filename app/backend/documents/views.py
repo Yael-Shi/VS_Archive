@@ -143,6 +143,12 @@ from documents.services.transcription_suggestion_review import (
     approve_suggestion,
     reject_suggestion,
 )
+from documents.services.verified_text_result_edit import (
+    VerifiedTextResultEditError,
+    edit_verified_text_result,
+    is_hebrew_translation_stale,
+    is_verified_editable_text_result,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1484,6 +1490,8 @@ def _review_non_actionable_reason(row: DocumentTextResult) -> Optional[str]:
         return None
 
     if row.verification_status == DocumentTextResult.VerificationStatus.VERIFIED:
+        if is_verified_editable_text_result(row):
+            return None
         return "התעתוק כבר אושר אנושית — אין פעולות בקרה זמינות במסך זה."
 
     if row.status == DocumentTextResult.Status.FAILED:
@@ -1522,8 +1530,18 @@ def review_detail_page(request, doc_id: int):
         doc.text_results.all(),
         key=lambda r: (r.result_type, r.engine, -r.updated_at.timestamp()),
     )
+    source_by_engine = {
+        r.engine: r
+        for r in text_results
+        if r.result_type == DocumentTextResult.ResultType.SOURCE_TEXT
+    }
     text_result_cards = []
     for row in text_results:
+        paired_source = (
+            source_by_engine.get(row.engine)
+            if row.result_type == DocumentTextResult.ResultType.HEBREW_TEXT
+            else None
+        )
         text_result_cards.append(
             {
                 "row": row,
@@ -1535,6 +1553,10 @@ def review_detail_page(request, doc_id: int):
                 "text_length": len((row.text or "").strip()),
                 "is_pending_review": is_review_pending_text_result(row),
                 "is_editable": is_review_editable_text_result(row),
+                "is_verified_editable": is_verified_editable_text_result(row),
+                "hebrew_translation_stale": is_hebrew_translation_stale(
+                    row, paired_source
+                ),
                 "non_actionable_reason": _review_non_actionable_reason(row),
             }
         )
@@ -1639,6 +1661,37 @@ def review_text_result_update_text(request, result_id: int):
 
     logger.info(
         "review_text_result_update_text user=%s result_id=%s document_id=%s",
+        getattr(request.user, "username", None),
+        row.id,
+        row.document_id,
+    )
+    return redirect(f"/api/ui/admin/review/{row.document_id}/")
+
+
+@login_required
+@require_POST
+def review_text_result_verified_edit(request, result_id: int):
+    deny = _require_admin(request)
+    if deny:
+        return deny
+
+    submitted = request.POST.get("text")
+    if submitted is None:
+        return HttpResponseBadRequest("text is required")
+
+    try:
+        row = edit_verified_text_result(
+            result_id=result_id,
+            new_text=submitted,
+            editor=request.user,
+        )
+    except DocumentTextResult.DoesNotExist:
+        raise Http404() from None
+    except VerifiedTextResultEditError as exc:
+        return HttpResponseBadRequest(str(exc))
+
+    logger.info(
+        "review_text_result_verified_edit user=%s result_id=%s document_id=%s",
         getattr(request.user, "username", None),
         row.id,
         row.document_id,

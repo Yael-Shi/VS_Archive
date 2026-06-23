@@ -72,6 +72,11 @@ urlpatterns = [
         name="review-text-result-update-text",
     ),
     path(
+        "ui/admin/review/text-results/<int:result_id>/verified-edit/",
+        views.review_text_result_verified_edit,
+        name="review-text-result-verified-edit",
+    ),
+    path(
         "ui/admin/transcription-suggestions/",
         views.transcription_suggestion_backlog_page,
         name="transcription-suggestion-backlog",

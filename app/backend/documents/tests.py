@@ -2182,8 +2182,34 @@ class RunWorkerBehaviorTests(TestCase):
         self.assertEqual(
             hebrew.prompt_variant, DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION
         )
+        self.assertEqual(hebrew.based_on_source_revision, result.source_revision)
         self.doc.refresh_from_db()
         self.assertEqual(self.doc.processing_state_user, Document.ProcessingState.READY)
+
+    def test_non_hebrew_hebrew_translation_links_to_current_source_revision(self):
+        DocumentTextResult.objects.create(
+            document=self.doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="engine-a",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            text="recognized text",
+            source_revision=4,
+        )
+
+        self.command._save_non_hebrew_hebrew_translation(
+            self.doc,
+            "engine-a",
+            "recognized text",
+        )
+
+        hebrew = DocumentTextResult.objects.get(
+            document=self.doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="engine-a",
+        )
+        self.assertEqual(hebrew.based_on_source_revision, 4)
 
     @patch("documents.management.commands.run_worker.get_object_bytes")
     @patch("documents.management.commands.run_worker.extract_pages")

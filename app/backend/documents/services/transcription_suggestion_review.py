@@ -5,7 +5,7 @@ from __future__ import annotations
 from django.db import transaction
 from django.utils import timezone
 
-from documents.models import DocumentTextResult, TranscriptionEditSuggestion
+from documents.models import Document, DocumentTextResult, TranscriptionEditSuggestion
 from documents.services.text_presentation import (
     _is_hebrew_language,
     resolve_displayed_transcription_result,
@@ -17,27 +17,108 @@ class TranscriptionSuggestionReviewError(Exception):
     """Validation or eligibility failure for suggestion review actions."""
 
 
-def _paired_hebrew_sync_rows(
+def _find_paired_source_row(
+    doc: Document,
+    *,
+    engine: str,
+) -> DocumentTextResult | None:
+    return DocumentTextResult.objects.filter(
+        document=doc,
+        result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+        engine=engine,
+    ).first()
+
+
+def _find_paired_hebrew_row(
+    doc: Document,
+    *,
+    engine: str,
+) -> DocumentTextResult | None:
+    return DocumentTextResult.objects.filter(
+        document=doc,
+        result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+        engine=engine,
+    ).first()
+
+
+def _apply_approved_suggestion_text(
     doc: Document,
     target: DocumentTextResult,
-) -> list[DocumentTextResult]:
-    """Hebrew docs: also update the other result_type row when it shares the engine."""
-    if not _is_hebrew_language(doc):
-        return [target]
+    approved_text: str,
+) -> None:
+    verified = DocumentTextResult.VerificationStatus.VERIFIED
 
-    other_type = (
-        DocumentTextResult.ResultType.SOURCE_TEXT
-        if target.result_type == DocumentTextResult.ResultType.HEBREW_TEXT
-        else DocumentTextResult.ResultType.HEBREW_TEXT
+    if _is_hebrew_language(doc):
+        source = _find_paired_source_row(doc, engine=target.engine)
+        hebrew = _find_paired_hebrew_row(doc, engine=target.engine)
+        if source is None or hebrew is None:
+            raise TranscriptionSuggestionReviewError(
+                "חסרה תוצאת טקסט מקור או עברי מקושרת; לא ניתן לאשר את ההצעה."
+            )
+
+        rows = DocumentTextResult.objects.select_for_update().filter(
+            pk__in=[source.pk, hebrew.pk]
+        )
+        locked = {row.pk: row for row in rows}
+        source = locked[source.pk]
+        hebrew = locked[hebrew.pk]
+        new_revision = source.source_revision + 1
+
+        source.text = approved_text
+        source.source_revision = new_revision
+        source.verification_status = verified
+        source.save(
+            update_fields=[
+                "text",
+                "source_revision",
+                "verification_status",
+                "updated_at",
+            ]
+        )
+
+        hebrew.text = approved_text
+        hebrew.based_on_source_revision = new_revision
+        hebrew.verification_status = verified
+        hebrew.save(
+            update_fields=[
+                "text",
+                "based_on_source_revision",
+                "verification_status",
+                "updated_at",
+            ]
+        )
+        return
+
+    if target.result_type == DocumentTextResult.ResultType.SOURCE_TEXT:
+        target.text = approved_text
+        target.source_revision += 1
+        target.verification_status = verified
+        target.save(
+            update_fields=[
+                "text",
+                "source_revision",
+                "verification_status",
+                "updated_at",
+            ]
+        )
+        return
+
+    paired_source = _find_paired_source_row(doc, engine=target.engine)
+    if paired_source is None:
+        raise TranscriptionSuggestionReviewError("אין תעתוק מקור לקישור גרסת תרגום.")
+
+    paired_source = DocumentTextResult.objects.select_for_update().get(pk=paired_source.pk)
+    target.text = approved_text
+    target.based_on_source_revision = paired_source.source_revision
+    target.verification_status = verified
+    target.save(
+        update_fields=[
+            "text",
+            "based_on_source_revision",
+            "verification_status",
+            "updated_at",
+        ]
     )
-    paired = DocumentTextResult.objects.filter(
-        document=doc,
-        result_type=other_type,
-        engine=target.engine,
-    ).first()
-    if paired is None:
-        return [target]
-    return [target, paired]
 
 
 def approve_suggestion(
@@ -64,17 +145,9 @@ def approve_suggestion(
             raise TranscriptionSuggestionReviewError("אין תעתוק להצגה לעדכון.")
 
         target = DocumentTextResult.objects.select_for_update().get(pk=target.pk)
-        row_ids = [row.pk for row in _paired_hebrew_sync_rows(doc, target)]
-        rows = list(
-            DocumentTextResult.objects.select_for_update().filter(pk__in=row_ids)
-        )
+        _apply_approved_suggestion_text(doc, target, approved_text)
 
         reviewed_at = timezone.now()
-        for row in rows:
-            row.text = approved_text
-            row.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
-            row.save(update_fields=["text", "verification_status", "updated_at"])
-
         suggestion.status = TranscriptionEditSuggestion.Status.APPROVED
         suggestion.approved_text = approved_text
         suggestion.applied_text_result = target
