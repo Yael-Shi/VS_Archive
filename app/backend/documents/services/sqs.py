@@ -17,6 +17,7 @@ def send_process_document_message(
     *,
     ocr_retry_mode: str | None = None,
     source_transkribus_run_id: int | None = None,
+    operation: str | None = None,
 ) -> None:
     queue_url = _required_env("SQS_QUEUE_URL")
     region = (
@@ -25,6 +26,8 @@ def send_process_document_message(
 
     sqs = boto3.client("sqs", region_name=region)
     payload: Dict[str, Any] = {"type": "PROCESS_DOCUMENT", "document_id": document_id}
+    if operation:
+        payload["operation"] = operation
     if ocr_retry_mode:
         payload["ocr_retry_mode"] = ocr_retry_mode
     if source_transkribus_run_id is not None:

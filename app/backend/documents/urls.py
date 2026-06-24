@@ -39,6 +39,11 @@ urlpatterns = [
         name="documents-ocr-reprocess",
     ),
     path(
+        "ui/documents/<int:doc_id>/hebrew-translation-retry/",
+        views.document_hebrew_translation_retry,
+        name="documents-hebrew-translation-retry",
+    ),
+    path(
         "ui/documents/<int:doc_id>/transcription-suggestions/new/",
         views.transcription_suggestion_form,
         name="transcription-suggestion-new",

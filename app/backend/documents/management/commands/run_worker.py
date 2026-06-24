@@ -15,10 +15,16 @@ from django.db import transaction
 from documents.models import Document, DocumentTextResult
 from documents.s3 import get_object_bytes
 from documents.services.env_validation import EnvConfigError, WorkerEnvConfig, validate_required_env
-from documents.services.expected_outputs import expected_result_types_for_document
 from documents.services.gemini_engine import translate_text_to_hebrew_with_gemini
+from documents.services.non_hebrew_hebrew_translation import persist_hebrew_translation_result
+from documents.services.processing_state import update_document_processing_state_for_engine
 from documents.services.gemini_models import DEFAULT_GEMINI_MODEL
 from documents.services.htr_adapters.base import UnsupportedEngineError
+from documents.services.hebrew_translation_retry import (
+    PROCESS_DOCUMENT_OPERATION_KEY,
+    RETRY_HEBREW_TRANSLATION_OPERATION,
+    run_hebrew_translation_retry,
+)
 from documents.services.htr_engine import transcribe_pages
 from documents.services.ocr_reprocess import (
     OCR_RETRY_MODE_PAYLOAD_KEY,
@@ -180,6 +186,21 @@ class Command(BaseCommand):
         if not isinstance(document_id, int):
             return True
 
+        operation = payload.get(PROCESS_DOCUMENT_OPERATION_KEY)
+        if operation == RETRY_HEBREW_TRANSLATION_OPERATION:
+            return run_hebrew_translation_retry(document_id, worker_env=self._cfg)
+        if operation is not None:
+            self.stderr.write(
+                self.style.ERROR(
+                    f"Invalid operation for doc {document_id}: {operation!r}"
+                )
+            )
+            logger.error(
+                "invalid operation in PROCESS_DOCUMENT payload",
+                extra={"document_id": document_id, "operation": operation},
+            )
+            return True
+
         if self._is_invalid_ocr_retry_mode(payload):
             retry_mode = payload.get(OCR_RETRY_MODE_PAYLOAD_KEY)
             self.stderr.write(
@@ -221,7 +242,7 @@ class Command(BaseCommand):
                 if doc.upload_status != Document.UploadStatus.UPLOADED:
                     return True
                 doc.processing_state_user = Document.ProcessingState.PROCESSING
-                doc.save(update_fields=["processing_state_user"])
+                doc.save(update_fields=["processing_state_user", "updated_at"])
         except Document.DoesNotExist:
             return True
 
@@ -433,53 +454,19 @@ class Command(BaseCommand):
                 max_output_tokens=self._cfg.gemini_max_output_tokens,
             )
         except Exception as e:
-            DocumentTextResult.objects.update_or_create(
-                document=doc,
-                result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
-                engine=engine,
-                defaults={
-                    "status": DocumentTextResult.Status.FAILED,
-                    "text": None,
-                    "engine_key": DocumentTextResult.OcrEngineKey.GEMINI,
-                    "prompt_variant": DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
-                    "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
-                    "error_code": "HEBREW_TRANSLATION_FAILED",
-                    "error_details": str(e),
-                    "review_reasons": "",
-                },
+            persist_hebrew_translation_result(
+                doc,
+                engine,
+                error=e,
+                min_text_length=self._cfg.min_text_length,
             )
             return
 
-        review_reasons = self._derive_review_reasons(
-            translation.text,
-            translation.needs_review,
-            translation.review_reasons,
-            include_automatic_policy=True,
-        )
-        source_revision = (
-            DocumentTextResult.objects.filter(
-                document=doc,
-                result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
-                engine=engine,
-            )
-            .values_list("source_revision", flat=True)
-            .first()
-        )
-        DocumentTextResult.objects.update_or_create(
-            document=doc,
-            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
-            engine=engine,
-            defaults={
-                "status": DocumentTextResult.Status.NEEDS_REVIEW,
-                "text": translation.text,
-                "engine_key": DocumentTextResult.OcrEngineKey.GEMINI,
-                "prompt_variant": DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
-                "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
-                "error_code": None,
-                "error_details": None,
-                "review_reasons": json.dumps(review_reasons),
-                "based_on_source_revision": source_revision,
-            },
+        persist_hebrew_translation_result(
+            doc,
+            engine,
+            translation=translation,
+            min_text_length=self._cfg.min_text_length,
         )
 
     def _save_ocr_failure(self, doc, engine, is_he, details):
@@ -526,36 +513,4 @@ class Command(BaseCommand):
             return None
 
     def _update_processing_state(self, doc, engine):
-        expected_types = expected_result_types_for_document(doc)
-        qs = doc.text_results.filter(engine=engine, result_type__in=expected_types)
-
-        rows_by_type: dict[str, Optional[DocumentTextResult]] = {}
-        for rt in expected_types:
-            rows_by_type[rt] = qs.filter(result_type=rt).first()
-
-        all_rows: list[DocumentTextResult] = []
-        for rt in expected_types:
-            row = rows_by_type[rt]
-            if row is None:
-                doc.processing_state_user = Document.ProcessingState.PARTIAL
-                return
-            all_rows.append(row)
-
-        def _row_usable(row: DocumentTextResult) -> bool:
-            if row.status not in (
-                DocumentTextResult.Status.SUCCEEDED,
-                DocumentTextResult.Status.NEEDS_REVIEW,
-            ):
-                return False
-            return bool((row.text or "").strip())
-
-        all_failed = all(r.status == DocumentTextResult.Status.FAILED for r in all_rows)
-        if all_failed:
-            doc.processing_state_user = Document.ProcessingState.FAILED
-            return
-
-        if all(_row_usable(r) for r in all_rows):
-            doc.processing_state_user = Document.ProcessingState.READY
-            return
-
-        doc.processing_state_user = Document.ProcessingState.PARTIAL
+        update_document_processing_state_for_engine(doc, engine)

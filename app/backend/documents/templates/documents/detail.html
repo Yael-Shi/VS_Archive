@@ -40,6 +40,16 @@
               <button type="submit" class="btn">נסה עיבוד מחדש</button>
             </form>
           {% endif %}
+          {% if show_hebrew_translation_retry_action %}
+            <form
+              method="post"
+              action="{% url 'documents-hebrew-translation-retry' doc_id=doc.id %}"
+              class="inline-form"
+            >
+              {% csrf_token %}
+              <button type="submit" class="btn">נסה תרגום לעברית מחדש</button>
+            </form>
+          {% endif %}
           <a class="btn" href="/admin/documents/document/{{ doc.id }}/change/">עריכה טכנית (Django Admin)</a>
         {% endif %}
       </div>
