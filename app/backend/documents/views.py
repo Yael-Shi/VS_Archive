@@ -123,6 +123,11 @@ from documents.services.ocr_reprocess import (
     apply_ocr_reprocess,
     is_ocr_reprocess_ui_eligible,
 )
+from documents.services.hebrew_translation_retry import (
+    HebrewTranslationRetryError,
+    enqueue_hebrew_translation_retry,
+    is_hebrew_translation_retry_ui_eligible,
+)
 from documents.services.sqs import send_process_document_message
 from documents.services.text_presentation import (
     get_displayed_transcription_text,
@@ -1742,6 +1747,8 @@ def document_detail_page(request, doc_id: int):
         "displayed_transcription_text": displayed_transcription_text,
         "is_admin": is_admin,
         "show_ocr_reprocess_action": is_admin and is_ocr_reprocess_ui_eligible(doc),
+        "show_hebrew_translation_retry_action": is_admin
+        and is_hebrew_translation_retry_ui_eligible(doc),
     }
 
     logger.info(
@@ -2072,6 +2079,40 @@ def document_ocr_reprocess(request, doc_id: int):
         getattr(request.user, "username", None),
         doc.id,
         assessment.retry_mode.value,
+    )
+    return redirect("documents-detail-page", doc_id=doc.id)
+
+
+@login_required
+@require_POST
+def document_hebrew_translation_retry(request, doc_id: int):
+    deny = _require_admin(request)
+    if deny:
+        return deny
+
+    doc = get_object_or_404(
+        Document.objects.select_related("archive_item"),
+        id=doc_id,
+    )
+    try:
+        enqueue_hebrew_translation_retry(doc.id)
+    except HebrewTranslationRetryError:
+        messages.error(request, "לא ניתן לשלוח תרגום לעברית לעיבוד כעת.")
+        return redirect("documents-detail-page", doc_id=doc.id)
+    except Exception:
+        logger.exception(
+            "document_hebrew_translation_retry enqueue failed user=%s doc_id=%s",
+            getattr(request.user, "username", None),
+            doc.id,
+        )
+        messages.error(request, "שליחת התרגום לעיבוד נכשלה. נסו שוב מאוחר יותר.")
+        return redirect("documents-detail-page", doc_id=doc.id)
+
+    messages.success(request, "תרגום לעברית נשלח לעיבוד.")
+    logger.info(
+        "document_hebrew_translation_retry user=%s doc_id=%s",
+        getattr(request.user, "username", None),
+        doc.id,
     )
     return redirect("documents-detail-page", doc_id=doc.id)
 
