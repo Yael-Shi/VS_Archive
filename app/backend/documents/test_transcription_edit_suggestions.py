@@ -420,6 +420,21 @@ class TranscriptionEditSuggestionStaffUiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "הצעת תיקון לתעתוק")
 
+    def test_suggestion_detail_omits_duplicate_backlog_link_in_toolbar(self):
+        doc = self._create_doc(title="Toolbar doc")
+        suggestion = self._create_suggestion(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._staff_detail_url(suggestion.id))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        toolbar = html[
+            html.index("page-toolbar") : html.index("page-title")
+        ]
+        self.assertNotIn("חזרה להצעות תיקון לתעתוקים", toolbar)
+        self.assertIn("תצוגת מסמך", toolbar)
+        self.assertContains(resp, self._backlog_url())
+        self.assertContains(resp, reverse("documents-detail-page", kwargs={"doc_id": doc.id}))
+
     def test_detail_shows_submitter_metadata_when_present(self):
         doc = self._create_doc(title="Metadata doc")
         suggestion = self._create_suggestion(

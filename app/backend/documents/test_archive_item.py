@@ -2480,12 +2480,20 @@ class ArchiveNavigationTests(TestCase):
         self.assertNotContains(resp, 'href="/admin/"')
         self.assertNotContains(resp, "ניהול מערכת")
 
-    def test_archive_list_page_shows_manage_toolbar_for_staff(self):
+    def test_archive_list_page_shows_manage_link_in_staff_nav_only(self):
         self.client.force_login(self.staff)
         resp = self.client.get(reverse("archive-list"))
         self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertContains(resp, "nav-staff-panel")
         self.assertContains(resp, reverse("archive-manage-list"))
         self.assertContains(resp, "ניהול ארכיון")
+        filters = html[
+            html.index("page-toolbar--archive-filters") : html.index(
+                '<div class="spacer"></div>'
+            )
+        ]
+        self.assertNotIn(reverse("archive-manage-list"), filters)
 
     def test_archive_list_page_hides_manage_toolbar_for_anonymous(self):
         resp = self.client.get(reverse("archive-list"))
@@ -2493,12 +2501,15 @@ class ArchiveNavigationTests(TestCase):
         self.assertNotContains(resp, reverse("archive-manage-list"))
         self.assertNotContains(resp, "ניהול ארכיון")
 
-    def test_archive_manage_list_shows_single_create_entrypoint_for_staff(self):
+    def test_archive_manage_list_shows_create_entrypoint_in_staff_nav_only(self):
         self.client.force_login(self.staff)
         resp = self.client.get(reverse("archive-manage-list"))
         self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertContains(resp, "nav-staff-panel")
         self.assertContains(resp, reverse("archive-manage-new"))
         self.assertContains(resp, "יצירת פריט חדש")
+        self.assertEqual(html.count(reverse("archive-manage-new")), 1)
         self.assertNotContains(resp, reverse("archive-manage-manual-text-create"))
         self.assertNotContains(resp, "יצירת טקסט מוקלד")
 
