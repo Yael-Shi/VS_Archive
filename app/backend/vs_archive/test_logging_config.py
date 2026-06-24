@@ -2,6 +2,8 @@ import io
 import logging
 import logging.config
 import os
+from collections.abc import Mapping
+from typing import cast
 from unittest.mock import patch
 
 from django.conf import settings
@@ -15,7 +17,7 @@ GEMINI_LOGGER_NAME = "documents.services.gemini_engine"
 
 class LoggingConfigurationTests(SimpleTestCase):
     def _logging_config(self, *, log_level: str | None = None) -> dict:
-        root = dict(settings.LOGGING["root"])
+        root = dict(cast(Mapping[str, object], settings.LOGGING["root"]))
         if log_level is not None:
             root["level"] = log_level
         return {
