@@ -21,4 +21,3 @@ def expected_result_types_for_document(doc: Document) -> list[ResultTypeStr]:
 
     # Non-Hebrew: expect both source OCR and Hebrew translation
     return ["SOURCE_TEXT", "HEBREW_TEXT"]
-

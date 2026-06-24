@@ -38,7 +38,9 @@ class PublicRegistrationTests(TestCase):
 
     def setUp(self):
         cache.clear()
-        self.family_group, _ = Group.objects.get_or_create(name=ARCHIVE_FAMILY_GROUP_NAME)
+        self.family_group, _ = Group.objects.get_or_create(
+            name=ARCHIVE_FAMILY_GROUP_NAME
+        )
         self.valid_password = "SecurePass123!"
         self._email_counter = 0
 
@@ -67,7 +69,9 @@ class PublicRegistrationTests(TestCase):
 
     def test_valid_registration_creates_non_staff_non_superuser_user(self):
         email = self._unique_email("valid.user")
-        resp = self.client.post(self.REGISTER_URL, self._registration_payload(email=email))
+        resp = self.client.post(
+            self.REGISTER_URL, self._registration_payload(email=email)
+        )
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp["Location"], self.PENDING_URL)
 
@@ -155,7 +159,9 @@ class PublicRegistrationTests(TestCase):
         self.assertContains(blocked, THROTTLE_ERROR)
         self.assertEqual(User.objects.count(), user_count_before)
         for email in [*allowed_emails, blocked_email]:
-            self.assertFalse(User.objects.filter(username=normalize_email(email)).exists())
+            self.assertFalse(
+                User.objects.filter(username=normalize_email(email)).exists()
+            )
 
     def test_throttle_allows_exactly_email_limit_then_blocks_next_attempt(self):
         email = self._unique_email("email-throttle")

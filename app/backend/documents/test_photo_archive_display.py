@@ -294,7 +294,9 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         "documents.views.create_presigned_get",
         return_value=PRESIGNED_URL,
     )
-    def test_photo_detail_does_not_render_empty_metadata_labels(self, _mock_presigned_get):
+    def test_photo_detail_does_not_render_empty_metadata_labels(
+        self, _mock_presigned_get
+    ):
         photo = self.public_uploaded.photo_content
         photo.description = "Only caption filled"
         photo.save()
@@ -314,7 +316,9 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         "documents.views.create_presigned_get",
         return_value=PRESIGNED_URL,
     )
-    def test_photo_detail_does_not_show_author_or_source_labels(self, _mock_presigned_get):
+    def test_photo_detail_does_not_show_author_or_source_labels(
+        self, _mock_presigned_get
+    ):
         self.public_uploaded.author_name = "Hidden author"
         self.public_uploaded.source_title = "Hidden source"
         self.public_uploaded.save()

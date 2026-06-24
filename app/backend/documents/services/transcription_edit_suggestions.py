@@ -29,7 +29,9 @@ def is_honeypot_triggered(post_data) -> bool:
 
 
 def texts_are_equivalent(current: str, suggested: str) -> bool:
-    return normalize_transcription_text(current) == normalize_transcription_text(suggested)
+    return normalize_transcription_text(current) == normalize_transcription_text(
+        suggested
+    )
 
 
 def suggestion_status_label(status: str) -> str:
@@ -40,7 +42,9 @@ def _escape_transcription_text(text: str) -> str:
     return html.escape(text or "", quote=True)
 
 
-def render_transcription_diff_html(current_text: str, suggested_text: str) -> SafeString:
+def render_transcription_diff_html(
+    current_text: str, suggested_text: str
+) -> SafeString:
     """Inline diff HTML with escaped user text; deletions and insertions highlighted."""
     current = current_text or ""
     suggested = suggested_text or ""

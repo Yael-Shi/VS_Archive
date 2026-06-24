@@ -79,8 +79,14 @@ def language_label(value) -> str:
 
 def archive_visibility_ui_choices() -> list[tuple[str, str]]:
     return [
-        (ArchiveItem.Visibility.PUBLIC, visibility_label(ArchiveItem.Visibility.PUBLIC)),
-        (ArchiveItem.Visibility.PRIVATE, visibility_label(ArchiveItem.Visibility.PRIVATE)),
+        (
+            ArchiveItem.Visibility.PUBLIC,
+            visibility_label(ArchiveItem.Visibility.PUBLIC),
+        ),
+        (
+            ArchiveItem.Visibility.PRIVATE,
+            visibility_label(ArchiveItem.Visibility.PRIVATE),
+        ),
     ]
 
 
@@ -100,9 +106,18 @@ def archive_metadata_status_ui_choices() -> list[tuple[str, str]]:
 def archive_manage_item_type_ui_choices() -> list[tuple[str, str]]:
     """Slugs used on /archive/manage/new/ (not stored enum values)."""
     return [
-        (ARCHIVE_LIST_ITEM_TYPE_FILTER_MANUAL, archive_item_type_label(ArchiveItem.ItemType.MANUAL_TEXT)),
-        (ARCHIVE_LIST_ITEM_TYPE_FILTER_OCR, archive_item_type_label(ArchiveItem.ItemType.OCR_DOCUMENT)),
-        (ARCHIVE_LIST_ITEM_TYPE_FILTER_PHOTO, archive_item_type_label(ArchiveItem.ItemType.PHOTO)),
+        (
+            ARCHIVE_LIST_ITEM_TYPE_FILTER_MANUAL,
+            archive_item_type_label(ArchiveItem.ItemType.MANUAL_TEXT),
+        ),
+        (
+            ARCHIVE_LIST_ITEM_TYPE_FILTER_OCR,
+            archive_item_type_label(ArchiveItem.ItemType.OCR_DOCUMENT),
+        ),
+        (
+            ARCHIVE_LIST_ITEM_TYPE_FILTER_PHOTO,
+            archive_item_type_label(ArchiveItem.ItemType.PHOTO),
+        ),
     ]
 
 

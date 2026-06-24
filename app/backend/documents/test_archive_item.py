@@ -5,7 +5,13 @@ from unittest.mock import patch
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth.models import Group, User
 from django.db import IntegrityError
-from django.test import Client, RequestFactory, SimpleTestCase, TestCase, override_settings
+from django.test import (
+    Client,
+    RequestFactory,
+    SimpleTestCase,
+    TestCase,
+    override_settings,
+)
 from django.urls import reverse
 
 from documents.admin import ArchiveItemAdmin, DocumentAdmin, ManualTextContentAdmin
@@ -46,7 +52,9 @@ from documents.services.archive_item_presentation import (
     language_label,
     visibility_label,
 )
-from documents.services.manual_text_body_display import format_manual_text_body_for_display
+from documents.services.manual_text_body_display import (
+    format_manual_text_body_for_display,
+)
 
 
 def assert_ocr_shared_fields_match(test_case, doc: Document) -> None:
@@ -466,7 +474,9 @@ class ArchiveItemUploadIntegrationTests(TestCase):
         }
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_single_file_create_links_ocr_document_archive_item(self, _mock_put):
         resp = self.client.post(
             "/api/uploads/create/",
@@ -482,7 +492,9 @@ class ArchiveItemUploadIntegrationTests(TestCase):
         assert_ocr_shared_fields_match(self, doc)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_multi_image_create_links_ocr_document_archive_item(self, _mock_put):
         resp = self.client.post(
             "/api/uploads/create/",
@@ -498,9 +510,13 @@ class ArchiveItemUploadIntegrationTests(TestCase):
         assert_ocr_shared_fields_match(self, doc)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
-    def test_single_file_complete_still_enqueues_processing(self, mock_enqueue, _mock_put):
+    def test_single_file_complete_still_enqueues_processing(
+        self, mock_enqueue, _mock_put
+    ):
         create_resp = self.client.post(
             "/api/uploads/create/",
             data=json.dumps(self._base_create_payload()),
@@ -509,7 +525,9 @@ class ArchiveItemUploadIntegrationTests(TestCase):
         doc_id = create_resp.json()["document_id"]
         complete_resp = self.client.post(
             f"/api/uploads/{doc_id}/complete/",
-            data=json.dumps({"success": True, "file_size": 2048, "file_mime": "image/jpeg"}),
+            data=json.dumps(
+                {"success": True, "file_size": 2048, "file_mime": "image/jpeg"}
+            ),
             content_type="application/json",
         )
         self.assertEqual(complete_resp.status_code, 200)
@@ -556,7 +574,9 @@ class ManualTextArchiveItemTests(TestCase):
         self.assertEqual(item.item_type, ArchiveItem.ItemType.MANUAL_TEXT)
         self.assertEqual(item.title, "Manual note")
         self.assertEqual(item.visibility, ArchiveItem.Visibility.PUBLIC)
-        self.assertEqual(item.metadata_status, ArchiveItem.MetadataStatus.NEEDS_COMPLETION)
+        self.assertEqual(
+            item.metadata_status, ArchiveItem.MetadataStatus.NEEDS_COMPLETION
+        )
         mock_enqueue.assert_not_called()
 
     def test_create_manual_text_archive_item_creates_manual_text_content(self):
@@ -1122,7 +1142,9 @@ class OcrDocumentMetadataEditTests(TestCase):
         for model in (doc, item):
             self.assertEqual(model.title, "Shared fields after")
             self.assertEqual(model.visibility, ArchiveItem.Visibility.PUBLIC)
-            self.assertEqual(model.metadata_status, ArchiveItem.MetadataStatus.COMPLETED)
+            self.assertEqual(
+                model.metadata_status, ArchiveItem.MetadataStatus.COMPLETED
+            )
             self.assertEqual(model.date_precision, ArchiveItem.DatePrecision.RANGE)
             self.assertEqual(str(model.date_start), "1920-03-01")
             self.assertEqual(str(model.date_end), "1921-06-30")
@@ -1452,8 +1474,12 @@ class OcrDocumentMetadataEditTests(TestCase):
         item = create_manual_text_archive_item(title="Manage list manual", body="Body")
         self.client.force_login(self.staff)
         resp = self.client.get(reverse("archive-manage-list"))
-        self.assertContains(resp, reverse("archive-manage-edit", kwargs={"item_id": item.id}))
-        self.assertContains(resp, reverse("archive-manage-delete", kwargs={"item_id": item.id}))
+        self.assertContains(
+            resp, reverse("archive-manage-edit", kwargs={"item_id": item.id})
+        )
+        self.assertContains(
+            resp, reverse("archive-manage-delete", kwargs={"item_id": item.id})
+        )
         html = resp.content.decode()
         edit_href = reverse("archive-manage-edit", kwargs={"item_id": item.id})
         self.assertEqual(self._link_label_for_href(html, edit_href), "עריכה")
@@ -1916,7 +1942,9 @@ class OcrDocumentCatalogMetadataEditTests(TestCase):
         doc.refresh_from_db()
         self.assertFalse(DocumentMetadata.objects.filter(document=doc).exists())
 
-    def test_catalog_edit_does_not_change_archive_item_shared_fields_when_unchanged(self):
+    def test_catalog_edit_does_not_change_archive_item_shared_fields_when_unchanged(
+        self,
+    ):
         doc = create_ocr_document(
             title="Shared unchanged",
             doc_type=Document.DocType.IMAGE,
@@ -2401,7 +2429,9 @@ class ArchiveNavigationTests(TestCase):
         self.assertNotContains(resp, reverse("archive-manage-new"))
         self.assertNotContains(resp, "יצירת פריט חדש")
 
-    def test_global_nav_hides_create_archive_item_for_non_staff_authenticated_user(self):
+    def test_global_nav_hides_create_archive_item_for_non_staff_authenticated_user(
+        self,
+    ):
         user = User.objects.create_user(
             username="archive_nav_non_staff",
             password="test-pass",
@@ -2806,7 +2836,9 @@ class ArchiveItemSourceMetadataTests(TestCase):
         self.assertNotContains(resp, "ירושלים")
         self.assertContains(resp, "מטא־דאטה למנהלים")
 
-    def test_existing_manual_text_detail_behavior_unchanged_without_source_metadata(self):
+    def test_existing_manual_text_detail_behavior_unchanged_without_source_metadata(
+        self,
+    ):
         item = create_manual_text_archive_item(
             title="Regression manual detail",
             body="Regression body.",
@@ -2819,7 +2851,9 @@ class ArchiveItemSourceMetadataTests(TestCase):
         self.assertContains(resp, "Regression body.")
         self.assertContains(resp, "טקסט")
 
-    def test_existing_ocr_document_detail_behavior_unchanged_without_source_metadata(self):
+    def test_existing_ocr_document_detail_behavior_unchanged_without_source_metadata(
+        self,
+    ):
         doc = create_ocr_document(
             title="Regression OCR detail",
             doc_type=Document.DocType.IMAGE,
@@ -3529,9 +3563,7 @@ class ArchiveItemDiscoveryBrowseTests(TestCase):
         item = self._create_public_item(title="Public tag browse visible")
         _, _, tag = self._attach_discovery_metadata(item)
 
-        resp = self.client.get(
-            reverse("archive-tag-browse", kwargs={"tag_id": tag.id})
-        )
+        resp = self.client.get(reverse("archive-tag-browse", kwargs={"tag_id": tag.id}))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "תגית: browse-tag-term")
         self.assertContains(resp, item.title)
@@ -3562,9 +3594,7 @@ class ArchiveItemDiscoveryBrowseTests(TestCase):
         item = self._create_private_item(title="Hidden private tag browse")
         _, _, tag = self._attach_discovery_metadata(item)
 
-        resp = self.client.get(
-            reverse("archive-tag-browse", kwargs={"tag_id": tag.id})
-        )
+        resp = self.client.get(reverse("archive-tag-browse", kwargs={"tag_id": tag.id}))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "תגית: browse-tag-term")
         self.assertNotContains(resp, item.title)
@@ -3696,7 +3726,9 @@ class ArchiveItemDiscoveryBrowseTests(TestCase):
 
         self.assertEqual(category_resp.status_code, 200)
         self.assertEqual(event_resp.status_code, 200)
-        self.assertNotContains(category_resp, "/archive/categories/slug-unused-category/")
+        self.assertNotContains(
+            category_resp, "/archive/categories/slug-unused-category/"
+        )
         self.assertNotContains(event_resp, "/archive/events/slug-unused-event/")
 
 
@@ -3824,8 +3856,12 @@ class ManualTextArchiveItemDeleteTests(TestCase):
         item = create_manual_text_archive_item(title="Detail delete link", body="Body")
         self.client.force_login(self.staff)
         resp = self.client.get(f"/archive/{item.id}/")
-        self.assertContains(resp, reverse("archive-manage-delete", kwargs={"item_id": item.id}))
-        self.assertContains(resp, reverse("archive-manage-edit", kwargs={"item_id": item.id}))
+        self.assertContains(
+            resp, reverse("archive-manage-delete", kwargs={"item_id": item.id})
+        )
+        self.assertContains(
+            resp, reverse("archive-manage-edit", kwargs={"item_id": item.id})
+        )
         self.assertContains(resp, "מחיקה")
 
     def test_delete_action_still_hidden_for_staff_on_ocr_document_detail(self):
@@ -3851,7 +3887,9 @@ class ManualTextArchiveItemDeleteTests(TestCase):
         item = create_manual_text_archive_item(title="Manage delete link", body="Body")
         self.client.force_login(self.staff)
         resp = self.client.get(reverse("archive-manage-list"))
-        self.assertContains(resp, reverse("archive-manage-delete", kwargs={"item_id": item.id}))
+        self.assertContains(
+            resp, reverse("archive-manage-delete", kwargs={"item_id": item.id})
+        )
         self.assertContains(resp, "מחיקה")
 
     def test_delete_action_does_not_appear_for_anonymous_on_detail(self):
@@ -3861,7 +3899,9 @@ class ManualTextArchiveItemDeleteTests(TestCase):
             visibility=ArchiveItem.Visibility.PUBLIC,
         )
         resp = self.client.get(f"/archive/{item.id}/")
-        self.assertNotContains(resp, reverse("archive-manage-delete", kwargs={"item_id": item.id}))
+        self.assertNotContains(
+            resp, reverse("archive-manage-delete", kwargs={"item_id": item.id})
+        )
 
     def test_delete_action_does_not_appear_for_family_user_on_detail(self):
         item = create_manual_text_archive_item(
@@ -3871,7 +3911,9 @@ class ManualTextArchiveItemDeleteTests(TestCase):
         )
         self.client.force_login(self._create_family_user())
         resp = self.client.get(f"/archive/{item.id}/")
-        self.assertNotContains(resp, reverse("archive-manage-delete", kwargs={"item_id": item.id}))
+        self.assertNotContains(
+            resp, reverse("archive-manage-delete", kwargs={"item_id": item.id})
+        )
 
     def test_delete_action_does_not_appear_for_non_staff_on_detail(self):
         item = create_manual_text_archive_item(
@@ -3886,7 +3928,9 @@ class ManualTextArchiveItemDeleteTests(TestCase):
         )
         self.client.force_login(user)
         resp = self.client.get(f"/archive/{item.id}/")
-        self.assertNotContains(resp, reverse("archive-manage-delete", kwargs={"item_id": item.id}))
+        self.assertNotContains(
+            resp, reverse("archive-manage-delete", kwargs={"item_id": item.id})
+        )
 
     def test_family_user_cannot_access_manage_list_with_delete_action(self):
         create_manual_text_archive_item(title="Family manage", body="Body")
@@ -3978,7 +4022,9 @@ class ArchiveItemDiscoveryMetadataFoundationTests(TestCase):
         )
 
     def test_one_archive_category_links_to_multiple_archive_items(self):
-        category = ArchiveCategory.objects.create(name="Shared topic", slug="shared-topic")
+        category = ArchiveCategory.objects.create(
+            name="Shared topic", slug="shared-topic"
+        )
         item_one = create_manual_text_archive_item(title="Item one", body="One")
         item_two = create_ocr_document(
             title="Item two",
@@ -3999,7 +4045,9 @@ class ArchiveItemDiscoveryMetadataFoundationTests(TestCase):
 
         event_one = ArchiveEvent.objects.create(name="Event one", slug="event-one")
         item.events.add(event_one)
-        self.assertEqual(list(item.events.values_list("slug", flat=True)), ["event-one"])
+        self.assertEqual(
+            list(item.events.values_list("slug", flat=True)), ["event-one"]
+        )
 
         event_two = ArchiveEvent.objects.create(name="Event two", slug="event-two")
         item.events.add(event_two)
@@ -4134,7 +4182,9 @@ class ArchiveItemDiscoveryMetadataEditTests(TestCase):
 
     def test_manual_text_get_seeds_discovery_metadata(self):
         item = create_manual_text_archive_item(title="Seed manual", body="Body")
-        cat = ArchiveCategory.objects.create(name="יהדות מצרים", slug="yahadut-mitzrayim")
+        cat = ArchiveCategory.objects.create(
+            name="יהדות מצרים", slug="yahadut-mitzrayim"
+        )
         event = ArchiveEvent.objects.create(name="חתונה", slug="hatuna")
         tag = Tag.objects.create(name="family")
         item.categories.add(cat)
@@ -4172,7 +4222,9 @@ class ArchiveItemDiscoveryMetadataEditTests(TestCase):
         )
         Tag.objects.create(name="existing-tag")
 
-        item = create_manual_text_archive_item(title="Manual POST discovery", body="Body")
+        item = create_manual_text_archive_item(
+            title="Manual POST discovery", body="Body"
+        )
         self.client.force_login(self.staff)
         resp = self.client.post(
             self.EDIT_URL_TEMPLATE.format(item_id=item.id),
@@ -4240,9 +4292,7 @@ class ArchiveItemDiscoveryMetadataEditTests(TestCase):
         item.tags.add(tag)
 
         self.client.force_login(self.staff)
-        resp = self.client.get(
-            self.EDIT_URL_TEMPLATE.format(item_id=item.id)
-        )
+        resp = self.client.get(self.EDIT_URL_TEMPLATE.format(item_id=item.id))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(
             resp,
@@ -4272,7 +4322,9 @@ class ArchiveItemDiscoveryMetadataEditTests(TestCase):
         )
         existing_tag = Tag.objects.create(name="selected-tag")
 
-        item = create_manual_text_archive_item(title="Combined manual discovery", body="Body")
+        item = create_manual_text_archive_item(
+            title="Combined manual discovery", body="Body"
+        )
         self.client.force_login(self.staff)
         resp = self.client.post(
             self.EDIT_URL_TEMPLATE.format(item_id=item.id),
@@ -4717,7 +4769,9 @@ class ManualTextCreateDiscoveryMetadataTests(TestCase):
         self.assertContains(resp, 'value="Preserved new category"')
         self.assertContains(resp, 'value="Preserved event"')
         self.assertContains(resp, 'value="preserved-tag"')
-        self.assertFalse(ArchiveItem.objects.filter(events__name="Preserved event").exists())
+        self.assertFalse(
+            ArchiveItem.objects.filter(events__name="Preserved event").exists()
+        )
 
     def test_create_selected_existing_and_new_typed_values_together(self):
         existing_cat = ArchiveCategory.objects.create(
@@ -4850,5 +4904,5 @@ class ManualTextBodyDisplayServiceTests(SimpleTestCase):
         )
 
     def test_format_manual_text_body_escapes_html_before_linkify(self):
-        rendered = format_manual_text_body_for_display('<b>not bold</b>')
+        rendered = format_manual_text_body_for_display("<b>not bold</b>")
         self.assertEqual(rendered, "&lt;b&gt;not bold&lt;/b&gt;")

@@ -267,7 +267,9 @@ class ReconcileOcrSharedFieldsCommandTests(TestCase):
         self.assertEqual(meta_after.donor, meta_before.donor)
         self.assertEqual(meta_after.collection, meta_before.collection)
         self.assertEqual(doc.category_event, "Event")
-        self.assertEqual(list(doc.tags_m2m.values_list("pk", flat=True)), tag_ids_before)
+        self.assertEqual(
+            list(doc.tags_m2m.values_list("pk", flat=True)), tag_ids_before
+        )
         self.assertEqual(text_result.text, "sample text")
 
     def test_json_output_is_parseable(self):

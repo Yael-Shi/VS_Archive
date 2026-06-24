@@ -13,10 +13,7 @@ def is_document_admin(user) -> bool:
     return bool(
         user is not None
         and getattr(user, "is_authenticated", False)
-        and (
-            getattr(user, "is_staff", False)
-            or getattr(user, "is_superuser", False)
-        )
+        and (getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
     )
 
 
@@ -57,9 +54,11 @@ def get_viewable_document(
 
     Uses 404 for both missing ids and unauthorized private documents.
     """
-    base = queryset if queryset is not None else Document.objects.select_related(
-        "archive_item"
-    ).all()
+    base = (
+        queryset
+        if queryset is not None
+        else Document.objects.select_related("archive_item").all()
+    )
     qs = filter_documents_for_user(user, base)
     try:
         return qs.get(id=doc_id)

@@ -84,7 +84,9 @@ def build_transkribus_cleanup_report(
 
     stale_cutoff = timezone.now() - timedelta(hours=stale_hours_int)
     lineages: dict[tuple[int, str, str], list[TranskribusRun]] = defaultdict(list)
-    remote_doc_usage: dict[tuple[str, str], set[tuple[int, str, str]]] = defaultdict(set)
+    remote_doc_usage: dict[tuple[str, str], set[tuple[int, str, str]]] = defaultdict(
+        set
+    )
     remote_doc_modes: dict[tuple[str, str], set[str]] = defaultdict(set)
 
     for run in runs:
@@ -114,14 +116,24 @@ def build_transkribus_cleanup_report(
                 runs=grouped_runs,
                 newest_useful_remote_doc_id=newest_useful_remote_doc_id,
                 verified_doc_ids=verified_doc_ids,
-                shared_lineages=remote_doc_usage[(_normalize_text(grouped_runs[0].collection_id) or "", remote_doc_id)],
-                shared_modes=remote_doc_modes[(_normalize_text(grouped_runs[0].collection_id) or "", remote_doc_id)],
+                shared_lineages=remote_doc_usage[
+                    (
+                        _normalize_text(grouped_runs[0].collection_id) or "",
+                        remote_doc_id,
+                    )
+                ],
+                shared_modes=remote_doc_modes[
+                    (
+                        _normalize_text(grouped_runs[0].collection_id) or "",
+                        remote_doc_id,
+                    )
+                ],
                 stale_cutoff=stale_cutoff,
             )
             remote_docs.append(remote_doc)
-            remote_lookup[(lineage_key[0], lineage_key[1], lineage_key[2], remote_doc_id)] = (
-                remote_doc
-            )
+            remote_lookup[
+                (lineage_key[0], lineage_key[1], lineage_key[2], remote_doc_id)
+            ] = remote_doc
 
     run_rows: list[dict[str, Any]] = []
     for run in runs:
@@ -185,7 +197,9 @@ def _classify_remote_doc_group(
     latest_run = runs[-1]
     document_id, collection_id, model_id = lineage_key
     has_reusable_run = any(_run_is_reusable_for_retry(run) for run in runs)
-    has_succeeded_run = any(run.status == TranskribusRun.Status.SUCCEEDED for run in runs)
+    has_succeeded_run = any(
+        run.status == TranskribusRun.Status.SUCCEEDED for run in runs
+    )
     has_failed_run = any(run.status == TranskribusRun.Status.FAILED for run in runs)
     has_stale_in_progress_run = any(
         run.status in _IN_PROGRESS_STATUSES and run.updated_at <= stale_cutoff
@@ -267,7 +281,9 @@ def _classify_run(
         reasons.append("run_has_no_remote_doc_id_and_requires_manual_review")
     else:
         lineage_key = _lineage_key(run)
-        remote_summary = remote_lookup[(lineage_key[0], lineage_key[1], lineage_key[2], remote_doc_id)]
+        remote_summary = remote_lookup[
+            (lineage_key[0], lineage_key[1], lineage_key[2], remote_doc_id)
+        ]
         bucket = remote_summary["bucket"]
         reasons.extend(remote_summary["reasons"])
 
@@ -295,7 +311,8 @@ def _newest_useful_remote_doc_id(groups: dict[str, list[TranskribusRun]]) -> str
 
     for remote_doc_id, runs in groups.items():
         if not any(
-            _run_is_reusable_for_retry(run) or run.status == TranskribusRun.Status.SUCCEEDED
+            _run_is_reusable_for_retry(run)
+            or run.status == TranskribusRun.Status.SUCCEEDED
             for run in runs
         ):
             continue

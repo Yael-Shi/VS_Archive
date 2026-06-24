@@ -47,9 +47,8 @@ def photo_is_archive_renderable(photo_content: PhotoContent | None) -> bool:
     """
     if photo_content is None:
         return False
-    return (
-        photo_content.upload_status == PhotoContent.UploadStatus.UPLOADED
-        and bool((photo_content.original_file_key or "").strip())
+    return photo_content.upload_status == PhotoContent.UploadStatus.UPLOADED and bool(
+        (photo_content.original_file_key or "").strip()
     )
 
 

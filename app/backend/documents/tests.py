@@ -18,7 +18,12 @@ from django.utils import timezone
 from PIL import Image
 
 from documents.management.commands.run_worker import Command
-from documents.models import Document, DocumentSourceFile, DocumentTextResult, TranskribusRun
+from documents.models import (
+    Document,
+    DocumentSourceFile,
+    DocumentTextResult,
+    TranskribusRun,
+)
 from documents.services.archive_items import create_ocr_document
 from documents.services.env_validation import validate_required_env
 from documents.services.transkribus_engine import PylaiaTranscriptionOutcome
@@ -59,7 +64,9 @@ from documents.services.ocr_routing import (
 class HtrDispatcherTests(SimpleTestCase):
     @patch("documents.services.htr_engine.get_htr_adapter")
     @patch("documents.services.htr_engine.select_ocr_route")
-    def test_dispatches_by_engine_key_and_prompt_variant(self, mock_select_route, mock_get_adapter):
+    def test_dispatches_by_engine_key_and_prompt_variant(
+        self, mock_select_route, mock_get_adapter
+    ):
         pages = [SimpleNamespace(page_index=1)]
         mock_select_route.return_value = OcrRouteConfig(
             engine_key="GEMINI",
@@ -230,7 +237,9 @@ class HtrDispatcherTests(SimpleTestCase):
             prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
         )
         adapter = Mock()
-        adapter.execute.return_value = HtrResult(text="ok", engine_name="gemini-2.0-flash")
+        adapter.execute.return_value = HtrResult(
+            text="ok", engine_name="gemini-2.0-flash"
+        )
         mock_get_adapter.return_value = adapter
         worker_env = WorkerEnvConfig(
             gemini_api_key="k",
@@ -280,10 +289,14 @@ class HtrDispatcherTests(SimpleTestCase):
 
     @patch("documents.services.htr_engine.get_htr_adapter")
     @patch("documents.services.htr_engine.select_ocr_route")
-    def test_route_provided_skips_select_ocr_route(self, mock_select_route, mock_get_adapter):
+    def test_route_provided_skips_select_ocr_route(
+        self, mock_select_route, mock_get_adapter
+    ):
         route = OcrRouteConfig(engine_key="GEMINI", prompt_variant="handwritten")
         adapter = Mock()
-        adapter.execute.return_value = HtrResult(text="x", engine_name="gemini-2.0-flash")
+        adapter.execute.return_value = HtrResult(
+            text="x", engine_name="gemini-2.0-flash"
+        )
         mock_get_adapter.return_value = adapter
 
         transcribe_pages(
@@ -406,7 +419,9 @@ class TranskribusAdapterTests(TestCase):
     @patch(
         "documents.services.htr_adapters.transkribus_adapter.tr.upload_then_transcribe_page_images_with_pylaia"
     )
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.transcribe_existing_server_document")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.transcribe_existing_server_document"
+    )
     def test_execute_mutually_exclusive_dev_modes_raises_without_engine_calls(
         self, mock_existing, mock_upload
     ):
@@ -464,8 +479,12 @@ class TranskribusAdapterTests(TestCase):
         mock_existing.assert_not_called()
         mock_upload.assert_not_called()
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_execute_success_maps_htr_result(self, m_login, m_start, m_complete):
         from documents.services.env_validation import WorkerEnvConfig
@@ -529,7 +548,9 @@ class TranskribusAdapterTests(TestCase):
         m_start.assert_called_once()
         m_complete.assert_called_once()
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_execute_maps_retryable_engine_error(self, m_login, m_start):
         from documents.services.env_validation import WorkerEnvConfig
@@ -577,18 +598,28 @@ class TranskribusAdapterTests(TestCase):
         doc = self._create_document()
         with self.assertRaises(EngineRetryableError):
             adapter.execute(
-                pages=[PageImage(page_index=1, image_bytes=b"x", mime_type="image/png")],
+                pages=[
+                    PageImage(page_index=1, image_bytes=b"x", mime_type="image/png")
+                ],
                 language_hint="en",
                 prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
                 worker_env=cfg,
                 document_id=doc.id,
             )
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
-    def test_execute_dev_upload_mode_calls_stepwise_engine(self, m_login, m_upload, m_start, m_complete):
+    def test_execute_dev_upload_mode_calls_stepwise_engine(
+        self, m_login, m_upload, m_start, m_complete
+    ):
         from documents.services.env_validation import WorkerEnvConfig
         from documents.services.page_extraction import PageImage
 
@@ -722,11 +753,20 @@ class TranskribusAdapterTests(TestCase):
                         worker_env=base_cfg(**override),
                         document_id=doc.id,
                     )
-                self.assertIn("dev upload mode configuration incomplete", str(ctx.exception).lower())
+                self.assertIn(
+                    "dev upload mode configuration incomplete",
+                    str(ctx.exception).lower(),
+                )
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_execute_dev_upload_mode_does_not_require_dev_existing_document_env(
         self, m_login, m_upload, m_start, m_complete
@@ -961,7 +1001,9 @@ class TranskribusUploadHelpersTests(SimpleTestCase):
 
     def test_build_document_upload_descriptor_json_img_only_pages(self):
         from documents.services.page_extraction import PageImage
-        from documents.services.transkribus_engine import build_document_upload_descriptor_json
+        from documents.services.transkribus_engine import (
+            build_document_upload_descriptor_json,
+        )
 
         pages = [
             PageImage(page_index=2, image_bytes=b"x", mime_type="image/png"),
@@ -982,7 +1024,9 @@ class TranskribusUploadHelpersTests(SimpleTestCase):
     def test_build_document_upload_descriptor_stable_order_by_page_index(self):
         """pageList.pages must follow ascending page_index regardless of input list order."""
         from documents.services.page_extraction import PageImage
-        from documents.services.transkribus_engine import build_document_upload_descriptor_json
+        from documents.services.transkribus_engine import (
+            build_document_upload_descriptor_json,
+        )
 
         pages = [
             PageImage(page_index=5, image_bytes=b"e", mime_type="image/png"),
@@ -1019,7 +1063,9 @@ class TranskribusUploadHelpersTests(SimpleTestCase):
 
     def test_parse_upload_create_json_upload_id_redacted_fixture(self):
         # Shape aligned with Transkribus REST upload article (redacted / minimal).
-        from documents.services.transkribus_engine import parse_upload_create_json_upload_id
+        from documents.services.transkribus_engine import (
+            parse_upload_create_json_upload_id,
+        )
 
         payload = {
             "uploadId": 1234567,
@@ -1033,7 +1079,9 @@ class TranskribusUploadHelpersTests(SimpleTestCase):
         self.assertEqual(parse_upload_create_json_upload_id({"uploadId": "42"}), 42)
 
     def test_parse_upload_put_json_job_id_if_present(self):
-        from documents.services.transkribus_engine import parse_upload_put_json_job_id_if_present
+        from documents.services.transkribus_engine import (
+            parse_upload_put_json_job_id_if_present,
+        )
 
         r_ok = requests.Response()
         r_ok.status_code = 200
@@ -1074,7 +1122,9 @@ class TranskribusUploadHelpersTests(SimpleTestCase):
         self.assertIn("not an object", str(ctx.exception).lower())
 
     def test_parse_doc_id_from_successful_trp_job_top_level(self):
-        from documents.services.transkribus_engine import parse_doc_id_from_successful_trp_job
+        from documents.services.transkribus_engine import (
+            parse_doc_id_from_successful_trp_job,
+        )
 
         job = {
             "success": True,
@@ -1086,7 +1136,9 @@ class TranskribusUploadHelpersTests(SimpleTestCase):
         self.assertEqual(parse_doc_id_from_successful_trp_job(job), "987654")
 
     def test_parse_doc_id_from_successful_trp_job_accepts_done_state(self):
-        from documents.services.transkribus_engine import parse_doc_id_from_successful_trp_job
+        from documents.services.transkribus_engine import (
+            parse_doc_id_from_successful_trp_job,
+        )
 
         job = {"success": True, "state": "DONE", "docId": 1}
         self.assertEqual(parse_doc_id_from_successful_trp_job(job), "1")
@@ -1143,7 +1195,9 @@ class TranskribusUploadHelpersTests(SimpleTestCase):
         self.assertIn("mismatch", str(ctx.exception).lower())
 
     def test_format_trp_pages_query_from_page_nrs(self):
-        from documents.services.transkribus_engine import format_trp_pages_query_from_page_nrs
+        from documents.services.transkribus_engine import (
+            format_trp_pages_query_from_page_nrs,
+        )
 
         self.assertEqual(format_trp_pages_query_from_page_nrs([3]), "3")
         self.assertEqual(format_trp_pages_query_from_page_nrs([1, 2, 3]), "1-3")
@@ -1242,9 +1296,7 @@ class TranskribusUploadHelpersTests(SimpleTestCase):
 
 class TranskribusJobPollingTests(SimpleTestCase):
     @patch("documents.services.transkribus_engine.get_job")
-    def test_poll_continues_past_upload_import_created_success_false(
-        self, m_get
-    ):
+    def test_poll_continues_past_upload_import_created_success_false(self, m_get):
         from documents.services.transkribus_engine import poll_job_until_done
 
         m_get.side_effect = [
@@ -1364,7 +1416,9 @@ class TranskribusJobPollingTests(SimpleTestCase):
 
         m_get.return_value = {"success": True, "state": "COMPLETED", "docId": 3}
         session = requests.Session()
-        job = poll_job_until_done(session, "jc", poll_interval_sec=0.0, max_wait_sec=5.0)
+        job = poll_job_until_done(
+            session, "jc", poll_interval_sec=0.0, max_wait_sec=5.0
+        )
         self.assertEqual(job.get("state"), "COMPLETED")
 
     @patch("documents.services.transkribus_engine.get_job")
@@ -1373,7 +1427,9 @@ class TranskribusJobPollingTests(SimpleTestCase):
 
         m_get.return_value = {"success": True, "state": "DONE", "description": "done"}
         session = requests.Session()
-        job = poll_job_until_done(session, "jd", poll_interval_sec=0.0, max_wait_sec=5.0)
+        job = poll_job_until_done(
+            session, "jd", poll_interval_sec=0.0, max_wait_sec=5.0
+        )
         self.assertEqual(job.get("state"), "DONE")
 
     @patch("documents.services.transkribus_engine.get_job")
@@ -1398,7 +1454,9 @@ class TranskribusJobPollingTests(SimpleTestCase):
         m_get.return_value = {"success": False, "state": "CANCELLED"}
         session = requests.Session()
         with self.assertRaises(TranskribusPermanentError):
-            poll_job_until_done(session, "jcan", poll_interval_sec=0.0, max_wait_sec=5.0)
+            poll_job_until_done(
+                session, "jcan", poll_interval_sec=0.0, max_wait_sec=5.0
+            )
 
     @patch("documents.services.transkribus_engine.get_job")
     def test_poll_canceled_us_spelling_raises(self, m_get):
@@ -1478,7 +1536,9 @@ class TranskribusJobPollingTests(SimpleTestCase):
         self.assertEqual(reasons, [])
         self.assertEqual(m_get.call_count, 2)
 
-    @patch("documents.services.transkribus_engine.pylaia_transcribe_document_with_session")
+    @patch(
+        "documents.services.transkribus_engine.pylaia_transcribe_document_with_session"
+    )
     @patch("documents.services.transkribus_engine.login_trp_server")
     def test_transcribe_existing_server_document_delegates_to_shared_pylaia_helper(
         self, m_login, m_pylaia
@@ -1508,8 +1568,12 @@ class TranskribusJobPollingTests(SimpleTestCase):
         self.assertEqual(kw["model_id"], "7")
         self.assertEqual(kw["collection_id"], "1")
 
-    @patch("documents.services.transkribus_engine.pylaia_transcribe_document_with_session")
-    @patch("documents.services.transkribus_engine.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.transkribus_engine.pylaia_transcribe_document_with_session"
+    )
+    @patch(
+        "documents.services.transkribus_engine.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.transkribus_engine.login_trp_server")
     def test_upload_then_transcribe_wires_upload_outcome_into_pylaia_and_htr_result(
         self, m_login, m_upload, m_pylaia
@@ -1702,7 +1766,10 @@ class TranskribusEngineUnitTests(SimpleTestCase):
         self.assertEqual(chosen_tie["url"], "http://b")
 
     def test_get_job_maps_timeout_to_retryable(self):
-        from documents.services.transkribus_engine import TranskribusRetryableError, get_job
+        from documents.services.transkribus_engine import (
+            TranskribusRetryableError,
+            get_job,
+        )
 
         session = requests.Session()
         with patch.object(session, "request", side_effect=requests.Timeout):
@@ -1711,7 +1778,10 @@ class TranskribusEngineUnitTests(SimpleTestCase):
         self.assertIn("timed out", str(ctx.exception).lower())
 
     def test_get_job_maps_connection_error_to_retryable(self):
-        from documents.services.transkribus_engine import TranskribusRetryableError, get_job
+        from documents.services.transkribus_engine import (
+            TranskribusRetryableError,
+            get_job,
+        )
 
         session = requests.Session()
         with patch.object(
@@ -1752,9 +1822,7 @@ class TranskribusEngineUnitTests(SimpleTestCase):
         with patch.object(session, "request", return_value=resp):
             login_trp_server(session, username="u", password="p")
 
-        jsession_values = [
-            c.value for c in session.cookies if c.name == "JSESSIONID"
-        ]
+        jsession_values = [c.value for c in session.cookies if c.name == "JSESSIONID"]
         self.assertEqual(jsession_values, ["sess-token-value"])
 
     def test_fetch_pages_metadata_parses_json_array(self):
@@ -1765,7 +1833,9 @@ class TranskribusEngineUnitTests(SimpleTestCase):
             "pageId": 50,
             "docId": 500,
             "url": "http://page",
-            "tsList": {"transcripts": [{"jobId": "1", "modelId": "2", "url": "http://t"}]},
+            "tsList": {
+                "transcripts": [{"jobId": "1", "modelId": "2", "url": "http://t"}]
+            },
         }
         meta = TrpPageMetadata.from_item(item)
         self.assertEqual(meta.page_nr, 5)
@@ -1795,7 +1865,9 @@ class TranskribusWorkdirRetryEngineTests(SimpleTestCase):
         self.assertFalse(is_retryable_pylaia_workdir_failure(""))
         self.assertFalse(is_retryable_pylaia_workdir_failure("model not found"))
         self.assertFalse(
-            is_retryable_pylaia_workdir_failure("Could not create workdir at: /other/path")
+            is_retryable_pylaia_workdir_failure(
+                "Could not create workdir at: /other/path"
+            )
         )
 
     @patch("documents.services.transkribus_engine.get_job")
@@ -1835,9 +1907,13 @@ class TranskribusWorkdirRetryEngineTests(SimpleTestCase):
             poll_job_until_done(session, "p1", poll_interval_sec=0.0, max_wait_sec=5.0)
 
     @patch("documents.services.transkribus_engine.time.sleep")
-    @patch("documents.services.transkribus_engine.complete_pylaia_transcription_after_job")
+    @patch(
+        "documents.services.transkribus_engine.complete_pylaia_transcription_after_job"
+    )
     @patch("documents.services.transkribus_engine.start_pylaia_recognition")
-    def test_recognition_retries_workdir_then_succeeds(self, m_start, m_complete, m_sleep):
+    def test_recognition_retries_workdir_then_succeeds(
+        self, m_start, m_complete, m_sleep
+    ):
         from documents.services.transkribus_engine import (
             PylaiaTranscriptionOutcome,
             TranskribusRetryableError,
@@ -1873,7 +1949,9 @@ class TranskribusWorkdirRetryEngineTests(SimpleTestCase):
         m_sleep.assert_called_once_with(30.0)
 
     @patch("documents.services.transkribus_engine.time.sleep")
-    @patch("documents.services.transkribus_engine.complete_pylaia_transcription_after_job")
+    @patch(
+        "documents.services.transkribus_engine.complete_pylaia_transcription_after_job"
+    )
     @patch("documents.services.transkribus_engine.start_pylaia_recognition")
     def test_recognition_workdir_failure_reraised_after_budget(
         self, m_start, m_complete, m_sleep
@@ -1905,7 +1983,9 @@ class TranskribusWorkdirRetryEngineTests(SimpleTestCase):
         m_sleep.assert_called_once_with(30.0)
 
     @patch("documents.services.transkribus_engine.time.sleep")
-    @patch("documents.services.transkribus_engine.complete_pylaia_transcription_after_job")
+    @patch(
+        "documents.services.transkribus_engine.complete_pylaia_transcription_after_job"
+    )
     @patch("documents.services.transkribus_engine.start_pylaia_recognition")
     def test_recognition_non_workdir_retryable_not_retried(
         self, m_start, m_complete, m_sleep
@@ -1936,11 +2016,15 @@ class TranskribusWorkdirRetryEngineTests(SimpleTestCase):
 
 
 class GeminiAdapterTests(SimpleTestCase):
-    @patch("documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini")
+    @patch(
+        "documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini"
+    )
     def test_worker_env_applies_gemini_defaults(self, mock_gemini_transcribe):
         from documents.services.env_validation import WorkerEnvConfig
 
-        mock_gemini_transcribe.return_value = GeminiResult(text="t", engine_name="gemini-2.0-flash")
+        mock_gemini_transcribe.return_value = GeminiResult(
+            text="t", engine_name="gemini-2.0-flash"
+        )
         cfg = WorkerEnvConfig(
             gemini_api_key="k",
             gemini_confidence_threshold=0.7,
@@ -1987,7 +2071,9 @@ class GeminiAdapterTests(SimpleTestCase):
         self.assertEqual(kwargs["consistency_min_ratio"], 0.88)
         self.assertEqual(kwargs["max_output_tokens"], 2048)
 
-    @patch("documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini")
+    @patch(
+        "documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini"
+    )
     def test_document_id_not_forwarded_to_gemini_engine(self, mock_gemini_transcribe):
         mock_gemini_transcribe.return_value = GeminiResult(
             text="text",
@@ -2005,7 +2091,9 @@ class GeminiAdapterTests(SimpleTestCase):
         kwargs = mock_gemini_transcribe.call_args.kwargs
         self.assertNotIn("document_id", kwargs)
 
-    @patch("documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini")
+    @patch(
+        "documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini"
+    )
     def test_success_uses_first_model(self, mock_gemini_transcribe):
         mock_gemini_transcribe.return_value = GeminiResult(
             text="text",
@@ -2027,7 +2115,9 @@ class GeminiAdapterTests(SimpleTestCase):
             DEFAULT_GEMINI_MODEL_CANDIDATES[0],
         )
 
-    @patch("documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini")
+    @patch(
+        "documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini"
+    )
     def test_quota_failure_falls_back_to_next_model(self, mock_gemini_transcribe):
         mock_gemini_transcribe.side_effect = [
             GeminiError(f"QUOTA_EXHAUSTED: {DEFAULT_GEMINI_MODEL_CANDIDATES[0]}"),
@@ -2045,7 +2135,9 @@ class GeminiAdapterTests(SimpleTestCase):
         self.assertEqual(result.engine_name, DEFAULT_GEMINI_MODEL_CANDIDATES[1])
         self.assertEqual(mock_gemini_transcribe.call_count, 2)
 
-    @patch("documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini")
+    @patch(
+        "documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini"
+    )
     def test_non_quota_gemini_error_is_permanent(self, mock_gemini_transcribe):
         mock_gemini_transcribe.side_effect = GeminiError("bad request")
         adapter = GeminiAdapter()
@@ -2057,7 +2149,9 @@ class GeminiAdapterTests(SimpleTestCase):
                 prompt_variant="printed",
             )
 
-    @patch("documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini")
+    @patch(
+        "documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini"
+    )
     def test_all_quota_failures_raise_retryable_error(self, mock_gemini_transcribe):
         mock_gemini_transcribe.side_effect = GeminiError("QUOTA_EXHAUSTED")
         adapter = GeminiAdapter()
@@ -2106,9 +2200,7 @@ class RunWorkerBehaviorTests(TestCase):
 
     def _message(self) -> dict:
         return {
-            "Body": json.dumps(
-                {"type": "PROCESS_DOCUMENT", "document_id": self.doc.id}
-            )
+            "Body": json.dumps({"type": "PROCESS_DOCUMENT", "document_id": self.doc.id})
         }
 
     @patch("documents.management.commands.run_worker.get_object_bytes")
@@ -2152,7 +2244,9 @@ class RunWorkerBehaviorTests(TestCase):
         mock_transcribe.assert_called_once()
         call_kw = mock_transcribe.call_args.kwargs
         self.assertIn("route", call_kw)
-        self.assertEqual(call_kw["route"].engine_key, DocumentTextResult.OcrEngineKey.GEMINI)
+        self.assertEqual(
+            call_kw["route"].engine_key, DocumentTextResult.OcrEngineKey.GEMINI
+        )
         self.assertEqual(
             call_kw["route"].prompt_variant,
             DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
@@ -2180,7 +2274,8 @@ class RunWorkerBehaviorTests(TestCase):
         self.assertEqual(hebrew.text, "translated hebrew text long enough")
         self.assertEqual(hebrew.engine_key, DocumentTextResult.OcrEngineKey.GEMINI)
         self.assertEqual(
-            hebrew.prompt_variant, DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION
+            hebrew.prompt_variant,
+            DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
         )
         self.assertEqual(hebrew.based_on_source_revision, result.source_revision)
         self.doc.refresh_from_db()
@@ -2251,10 +2346,13 @@ class RunWorkerBehaviorTests(TestCase):
         self.assertEqual(hebrew.error_code, "HEBREW_TRANSLATION_FAILED")
         self.assertIn("timeout", hebrew.error_details or "")
         self.assertEqual(
-            hebrew.prompt_variant, DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION
+            hebrew.prompt_variant,
+            DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
         )
         self.doc.refresh_from_db()
-        self.assertEqual(self.doc.processing_state_user, Document.ProcessingState.PARTIAL)
+        self.assertEqual(
+            self.doc.processing_state_user, Document.ProcessingState.PARTIAL
+        )
 
     @patch("documents.management.commands.run_worker.get_object_bytes")
     @patch("documents.management.commands.run_worker.extract_pages")
@@ -2448,7 +2546,9 @@ class RunWorkerBehaviorTests(TestCase):
             engine="ocr-dispatch",
         )
         self.assertEqual(failure.status, DocumentTextResult.Status.FAILED)
-        self.assertEqual(failure.engine_key, DocumentTextResult.OcrEngineKey.TRANSKRIBUS)
+        self.assertEqual(
+            failure.engine_key, DocumentTextResult.OcrEngineKey.TRANSKRIBUS
+        )
         self.assertEqual(
             failure.prompt_variant, DocumentTextResult.OcrPromptVariant.HANDWRITTEN
         )
@@ -2470,7 +2570,9 @@ class RunWorkerBehaviorTests(TestCase):
     ):
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
         mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
-        mock_transcribe.side_effect = ValueError("Invalid or missing language for OCR routing")
+        mock_transcribe.side_effect = ValueError(
+            "Invalid or missing language for OCR routing"
+        )
 
         self.assertTrue(self.command._process_message(self._message()))
 
@@ -2485,7 +2587,9 @@ class RunWorkerBehaviorTests(TestCase):
         self.assertEqual(
             failure.prompt_variant, DocumentTextResult.OcrPromptVariant.HANDWRITTEN
         )
-        self.assertIn("Invalid or missing language for OCR routing", failure.error_details)
+        self.assertIn(
+            "Invalid or missing language for OCR routing", failure.error_details
+        )
 
     @patch("documents.management.commands.run_worker.transcribe_pages")
     @patch("documents.management.commands.run_worker.extract_pages")
@@ -2560,9 +2664,7 @@ class RunWorkerBehaviorTests(TestCase):
             mime_type="application/pdf",
         )
         msg = {
-            "Body": json.dumps(
-                {"type": "PROCESS_DOCUMENT", "document_id": he_doc.id}
-            )
+            "Body": json.dumps({"type": "PROCESS_DOCUMENT", "document_id": he_doc.id})
         }
 
         with patch.dict(
@@ -2640,9 +2742,7 @@ class RunWorkerBehaviorTests(TestCase):
         mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
 
         msg = {
-            "Body": json.dumps(
-                {"type": "PROCESS_DOCUMENT", "document_id": he_doc.id}
-            )
+            "Body": json.dumps({"type": "PROCESS_DOCUMENT", "document_id": he_doc.id})
         }
 
         with patch.dict(
@@ -2699,9 +2799,7 @@ class RunWorkerBehaviorTests(TestCase):
         )
 
         msg = {
-            "Body": json.dumps(
-                {"type": "PROCESS_DOCUMENT", "document_id": he_doc.id}
-            )
+            "Body": json.dumps({"type": "PROCESS_DOCUMENT", "document_id": he_doc.id})
         }
 
         with patch.dict(
@@ -2802,11 +2900,7 @@ class MultiImageWorkerTests(TestCase):
         )
 
     def _message(self, doc) -> dict:
-        return {
-            "Body": json.dumps(
-                {"type": "PROCESS_DOCUMENT", "document_id": doc.id}
-            )
-        }
+        return {"Body": json.dumps({"type": "PROCESS_DOCUMENT", "document_id": doc.id})}
 
     @patch("documents.management.commands.run_worker.get_object_bytes")
     @patch("documents.management.commands.run_worker.transcribe_pages")
@@ -2823,7 +2917,10 @@ class MultiImageWorkerTests(TestCase):
         self._add_source(doc, 0)
         self._add_source(doc, 1)
 
-        mock_get_object_bytes.side_effect = lambda bucket, key: (_png_bytes(), "image/png")
+        mock_get_object_bytes.side_effect = lambda bucket, key: (
+            _png_bytes(),
+            "image/png",
+        )
         mock_transcribe.return_value = HtrResult(
             text="combined text",
             needs_review=False,
@@ -2834,7 +2931,9 @@ class MultiImageWorkerTests(TestCase):
         self.assertTrue(self.command._process_message(self._message(doc)))
 
         # Each S3 key is read, in order_index order.
-        read_keys = [call.kwargs["key"] for call in mock_get_object_bytes.call_args_list]
+        read_keys = [
+            call.kwargs["key"] for call in mock_get_object_bytes.call_args_list
+        ]
         self.assertEqual(
             read_keys,
             [
@@ -2880,7 +2979,10 @@ class MultiImageWorkerTests(TestCase):
         self._add_source(doc, 0)
         self._add_source(doc, 1)
 
-        mock_get_object_bytes.side_effect = lambda bucket, key: (_png_bytes(), "image/png")
+        mock_get_object_bytes.side_effect = lambda bucket, key: (
+            _png_bytes(),
+            "image/png",
+        )
         mock_transcribe.return_value = HtrResult(
             text="טקסט עברי",
             needs_review=False,
@@ -2912,7 +3014,10 @@ class MultiImageWorkerTests(TestCase):
         self._add_source(doc, 0)
         self._add_source(doc, 1)
 
-        mock_get_object_bytes.side_effect = lambda bucket, key: (_png_bytes(), "image/png")
+        mock_get_object_bytes.side_effect = lambda bucket, key: (
+            _png_bytes(),
+            "image/png",
+        )
 
         # Flag disabled (default): routing must fail explicitly, not route to Gemini.
         with patch.dict(
@@ -3089,7 +3194,9 @@ def _worker_env_for_dev_transkribus_upload_command(**overrides):
 
 class DevTranskribusTranscribeCommandTests(SimpleTestCase):
     @patch("documents.management.commands.dev_transkribus_transcribe.transcribe_pages")
-    @patch("documents.management.commands.dev_transkribus_transcribe.validate_required_env")
+    @patch(
+        "documents.management.commands.dev_transkribus_transcribe.validate_required_env"
+    )
     def test_missing_confirm_fails_before_transcribe_pages(
         self, mock_validate_env, mock_transcribe
     ):
@@ -3100,7 +3207,9 @@ class DevTranskribusTranscribeCommandTests(SimpleTestCase):
         mock_validate_env.assert_not_called()
 
     @patch("documents.management.commands.dev_transkribus_transcribe.transcribe_pages")
-    @patch("documents.management.commands.dev_transkribus_transcribe.validate_required_env")
+    @patch(
+        "documents.management.commands.dev_transkribus_transcribe.validate_required_env"
+    )
     def test_confirm_calls_transcribe_pages_with_transkribus_route_and_worker_env(
         self, mock_validate_env, mock_transcribe
     ):
@@ -3144,7 +3253,9 @@ class DevTranskribusTranscribeCommandTests(SimpleTestCase):
         self.assertEqual(len(call_kw["pages"]), 1)
 
     @patch("documents.management.commands.dev_transkribus_transcribe.transcribe_pages")
-    @patch("documents.management.commands.dev_transkribus_transcribe.validate_required_env")
+    @patch(
+        "documents.management.commands.dev_transkribus_transcribe.validate_required_env"
+    )
     def test_transkribus_dev_upload_mode_required_before_transcribe(
         self, mock_validate_env, mock_transcribe
     ):
@@ -3172,14 +3283,23 @@ class DevTranskribusTranscribeCommandTests(SimpleTestCase):
         mock_transcribe.assert_not_called()
 
     @patch("documents.management.commands.dev_transkribus_transcribe.transcribe_pages")
-    @patch("documents.management.commands.dev_transkribus_transcribe.validate_required_env")
-    def test_ocr_routes_unchanged_after_command(self, mock_validate_env, mock_transcribe):
+    @patch(
+        "documents.management.commands.dev_transkribus_transcribe.validate_required_env"
+    )
+    def test_ocr_routes_unchanged_after_command(
+        self, mock_validate_env, mock_transcribe
+    ):
         import documents.services.ocr_routing as ocr_routing
 
-        before = {k: (v.engine_key, v.prompt_variant) for k, v in ocr_routing.OCR_ROUTES.items()}
+        before = {
+            k: (v.engine_key, v.prompt_variant)
+            for k, v in ocr_routing.OCR_ROUTES.items()
+        }
         cfg = _worker_env_for_dev_transkribus_upload_command()
         mock_validate_env.return_value = cfg
-        mock_transcribe.return_value = HtrResult(text="ok", engine_name="transkribus-pylaia:1")
+        mock_transcribe.return_value = HtrResult(
+            text="ok", engine_name="transkribus-pylaia:1"
+        )
 
         buf = BytesIO()
         Image.new("RGB", (2, 2), color="white").save(buf, format="PNG")
@@ -3196,7 +3316,10 @@ class DevTranskribusTranscribeCommandTests(SimpleTestCase):
         finally:
             os.unlink(path)
 
-        after = {k: (v.engine_key, v.prompt_variant) for k, v in ocr_routing.OCR_ROUTES.items()}
+        after = {
+            k: (v.engine_key, v.prompt_variant)
+            for k, v in ocr_routing.OCR_ROUTES.items()
+        }
         self.assertEqual(before, after)
         self.assertEqual(
             mock_transcribe.call_args.kwargs["route"].prompt_variant,
@@ -3252,7 +3375,9 @@ class TranskribusCleanupReportTests(TestCase):
         )
         if age_hours is not None:
             ts = timezone.now() - timedelta(hours=age_hours)
-            TranskribusRun.objects.filter(id=run.id).update(created_at=ts, updated_at=ts)
+            TranskribusRun.objects.filter(id=run.id).update(
+                created_at=ts, updated_at=ts
+            )
             run.refresh_from_db()
         return run
 
@@ -3350,7 +3475,9 @@ class TranskribusCleanupReportTests(TestCase):
         )
 
         report = build_transkribus_cleanup_report()
-        remote_docs = {item["remote_doc_id"]: item["bucket"] for item in report["remote_docs"]}
+        remote_docs = {
+            item["remote_doc_id"]: item["bucket"] for item in report["remote_docs"]
+        }
 
         self.assertEqual(
             remote_docs["111"],
@@ -3401,7 +3528,9 @@ class TranskribusCleanupReportTests(TestCase):
 
         report = build_transkribus_cleanup_report(stale_hours=24)
         remote_doc = report["remote_docs"][0]
-        run_row = next(item for item in report["runs"] if item["run_id"] == stale_run.id)
+        run_row = next(
+            item for item in report["runs"] if item["run_id"] == stale_run.id
+        )
 
         self.assertEqual(remote_doc["bucket"], RETAIN_LATEST_OR_REUSABLE_REMOTE_DOC)
         self.assertEqual(run_row["bucket"], REVIEW_STALE_IN_PROGRESS_RUN)
@@ -3423,7 +3552,9 @@ class TranskribusCleanupReportTests(TestCase):
         )
 
         report = build_transkribus_cleanup_report()
-        run_row = next(item for item in report["runs"] if item["run_id"] == failed_run.id)
+        run_row = next(
+            item for item in report["runs"] if item["run_id"] == failed_run.id
+        )
 
         self.assertEqual(run_row["bucket"], LOCAL_ONLY_FAILED_WITHOUT_REMOTE_DOC)
 
@@ -3466,7 +3597,9 @@ class ReportTranskribusCleanupCommandTests(TestCase):
         self.assertEqual(payload["summary"]["remote_doc_count"], 1)
         self.assertEqual(payload["summary"]["run_count"], 1)
 
-    def test_cleanup_command_source_does_not_import_transkribus_engine_or_requests(self):
+    def test_cleanup_command_source_does_not_import_transkribus_engine_or_requests(
+        self,
+    ):
         import documents.management.commands.report_transkribus_cleanup as mod
 
         src = inspect.getsource(mod)
@@ -3735,9 +3868,7 @@ class UploadCompleteSourceFileTests(TestCase):
         )
 
     @patch("documents.views.send_process_document_message")
-    def test_successful_upload_complete_creates_primary_source_file(
-        self, mock_enqueue
-    ):
+    def test_successful_upload_complete_creates_primary_source_file(self, mock_enqueue):
         doc = self._create_uploading_document()
 
         resp = self._post_complete(
@@ -3867,9 +3998,7 @@ class UploadCompleteSourceFileTests(TestCase):
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
     @patch("documents.views.send_process_document_message")
-    def test_upload_complete_succeeds_when_s3_content_type_matches(
-        self, mock_enqueue
-    ):
+    def test_upload_complete_succeeds_when_s3_content_type_matches(self, mock_enqueue):
         doc = self._create_uploading_document()
 
         resp = self._post_complete(
@@ -3910,7 +4039,9 @@ class UploadCompleteSourceFileTests(TestCase):
     def test_upload_complete_rejects_missing_s3_content_type(self, mock_enqueue):
         from documents.s3 import S3HeadObjectResult
 
-        self.mock_s3_head.return_value = S3HeadObjectResult(exists=True, content_type=None)
+        self.mock_s3_head.return_value = S3HeadObjectResult(
+            exists=True, content_type=None
+        )
         doc = self._create_uploading_document()
 
         resp = self._post_complete(doc.id, {"success": True})
@@ -4078,7 +4209,9 @@ class UploadApiTests(TestCase):
         payload.update(overrides)
         return payload
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_single_file_create_response_shape_unchanged(self, _mock_put):
         resp = self._post_create(self._base_create_payload())
         self.assertEqual(resp.status_code, 201)
@@ -4092,7 +4225,9 @@ class UploadApiTests(TestCase):
         self.assertTrue(body["s3_key"].endswith("/original.jpeg"))
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_create_upload_defaults_visibility_private_when_omitted(self, _mock_put):
         resp = self._post_create(self._base_create_payload())
         self.assertEqual(resp.status_code, 201)
@@ -4100,7 +4235,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(doc.visibility, Document.Visibility.PRIVATE)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_single_file_create_accepts_year_date_precision(self, _mock_put):
         resp = self._post_create(
             self._base_create_payload(date_precision=Document.DatePrecision.YEAR)
@@ -4111,7 +4248,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(doc.archive_item.date_precision, Document.DatePrecision.YEAR)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_multi_image_create_accepts_year_date_precision(self, _mock_put):
         resp = self._post_create(
             self._multi_files_payload(date_precision=Document.DatePrecision.YEAR)
@@ -4122,22 +4261,32 @@ class UploadApiTests(TestCase):
         self.assertEqual(doc.archive_item.date_precision, Document.DatePrecision.YEAR)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
-    def test_create_upload_defaults_date_precision_unknown_when_omitted(self, _mock_put):
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
+    def test_create_upload_defaults_date_precision_unknown_when_omitted(
+        self, _mock_put
+    ):
         resp = self._post_create(self._base_create_payload())
         self.assertEqual(resp.status_code, 201)
         doc = Document.objects.get(id=resp.json()["document_id"])
         self.assertEqual(doc.date_precision, Document.DatePrecision.UNKNOWN)
-        self.assertEqual(doc.archive_item.date_precision, Document.DatePrecision.UNKNOWN)
+        self.assertEqual(
+            doc.archive_item.date_precision, Document.DatePrecision.UNKNOWN
+        )
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_create_upload_rejects_invalid_date_precision(self, _mock_put):
         resp = self._post_create(self._base_create_payload(date_precision="GUESS"))
         self.assertEqual(resp.status_code, 400)
         self.assertIn(b"date_precision is invalid", resp.content)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_create_upload_saves_author_name_and_source_title_on_archive_item(
         self, _mock_put
     ):
@@ -4153,7 +4302,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(doc.archive_item.source_title, "הארץ")
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_create_upload_strips_author_name_and_source_title_whitespace(
         self, _mock_put
     ):
@@ -4169,10 +4320,10 @@ class UploadApiTests(TestCase):
         self.assertEqual(doc.archive_item.source_title, "דבר")
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
-    def test_create_upload_omitted_source_metadata_saves_empty_strings(
-        self, _mock_put
-    ):
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
+    def test_create_upload_omitted_source_metadata_saves_empty_strings(self, _mock_put):
         resp = self._post_create(self._base_create_payload())
         self.assertEqual(resp.status_code, 201)
         doc = Document.objects.get(id=resp.json()["document_id"])
@@ -4180,7 +4331,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(doc.archive_item.source_title, "")
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_create_upload_whitespace_only_source_metadata_saves_empty_strings(
         self, _mock_put
     ):
@@ -4195,12 +4348,12 @@ class UploadApiTests(TestCase):
         self.assertEqual(doc.archive_item.author_name, "")
         self.assertEqual(doc.archive_item.source_title, "")
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_create_upload_rejects_over_255_author_name(self, _mock_put):
         before_count = Document.objects.count()
-        resp = self._post_create(
-            self._base_create_payload(author_name="א" * 256)
-        )
+        resp = self._post_create(self._base_create_payload(author_name="א" * 256))
         self.assertEqual(resp.status_code, 400)
         self.assertIn(
             "מחבר/ת חייב להיות עד 255 תווים".encode("utf-8"),
@@ -4208,12 +4361,12 @@ class UploadApiTests(TestCase):
         )
         self.assertEqual(Document.objects.count(), before_count)
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_create_upload_rejects_over_255_source_title(self, _mock_put):
         before_count = Document.objects.count()
-        resp = self._post_create(
-            self._base_create_payload(source_title="מ" * 256)
-        )
+        resp = self._post_create(self._base_create_payload(source_title="מ" * 256))
         self.assertEqual(resp.status_code, 400)
         self.assertIn(
             "מקור חייב להיות עד 255 תווים".encode("utf-8"),
@@ -4222,10 +4375,10 @@ class UploadApiTests(TestCase):
         self.assertEqual(Document.objects.count(), before_count)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
-    def test_multi_image_create_saves_source_metadata_on_archive_item(
-        self, _mock_put
-    ):
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
+    def test_multi_image_create_saves_source_metadata_on_archive_item(self, _mock_put):
         resp = self._post_create(
             self._multi_files_payload(
                 author_name="דוד בן-גוריון",
@@ -4238,7 +4391,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(doc.archive_item.source_title, "מגילת העצמאות")
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_create_upload_saves_archive_item_discovery_metadata(self, _mock_put):
         resp = self._post_create(
             self._base_create_payload(
@@ -4266,7 +4421,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(list(doc.tags_m2m.values_list("name", flat=True)), [])
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_create_upload_saves_discovery_metadata_from_selected_ids_and_new_names(
         self, _mock_put
     ):
@@ -4303,7 +4460,9 @@ class UploadApiTests(TestCase):
         )
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_multi_image_create_saves_archive_item_discovery_metadata(self, _mock_put):
         resp = self._post_create(
             self._multi_files_payload(
@@ -4331,7 +4490,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(list(doc.tags_m2m.values_list("name", flat=True)), [])
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_create_upload_does_not_set_legacy_document_discovery_fields(
         self, _mock_put
     ):
@@ -4357,7 +4518,9 @@ class UploadApiTests(TestCase):
         )
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_create_upload_saves_admin_meta(self, _mock_put):
         resp = self._post_create(
             self._base_create_payload(
@@ -4377,7 +4540,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(meta.original_location, "ירושלים")
         self.assertEqual(meta.notes, "הערות פנימיות")
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
     def test_single_file_complete_still_enqueues_and_dual_writes(
         self, mock_enqueue, _mock_put
@@ -4396,11 +4561,17 @@ class UploadApiTests(TestCase):
         sources = list(DocumentSourceFile.objects.filter(document=doc))
         self.assertEqual(len(sources), 1)
         self.assertEqual(sources[0].order_index, 0)
-        self.assertEqual(sources[0].upload_status, DocumentSourceFile.UploadStatus.UPLOADED)
+        self.assertEqual(
+            sources[0].upload_status, DocumentSourceFile.UploadStatus.UPLOADED
+        )
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
-    def test_single_file_complete_retry_does_not_re_enqueue(self, mock_enqueue, _mock_put):
+    def test_single_file_complete_retry_does_not_re_enqueue(
+        self, mock_enqueue, _mock_put
+    ):
         create_resp = self._post_create(self._base_create_payload())
         doc_id = create_resp.json()["document_id"]
 
@@ -4409,7 +4580,9 @@ class UploadApiTests(TestCase):
         mock_enqueue.assert_called_once()
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
     def test_single_file_complete_valid_image_succeeds_when_s3_exists(
         self, mock_enqueue, _mock_put
@@ -4430,7 +4603,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADED)
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.PROCESSING)
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
     def test_single_file_complete_rejects_unsupported_file_mime(
         self, mock_enqueue, _mock_put
@@ -4450,7 +4625,9 @@ class UploadApiTests(TestCase):
         doc = Document.objects.get(id=doc_id)
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
     def test_single_file_complete_rejects_mime_extension_mismatch(
         self, mock_enqueue, _mock_put
@@ -4475,7 +4652,9 @@ class UploadApiTests(TestCase):
         doc = Document.objects.get(id=doc_id)
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
     def test_single_file_complete_pdf_rejects_non_pdf_mime(
         self, mock_enqueue, _mock_put
@@ -4501,7 +4680,9 @@ class UploadApiTests(TestCase):
         doc = Document.objects.get(id=doc_id)
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
     def test_single_file_complete_mime_validation_failure_does_not_enqueue(
         self, mock_enqueue, _mock_put
@@ -4522,7 +4703,9 @@ class UploadApiTests(TestCase):
         doc.refresh_from_db()
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
         self.assertEqual(doc.mime_type, initial_mime_type)
-        self.assertEqual(DocumentSourceFile.objects.filter(document_id=doc_id).count(), 0)
+        self.assertEqual(
+            DocumentSourceFile.objects.filter(document_id=doc_id).count(), 0
+        )
 
     @patch("documents.views.create_presigned_put")
     def test_multi_image_create_returns_ordered_uploads(self, mock_put):
@@ -4539,7 +4722,9 @@ class UploadApiTests(TestCase):
             [0, 1, 2],
         )
         for row in body["uploads"]:
-            self.assertTrue(row["s3_key"].startswith(f"documents/{body['document_id']}/source/"))
+            self.assertTrue(
+                row["s3_key"].startswith(f"documents/{body['document_id']}/source/")
+            )
             self.assertTrue(row["upload_url"].startswith("https://example/"))
 
         doc = Document.objects.get(id=body["document_id"])
@@ -4548,7 +4733,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(len(sources), 3)
         for index, source in enumerate(sources):
             self.assertEqual(source.order_index, index)
-            self.assertEqual(source.upload_status, DocumentSourceFile.UploadStatus.PENDING)
+            self.assertEqual(
+                source.upload_status, DocumentSourceFile.UploadStatus.PENDING
+            )
             self.assertEqual(source.file_s3_key, body["uploads"][index]["s3_key"])
 
     def test_multi_image_create_rejects_empty_files(self):
@@ -4589,7 +4776,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn("must be one of", resp.content.decode())
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_single_image_accepts_jpeg_jpg(self, _mock_put):
         resp = self._post_create(
             self._base_create_payload(
@@ -4626,7 +4815,9 @@ class UploadApiTests(TestCase):
             msg=body,
         )
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_single_pdf_accepts_pdf_mime_and_extension(self, _mock_put):
         resp = self._post_create(
             self._base_create_payload(
@@ -4659,7 +4850,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn(".pdf", resp.content.decode())
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_multi_image_accepts_allowed_image_types(self, _mock_put):
         payload = self._multi_files_payload(count=2)
         payload["files"] = [
@@ -4726,7 +4919,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn("top-level single-file fields", resp.content.decode())
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
     def test_part_complete_success_does_not_enqueue(self, mock_enqueue, _mock_put):
         create_resp = self._post_create(self._multi_files_payload(count=2))
@@ -4749,7 +4944,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
     def test_part_complete_succeeds_when_s3_content_type_matches(
         self, mock_enqueue, _mock_put
@@ -4771,7 +4968,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(source.upload_status, DocumentSourceFile.UploadStatus.UPLOADED)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
     def test_part_complete_rejects_s3_content_type_mismatch(
         self, mock_enqueue, _mock_put
@@ -4802,7 +5001,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
     def test_part_complete_missing_s3_object_leaves_part_pending(
         self, mock_enqueue, _mock_put
@@ -4831,7 +5032,9 @@ class UploadApiTests(TestCase):
         doc = Document.objects.get(id=doc_id)
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
     def test_part_complete_rejects_non_image_file_mime(self, mock_enqueue, _mock_put):
         create_resp = self._post_create(self._multi_files_payload(count=2))
@@ -4852,9 +5055,13 @@ class UploadApiTests(TestCase):
         doc = Document.objects.get(id=doc_id)
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
-    def test_part_complete_accepts_mime_matching_stored_extension(self, mock_enqueue, _mock_put):
+    def test_part_complete_accepts_mime_matching_stored_extension(
+        self, mock_enqueue, _mock_put
+    ):
         create_resp = self._post_create(self._multi_files_payload(count=2))
         doc_id = create_resp.json()["document_id"]
 
@@ -4869,7 +5076,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(source.mime_type, "image/jpeg")
         self.assertEqual(source.file_original_name, "page-2.jpg")
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_part_complete_rejects_unsupported_mime(self, _mock_put):
         create_resp = self._post_create(self._multi_files_payload(count=2))
         doc_id = create_resp.json()["document_id"]
@@ -4882,7 +5091,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn("must be one of", resp.content.decode())
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_part_complete_rejects_mime_extension_mismatch(self, _mock_put):
         payload = self._multi_files_payload(count=2)
         payload["files"][0]["original_name"] = "page-1.png"
@@ -4898,7 +5109,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn("does not match", resp.content.decode())
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
     def test_part_complete_failure_marks_document_failed(self, mock_enqueue, _mock_put):
         create_resp = self._post_create(self._multi_files_payload(count=2))
@@ -4919,7 +5132,9 @@ class UploadApiTests(TestCase):
         source = DocumentSourceFile.objects.get(document_id=doc_id, order_index=1)
         self.assertEqual(source.upload_status, DocumentSourceFile.UploadStatus.FAILED)
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
     def test_part_complete_retry_after_document_failed_is_rejected(
         self, mock_enqueue, _mock_put
@@ -4956,7 +5171,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(doc.upload_error, "s3 put failed")
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.FAILED)
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
     def test_finalize_after_document_failed_is_rejected(self, mock_enqueue, _mock_put):
         create_resp = self._post_create(self._multi_files_payload(count=2))
@@ -4975,7 +5192,9 @@ class UploadApiTests(TestCase):
         self.assertNotEqual(doc.processing_state_user, Document.ProcessingState.PARTIAL)
         self.assertEqual(doc.file_s3_key, "")
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_part_complete_invalid_order_index_returns_400(self, _mock_put):
         create_resp = self._post_create(self._multi_files_payload(count=2))
         doc_id = create_resp.json()["document_id"]
@@ -4983,7 +5202,9 @@ class UploadApiTests(TestCase):
         resp = self._post_part_complete(doc_id, 9, {"success": True})
         self.assertEqual(resp.status_code, 400)
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
     def test_finalize_fails_when_parts_pending(self, mock_enqueue, _mock_put):
         create_resp = self._post_create(self._multi_files_payload(count=2))
@@ -4995,7 +5216,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         mock_enqueue.assert_not_called()
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
     def test_finalize_fails_when_part_failed(self, mock_enqueue, _mock_put):
         create_resp = self._post_create(self._multi_files_payload(count=2))
@@ -5008,7 +5231,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         mock_enqueue.assert_not_called()
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
     def test_finalize_success_mirrors_primary_sets_processing_and_enqueues(
         self, mock_enqueue, _mock_put
@@ -5037,7 +5262,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(doc.mime_type, primary.mime_type)
         self.assertEqual(doc.size_bytes, primary.size_bytes)
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
     def test_finalize_enqueue_failure_marks_document_failed(
         self, mock_enqueue, _mock_put
@@ -5060,7 +5287,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.FAILED)
         self.assertIn("enqueue failed", doc.upload_error or "")
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
     def test_finalize_idempotent_retry_enqueues_once(self, mock_enqueue, _mock_put):
         create_resp = self._post_create(self._multi_files_payload(count=2))
@@ -5075,7 +5304,9 @@ class UploadApiTests(TestCase):
         self.assertEqual(second.status_code, 200)
         mock_enqueue.assert_called_once_with(document_id=doc_id)
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_legacy_complete_rejects_multi_image_document(self, _mock_put):
         create_resp = self._post_create(self._multi_files_payload(count=2))
         doc_id = create_resp.json()["document_id"]
@@ -5145,13 +5376,17 @@ class UploadApiCsrfTests(TestCase):
         resp = self._post_json("/api/uploads/create/", self._single_create_payload())
         self.assertEqual(resp.status_code, 403)
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_authenticated_create_without_csrf_is_rejected(self, _mock_put):
         self.csrf_client.force_login(self.staff)
         resp = self._post_json("/api/uploads/create/", self._single_create_payload())
         self.assertEqual(resp.status_code, 403)
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_authenticated_create_with_csrf_succeeds(self, _mock_put):
         token = self._csrf_token_for_user(self.staff)
         resp = self._post_json(
@@ -5162,7 +5397,9 @@ class UploadApiCsrfTests(TestCase):
         )
         self.assertEqual(resp.status_code, 201)
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_non_staff_create_forbidden_even_with_csrf(self, _mock_put):
         token = self._csrf_token_for_user(self.viewer)
         resp = self._post_json(
@@ -5211,7 +5448,9 @@ class UploadApiCsrfTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         _mock_enqueue.assert_called_once_with(document_id=doc.id)
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_part_complete_without_csrf_is_rejected(self, _mock_put):
         create_token = self._csrf_token_for_user(self.staff)
         create_resp = self._post_json(
@@ -5244,7 +5483,9 @@ class UploadApiCsrfTests(TestCase):
         )
         self.assertEqual(resp.status_code, 403)
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     @patch("documents.views.send_process_document_message")
     def test_part_complete_and_finalize_with_csrf_succeed(
         self, _mock_enqueue, _mock_put
@@ -5456,14 +5697,22 @@ class TranskribusAdapterPersistenceTests(TestCase):
             upload_status=Document.UploadStatus.UPLOADED,
         )
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_dev_upload_success_persists_succeeded_run(
         self, m_login, m_upload, m_start, m_complete
     ):
-        from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
+        from documents.services.htr_adapters.transkribus_adapter import (
+            TranskribusAdapter,
+        )
         from documents.services.page_extraction import PageImage
         from documents.services.transkribus_engine import TrpUploadOutcome
 
@@ -5487,7 +5736,9 @@ class TranskribusAdapterPersistenceTests(TestCase):
             pages=[PageImage(page_index=0, image_bytes=b"x", mime_type="image/png")],
             language_hint="he",
             prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
-            worker_env=_transkribus_adapter_worker_env(transkribus_dev_upload_mode=True),
+            worker_env=_transkribus_adapter_worker_env(
+                transkribus_dev_upload_mode=True
+            ),
             document_id=doc.id,
         )
         self.assertEqual(result.engine_name, "transkribus-pylaia:42")
@@ -5500,12 +5751,16 @@ class TranskribusAdapterPersistenceTests(TestCase):
         self.assertEqual(run.recognition_job_id, "recog-9")
         self.assertEqual(run.engine_runtime, "transkribus-pylaia:42")
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_dev_upload_ingest_failure_marks_failed_without_remote_doc_id(
         self, m_login, m_upload
     ):
-        from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
+        from documents.services.htr_adapters.transkribus_adapter import (
+            TranskribusAdapter,
+        )
         from documents.services.page_extraction import PageImage
         from documents.services.transkribus_engine import TranskribusPermanentError
 
@@ -5514,10 +5769,14 @@ class TranskribusAdapterPersistenceTests(TestCase):
         adapter = TranskribusAdapter()
         with self.assertRaises(EnginePermanentError):
             adapter.execute(
-                pages=[PageImage(page_index=0, image_bytes=b"x", mime_type="image/png")],
+                pages=[
+                    PageImage(page_index=0, image_bytes=b"x", mime_type="image/png")
+                ],
                 language_hint="he",
                 prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
-                worker_env=_transkribus_adapter_worker_env(transkribus_dev_upload_mode=True),
+                worker_env=_transkribus_adapter_worker_env(
+                    transkribus_dev_upload_mode=True
+                ),
                 document_id=doc.id,
             )
         run = TranskribusRun.objects.get(document=doc)
@@ -5525,14 +5784,22 @@ class TranskribusAdapterPersistenceTests(TestCase):
         self.assertIsNone(run.remote_doc_id)
         self.assertEqual(run.error_code, "TRANSKRIBUS_UPLOAD_FAILED")
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_dev_upload_recognition_failure_preserves_remote_doc_id(
         self, m_login, m_upload, m_start, m_complete
     ):
-        from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
+        from documents.services.htr_adapters.transkribus_adapter import (
+            TranskribusAdapter,
+        )
         from documents.services.page_extraction import PageImage
         from documents.services.transkribus_engine import (
             TranskribusPermanentError,
@@ -5553,10 +5820,14 @@ class TranskribusAdapterPersistenceTests(TestCase):
         adapter = TranskribusAdapter()
         with self.assertRaises(EnginePermanentError):
             adapter.execute(
-                pages=[PageImage(page_index=0, image_bytes=b"x", mime_type="image/png")],
+                pages=[
+                    PageImage(page_index=0, image_bytes=b"x", mime_type="image/png")
+                ],
                 language_hint="he",
                 prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
-                worker_env=_transkribus_adapter_worker_env(transkribus_dev_upload_mode=True),
+                worker_env=_transkribus_adapter_worker_env(
+                    transkribus_dev_upload_mode=True
+                ),
                 document_id=doc.id,
             )
         run = TranskribusRun.objects.get(document=doc)
@@ -5565,13 +5836,19 @@ class TranskribusAdapterPersistenceTests(TestCase):
         self.assertEqual(run.recognition_job_id, "recog-fail")
         self.assertEqual(run.error_code, "TRANSKRIBUS_RECOGNITION_FAILED")
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_existing_server_success_persists_without_upload_fields(
         self, m_login, m_start, m_complete
     ):
-        from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
+        from documents.services.htr_adapters.transkribus_adapter import (
+            TranskribusAdapter,
+        )
         from documents.services.page_extraction import PageImage
 
         doc = self._create_document()
@@ -5601,10 +5878,14 @@ class TranskribusAdapterPersistenceTests(TestCase):
         self.assertIsNone(run.upload_id)
         self.assertIsNone(run.ingest_job_id)
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_existing_server_failure_marks_failed(self, m_login, m_start):
-        from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
+        from documents.services.htr_adapters.transkribus_adapter import (
+            TranskribusAdapter,
+        )
         from documents.services.page_extraction import PageImage
         from documents.services.transkribus_engine import TranskribusPermanentError
 
@@ -5613,7 +5894,9 @@ class TranskribusAdapterPersistenceTests(TestCase):
         adapter = TranskribusAdapter()
         with self.assertRaises(EnginePermanentError):
             adapter.execute(
-                pages=[PageImage(page_index=0, image_bytes=b"x", mime_type="image/png")],
+                pages=[
+                    PageImage(page_index=0, image_bytes=b"x", mime_type="image/png")
+                ],
                 language_hint="he",
                 prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
                 worker_env=_transkribus_adapter_worker_env(
@@ -5662,14 +5945,20 @@ class TranskribusWorkdirRetryAdapterTests(TestCase):
         )
 
     @patch("documents.services.transkribus_engine.time.sleep")
-    @patch("documents.services.transkribus_engine.complete_pylaia_transcription_after_job")
+    @patch(
+        "documents.services.transkribus_engine.complete_pylaia_transcription_after_job"
+    )
     @patch("documents.services.transkribus_engine.start_pylaia_recognition")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_dev_upload_recovers_workdir_failure_without_new_upload(
         self, m_login, m_upload, m_start, m_complete, m_sleep
     ):
-        from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
+        from documents.services.htr_adapters.transkribus_adapter import (
+            TranskribusAdapter,
+        )
         from documents.services.page_extraction import PageImage
 
         doc = self._create_document()
@@ -5710,15 +5999,21 @@ class TranskribusWorkdirRetryAdapterTests(TestCase):
         self.assertEqual(run.recognition_job_id, "recog-2")
 
     @patch("documents.services.transkribus_engine.time.sleep")
-    @patch("documents.services.transkribus_engine.complete_pylaia_transcription_after_job")
+    @patch(
+        "documents.services.transkribus_engine.complete_pylaia_transcription_after_job"
+    )
     @patch("documents.services.transkribus_engine.start_pylaia_recognition")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_dev_upload_workdir_failure_after_budget_raises_retryable_and_marks_failed(
         self, m_login, m_upload, m_start, m_complete, m_sleep
     ):
         from documents.services.htr_adapters.base import EngineRetryableError
-        from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
+        from documents.services.htr_adapters.transkribus_adapter import (
+            TranskribusAdapter,
+        )
         from documents.services.page_extraction import PageImage
 
         doc = self._create_document()
@@ -5780,9 +6075,13 @@ class TranskribusWorkdirRetryWorkerTests(TestCase):
         )
 
     @patch("documents.services.transkribus_engine.time.sleep")
-    @patch("documents.services.transkribus_engine.complete_pylaia_transcription_after_job")
+    @patch(
+        "documents.services.transkribus_engine.complete_pylaia_transcription_after_job"
+    )
     @patch("documents.services.transkribus_engine.start_pylaia_recognition")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     @patch("documents.management.commands.run_worker.extract_pages")
     @patch("documents.management.commands.run_worker.get_object_bytes")
@@ -5797,7 +6096,10 @@ class TranskribusWorkdirRetryWorkerTests(TestCase):
         m_sleep,
     ):
         from documents.services.page_extraction import PageImage
-        from documents.services.transkribus_engine import TranskribusRetryableError, TrpUploadOutcome
+        from documents.services.transkribus_engine import (
+            TranskribusRetryableError,
+            TrpUploadOutcome,
+        )
 
         m_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
         m_extract_pages.return_value = [
@@ -5818,13 +6120,17 @@ class TranskribusWorkdirRetryWorkerTests(TestCase):
                 "/tmp/HTR/PyLaia/trpProd/Decode/pylaiaDecode_recog-1"
             ),
             PylaiaTranscriptionOutcome(
-                text="worker recovered text", review_reasons=[], recognition_job_id="recog-2"
+                text="worker recovered text",
+                review_reasons=[],
+                recognition_job_id="recog-2",
             ),
         ]
 
         cmd = self._make_worker_command()
         he_doc = self._he_doc()
-        msg = {"Body": json.dumps({"type": "PROCESS_DOCUMENT", "document_id": he_doc.id})}
+        msg = {
+            "Body": json.dumps({"type": "PROCESS_DOCUMENT", "document_id": he_doc.id})
+        }
 
         with patch.dict(
             os.environ, {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "true"}, clear=False
@@ -6146,7 +6452,9 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
         *,
         worker_env_overrides: dict | None = None,
     ):
-        from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
+        from documents.services.htr_adapters.transkribus_adapter import (
+            TranskribusAdapter,
+        )
         from documents.services.page_extraction import PageImage
 
         overrides = {"transkribus_dev_upload_mode": True}
@@ -6161,7 +6469,9 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
             document_id=doc.id,
         )
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_prior_succeeded_blocks_before_upload(self, m_login, m_upload):
         from documents.services.htr_adapters.base import EnginePermanentError
@@ -6184,7 +6494,9 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
             run_count_before,
         )
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_prior_failed_with_remote_doc_id_blocks(self, m_login, m_upload):
         from documents.services.htr_adapters.base import EnginePermanentError
@@ -6200,9 +6512,15 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
         m_upload.assert_not_called()
         m_login.assert_not_called()
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_prior_failed_without_remote_doc_id_allows_upload(
         self, m_login, m_upload, m_start, m_complete
@@ -6233,7 +6551,9 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
         m_upload.assert_called_once()
         self.assertEqual(TranskribusRun.objects.filter(document=doc).count(), 2)
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_prior_started_blocks(self, m_login, m_upload):
         from documents.services.htr_adapters.base import EnginePermanentError
@@ -6244,7 +6564,9 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
             self._execute_dev_upload(doc)
         m_upload.assert_not_called()
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_prior_uploaded_blocks(self, m_login, m_upload):
         from documents.services.htr_adapters.base import EnginePermanentError
@@ -6259,7 +6581,9 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
             self._execute_dev_upload(doc)
         m_upload.assert_not_called()
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_prior_recognition_started_blocks(self, m_login, m_upload):
         from documents.services.htr_adapters.base import EnginePermanentError
@@ -6274,11 +6598,19 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
             self._execute_dev_upload(doc)
         m_upload.assert_not_called()
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
-    def test_different_collection_id_does_not_block(self, m_login, m_upload, m_start, m_complete):
+    def test_different_collection_id_does_not_block(
+        self, m_login, m_upload, m_start, m_complete
+    ):
         from documents.services.transkribus_engine import TrpUploadOutcome
 
         doc = self._create_document()
@@ -6305,11 +6637,19 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
         self._execute_dev_upload(doc)
         m_upload.assert_called_once()
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
-    def test_different_model_id_does_not_block(self, m_login, m_upload, m_start, m_complete):
+    def test_different_model_id_does_not_block(
+        self, m_login, m_upload, m_start, m_complete
+    ):
         from documents.services.transkribus_engine import TrpUploadOutcome
 
         doc = self._create_document()
@@ -6336,11 +6676,19 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
         self._execute_dev_upload(doc)
         m_upload.assert_called_once()
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
-    def test_force_reprocess_bypasses_guard(self, m_login, m_upload, m_start, m_complete):
+    def test_force_reprocess_bypasses_guard(
+        self, m_login, m_upload, m_start, m_complete
+    ):
         from documents.services.transkribus_engine import TrpUploadOutcome
 
         doc = self._create_document()
@@ -6370,13 +6718,19 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
         m_upload.assert_called_once()
         self.assertEqual(TranskribusRun.objects.filter(document=doc).count(), 2)
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_existing_server_mode_not_blocked_by_prior_upload_run(
         self, m_login, m_start, m_complete
     ):
-        from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
+        from documents.services.htr_adapters.transkribus_adapter import (
+            TranskribusAdapter,
+        )
         from documents.services.page_extraction import PageImage
 
         doc = self._create_document()
@@ -6442,7 +6796,9 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
             status=status,
             remote_doc_id=remote_doc_id,
             pages_query=pages_query,
-            page_index_to_page_nr=page_index_to_page_nr if page_index_to_page_nr is not None else {0: 1},
+            page_index_to_page_nr=page_index_to_page_nr
+            if page_index_to_page_nr is not None
+            else {0: 1},
             upload_id=upload_id,
             ingest_job_id=ingest_job_id,
         )
@@ -6455,7 +6811,9 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
         worker_env_overrides: dict | None = None,
         source_transkribus_run_id: int | None = None,
     ):
-        from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
+        from documents.services.htr_adapters.transkribus_adapter import (
+            TranskribusAdapter,
+        )
         from documents.services.page_extraction import PageImage
 
         if pages is None:
@@ -6475,9 +6833,15 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
             execute_kwargs["source_transkribus_run_id"] = source_transkribus_run_id
         return adapter.execute(**execute_kwargs)
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_explicit_source_run_id_uses_exact_run_not_rediscovery(
         self, m_login, m_upload, m_start, m_complete
@@ -6529,11 +6893,11 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
         self.assertEqual(older.status, TranskribusRun.Status.FAILED)
         self.assertEqual(newer.status, TranskribusRun.Status.FAILED)
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
-    def test_explicit_source_run_id_wrong_document_rejected(
-        self, m_login, m_upload
-    ):
+    def test_explicit_source_run_id_wrong_document_rejected(self, m_login, m_upload):
         from documents.services.htr_adapters.base import EnginePermanentError
 
         doc = self._create_document()
@@ -6555,11 +6919,11 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
         m_upload.assert_not_called()
         m_login.assert_not_called()
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
-    def test_explicit_source_run_id_succeeded_run_rejected(
-        self, m_login, m_upload
-    ):
+    def test_explicit_source_run_id_succeeded_run_rejected(self, m_login, m_upload):
         from documents.services.htr_adapters.base import EnginePermanentError
 
         doc = self._create_document()
@@ -6580,7 +6944,9 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
         m_upload.assert_not_called()
         m_login.assert_not_called()
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_flag_off_prior_failed_with_remote_doc_id_still_blocks(
         self, m_login, m_upload
@@ -6598,9 +6964,15 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
         m_upload.assert_not_called()
         m_login.assert_not_called()
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_flag_on_reusable_failed_run_skips_upload_and_returns_htr_result(
         self, m_login, m_upload, m_start, m_complete
@@ -6640,11 +7012,19 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
         source.refresh_from_db()
         self.assertEqual(source.status, TranskribusRun.Status.FAILED)
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
-    def test_flag_on_reusable_uploaded_run_works(self, m_login, m_upload, m_start, m_complete):
+    def test_flag_on_reusable_uploaded_run_works(
+        self, m_login, m_upload, m_start, m_complete
+    ):
         doc = self._create_document()
         self._seed_source_run(doc, status=TranskribusRun.Status.UPLOADED)
         m_start.return_value = "recog-u"
@@ -6660,9 +7040,15 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
         m_upload.assert_not_called()
         m_start.assert_called_once()
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_flag_on_reusable_recognition_started_run_works(
         self, m_login, m_upload, m_start, m_complete
@@ -6682,7 +7068,9 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
         m_upload.assert_not_called()
         m_start.assert_called_once()
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_flag_on_prior_succeeded_does_not_trigger_recognition_only_blocks(
         self, m_login, m_upload
@@ -6700,9 +7088,15 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
         m_upload.assert_not_called()
         m_login.assert_not_called()
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_force_reprocess_wins_over_recognition_only_retry(
         self, m_login, m_upload_ingest, m_start, m_complete
@@ -6734,11 +7128,11 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
         )
         m_upload_ingest.assert_called_once()
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
-    def test_verified_document_text_result_blocks_before_http(
-        self, m_login, m_start
-    ):
+    def test_verified_document_text_result_blocks_before_http(self, m_login, m_start):
         from documents.services.htr_adapters.base import EnginePermanentError
 
         doc = self._create_document()
@@ -6762,7 +7156,9 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
         m_login.assert_not_called()
         m_start.assert_not_called()
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_page_count_mismatch_blocks_before_http(self, m_login, m_start):
         from documents.services.htr_adapters.base import EnginePermanentError
@@ -6789,13 +7185,19 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
         m_login.assert_not_called()
         m_start.assert_not_called()
 
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job")
-    @patch("documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition")
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
+    )
+    @patch(
+        "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
+    )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_existing_server_mode_unchanged_by_recognition_only_flag(
         self, m_login, m_start, m_complete
     ):
-        from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
+        from documents.services.htr_adapters.transkribus_adapter import (
+            TranskribusAdapter,
+        )
         from documents.services.page_extraction import PageImage
 
         doc = self._create_document()
@@ -6884,7 +7286,9 @@ class GeminiEnginePromptTests(SimpleTestCase):
         )
         self.assertIn("Output only the transcription text", _HANDWRITTEN_LATIN_PROMPT)
         self.assertIn("Do not output JSON", _HANDWRITTEN_LATIN_PROMPT)
-        self.assertNotIn("printed historical archival documents", _HANDWRITTEN_LATIN_PROMPT)
+        self.assertNotIn(
+            "printed historical archival documents", _HANDWRITTEN_LATIN_PROMPT
+        )
         self.assertNotIn("Hebrew words", _HANDWRITTEN_LATIN_PROMPT)
 
     def test_hebrew_translation_prompt_includes_archival_guardrails(self):
@@ -6989,7 +7393,9 @@ class GeminiEnginePromptTests(SimpleTestCase):
         )
 
         for language_hint, prompt_variant in cases:
-            with self.subTest(language_hint=language_hint, prompt_variant=prompt_variant):
+            with self.subTest(
+                language_hint=language_hint, prompt_variant=prompt_variant
+            ):
                 mock_client.models.generate_content.reset_mock()
                 mock_create_client.reset_mock()
 
@@ -7089,14 +7495,12 @@ class GeminiEnginePromptTests(SimpleTestCase):
         )
         self.assertEqual(mock_client.models.generate_content.call_count, 2)
 
-        first_config = (
-            mock_client.models.generate_content.call_args_list[0]
-            .kwargs["config"]
-        )
-        retry_config = (
-            mock_client.models.generate_content.call_args_list[1]
-            .kwargs["config"]
-        )
+        first_config = mock_client.models.generate_content.call_args_list[0].kwargs[
+            "config"
+        ]
+        retry_config = mock_client.models.generate_content.call_args_list[1].kwargs[
+            "config"
+        ]
         self.assertEqual(first_config.max_output_tokens, 2048)
         self.assertEqual(retry_config.max_output_tokens, 8192)
 
@@ -7157,14 +7561,12 @@ class GeminiEnginePromptTests(SimpleTestCase):
         self.assertIn("model=test-model", message)
         self.assertEqual(mock_client.models.generate_content.call_count, 2)
 
-        first_config = (
-            mock_client.models.generate_content.call_args_list[0]
-            .kwargs["config"]
-        )
-        retry_config = (
-            mock_client.models.generate_content.call_args_list[1]
-            .kwargs["config"]
-        )
+        first_config = mock_client.models.generate_content.call_args_list[0].kwargs[
+            "config"
+        ]
+        retry_config = mock_client.models.generate_content.call_args_list[1].kwargs[
+            "config"
+        ]
         self.assertEqual(first_config.max_output_tokens, 2048)
         self.assertEqual(retry_config.max_output_tokens, 8192)
 
@@ -7197,14 +7599,12 @@ class GeminiEnginePromptTests(SimpleTestCase):
         self.assertEqual(result.text, "complete transcription after retry")
         self.assertEqual(mock_client.models.generate_content.call_count, 2)
 
-        first_config = (
-            mock_client.models.generate_content.call_args_list[0]
-            .kwargs["config"]
-        )
-        retry_config = (
-            mock_client.models.generate_content.call_args_list[1]
-            .kwargs["config"]
-        )
+        first_config = mock_client.models.generate_content.call_args_list[0].kwargs[
+            "config"
+        ]
+        retry_config = mock_client.models.generate_content.call_args_list[1].kwargs[
+            "config"
+        ]
         self.assertEqual(first_config.max_output_tokens, 2048)
         self.assertEqual(retry_config.max_output_tokens, 8192)
 
@@ -7249,9 +7649,7 @@ class GeminiHebrewTranslationTests(SimpleTestCase):
         return ("word " * (char_count // 5)).strip()
 
     def _short_source_text(self, char_count: int = 80) -> str:
-        sentence = (
-            "This is a short archival note about a person named John Smith. "
-        )
+        sentence = "This is a short archival note about a person named John Smith. "
         return (sentence * max(1, char_count // len(sentence)))[:char_count].strip()
 
     def _multi_chunk_source_text(self) -> str:
@@ -7303,10 +7701,9 @@ class GeminiHebrewTranslationTests(SimpleTestCase):
 
         self.assertEqual(len(result.text), 400)
         self.assertEqual(mock_client.models.generate_content.call_count, 2)
-        retry_config = (
-            mock_client.models.generate_content.call_args_list[1]
-            .kwargs["config"]
-        )
+        retry_config = mock_client.models.generate_content.call_args_list[1].kwargs[
+            "config"
+        ]
         self.assertEqual(retry_config.max_output_tokens, 8192)
 
     @patch("documents.services.gemini_engine._create_client")
@@ -7330,10 +7727,9 @@ class GeminiHebrewTranslationTests(SimpleTestCase):
 
         self.assertEqual(len(result.text), 500)
         self.assertEqual(mock_client.models.generate_content.call_count, 2)
-        retry_config = (
-            mock_client.models.generate_content.call_args_list[1]
-            .kwargs["config"]
-        )
+        retry_config = mock_client.models.generate_content.call_args_list[1].kwargs[
+            "config"
+        ]
         self.assertEqual(retry_config.max_output_tokens, 8192)
 
     @patch("documents.services.gemini_engine._create_client")
@@ -7442,10 +7838,9 @@ class GeminiHebrewTranslationTests(SimpleTestCase):
         self.assertIn("truncation_retry=True", message)
         self.assertIn("model=test-model", message)
         self.assertEqual(mock_client.models.generate_content.call_count, 2)
-        retry_config = (
-            mock_client.models.generate_content.call_args_list[1]
-            .kwargs["config"]
-        )
+        retry_config = mock_client.models.generate_content.call_args_list[1].kwargs[
+            "config"
+        ]
         self.assertEqual(retry_config.max_output_tokens, 8192)
 
     @patch("documents.services.gemini_engine._create_client")
@@ -7546,7 +7941,9 @@ class GeminiHebrewTranslationTests(SimpleTestCase):
 
         result = translate_text_to_hebrew_with_gemini(source_text, "en")
 
-        prompt = mock_client.models.generate_content.call_args.kwargs["contents"][0].text
+        prompt = mock_client.models.generate_content.call_args.kwargs["contents"][
+            0
+        ].text
         self.assertIn("<source_excerpt>", prompt)
         self.assertIn("</source_excerpt>", prompt)
         self.assertIn(source_text, prompt)
@@ -7879,7 +8276,9 @@ class SourcePreviewTests(TestCase):
         )
         return doc
 
-    def _multi_image_doc(self, *, count=3, expected=None, language=Document.Language.HEBREW):
+    def _multi_image_doc(
+        self, *, count=3, expected=None, language=Document.Language.HEBREW
+    ):
         doc = create_ocr_document(
             title="Multi image",
             doc_type=Document.DocType.IMAGE,
@@ -7894,7 +8293,13 @@ class SourcePreviewTests(TestCase):
         )
         return doc
 
-    def _add_source(self, doc, order_index, *, upload_status=DocumentSourceFile.UploadStatus.UPLOADED):
+    def _add_source(
+        self,
+        doc,
+        order_index,
+        *,
+        upload_status=DocumentSourceFile.UploadStatus.UPLOADED,
+    ):
         return DocumentSourceFile.objects.create(
             document=doc,
             order_index=order_index,
@@ -7907,8 +8312,12 @@ class SourcePreviewTests(TestCase):
     # ----- legacy single-file (fallback path unchanged) -----
 
     @patch("documents.services.source_files.create_presigned_get")
-    @patch("documents.views.create_presigned_get", return_value="https://example/legacy")
-    def test_legacy_single_file_detail_preview_unchanged(self, mock_view_get, mock_helper_get):
+    @patch(
+        "documents.views.create_presigned_get", return_value="https://example/legacy"
+    )
+    def test_legacy_single_file_detail_preview_unchanged(
+        self, mock_view_get, mock_helper_get
+    ):
         doc = self._single_file_doc()
         self.client.force_login(self.staff)
         resp = self.client.get(self._detail_url(doc.id))
@@ -7922,7 +8331,9 @@ class SourcePreviewTests(TestCase):
         mock_helper_get.assert_not_called()
 
     @patch("documents.services.source_files.create_presigned_get")
-    @patch("documents.views.create_presigned_get", return_value="https://example/legacy")
+    @patch(
+        "documents.views.create_presigned_get", return_value="https://example/legacy"
+    )
     def test_legacy_single_file_review_detail_preview_unchanged(
         self, mock_view_get, mock_helper_get
     ):
@@ -7940,7 +8351,8 @@ class SourcePreviewTests(TestCase):
     def test_single_file_source_files_not_used_avoids_duplicate_first_preview(self):
         doc = self._single_file_doc()
         with patch(
-            "documents.views.create_presigned_get", return_value="https://example/legacy"
+            "documents.views.create_presigned_get",
+            return_value="https://example/legacy",
         ):
             self.client.force_login(self.staff)
             resp = self.client.get(self._detail_url(doc.id))
@@ -8059,7 +8471,9 @@ class SourcePreviewTests(TestCase):
         self.assertEqual(mock_helper_get.call_count, 1)
 
     @patch("documents.services.source_files.create_presigned_get")
-    def test_pending_failed_source_files_show_single_unavailable_note(self, mock_helper_get):
+    def test_pending_failed_source_files_show_single_unavailable_note(
+        self, mock_helper_get
+    ):
         mock_helper_get.side_effect = lambda **kw: f"https://example/{kw['key']}"
         doc = self._multi_image_doc(count=3, expected=3)
         self._add_source(doc, 0, upload_status=DocumentSourceFile.UploadStatus.UPLOADED)
@@ -8474,7 +8888,9 @@ class ReviewUiTests(TestCase):
         )
         self.client.force_login(self.staff)
         self.client.post(self._verify_url(r1.id))
-        self.assertIn(doc.id, set(documents_in_review_backlog().values_list("id", flat=True)))
+        self.assertIn(
+            doc.id, set(documents_in_review_backlog().values_list("id", flat=True))
+        )
         self.client.post(self._verify_url(r2.id))
         self.assertNotIn(
             doc.id, set(documents_in_review_backlog().values_list("id", flat=True))
@@ -8499,7 +8915,9 @@ class ReviewUiTests(TestCase):
         )
         self.client.force_login(self.staff)
         self.client.post(self._verify_url(r1.id))
-        self.assertIn(doc.id, set(documents_in_review_backlog().values_list("id", flat=True)))
+        self.assertIn(
+            doc.id, set(documents_in_review_backlog().values_list("id", flat=True))
+        )
         doc.refresh_from_db()
         _doc, summary = attach_review_summaries([doc])[0]
         self.assertEqual(summary.pending_count, 1)
@@ -8515,7 +8933,9 @@ class ReviewUiTests(TestCase):
         self.assertEqual(
             row.verification_status, DocumentTextResult.VerificationStatus.REJECTED
         )
-        self.assertIn(doc.id, set(documents_in_review_backlog().values_list("id", flat=True)))
+        self.assertIn(
+            doc.id, set(documents_in_review_backlog().values_list("id", flat=True))
+        )
 
     def test_cannot_verify_failed_transcription_result(self):
         doc = self._create_document()
@@ -8759,7 +9179,9 @@ class ReviewUiTests(TestCase):
         row = self._create_text_result(doc)
         self.client.force_login(self.staff)
         self.client.post(self._text_url(row.id), {"text": "עודכן"})
-        self.assertIn(doc.id, set(documents_in_review_backlog().values_list("id", flat=True)))
+        self.assertIn(
+            doc.id, set(documents_in_review_backlog().values_list("id", flat=True))
+        )
 
     def test_edited_rejected_row_remains_in_review_backlog(self):
         from documents.services.review_backlog import documents_in_review_backlog
@@ -8775,7 +9197,9 @@ class ReviewUiTests(TestCase):
         self.assertEqual(
             row.verification_status, DocumentTextResult.VerificationStatus.REJECTED
         )
-        self.assertIn(doc.id, set(documents_in_review_backlog().values_list("id", flat=True)))
+        self.assertIn(
+            doc.id, set(documents_in_review_backlog().values_list("id", flat=True))
+        )
 
     def test_review_detail_shows_textarea_for_editable_row(self):
         doc = self._create_document()
@@ -8893,7 +9317,9 @@ class UploadPageTemplateTests(TestCase):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "לבחור כמה תמונות יחד")
-        self.assertContains(resp, "2–35 תמונות / עמודים / חלקים = מסמך אחד לפי סדר הבחירה")
+        self.assertContains(
+            resp, "2–35 תמונות / עמודים / חלקים = מסמך אחד לפי סדר הבחירה"
+        )
         self.assertContains(resp, "ריבוי קבצים תומך בתמונות בלבד")
         self.assertContains(resp, "PDF יש להעלות כקובץ יחיד")
         self.assertContains(resp, "מומלץ להעלות כמה תמונות חלקיות לפי סדר הקריאה")
@@ -8966,7 +9392,7 @@ class UploadPageTemplateTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "X-CSRFToken")
         self.assertContains(resp, "getCsrfToken")
-        self.assertContains(resp, '#uploadForm input[name=csrfmiddlewaretoken]')
+        self.assertContains(resp, "#uploadForm input[name=csrfmiddlewaretoken]")
 
     def test_upload_page_renders_own_csrf_token_in_upload_form(self):
         resp = self._get_page()
@@ -9033,7 +9459,9 @@ class StatusLabelFilterTests(SimpleTestCase):
         self.assertEqual(metadata_status_label("NEEDS_COMPLETION"), "דרושה השלמת פרטים")
         self.assertEqual(metadata_status_label("COMPLETED"), "פרטים הושלמו")
         # Regression: the raw English label must not be user-facing.
-        self.assertNotEqual(metadata_status_label("NEEDS_COMPLETION"), "Needs completion")
+        self.assertNotEqual(
+            metadata_status_label("NEEDS_COMPLETION"), "Needs completion"
+        )
 
     def test_verification_status_labels_are_separate_from_processing(self):
         from documents.templatetags.status_labels import verification_status_label
@@ -9055,7 +9483,10 @@ class StatusLabelFilterTests(SimpleTestCase):
             review_reason_label("AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW"),
             "נדרשת בקרת תעתוק אנושית",
         )
-        self.assertNotEqual(review_reason_label("AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW"), "AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW")
+        self.assertNotEqual(
+            review_reason_label("AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW"),
+            "AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW",
+        )
 
     def test_text_input_type_labels_match_upload_ui_choices(self):
         from documents.templatetags.status_labels import text_input_type_label
@@ -9122,7 +9553,9 @@ class StatusLabelPresentationTests(TestCase):
         # raw English enum label.
         self.assertNotContains(resp, "Needs completion")
 
-    def test_list_page_visibility_filter_uses_hebrew_labels_not_raw_english_placeholder(self):
+    def test_list_page_visibility_filter_uses_hebrew_labels_not_raw_english_placeholder(
+        self,
+    ):
         self.client.force_login(self.staff)
         resp = self.client.get("/api/ui/documents/")
         self.assertEqual(resp.status_code, 200)
@@ -9169,7 +9602,9 @@ class StatusLabelPresentationTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         # Processing readiness and human approval stay distinct on the detail page.
         self.assertContains(resp, "מוכן לצפייה")
-        self.assertContains(resp, "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות.")
+        self.assertContains(
+            resp, "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות."
+        )
         self.assertContains(resp, "פרטים")
         self.assertContains(resp, "טרם אושר")
         self.assertContains(resp, "ממתין לבקרת תעתוק")
@@ -9216,7 +9651,9 @@ class StatusLabelPresentationTests(TestCase):
     def test_review_backlog_text_input_type_filter_preserves_query_values(self):
         from documents.services.review_backlog import documents_in_review_backlog
 
-        handwritten = self._create_document(text_input_type=Document.TextInputType.HANDWRITTEN)
+        handwritten = self._create_document(
+            text_input_type=Document.TextInputType.HANDWRITTEN
+        )
         printed = self._create_document(
             title="Printed review doc",
             text_input_type=Document.TextInputType.PRINTED,
@@ -9331,7 +9768,9 @@ class AdminBacklogMetadataEditLinkTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
         admin_href = f"/admin/documents/document/{doc.id}/change/"
-        self.assertEqual(self._link_label(html, admin_href), "עריכה טכנית (Django Admin)")
+        self.assertEqual(
+            self._link_label(html, admin_href), "עריכה טכנית (Django Admin)"
+        )
         admin_tag = self._link_opening_tag(html, admin_href)
         self.assertIn("btn", admin_tag)
         self.assertNotIn("btn-primary", admin_tag)
@@ -9521,9 +9960,7 @@ class NavigationLabelTests(TestCase):
         main_start = html.index("document-detail-header-main")
         toolbar_start = html.index("document-detail-toolbar")
         main_section = html[main_start:toolbar_start]
-        toolbar_section = html[
-            toolbar_start : html.index("</header>", toolbar_start)
-        ]
+        toolbar_section = html[toolbar_start : html.index("</header>", toolbar_start)]
         self.assertNotIn("חזרה לרשימה", main_section)
         self.assertIn("חזרה לרשימה", toolbar_section)
         self.assertNotIn("רשימת בקרת תעתוק", toolbar_section)
@@ -9713,7 +10150,9 @@ class ReviewDetailHierarchyTests(SimpleTestCase):
         self.assertIn("בדיקה", desc)
 
 
-def _assert_raw_enum_not_in_visible_badge_text(test_case, response, raw_enum: str) -> None:
+def _assert_raw_enum_not_in_visible_badge_text(
+    test_case, response, raw_enum: str
+) -> None:
     """Raw enum values in form ``value=`` attributes are OK; badge text must be Hebrew."""
     html = response.content.decode()
     for tone in ("", "badge-warn", "badge-ok", "badge-bad"):
@@ -9895,7 +10334,9 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertContains(resp, "תעתוק")
         self.assertContains(resp, "טקסט לצופה")
         self.assertContains(resp, "פרטים")
-        self.assertContains(resp, "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות.")
+        self.assertContains(
+            resp, "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות."
+        )
         self.assertNotContains(resp, "תעתוק אוטומטי")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "HEBREW_TEXT")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "SOURCE_TEXT")
@@ -9936,7 +10377,9 @@ class TextPresentationHelperTests(TestCase):
     """DB-backed tests for document detail text presentation helpers."""
 
     def test_get_text_presentation_hebrew_prefers_single_hebrew_panel(self):
-        from documents.services.text_presentation import get_text_presentation_for_document
+        from documents.services.text_presentation import (
+            get_text_presentation_for_document,
+        )
 
         doc = create_ocr_document(
             title="Presentation helper doc",
@@ -9969,7 +10412,9 @@ class TextPresentationHelperTests(TestCase):
         self.assertTrue(presentation.show_hebrew)
 
     def test_get_text_presentation_hebrew_falls_back_to_source_panel(self):
-        from documents.services.text_presentation import get_text_presentation_for_document
+        from documents.services.text_presentation import (
+            get_text_presentation_for_document,
+        )
 
         doc = create_ocr_document(
             title="Presentation helper fallback doc",
@@ -10010,7 +10455,9 @@ class DocumentVisibilityAccessControlTests(TestCase):
             is_staff=False,
         )
 
-    def _create_document(self, *, visibility=Document.Visibility.PRIVATE, title="Vis doc", **kwargs):
+    def _create_document(
+        self, *, visibility=Document.Visibility.PRIVATE, title="Vis doc", **kwargs
+    ):
         defaults = {
             "title": title,
             "doc_type": Document.DocType.IMAGE,
@@ -10054,7 +10501,10 @@ class DocumentVisibilityAccessControlTests(TestCase):
         self.assertNotContains(resp, "Private list UI")
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_get", return_value="https://example.com/presigned")
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value="https://example.com/presigned",
+    )
     def test_anonymous_public_detail_ok_private_detail_404(self, _mock_presign):
         public_doc = self._create_document(visibility=Document.Visibility.PUBLIC)
         private_doc = self._create_document(visibility=Document.Visibility.PRIVATE)
@@ -10089,14 +10539,22 @@ class DocumentVisibilityAccessControlTests(TestCase):
         self.assertEqual(ids, {public_doc.id, private_doc.id})
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_get", return_value="https://example.com/presigned")
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value="https://example.com/presigned",
+    )
     def test_private_detail_does_not_presign_for_anonymous(self, mock_presign):
         doc = self._create_document(visibility=Document.Visibility.PRIVATE)
-        self.assertEqual(self.client.get(f"/api/ui/documents/{doc.id}/").status_code, 404)
+        self.assertEqual(
+            self.client.get(f"/api/ui/documents/{doc.id}/").status_code, 404
+        )
         mock_presign.assert_not_called()
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_get", return_value="https://example.com/presigned")
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value="https://example.com/presigned",
+    )
     def test_public_detail_presigns_for_anonymous(self, mock_presign):
         doc = self._create_document(visibility=Document.Visibility.PUBLIC)
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
@@ -10134,15 +10592,23 @@ class DocumentVisibilityAccessControlTests(TestCase):
         self.assertNotContains(resp, f"· #{public_doc.id}")
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_get", return_value="https://example.com/presigned")
-    def test_anonymous_detail_page_hides_internal_document_id_display(self, _mock_presign):
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value="https://example.com/presigned",
+    )
+    def test_anonymous_detail_page_hides_internal_document_id_display(
+        self, _mock_presign
+    ):
         public_doc = self._create_document(visibility=Document.Visibility.PUBLIC)
         resp = self.client.get(f"/api/ui/documents/{public_doc.id}/")
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, f"מסמך #{public_doc.id}")
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_get", return_value="https://example.com/presigned")
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value="https://example.com/presigned",
+    )
     def test_viewer_detail_page_hides_internal_document_id_display(self, _mock_presign):
         public_doc = self._create_document(visibility=Document.Visibility.PUBLIC)
         self.client.force_login(self.viewer)
@@ -10161,7 +10627,10 @@ class DocumentVisibilityAccessControlTests(TestCase):
         self.assertContains(resp, f"· #{public_doc.id}")
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_get", return_value="https://example.com/presigned")
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value="https://example.com/presigned",
+    )
     def test_staff_detail_page_shows_internal_document_id_display(self, _mock_presign):
         public_doc = self._create_document(visibility=Document.Visibility.PUBLIC)
         self.client.force_login(self.staff)
@@ -10340,7 +10809,9 @@ class DocumentDatePrecisionTests(TestCase):
             {"EXACT_DAY", "MONTH", "YEAR", "RANGE", "UNKNOWN"},
         )
 
-    @patch("documents.views.create_presigned_put", return_value="https://example/upload")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
     def test_upload_create_without_date_precision_succeeds(self, _mock_put):
         self.client.force_login(self.staff)
         resp = self.client.post(
@@ -10384,7 +10855,9 @@ class DocumentAccessServiceTests(TestCase):
         staff = User.objects.create_user(username="svc_staff", is_staff=True)
         viewer = User.objects.create_user(username="svc_viewer", is_staff=False)
 
-        viewer_ids = set(document_queryset_for_user(viewer).values_list("id", flat=True))
+        viewer_ids = set(
+            document_queryset_for_user(viewer).values_list("id", flat=True)
+        )
         self.assertEqual(viewer_ids, {public_doc.id})
 
         staff_ids = set(document_queryset_for_user(staff).values_list("id", flat=True))

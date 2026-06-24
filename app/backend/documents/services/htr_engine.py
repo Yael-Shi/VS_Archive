@@ -31,8 +31,8 @@ def transcribe_pages(
     When ``route`` is provided (e.g. from the worker), it must be the same route
     used for persistence; ``select_ocr_route`` is not called again.
     """
-    selected = route if route is not None else select_ocr_route(
-        language_hint, text_input_type
+    selected = (
+        route if route is not None else select_ocr_route(language_hint, text_input_type)
     )
     adapter = get_htr_adapter(selected.engine_key)
     if source_transkribus_run_id is not None:

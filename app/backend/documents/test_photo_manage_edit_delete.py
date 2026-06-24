@@ -16,7 +16,10 @@ from documents.models import (
     Tag,
 )
 from documents.services.archive_item_access import ARCHIVE_FAMILY_GROUP_NAME
-from documents.services.archive_items import create_manual_text_archive_item, create_ocr_document
+from documents.services.archive_items import (
+    create_manual_text_archive_item,
+    create_ocr_document,
+)
 
 
 def _create_photo_archive_item(
@@ -78,7 +81,9 @@ class PhotoManageEditTests(TestCase):
 
     def test_staff_can_open_photo_edit_page(self):
         self.client.force_login(self.staff)
-        resp = self.client.get(self.EDIT_URL_TEMPLATE.format(item_id=self.photo_item.id))
+        resp = self.client.get(
+            self.EDIT_URL_TEMPLATE.format(item_id=self.photo_item.id)
+        )
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "עריכת תמונה")
         self.assertContains(resp, "ללא החלפת קובץ התמונה")
@@ -90,7 +95,9 @@ class PhotoManageEditTests(TestCase):
         self.assertNotContains(resp, 'name="body"')
 
     def test_anonymous_cannot_open_photo_edit_page(self):
-        resp = self.client.get(self.EDIT_URL_TEMPLATE.format(item_id=self.photo_item.id))
+        resp = self.client.get(
+            self.EDIT_URL_TEMPLATE.format(item_id=self.photo_item.id)
+        )
         self.assertIn(resp.status_code, (302, 403))
 
     def test_non_staff_cannot_open_photo_edit_page(self):
@@ -100,7 +107,9 @@ class PhotoManageEditTests(TestCase):
             is_staff=False,
         )
         self.client.force_login(user)
-        resp = self.client.get(self.EDIT_URL_TEMPLATE.format(item_id=self.photo_item.id))
+        resp = self.client.get(
+            self.EDIT_URL_TEMPLATE.format(item_id=self.photo_item.id)
+        )
         self.assertEqual(resp.status_code, 403)
 
     def test_family_user_cannot_open_photo_edit_page(self):
@@ -110,7 +119,9 @@ class PhotoManageEditTests(TestCase):
         )
         family_user.groups.add(self.family_group)
         self.client.force_login(family_user)
-        resp = self.client.get(self.EDIT_URL_TEMPLATE.format(item_id=self.photo_item.id))
+        resp = self.client.get(
+            self.EDIT_URL_TEMPLATE.format(item_id=self.photo_item.id)
+        )
         self.assertEqual(resp.status_code, 403)
 
     def test_staff_can_update_photo_title_visibility_metadata_status_and_dates(self):
@@ -130,10 +141,14 @@ class PhotoManageEditTests(TestCase):
         self.photo_item.refresh_from_db()
         self.assertEqual(self.photo_item.title, "Updated photo title")
         self.assertEqual(self.photo_item.visibility, ArchiveItem.Visibility.PRIVATE)
-        self.assertEqual(self.photo_item.metadata_status, ArchiveItem.MetadataStatus.COMPLETED)
+        self.assertEqual(
+            self.photo_item.metadata_status, ArchiveItem.MetadataStatus.COMPLETED
+        )
         self.assertEqual(self.photo_item.date_start.isoformat(), "1940-05-01")
         self.assertEqual(self.photo_item.date_end.isoformat(), "1940-05-31")
-        self.assertEqual(self.photo_item.date_precision, ArchiveItem.DatePrecision.RANGE)
+        self.assertEqual(
+            self.photo_item.date_precision, ArchiveItem.DatePrecision.RANGE
+        )
 
     def test_staff_can_update_photo_metadata(self):
         self.client.force_login(self.staff)
@@ -205,7 +220,9 @@ class PhotoManageEditTests(TestCase):
         self.photo_item.tags.add(existing_tag)
 
         self.client.force_login(self.staff)
-        resp = self.client.get(self.EDIT_URL_TEMPLATE.format(item_id=self.photo_item.id))
+        resp = self.client.get(
+            self.EDIT_URL_TEMPLATE.format(item_id=self.photo_item.id)
+        )
         self.assertEqual(resp.status_code, 200)
         self.assertContains(
             resp,
@@ -401,7 +418,9 @@ class PhotoManageDeleteTests(TestCase):
         mock_boto_client.assert_not_called()
 
     def test_manual_text_delete_still_works(self):
-        manual_item = create_manual_text_archive_item(title="Manual delete", body="Body")
+        manual_item = create_manual_text_archive_item(
+            title="Manual delete", body="Body"
+        )
         content_id = manual_item.manual_text_content.id
         self.client.force_login(self.staff)
         resp = self.client.post(self._delete_url(manual_item.id))

@@ -7,7 +7,9 @@ from typing import Any
 from documents.services.archive_metadata_validation import parse_archive_metadata_form
 
 
-def parse_manual_text_form(post_data: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+def parse_manual_text_form(
+    post_data: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
     """Parse POST fields and return normalized form data plus validation errors."""
     parsed, errors = parse_archive_metadata_form(post_data)
     parsed["body"] = post_data.get("body") or ""

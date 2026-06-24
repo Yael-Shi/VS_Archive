@@ -70,10 +70,12 @@ class VsArchiveAppStack(Stack):
                 f"{transkribus_parameter_prefix}/enable-hebrew-handwritten",
             )
         )
-        transkribus_dev_upload_mode_param = ssm.StringParameter.from_string_parameter_name(
-            self,
-            "TranskribusDevUploadModeParam",
-            f"{transkribus_parameter_prefix}/dev-upload-mode",
+        transkribus_dev_upload_mode_param = (
+            ssm.StringParameter.from_string_parameter_name(
+                self,
+                "TranskribusDevUploadModeParam",
+                f"{transkribus_parameter_prefix}/dev-upload-mode",
+            )
         )
         transkribus_use_existing_server_document_param = (
             ssm.StringParameter.from_string_parameter_name(
@@ -82,10 +84,12 @@ class VsArchiveAppStack(Stack):
                 f"{transkribus_parameter_prefix}/use-existing-server-document",
             )
         )
-        transkribus_collection_id_param = ssm.StringParameter.from_string_parameter_name(
-            self,
-            "TranskribusCollectionIdParam",
-            f"{transkribus_parameter_prefix}/collection-id",
+        transkribus_collection_id_param = (
+            ssm.StringParameter.from_string_parameter_name(
+                self,
+                "TranskribusCollectionIdParam",
+                f"{transkribus_parameter_prefix}/collection-id",
+            )
         )
         transkribus_model_id_param = ssm.StringParameter.from_string_parameter_name(
             self,
@@ -108,7 +112,6 @@ class VsArchiveAppStack(Stack):
             f"{transkribus_secret_prefix}/api-token",
         )
 
-
         # --- Postgres Task with EFS Storage ---
         pg_task = ecs.FargateTaskDefinition(
             self, f"{cfg.prefix}-pg-td", cpu=256, memory_limit_mib=512
@@ -127,7 +130,9 @@ class VsArchiveAppStack(Stack):
             logging=get_log_driver("pg"),
             environment={"POSTGRES_DB": "vsarchive", "POSTGRES_USER": "vsarchive"},
             secrets={
-                "POSTGRES_PASSWORD": ecs.Secret.from_secrets_manager(db_secret, "password")
+                "POSTGRES_PASSWORD": ecs.Secret.from_secrets_manager(
+                    db_secret, "password"
+                )
             },
         )
 
@@ -155,13 +160,15 @@ class VsArchiveAppStack(Stack):
         )
 
         # --- IAM Roles ---
-        assumed_by = cast(iam.IPrincipal, iam.ServicePrincipal("ecs-tasks.amazonaws.com"))
+        assumed_by = cast(
+            iam.IPrincipal, iam.ServicePrincipal("ecs-tasks.amazonaws.com")
+        )
         task_role = iam.Role(self, f"{cfg.prefix}-task-role", assumed_by=assumed_by)
         bucket.grant_read_write(task_role)
         queue.grant_consume_messages(task_role)
         db_secret.grant_read(task_role)
         gemini_secret.grant_read(task_role)
-        
+
         task_role.add_to_principal_policy(
             iam.PolicyStatement(
                 actions=["bedrock:InvokeModel", "translate:TranslateText"],
@@ -211,29 +218,23 @@ class VsArchiveAppStack(Stack):
                 "DB_HOST": f"postgres.{cfg.prefix}.local",
                 "DB_NAME": "vsarchive",
                 "DB_USER": "vsarchive",
-
                 # Feature flags
                 "ENABLE_HYBRID_HTR": "false",
                 "ENABLE_DAILY_REPORT": "false",
-
                 # Gemini / OCR behavior
                 "GEMINI_CONFIDENCE_THRESHOLD": "0.55",
                 "MIN_TEXT_LENGTH": "30",
-
                 # Retry policy
                 "MAX_RETRIES": "2",
                 "RETRY_DELAY_SECONDS_1": "60",
                 "RETRY_DELAY_SECONDS_2": "300",
-
                 # Reporting (still required by current env_validation, even if ENABLE_DAILY_REPORT=false) 17.2.26
                 "REPORT_WINDOW_START": "07:00",
                 "REPORT_SEND_TIME": "23:00",
-
                 "FREE_TIER_ALERT_PCT": "80",
                 "GEMINI_FREE_DAILY_REQUEST_LIMIT": "200",
                 "GEMINI_FREE_DAILY_IMAGE_LIMIT": "200",
                 "TRANSKRIBUS_FREE_MONTHLY_CREDITS": "50",
-
                 # Django (production)
                 "DJANGO_DEBUG": "0",
                 "ALLOWED_HOSTS": "vs-archive.com",
@@ -393,7 +394,9 @@ class VsArchiveAppStack(Stack):
             protocol=elbv2.ApplicationProtocol.HTTP,
             target_type=elbv2.TargetType.IP,
             targets=[web_svc],
-            health_check=elbv2.HealthCheck(path="/health/", interval=Duration.seconds(30)),
+            health_check=elbv2.HealthCheck(
+                path="/health/", interval=Duration.seconds(30)
+            ),
         )
         https_listener = alb.add_listener(
             f"{cfg.prefix}-https",
@@ -418,5 +421,7 @@ class VsArchiveAppStack(Stack):
             self,
             f"{cfg.prefix}-apex-alias",
             zone=zone,
-            target=route53.RecordTarget.from_alias(route53_targets.LoadBalancerTarget(alb)),
+            target=route53.RecordTarget.from_alias(
+                route53_targets.LoadBalancerTarget(alb)
+            ),
         )

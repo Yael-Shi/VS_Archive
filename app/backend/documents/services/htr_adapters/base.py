@@ -37,5 +37,4 @@ class HtrEngineAdapter(Protocol):
         language_hint: str | None,
         prompt_variant: str,
         **kwargs,
-    ) -> HtrResult:
-        ...
+    ) -> HtrResult: ...

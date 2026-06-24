@@ -81,9 +81,7 @@ class Command(BaseCommand):
         )
         self.stdout.write(f"  categories_to_create: {report.categories_to_create}")
         self.stdout.write(f"  category_links_to_add: {report.category_links_to_add}")
-        self.stdout.write(
-            f"  category_links_skipped: {report.category_links_skipped}"
-        )
+        self.stdout.write(f"  category_links_skipped: {report.category_links_skipped}")
 
     def _write_planned_rows(self, report: BackfillReport) -> None:
         if not report.rows:
@@ -92,8 +90,7 @@ class Command(BaseCommand):
         self.stdout.write("Planned changes:")
         for row in report.rows:
             self.stdout.write(
-                f"  document_id={row.document_id} "
-                f"archive_item_id={row.archive_item_id}"
+                f"  document_id={row.document_id} archive_item_id={row.archive_item_id}"
             )
             if row.tag_names_to_add:
                 self.stdout.write(
@@ -105,7 +102,9 @@ class Command(BaseCommand):
                     f"{', '.join(row.tag_names_skipped)!r}"
                 )
             if row.category_link_to_add:
-                created = " (new ArchiveCategory)" if row.category_would_be_created else ""
+                created = (
+                    " (new ArchiveCategory)" if row.category_would_be_created else ""
+                )
                 self.stdout.write(
                     f"    category to add: {row.category_name!r}{created}"
                 )
@@ -127,7 +126,9 @@ class Command(BaseCommand):
         if report.tag_links_to_add or report.category_links_to_add:
             self.stdout.write("")
             self.stdout.write("Apply hint:")
-            self.stdout.write("  --apply   link legacy tags and categories onto ArchiveItem")
+            self.stdout.write(
+                "  --apply   link legacy tags and categories onto ArchiveItem"
+            )
 
     def _write_apply_output(
         self,

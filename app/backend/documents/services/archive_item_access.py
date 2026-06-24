@@ -84,9 +84,7 @@ def archive_browse_queryset_for_user(user) -> QuerySet[ArchiveItem]:
     Applies visibility/access via ``archive_item_queryset_for_user``. Applies PHOTO
     upload-completion eligibility via ``filter_browse_renderable_photo_items``.
     """
-    return filter_browse_renderable_photo_items(
-        archive_item_queryset_for_user(user)
-    )
+    return filter_browse_renderable_photo_items(archive_item_queryset_for_user(user))
 
 
 def get_viewable_archive_item(
@@ -102,9 +100,7 @@ def get_viewable_archive_item(
     Uses 404 for missing ids, unauthorized items, and non-renderable PHOTO rows.
     """
     base = queryset if queryset is not None else ArchiveItem.objects.all()
-    qs = filter_browse_renderable_photo_items(
-        filter_archive_items_for_user(user, base)
-    )
+    qs = filter_browse_renderable_photo_items(filter_archive_items_for_user(user, base))
     try:
         return qs.select_related(
             "manual_text_content",

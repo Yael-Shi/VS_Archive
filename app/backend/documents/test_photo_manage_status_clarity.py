@@ -7,7 +7,10 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from documents.models import ArchiveItem, Document, PhotoContent
-from documents.services.archive_items import create_manual_text_archive_item, create_ocr_document
+from documents.services.archive_items import (
+    create_manual_text_archive_item,
+    create_ocr_document,
+)
 from documents.services.photo_presentation import (
     photo_archive_renderability_label,
     photo_archive_renderability_tone,
@@ -76,7 +79,9 @@ class PhotoPresentationHelperTests(TestCase):
         self.assertTrue(photo_is_archive_renderable(uploaded))
         self.assertEqual(photo_archive_renderability_label(uploaded), "מוצג בארכיון")
         self.assertFalse(photo_is_archive_renderable(empty_key))
-        self.assertEqual(photo_archive_renderability_label(empty_key), "לא מוצג בארכיון")
+        self.assertEqual(
+            photo_archive_renderability_label(empty_key), "לא מוצג בארכיון"
+        )
         self.assertFalse(photo_is_archive_renderable(pending))
         self.assertEqual(photo_archive_renderability_label(pending), "לא מוצג בארכיון")
 
@@ -98,7 +103,9 @@ class PhotoPresentationHelperTests(TestCase):
         self.assertEqual(photo_upload_status_label(photo_content), "UNKNOWN")
         self.assertEqual(photo_upload_status_tone(photo_content), "")
         self.assertFalse(photo_is_archive_renderable(photo_content))
-        self.assertEqual(photo_archive_renderability_label(photo_content), "לא מוצג בארכיון")
+        self.assertEqual(
+            photo_archive_renderability_label(photo_content), "לא מוצג בארכיון"
+        )
         self.assertEqual(photo_archive_renderability_tone(photo_content), "badge-warn")
 
 
@@ -233,7 +240,9 @@ class PhotoManageCopyClarityTests(TestCase):
         self.assertContains(resp, "תופיע בארכיון הציבורי רק לאחר שההעלאה הושלמה")
         self.assertNotContains(resp, 'type="file"')
 
-    def test_photo_delete_confirmation_contains_db_delete_and_s3_deferred_guidance(self):
+    def test_photo_delete_confirmation_contains_db_delete_and_s3_deferred_guidance(
+        self,
+    ):
         self.client.force_login(self.staff)
         resp = self.client.get(
             reverse("archive-manage-delete", kwargs={"item_id": self.photo_item.id}),

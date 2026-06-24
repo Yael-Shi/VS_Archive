@@ -61,9 +61,7 @@ if _allowed_hosts_raw:
 elif DEBUG:
     ALLOWED_HOSTS = list(_LOCAL_DEV_ALLOWED_HOSTS)
 else:
-    raise ImproperlyConfigured(
-        "ALLOWED_HOSTS must be set when DJANGO_DEBUG is False."
-    )
+    raise ImproperlyConfigured("ALLOWED_HOSTS must be set when DJANGO_DEBUG is False.")
 
 if not DEBUG and "*" in ALLOWED_HOSTS:
     raise ImproperlyConfigured(

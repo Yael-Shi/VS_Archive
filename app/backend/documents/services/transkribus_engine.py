@@ -67,7 +67,9 @@ def _session_request(
     except requests.ConnectionError as exc:
         raise _http_retryable(f"{context}: connection failed") from exc
     except requests.RequestException as exc:
-        raise _http_retryable(f"{context}: request failed ({type(exc).__name__})") from exc
+        raise _http_retryable(
+            f"{context}: request failed ({type(exc).__name__})"
+        ) from exc
     _check_response_status(resp, context)
     return resp
 
@@ -86,7 +88,9 @@ def _bare_request(
     except requests.ConnectionError as exc:
         raise _http_retryable(f"{context}: connection failed") from exc
     except requests.RequestException as exc:
-        raise _http_retryable(f"{context}: request failed ({type(exc).__name__})") from exc
+        raise _http_retryable(
+            f"{context}: request failed ({type(exc).__name__})"
+        ) from exc
     _check_response_status(resp, context)
     return resp
 
@@ -286,13 +290,18 @@ def _job_terminal_failure(job: dict) -> bool:
     if state in {"FINISHED", "DONE", "COMPLETED"} and job.get("success") is not True:
         return True
     errors = job.get("nrOfErrors")
-    if isinstance(errors, int) and errors > 0 and state not in {
-        "",
-        "CREATED",
-        "RUNNING",
-        "WAITING",
-        "QUEUED",
-    }:
+    if (
+        isinstance(errors, int)
+        and errors > 0
+        and state
+        not in {
+            "",
+            "CREATED",
+            "RUNNING",
+            "WAITING",
+            "QUEUED",
+        }
+    ):
         return True
     return False
 
@@ -311,7 +320,9 @@ def is_retryable_pylaia_workdir_failure(description: Optional[str]) -> bool:
     if not description:
         return False
     text = description.lower()
-    return _PYLAIA_WORKDIR_FAILURE_PHRASE in text and _PYLAIA_WORKDIR_FAILURE_PATH in text
+    return (
+        _PYLAIA_WORKDIR_FAILURE_PHRASE in text and _PYLAIA_WORKDIR_FAILURE_PATH in text
+    )
 
 
 def safe_job_failure_diagnostics(job: dict, job_id: str) -> Dict[str, Any]:
@@ -359,16 +370,10 @@ def poll_job_until_done(
                     "Transkribus PyLaia workdir failure (retryable): %s",
                     safe_job_failure_diagnostics(job, job_id),
                 )
-                raise _http_retryable(
-                    f"Transkribus job {job_id} failed: {desc}"
-                )
-            raise _http_permanent(
-                f"Transkribus job {job_id} failed: {desc}"
-            )
+                raise _http_retryable(f"Transkribus job {job_id} failed: {desc}")
+            raise _http_permanent(f"Transkribus job {job_id} failed: {desc}")
         time.sleep(poll_interval_sec)
-    raise _http_retryable(
-        f"Transkribus job {job_id} polling exceeded {max_wait_sec}s"
-    )
+    raise _http_retryable(f"Transkribus job {job_id} polling exceeded {max_wait_sec}s")
 
 
 def fetch_pages_metadata(
@@ -424,7 +429,9 @@ def build_document_upload_descriptor_json(
     multipart PUT (per Transkribus REST upload documentation).
     """
     if not pages:
-        raise _http_permanent("Transkribus upload descriptor requires at least one PageImage")
+        raise _http_permanent(
+            "Transkribus upload descriptor requires at least one PageImage"
+        )
     sorted_pages = sorted(pages, key=lambda p: p.page_index)
     seen: set[int] = set()
     page_entries: List[dict[str, Any]] = []
@@ -650,7 +657,9 @@ def strict_map_page_index_to_trp_page_nr(
     out: Dict[int, int] = {}
     for img, meta in zip(sorted_imgs, sorted_meta, strict=True):
         if meta.page_nr is None:
-            raise _http_permanent("Transkribus page metadata missing pageNr for mapping")
+            raise _http_permanent(
+                "Transkribus page metadata missing pageNr for mapping"
+            )
         out[img.page_index] = int(meta.page_nr)
     return out
 
@@ -844,9 +853,7 @@ def ordered_transcript_urls(
             )
         url = chosen.get("url")
         if not url or not isinstance(url, str):
-            raise _http_permanent(
-                f"Transcript URL missing for page {pm.page_nr}"
-            )
+            raise _http_permanent(f"Transcript URL missing for page {pm.page_nr}")
         out.append((pm.page_nr, url))
     return out
 
@@ -922,7 +929,9 @@ def complete_pylaia_transcription_after_job(
     page_texts: List[str] = []
     review_reasons: List[str] = []
     for _page_nr, t_url in pairs:
-        xml_bytes = fetch_transcript_xml(t_url, bearer_token=bearer_token, timeout_sec=timeout_sec)
+        xml_bytes = fetch_transcript_xml(
+            t_url, bearer_token=bearer_token, timeout_sec=timeout_sec
+        )
         text = parse_page_xml_to_text(xml_bytes)
         if not text.strip():
             review_reasons.append("EMPTY_TRANSCRIPT_PAGE")
@@ -1098,7 +1107,9 @@ def upload_then_transcribe_page_images_with_pylaia(
     same ``engine_name`` pattern as ``TranskribusAdapter`` (``transkribus-pylaia:{model_id}``).
     """
     session = requests.Session()
-    login_trp_server(session, username=username, password=password, timeout_sec=timeout_sec)
+    login_trp_server(
+        session, username=username, password=password, timeout_sec=timeout_sec
+    )
     upload_out = run_trp_upload_page_images_through_ingest(
         session,
         collection_id=collection_id,

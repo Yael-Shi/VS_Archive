@@ -61,8 +61,12 @@ class ReconciliationReport:
                     "visibility_only": row.visibility_only,
                     "fields": {
                         name: {
-                            "document": serialize_reconciliation_value(m.document_value),
-                            "archive_item": serialize_reconciliation_value(m.archive_item_value),
+                            "document": serialize_reconciliation_value(
+                                m.document_value
+                            ),
+                            "archive_item": serialize_reconciliation_value(
+                                m.archive_item_value
+                            ),
                         }
                         for name, m in row.mismatches.items()
                     },
@@ -175,9 +179,7 @@ def apply_ocr_shared_field_reconciliation(
     result = ApplyResult(include_visibility=include_visibility)
 
     for row in report.mismatched_rows:
-        fields_to_sync = [
-            name for name in apply_fields if name in row.mismatches
-        ]
+        fields_to_sync = [name for name in apply_fields if name in row.mismatches]
         if "visibility" in row.mismatches and not include_visibility:
             result.visibility_skipped_count += 1
         if not fields_to_sync:

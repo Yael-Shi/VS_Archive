@@ -45,7 +45,9 @@ class GeminiAdapter:
             kwargs.setdefault("top_k", worker_env.gemini_top_k)
             kwargs.setdefault("top_p", worker_env.gemini_top_p)
             max_tok = worker_env.gemini_max_output_tokens
-            kwargs.setdefault("max_output_tokens", max_tok if max_tok is not None else 8192)
+            kwargs.setdefault(
+                "max_output_tokens", max_tok if max_tok is not None else 8192
+            )
 
         last_error: Exception | None = None
         for model_name in model_candidates:
@@ -68,7 +70,12 @@ class GeminiAdapter:
                 error_text = str(exc).upper()
                 if any(
                     marker in error_text
-                    for marker in ["429", "RESOURCE_EXHAUSTED", "QUOTA_EXHAUSTED", "QUOTA"]
+                    for marker in [
+                        "429",
+                        "RESOURCE_EXHAUSTED",
+                        "QUOTA_EXHAUSTED",
+                        "QUOTA",
+                    ]
                 ):
                     continue
                 raise EnginePermanentError(str(exc)) from exc

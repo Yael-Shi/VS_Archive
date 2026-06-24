@@ -99,7 +99,9 @@ def _resolve_names_by_ids(model, ids: list[int]) -> list[str]:
     return names
 
 
-def _merge_discovery_names(selected_names: list[str], new_names: list[str]) -> list[str]:
+def _merge_discovery_names(
+    selected_names: list[str], new_names: list[str]
+) -> list[str]:
     return normalize_tag_names_from_list(selected_names + new_names)
 
 
@@ -123,7 +125,9 @@ def parse_archive_item_discovery_metadata_form(
     selected_event_ids = _parse_selected_ids(post_data, "selected_events")
     selected_tag_ids = _parse_selected_ids(post_data, "selected_tags")
 
-    selected_category_names = _resolve_names_by_ids(ArchiveCategory, selected_category_ids)
+    selected_category_names = _resolve_names_by_ids(
+        ArchiveCategory, selected_category_ids
+    )
     selected_event_names = _resolve_names_by_ids(ArchiveEvent, selected_event_ids)
     selected_tag_names = _resolve_names_by_ids(Tag, selected_tag_ids)
 
