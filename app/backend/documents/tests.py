@@ -9518,12 +9518,16 @@ class NavigationLabelTests(TestCase):
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
-        toolbar = html[
-            html.index("document-detail-toolbar") : html.index("flex-spacer")
+        main_start = html.index("document-detail-header-main")
+        toolbar_start = html.index("document-detail-toolbar")
+        main_section = html[main_start:toolbar_start]
+        toolbar_section = html[
+            toolbar_start : html.index("</header>", toolbar_start)
         ]
-        self.assertIn("חזרה לרשימה", toolbar)
-        self.assertNotIn("רשימת בקרת תעתוק", toolbar)
-        self.assertNotIn("רשימת השלמת פרטים", toolbar)
+        self.assertNotIn("חזרה לרשימה", main_section)
+        self.assertIn("חזרה לרשימה", toolbar_section)
+        self.assertNotIn("רשימת בקרת תעתוק", toolbar_section)
+        self.assertNotIn("רשימת השלמת פרטים", toolbar_section)
         self.assertContains(resp, "nav-staff-panel")
         self.assertContains(resp, "רשימת בקרת תעתוק")
         self.assertContains(resp, "בקרת תעתוק למסמך זה")
@@ -9544,7 +9548,7 @@ class NavigationLabelTests(TestCase):
         self.assertNotContains(resp, "רשימת בקרת תעתוק")
         self.assertNotContains(resp, "/api/ui/admin/review/")
 
-    def test_detail_metadata_edit_is_primary_staff_action(self):
+    def test_detail_metadata_edit_uses_primary_toolbar_button_style(self):
         doc = self._create_document()
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
@@ -9554,18 +9558,16 @@ class NavigationLabelTests(TestCase):
         self.assertEqual(self._link_label(html, edit_href), "עריכת מטא־דאטה")
         self.assertIn("btn-primary", self._link_opening_tag(html, edit_href))
 
-    def test_detail_review_link_is_secondary_not_primary(self):
+    def test_detail_review_link_uses_primary_toolbar_button_style(self):
         doc = self._create_document()
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
         html = resp.content.decode()
         review_href = f"/api/ui/admin/review/{doc.id}/"
         self.assertEqual(self._link_label(html, review_href), "בקרת תעתוק למסמך זה")
-        review_tag = self._link_opening_tag(html, review_href)
-        self.assertIn("btn", review_tag)
-        self.assertNotIn("btn-primary", review_tag)
+        self.assertIn("btn-primary", self._link_opening_tag(html, review_href))
 
-    def test_detail_django_admin_is_technical_secondary(self):
+    def test_detail_django_admin_uses_primary_toolbar_button_style(self):
         doc = self._create_document()
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
@@ -9574,9 +9576,7 @@ class NavigationLabelTests(TestCase):
         self.assertEqual(
             self._link_label(html, admin_href), "עריכה טכנית (Django Admin)"
         )
-        admin_tag = self._link_opening_tag(html, admin_href)
-        self.assertIn("btn", admin_tag)
-        self.assertNotIn("btn-primary", admin_tag)
+        self.assertIn("btn-primary", self._link_opening_tag(html, admin_href))
 
     def test_detail_no_delete_action_for_ocr_document(self):
         from django.urls import reverse

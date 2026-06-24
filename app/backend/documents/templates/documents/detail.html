@@ -14,63 +14,61 @@
     {% endif %}
 
     <div class="card card--pad-lg document-detail-header-card">
-      <div class="page-toolbar document-detail-toolbar">
-        <a class="btn" href="/api/ui/documents/">חזרה לרשימה</a>
-
-        <div class="flex-spacer"></div>
-
-        {% if is_admin %}
-          {# Actions for the current document #}
-          {% if doc.archive_item_id %}
-            <a class="btn btn-primary" href="{% url 'archive-manage-edit' item_id=doc.archive_item_id %}">עריכת מטא־דאטה</a>
-          {% endif %}
-          <a class="btn" href="/api/ui/admin/review/{{ doc.id }}/">בקרת תעתוק למסמך זה</a>
-          {% if show_ocr_reprocess_action %}
-            <form
-              method="post"
-              action="{% url 'documents-ocr-reprocess' doc_id=doc.id %}"
-              class="inline-form"
-            >
-              {% csrf_token %}
-              <button type="submit" class="btn">נסה עיבוד מחדש</button>
-            </form>
-          {% endif %}
-          {% if show_hebrew_translation_retry_action %}
-            <form
-              method="post"
-              action="{% url 'documents-hebrew-translation-retry' doc_id=doc.id %}"
-              class="inline-form"
-            >
-              {% csrf_token %}
-              <button type="submit" class="btn">נסה תרגום לעברית מחדש</button>
-            </form>
-          {% endif %}
-          <a class="btn" href="/admin/documents/document/{{ doc.id }}/change/">עריכה טכנית (Django Admin)</a>
-        {% endif %}
-      </div>
-
-      <div class="spacer"></div>
-
       <header class="document-detail-header">
-        <h1 class="page-title document-detail-title">{{ doc.archive_item.title }}</h1>
+        <div class="document-detail-header-main">
+          <h1 class="page-title document-detail-title">{{ doc.archive_item.title }}</h1>
 
-        <div class="page-lead document-detail-lead">
+          <div class="page-lead document-detail-lead">
+            {% if is_admin %}
+              מסמך #{{ doc.id }}
+              {% if doc.file_original_name %} · {{ doc.file_original_name }}{% endif %}
+              · {{ doc.archive_item|document_date_display }}
+            {% else %}
+              {{ doc.archive_item|document_date_display }}
+            {% endif %}
+          </div>
+
+          {% if doc.archive_item %}
+            <div class="archive-detail-meta document-detail-meta">
+              {% include "documents/archive/partials/source_metadata.html" with item=doc.archive_item %}
+              {% include "documents/archive/partials/discovery_metadata.html" with item=doc.archive_item %}
+            </div>
+          {% endif %}
+        </div>
+
+        <div class="page-toolbar document-detail-toolbar">
+          <a class="btn btn-primary" href="/api/ui/documents/">חזרה לרשימה</a>
+
           {% if is_admin %}
-            מסמך #{{ doc.id }}
-            {% if doc.file_original_name %} · {{ doc.file_original_name }}{% endif %}
-            · {{ doc.archive_item|document_date_display }}
-          {% else %}
-            {{ doc.archive_item|document_date_display }}
+            {# Actions for the current document #}
+            {% if doc.archive_item_id %}
+              <a class="btn btn-primary" href="{% url 'archive-manage-edit' item_id=doc.archive_item_id %}">עריכת מטא־דאטה</a>
+            {% endif %}
+            <a class="btn btn-primary" href="/api/ui/admin/review/{{ doc.id }}/">בקרת תעתוק למסמך זה</a>
+            {% if show_ocr_reprocess_action %}
+              <form
+                method="post"
+                action="{% url 'documents-ocr-reprocess' doc_id=doc.id %}"
+                class="inline-form"
+              >
+                {% csrf_token %}
+                <button type="submit" class="btn btn-primary">נסה עיבוד מחדש</button>
+              </form>
+            {% endif %}
+            {% if show_hebrew_translation_retry_action %}
+              <form
+                method="post"
+                action="{% url 'documents-hebrew-translation-retry' doc_id=doc.id %}"
+                class="inline-form"
+              >
+                {% csrf_token %}
+                <button type="submit" class="btn btn-primary">נסה תרגום לעברית מחדש</button>
+              </form>
+            {% endif %}
+            <a class="btn btn-primary" href="/admin/documents/document/{{ doc.id }}/change/">עריכה טכנית (Django Admin)</a>
           {% endif %}
         </div>
       </header>
-
-      {% if doc.archive_item %}
-        <div class="archive-detail-meta document-detail-meta">
-          {% include "documents/archive/partials/source_metadata.html" with item=doc.archive_item %}
-          {% include "documents/archive/partials/discovery_metadata.html" with item=doc.archive_item %}
-        </div>
-      {% endif %}
 
       <div class="spacer"></div>
 
