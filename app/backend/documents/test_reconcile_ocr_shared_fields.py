@@ -165,7 +165,7 @@ class ReconcileOcrSharedFieldsCommandTests(TestCase):
 
     def test_manual_text_ignored(self):
         create_manual_text_archive_item(title="Manual only", body="Hello")
-        doc = self._create_ocr_doc(title="OCR only")
+        self._create_ocr_doc(title="OCR only")
 
         stdout = StringIO()
         call_command("reconcile_ocr_shared_fields", stdout=stdout)

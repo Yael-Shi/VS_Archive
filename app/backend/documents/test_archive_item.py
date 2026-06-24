@@ -4216,7 +4216,7 @@ class ArchiveItemDiscoveryMetadataEditTests(TestCase):
             name="Existing topic",
             slug="existing-topic",
         )
-        existing_event = ArchiveEvent.objects.create(
+        ArchiveEvent.objects.create(
             name="Existing event",
             slug="existing-event",
         )
