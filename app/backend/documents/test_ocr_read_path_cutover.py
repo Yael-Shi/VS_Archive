@@ -137,7 +137,7 @@ class OcrReadPathCutoverTests(TestCase):
         self.assertNotIn("Document-side title", html)
 
     def test_review_backlog_displays_archive_item_title_when_drifted(self):
-        doc = self._create_review_pending_doc()
+        self._create_review_pending_doc()
         self.client.force_login(self.staff)
         resp = self.client.get("/api/ui/admin/review/")
         self.assertEqual(resp.status_code, 200)
@@ -263,11 +263,11 @@ class OcrReadPathCutoverTests(TestCase):
         self.assertContains(resp, str(doc.id))
 
     def test_doc_type_filter_still_uses_document_field(self):
-        image_doc = self._create_ocr_doc(
+        self._create_ocr_doc(
             title="Image type doc",
             doc_type=Document.DocType.IMAGE,
         )
-        pdf_doc = self._create_ocr_doc(
+        self._create_ocr_doc(
             title="PDF type doc",
             doc_type=Document.DocType.PDF,
             file_s3_key="documents/99/original.pdf",
@@ -281,11 +281,11 @@ class OcrReadPathCutoverTests(TestCase):
         self.assertNotIn("Image type doc", html)
 
     def test_upload_status_filter_still_uses_document_field(self):
-        uploaded = self._create_ocr_doc(
+        self._create_ocr_doc(
             title="Uploaded status doc",
             upload_status=Document.UploadStatus.UPLOADED,
         )
-        failed = self._create_ocr_doc(
+        self._create_ocr_doc(
             title="Failed status doc",
             upload_status=Document.UploadStatus.FAILED,
         )
@@ -347,7 +347,7 @@ class OcrReadPathCutoverTests(TestCase):
         self.assertNotIn('value="Document-side title"', html)
 
     def test_manual_text_manage_list_unaffected(self):
-        item = create_manual_text_archive_item(
+        create_manual_text_archive_item(
             title="Manual text unchanged",
             body="Body text",
         )

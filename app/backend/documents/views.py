@@ -104,7 +104,6 @@ from documents.services.document_access import (
 from documents.services.archive_item_access import (
     ARCHIVE_FAMILY_GROUP_NAME,
     archive_browse_queryset_for_user,
-    archive_item_queryset_for_user,
     get_viewable_archive_item,
 )
 from documents.services.archive_item_validation import (

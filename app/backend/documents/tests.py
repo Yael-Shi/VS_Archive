@@ -7662,7 +7662,7 @@ class GeminiHebrewTranslationTests(SimpleTestCase):
         text: str,
         *,
         finish_reason: str = "STOP",
-        finish_message: Optional[str] = None,
+        finish_message: str | None = None,
     ) -> SimpleNamespace:
         return SimpleNamespace(
             text=text,

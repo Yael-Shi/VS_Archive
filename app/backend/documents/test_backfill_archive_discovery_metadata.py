@@ -9,7 +9,6 @@ from django.test import TestCase
 from documents.models import (
     ArchiveCategory,
     ArchiveEvent,
-    ArchiveItem,
     Document,
     DocumentMetadata,
     Tag,
