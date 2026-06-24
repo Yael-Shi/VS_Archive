@@ -13,7 +13,9 @@ from documents.services.text_presentation import (
     get_displayed_transcription_text,
     resolve_displayed_transcription_result,
 )
-from documents.services.transcription_edit_suggestions import render_transcription_diff_html
+from documents.services.transcription_edit_suggestions import (
+    render_transcription_diff_html,
+)
 from documents.services.transcription_suggestion_review import (
     TranscriptionSuggestionReviewError,
     approve_suggestion,
@@ -199,7 +201,9 @@ class TranscriptionEditSuggestionPublicFlowTests(TestCase):
 
         self.assertEqual(self.client.get(self._form_url(doc.id)).status_code, 404)
         self.assertEqual(
-            self.client.post(self._form_url(doc.id), self._valid_post_data()).status_code,
+            self.client.post(
+                self._form_url(doc.id), self._valid_post_data()
+            ).status_code,
             404,
         )
 
@@ -427,13 +431,13 @@ class TranscriptionEditSuggestionStaffUiTests(TestCase):
         resp = self.client.get(self._staff_detail_url(suggestion.id))
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
-        toolbar = html[
-            html.index("page-toolbar") : html.index("page-title")
-        ]
+        toolbar = html[html.index("page-toolbar") : html.index("page-title")]
         self.assertNotIn("חזרה להצעות תיקון לתעתוקים", toolbar)
         self.assertIn("תצוגת מסמך", toolbar)
         self.assertContains(resp, self._backlog_url())
-        self.assertContains(resp, reverse("documents-detail-page", kwargs={"doc_id": doc.id}))
+        self.assertContains(
+            resp, reverse("documents-detail-page", kwargs={"doc_id": doc.id})
+        )
 
     def test_detail_shows_submitter_metadata_when_present(self):
         doc = self._create_doc(title="Metadata doc")
@@ -466,7 +470,10 @@ class TranscriptionEditSuggestionStaffUiTests(TestCase):
         self.assertNotContains(resp, "<script>")
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_get", return_value="https://example.com/preview.jpg")
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value="https://example.com/preview.jpg",
+    )
     def test_detail_uses_source_preview_path(self, _mock_presign):
         doc = self._create_doc(title="Preview doc")
         suggestion = self._create_suggestion(doc)

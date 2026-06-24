@@ -9,7 +9,10 @@ from django.test import TestCase, override_settings
 from unittest.mock import patch
 
 from documents.models import ArchiveItem, Document, DocumentTextResult, Tag
-from documents.services.archive_items import create_manual_text_archive_item, create_ocr_document
+from documents.services.archive_items import (
+    create_manual_text_archive_item,
+    create_ocr_document,
+)
 from documents.services.review_backlog import documents_in_review_backlog
 
 
@@ -88,7 +91,10 @@ class OcrReadPathCutoverTests(TestCase):
         self.assertNotIn(doc.title, html)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.create_presigned_get", return_value="https://example.com/presigned")
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value="https://example.com/presigned",
+    )
     def test_detail_page_displays_archive_item_shared_fields_when_drifted(
         self, _mock_presign
     ):
@@ -117,9 +123,12 @@ class OcrReadPathCutoverTests(TestCase):
     def test_review_detail_displays_archive_item_title_when_drifted(self):
         doc = self._create_review_pending_doc()
         self.client.force_login(self.staff)
-        with override_settings(UPLOADS_BUCKET_NAME="test-bucket"), patch(
-            "documents.views.create_presigned_get",
-            return_value="https://example.com/presigned",
+        with (
+            override_settings(UPLOADS_BUCKET_NAME="test-bucket"),
+            patch(
+                "documents.views.create_presigned_get",
+                return_value="https://example.com/presigned",
+            ),
         ):
             resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
@@ -173,9 +182,7 @@ class OcrReadPathCutoverTests(TestCase):
             metadata_status=ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
         )
         self.client.force_login(self.staff)
-        resp = self.client.get(
-            "/api/ui/documents/?metadata_status=NEEDS_COMPLETION"
-        )
+        resp = self.client.get("/api/ui/documents/?metadata_status=NEEDS_COMPLETION")
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
         self.assertIn("Completed archive title", html)
@@ -242,9 +249,7 @@ class OcrReadPathCutoverTests(TestCase):
             category_event="Unique category event marker",
         )
         self.client.force_login(self.staff)
-        resp = self.client.get(
-            "/api/ui/documents/?q=Unique+category+event+marker"
-        )
+        resp = self.client.get("/api/ui/documents/?q=Unique+category+event+marker")
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, str(doc.id))
 
@@ -326,12 +331,16 @@ class OcrReadPathCutoverTests(TestCase):
         ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
             visibility=ArchiveItem.Visibility.PRIVATE
         )
-        self.assertEqual(self.client.get(f"/api/ui/documents/{doc.id}/").status_code, 404)
+        self.assertEqual(
+            self.client.get(f"/api/ui/documents/{doc.id}/").status_code, 404
+        )
 
     def test_ocr_edit_form_seed_reads_archive_item_shared_fields(self):
         doc = self._create_drifted_doc()
         self.client.force_login(self.staff)
-        resp = self.client.get(self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id))
+        resp = self.client.get(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id)
+        )
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
         self.assertIn('value="ArchiveItem-side title"', html)

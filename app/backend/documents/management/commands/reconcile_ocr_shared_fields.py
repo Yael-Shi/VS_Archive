@@ -120,9 +120,7 @@ class Command(BaseCommand):
             self.stdout.write("")
             self.stdout.write("Other mismatches:")
             for row in rows_with_non_visibility:
-                fields = tuple(
-                    name for name in row.mismatches if name != "visibility"
-                )
+                fields = tuple(name for name in row.mismatches if name != "visibility")
                 self._write_row(row, fields=fields)
 
     def _write_row(

@@ -37,7 +37,12 @@ class VsArchiveDataStack(Stack):
             ],
             cors=[
                 s3.CorsRule(
-                    allowed_methods=[s3.HttpMethods.PUT, s3.HttpMethods.POST, s3.HttpMethods.GET, s3.HttpMethods.HEAD],
+                    allowed_methods=[
+                        s3.HttpMethods.PUT,
+                        s3.HttpMethods.POST,
+                        s3.HttpMethods.GET,
+                        s3.HttpMethods.HEAD,
+                    ],
                     allowed_origins=["*"],
                     allowed_headers=["*"],
                 )
@@ -53,7 +58,9 @@ class VsArchiveDataStack(Stack):
             lifecycle_policy=efs.LifecyclePolicy.AFTER_14_DAYS,
             performance_mode=efs.PerformanceMode.GENERAL_PURPOSE,
             out_of_infrequent_access_policy=efs.OutOfInfrequentAccessPolicy.AFTER_1_ACCESS,
-            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED),
+            vpc_subnets=ec2.SubnetSelection(
+                subnet_type=ec2.SubnetType.PRIVATE_ISOLATED
+            ),
         )
 
         self.jobs_queue = sqs.Queue(

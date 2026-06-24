@@ -42,7 +42,9 @@ class GetOrderedSourceFilesForProcessingTests(TestCase):
 
     def test_accepts_allowed_mime_matching_extension(self):
         doc = self._make_doc()
-        self._add_source(doc, 0, mime_type="image/jpeg", file_original_name="page-0.jpg")
+        self._add_source(
+            doc, 0, mime_type="image/jpeg", file_original_name="page-0.jpg"
+        )
         self._add_source(doc, 1, mime_type="image/png", file_original_name="page-1.png")
 
         ordered = get_ordered_source_files_for_processing(doc)
@@ -51,7 +53,9 @@ class GetOrderedSourceFilesForProcessingTests(TestCase):
     def test_rejects_non_allowlisted_mime(self):
         doc = self._make_doc()
         self._add_source(doc, 0)
-        self._add_source(doc, 1, mime_type="application/pdf", file_original_name="page-1.pdf")
+        self._add_source(
+            doc, 1, mime_type="application/pdf", file_original_name="page-1.pdf"
+        )
 
         with self.assertRaises(MultiImageSourceFilesError) as ctx:
             get_ordered_source_files_for_processing(doc)

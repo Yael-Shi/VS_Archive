@@ -46,7 +46,9 @@ def _is_hebrew_language(doc: Document) -> bool:
     return lang in ("he", "heb", "hebrew")
 
 
-def text_block_display_meta(doc: Document, result_type: ResultTypeStr) -> TextBlockDisplayMeta:
+def text_block_display_meta(
+    doc: Document, result_type: ResultTypeStr
+) -> TextBlockDisplayMeta:
     """User-facing label and short explanation for a document detail text block."""
     is_hebrew_doc = _is_hebrew_language(doc)
 
@@ -83,7 +85,9 @@ def text_block_display_meta(doc: Document, result_type: ResultTypeStr) -> TextBl
     )
 
 
-def _latest_displayable(doc: Document, result_type: ResultTypeStr) -> Optional[DocumentTextResult]:
+def _latest_displayable(
+    doc: Document, result_type: ResultTypeStr
+) -> Optional[DocumentTextResult]:
     qs = (
         doc.text_results.filter(result_type=result_type)
         .exclude(text__isnull=True)
@@ -102,9 +106,13 @@ def _latest_displayable(doc: Document, result_type: ResultTypeStr) -> Optional[D
     return None
 
 
-def _latest_failed(doc: Document, result_type: ResultTypeStr) -> Optional[DocumentTextResult]:
+def _latest_failed(
+    doc: Document, result_type: ResultTypeStr
+) -> Optional[DocumentTextResult]:
     return (
-        doc.text_results.filter(result_type=result_type, status=DocumentTextResult.Status.FAILED)
+        doc.text_results.filter(
+            result_type=result_type, status=DocumentTextResult.Status.FAILED
+        )
         .order_by("-created_at")
         .first()
     )

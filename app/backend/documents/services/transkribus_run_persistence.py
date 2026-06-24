@@ -26,12 +26,16 @@ _REUSABLE_UPLOAD_STATUSES = frozenset(
 _MAX_ERROR_DETAILS_LEN = 4000
 
 _SENSITIVE_PATTERNS = (
-    re.compile(r"(?i)\b(password|passwd|api[_-]?token|bearer|authorization|jsessionid|cookie)\b"),
+    re.compile(
+        r"(?i)\b(password|passwd|api[_-]?token|bearer|authorization|jsessionid|cookie)\b"
+    ),
     re.compile(r"(?i)\b(transkribus_username|transkribus_password|gemini_api_key)\b"),
 )
 
 
-def sanitize_error_details(message: str, *, max_len: int = _MAX_ERROR_DETAILS_LEN) -> str:
+def sanitize_error_details(
+    message: str, *, max_len: int = _MAX_ERROR_DETAILS_LEN
+) -> str:
     """Return bounded error text safe for persistence (no secrets or tracebacks)."""
     text = (message or "").strip()
     if not text:
@@ -127,16 +131,13 @@ def find_reusable_upload_run(
     """
     col = str(collection_id).strip()
     mid = str(model_id).strip()
-    candidates = (
-        TranskribusRun.objects.filter(
-            document_id=document_id,
-            mode=TranskribusRun.Mode.UPLOAD_CREATED,
-            collection_id=col,
-            model_id=mid,
-            status__in=_REUSABLE_UPLOAD_STATUSES,
-        )
-        .order_by("-created_at", "-id")
-    )
+    candidates = TranskribusRun.objects.filter(
+        document_id=document_id,
+        mode=TranskribusRun.Mode.UPLOAD_CREATED,
+        collection_id=col,
+        model_id=mid,
+        status__in=_REUSABLE_UPLOAD_STATUSES,
+    ).order_by("-created_at", "-id")
     for run in candidates:
         if _run_is_reusable_for_recognition_retry(run):
             return run

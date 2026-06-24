@@ -137,9 +137,7 @@ def _get_bool(name: str, *, default: bool = False) -> bool:
         return True
     if v in ("0", "false", "no", "n", "off"):
         return False
-    raise EnvConfigError(
-        f"Env var {name} must be a boolean (true/false). Got: {raw!r}"
-    )
+    raise EnvConfigError(f"Env var {name} must be a boolean (true/false). Got: {raw!r}")
 
 
 @dataclass(frozen=True)
@@ -192,7 +190,9 @@ class WorkerEnvConfig:
     transkribus_force_reprocess: bool = field(default=False)
     transkribus_recognition_only_retry: bool = field(default=False)
     enable_transkribus_hebrew_handwritten: bool = field(default=False)
-    gemini_hebrew_printed_model: str = field(default=DEFAULT_HEBREW_PRINTED_GEMINI_MODEL)
+    gemini_hebrew_printed_model: str = field(
+        default=DEFAULT_HEBREW_PRINTED_GEMINI_MODEL
+    )
 
 
 def validate_required_env() -> WorkerEnvConfig:
@@ -206,7 +206,7 @@ def validate_required_env() -> WorkerEnvConfig:
         min_value=0.0,
         max_value=1.0,
     )
-    
+
     min_text_length = _get_int("MIN_TEXT_LENGTH", default=20, min_value=0)
 
     max_retries = _get_int("MAX_RETRIES", default=3, min_value=0)
@@ -216,18 +216,26 @@ def validate_required_env() -> WorkerEnvConfig:
     report_window_start = _get("REPORT_WINDOW_START") or "00:00"
     report_send_time = _get("REPORT_SEND_TIME") or "08:00"
 
-    free_tier_alert_pct = _get_int("FREE_TIER_ALERT_PCT", default=80, min_value=1, max_value=100)
+    free_tier_alert_pct = _get_int(
+        "FREE_TIER_ALERT_PCT", default=80, min_value=1, max_value=100
+    )
     gemini_free_daily_request_limit = _get_int(
-        "GEMINI_FREE_DAILY_REQUEST_LIMIT", default=DEFAULT_GEMINI_FREE_DAILY_REQUEST_LIMIT
+        "GEMINI_FREE_DAILY_REQUEST_LIMIT",
+        default=DEFAULT_GEMINI_FREE_DAILY_REQUEST_LIMIT,
     )
     gemini_free_daily_image_limit = _get_int(
         "GEMINI_FREE_DAILY_IMAGE_LIMIT", default=DEFAULT_GEMINI_FREE_DAILY_IMAGE_LIMIT
     )
-    transkribus_free_monthly_credits = _get_int("TRANSKRIBUS_FREE_MONTHLY_CREDITS", default=500)
+    transkribus_free_monthly_credits = _get_int(
+        "TRANSKRIBUS_FREE_MONTHLY_CREDITS", default=500
+    )
 
     # --- Gemini Hardening (Defaults adjusted for HTR) ---
     gemini_temperature = _get_float(
-        "GEMINI_TEMPERATURE", default=DEFAULT_GEMINI_TEMPERATURE, min_value=0.0, max_value=2.0
+        "GEMINI_TEMPERATURE",
+        default=DEFAULT_GEMINI_TEMPERATURE,
+        min_value=0.0,
+        max_value=2.0,
     )
     gemini_top_k = _get_int(
         "GEMINI_TOP_K", default=DEFAULT_GEMINI_TOP_K, min_value=1, max_value=64
@@ -238,7 +246,7 @@ def validate_required_env() -> WorkerEnvConfig:
     gemini_max_output_tokens = _get_int(
         "GEMINI_MAX_OUTPUT_TOKENS", default=DEFAULT_GEMINI_MAX_OUTPUT_TOKENS
     )
-    
+
     # For handwriting, False as the default to avoid disqualifications for minor inconsistencies
     gemini_double_pass = _get_bool("GEMINI_DOUBLE_PASS", default=False)
     gemini_consistency_min_ratio = _get_float(
@@ -248,14 +256,20 @@ def validate_required_env() -> WorkerEnvConfig:
     # --- Email & Transkribus (Keep original logic) ---
     smtp_host = _get("SMTP_HOST")
     smtp_port_raw = _get("SMTP_PORT")
-    smtp_port = int(smtp_port_raw) if smtp_port_raw and smtp_port_raw.isdigit() else None
+    smtp_port = (
+        int(smtp_port_raw) if smtp_port_raw and smtp_port_raw.isdigit() else None
+    )
     smtp_username = _get("SMTP_USERNAME")
     smtp_password = _get("SMTP_PASSWORD")
     default_from_email = _get("DEFAULT_FROM_EMAIL")
 
     if enable_daily_report:
-        if not all([smtp_host, smtp_port, smtp_username, smtp_password, default_from_email]):
-            raise EnvConfigError("ENABLE_DAILY_REPORT is true but SMTP vars are missing.")
+        if not all(
+            [smtp_host, smtp_port, smtp_username, smtp_password, default_from_email]
+        ):
+            raise EnvConfigError(
+                "ENABLE_DAILY_REPORT is true but SMTP vars are missing."
+            )
 
     transkribus_api_token = _get("TRANSKRIBUS_API_TOKEN")
     transkribus_username = _get("TRANSKRIBUS_USERNAME")
@@ -264,12 +278,16 @@ def validate_required_env() -> WorkerEnvConfig:
     transkribus_use_existing_server_document = _get_bool(
         "TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT", default=False
     )
-    transkribus_dev_upload_mode = _get_bool("TRANSKRIBUS_DEV_UPLOAD_MODE", default=False)
+    transkribus_dev_upload_mode = _get_bool(
+        "TRANSKRIBUS_DEV_UPLOAD_MODE", default=False
+    )
     transkribus_dev_existing_document_id = _get("TRANSKRIBUS_DEV_EXISTING_DOCUMENT_ID")
     transkribus_collection_id = _get("TRANSKRIBUS_COLLECTION_ID")
     transkribus_model_id = _get("TRANSKRIBUS_MODEL_ID")
     transkribus_dev_existing_pages = _get("TRANSKRIBUS_DEV_EXISTING_PAGES")
-    transkribus_force_reprocess = _get_bool("TRANSKRIBUS_FORCE_REPROCESS", default=False)
+    transkribus_force_reprocess = _get_bool(
+        "TRANSKRIBUS_FORCE_REPROCESS", default=False
+    )
     transkribus_recognition_only_retry = _get_bool(
         "TRANSKRIBUS_RECOGNITION_ONLY_RETRY", default=False
     )
@@ -280,8 +298,12 @@ def validate_required_env() -> WorkerEnvConfig:
         _get("GEMINI_HEBREW_PRINTED_MODEL") or DEFAULT_HEBREW_PRINTED_GEMINI_MODEL
     )
 
-    if enable_hybrid_htr and not (transkribus_api_token or (transkribus_username and transkribus_password)):
-        raise EnvConfigError("ENABLE_HYBRID_HTR is true but Transkribus credentials missing.")
+    if enable_hybrid_htr and not (
+        transkribus_api_token or (transkribus_username and transkribus_password)
+    ):
+        raise EnvConfigError(
+            "ENABLE_HYBRID_HTR is true but Transkribus credentials missing."
+        )
 
     return WorkerEnvConfig(
         gemini_api_key=gemini_api_key,

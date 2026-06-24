@@ -12,7 +12,11 @@ from documents.services.archive_item_access import (
     archive_item_queryset_for_user,
 )
 from documents.services.archive_items import create_manual_text_archive_item
-from documents.s3 import S3HeadObjectResult, build_photo_original_s3_key, photo_mime_to_s3_extension
+from documents.s3 import (
+    S3HeadObjectResult,
+    build_photo_original_s3_key,
+    photo_mime_to_s3_extension,
+)
 
 
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
@@ -313,7 +317,9 @@ class PhotoUploadFlowTests(TestCase):
         )
 
     @patch("documents.views.send_process_document_message")
-    def test_discovery_metadata_saved_from_selected_ids_and_new_names(self, mock_enqueue):
+    def test_discovery_metadata_saved_from_selected_ids_and_new_names(
+        self, mock_enqueue
+    ):
         existing_cat = ArchiveCategory.objects.create(
             name="Existing upload category",
             slug="existing-upload-category",

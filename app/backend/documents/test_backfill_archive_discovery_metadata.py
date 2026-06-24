@@ -118,7 +118,9 @@ class BackfillArchiveDiscoveryMetadataCommandTests(TestCase):
         output = stdout.getvalue()
 
         item.refresh_from_db()
-        self.assertEqual(list(item.tags.values_list("pk", flat=True)), tag_ids_after_first)
+        self.assertEqual(
+            list(item.tags.values_list("pk", flat=True)), tag_ids_after_first
+        )
         self.assertEqual(
             list(item.categories.values_list("pk", flat=True)),
             category_ids_after_first,
@@ -179,7 +181,9 @@ class BackfillArchiveDiscoveryMetadataCommandTests(TestCase):
         )
 
         doc.refresh_from_db()
-        self.assertEqual(list(doc.tags_m2m.values_list("pk", flat=True)), tag_ids_before)
+        self.assertEqual(
+            list(doc.tags_m2m.values_list("pk", flat=True)), tag_ids_before
+        )
 
     def test_document_category_event_not_cleared_or_changed(self):
         doc = self._create_ocr_doc(
@@ -215,7 +219,9 @@ class BackfillArchiveDiscoveryMetadataCommandTests(TestCase):
             ["יהדות מצרים"],
         )
         self.assertTrue(ArchiveCategory.objects.filter(name="יהדות מצרים").exists())
-        self.assertFalse(ArchiveCategory.objects.filter(name="  יהדות מצרים  ").exists())
+        self.assertFalse(
+            ArchiveCategory.objects.filter(name="  יהדות מצרים  ").exists()
+        )
 
     def test_dry_run_counts_unique_categories_to_create(self):
         self._create_ocr_doc(title="Doc one", category_event="shared-category")
@@ -236,11 +242,7 @@ class BackfillArchiveDiscoveryMetadataCommandTests(TestCase):
             stdout=json_stdout,
         )
         payload = json.loads(json_stdout.getvalue())
-        category_rows = [
-            row
-            for row in payload["rows"]
-            if row["category_link_to_add"]
-        ]
+        category_rows = [row for row in payload["rows"] if row["category_link_to_add"]]
         self.assertEqual(len(category_rows), 2)
         self.assertEqual(
             sum(1 for row in category_rows if row["category_would_be_created"]),
@@ -259,14 +261,18 @@ class BackfillArchiveDiscoveryMetadataCommandTests(TestCase):
             category.archive_items.order_by("id").values_list("id", flat=True)
         )
         self.assertEqual(len(linked_item_ids), 2)
-        self.assertEqual(ArchiveCategory.objects.filter(name="shared-category").count(), 1)
+        self.assertEqual(
+            ArchiveCategory.objects.filter(name="shared-category").count(), 1
+        )
 
     def test_archive_item_events_unchanged(self):
         doc = self._create_ocr_doc(
             title="Events unchanged",
             category_event="looks-like-event",
         )
-        event = ArchiveEvent.objects.create(name="existing-event", slug="existing-event")
+        event = ArchiveEvent.objects.create(
+            name="existing-event", slug="existing-event"
+        )
         doc.archive_item.events.add(event)
         event_ids_before = list(doc.archive_item.events.values_list("pk", flat=True))
 
@@ -298,7 +304,9 @@ class BackfillArchiveDiscoveryMetadataCommandTests(TestCase):
         output = stdout.getvalue()
 
         manual_item.refresh_from_db()
-        self.assertEqual(list(manual_item.tags.values_list("name", flat=True)), ["manual-tag"])
+        self.assertEqual(
+            list(manual_item.tags.values_list("name", flat=True)), ["manual-tag"]
+        )
         self.assertIn("scanned_ocr_documents: 1", output)
 
     def test_documents_without_backfill_needs_report_zero_adds(self):
@@ -356,7 +364,9 @@ class BackfillArchiveDiscoveryMetadataCommandTests(TestCase):
         categories_before = list(
             doc.archive_item.categories.values_list("name", flat=True)
         )
-        discovery_tags_before = list(doc.archive_item.tags.values_list("name", flat=True))
+        discovery_tags_before = list(
+            doc.archive_item.tags.values_list("name", flat=True)
+        )
 
         call_command(
             "backfill_archive_discovery_metadata",

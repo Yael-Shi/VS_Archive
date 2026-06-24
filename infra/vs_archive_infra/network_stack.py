@@ -29,21 +29,24 @@ class VsArchiveNetworkStack(Stack):
         )
 
         self.sg_alb = ec2.SecurityGroup(
-            self, f"{cfg.prefix}-sg-alb",
+            self,
+            f"{cfg.prefix}-sg-alb",
             vpc=self.vpc,
             allow_all_outbound=True,
             description="ALB Security Group",
         )
 
         self.sg_web = ec2.SecurityGroup(
-            self, f"{cfg.prefix}-sg-web",
+            self,
+            f"{cfg.prefix}-sg-web",
             vpc=self.vpc,
             allow_all_outbound=True,
             description="ECS Web/Worker Security Group",
         )
 
         self.sg_pg = ec2.SecurityGroup(
-            self, f"{cfg.prefix}-sg-pg",
+            self,
+            f"{cfg.prefix}-sg-pg",
             vpc=self.vpc,
             allow_all_outbound=True,
             description="Postgres ECS Security Group",
@@ -57,8 +60,12 @@ class VsArchiveNetworkStack(Stack):
             description="EFS Security Group",
         )
 
-        self.sg_alb.add_ingress_rule(peer=ec2.Peer.any_ipv4(), connection=ec2.Port.tcp(80))
-        self.sg_alb.add_ingress_rule(peer=ec2.Peer.any_ipv4(), connection=ec2.Port.tcp(443))
+        self.sg_alb.add_ingress_rule(
+            peer=ec2.Peer.any_ipv4(), connection=ec2.Port.tcp(80)
+        )
+        self.sg_alb.add_ingress_rule(
+            peer=ec2.Peer.any_ipv4(), connection=ec2.Port.tcp(443)
+        )
         self.sg_web.add_ingress_rule(peer=self.sg_alb, connection=ec2.Port.tcp(8000))
         self.sg_pg.add_ingress_rule(peer=self.sg_web, connection=ec2.Port.tcp(5432))
         self.sg_efs.add_ingress_rule(peer=self.sg_pg, connection=ec2.Port.tcp(2049))

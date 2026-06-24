@@ -144,6 +144,7 @@ _LATIN_LANGUAGE_HINTS = frozenset(
 
 # ------------------------------------------------------------------ helpers
 
+
 def _is_latin_language_hint(language_hint: Optional[str]) -> bool:
     if not language_hint:
         return False
@@ -154,14 +155,10 @@ def _uses_plain_text_transcription(
     prompt_variant: str,
     language_hint: Optional[str],
 ) -> bool:
-    return (
-        prompt_variant
-        in (
-            DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
-            DocumentTextResult.OcrPromptVariant.PRINTED,
-        )
-        and _is_latin_language_hint(language_hint)
-    )
+    return prompt_variant in (
+        DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+        DocumentTextResult.OcrPromptVariant.PRINTED,
+    ) and _is_latin_language_hint(language_hint)
 
 
 def _get_api_key() -> str:
@@ -455,6 +452,7 @@ def _parse_page_json_strict(raw: str, *, page_index: int) -> Dict[str, Any]:
 
 # ------------------------------------------------------------------ main
 
+
 def transcribe_pages_with_gemini(
     pages: List[PageImage],
     language_hint: Optional[str],
@@ -520,9 +518,7 @@ def transcribe_pages_with_gemini(
         while not success and attempts < 2:
             try:
                 attempt_config_kwargs = dict(config_kwargs)
-                attempt_config_kwargs["max_output_tokens"] = (
-                    attempt_max_output_tokens
-                )
+                attempt_config_kwargs["max_output_tokens"] = attempt_max_output_tokens
 
                 resp = client.models.generate_content(
                     model=model_name,
@@ -533,9 +529,7 @@ def transcribe_pages_with_gemini(
                             mime_type=page.mime_type or "image/png",
                         ),
                     ],
-                    config=types.GenerateContentConfig(
-                        **attempt_config_kwargs
-                    ),
+                    config=types.GenerateContentConfig(**attempt_config_kwargs),
                 )
 
                 finish_reason = _extract_finish_reason(resp)
@@ -544,8 +538,8 @@ def transcribe_pages_with_gemini(
 
                 raw_output_text = resp.text or ""
                 output_text = raw_output_text.strip()
-                trailing_whitespace_chars = (
-                    len(raw_output_text) - len(raw_output_text.rstrip())
+                trailing_whitespace_chars = len(raw_output_text) - len(
+                    raw_output_text.rstrip()
                 )
 
                 logger.info(
@@ -569,9 +563,8 @@ def transcribe_pages_with_gemini(
                     model_name,
                 )
 
-                if (
-                    uses_plain_text_transcription
-                    and _is_max_tokens_finish_reason(finish_reason)
+                if uses_plain_text_transcription and _is_max_tokens_finish_reason(
+                    finish_reason
                 ):
                     attempts += 1
                     if attempts < 2:
@@ -647,8 +640,7 @@ def transcribe_pages_with_gemini(
             except Exception as exc:
                 err_str = str(exc).upper()
                 if any(
-                    token in err_str
-                    for token in ("429", "RESOURCE_EXHAUSTED", "QUOTA")
+                    token in err_str for token in ("429", "RESOURCE_EXHAUSTED", "QUOTA")
                 ):
                     if "LIMIT: 0" in err_str:
                         raise GeminiError(f"QUOTA_EXHAUSTED: {model_name}")
@@ -760,7 +752,9 @@ def translate_text_to_hebrew_with_gemini(
                     raise
                 except Exception as e:
                     err_str = str(e).upper()
-                    if any(x in err_str for x in ["429", "RESOURCE_EXHAUSTED", "QUOTA"]):
+                    if any(
+                        x in err_str for x in ["429", "RESOURCE_EXHAUSTED", "QUOTA"]
+                    ):
                         if "LIMIT: 0" in err_str:
                             raise GeminiError(f"QUOTA_EXHAUSTED: {model_name}")
                         time.sleep(5)

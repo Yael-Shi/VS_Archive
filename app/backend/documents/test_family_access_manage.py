@@ -148,7 +148,9 @@ class ArchiveFamilyAccessManagePageTests(TestCase):
             self.superuser.groups.filter(name=ARCHIVE_FAMILY_GROUP_NAME).exists()
         )
 
-    def test_normal_visible_page_copy_does_not_expose_archive_family_when_configured(self):
+    def test_normal_visible_page_copy_does_not_expose_archive_family_when_configured(
+        self,
+    ):
         self.client.force_login(self.staff)
         resp = self.client.get(self.URL)
         self.assertEqual(resp.status_code, 200)

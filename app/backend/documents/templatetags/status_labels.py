@@ -14,7 +14,9 @@ from typing import Tuple
 from django import template
 
 from documents.models import Document, DocumentTextResult
-from documents.services.archive_item_presentation import language_label as _language_label
+from documents.services.archive_item_presentation import (
+    language_label as _language_label,
+)
 from documents.services.archive_item_validation import TEXT_INPUT_TYPE_UI_CHOICES
 from documents.services.review_reasons import (
     AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW,

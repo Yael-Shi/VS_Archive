@@ -9,9 +9,23 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.db import transaction
-from django.db.models import BooleanField, Case, Exists, IntegerField, OuterRef, Q, Value, When
+from django.db.models import (
+    BooleanField,
+    Case,
+    Exists,
+    IntegerField,
+    OuterRef,
+    Q,
+    Value,
+    When,
+)
 from django.db.models.functions import Length, Trim
-from django.http import Http404, HttpResponseBadRequest, JsonResponse, HttpResponseForbidden
+from django.http import (
+    Http404,
+    HttpResponseBadRequest,
+    JsonResponse,
+    HttpResponseForbidden,
+)
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import urlencode
@@ -64,7 +78,9 @@ from documents.services.review_backlog import (
     is_review_pending_text_result,
     parse_review_reasons,
 )
-from documents.services.archive_metadata_validation import validate_source_metadata_fields
+from documents.services.archive_metadata_validation import (
+    validate_source_metadata_fields,
+)
 from documents.services.upload_validation import (
     normalize_upload_mime_type,
     upload_mime_types_match,
@@ -369,7 +385,11 @@ def _verify_uploaded_s3_object_metadata(
     except (BotoCoreError, ClientError):
         logger.exception(
             "s3 head_object failed during upload verification",
-            extra={"document_id": document_id, "order_index": order_index, "s3_key": key},
+            extra={
+                "document_id": document_id,
+                "order_index": order_index,
+                "s3_key": key,
+            },
         )
         body["error"] = "s3 verification failed"
         return JsonResponse(body, status=502)
@@ -402,7 +422,9 @@ def _parse_create_upload_discovery_metadata(payload: dict):
         **empty_discovery_metadata_form_fields(),
         "categories": _json_value_as_discovery_string(payload.get("categories")),
         "events": _json_value_as_discovery_string(payload.get("events")),
-        "discovery_tags": _json_value_as_discovery_string(payload.get("discovery_tags")),
+        "discovery_tags": _json_value_as_discovery_string(
+            payload.get("discovery_tags")
+        ),
         "selected_categories": payload.get("selected_categories"),
         "selected_events": payload.get("selected_events"),
         "selected_tags": payload.get("selected_tags"),
@@ -450,7 +472,9 @@ def _parse_create_upload_common(payload: dict):
     if source_errors:
         return None, _bad(source_errors[0])
 
-    parsed_discovery, discovery_errors = _parse_create_upload_discovery_metadata(payload)
+    parsed_discovery, discovery_errors = _parse_create_upload_discovery_metadata(
+        payload
+    )
     if discovery_errors:
         return None, _bad(discovery_errors[0])
 
@@ -525,15 +549,15 @@ def _create_multi_image_upload(request, payload: dict, common: dict):
         if not isinstance(entry, dict):
             return _bad(f"files[{index}] must be an object")
         if "order_index" in entry:
-            return _bad("order_index must not be provided; order is defined by files[] position")
+            return _bad(
+                "order_index must not be provided; order is defined by files[] position"
+            )
 
         original_name = (entry.get("original_name") or "").strip()
         if not original_name:
             return _bad(f"files[{index}].original_name is required")
 
-        mime_type = (
-            entry.get("mime_type") or entry.get("content_type") or ""
-        ).strip()
+        mime_type = (entry.get("mime_type") or entry.get("content_type") or "").strip()
         file_err = validate_image_upload_metadata(
             mime_type=mime_type,
             original_name=original_name,
@@ -744,7 +768,9 @@ def upload_complete(request, doc_id: int):
             doc.upload_status = Document.UploadStatus.FAILED
             doc.upload_error = "upload complete called but file_s3_key is missing"
             doc.processing_state_user = Document.ProcessingState.FAILED
-            doc.save(update_fields=["upload_status", "upload_error", "processing_state_user"])
+            doc.save(
+                update_fields=["upload_status", "upload_error", "processing_state_user"]
+            )
             return JsonResponse(
                 {"error": "file_s3_key missing", "document_id": doc.id},
                 status=400,
@@ -823,13 +849,15 @@ def upload_complete(request, doc_id: int):
                 )
 
     else:
-        raw_err = (payload.get("error") or "upload failed")
+        raw_err = payload.get("error") or "upload failed"
         err = str(raw_err).strip() or "upload failed"
 
         doc.upload_status = Document.UploadStatus.FAILED
         doc.upload_error = err
         doc.processing_state_user = Document.ProcessingState.FAILED
-        doc.save(update_fields=["upload_status", "upload_error", "processing_state_user"])
+        doc.save(
+            update_fields=["upload_status", "upload_error", "processing_state_user"]
+        )
 
     return JsonResponse(
         {
@@ -990,7 +1018,7 @@ def upload_part_complete(request, doc_id: int, order_index: int):
             ]
         )
     else:
-        raw_err = (payload.get("error") or "upload failed")
+        raw_err = payload.get("error") or "upload failed"
         err = str(raw_err).strip() or "upload failed"
         source_file.upload_status = DocumentSourceFile.UploadStatus.FAILED
         source_file.upload_error = err
@@ -999,7 +1027,9 @@ def upload_part_complete(request, doc_id: int, order_index: int):
         doc.upload_status = Document.UploadStatus.FAILED
         doc.upload_error = err
         doc.processing_state_user = Document.ProcessingState.FAILED
-        doc.save(update_fields=["upload_status", "upload_error", "processing_state_user"])
+        doc.save(
+            update_fields=["upload_status", "upload_error", "processing_state_user"]
+        )
 
     return JsonResponse(
         {
@@ -1036,12 +1066,14 @@ def upload_finalize(request, doc_id: int):
         return _multi_image_upload_terminal_failed_response(doc)
 
     if not success:
-        raw_err = (payload.get("error") or "upload finalize failed")
+        raw_err = payload.get("error") or "upload finalize failed"
         err = str(raw_err).strip() or "upload finalize failed"
         doc.upload_status = Document.UploadStatus.FAILED
         doc.upload_error = err
         doc.processing_state_user = Document.ProcessingState.FAILED
-        doc.save(update_fields=["upload_status", "upload_error", "processing_state_user"])
+        doc.save(
+            update_fields=["upload_status", "upload_error", "processing_state_user"]
+        )
         return _finalize_response(doc)
 
     ready, ready_err = all_expected_source_files_uploaded(doc)
@@ -1250,7 +1282,9 @@ def documents_list_api(request):
         len(items),
     )
 
-    return JsonResponse({"count": total, "limit": limit, "offset": offset, "items": items})
+    return JsonResponse(
+        {"count": total, "limit": limit, "offset": offset, "items": items}
+    )
 
 
 def documents_list_page(request):
@@ -1322,7 +1356,9 @@ def admin_backlog_page(request):
     offset = _parse_int(request.GET.get("offset"), default=0, min_value=0)
 
     only_missing_tags = (request.GET.get("only_missing_tags") or "").strip() == "1"
-    only_missing_admin_meta = (request.GET.get("only_missing_admin_meta") or "").strip() == "1"
+    only_missing_admin_meta = (
+        request.GET.get("only_missing_admin_meta") or ""
+    ).strip() == "1"
 
     base_qs = (
         Document.objects.select_related("admin_meta", "archive_item")
@@ -1529,7 +1565,9 @@ def review_detail_page(request, doc_id: int):
     source_preview = build_source_preview(doc, bucket)
     content_url = None
     if not is_multi_image_document(doc) and bucket and doc.file_s3_key:
-        content_url = create_presigned_get(bucket=bucket, key=doc.file_s3_key, expires_in=3600)
+        content_url = create_presigned_get(
+            bucket=bucket, key=doc.file_s3_key, expires_in=3600
+        )
 
     text_results = sorted(
         doc.text_results.all(),
@@ -1732,7 +1770,9 @@ def document_detail_page(request, doc_id: int):
     content_url = None
 
     if not is_multi_image_document(doc) and bucket and doc.file_s3_key:
-        content_url = create_presigned_get(bucket=bucket, key=doc.file_s3_key, expires_in=3600)
+        content_url = create_presigned_get(
+            bucket=bucket, key=doc.file_s3_key, expires_in=3600
+        )
 
     text_presentation = get_text_presentation_for_document(doc)
     displayed_transcription_text = get_displayed_transcription_text(doc)
@@ -1771,7 +1811,9 @@ def _suggestion_form_queryset():
     )
 
 
-def _load_transcription_suggestion_document(request, doc_id: int) -> tuple[Document, str]:
+def _load_transcription_suggestion_document(
+    request, doc_id: int
+) -> tuple[Document, str]:
     try:
         doc = get_viewable_document(
             request.user,
@@ -1800,7 +1842,9 @@ def _transcription_suggestion_source_context(doc: Document) -> dict:
     source_preview = build_source_preview(doc, bucket)
     content_url = None
     if not is_multi_image_document(doc) and bucket and doc.file_s3_key:
-        content_url = create_presigned_get(bucket=bucket, key=doc.file_s3_key, expires_in=3600)
+        content_url = create_presigned_get(
+            bucket=bucket, key=doc.file_s3_key, expires_in=3600
+        )
     return {
         "content_url": content_url,
         "source_preview_items": source_preview.items,
@@ -1959,7 +2003,9 @@ def transcription_suggestion_detail_page(request, suggestion_id: int):
     source_preview = build_source_preview(doc, bucket)
     content_url = None
     if not is_multi_image_document(doc) and bucket and doc.file_s3_key:
-        content_url = create_presigned_get(bucket=bucket, key=doc.file_s3_key, expires_in=3600)
+        content_url = create_presigned_get(
+            bucket=bucket, key=doc.file_s3_key, expires_in=3600
+        )
 
     diff_html = render_transcription_diff_html(
         suggestion.current_text_snapshot,
@@ -2836,7 +2882,9 @@ def archive_manage_family_access_page(request):
         target_user = get_object_or_404(User, pk=target_user_id)
 
         if target_user.is_staff or target_user.is_superuser:
-            return HttpResponseBadRequest("לא ניתן לשנות גישת משפחה למשתמשי צוות או מנהלים.")
+            return HttpResponseBadRequest(
+                "לא ניתן לשנות גישת משפחה למשתמשי צוות או מנהלים."
+            )
 
         if action == "add":
             if not _user_has_usable_email(target_user):

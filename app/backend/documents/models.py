@@ -713,10 +713,14 @@ class TranskribusRun(models.Model):
 
     class Meta:
         indexes = [
-            models.Index(fields=["document", "-created_at"], name="tr_run_doc_created_idx"),
+            models.Index(
+                fields=["document", "-created_at"], name="tr_run_doc_created_idx"
+            ),
             models.Index(fields=["document", "status"], name="tr_run_doc_status_idx"),
             models.Index(fields=["remote_doc_id"], name="tr_run_remote_doc_idx"),
-            models.Index(fields=["status", "created_at"], name="tr_run_status_created_idx"),
+            models.Index(
+                fields=["status", "created_at"], name="tr_run_status_created_idx"
+            ),
         ]
 
     def __str__(self) -> str:

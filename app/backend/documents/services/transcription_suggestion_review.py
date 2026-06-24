@@ -10,7 +10,9 @@ from documents.services.text_presentation import (
     _is_hebrew_language,
     resolve_displayed_transcription_result,
 )
-from documents.services.transcription_edit_suggestions import normalize_transcription_text
+from documents.services.transcription_edit_suggestions import (
+    normalize_transcription_text,
+)
 
 
 class TranscriptionSuggestionReviewError(Exception):
@@ -107,7 +109,9 @@ def _apply_approved_suggestion_text(
     if paired_source is None:
         raise TranscriptionSuggestionReviewError("אין תעתוק מקור לקישור גרסת תרגום.")
 
-    paired_source = DocumentTextResult.objects.select_for_update().get(pk=paired_source.pk)
+    paired_source = DocumentTextResult.objects.select_for_update().get(
+        pk=paired_source.pk
+    )
     target.text = approved_text
     target.based_on_source_revision = paired_source.source_revision
     target.verification_status = verified

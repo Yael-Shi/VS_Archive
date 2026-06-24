@@ -52,8 +52,8 @@ class S3HeadObjectTests(SimpleTestCase):
     def test_returns_not_exists_for_not_found_codes(self, mock_get_client):
         for code in ("404", "NoSuchKey", "NotFound"):
             with self.subTest(code=code):
-                mock_get_client.return_value.head_object.side_effect = self._client_error(
-                    code
+                mock_get_client.return_value.head_object.side_effect = (
+                    self._client_error(code)
                 )
                 result = head_s3_object("bucket", "missing/key")
                 self.assertFalse(result.exists)
@@ -78,7 +78,9 @@ class S3ObjectExistsTests(SimpleTestCase):
 
     @patch("documents.s3.head_s3_object")
     def test_returns_true_when_head_reports_exists(self, mock_head):
-        mock_head.return_value = S3HeadObjectResult(exists=True, content_type="image/jpeg")
+        mock_head.return_value = S3HeadObjectResult(
+            exists=True, content_type="image/jpeg"
+        )
 
         self.assertTrue(s3_object_exists("bucket", "documents/1/original.jpg"))
 

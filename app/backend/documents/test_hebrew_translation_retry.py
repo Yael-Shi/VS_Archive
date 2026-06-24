@@ -127,8 +127,12 @@ class HebrewTranslationRetryWorkerTests(TestCase):
     def setUp(self):
         self.worker_env = _worker_env_config()
 
-    @patch("documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini")
-    def test_successful_worker_retry_preserves_source_and_writes_hebrew(self, mock_translate):
+    @patch(
+        "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
+    )
+    def test_successful_worker_retry_preserves_source_and_writes_hebrew(
+        self, mock_translate
+    ):
         doc = _non_hebrew_doc()
         source = _usable_source(doc, text="keep this source exactly")
         _failed_hebrew(doc)
@@ -151,7 +155,9 @@ class HebrewTranslationRetryWorkerTests(TestCase):
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.READY)
 
-    @patch("documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini")
+    @patch(
+        "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
+    )
     def test_successful_worker_retry_returns_true(self, mock_translate):
         doc = _non_hebrew_doc()
         _usable_source(doc)
@@ -165,7 +171,9 @@ class HebrewTranslationRetryWorkerTests(TestCase):
 
         self.assertTrue(ack)
 
-    @patch("documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini")
+    @patch(
+        "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
+    )
     def test_failed_worker_retry_preserves_source_writes_failed_hebrew_and_partial(
         self, mock_translate
     ):
@@ -188,7 +196,9 @@ class HebrewTranslationRetryWorkerTests(TestCase):
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.PARTIAL)
 
-    @patch("documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini")
+    @patch(
+        "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
+    )
     def test_gemini_failure_persisted_as_failed_returns_true(self, mock_translate):
         doc = _non_hebrew_doc()
         _usable_source(doc)
@@ -264,8 +274,12 @@ class HebrewTranslationRetryWorkerTests(TestCase):
         existing.refresh_from_db()
         self.assertIsNone(existing.text)
 
-    @patch("documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini")
-    def test_fresh_processing_defers_without_gemini_or_state_change(self, mock_translate):
+    @patch(
+        "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
+    )
+    def test_fresh_processing_defers_without_gemini_or_state_change(
+        self, mock_translate
+    ):
         doc = _non_hebrew_doc()
         _usable_source(doc)
         _failed_hebrew(doc)
@@ -278,7 +292,9 @@ class HebrewTranslationRetryWorkerTests(TestCase):
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.PROCESSING)
 
-    @patch("documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini")
+    @patch(
+        "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
+    )
     def test_stale_processing_is_reclaimed_successfully(self, mock_translate):
         doc = _non_hebrew_doc()
         _usable_source(doc)
@@ -299,8 +315,12 @@ class HebrewTranslationRetryWorkerTests(TestCase):
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.READY)
 
-    @patch("documents.services.hebrew_translation_retry._recompute_processing_state_from_source_engine")
-    @patch("documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini")
+    @patch(
+        "documents.services.hebrew_translation_retry._recompute_processing_state_from_source_engine"
+    )
+    @patch(
+        "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
+    )
     def test_stale_processing_recompute_failure_leaves_partial(
         self, mock_translate, mock_recompute
     ):
@@ -323,7 +343,9 @@ class HebrewTranslationRetryWorkerTests(TestCase):
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.PARTIAL)
 
-    @patch("documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini")
+    @patch(
+        "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
+    )
     def test_stale_processing_no_longer_eligible_is_safe_acknowledged_noop(
         self, mock_translate
     ):
@@ -369,7 +391,9 @@ class HebrewTranslationRetryWorkerTests(TestCase):
         with self.assertRaises(HebrewTranslationRetryError):
             enqueue_hebrew_translation_retry(doc.id)
 
-    @patch("documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini")
+    @patch(
+        "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
+    )
     def test_cross_engine_hebrew_blocks_worker_claim(self, mock_translate):
         doc = _non_hebrew_doc()
         _usable_source(doc, engine=ENGINE)
@@ -390,7 +414,9 @@ class HebrewTranslationRetryWorkerTests(TestCase):
         self.assertTrue(ack)
         mock_translate.assert_not_called()
 
-    @patch("documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini")
+    @patch(
+        "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
+    )
     def test_cross_engine_hebrew_appearing_during_gemini_is_not_overwritten(
         self, mock_translate
     ):
@@ -435,8 +461,12 @@ class HebrewTranslationRetryWorkerTests(TestCase):
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.PARTIAL)
 
-    @patch("documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini")
-    def test_duplicate_messages_do_not_overwrite_completed_translation(self, mock_translate):
+    @patch(
+        "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
+    )
+    def test_duplicate_messages_do_not_overwrite_completed_translation(
+        self, mock_translate
+    ):
         doc = _non_hebrew_doc()
         _usable_source(doc)
         _failed_hebrew(doc)
@@ -459,7 +489,9 @@ class HebrewTranslationRetryWorkerTests(TestCase):
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.READY)
 
-    @patch("documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini")
+    @patch(
+        "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
+    )
     def test_source_change_before_persistence_aborts_without_leaving_processing(
         self, mock_translate
     ):
@@ -486,7 +518,9 @@ class HebrewTranslationRetryWorkerTests(TestCase):
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.PARTIAL)
 
-    @patch("documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini")
+    @patch(
+        "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
+    )
     def test_hebrew_appearing_during_gemini_returns_true_without_overwrite(
         self, mock_translate
     ):
@@ -526,8 +560,12 @@ class HebrewTranslationRetryWorkerTests(TestCase):
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.READY)
 
-    @patch("documents.services.hebrew_translation_retry.persist_hebrew_translation_result")
-    @patch("documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini")
+    @patch(
+        "documents.services.hebrew_translation_retry.persist_hebrew_translation_result"
+    )
+    @patch(
+        "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
+    )
     def test_unexpected_persist_failure_returns_false_and_restores_state(
         self, mock_translate, mock_persist
     ):
@@ -546,8 +584,12 @@ class HebrewTranslationRetryWorkerTests(TestCase):
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.PARTIAL)
 
-    @patch("documents.services.hebrew_translation_retry.update_document_processing_state_for_engine")
-    @patch("documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini")
+    @patch(
+        "documents.services.hebrew_translation_retry.update_document_processing_state_for_engine"
+    )
+    @patch(
+        "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
+    )
     def test_unexpected_processing_state_update_failure_returns_false(
         self, mock_translate, mock_update_state
     ):
@@ -626,7 +668,9 @@ class HebrewTranslationRetryWorkerMessageTests(TestCase):
 
         def _assert_phase_one_claim(*args, **kwargs):
             doc.refresh_from_db()
-            self.assertEqual(doc.processing_state_user, Document.ProcessingState.PROCESSING)
+            self.assertEqual(
+                doc.processing_state_user, Document.ProcessingState.PROCESSING
+            )
             self.assertGreater(doc.updated_at, old_updated_at)
             phase_one_updated_at["value"] = doc.updated_at
             return (b"%PDF-1.4", "application/pdf")
@@ -651,7 +695,9 @@ class HebrewTranslationRetryWorkerMessageTests(TestCase):
         doc.refresh_from_db()
         self.assertGreaterEqual(doc.updated_at, phase_one_updated_at["value"])
 
-    @patch("documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini")
+    @patch(
+        "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
+    )
     @patch("documents.management.commands.run_worker.transcribe_pages")
     @patch("documents.management.commands.run_worker.get_object_bytes")
     def test_translation_only_message_does_not_download_or_transcribe(
@@ -704,7 +750,9 @@ class HebrewTranslationRetryUiTests(TestCase):
         _failed_hebrew(doc)
         return doc
 
-    @patch("documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini")
+    @patch(
+        "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
+    )
     @patch("documents.services.hebrew_translation_retry.send_process_document_message")
     def test_staff_post_enqueues_translation_only_operation_without_gemini(
         self, mock_send, mock_translate

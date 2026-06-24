@@ -140,7 +140,9 @@ class OcrReprocessServiceTests(TestCase):
         self.assertIsNone(doc.upload_error)
         mock_enqueue.assert_called_once_with(doc.id)
 
-    def test_missing_transkribus_config_blocks_misclassification_as_normal_reenqueue(self):
+    def test_missing_transkribus_config_blocks_misclassification_as_normal_reenqueue(
+        self,
+    ):
         doc = _failed_ocr_document()
         _seed_transkribus_run(
             doc,
@@ -306,8 +308,11 @@ class OcrReprocessServiceTests(TestCase):
             )
         self.assertIn("FAILED", str(ctx.exception))
 
+
 class SendProcessDocumentMessageTests(SimpleTestCase):
-    @patch.dict("os.environ", {"SQS_QUEUE_URL": "https://sqs.example/queue"}, clear=False)
+    @patch.dict(
+        "os.environ", {"SQS_QUEUE_URL": "https://sqs.example/queue"}, clear=False
+    )
     @patch("documents.services.sqs.boto3.client")
     def test_normal_payload_omits_retry_fields(self, mock_boto_client):
         from documents.services.sqs import send_process_document_message
@@ -317,7 +322,9 @@ class SendProcessDocumentMessageTests(SimpleTestCase):
         body = json.loads(mock_sqs.send_message.call_args.kwargs["MessageBody"])
         self.assertEqual(body, {"type": "PROCESS_DOCUMENT", "document_id": 123})
 
-    @patch.dict("os.environ", {"SQS_QUEUE_URL": "https://sqs.example/queue"}, clear=False)
+    @patch.dict(
+        "os.environ", {"SQS_QUEUE_URL": "https://sqs.example/queue"}, clear=False
+    )
     @patch("documents.services.sqs.boto3.client")
     def test_recognition_only_payload_includes_source_run_id(self, mock_boto_client):
         from documents.services.sqs import send_process_document_message
@@ -552,7 +559,9 @@ class RunWorkerOcrRetryModeTests(TestCase):
 
         mock_transcribe.assert_not_called()
         self.doc.refresh_from_db()
-        self.assertEqual(self.doc.processing_state_user, Document.ProcessingState.FAILED)
+        self.assertEqual(
+            self.doc.processing_state_user, Document.ProcessingState.FAILED
+        )
         failure = DocumentTextResult.objects.get(
             document=self.doc,
             result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
@@ -560,7 +569,9 @@ class RunWorkerOcrRetryModeTests(TestCase):
         )
         self.assertEqual(failure.status, DocumentTextResult.Status.FAILED)
         self.assertIn("transkribus_recognition_only", failure.error_details or "")
-        self.assertIn(DocumentTextResult.OcrEngineKey.GEMINI, failure.error_details or "")
+        self.assertIn(
+            DocumentTextResult.OcrEngineKey.GEMINI, failure.error_details or ""
+        )
 
     @patch("documents.management.commands.run_worker.get_object_bytes")
     @patch("documents.management.commands.run_worker.extract_pages")
@@ -584,7 +595,9 @@ class RunWorkerOcrRetryModeTests(TestCase):
         mock_extract_pages.assert_not_called()
         mock_transcribe.assert_not_called()
         self.doc.refresh_from_db()
-        self.assertEqual(self.doc.processing_state_user, Document.ProcessingState.FAILED)
+        self.assertEqual(
+            self.doc.processing_state_user, Document.ProcessingState.FAILED
+        )
 
     @patch("documents.management.commands.run_worker.get_object_bytes")
     @patch("documents.management.commands.run_worker.extract_pages")
@@ -608,7 +621,9 @@ class RunWorkerOcrRetryModeTests(TestCase):
         mock_extract_pages.assert_not_called()
         mock_transcribe.assert_not_called()
         self.doc.refresh_from_db()
-        self.assertEqual(self.doc.processing_state_user, Document.ProcessingState.FAILED)
+        self.assertEqual(
+            self.doc.processing_state_user, Document.ProcessingState.FAILED
+        )
 
     @patch("documents.management.commands.run_worker.get_object_bytes")
     @patch("documents.management.commands.run_worker.extract_pages")
@@ -634,4 +649,6 @@ class RunWorkerOcrRetryModeTests(TestCase):
         mock_extract_pages.assert_not_called()
         mock_transcribe.assert_not_called()
         self.doc.refresh_from_db()
-        self.assertEqual(self.doc.processing_state_user, Document.ProcessingState.FAILED)
+        self.assertEqual(
+            self.doc.processing_state_user, Document.ProcessingState.FAILED
+        )

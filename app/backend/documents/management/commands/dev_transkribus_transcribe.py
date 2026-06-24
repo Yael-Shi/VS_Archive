@@ -36,7 +36,9 @@ def _mime_type_for_path(path: Path) -> str:
     suffix = path.suffix.lower()
     mime = _SUPPORTED_SUFFIX_TO_MIME.get(suffix)
     if mime is None:
-        supported = ", ".join(sorted({s.lstrip(".") for s in _SUPPORTED_SUFFIX_TO_MIME}))
+        supported = ", ".join(
+            sorted({s.lstrip(".") for s in _SUPPORTED_SUFFIX_TO_MIME})
+        )
         raise CommandError(
             f"Unsupported file extension {suffix!r}. "
             f"Supported types for this dev command: {supported}."
@@ -196,7 +198,9 @@ class Command(BaseCommand):
 
         self.stdout.write(f"engine_name: {result.engine_name}")
         self.stdout.write(f"needs_review: {result.needs_review}")
-        self.stdout.write(f"review_reasons: {list(getattr(result, 'review_reasons', None) or [])}")
+        self.stdout.write(
+            f"review_reasons: {list(getattr(result, 'review_reasons', None) or [])}"
+        )
         self.stdout.write(f"text_length: {len(text)}")
         self.stdout.write("--- text preview ---")
         self.stdout.write(preview if preview else "(empty)")

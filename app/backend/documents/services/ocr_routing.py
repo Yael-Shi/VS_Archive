@@ -50,6 +50,7 @@ HEBREW_HANDWRITTEN_TRANSKRIBUS_ROUTE = OcrRouteConfig(
     prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
 )
 
+
 def gemini_model_candidates(
     route: OcrRouteConfig,
     *,
@@ -70,10 +71,7 @@ def gemini_model_candidates(
     lang = (language or "").strip().lower()
     text_type = (text_input_type or "").strip().upper()
 
-    if (
-        lang == Document.Language.HEBREW
-        and text_type == Document.TextInputType.PRINTED
-    ):
+    if lang == Document.Language.HEBREW and text_type == Document.TextInputType.PRINTED:
         return (gemini_hebrew_printed_model,)
 
     if lang in (Document.Language.ENGLISH, Document.Language.FRENCH):
@@ -97,12 +95,12 @@ def _env_bool(name: str, *, default: bool = False) -> bool:
         return True
     if v_lower in ("0", "false", "no", "n", "off"):
         return False
-    raise ValueError(
-        f"Env var {name} must be a boolean (true/false). Got: {raw!r}"
-    )
+    raise ValueError(f"Env var {name} must be a boolean (true/false). Got: {raw!r}")
 
 
-def select_ocr_route(language: str | None, text_input_type: str | None) -> OcrRouteConfig:
+def select_ocr_route(
+    language: str | None, text_input_type: str | None
+) -> OcrRouteConfig:
     lang = (language or "").strip().lower()
     if lang not in {v for v, _label in Document.Language.choices}:
         raise ValueError(f"Invalid or missing language for OCR routing: {language!r}")
@@ -110,7 +108,9 @@ def select_ocr_route(language: str | None, text_input_type: str | None) -> OcrRo
     text_type = (text_input_type or "").strip().upper()
     valid_text_types = {v for v, _label in Document.TextInputType.choices}
     if text_type not in valid_text_types:
-        raise ValueError(f"Invalid or missing text_input_type for OCR routing: {text_input_type!r}")
+        raise ValueError(
+            f"Invalid or missing text_input_type for OCR routing: {text_input_type!r}"
+        )
 
     if (
         lang == Document.Language.HEBREW
@@ -127,5 +127,7 @@ def select_ocr_route(language: str | None, text_input_type: str | None) -> OcrRo
 
     route = OCR_ROUTES.get((lang, text_type))
     if route is None:
-        raise ValueError(f"No OCR route configured for language={lang!r}, text_input_type={text_type!r}")
+        raise ValueError(
+            f"No OCR route configured for language={lang!r}, text_input_type={text_type!r}"
+        )
     return route

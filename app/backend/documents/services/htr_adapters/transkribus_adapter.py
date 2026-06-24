@@ -33,9 +33,7 @@ _NO_DEV_MODE_MESSAGE = (
     "Production routing and VS-Archive-wide upload defaults remain deferred."
 )
 
-_MISSING_DOCUMENT_ID_MESSAGE = (
-    "TranskribusAdapter requires document_id (supplied by run_worker via transcribe_pages)."
-)
+_MISSING_DOCUMENT_ID_MESSAGE = "TranskribusAdapter requires document_id (supplied by run_worker via transcribe_pages)."
 
 
 class TranskribusAdapter:
@@ -312,7 +310,9 @@ class TranskribusAdapter:
         engine_runtime: str,
     ) -> HtrResult:
         self._guard_verified_text_results(document_id=document_id)
-        self._guard_page_count_matches_source_mapping(pages=pages, source_run=source_run)
+        self._guard_page_count_matches_source_mapping(
+            pages=pages, source_run=source_run
+        )
 
         remote_doc_id = str(source_run.remote_doc_id).strip()
         pages_query = str(source_run.pages_query).strip()
@@ -524,9 +524,10 @@ class TranskribusAdapter:
     @staticmethod
     def _validate_existing_document_config(worker_env: object) -> None:
         missing: list[str] = []
-        if not (getattr(worker_env, "transkribus_username", None) and getattr(
-            worker_env, "transkribus_password", None
-        )):
+        if not (
+            getattr(worker_env, "transkribus_username", None)
+            and getattr(worker_env, "transkribus_password", None)
+        ):
             missing.append("TRANSKRIBUS_USERNAME and TRANSKRIBUS_PASSWORD")
         if not getattr(worker_env, "transkribus_api_token", None):
             missing.append("TRANSKRIBUS_API_TOKEN")
@@ -540,16 +541,16 @@ class TranskribusAdapter:
             missing.append("TRANSKRIBUS_DEV_EXISTING_PAGES")
         if missing:
             raise EnginePermanentError(
-                "Transkribus dev/demo configuration incomplete: "
-                + ", ".join(missing)
+                "Transkribus dev/demo configuration incomplete: " + ", ".join(missing)
             )
 
     @staticmethod
     def _validate_upload_dev_config(worker_env: object) -> None:
         missing: list[str] = []
-        if not (getattr(worker_env, "transkribus_username", None) and getattr(
-            worker_env, "transkribus_password", None
-        )):
+        if not (
+            getattr(worker_env, "transkribus_username", None)
+            and getattr(worker_env, "transkribus_password", None)
+        ):
             missing.append("TRANSKRIBUS_USERNAME and TRANSKRIBUS_PASSWORD")
         if not getattr(worker_env, "transkribus_api_token", None):
             missing.append("TRANSKRIBUS_API_TOKEN")

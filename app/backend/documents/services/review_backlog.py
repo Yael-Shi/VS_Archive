@@ -11,21 +11,22 @@ from documents.models import Document, DocumentTextResult
 
 # Matches ``is_review_pending_text_result`` (non-empty after strip).
 _REVIEWABLE_TEXT_Q = (
-    ~Q(text__isnull=True)
-    & ~Q(text__exact="")
-    & ~Q(text__regex=r"^\s*$")
+    ~Q(text__isnull=True) & ~Q(text__exact="") & ~Q(text__regex=r"^\s*$")
 )
 
 
 def review_pending_text_result_filter() -> Q:
     """Rows that belong in the בקרת תעתוק backlog."""
-    return Q(
-        status=DocumentTextResult.Status.NEEDS_REVIEW,
-        verification_status__in=(
-            DocumentTextResult.VerificationStatus.UNVERIFIED,
-            DocumentTextResult.VerificationStatus.REJECTED,
-        ),
-    ) & _REVIEWABLE_TEXT_Q
+    return (
+        Q(
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status__in=(
+                DocumentTextResult.VerificationStatus.UNVERIFIED,
+                DocumentTextResult.VerificationStatus.REJECTED,
+            ),
+        )
+        & _REVIEWABLE_TEXT_Q
+    )
 
 
 def documents_in_review_backlog(
@@ -55,13 +56,10 @@ def documents_in_review_backlog(
     q = (q or "").strip()
     if q:
         if q.isdigit():
-            qs = qs.filter(
-                Q(id=int(q)) | Q(archive_item__title__icontains=q)
-            )
+            qs = qs.filter(Q(id=int(q)) | Q(archive_item__title__icontains=q))
         else:
             qs = qs.filter(
-                Q(archive_item__title__icontains=q)
-                | Q(file_original_name__icontains=q)
+                Q(archive_item__title__icontains=q) | Q(file_original_name__icontains=q)
             )
 
     if language:

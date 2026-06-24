@@ -14,10 +14,18 @@ from django.db import transaction
 
 from documents.models import Document, DocumentTextResult
 from documents.s3 import get_object_bytes
-from documents.services.env_validation import EnvConfigError, WorkerEnvConfig, validate_required_env
+from documents.services.env_validation import (
+    EnvConfigError,
+    WorkerEnvConfig,
+    validate_required_env,
+)
 from documents.services.gemini_engine import translate_text_to_hebrew_with_gemini
-from documents.services.non_hebrew_hebrew_translation import persist_hebrew_translation_result
-from documents.services.processing_state import update_document_processing_state_for_engine
+from documents.services.non_hebrew_hebrew_translation import (
+    persist_hebrew_translation_result,
+)
+from documents.services.processing_state import (
+    update_document_processing_state_for_engine,
+)
 from documents.services.gemini_models import DEFAULT_GEMINI_MODEL
 from documents.services.htr_adapters.base import UnsupportedEngineError
 from documents.services.hebrew_translation_retry import (
@@ -64,9 +72,11 @@ def _env(name: str) -> str:
         raise RuntimeError(f"Missing required env var: {name}")
     return value
 
+
 def _is_hebrew_language(language: Optional[str]) -> bool:
     lang = (language or "").strip().lower()
     return lang in ("he", "heb", "hebrew")
+
 
 class Command(BaseCommand):
     help = "Run the async worker: poll SQS and process document jobs."
@@ -152,7 +162,9 @@ class Command(BaseCommand):
             return None
         run_id = payload.get(SOURCE_TRANSKRIBUS_RUN_ID_PAYLOAD_KEY)
         if run_id is None:
-            return "source_transkribus_run_id is required for transkribus_recognition_only"
+            return (
+                "source_transkribus_run_id is required for transkribus_recognition_only"
+            )
         if not isinstance(run_id, int):
             return (
                 "source_transkribus_run_id must be int for transkribus_recognition_only, "
@@ -283,9 +295,13 @@ class Command(BaseCommand):
         try:
             bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
             if is_multi:
-                pages = self._build_pages_from_source_files(bucket, ordered_sources or [])
+                pages = self._build_pages_from_source_files(
+                    bucket, ordered_sources or []
+                )
             else:
-                file_bytes, s3_mime = get_object_bytes(bucket=bucket, key=doc.file_s3_key)
+                file_bytes, s3_mime = get_object_bytes(
+                    bucket=bucket, key=doc.file_s3_key
+                )
                 effective_mime = (doc.mime_type or s3_mime or "").strip()
                 pages = extract_pages(file_bytes=file_bytes, mime_type=effective_mime)
 
@@ -317,7 +333,9 @@ class Command(BaseCommand):
         except Exception as e:
             processing_exc = e
             error = str(e)
-            self.stderr.write(self.style.ERROR(f"Processing error for doc {document_id}: {e}"))
+            self.stderr.write(
+                self.style.ERROR(f"Processing error for doc {document_id}: {e}")
+            )
 
         # Phase 3: Save results
         try:
@@ -357,7 +375,9 @@ class Command(BaseCommand):
         """
         pages = []
         for source in ordered_sources:
-            file_bytes, _s3_mime = get_object_bytes(bucket=bucket, key=source.file_s3_key)
+            file_bytes, _s3_mime = get_object_bytes(
+                bucket=bucket, key=source.file_s3_key
+            )
             pages.append(
                 source_file_bytes_to_page(
                     order_index=source.order_index,

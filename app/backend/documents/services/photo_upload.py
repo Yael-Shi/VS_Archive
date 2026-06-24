@@ -171,9 +171,11 @@ def finalize_photo_upload(
     Validation/verification/client failures set ``upload_status=FAILED``.
     Re-upload/retry after ``FAILED`` is deferred (not implemented in PR3).
     """
-    photo_content = PhotoContent.objects.select_for_update().select_related(
-        "archive_item"
-    ).get(pk=photo_content.pk)
+    photo_content = (
+        PhotoContent.objects.select_for_update()
+        .select_related("archive_item")
+        .get(pk=photo_content.pk)
+    )
 
     if photo_content.upload_status == PhotoContent.UploadStatus.UPLOADED:
         return photo_content, None
@@ -190,7 +192,9 @@ def finalize_photo_upload(
         original_name=photo_content.original_filename,
     )
     if metadata_err:
-        return _mark_photo_upload_failed(photo_content, metadata_err), PhotoS3VerificationError(
+        return _mark_photo_upload_failed(
+            photo_content, metadata_err
+        ), PhotoS3VerificationError(
             metadata_err,
             400,
         )
@@ -230,7 +234,9 @@ def _json_value_as_discovery_string(value) -> str:
     return str(value)
 
 
-def parse_create_photo_upload_metadata(payload: dict[str, Any]) -> tuple[dict | None, str | None]:
+def parse_create_photo_upload_metadata(
+    payload: dict[str, Any],
+) -> tuple[dict | None, str | None]:
     """Parse JSON body for photo upload create; return (parsed, error_message)."""
     title = (payload.get("title") or "").strip()
     if not title:
@@ -274,7 +280,9 @@ def parse_create_photo_upload_metadata(payload: dict[str, Any]) -> tuple[dict | 
         **empty_discovery_metadata_form_fields(),
         "categories": _json_value_as_discovery_string(payload.get("categories")),
         "events": _json_value_as_discovery_string(payload.get("events")),
-        "discovery_tags": _json_value_as_discovery_string(payload.get("discovery_tags")),
+        "discovery_tags": _json_value_as_discovery_string(
+            payload.get("discovery_tags")
+        ),
         "selected_categories": payload.get("selected_categories"),
         "selected_events": payload.get("selected_events"),
         "selected_tags": payload.get("selected_tags"),

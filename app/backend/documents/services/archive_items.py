@@ -20,9 +20,7 @@ ARCHIVE_ITEM_SHARED_FIELD_NAMES = (
 
 def archive_item_field_values_from_document(document: Any) -> dict[str, Any]:
     """Build ArchiveItem field values copied from a Document (no inference)."""
-    return {
-        name: getattr(document, name) for name in ARCHIVE_ITEM_SHARED_FIELD_NAMES
-    }
+    return {name: getattr(document, name) for name in ARCHIVE_ITEM_SHARED_FIELD_NAMES}
 
 
 def archive_item_field_values_from_archive_item(archive_item: Any) -> dict[str, Any]:

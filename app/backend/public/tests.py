@@ -96,7 +96,7 @@ class PublicContentBlockTests(TestCase):
                 "body_creator_note": DEFAULT_PUBLIC_CONTENT["creator_note"]["body"],
                 "title_contact_note": "יצירת קשר",
                 "body_contact_note": f"מייל: {CONTACT_EMAIL}",
-            }
+            },
         )
         self.assertEqual(save_resp.status_code, 200)
         self.assertContains(save_resp, "התוכן נשמר בהצלחה")

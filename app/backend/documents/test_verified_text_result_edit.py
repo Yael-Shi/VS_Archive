@@ -294,9 +294,7 @@ class VerifiedTextResultEditTests(TestCase):
         )
 
         self.client.force_login(self.staff)
-        resp = self.client.get(
-            reverse("review-detail-page", kwargs={"doc_id": doc.id})
-        )
+        resp = self.client.get(reverse("review-detail-page", kwargs={"doc_id": doc.id}))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "טעון תרגום מחדש")
         self.assertContains(resp, "עריכת תרגום מאושר")
@@ -310,9 +308,7 @@ class VerifiedTextResultEditTests(TestCase):
         )
 
         self.client.force_login(self.staff)
-        resp = self.client.get(
-            reverse("review-detail-page", kwargs={"doc_id": doc.id})
-        )
+        resp = self.client.get(reverse("review-detail-page", kwargs={"doc_id": doc.id}))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "עריכת תעתוק מאושר")
         self.assertNotContains(resp, "source_revision")
@@ -466,8 +462,6 @@ class VerifiedTextResultEditTests(TestCase):
         self.assertFalse(is_hebrew_translation_stale(hebrew, source))
 
         self.client.force_login(self.staff)
-        resp = self.client.get(
-            reverse("review-detail-page", kwargs={"doc_id": doc.id})
-        )
+        resp = self.client.get(reverse("review-detail-page", kwargs={"doc_id": doc.id}))
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, "טעון תרגום מחדש")

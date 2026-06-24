@@ -12,8 +12,12 @@ from documents.models import ArchiveItem, Document, DocumentTextResult
 from documents.services.env_validation import WorkerEnvConfig
 from documents.services.gemini_engine import translate_text_to_hebrew_with_gemini
 from documents.services.gemini_models import DEFAULT_GEMINI_MODEL
-from documents.services.non_hebrew_hebrew_translation import persist_hebrew_translation_result
-from documents.services.processing_state import update_document_processing_state_for_engine
+from documents.services.non_hebrew_hebrew_translation import (
+    persist_hebrew_translation_result,
+)
+from documents.services.processing_state import (
+    update_document_processing_state_for_engine,
+)
 from documents.services.sqs import send_process_document_message
 from documents.services.text_presentation import resolve_displayed_transcription_result
 
@@ -96,7 +100,10 @@ def _validate_retry_document_metadata(doc: Document) -> None:
 
 def _validate_usable_source_row(doc: Document) -> DocumentTextResult:
     source_row = resolve_displayed_transcription_result(doc)
-    if source_row is None or source_row.result_type != DocumentTextResult.ResultType.SOURCE_TEXT:
+    if (
+        source_row is None
+        or source_row.result_type != DocumentTextResult.ResultType.SOURCE_TEXT
+    ):
         raise HebrewTranslationRetryError(
             f"Document id={doc.id} has no usable SOURCE_TEXT to translate."
         )
@@ -144,7 +151,10 @@ def validate_document_for_hebrew_translation_retry_persistence(
 
     source_row = _validate_usable_source_row(doc)
 
-    if source_row.engine != expected_engine or (source_row.text or "") != expected_source_text:
+    if (
+        source_row.engine != expected_engine
+        or (source_row.text or "") != expected_source_text
+    ):
         raise HebrewTranslationRetryError(
             f"Document id={doc.id} SOURCE_TEXT changed during translation retry; "
             "aborting without overwrite."
