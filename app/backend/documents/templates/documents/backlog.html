@@ -11,13 +11,6 @@
 
     <div class="page-toolbar">
       <a class="btn" href="/api/ui/documents/">חזרה למסמכים</a>
-      <a class="btn" href="/api/ui/admin/review/">רשימת בקרת תעתוק</a>
-
-      <div class="flex-spacer"></div>
-
-      {% if user.is_staff or user.is_superuser %}
-        <a class="btn" href="/admin/">Django Admin</a>
-      {% endif %}
     </div>
 
     {% if not user.is_staff and not user.is_superuser %}

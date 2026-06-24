@@ -9499,22 +9499,35 @@ class NavigationLabelTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get("/api/ui/documents/")
         self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertContains(resp, "nav-staff-panel")
         self.assertContains(resp, "רשימת בקרת תעתוק")
         self.assertContains(resp, "רשימת השלמת פרטים")
         self.assertContains(resp, 'href="/api/ui/admin/review/"')
         self.assertContains(resp, 'href="/api/ui/admin/backlog/"')
+        pagination_start = html.index("pagination-bar")
+        pagination_end = html.index("form-actions", pagination_start)
+        pagination = html[pagination_start:pagination_end]
+        self.assertNotIn('href="/api/ui/admin/review/"', pagination)
+        self.assertNotIn('href="/api/ui/admin/backlog/"', pagination)
+        self.assertIn('href="/api/ui/upload/"', pagination)
 
     def test_detail_distinguishes_global_list_from_current_doc_action(self):
         doc = self._create_document()
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        # Global list link and current-document action use distinct labels...
+        html = resp.content.decode()
+        toolbar = html[
+            html.index("document-detail-toolbar") : html.index("flex-spacer")
+        ]
+        self.assertIn("חזרה לרשימה", toolbar)
+        self.assertNotIn("רשימת בקרת תעתוק", toolbar)
+        self.assertNotIn("רשימת השלמת פרטים", toolbar)
+        self.assertContains(resp, "nav-staff-panel")
         self.assertContains(resp, "רשימת בקרת תעתוק")
         self.assertContains(resp, "בקרת תעתוק למסמך זה")
-        # ...the old ambiguous label is gone...
         self.assertNotContains(resp, "בדיקת תעתוק למסמך זה")
-        # ...and both still point at their original, distinct hrefs.
         self.assertContains(resp, 'href="/api/ui/admin/review/"')
         self.assertContains(resp, f'href="/api/ui/admin/review/{doc.id}/"')
         self.assertContains(resp, "רשימת השלמת פרטים")
