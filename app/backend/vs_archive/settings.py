@@ -5,6 +5,8 @@ import tempfile
 
 from django.core.exceptions import ImproperlyConfigured
 
+_VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 google_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
@@ -27,6 +29,15 @@ def _split_env_list(value: str) -> list[str]:
         if item:
             parts.append(item)
     return parts
+
+
+def _log_level_from_env(name: str, *, default: str = "INFO") -> str:
+    value = os.getenv(name, default).strip().upper()
+    if value not in _VALID_LOG_LEVELS:
+        raise ImproperlyConfigured(
+            f"{name} must be one of {sorted(_VALID_LOG_LEVELS)}; got {value!r}."
+        )
+    return value
 
 
 DEBUG = os.getenv("DJANGO_DEBUG", "0") == "1"
@@ -179,5 +190,33 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_HTTPONLY = True
+
+LOG_LEVEL = _log_level_from_env("LOG_LEVEL")
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": "%(levelname)s %(asctime)s %(name)s %(message)s",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": LOG_LEVEL,
+    },
+    "loggers": {
+        # Keep common AWS/HTTP client libraries quiet when LOG_LEVEL=DEBUG.
+        "botocore": {"level": "WARNING"},
+        "boto3": {"level": "WARNING"},
+        "urllib3": {"level": "WARNING"},
+    },
+}
 
 # build v2.2
