@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import uuid
 
 from django.conf import settings
@@ -49,17 +51,19 @@ class ArchiveItem(models.Model):
         choices=MetadataStatus.choices,
         default=MetadataStatus.NEEDS_COMPLETION,
     )
-    categories = models.ManyToManyField(
-        "ArchiveCategory",
-        blank=True,
-        related_name="archive_items",
+    categories: models.ManyToManyField[ArchiveCategory, ArchiveCategory] = (
+        models.ManyToManyField(
+            "ArchiveCategory",
+            blank=True,
+            related_name="archive_items",
+        )
     )
-    events = models.ManyToManyField(
+    events: models.ManyToManyField[ArchiveEvent, ArchiveEvent] = models.ManyToManyField(
         "ArchiveEvent",
         blank=True,
         related_name="archive_items",
     )
-    tags = models.ManyToManyField(
+    tags: models.ManyToManyField[Tag, Tag] = models.ManyToManyField(
         "Tag",
         blank=True,
         related_name="archive_items",
@@ -181,7 +185,7 @@ class PhotoContent(models.Model):
 
 
 class DocumentQuerySet(models.QuerySet):
-    def delete(self):
+    def delete(self) -> tuple[int, dict[str, int]]:
         with transaction.atomic():
             archive_item_ids = list(
                 self.exclude(archive_item_id__isnull=True)
@@ -255,7 +259,9 @@ class Document(models.Model):
 
     category_event = models.CharField(max_length=255, null=True, blank=True)
 
-    tags_m2m = models.ManyToManyField("Tag", blank=True, related_name="documents")
+    tags_m2m: models.ManyToManyField[Tag, Tag] = models.ManyToManyField(
+        "Tag", blank=True, related_name="documents"
+    )
 
     metadata_status = models.CharField(
         max_length=32,
@@ -317,12 +323,17 @@ class Document(models.Model):
     def __str__(self) -> str:
         return str(self.title)
 
-    def delete(self, using=None, keep_parents=False):
+    def delete(
+        self,
+        using: str | None = None,
+        keep_parents: bool = False,
+    ) -> tuple[int, dict[str, int]]:
         with transaction.atomic():
             archive_item_id = self.archive_item_id
-            super().delete(using=using, keep_parents=keep_parents)
+            deleted = super().delete(using=using, keep_parents=keep_parents)
             if archive_item_id:
                 ArchiveItem.objects.filter(pk=archive_item_id).delete()
+            return deleted
 
 
 class DocumentTextResult(models.Model):
