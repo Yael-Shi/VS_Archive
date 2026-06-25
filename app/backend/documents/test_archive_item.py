@@ -312,6 +312,23 @@ class ArchiveItemFoundationTests(TestCase):
         doc.delete()
         self.assertFalse(ArchiveItem.objects.filter(pk=archive_item_id).exists())
 
+    def test_document_instance_delete_returns_django_delete_tuple(self):
+        doc = create_ocr_document(
+            title="Document delete return value",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        doc_id = doc.id
+        archive_item_id = doc.archive_item_id
+
+        deleted_count, deleted_by_model = doc.delete()
+
+        self.assertIsInstance(deleted_count, int)
+        self.assertIsInstance(deleted_by_model, dict)
+        self.assertGreaterEqual(deleted_count, 1)
+        self.assertFalse(Document.objects.filter(pk=doc_id).exists())
+        self.assertFalse(ArchiveItem.objects.filter(pk=archive_item_id).exists())
+
     def test_document_queryset_delete_removes_linked_archive_items(self):
         doc_one = create_ocr_document(
             title="Bulk delete one",
