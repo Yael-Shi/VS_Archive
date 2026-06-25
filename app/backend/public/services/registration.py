@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.base_user import AbstractBaseUser
 from django.contrib.auth.password_validation import validate_password
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -96,7 +97,7 @@ class RegistrationFieldValues:
 
 @dataclass
 class RegistrationResult:
-    user: User | None = None
+    user: AbstractBaseUser | None = None
     errors: list[str] | None = None
     field_values: RegistrationFieldValues | None = None
     honeypot_triggered: bool = False

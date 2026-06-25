@@ -397,7 +397,9 @@ class ArchiveItemAdminPolicyTests(TestCase):
         before_metadata_status = item.metadata_status
 
         client = Client()
-        client.force_login(self.request.user)
+        user = self.request.user
+        assert isinstance(user, User)
+        client.force_login(user)
         change_url = f"/admin/documents/document/{doc.id}/change/"
         get_resp = client.get(change_url)
         self.assertEqual(get_resp.status_code, 200)

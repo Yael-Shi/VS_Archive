@@ -22,11 +22,13 @@ class UploadValidationTests(SimpleTestCase):
             original_name="scan.png",
         )
         self.assertIsNotNone(err)
+        assert err is not None
         self.assertIn("does not match", err)
 
     def test_validate_allowed_image_mime_rejects_non_allowlisted(self):
         err = validate_allowed_image_mime("image/gif")
         self.assertIsNotNone(err)
+        assert err is not None
         self.assertIn("must be one of", err)
 
     def test_validate_single_pdf_accepts_matching_metadata(self):
