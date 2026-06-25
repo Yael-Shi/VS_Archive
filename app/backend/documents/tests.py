@@ -4,6 +4,7 @@ import inspect
 import json
 import os
 import tempfile
+from dataclasses import replace
 from datetime import timedelta
 from io import BytesIO, StringIO
 from types import SimpleNamespace
@@ -61,13 +62,21 @@ from documents.services.ocr_routing import (
 )
 
 
+def _htr_test_page(page_index: int = 1) -> PageImage:
+    return PageImage(
+        page_index=page_index,
+        image_bytes=b"x",
+        mime_type="image/png",
+    )
+
+
 class HtrDispatcherTests(SimpleTestCase):
     @patch("documents.services.htr_engine.get_htr_adapter")
     @patch("documents.services.htr_engine.select_ocr_route")
     def test_dispatches_by_engine_key_and_prompt_variant(
         self, mock_select_route, mock_get_adapter
     ):
-        pages = [SimpleNamespace(page_index=1)]
+        pages = [_htr_test_page()]
         mock_select_route.return_value = OcrRouteConfig(
             engine_key="GEMINI",
             prompt_variant="printed",
@@ -337,7 +346,7 @@ class HtrDispatcherTests(SimpleTestCase):
         )
         with self.assertRaises(EnginePermanentError) as ctx:
             transcribe_pages(
-                pages=[SimpleNamespace(page_index=1)],
+                pages=[_htr_test_page()],
                 language_hint="en",
                 text_input_type=Document.TextInputType.HANDWRITTEN,
                 route=route,
@@ -365,7 +374,7 @@ class TranskribusAdapterTests(TestCase):
         adapter = TranskribusAdapter()
         with self.assertRaises(EnginePermanentError) as ctx:
             adapter.execute(
-                pages=[SimpleNamespace(page_index=1)],
+                pages=[_htr_test_page()],
                 language_hint="en",
                 prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
             )
@@ -407,7 +416,7 @@ class TranskribusAdapterTests(TestCase):
         )
         with self.assertRaises(EnginePermanentError) as ctx:
             adapter.execute(
-                pages=[SimpleNamespace(page_index=1)],
+                pages=[_htr_test_page()],
                 language_hint="en",
                 prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
                 worker_env=cfg,
@@ -699,7 +708,7 @@ class TranskribusAdapterTests(TestCase):
         pages = [PageImage(page_index=1, image_bytes=b"x", mime_type="image/png")]
 
         def base_cfg(**kwargs):
-            defaults = dict(
+            base = WorkerEnvConfig(
                 gemini_api_key="k",
                 gemini_confidence_threshold=0.7,
                 min_text_length=20,
@@ -732,8 +741,7 @@ class TranskribusAdapterTests(TestCase):
                 transkribus_collection_id="c",
                 transkribus_model_id="m",
             )
-            defaults.update(kwargs)
-            return WorkerEnvConfig(**defaults)
+            return replace(base, **kwargs)
 
         cases = [
             ("username", dict(transkribus_username=None)),
@@ -1722,6 +1730,7 @@ class TranskribusEngineUnitTests(SimpleTestCase):
             {"tsId": "2", "jobId": "10", "modelId": "20", "url": "http://ok"},
         ]
         chosen = pick_transcript(transcripts, job_id="10", model_id="20")
+        assert chosen is not None
         self.assertEqual(chosen["url"], "http://ok")
 
     def test_pick_transcript_newest_by_timestamp_then_ts_id(self):
@@ -1744,6 +1753,7 @@ class TranskribusEngineUnitTests(SimpleTestCase):
             },
         ]
         chosen = pick_transcript(transcripts, job_id="10", model_id="20")
+        assert chosen is not None
         self.assertEqual(chosen["url"], "http://new")
 
         tie = [
@@ -1763,6 +1773,7 @@ class TranskribusEngineUnitTests(SimpleTestCase):
             },
         ]
         chosen_tie = pick_transcript(tie, job_id="10", model_id="20")
+        assert chosen_tie is not None
         self.assertEqual(chosen_tie["url"], "http://b")
 
     def test_get_job_maps_timeout_to_retryable(self):
@@ -3152,7 +3163,7 @@ class WorkerEnvConfigTests(SimpleTestCase):
 def _worker_env_for_dev_transkribus_upload_command(**overrides):
     from documents.services.env_validation import WorkerEnvConfig
 
-    base = dict(
+    base = WorkerEnvConfig(
         gemini_api_key="k",
         gemini_confidence_threshold=0.7,
         min_text_length=20,
@@ -3188,8 +3199,7 @@ def _worker_env_for_dev_transkribus_upload_command(**overrides):
         transkribus_model_id="42",
         transkribus_dev_existing_pages=None,
     )
-    base.update(overrides)
-    return WorkerEnvConfig(**base)
+    return replace(base, **overrides)
 
 
 class DevTranskribusTranscribeCommandTests(SimpleTestCase):
@@ -5650,7 +5660,7 @@ class TranskribusRunPersistenceServiceTests(TestCase):
 def _transkribus_adapter_worker_env(**overrides):
     from documents.services.env_validation import WorkerEnvConfig
 
-    base = dict(
+    base = WorkerEnvConfig(
         gemini_api_key="k",
         gemini_confidence_threshold=0.7,
         min_text_length=20,
@@ -5684,8 +5694,7 @@ def _transkribus_adapter_worker_env(**overrides):
         transkribus_force_reprocess=False,
         transkribus_recognition_only_retry=False,
     )
-    base.update(overrides)
-    return WorkerEnvConfig(**base)
+    return replace(base, **overrides)
 
 
 class TranskribusAdapterPersistenceTests(TestCase):
@@ -10127,6 +10136,7 @@ class ReviewDetailHierarchyTests(SimpleTestCase):
         )
         reason = _review_non_actionable_reason(row)
         self.assertIsNotNone(reason)
+        assert reason is not None
         self.assertIn("אושר אנושית", reason)
 
     def test_non_actionable_reason_empty_text(self):

@@ -114,9 +114,9 @@ def parse_archive_metadata_form(
     errors: list[str] = []
     date_start = None
     date_end = None
-    visibility = ArchiveItem.Visibility.PRIVATE
-    metadata_status = ArchiveItem.MetadataStatus.NEEDS_COMPLETION
-    date_precision = ArchiveItem.DatePrecision.UNKNOWN
+    visibility: str = ArchiveItem.Visibility.PRIVATE
+    metadata_status: str = ArchiveItem.MetadataStatus.NEEDS_COMPLETION
+    date_precision: str = ArchiveItem.DatePrecision.UNKNOWN
 
     try:
         visibility = parse_visibility(form_data["visibility"])

@@ -82,6 +82,7 @@ class Command(BaseCommand):
             return
 
         if apply_mode:
+            assert apply_result is not None
             self._write_apply_output(report, apply_result)
         else:
             self._write_dry_run_output(report)

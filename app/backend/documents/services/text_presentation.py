@@ -46,9 +46,7 @@ def _is_hebrew_language(doc: Document) -> bool:
     return lang in ("he", "heb", "hebrew")
 
 
-def text_block_display_meta(
-    doc: Document, result_type: ResultTypeStr
-) -> TextBlockDisplayMeta:
+def text_block_display_meta(doc: Document, result_type: str) -> TextBlockDisplayMeta:
     """User-facing label and short explanation for a document detail text block."""
     is_hebrew_doc = _is_hebrew_language(doc)
 

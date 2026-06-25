@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import TypedDict
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
@@ -19,7 +20,16 @@ from documents.services.ocr_reprocess import (
 COLLECTION_ID = "col"
 MODEL_ID = "42"
 
-_TRANSKRIBUS_WORKER_ENV_FIELDS = {
+
+class _TranskribusWorkerEnvFields(TypedDict):
+    transkribus_api_token: str
+    transkribus_username: str
+    transkribus_password: str
+    transkribus_collection_id: str
+    transkribus_model_id: str
+
+
+_TRANSKRIBUS_WORKER_ENV_FIELDS: _TranskribusWorkerEnvFields = {
     "transkribus_api_token": "tok",
     "transkribus_username": "u",
     "transkribus_password": "p",

@@ -210,8 +210,10 @@ def finalize_photo_upload(
         return _mark_photo_upload_failed(photo_content, verify_err.message), verify_err
 
     assert head is not None
+    content_length = head.content_length
+    assert content_length is not None
     photo_content.original_mime_type = expected_mime
-    photo_content.original_size_bytes = head.content_length
+    photo_content.original_size_bytes = content_length
     photo_content.upload_status = PhotoContent.UploadStatus.UPLOADED
     photo_content.upload_error = ""
     photo_content.save(
