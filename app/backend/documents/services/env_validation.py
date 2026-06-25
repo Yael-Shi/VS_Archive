@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, overload
 
 from documents.services.gemini_defaults import (
     DEFAULT_GEMINI_CONFIDENCE_THRESHOLD,
@@ -72,6 +72,26 @@ def _require_float(
     return val
 
 
+@overload
+def _get_int(
+    name: str,
+    *,
+    default: int,
+    min_value: Optional[int] = None,
+    max_value: Optional[int] = None,
+) -> int: ...
+
+
+@overload
+def _get_int(
+    name: str,
+    *,
+    default: None = None,
+    min_value: Optional[int] = None,
+    max_value: Optional[int] = None,
+) -> Optional[int]: ...
+
+
 def _get_int(
     name: str,
     *,
@@ -92,6 +112,26 @@ def _get_int(
     if max_value is not None and val > max_value:
         raise EnvConfigError(f"Env var {name} must be <= {max_value}. Got: {val}")
     return val
+
+
+@overload
+def _get_float(
+    name: str,
+    *,
+    default: float,
+    min_value: Optional[float] = None,
+    max_value: Optional[float] = None,
+) -> float: ...
+
+
+@overload
+def _get_float(
+    name: str,
+    *,
+    default: None = None,
+    min_value: Optional[float] = None,
+    max_value: Optional[float] = None,
+) -> Optional[float]: ...
 
 
 def _get_float(
@@ -307,17 +347,17 @@ def validate_required_env() -> WorkerEnvConfig:
 
     return WorkerEnvConfig(
         gemini_api_key=gemini_api_key,
-        gemini_confidence_threshold=float(gemini_confidence_threshold),
-        min_text_length=int(min_text_length),
-        max_retries=int(max_retries),
-        retry_delay_seconds_1=int(retry_delay_seconds_1),
-        retry_delay_seconds_2=int(retry_delay_seconds_2),
+        gemini_confidence_threshold=gemini_confidence_threshold,
+        min_text_length=min_text_length,
+        max_retries=max_retries,
+        retry_delay_seconds_1=retry_delay_seconds_1,
+        retry_delay_seconds_2=retry_delay_seconds_2,
         report_window_start=report_window_start,
         report_send_time=report_send_time,
-        free_tier_alert_pct=int(free_tier_alert_pct),
-        gemini_free_daily_request_limit=int(gemini_free_daily_request_limit),
-        gemini_free_daily_image_limit=int(gemini_free_daily_image_limit),
-        transkribus_free_monthly_credits=int(transkribus_free_monthly_credits),
+        free_tier_alert_pct=free_tier_alert_pct,
+        gemini_free_daily_request_limit=gemini_free_daily_request_limit,
+        gemini_free_daily_image_limit=gemini_free_daily_image_limit,
+        transkribus_free_monthly_credits=transkribus_free_monthly_credits,
         enable_hybrid_htr=enable_hybrid_htr,
         enable_daily_report=enable_daily_report,
         smtp_host=smtp_host,
@@ -328,12 +368,12 @@ def validate_required_env() -> WorkerEnvConfig:
         transkribus_api_token=transkribus_api_token,
         transkribus_username=transkribus_username,
         transkribus_password=transkribus_password,
-        gemini_temperature=float(gemini_temperature),
-        gemini_top_k=int(gemini_top_k),
-        gemini_top_p=float(gemini_top_p),
+        gemini_temperature=gemini_temperature,
+        gemini_top_k=gemini_top_k,
+        gemini_top_p=gemini_top_p,
         gemini_max_output_tokens=gemini_max_output_tokens,
         gemini_double_pass=gemini_double_pass,
-        gemini_consistency_min_ratio=float(gemini_consistency_min_ratio),
+        gemini_consistency_min_ratio=gemini_consistency_min_ratio,
         transkribus_use_existing_server_document=transkribus_use_existing_server_document,
         transkribus_dev_upload_mode=transkribus_dev_upload_mode,
         transkribus_dev_existing_document_id=transkribus_dev_existing_document_id,
