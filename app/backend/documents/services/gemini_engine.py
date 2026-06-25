@@ -7,7 +7,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from google import genai
 from google.genai import types
@@ -159,6 +159,14 @@ def _uses_plain_text_transcription(
         DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
         DocumentTextResult.OcrPromptVariant.PRINTED,
     ) and _is_latin_language_hint(language_hint)
+
+
+def _prompt_base_for_variant(prompt_variant: str) -> str | None:
+    try:
+        variant_key = DocumentTextResult.OcrPromptVariant(prompt_variant)
+    except ValueError:
+        return None
+    return _PROMPT_BY_VARIANT.get(variant_key)
 
 
 def _get_api_key() -> str:
@@ -476,9 +484,9 @@ def transcribe_pages_with_gemini(
         prompt_variant == DocumentTextResult.OcrPromptVariant.PRINTED
         and _is_latin_language_hint(language_hint)
     ):
-        prompt_base = _PRINTED_LATIN_PROMPT
+        prompt_base: str | None = _PRINTED_LATIN_PROMPT
     else:
-        prompt_base = _PROMPT_BY_VARIANT.get(prompt_variant)
+        prompt_base = _prompt_base_for_variant(prompt_variant)
 
     if prompt_base is None:
         raise GeminiError(f"Unsupported Gemini prompt_variant: {prompt_variant!r}")
@@ -514,21 +522,23 @@ def transcribe_pages_with_gemini(
         success = False
         attempts = 0
         attempt_max_output_tokens = max_output_tokens
+        data: Dict[str, Any] = {}
 
         while not success and attempts < 2:
             try:
                 attempt_config_kwargs = dict(config_kwargs)
                 attempt_config_kwargs["max_output_tokens"] = attempt_max_output_tokens
 
+                contents = [
+                    types.Part.from_text(text=prompt),
+                    types.Part.from_bytes(
+                        data=page.image_bytes,
+                        mime_type=page.mime_type or "image/png",
+                    ),
+                ]
                 resp = client.models.generate_content(
                     model=model_name,
-                    contents=[
-                        types.Part.from_text(text=prompt),
-                        types.Part.from_bytes(
-                            data=page.image_bytes,
-                            mime_type=page.mime_type or "image/png",
-                        ),
-                    ],
+                    contents=cast(types.ContentListUnionDict, contents),
                     config=types.GenerateContentConfig(**attempt_config_kwargs),
                 )
 
@@ -718,9 +728,10 @@ def translate_text_to_hebrew_with_gemini(
 
             while not success and attempts < 2:
                 try:
+                    contents = [types.Part.from_text(text=prompt)]
                     resp = client.models.generate_content(
                         model=model_name,
-                        contents=[types.Part.from_text(text=prompt)],
+                        contents=cast(types.ContentListUnionDict, contents),
                         config=types.GenerateContentConfig(
                             temperature=temperature,
                             top_k=top_k,
@@ -733,7 +744,7 @@ def translate_text_to_hebrew_with_gemini(
                     finish_message = _extract_finish_message(resp)
                     usage = _extract_response_usage(resp)
                     data = _plain_text_response_to_page_data(
-                        resp.text,
+                        resp.text or "",
                         page_index=index,
                     )
                     success = True
