@@ -238,17 +238,17 @@ class TranskribusAdapter:
                     engine_runtime=engine_runtime,
                 )
 
-            source_run = trp.find_reusable_upload_run(
+            reusable_run = trp.find_reusable_upload_run(
                 document_id=document_id,
                 collection_id=collection_id,
                 model_id=model_id,
             )
-            if source_run is not None:
+            if reusable_run is not None:
                 return self._execute_dev_recognition_only(
                     worker_env=worker_env,
                     document_id=document_id,
                     pages=pages,
-                    source_run=source_run,
+                    source_run=reusable_run,
                     username=username,
                     password=password,
                     bearer=bearer,
@@ -473,6 +473,10 @@ class TranskribusAdapter:
         recognition job id on ``run`` as each attempt starts.
         """
         max_attempts, retry_delays = self._recognition_retry_params(worker_env)
+
+        def on_recognition_started(job_id: str) -> None:
+            trp.mark_recognition_started(run, recognition_job_id=job_id)
+
         return tr.run_recognition_with_workdir_retry(
             session,
             collection_id=collection_id,
@@ -482,9 +486,7 @@ class TranskribusAdapter:
             bearer_token=bearer,
             max_attempts=max_attempts,
             retry_delays=retry_delays,
-            on_recognition_started=lambda job_id: trp.mark_recognition_started(
-                run, recognition_job_id=job_id
-            ),
+            on_recognition_started=on_recognition_started,
         )
 
     @staticmethod
