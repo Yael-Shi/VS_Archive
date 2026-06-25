@@ -1,7 +1,7 @@
 import json
 import logging
-from datetime import datetime
-from typing import Optional
+from datetime import date, datetime
+from typing import Optional, TypedDict
 
 from django.conf import settings
 from django.contrib import messages
@@ -189,6 +189,26 @@ def _bad(msg: str, status: int = 400):
     return HttpResponseBadRequest(msg)
 
 
+class _ParsedImageFileMeta(TypedDict):
+    original_name: str
+    mime_type: str
+    size_bytes: int | None
+
+
+class _CreateUploadCommon(TypedDict):
+    title: str
+    date_start: date | None
+    date_end: date | None
+    date_precision: str
+    language: str | None
+    text_input_type: str
+    visibility: str
+    admin_meta: dict
+    author_name: str
+    source_title: str
+    discovery_metadata: dict
+
+
 def _parse_int(value, default, min_value=None, max_value=None):
     try:
         n = int(value)
@@ -347,14 +367,14 @@ def _serialize_doc(d: Document, *, is_admin: bool) -> dict:
     return payload
 
 
-def _uploads_bucket_or_error():
-    bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
-    if not bucket:
-        return None, JsonResponse(
+def _uploads_bucket_or_error() -> str | JsonResponse:
+    bucket_raw = getattr(settings, "UPLOADS_BUCKET_NAME", "")
+    if not isinstance(bucket_raw, str) or not bucket_raw:
+        return JsonResponse(
             {"error": "Bucket not configured (set UPLOADS_BUCKET_NAME or S3_BUCKET)"},
             status=500,
         )
-    return bucket, None
+    return bucket_raw
 
 
 def _verify_uploaded_s3_object_metadata(
@@ -434,7 +454,9 @@ def _parse_create_upload_discovery_metadata(payload: dict):
     )
 
 
-def _parse_create_upload_common(payload: dict):
+def _parse_create_upload_common(
+    payload: dict,
+) -> tuple[_CreateUploadCommon | None, HttpResponseBadRequest | None]:
     title = (payload.get("title") or "").strip()
     if not title:
         return None, _bad("title required")
@@ -511,7 +533,7 @@ def _apply_upload_discovery_metadata(doc: Document, discovery_metadata: dict) ->
     )
 
 
-def _create_multi_image_upload(request, payload: dict, common: dict):
+def _create_multi_image_upload(request, payload: dict, common: _CreateUploadCommon):
     files_raw = payload.get("files")
     if not isinstance(files_raw, list):
         return _bad("files must be a list")
@@ -543,7 +565,7 @@ def _create_multi_image_upload(request, payload: dict, common: dict):
     if doc_type and doc_type != Document.DocType.IMAGE:
         return _bad("multi-image upload requires doc_type=IMAGE")
 
-    parsed_files = []
+    parsed_files: list[_ParsedImageFileMeta] = []
     for index, entry in enumerate(files_raw):
         if not isinstance(entry, dict):
             return _bad(f"files[{index}] must be an object")
@@ -577,9 +599,10 @@ def _create_multi_image_upload(request, payload: dict, common: dict):
             }
         )
 
-    bucket, bucket_err = _uploads_bucket_or_error()
-    if bucket_err:
-        return bucket_err
+    bucket_or_response = _uploads_bucket_or_error()
+    if isinstance(bucket_or_response, JsonResponse):
+        return bucket_or_response
+    bucket = bucket_or_response
 
     doc = create_ocr_document(
         title=common["title"],
@@ -642,7 +665,7 @@ def _create_multi_image_upload(request, payload: dict, common: dict):
     )
 
 
-def _create_single_file_upload(request, payload: dict, common: dict):
+def _create_single_file_upload(request, payload: dict, common: _CreateUploadCommon):
     doc_type = (payload.get("doc_type") or "").strip()
     if doc_type not in ("PDF", "IMAGE"):
         return _bad("doc_type must be PDF or IMAGE")
@@ -663,9 +686,10 @@ def _create_single_file_upload(request, payload: dict, common: dict):
     if metadata_err:
         return _bad(metadata_err)
 
-    bucket, bucket_err = _uploads_bucket_or_error()
-    if bucket_err:
-        return bucket_err
+    bucket_or_response = _uploads_bucket_or_error()
+    if isinstance(bucket_or_response, JsonResponse):
+        return bucket_or_response
+    bucket = bucket_or_response
 
     doc = create_ocr_document(
         title=common["title"],
@@ -719,8 +743,9 @@ def create_upload(request):
         return _bad("invalid json")
 
     common, err = _parse_create_upload_common(payload)
-    if err:
+    if err is not None:
         return err
+    assert common is not None
 
     if "files" in payload:
         return _create_multi_image_upload(request, payload, common)
@@ -794,9 +819,10 @@ def upload_complete(request, doc_id: int):
                         status=400,
                     )
 
-        bucket, bucket_err = _uploads_bucket_or_error()
-        if bucket_err:
-            return bucket_err
+        bucket_or_response = _uploads_bucket_or_error()
+        if isinstance(bucket_or_response, JsonResponse):
+            return bucket_or_response
+        bucket = bucket_or_response
 
         expected_mime = file_mime or (doc.mime_type or "")
         s3_err = _verify_uploaded_s3_object_metadata(
@@ -867,7 +893,9 @@ def upload_complete(request, doc_id: int):
     )
 
 
-def _parse_upload_success_payload(request):
+def _parse_upload_success_payload(
+    request,
+) -> tuple[dict | None, bool | None, HttpResponseBadRequest | None]:
     if request.method != "POST":
         return None, None, HttpResponseBadRequest("POST only")
 
@@ -913,8 +941,10 @@ def upload_part_complete(request, doc_id: int, order_index: int):
         return deny
 
     payload, success, err = _parse_upload_success_payload(request)
-    if err:
+    if err is not None:
         return err
+    assert payload is not None
+    assert success is not None
 
     try:
         doc = Document.objects.get(id=doc_id)
@@ -931,6 +961,7 @@ def upload_part_complete(request, doc_id: int, order_index: int):
         return _multi_image_upload_terminal_failed_response(doc)
 
     expected = doc.expected_source_file_count
+    assert expected is not None  # guaranteed when is_multi_image_document is true
     if order_index < 0 or order_index >= expected:
         return JsonResponse(
             {
@@ -981,9 +1012,10 @@ def upload_part_complete(request, doc_id: int, order_index: int):
                 status=400,
             )
 
-        bucket, bucket_err = _uploads_bucket_or_error()
-        if bucket_err:
-            return bucket_err
+        bucket_or_response = _uploads_bucket_or_error()
+        if isinstance(bucket_or_response, JsonResponse):
+            return bucket_or_response
+        bucket = bucket_or_response
 
         payload_file_mime = payload.get("file_mime")
         if isinstance(payload_file_mime, str) and payload_file_mime.strip():
@@ -1003,8 +1035,9 @@ def upload_part_complete(request, doc_id: int, order_index: int):
 
         source_file.upload_status = DocumentSourceFile.UploadStatus.UPLOADED
         source_file.upload_error = None
-        if isinstance(payload.get("file_size"), int):
-            source_file.size_bytes = payload["file_size"]
+        file_size = payload.get("file_size")
+        if isinstance(file_size, int):
+            source_file.size_bytes = file_size
         if isinstance(file_mime, str) and file_mime:
             source_file.mime_type = file_mime
         source_file.save(
@@ -1018,13 +1051,13 @@ def upload_part_complete(request, doc_id: int, order_index: int):
         )
     else:
         raw_err = payload.get("error") or "upload failed"
-        err = str(raw_err).strip() or "upload failed"
+        upload_err = str(raw_err).strip() or "upload failed"
         source_file.upload_status = DocumentSourceFile.UploadStatus.FAILED
-        source_file.upload_error = err
+        source_file.upload_error = upload_err
         source_file.save(update_fields=["upload_status", "upload_error", "updated_at"])
 
         doc.upload_status = Document.UploadStatus.FAILED
-        doc.upload_error = err
+        doc.upload_error = upload_err
         doc.processing_state_user = Document.ProcessingState.FAILED
         doc.save(
             update_fields=["upload_status", "upload_error", "processing_state_user"]
@@ -1047,8 +1080,10 @@ def upload_finalize(request, doc_id: int):
         return deny
 
     payload, success, err = _parse_upload_success_payload(request)
-    if err:
+    if err is not None:
         return err
+    assert payload is not None
+    assert success is not None
 
     try:
         doc = Document.objects.get(id=doc_id)
@@ -1066,9 +1101,9 @@ def upload_finalize(request, doc_id: int):
 
     if not success:
         raw_err = payload.get("error") or "upload finalize failed"
-        err = str(raw_err).strip() or "upload finalize failed"
+        upload_err = str(raw_err).strip() or "upload finalize failed"
         doc.upload_status = Document.UploadStatus.FAILED
-        doc.upload_error = err
+        doc.upload_error = upload_err
         doc.processing_state_user = Document.ProcessingState.FAILED
         doc.save(
             update_fields=["upload_status", "upload_error", "processing_state_user"]
@@ -1142,12 +1177,14 @@ def create_photo_upload(request):
         return JsonResponse({"error": "invalid json"}, status=400)
 
     parsed, err = parse_create_photo_upload_metadata(payload)
-    if err:
+    if err is not None:
         return JsonResponse({"error": err}, status=400)
+    assert parsed is not None
 
-    bucket, bucket_err = _uploads_bucket_or_error()
-    if bucket_err:
-        return bucket_err
+    bucket_or_response = _uploads_bucket_or_error()
+    if isinstance(bucket_or_response, JsonResponse):
+        return bucket_or_response
+    bucket = bucket_or_response
 
     archive_item, photo_content, upload_url = create_photo_upload_plan(
         bucket=bucket,
@@ -1207,9 +1244,10 @@ def photo_upload_complete(request, photo_content_id: int):
     file_mime = (payload.get("file_mime") or "").strip() or None
     client_error = (payload.get("error") or "").strip() or None
 
-    bucket, bucket_err = _uploads_bucket_or_error()
-    if bucket_err:
-        return bucket_err
+    bucket_or_response = _uploads_bucket_or_error()
+    if isinstance(bucket_or_response, JsonResponse):
+        return bucket_or_response
+    bucket = bucket_or_response
 
     photo_content, verify_err = finalize_photo_upload(
         photo_content,

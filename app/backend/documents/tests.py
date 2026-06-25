@@ -4138,6 +4138,42 @@ class UploadCompleteSourceFileTests(TestCase):
         mock_enqueue.assert_not_called()
 
 
+class UploadsBucketConfigTests(SimpleTestCase):
+    def test_returns_configured_bucket_name(self):
+        from documents.views import _uploads_bucket_or_error
+
+        with override_settings(UPLOADS_BUCKET_NAME="my-bucket"):
+            result = _uploads_bucket_or_error()
+
+        self.assertEqual(result, "my-bucket")
+
+    def test_returns_500_when_bucket_empty(self):
+        from django.http import JsonResponse
+
+        from documents.views import _uploads_bucket_or_error
+
+        with override_settings(UPLOADS_BUCKET_NAME=""):
+            result = _uploads_bucket_or_error()
+
+        self.assertIsInstance(result, JsonResponse)
+        self.assertEqual(result.status_code, 500)
+        body = json.loads(result.content)
+        self.assertIn("Bucket not configured", body["error"])
+
+    def test_returns_500_when_bucket_none(self):
+        from django.http import JsonResponse
+
+        from documents.views import _uploads_bucket_or_error
+
+        with override_settings(UPLOADS_BUCKET_NAME=None):
+            result = _uploads_bucket_or_error()
+
+        self.assertIsInstance(result, JsonResponse)
+        self.assertEqual(result.status_code, 500)
+        body = json.loads(result.content)
+        self.assertIn("Bucket not configured", body["error"])
+
+
 class UploadApiTests(TestCase):
     def setUp(self):
         from django.contrib.auth.models import User
