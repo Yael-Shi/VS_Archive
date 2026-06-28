@@ -273,11 +273,11 @@ Do not redesign retry, backoff, DLQ, or failure handling opportunistically.
 
 This is **current accepted behavior**. Whether Hebrew should permanently keep both result types is an **open product/architecture decision** for a future PR; do not change persistence in unrelated work.
 
-### Non-Hebrew documents — intentional `PARTIAL`
+### Non-Hebrew documents — translation and intentional `PARTIAL`
 
-**Worker persistence:** non-Hebrew success paths persist **`SOURCE_TEXT` only** (no real Hebrew translation yet).
+**Worker persistence:** after successful OCR/HTR, non-Hebrew documents persist OCR output to **`SOURCE_TEXT`**, then call Gemini Hebrew translation and persist **`HEBREW_TEXT`**. Translation failure persists a failed **`HEBREW_TEXT`** row (e.g. **`HEBREW_TRANSLATION_FAILED`**); it does not fail the OCR row. See **`docs/ocr-routing-reference.md`**.
 
-**Rollup expectation:** `expected_outputs` still expects **`SOURCE_TEXT` + `HEBREW_TEXT`**. Missing `HEBREW_TEXT` means the document should remain **`PARTIAL`** — this is **intentional current behavior**, not an OCR failure.
+**Rollup expectation:** `expected_outputs` expects **`SOURCE_TEXT` + `HEBREW_TEXT`**. Missing or failed **`HEBREW_TEXT`** keeps the document **`PARTIAL`** — this is **intentional current behavior**, not an OCR failure.
 
 Do not “fix” non-Hebrew `PARTIAL` opportunistically during routing, adapter, or Transkribus work unless explicitly requested.
 
