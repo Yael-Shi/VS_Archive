@@ -11,7 +11,7 @@ This file defines architecture boundaries for code changes. It is not a full pro
 
 - `docs/ai-context/decision-log.md`
 - `docs/ai-context/vs-archive-context.md`
-- `docs/ai-context/tasks/engine-selection.md`
+- `docs/ai-context/tasks/engine-selection.md` — historical task background (routing implemented; see decision-log and this file for current policy)
 
 If the code conflicts with these docs, report the conflict before editing.
 
