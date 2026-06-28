@@ -2,9 +2,9 @@
 
 Short reference for the post-cleanup backend quality bar in `app/backend`. Preserve this baseline when touching backend code.
 
-## Current intended baseline
+## Recommended manual backend baseline
 
-From `app/backend`, these checks should pass cleanly (zero errors / zero unapplied migrations):
+When you change backend code, run these checks from `app/backend`. They should pass cleanly (zero errors / zero unapplied migrations):
 
 | Check | Command |
 |-------|---------|
@@ -15,23 +15,38 @@ From `app/backend`, these checks should pass cleanly (zero errors / zero unappli
 | Django system check | `poetry run python manage.py check` |
 | Migration check | `poetry run python manage.py makemigrations --check --dry-run` |
 
+This table is the **recommended manual baseline** for backend work. It is not identical to what CI runs (see below). Docs-only or other non-backend changes do not require this full pass.
+
 **Typing split:** mypy + django-stubs (`mypy.ini`) is the source of truth for Django/ORM typing. Pyright (`pyproject.toml`, `standard` mode) provides editor/CI signal but is not ORM-aware—do not “fix” ORM-heavy code only to satisfy Pyright at mypy’s expense.
 
 **Ruff:** migrations are excluded from Ruff; do not reformat migration files for style-only churn.
 
-## CI / local-check policy
+## Local / CI check script (`scripts/local_check.sh`)
 
-- Checks are intentionally useful for **visibility** and regression awareness.
-- CI runs `scripts/local_check.sh` with `FAIL_ON_WARNINGS=0` (non-blocking warnings mode).
+CI and local development use the same script for **visibility** and regression awareness. It is a convenient full pass from the repo root—it is **not** a perfect duplicate of the manual baseline table above.
+
+From repo root:
+
+```bash
+bash scripts/local_check.sh
+```
+
+Strict mode (optional): `FAIL_ON_WARNINGS=1 bash scripts/local_check.sh`
+
+**What the script runs (related, not identical):**
+
+| Area | Checks |
+|------|--------|
+| Backend | Ruff format/check, Pyright, mypy, **pytest**, Django system check |
+| Infra | Ruff format/check, Pyright |
+| Optional | Secrets scan when `RUN_SECRETS=1` |
+
+**Differences from the manual baseline:**
+
+- Includes **pytest** and **infra** checks for broader signal; pytest is not listed in the manual baseline table and is not required for every small change (e.g. docs-only).
+- Does **not** run the **migration check** (`makemigrations --check --dry-run`); run that manually when models or migrations change.
+- In CI, `FAIL_ON_WARNINGS=0` (non-blocking warnings mode)—findings are visible but do not fail the job.
 - Do **not** make warnings, type findings, or lint findings **blocking** in CI unless that is an explicit, agreed decision later.
-- Locally, the same script is the convenient full pass (backend + infra):
-
-  ```bash
-  # from repo root
-  bash scripts/local_check.sh
-  ```
-
-  Strict mode (optional): `FAIL_ON_WARNINGS=1 bash scripts/local_check.sh`
 
 ## Run backend checks locally
 
