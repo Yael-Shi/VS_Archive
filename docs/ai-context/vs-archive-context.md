@@ -12,7 +12,7 @@ VS-Archive is a Django backend project for managing historical family documents.
 - Documents may be uploaded as IMAGE or PDF.
 - Documents have metadata (`language`, `text_input_type`, etc.).
 - OCR/HTR extracts text into `DocumentTextResult` rows.
-- Translation to Hebrew is planned; not fully implemented for non-Hebrew documents.
+- After OCR/HTR, Hebrew documents use the transcript for **`HEBREW_TEXT`**; non-Hebrew documents persist **`SOURCE_TEXT`**, then automatic Gemini Hebrew translation to **`HEBREW_TEXT`** (see **`docs/ocr-routing-reference.md`**).
 - Text results are stored separately from the document.
 - Admin review/verification matters (`verification_status` on results).
 
@@ -69,10 +69,11 @@ For Hebrew documents, the worker persists **both** `SOURCE_TEXT` and `HEBREW_TEX
 
 ## Non-Hebrew `PARTIAL`
 
-Non-Hebrew documents may remain **`PARTIAL`** because `HEBREW_TEXT` (translation) is not implemented — **intentional**, not an OCR failure.
+Non-Hebrew documents may remain **`PARTIAL`** when **`HEBREW_TEXT`** is missing or translation failed — **intentional**, not an OCR failure. **`READY`** rollup requires usable **`SOURCE_TEXT`** and **`HEBREW_TEXT`**.
 
 ## Where to read more
 
+- `docs/ocr-routing-reference.md` — current OCR/HTR routing, models, and translation behavior.
 - `docs/ai-context/decision-log.md` — durable decisions, Transkribus PR history, operational boundaries.
 - `docs/ai-context/photo-archive-items.md` — PHOTO item design/scope (planned; not implemented).
 - `.cursor/rules/architecture.mdc` — layer boundaries and contracts for code changes.

@@ -102,10 +102,10 @@ Current accepted behavior:
 
 Expected outputs:
 
-- `SOURCE_TEXT`
-- `HEBREW_TEXT`
+- `SOURCE_TEXT` (OCR/HTR output)
+- `HEBREW_TEXT` (Gemini Hebrew translation after OCR; see **`docs/ocr-routing-reference.md`**)
 
-Hebrew translation is not implemented yet, so non-Hebrew documents may intentionally remain `PARTIAL` when `HEBREW_TEXT` is missing. This is not an OCR failure.
+After successful OCR/HTR, the worker persists **`SOURCE_TEXT`**, then calls automatic Gemini Hebrew translation and persists **`HEBREW_TEXT`**. Translation failure persists a failed **`HEBREW_TEXT`** row; the document may remain **`PARTIAL`** until translation succeeds or is retried. This is not an OCR failure.
 
 ## `TranskribusRun.status`
 

@@ -464,7 +464,8 @@ Does **not** include legacy `SUCCEEDED` + `UNVERIFIED` rows. Does **not** reuse 
 
 ### Non-Hebrew `PARTIAL` (intentional)
 
-- Worker persists **`SOURCE_TEXT` only**; `expected_outputs` expects **`SOURCE_TEXT` + `HEBREW_TEXT`**. Missing translation → **`PARTIAL`**, not OCR failure. Do not fix opportunistically.
+- After successful OCR/HTR, worker persists **`SOURCE_TEXT`**, then calls Gemini Hebrew translation and persists **`HEBREW_TEXT`** (see **`docs/ocr-routing-reference.md`**). Translation failure persists a failed **`HEBREW_TEXT`** row (`HEBREW_TRANSLATION_FAILED`); manual retry via `hebrew_translation_retry`.
+- `expected_outputs` expects **`SOURCE_TEXT` + `HEBREW_TEXT`**. Missing or failed **`HEBREW_TEXT`** → **`PARTIAL`**, not OCR failure.
 
 ### Blockers before broader Transkribus use
 
@@ -811,14 +812,11 @@ Changing `Document.text_input_type` after a document has already been processed 
 Future work:
 Design an explicit reprocessing workflow.
 
-### Non-Hebrew Hebrew translation — intentional `PARTIAL` (current behavior)
-**Current behavior (accepted):**
+### Non-Hebrew Hebrew translation — intentional `PARTIAL` (historical)
 
-- `run_worker._save_htr_results` persists **`SOURCE_TEXT` only** for non-Hebrew documents.
-- `expected_outputs.expected_result_types_for_document` expects **`SOURCE_TEXT` + `HEBREW_TEXT`**.
-- Until real Hebrew translation exists, documents stay **`PARTIAL`** — **not** an OCR failure.
+> **Superseded.** Automatic Gemini Hebrew translation for non-Hebrew documents is **implemented**. See **“Non-Hebrew `PARTIAL` (intentional)”** in **“Current state — OCR/HTR and Transkribus”** above and **`docs/ocr-routing-reference.md`**.
 
-Do not fix this opportunistically unless explicitly requested (translation feature).
+**Earlier behavior (before translation):** worker persisted **`SOURCE_TEXT` only**; documents stayed **`PARTIAL`** until **`HEBREW_TEXT`** existed — **not** an OCR failure.
 
 ## Transkribus integration — PR #1 (skeleton / stable connection point)
 
