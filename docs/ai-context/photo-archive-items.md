@@ -34,7 +34,7 @@ A **`PHOTO`** archive item is a **single historical/family photograph** cataloge
 
 | Aspect | **`OCR_DOCUMENT`** | **`PHOTO`** |
 |--------|-------------------|-------------|
-| Backing model | **`Document`** (+ **`DocumentSourceFile`**, etc.) | **`PhotoContent`** (proposed; dedicated model) |
+| Backing model | **`Document`** (+ **`DocumentSourceFile`**, etc.) | **`PhotoContent`** (dedicated model) |
 | Primary payload | Scanned document / PDF for text extraction | Photograph for viewing |
 | Processing | S3 upload → SQS → worker → OCR/HTR → **`DocumentTextResult`** | Direct create/upload → store in S3 → display via presigned GET |
 | Text results | **`DocumentTextResult`** rows, review/verification lifecycle | **None** — no OCR/HTR, no worker, no Gemini/Transkribus |
@@ -82,7 +82,7 @@ ArchiveItem (item_type=PHOTO)
 
 ## 3. PhotoContent fields
 
-**Status:** Model + migration implemented in **PR2** (foundation only). Upload, S3, and display remain deferred.
+**Status:** Model + migration in **PR2**; staff create/upload (**PR3**), public archive display (**PR4**), staff metadata edit/delete (**PR5**), and staff manage status clarity (**PR6**) are implemented. Thumbnail generation, dimension extraction, S3 cleanup on delete, and re-upload/retry remain deferred.
 
 | Field | Type | Notes |
 |-------|------|-------|
@@ -300,4 +300,4 @@ Use existing shared fields only:
 |-------------|---------|------------|---------------------|
 | **`OCR_DOCUMENT`** | **`Document`** | Worker + OCR/HTR | Bridge: OCR detail redirect; archive metadata on **`ArchiveItem`** |
 | **`MANUAL_TEXT`** | **`ManualTextContent`** | None | **`/archive/`** + **`/archive/<id>/`** |
-| **`PHOTO`** (planned) | **`PhotoContent`** | None | **`/archive/`** + **`/archive/<id>/`** from V1 |
+| **`PHOTO`** | **`PhotoContent`** | None | **`/archive/`** + **`/archive/<id>/`** (V1) |

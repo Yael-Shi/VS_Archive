@@ -43,7 +43,7 @@ All upload flows call the **same** `/api/uploads/*` endpoints with the **same** 
 
 ### Out of scope (still deferred)
 
-- **`PHOTO`** item implementation
+- **`PHOTO`** integration into the unified OCR upload path (PHOTO create exists separately at **`/archive/manage/new/?item_type=photo`** via PHOTO-specific upload API — not **`/api/uploads/*`**)
 - Rich text editing
 - Legacy schema cleanup (`Document.category_event`, `Document.tags_m2m` removal)
 - Backfill of existing OCR documents to ArchiveItem discovery metadata from legacy fields
@@ -299,6 +299,6 @@ These are **not** blockers for PHOTO work:
 3. **Upload page back link** — fallback page still links to document list, not archive manage.
 4. **`metadata_status` on OCR create** — manual text create collects it; OCR upload create does not (deferred).
 5. **Legacy schema cleanup** — `Document.category_event` and `Document.tags_m2m` remain for old/transitional data; no backfill from legacy fields to ArchiveItem discovery metadata in this series.
-6. **`PHOTO`** item create flow — not implemented.
+6. **`PHOTO`** integration into unified create/upload — not implemented (PHOTO create exists separately at **`/archive/manage/new/?item_type=photo`**; remains outside **`/api/uploads/*`** OCR flow).
 7. **Rich text** — not implemented.
 8. OCR shared-field cutover follow-ups (`ocr-archiveitem-cutover.md`) — separate concern.
