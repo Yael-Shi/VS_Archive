@@ -2,7 +2,7 @@
 
 This document defines the **target direction** for public archive discovery and catalog metadata across **`ArchiveItem`** item types — categories, events, tags, search/discovery, visibility rules, and the role of **`DocumentMetadata`**.
 
-**Status:** Design only (PR0). **Does not change runtime behavior.**
+**Status:** Originated as PR0 design. Follow-up PRs implemented parts of the **`ArchiveItem`** discovery model (categories, events, tags), edit UI, public display, search, and browse pages. Not all discovery/catalog goals in this doc are complete. Current behavior and PR details: **`docs/ai-context/decision-log.md`**.
 
 **Related docs:**
 
@@ -87,9 +87,9 @@ These fields still exist on the **`OCR_DOCUMENT`** side only:
 | **`original_location`** | **`DocumentMetadata`** | Staff/admin metadata |
 | **`notes`** | **`DocumentMetadata`** | Staff/admin metadata; public vs internal split **undecided** |
 
-Staff edit **`OCR_DOCUMENT`** catalog scalar metadata and tags at **`/archive/manage/<id>/edit/`**; persistence remains on **`Document`** / **`DocumentMetadata`** with **no** **`ArchiveItem`** mirror.
+Staff edit **`OCR_DOCUMENT`** at **`/archive/manage/<id>/edit/`**. Shared archival and discovery fields persist on **`ArchiveItem`**; **`Document`** retains legacy/compatibility OCR-side mirrors where relevant. **`DocumentMetadata`** stays OCR-side operational metadata only — not the unified public discovery model.
 
-**`MANUAL_TEXT`** items have **no** equivalent category/event/tag/catalog fields yet.
+**`MANUAL_TEXT`** and **`PHOTO`** use **`ArchiveItem`**-level categories/events/tags on create/edit. Legacy OCR-side fields remain on **`Document`** only. Remaining concern is legacy OCR metadata/backfill/cross-item consistency, not absence of a shared tag model.
 
 ---
 

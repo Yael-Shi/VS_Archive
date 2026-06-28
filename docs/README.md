@@ -7,6 +7,11 @@ One-page index for developers and operators (ongoing stabilization, family-facin
 - [`docs/ai-context/vs-archive-context.md`](ai-context/vs-archive-context.md) — domain model, current OCR/HTR state, review lifecycle
 - [`.cursor/rules/architecture.mdc`](../.cursor/rules/architecture.mdc) — layer boundaries and code-change contracts
 
+## Archive items / discovery
+
+- [`docs/ai-context/photo-archive-items.md`](ai-context/photo-archive-items.md) — PHOTO V1 scope and current behavior
+- [`docs/ai-context/archive-discovery-catalog-design.md`](ai-context/archive-discovery-catalog-design.md) — ArchiveItem discovery metadata design/current notes
+
 ## OCR/HTR
 
 - [`docs/ocr-routing-reference.md`](ocr-routing-reference.md) — routing matrix, model selection, translation behavior (**current reference**)
