@@ -1,5 +1,7 @@
 # V1 Manual Checklist
 
+**Legacy scope.** This checklist covers the original V1 upload/list/backlog smoke slice only. It is **not** the full current launch QA checklist — it does not cover OCR/HTR, PHOTO, translation, or archive browse QA. For current documentation and broader QA pointers, see [`docs/README.md`](README.md).
+
 ## Upload (Desktop)
 - [ ] Open /api/ui/upload/
 - [ ] Upload PDF with only: file + title + doc_type=PDF
