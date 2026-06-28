@@ -10,7 +10,7 @@ One-page index for developers and operators (ongoing stabilization, family-facin
 ## OCR/HTR
 
 - [`docs/ocr-routing-reference.md`](ocr-routing-reference.md) — routing matrix, model selection, translation behavior (**current reference**)
-- [`docs/ai-context/decision-log.md`](ai-context/decision-log.md) — durable decisions; see **“Current state — OCR/HTR and Transkribus”**
+- [`docs/ai-context/decision-log.md`](ai-context/decision-log.md#current-state--ocrhtr-and-transkribus-read-this-first) — durable decisions; see **“Current state — OCR/HTR and Transkribus”**
 - [`docs/ai-context/tasks/engine-selection.md`](ai-context/tasks/engine-selection.md) — historical task background (routing is implemented)
 
 ## Processing semantics
