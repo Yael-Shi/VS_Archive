@@ -1,6 +1,6 @@
 # VS-Archive documentation map
 
-One-page index for developers and operators approaching launch. The root [`README.md`](../README.md) still describes the original V1 upload slice; use the links below for current OCR/HTR, processing, and ops behavior.
+One-page index for developers and operators (ongoing stabilization, family-facing QA, and ops). The root [`README.md`](../README.md) still describes the original V1 upload slice; use the links below for current OCR/HTR, processing, and ops behavior.
 
 ## Start here
 
