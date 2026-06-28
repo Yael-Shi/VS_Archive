@@ -1,36 +1,36 @@
 # VS-Archive
 
-## Project status
-**Current version:** V1 (closed)
+Django/AWS digital archive for historical and family archive materials.
 
-V1 provides a minimal, end-to-end vertical slice:
-- Browser upload (Desktop + Mobile)
-- Inline document viewing (PDF / Image)
-- Document list with basic filtering
-- Admin backlog for metadata completion
-- Server-rendered UI behind authentication
+## Current status
 
-Advanced processing (OCR / translation / entity extraction) is planned for V2+.
+- **Archive items** — OCR documents, manual text items, and PHOTO items (unified archive at `/archive/`)
+- **OCR/HTR** — implemented for configured routes (Gemini default; Transkribus for Hebrew handwritten when enabled)
+- **Hebrew translation** — non-Hebrew OCR output can be translated to Hebrew via Gemini
+- **Staff workflows** — upload, processing, transcription review, metadata edit, and archive browse/manage
+- **Quality baseline** — Ruff, mypy, Pyright, Django `check`, and migration checks are currently clean
 
-## V1 Scope
+Not every planned capability is complete. See the documentation map for scope, deferred work, and operational detail.
+
+## Documentation
+
+**[`docs/README.md`](docs/README.md)** — current documentation map (OCR/HTR routing, processing semantics, deploy/ops, quality baseline).
+
+## Key URLs
+
+- Archive browse: `/archive/`
+- Archive manage: `/archive/manage/`
+- Upload UI (OCR fallback): `/api/ui/upload/`
+- Documents list: `/api/ui/documents/`
+- Django admin: `/admin/`
+
+## Historical — original V1 slice (closed)
+
+The first vertical slice delivered browser upload, inline viewing, document list, admin backlog, and server-rendered UI behind authentication. The bullets below describe that original scope, not the full current system:
+
 - Minimal UI (server-rendered) behind login
-- Upload via browser using: create → presigned PUT → complete
+- Upload via browser: create → presigned PUT → complete
 - Required fields on upload: title, doc_type
 - Inline viewing via presigned GET URLs
 - Admin backlog for documents needing metadata completion
-- Admins can always edit metadata (even after completion)
-- Correction requests managed via Django admin
-
-## Key URLs
-- Upload UI: /api/ui/upload/
-- Documents list: /api/ui/documents/
-- Document detail: /api/ui/documents/<id>/
-- Admin backlog: /api/ui/admin/backlog/
-- Django admin: /admin/
-
-## Known limitations
-- OCR / HTR / translation are not implemented in V1 (planned for V2)
-- Mobile camera capture is best-effort (device/browser dependent)
-
-## Documentation
-- V1 manual checklist: docs/V1_CHECKLIST.md
+- Manual QA checklist: `docs/V1_CHECKLIST.md`
