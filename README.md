@@ -20,6 +20,7 @@ Not every planned capability is complete. See the documentation map for scope, d
 
 - Archive browse: `/archive/`
 - Archive manage: `/archive/manage/`
+- Staff create (unified): `/archive/manage/new/`
 - Upload UI (OCR fallback): `/api/ui/upload/`
 - Documents list: `/api/ui/documents/`
 - Django admin: `/admin/`
