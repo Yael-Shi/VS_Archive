@@ -106,7 +106,7 @@ The archive is becoming a **discovery interface**, not only an OCR processing UI
 **Current gaps:**
 
 1. **`category_event`** is a **legacy transitional field** that mixes category and event in one string on **`Document`**.
-2. **`Document.tags_m2m`** exists only on **`OCR_DOCUMENT`**; **`MANUAL_TEXT`** and future **`PHOTO`** items have no shared tag model.
+2. **`Document.tags_m2m`** and **`Document.category_event`** remain **legacy OCR-side-only** fields. **`ArchiveItem`**-level categories/events/tags exist for new/edited items, including **`MANUAL_TEXT`** and **`PHOTO`**; the remaining gap is legacy OCR metadata backfill and cross-item discovery consistency, not absence of a shared tag model.
 3. **`DocumentMetadata`** is **OCR-side** and was introduced for staff/admin operational metadata — it must **not** become the unified public discovery model as the archive grows cross-item.
 4. **`author_name`** / **`source_title`** live on **`ArchiveItem`** but are not yet part of a unified discovery taxonomy.
 5. **Public discovery** must preserve the same **visibility/access policy** as **`/archive/`** — no leakage of private items, hidden counts, or internal metadata.
