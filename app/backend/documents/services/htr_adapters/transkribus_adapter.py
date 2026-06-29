@@ -4,7 +4,7 @@ import logging
 import requests
 from typing import List, Optional
 
-from documents.models import DocumentTextResult, TranskribusRun
+from documents.models import Document, DocumentTextResult, TranskribusRun
 from documents.services import transkribus_engine as tr
 from documents.services.htr_adapters.base import (
     EnginePermanentError,
@@ -385,6 +385,8 @@ class TranskribusAdapter:
         model_id: str,
         engine_runtime: str,
     ) -> HtrResult:
+        upload_title = self._resolve_upload_title(document_id=document_id)
+
         run = trp.start_run(
             document_id=document_id,
             mode=TranskribusRun.Mode.UPLOAD_CREATED,
@@ -399,6 +401,7 @@ class TranskribusAdapter:
                     session,
                     collection_id=collection_id,
                     pages=pages,
+                    title=upload_title,
                 )
                 trp.mark_uploaded(
                     run,
@@ -441,6 +444,29 @@ class TranskribusAdapter:
             )
             trp.mark_failed(run, error_code=error_code, error_details=str(exc))
             raise EnginePermanentError(str(exc)) from exc
+
+    @staticmethod
+    def _resolve_upload_title(*, document_id: int) -> str:
+        try:
+            document = (
+                Document.objects.select_related("archive_item")
+                .only("id", "title", "archive_item__title")
+                .get(pk=document_id)
+            )
+        except Document.DoesNotExist as exc:
+            raise EnginePermanentError(
+                f"Transkribus upload title lookup failed: document_id={document_id} does not exist."
+            ) from exc
+
+        archive_title = str(document.archive_item.title or "").strip()
+        if archive_title:
+            return archive_title
+
+        document_title = str(document.title or "").strip()
+        if document_title:
+            return document_title
+
+        return f"VS-Archive document {document_id}"
 
     @staticmethod
     def _recognition_retry_params(worker_env: object) -> tuple[int, tuple[int, int]]:

@@ -380,6 +380,15 @@ class TranskribusAdapterTests(TestCase):
             )
         self.assertIn("worker_env", str(ctx.exception).lower())
 
+    def test_resolve_upload_title_prefers_archive_item_title_and_preserves_hebrew(self):
+        doc = self._create_document()
+        doc.archive_item.title = "  מכתב משפחתי מתל אביב (עברית)  "
+        doc.archive_item.save(update_fields=["title"])
+
+        title = TranskribusAdapter._resolve_upload_title(document_id=doc.id)
+
+        self.assertEqual(title, "מכתב משפחתי מתל אביב (עברית)")
+
     def test_execute_fails_fast_when_no_dev_mode_enabled(self):
         from documents.services.env_validation import WorkerEnvConfig
 
