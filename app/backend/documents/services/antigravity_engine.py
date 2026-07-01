@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -21,6 +22,11 @@ DEFAULT_POLL_SECONDS = 5.0
 DEFAULT_TIMEOUT_SECONDS = 300.0
 COMPLETED_STATUS = "completed"
 IN_PROGRESS_STATUS = "in_progress"
+
+_IMAGE_HEADING_RE = re.compile(
+    r"^\[IMAGE\s+(\d+)\s*:\s*[^\]]+\]\s*$",
+    re.MULTILINE,
+)
 
 
 class AntigravityError(RuntimeError):
@@ -72,6 +78,28 @@ def _raise_for_api_error(response: requests.Response) -> None:
     except ValueError:
         pass
     raise AntigravityError(f"HTTP {response.status_code}: {message}")
+
+
+def normalize_antigravity_image_headings(text: str) -> str:
+    """
+    Strip or replace Antigravity multi-image section headings for stored OCR text.
+
+    Single-image output drops the ``[IMAGE N: filename]`` line entirely.
+    Multi-image output replaces each heading with ``עמוד N`` (no filenames).
+    """
+    headings = list(_IMAGE_HEADING_RE.finditer(text))
+    if not headings:
+        return text
+    if len(headings) == 1:
+        match = headings[0]
+        start, end = match.span()
+        if end < len(text) and text[end] == "\n":
+            end += 1
+        return text[:start] + text[end:]
+    return _IMAGE_HEADING_RE.sub(
+        lambda match: f"עמוד {int(match.group(1))}",
+        text,
+    )
 
 
 def output_text_from_steps(steps: list[dict[str, Any]] | None) -> str | None:
@@ -243,4 +271,7 @@ def transcribe_pages_with_antigravity(
             "Antigravity interaction completed with no OCR output text"
         )
 
-    return AntigravityResult(text=text, engine_name=agent_id)
+    return AntigravityResult(
+        text=normalize_antigravity_image_headings(text),
+        engine_name=agent_id,
+    )
