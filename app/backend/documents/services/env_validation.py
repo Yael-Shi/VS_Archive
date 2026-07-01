@@ -16,6 +16,7 @@ from documents.services.gemini_defaults import (
     DEFAULT_GEMINI_TOP_P,
 )
 from documents.services.gemini_models import DEFAULT_HEBREW_PRINTED_GEMINI_MODEL
+from documents.services.antigravity_defaults import DEFAULT_ANTIGRAVITY_AGENT_ID
 
 
 class EnvConfigError(RuntimeError):
@@ -234,6 +235,10 @@ class WorkerEnvConfig:
         default=DEFAULT_HEBREW_PRINTED_GEMINI_MODEL
     )
 
+    # Antigravity Interactions OCR (Arabic printed; routing not enabled yet)
+    enable_antigravity_arabic_printed: bool = field(default=False)
+    antigravity_agent_id: str = field(default=DEFAULT_ANTIGRAVITY_AGENT_ID)
+
 
 def validate_required_env() -> WorkerEnvConfig:
     enable_hybrid_htr = _get_bool("ENABLE_HYBRID_HTR", default=False)
@@ -337,6 +342,10 @@ def validate_required_env() -> WorkerEnvConfig:
     gemini_hebrew_printed_model = (
         _get("GEMINI_HEBREW_PRINTED_MODEL") or DEFAULT_HEBREW_PRINTED_GEMINI_MODEL
     )
+    enable_antigravity_arabic_printed = _get_bool(
+        "ENABLE_ANTIGRAVITY_ARABIC_PRINTED", default=False
+    )
+    antigravity_agent_id = _get("ANTIGRAVITY_AGENT_ID") or DEFAULT_ANTIGRAVITY_AGENT_ID
 
     if enable_hybrid_htr and not (
         transkribus_api_token or (transkribus_username and transkribus_password)
@@ -384,4 +393,6 @@ def validate_required_env() -> WorkerEnvConfig:
         transkribus_recognition_only_retry=transkribus_recognition_only_retry,
         enable_transkribus_hebrew_handwritten=enable_transkribus_hebrew_handwritten,
         gemini_hebrew_printed_model=gemini_hebrew_printed_model,
+        enable_antigravity_arabic_printed=enable_antigravity_arabic_printed,
+        antigravity_agent_id=antigravity_agent_id,
     )
