@@ -32,6 +32,18 @@ ANTIGRAVITY_AGENT = "antigravity-preview-05-2026"
 DEFAULT_MODEL = "gemini-2.5-flash-lite"
 INTERACTIONS_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/interactions"
 INTERACTIONS_API_REVISION = "2026-05-20"
+IMAGE_SUFFIXES = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".gif",
+    ".bmp",
+    ".tif",
+    ".tiff",
+    ".heic",
+    ".heif",
+}
 
 
 class SmokeError(RuntimeError):
@@ -117,12 +129,13 @@ def _create_interaction(
     api_key: str,
     *,
     payload: dict[str, Any],
+    timeout_seconds: float = 120,
 ) -> dict[str, Any]:
     response = requests.post(
         INTERACTIONS_BASE_URL,
         headers=_request_headers(api_key),
         json=payload,
-        timeout=120,
+        timeout=timeout_seconds,
     )
     _raise_for_api_error(response)
     body = response.json()
@@ -212,41 +225,110 @@ def _image_mime_type(path: Path) -> str:
     return mime or "application/octet-stream"
 
 
-def _run_antigravity_image_smoke(
+def _images_from_dir(image_dir: Path) -> list[Path]:
+    if not image_dir.is_dir():
+        raise SmokeError(f"Image directory not found: {image_dir}")
+    paths = sorted(
+        p
+        for p in image_dir.iterdir()
+        if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES
+    )
+    if not paths:
+        raise SmokeError(f"No images found in {image_dir}")
+    return paths
+
+
+def _resolve_image_paths(
+    *,
+    cli_images: list[Path],
+    image_dir: Path | None,
+) -> list[Path]:
+    paths: list[Path] = []
+    if image_dir is not None:
+        paths.extend(_images_from_dir(image_dir))
+    paths.extend(cli_images)
+    if not paths:
+        raise SmokeError("No images specified")
+    for path in paths:
+        if not path.is_file():
+            raise SmokeError(f"Image not found: {path}")
+    return paths
+
+
+def _antigravity_ocr_prompt(image_paths: list[Path]) -> str:
+    filenames = [path.name for path in image_paths]
+    image_order = "\n".join(
+        f"- IMAGE {index}: {name}" for index, name in enumerate(filenames, start=1)
+    )
+    heading_examples = "\n\n".join(
+        f"[IMAGE {index}: {name}]\n<transcription for image {index}>"
+        for index, name in enumerate(filenames, start=1)
+    )
+    return (
+        "You are transcribing historical archive document page images.\n"
+        "TASK: OCR/transcription only. Do not translate.\n"
+        "RULES:\n"
+        "- Preserve Arabic, Hebrew, and Latin scripts exactly as written.\n"
+        "- Preserve names, dates, page numbers, document numbers, and punctuation.\n"
+        "- Include cover/catalog page text when present.\n"
+        "- Include occasional handwritten additions when visible.\n"
+        "- Prefer [UNCLEAR] over inventing confident text.\n"
+        "- Do not browse the web, run code, or use tools unless strictly needed for OCR.\n"
+        "- Reply with plain text only.\n"
+        "\n"
+        f"Images are attached in this order ({len(filenames)} total):\n"
+        f"{image_order}\n"
+        "\n"
+        "Return one section per image, in order, using headings exactly like:\n"
+        f"{heading_examples}"
+    )
+
+
+def _build_multimodal_input(
+    prompt: str, image_paths: list[Path]
+) -> list[dict[str, Any]]:
+    input_blocks: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+    for path in image_paths:
+        input_blocks.append(
+            {
+                "type": "image",
+                "data": base64.b64encode(path.read_bytes()).decode("ascii"),
+                "mime_type": _image_mime_type(path),
+            }
+        )
+    return input_blocks
+
+
+def _run_antigravity_ocr_smoke(
     api_key: str,
     *,
-    image_path: Path,
-    prompt: str,
+    label: str,
+    image_paths: list[Path],
     background: bool,
     poll_seconds: float,
     timeout_seconds: float,
 ) -> dict[str, Any]:
-    if not image_path.is_file():
-        raise SmokeError(f"Image not found: {image_path}")
-    image_bytes = image_path.read_bytes()
-    mime_type = _image_mime_type(image_path)
+    total_bytes = sum(path.stat().st_size for path in image_paths)
+    names = ", ".join(path.name for path in image_paths)
     print(
-        f"[antigravity-image] Creating multimodal interaction "
-        f"(file={image_path.name!r}, bytes={len(image_bytes)}, mime={mime_type!r})"
+        f"[{label}] Creating multimodal interaction "
+        f"(images={len(image_paths)}, bytes={total_bytes}, files=[{names}])"
     )
     interaction = _create_interaction(
         api_key,
         payload={
             "agent": ANTIGRAVITY_AGENT,
-            "input": [
-                {"type": "text", "text": prompt},
-                {
-                    "type": "image",
-                    "data": base64.b64encode(image_bytes).decode("ascii"),
-                    "mime_type": mime_type,
-                },
-            ],
+            "input": _build_multimodal_input(
+                _antigravity_ocr_prompt(image_paths),
+                image_paths,
+            ),
             "environment": "remote",
             "background": background,
         },
+        timeout_seconds=max(120.0, 30.0 * len(image_paths)),
     )
     if background or interaction.get("status") == "in_progress":
-        print(f"[antigravity-image] Polling interaction id={interaction.get('id')!r}")
+        print(f"[{label}] Polling interaction id={interaction.get('id')!r}")
         interaction = _poll_until_done(
             api_key,
             interaction,
@@ -266,6 +348,26 @@ def _print_result(label: str, interaction: dict[str, Any]) -> None:
         raise SmokeError(f"{label} finished with status={status!r}")
 
 
+def _print_ocr_summary(
+    label: str,
+    interaction: dict[str, Any],
+    image_paths: list[Path],
+) -> None:
+    summary = _summarize_interaction(interaction)
+    print(f"\n== {label} summary ==")
+    print(f"interaction_id: {summary['id']}")
+    print(f"status: {summary['status']}")
+    print(f"step_count: {summary['step_count']}")
+    print(
+        f"images: {len(image_paths)} ({', '.join(path.name for path in image_paths)})"
+    )
+    preview = summary.get("output_text_preview")
+    print(f"output_preview:\n{preview or '(empty)'}")
+    status = summary.get("status")
+    if status not in {"completed", None}:
+        raise SmokeError(f"{label} finished with status={status!r}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Smoke-test GEMINI_API_KEY against Gemini Interactions / Antigravity."
@@ -278,9 +380,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--check",
-        choices=("model", "antigravity", "antigravity-image", "all"),
+        choices=(
+            "model",
+            "antigravity",
+            "antigravity-image",
+            "antigravity-images",
+            "all",
+        ),
         default="model",
-        help="model=fast Interactions API check; antigravity*=managed agent.",
+        help="model=fast check; antigravity*=managed agent; *-image(s)=OCR spike.",
     )
     parser.add_argument(
         "--model",
@@ -289,8 +397,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--image",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="Image path; repeat for multiple images (antigravity-images).",
+    )
+    parser.add_argument(
+        "--image-dir",
         type=Path,
-        help="Local image path for --check antigravity-image.",
+        help="Directory of images, read in filename sort order (antigravity-images).",
     )
     parser.add_argument(
         "--background",
@@ -322,21 +437,30 @@ def main(argv: list[str] | None = None) -> int:
     antigravity_prompt = (
         "Reply with exactly: antigravity-ok. Do not browse the web or run code."
     )
-    image_prompt = (
-        "Transcribe all visible text in the image faithfully. "
-        "Reply with plain text only."
-    )
 
     checks: list[str]
     if args.check == "all":
         checks = ["model", "antigravity"]
-        if args.image:
+        if args.image_dir or len(args.image) > 1:
+            checks.append("antigravity-images")
+        elif args.image:
             checks.append("antigravity-image")
     else:
         checks = [args.check]
 
-    if "antigravity-image" in checks and not args.image:
-        raise SmokeError("--image is required for --check antigravity-image")
+    if args.check == "antigravity-image":
+        if args.image_dir is not None:
+            raise SmokeError(
+                "--check antigravity-image does not support --image-dir; "
+                "use --check antigravity-images"
+            )
+        if len(args.image) != 1:
+            raise SmokeError("--check antigravity-image requires exactly one --image")
+
+    if "antigravity-images" in checks and not args.image and not args.image_dir:
+        raise SmokeError(
+            "--check antigravity-images requires --image and/or --image-dir"
+        )
 
     try:
         if "model" in checks:
@@ -356,16 +480,34 @@ def main(argv: list[str] | None = None) -> int:
             _print_result("antigravity", interaction)
 
         if "antigravity-image" in checks:
-            assert args.image is not None
-            interaction = _run_antigravity_image_smoke(
+            image_paths = _resolve_image_paths(
+                cli_images=args.image,
+                image_dir=None,
+            )
+            interaction = _run_antigravity_ocr_smoke(
                 api_key,
-                image_path=args.image,
-                prompt=image_prompt,
+                label="antigravity-image",
+                image_paths=image_paths,
                 background=args.background,
                 poll_seconds=args.poll_seconds,
                 timeout_seconds=args.timeout_seconds,
             )
-            _print_result("antigravity-image", interaction)
+            _print_ocr_summary("antigravity-image", interaction, image_paths)
+
+        if "antigravity-images" in checks:
+            image_paths = _resolve_image_paths(
+                cli_images=args.image,
+                image_dir=args.image_dir,
+            )
+            interaction = _run_antigravity_ocr_smoke(
+                api_key,
+                label="antigravity-images",
+                image_paths=image_paths,
+                background=args.background,
+                poll_seconds=args.poll_seconds,
+                timeout_seconds=args.timeout_seconds,
+            )
+            _print_ocr_summary("antigravity-images", interaction, image_paths)
     except Exception as exc:
         print(f"\nSmoke test failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1

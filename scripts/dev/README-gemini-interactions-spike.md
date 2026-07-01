@@ -11,7 +11,7 @@ As of the [May 2026 breaking-change migration](https://ai.google.dev/gemini-api/
 - REST calls should send **`Api-Revision: 2026-05-20`** (required before the default flip; harmless after).
 - **`google-genai` ≥ 2.0.0** is required if you use the Python SDK for Interactions. Production OCR still uses **`generate_content`** on **`google-genai` 1.x** and is unaffected.
 
-This spike uses **`requests`** + the REST schema so it works **without bumping `poetry.lock`**. When Interactions is integrated into production later, plan a separate **`google-genai` ≥ 2.0.0** upgrade (Interactions-only breaking change; `generate_content` unchanged per [release notes](https://github.com/googleapis/python-genai/releases/tag/v2.0.0)).
+This spike uses **`requests`** + the REST schema so it works **without bumping `poetry.lock`**.
 
 ## What this verifies
 
@@ -19,13 +19,12 @@ This spike uses **`requests`** + the REST schema so it works **without bumping `
 |-------|-------------|---------|
 | `model` | `POST /v1beta/interactions` with `model` | Fastest key + Interactions API smoke test |
 | `antigravity` | Same endpoint with `agent=antigravity-preview-05-2026` | Managed Antigravity agent (remote sandbox) |
-| `antigravity-image` | Antigravity + multimodal `input` | Local image → inline base64 OCR spike |
+| `antigravity-image` | Antigravity + one image | Single-image OCR spike |
+| `antigravity-images` | Antigravity + multiple images in one interaction | Multi-image OCR spike |
 
 Default model for the fast check: **`gemini-2.5-flash-lite`** (cheap/fast).
 
 Auth: **`GEMINI_API_KEY`** via `x-goog-api-key`.
-
-Production OCR today: **`client.models.generate_content`** in `documents/services/gemini_engine.py` — separate endpoint and contract.
 
 ## Prerequisites
 
@@ -46,15 +45,68 @@ poetry run python ../../scripts/dev/gemini_interactions_smoke.py \
   --env-file .env --check antigravity --background
 ```
 
-Antigravity + local image OCR spike:
+## Antigravity OCR spikes
+
+OCR prompt rules (all image modes):
+
+- OCR/transcription only — **no translation**
+- Preserve Arabic, Hebrew, and Latin scripts
+- Preserve names, dates, page numbers, document numbers, punctuation
+- Include cover/catalog page text and occasional handwritten additions
+- Prefer **`[UNCLEAR]`** over invented text
+- Output one section per image with headings like **`[IMAGE 1: filename.png]`**
+
+Always use **`--background`** for image OCR (Antigravity can take minutes).
+
+### One image
 
 ```bash
 poetry run python ../../scripts/dev/gemini_interactions_smoke.py \
   --env-file .env --check antigravity-image \
-  --image /path/to/page.png --background
+  --image /path/to/page1.png --background
 ```
 
-The script prints interaction `id`, `status`, and a short text preview from **`steps`** — **never the API key**.
+### Two images (one interaction)
+
+```bash
+poetry run python ../../scripts/dev/gemini_interactions_smoke.py \
+  --env-file .env --check antigravity-images \
+  --image /path/to/page1.png \
+  --image /path/to/page2.png \
+  --background
+```
+
+### Full directory (filename sort order)
+
+Reads `*.png`, `*.jpg`, `*.jpeg`, `*.webp`, `*.gif`, `*.bmp`, `*.tif`, `*.tiff`, `*.heic`, `*.heif` from the directory, sorted by filename:
+
+```bash
+poetry run python ../../scripts/dev/gemini_interactions_smoke.py \
+  --env-file .env --check antigravity-images \
+  --image-dir /path/to/pages/ --background
+```
+
+Combine directory + extra CLI images (directory files first, then `--image` paths in order):
+
+```bash
+poetry run python ../../scripts/dev/gemini_interactions_smoke.py \
+  --env-file .env --check antigravity-images \
+  --image-dir /path/to/pages/ \
+  --image /path/to/extra-cover.png \
+  --background
+```
+
+### Output summary
+
+Image OCR modes print a concise summary:
+
+- `interaction_id`
+- `status`
+- `step_count`
+- `images` (count and filenames)
+- `output_preview` (first 500 characters of transcription)
+
+The script never prints the API key.
 
 ## Equivalent curl (text-only, new schema)
 
@@ -69,74 +121,9 @@ curl -sS -X POST "https://generativelanguage.googleapis.com/v1beta/interactions"
   }'
 ```
 
-Response shape (read text from `steps`, not `outputs`):
-
-```json
-{
-  "id": "int_123",
-  "status": "completed",
-  "steps": [
-    {
-      "type": "model_output",
-      "content": [{ "type": "text", "text": "interactions-api-ok" }]
-    }
-  ]
-}
-```
-
-## Equivalent curl (Antigravity text-only)
-
-```bash
-curl -sS -X POST "https://generativelanguage.googleapis.com/v1beta/interactions" \
-  -H "Content-Type: application/json" \
-  -H "x-goog-api-key: $GEMINI_API_KEY" \
-  -H "Api-Revision: 2026-05-20" \
-  -d '{
-    "agent": "antigravity-preview-05-2026",
-    "input": "Reply with exactly: antigravity-ok. Do not browse the web or run code.",
-    "environment": "remote"
-  }'
-```
-
-For long-running agent work, add `"background": true` and poll `GET /v1beta/interactions/{id}` with the same headers.
-
-## Local image files for OCR (Antigravity path)
-
-Antigravity multimodal input supports **`text` + `image`**. Images are inline base64 in `input`:
-
-```json
-{
-  "agent": "antigravity-preview-05-2026",
-  "input": [
-    {"type": "text", "text": "Transcribe all visible text faithfully."},
-    {
-      "type": "image",
-      "mime_type": "image/png",
-      "data": "<BASE64_BYTES>"
-    }
-  ],
-  "environment": "remote"
-}
-```
-
-**Not the same as production today:** `gemini_engine.transcribe_pages_with_gemini` uses `types.Part.from_bytes(...)` on **`generate_content`**. A future Interactions integration would be a new adapter path.
-
-### Alternative: Interactions with `model` (non-agent)
-
-```json
-{
-  "model": "gemini-2.5-flash-lite",
-  "input": [
-    {"type": "text", "text": "Transcribe this document page."},
-    {"type": "image", "mime_type": "image/png", "data": "<BASE64_BYTES>"}
-  ]
-}
-```
-
 ## Expected outcomes / failures
 
 - **`status: completed`** + `model_output` step with text — key works.
-- Error mentioning legacy schema / upgrade to **`google-genai` ≥ 2.0.0** — you are on SDK 1.x calling Interactions; use this REST spike or upgrade the SDK for Interactions-only code paths.
 - **403 / PERMISSION_DENIED** — key may work for `generate_content` but not Interactions/Antigravity preview.
 - **Long `in_progress`** — normal for `environment=remote`; use `--background`.
 
