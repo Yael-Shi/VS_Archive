@@ -76,6 +76,19 @@ poetry run python ../../scripts/dev/gemini_interactions_smoke.py \
   --background
 ```
 
+Write the full transcription to a file (terminal still shows a 500-char preview):
+
+```bash
+poetry run python ../../scripts/dev/gemini_interactions_smoke.py \
+  --env-file .env --check antigravity-images \
+  --image /path/to/page1.png \
+  --image /path/to/page2.png \
+  --background \
+  --output-file /path/to/ocr-result.md
+```
+
+The output file contains extracted OCR text only — not API keys or raw JSON.
+
 ### Full directory (filename sort order)
 
 Reads `*.png`, `*.jpg`, `*.jpeg`, `*.webp`, `*.gif`, `*.bmp`, `*.tif`, `*.tiff`, `*.heic`, `*.heif` from the directory, sorted by filename:
@@ -105,6 +118,7 @@ Image OCR modes print a concise summary:
 - `step_count`
 - `images` (count and filenames)
 - `output_preview` (first 500 characters of transcription)
+- `output_file` path and byte count when `--output-file` is set
 
 The script never prints the API key.
 

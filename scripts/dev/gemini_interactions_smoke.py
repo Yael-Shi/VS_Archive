@@ -352,8 +352,14 @@ def _print_ocr_summary(
     label: str,
     interaction: dict[str, Any],
     image_paths: list[Path],
+    *,
+    output_file: Path | None = None,
 ) -> None:
     summary = _summarize_interaction(interaction)
+    full_text = _output_text_from_steps(interaction.get("steps"))
+    if not (full_text or "").strip():
+        raise SmokeError(f"{label}: no OCR output text found in interaction steps")
+
     print(f"\n== {label} summary ==")
     print(f"interaction_id: {summary['id']}")
     print(f"status: {summary['status']}")
@@ -363,6 +369,10 @@ def _print_ocr_summary(
     )
     preview = summary.get("output_text_preview")
     print(f"output_preview:\n{preview or '(empty)'}")
+    if output_file is not None:
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(full_text, encoding="utf-8")
+        print(f"output_file: {output_file} ({len(full_text)} chars written)")
     status = summary.get("status")
     if status not in {"completed", None}:
         raise SmokeError(f"{label} finished with status={status!r}")
@@ -398,6 +408,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--image",
         action="append",
+        type=Path,
         default=[],
         metavar="PATH",
         help="Image path; repeat for multiple images (antigravity-images).",
@@ -423,6 +434,11 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=300.0,
         help="Max wait time when polling Antigravity interactions.",
+    )
+    parser.add_argument(
+        "--output-file",
+        type=Path,
+        help="Write full OCR transcription text to this file (antigravity-image(s) only).",
     )
     args = parser.parse_args(argv)
 
@@ -462,6 +478,14 @@ def main(argv: list[str] | None = None) -> int:
             "--check antigravity-images requires --image and/or --image-dir"
         )
 
+    if args.output_file is not None and not (
+        "antigravity-image" in checks or "antigravity-images" in checks
+    ):
+        raise SmokeError(
+            "--output-file is only supported for --check antigravity-image "
+            "or antigravity-images"
+        )
+
     try:
         if "model" in checks:
             interaction = _run_model_smoke(
@@ -492,7 +516,12 @@ def main(argv: list[str] | None = None) -> int:
                 poll_seconds=args.poll_seconds,
                 timeout_seconds=args.timeout_seconds,
             )
-            _print_ocr_summary("antigravity-image", interaction, image_paths)
+            _print_ocr_summary(
+                "antigravity-image",
+                interaction,
+                image_paths,
+                output_file=args.output_file,
+            )
 
         if "antigravity-images" in checks:
             image_paths = _resolve_image_paths(
@@ -507,7 +536,12 @@ def main(argv: list[str] | None = None) -> int:
                 poll_seconds=args.poll_seconds,
                 timeout_seconds=args.timeout_seconds,
             )
-            _print_ocr_summary("antigravity-images", interaction, image_paths)
+            _print_ocr_summary(
+                "antigravity-images",
+                interaction,
+                image_paths,
+                output_file=args.output_file,
+            )
     except Exception as exc:
         print(f"\nSmoke test failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
