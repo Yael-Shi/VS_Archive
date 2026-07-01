@@ -15,9 +15,9 @@ Concise reference for current OCR/HTR route selection, engine dispatch, and rela
 | French (`fr`) | Handwritten | **Gemini** | `handwritten` |
 | French (`fr`) | Printed | **Gemini** | `printed` |
 | Arabic (`ar`) | Handwritten | **Gemini** | `handwritten` |
-| Arabic (`ar`) | Printed | **Gemini** | `printed` |
+| Arabic (`ar`) | Printed | **Gemini** (default) or **Antigravity** (see gate below) | `printed` |
 
-Static Gemini routes live in `OCR_ROUTES`. Hebrew handwritten is **not** in that table; it is handled separately.
+Static Gemini routes live in `OCR_ROUTES`. Hebrew handwritten and Arabic printed (when Antigravity is enabled) are **not** selected from that table alone; they are handled separately.
 
 ### Hebrew handwritten gate
 
@@ -26,13 +26,35 @@ Static Gemini routes live in `OCR_ROUTES`. Hebrew handwritten is **not** in that
 
 There is **no** Gemini↔Transkribus fallback in code. `ENABLE_HYBRID_HTR` only validates Transkribus credentials in env validation; it does **not** change routing.
 
+### Arabic printed gate (Antigravity)
+
+Antigravity is a **real** Gemini Interactions managed-agent adapter (`AntigravityAdapter`, `antigravity_engine.py`). It is **not** broad production-default routing. Current approved routing scope is **Arabic printed only**, behind **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED`**.
+
+- `ENABLE_ANTIGRAVITY_ARABIC_PRINTED=false` (default, safe state) → `ar` + `PRINTED` uses the existing **Gemini** route from `OCR_ROUTES`.
+- `ENABLE_ANTIGRAVITY_ARABIC_PRINTED=true` → route to **Antigravity** (`ARABIC_PRINTED_ANTIGRAVITY_ROUTE`).
+- `ar` + `HANDWRITTEN` is **not** routed to Antigravity; it remains **Gemini**.
+
+Route activation is env-gated in `select_ocr_route` via `_env_bool` (same pattern as Hebrew handwritten → Transkribus). `AntigravityAdapter` also checks `worker_env.enable_antigravity_arabic_printed` as a **second safety gate** before calling the Interactions API.
+
+- `ANTIGRAVITY_AGENT_ID` defaults to `antigravity-preview-05-2026` (override via env / `WorkerEnvConfig`).
+- Auth uses the existing **`GEMINI_API_KEY`** (Interactions API).
+
+**Production rollout (two phases):**
+
+1. Deploy code/migration with **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED=false`** (or unset). Default behavior is unchanged.
+2. Enable the flag only for a **controlled Arabic printed OCR test** once wiring and credentials are ready.
+
+There is **no** Gemini↔Antigravity fallback in code.
+
+**Future cleanup:** OCR routing feature gates may be centralized through `WorkerEnvConfig` passed into `select_ocr_route`, but any such change should migrate **all** env-gated OCR routes together (Hebrew handwritten, Arabic printed, etc.), not Arabic Antigravity alone.
+
 ## Dispatch flow
 
 1. Worker calls `select_ocr_route(language, text_input_type)` once.
 2. `transcribe_pages(..., route=...)` dispatches via `get_htr_adapter(route.engine_key)`.
 3. Adapter receives `prompt_variant` from the route. Routing metadata is persisted on `DocumentTextResult` from the worker-held route, not from `HtrResult`.
 
-Registered engines: `GEMINI` (`GeminiAdapter`), `TRANSKRIBUS` (`TranskribusAdapter`).
+Registered engines: `GEMINI` (`GeminiAdapter`), `TRANSKRIBUS` (`TranskribusAdapter`), `ANTIGRAVITY` (`AntigravityAdapter`).
 
 ## Gemini model selection
 
@@ -73,6 +95,10 @@ After routing to Transkribus, the adapter requires exactly one dev/ops mode:
 - `TRANSKRIBUS_DEV_UPLOAD_MODE=true` — upload pages, then PyLaia.
 
 If neither is enabled, the adapter fails before HTTP. Additional execution controls (not routing): `TRANSKRIBUS_FORCE_REPROCESS`, `TRANSKRIBUS_RECOGNITION_ONLY_RETRY`, plus credential/collection/model env vars.
+
+## Antigravity execution (not route selection)
+
+After routing to Antigravity, the adapter requires `worker_env` and `worker_env.enable_antigravity_arabic_printed=true`. It calls the Gemini Interactions API with `agent_id` from `ANTIGRAVITY_AGENT_ID` (default `antigravity-preview-05-2026`). Antigravity ignores Gemini OCR prompt variants; `prompt_variant=printed` on Antigravity routes is observability metadata only.
 
 ## Translation behavior (high level)
 
