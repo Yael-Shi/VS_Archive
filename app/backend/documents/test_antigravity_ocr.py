@@ -9,6 +9,7 @@ from documents.services.antigravity_engine import (
     AntigravityError,
     build_antigravity_ocr_prompt,
     build_multimodal_input,
+    normalize_antigravity_image_headings,
     output_text_from_steps,
     transcribe_pages_with_antigravity,
 )
@@ -68,6 +69,36 @@ def _completed_interaction(text: str, *, interaction_id: str = "ix-1") -> dict:
             }
         ],
     }
+
+
+class NormalizeAntigravityImageHeadingsTests(SimpleTestCase):
+    def test_single_image_heading_is_removed(self):
+        raw = "[IMAGE 1: page-1.png]\nArabic text here"
+        self.assertEqual(
+            normalize_antigravity_image_headings(raw),
+            "Arabic text here",
+        )
+
+    def test_multi_image_headings_become_page_separators(self):
+        raw = (
+            "[IMAGE 1: page-1.png]\n"
+            "First page body\n\n"
+            "[IMAGE 2: page-2.png]\n"
+            "Second page body"
+        )
+        self.assertEqual(
+            normalize_antigravity_image_headings(raw),
+            "עמוד 1\nFirst page body\n\nעמוד 2\nSecond page body",
+        )
+
+    def test_body_text_remains_unchanged(self):
+        body = "Line one\nLine two\n  indented"
+        raw = f"[IMAGE 1: cover.png]\n{body}"
+        self.assertEqual(normalize_antigravity_image_headings(raw), body)
+
+    def test_text_without_image_headings_is_unchanged(self):
+        text = "Plain OCR output\nwith no headings"
+        self.assertEqual(normalize_antigravity_image_headings(text), text)
 
 
 class AntigravityEngineTests(SimpleTestCase):
@@ -204,7 +235,7 @@ class AntigravityEngineTests(SimpleTestCase):
             background=False,
         )
 
-        self.assertEqual(result.text, ocr_text)
+        self.assertEqual(result.text, "Arabic text here")
         self.assertEqual(result.engine_name, DEFAULT_ANTIGRAVITY_AGENT_ID)
         self.assertTrue(result.needs_review)
 
