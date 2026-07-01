@@ -50,6 +50,11 @@ HEBREW_HANDWRITTEN_TRANSKRIBUS_ROUTE = OcrRouteConfig(
     prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
 )
 
+ARABIC_PRINTED_ANTIGRAVITY_ROUTE = OcrRouteConfig(
+    engine_key=DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+    prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+)
+
 
 def gemini_model_candidates(
     route: OcrRouteConfig,
@@ -112,6 +117,12 @@ def select_ocr_route(
             f"Invalid or missing text_input_type for OCR routing: {text_input_type!r}"
         )
 
+    # Env-gated routes (below) read feature flags directly from os.environ via
+    # _env_bool — the current OCR routing pattern (see Hebrew handwritten →
+    # Transkribus). Arabic printed → Antigravity follows the same shape.
+    # Adapters may also check WorkerEnvConfig for a second safety gate; a future
+    # cleanup could pass WorkerEnvConfig into select_ocr_route instead, but only
+    # if all env-gated OCR routes are migrated together.
     if (
         lang == Document.Language.HEBREW
         and text_type == Document.TextInputType.HANDWRITTEN
@@ -124,6 +135,13 @@ def select_ocr_route(
                 "text_input_type='HANDWRITTEN'."
             )
         return HEBREW_HANDWRITTEN_TRANSKRIBUS_ROUTE
+
+    if (
+        lang == Document.Language.ARABIC
+        and text_type == Document.TextInputType.PRINTED
+        and _env_bool("ENABLE_ANTIGRAVITY_ARABIC_PRINTED", default=False)
+    ):
+        return ARABIC_PRINTED_ANTIGRAVITY_ROUTE
 
     route = OCR_ROUTES.get((lang, text_type))
     if route is None:

@@ -8141,6 +8141,82 @@ class GeminiModelCandidatesTests(SimpleTestCase):
         self.assertEqual(candidates, DEFAULT_GEMINI_MODEL_CANDIDATES)
 
 
+class OcrRoutingAntigravityArabicPrintedTests(SimpleTestCase):
+    """Arabic printed Antigravity routing policy; no live API calls."""
+
+    def test_flag_on_ar_printed_returns_antigravity(self):
+        with patch.dict(
+            os.environ,
+            {"ENABLE_ANTIGRAVITY_ARABIC_PRINTED": "true"},
+            clear=False,
+        ):
+            route = select_ocr_route("ar", Document.TextInputType.PRINTED)
+        self.assertEqual(route.engine_key, DocumentTextResult.OcrEngineKey.ANTIGRAVITY)
+        self.assertEqual(
+            route.prompt_variant, DocumentTextResult.OcrPromptVariant.PRINTED
+        )
+
+    def test_flag_off_ar_printed_remains_gemini(self):
+        with patch.dict(
+            os.environ,
+            {"ENABLE_ANTIGRAVITY_ARABIC_PRINTED": "false"},
+            clear=False,
+        ):
+            route = select_ocr_route("ar", Document.TextInputType.PRINTED)
+        self.assertEqual(route.engine_key, DocumentTextResult.OcrEngineKey.GEMINI)
+        self.assertEqual(
+            route.prompt_variant, DocumentTextResult.OcrPromptVariant.PRINTED
+        )
+
+    def test_flag_on_ar_handwritten_does_not_route_to_antigravity(self):
+        with patch.dict(
+            os.environ,
+            {"ENABLE_ANTIGRAVITY_ARABIC_PRINTED": "true"},
+            clear=False,
+        ):
+            route = select_ocr_route("ar", Document.TextInputType.HANDWRITTEN)
+        self.assertEqual(route.engine_key, DocumentTextResult.OcrEngineKey.GEMINI)
+        self.assertEqual(
+            route.prompt_variant, DocumentTextResult.OcrPromptVariant.HANDWRITTEN
+        )
+
+    def test_flag_on_hebrew_printed_remains_gemini(self):
+        with patch.dict(
+            os.environ,
+            {"ENABLE_ANTIGRAVITY_ARABIC_PRINTED": "true"},
+            clear=False,
+        ):
+            route = select_ocr_route("he", Document.TextInputType.PRINTED)
+        self.assertEqual(route.engine_key, DocumentTextResult.OcrEngineKey.GEMINI)
+        self.assertEqual(
+            route.prompt_variant, DocumentTextResult.OcrPromptVariant.PRINTED
+        )
+
+    def test_flag_on_english_printed_remains_gemini(self):
+        with patch.dict(
+            os.environ,
+            {"ENABLE_ANTIGRAVITY_ARABIC_PRINTED": "true"},
+            clear=False,
+        ):
+            route = select_ocr_route("en", Document.TextInputType.PRINTED)
+        self.assertEqual(route.engine_key, DocumentTextResult.OcrEngineKey.GEMINI)
+        self.assertEqual(
+            route.prompt_variant, DocumentTextResult.OcrPromptVariant.PRINTED
+        )
+
+    def test_flag_on_french_printed_remains_gemini(self):
+        with patch.dict(
+            os.environ,
+            {"ENABLE_ANTIGRAVITY_ARABIC_PRINTED": "true"},
+            clear=False,
+        ):
+            route = select_ocr_route("fr", Document.TextInputType.PRINTED)
+        self.assertEqual(route.engine_key, DocumentTextResult.OcrEngineKey.GEMINI)
+        self.assertEqual(
+            route.prompt_variant, DocumentTextResult.OcrPromptVariant.PRINTED
+        )
+
+
 class OcrRoutingTranskribusHebrewHandwrittenTests(SimpleTestCase):
     """Hebrew handwritten routing policy; no live Transkribus."""
 

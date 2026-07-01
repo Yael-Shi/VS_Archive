@@ -340,6 +340,7 @@ class DocumentTextResult(models.Model):
     class OcrEngineKey(models.TextChoices):
         GEMINI = "GEMINI", "Gemini"
         TRANSKRIBUS = "TRANSKRIBUS", "Transkribus"
+        ANTIGRAVITY = "ANTIGRAVITY", "Antigravity"
 
     class OcrPromptVariant(models.TextChoices):
         HANDWRITTEN = "handwritten", "Handwritten"
