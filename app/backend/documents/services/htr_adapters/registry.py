@@ -4,6 +4,7 @@ from documents.services.htr_adapters.base import (
     HtrEngineAdapter,
     UnsupportedEngineError,
 )
+from documents.services.htr_adapters.antigravity_adapter import AntigravityAdapter
 from documents.services.htr_adapters.gemini_adapter import GeminiAdapter
 from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
 
@@ -11,6 +12,7 @@ from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapt
 _ADAPTERS: dict[str, HtrEngineAdapter] = {
     GeminiAdapter.engine_key: GeminiAdapter(),
     TranskribusAdapter.engine_key: TranskribusAdapter(),
+    AntigravityAdapter.engine_key: AntigravityAdapter(),
 }
 
 
