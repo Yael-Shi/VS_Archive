@@ -388,8 +388,8 @@ class DocumentTextResult(models.Model):
     error_code = models.CharField(max_length=64, null=True, blank=True)
     error_details = models.TextField(null=True, blank=True)
 
-    # NEW: why this result was marked as NEEDS_REVIEW.
-    # Store as a JSON string (e.g. ["HAS_UNCLEAR","CONSISTENCY_MISMATCH"]) or plain text.
+    # Why this result was marked as NEEDS_REVIEW.
+    # Stored as a JSON string (e.g. ["HAS_UNCLEAR","CONSISTENCY_MISMATCH"]) or plain text.
     review_reasons = models.TextField(blank=True, default="")
 
     created_at = models.DateTimeField(auto_now_add=True)

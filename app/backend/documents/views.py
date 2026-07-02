@@ -80,6 +80,7 @@ from documents.services.review_backlog import (
     parse_review_reasons,
 )
 from documents.services.archive_metadata_validation import (
+    parse_archive_metadata_form,
     parse_public_note,
     validate_source_metadata_fields,
 )
@@ -120,7 +121,6 @@ from documents.services.archive_item_validation import (
     parse_date_precision,
 )
 from documents.services.manual_text_validation import parse_manual_text_form
-from documents.services.archive_metadata_validation import parse_archive_metadata_form
 from documents.services.photo_upload import (
     create_photo_upload_plan,
     finalize_photo_upload,
@@ -200,8 +200,7 @@ _VALID_ARCHIVE_ITEM_CREATE_TYPES = frozenset(
 )
 
 
-def _bad(msg: str, status: int = 400):
-    # status kept for compatibility (caller may expect it)
+def _bad(msg: str):
     return HttpResponseBadRequest(msg)
 
 
@@ -1813,14 +1812,11 @@ def document_detail_page(request, doc_id: int):
         "archive_item__events",
         "archive_item__tags",
     )
-    try:
-        doc = get_viewable_document(
-            request.user,
-            doc_id,
-            queryset=detail_qs,
-        )
-    except Http404:
-        raise
+    doc = get_viewable_document(
+        request.user,
+        doc_id,
+        queryset=detail_qs,
+    )
 
     admin_meta = getattr(doc, "admin_meta", None) if is_admin else None
 
@@ -1854,7 +1850,7 @@ def document_detail_page(request, doc_id: int):
         "document_detail_page user=%s doc_id=%s admin=%s has_content_url=%s mime_type=%r missing_text=%s",
         getattr(request.user, "username", None),
         doc.id,
-        _is_admin(request.user),
+        is_admin,
         bool(content_url),
         doc.mime_type,
         text_presentation.missing,
@@ -1873,14 +1869,11 @@ def _suggestion_form_queryset():
 def _load_transcription_suggestion_document(
     request, doc_id: int
 ) -> tuple[Document, str]:
-    try:
-        doc = get_viewable_document(
-            request.user,
-            doc_id,
-            queryset=_suggestion_form_queryset(),
-        )
-    except Http404:
-        raise
+    doc = get_viewable_document(
+        request.user,
+        doc_id,
+        queryset=_suggestion_form_queryset(),
+    )
 
     archive_item = doc.archive_item
     if (
@@ -1921,10 +1914,7 @@ def _empty_suggestion_field_values() -> dict[str, str]:
 
 
 def transcription_suggestion_form(request, doc_id: int):
-    try:
-        doc, displayed_text = _load_transcription_suggestion_document(request, doc_id)
-    except Http404:
-        raise
+    doc, displayed_text = _load_transcription_suggestion_document(request, doc_id)
 
     form_errors: list[str] = []
     field_values = _empty_suggestion_field_values()
@@ -1980,14 +1970,11 @@ def transcription_suggestion_form(request, doc_id: int):
 
 
 def transcription_suggestion_thanks(request, doc_id: int):
-    try:
-        doc = get_viewable_document(
-            request.user,
-            doc_id,
-            queryset=Document.objects.select_related("archive_item"),
-        )
-    except Http404:
-        raise
+    doc = get_viewable_document(
+        request.user,
+        doc_id,
+        queryset=Document.objects.select_related("archive_item"),
+    )
 
     archive_item = doc.archive_item
     if (
@@ -2165,10 +2152,7 @@ def _load_archive_metadata_suggestion_item(
 
 
 def archive_metadata_suggestion_form(request, item_id: int):
-    try:
-        item = _load_archive_metadata_suggestion_item(request, item_id)
-    except Http404:
-        raise
+    item = _load_archive_metadata_suggestion_item(request, item_id)
 
     form_errors: list[str] = []
     field_values = _empty_archive_metadata_suggestion_field_values()
@@ -2245,10 +2229,7 @@ def archive_metadata_suggestion_form(request, item_id: int):
 
 
 def archive_metadata_suggestion_thanks(request, item_id: int):
-    try:
-        item = _load_archive_metadata_suggestion_item(request, item_id)
-    except Http404:
-        raise
+    item = _load_archive_metadata_suggestion_item(request, item_id)
 
     return render(
         request,
