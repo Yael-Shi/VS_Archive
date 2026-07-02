@@ -168,6 +168,11 @@ from documents.services.transcription_edit_suggestions import (
     suggestion_status_label,
     texts_are_equivalent,
 )
+from documents.services.archive_metadata_suggestion_review import (
+    ArchiveMetadataSuggestionReviewError,
+    approve_suggestion as approve_archive_metadata_suggestion,
+    reject_suggestion as reject_archive_metadata_suggestion,
+)
 from documents.services.transcription_suggestion_review import (
     TranscriptionSuggestionReviewError,
     approve_suggestion,
@@ -2279,6 +2284,50 @@ def archive_metadata_suggestion_backlog_page(request):
         "documents/archive/metadata_suggestion_backlog.html",
         {"suggestions": suggestions},
     )
+
+
+@login_required
+@require_POST
+def archive_metadata_suggestion_approve(request, suggestion_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    backlog_url = reverse("archive-metadata-suggestion-backlog")
+
+    try:
+        approve_archive_metadata_suggestion(
+            suggestion_id,
+            reviewer=request.user,
+        )
+    except ArchiveMetadataSuggestion.DoesNotExist:
+        raise Http404()
+    except ArchiveMetadataSuggestionReviewError as exc:
+        messages.error(request, str(exc))
+
+    return redirect(backlog_url)
+
+
+@login_required
+@require_POST
+def archive_metadata_suggestion_reject(request, suggestion_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    backlog_url = reverse("archive-metadata-suggestion-backlog")
+
+    try:
+        reject_archive_metadata_suggestion(
+            suggestion_id,
+            reviewer=request.user,
+        )
+    except ArchiveMetadataSuggestion.DoesNotExist:
+        raise Http404()
+    except ArchiveMetadataSuggestionReviewError as exc:
+        messages.error(request, str(exc))
+
+    return redirect(backlog_url)
 
 
 @login_required

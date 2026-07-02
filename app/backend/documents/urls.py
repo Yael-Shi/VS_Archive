@@ -106,4 +106,14 @@ urlpatterns = [
         views.archive_metadata_suggestion_backlog_page,
         name="archive-metadata-suggestion-backlog",
     ),
+    path(
+        "ui/admin/archive-metadata-suggestions/<int:suggestion_id>/approve/",
+        views.archive_metadata_suggestion_approve,
+        name="archive-metadata-suggestion-approve",
+    ),
+    path(
+        "ui/admin/archive-metadata-suggestions/<int:suggestion_id>/reject/",
+        views.archive_metadata_suggestion_reject,
+        name="archive-metadata-suggestion-reject",
+    ),
 ]
