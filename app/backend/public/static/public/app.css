@@ -840,6 +840,7 @@ textarea {
   border: 1px solid var(--border);
   background: linear-gradient(180deg, var(--card-elevated) 0%, var(--card) 100%);
   backdrop-filter: blur(6px);
+  overflow-x: clip;
 }
 
 .nav-row {
@@ -860,6 +861,8 @@ textarea {
 }
 
 .nav-brand-link {
+  display: inline-flex;
+  align-items: center;
   color: inherit;
   text-decoration: none;
 }
@@ -1678,15 +1681,24 @@ pre {
 
   .nav-row {
     gap: var(--space-2);
+    row-gap: var(--space-2);
   }
 
   .nav-brand {
     flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .nav-brand-link {
+    min-height: 44px;
+    padding-inline: var(--space-1);
   }
 
   .nav-links {
     margin-inline-start: 0;
     flex: 1 1 auto;
+    gap: var(--space-2);
+    min-width: 0;
   }
 
   .nav-spacer {
@@ -1699,6 +1711,23 @@ pre {
   .nav-auth {
     flex: 1 1 100%;
     justify-content: flex-start;
+    gap: var(--space-2) var(--space-3);
+    row-gap: var(--space-2);
+    width: 100%;
+    min-width: 0;
+  }
+
+  .nav-user {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    line-height: var(--line-normal);
+    padding-inline: var(--space-1);
+  }
+
+  .nav-form {
+    flex-shrink: 0;
   }
 
   .nav-row .btn-link,
@@ -1735,7 +1764,13 @@ pre {
   }
 
   .nav-brand {
+    flex: 1 1 100%;
     font-size: var(--font-md);
+  }
+
+  .nav-links {
+    flex: 1 1 100%;
+    gap: var(--space-1) var(--space-2);
   }
 }
 
