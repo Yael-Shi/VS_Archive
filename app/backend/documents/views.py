@@ -80,6 +80,7 @@ from documents.services.review_backlog import (
     parse_review_reasons,
 )
 from documents.services.archive_metadata_validation import (
+    parse_public_note,
     validate_source_metadata_fields,
 )
 from documents.services.upload_validation import (
@@ -221,6 +222,7 @@ class _CreateUploadCommon(TypedDict):
     admin_meta: dict
     author_name: str
     source_title: str
+    public_note: str
     discovery_metadata: dict
 
 
@@ -501,6 +503,7 @@ def _parse_create_upload_common(
 
     author_name = (payload.get("author_name") or "").strip()
     source_title = (payload.get("source_title") or "").strip()
+    public_note = parse_public_note(payload.get("public_note"))
     source_errors = validate_source_metadata_fields(
         author_name=author_name,
         source_title=source_title,
@@ -525,6 +528,7 @@ def _parse_create_upload_common(
         "admin_meta": admin_meta,
         "author_name": author_name,
         "source_title": source_title,
+        "public_note": public_note,
         "discovery_metadata": parsed_discovery,
     }, None
 
@@ -630,6 +634,7 @@ def _create_multi_image_upload(request, payload: dict, common: _CreateUploadComm
         visibility=common["visibility"],
         author_name=common["author_name"],
         source_title=common["source_title"],
+        public_note=common["public_note"],
         upload_status=Document.UploadStatus.UPLOADING,
         expected_source_file_count=file_count,
     )
@@ -717,6 +722,7 @@ def _create_single_file_upload(request, payload: dict, common: _CreateUploadComm
         visibility=common["visibility"],
         author_name=common["author_name"],
         source_title=common["source_title"],
+        public_note=common["public_note"],
         upload_status=Document.UploadStatus.UPLOADING,
         file_original_name=original_name,
         mime_type=mime_type,
@@ -1217,6 +1223,7 @@ def create_photo_upload(request):
         context=parsed["context"],
         people_present=parsed["people_present"],
         notes=parsed["notes"],
+        public_note=parsed["public_note"],
     )
 
     return JsonResponse(
@@ -2491,6 +2498,7 @@ def _archive_metadata_form_data(
     metadata_status: str,
     author_name: str = "",
     source_title: str = "",
+    public_note: str = "",
 ) -> dict:
     return {
         "title": title,
@@ -2501,6 +2509,7 @@ def _archive_metadata_form_data(
         "metadata_status": metadata_status,
         "author_name": author_name,
         "source_title": source_title,
+        "public_note": public_note,
     }
 
 
@@ -2515,6 +2524,7 @@ def _archive_metadata_form_data_from_document(document: Document) -> dict:
         metadata_status=item.metadata_status,
         author_name=item.author_name,
         source_title=item.source_title,
+        public_note=item.public_note,
     )
 
 
@@ -2583,6 +2593,7 @@ def _manual_text_form_data_from_item(item: ArchiveItem) -> dict:
             metadata_status=item.metadata_status,
             author_name=item.author_name,
             source_title=item.source_title,
+            public_note=item.public_note,
         ),
         "body": item.manual_text_content.body,
         **discovery_metadata_form_data_from_item(item),
@@ -2599,6 +2610,7 @@ def _photo_form_data_from_item(item: ArchiveItem) -> dict:
             date_end=item.date_end,
             date_precision=item.date_precision,
             metadata_status=item.metadata_status,
+            public_note=item.public_note,
         ),
         **photo_metadata_form_data_from_content(photo_content),
         **discovery_metadata_form_data_from_item(item),
@@ -2637,6 +2649,7 @@ def _submit_manual_text_create(request):
             metadata_status=parsed["metadata_status"],
             author_name=parsed["author_name"],
             source_title=parsed["source_title"],
+            public_note=parsed["public_note"],
         )
         update_archive_item_discovery_metadata(
             item,
@@ -2944,6 +2957,7 @@ def _archive_manage_edit_manual_text(request, item: ArchiveItem):
                     metadata_status=parsed["metadata_status"],
                     author_name=parsed["author_name"],
                     source_title=parsed["source_title"],
+                    public_note=parsed["public_note"],
                 )
                 update_archive_item_discovery_metadata(
                     item,
@@ -2995,6 +3009,7 @@ def _archive_manage_edit_photo(request, item: ArchiveItem):
                     context=parsed["context"],
                     people_present=parsed["people_present"],
                     notes=parsed["notes"],
+                    public_note=parsed["public_note"],
                 )
                 update_archive_item_discovery_metadata(
                     item,
@@ -3057,6 +3072,7 @@ def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
                     metadata_status=parsed_shared["metadata_status"],
                     author_name=parsed_shared["author_name"],
                     source_title=parsed_shared["source_title"],
+                    public_note=parsed_shared["public_note"],
                 )
                 update_ocr_document_catalog_metadata(
                     doc,

@@ -100,6 +100,7 @@ def create_photo_upload_plan(
     context: str = "",
     people_present: str = "",
     notes: str = "",
+    public_note: str = "",
 ) -> tuple[ArchiveItem, PhotoContent, str]:
     """
     Create PHOTO ArchiveItem + pending PhotoContent and return a presigned PUT URL.
@@ -116,6 +117,7 @@ def create_photo_upload_plan(
         date_end=date_end,
         date_precision=date_precision,
         metadata_status=metadata_status,
+        public_note=public_note,
     )
     photo_content = PhotoContent.objects.create(
         archive_item=archive_item,
@@ -256,6 +258,7 @@ def parse_create_photo_upload_metadata(
     from documents.services.archive_metadata_validation import (
         parse_metadata_status,
         parse_optional_date,
+        parse_public_note,
         validate_archive_metadata_fields,
     )
 
@@ -311,6 +314,7 @@ def parse_create_photo_upload_metadata(
         return None, metadata_err
 
     photo_metadata = photo_metadata_from_mapping(payload)
+    public_note = parse_public_note(payload.get("public_note"))
 
     return {
         "title": title,
@@ -322,5 +326,6 @@ def parse_create_photo_upload_metadata(
         "original_name": original_name,
         "mime_type": normalize_upload_mime_type(mime_type),
         "discovery_metadata": parsed_discovery,
+        "public_note": public_note,
         **photo_metadata,
     }, None

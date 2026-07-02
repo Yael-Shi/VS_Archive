@@ -40,6 +40,12 @@ def parse_metadata_status(raw_value: str | None) -> str:
 SOURCE_METADATA_MAX_LENGTH = 255
 
 
+def parse_public_note(raw_value: Any) -> str:
+    if raw_value is None:
+        return ""
+    return str(raw_value)
+
+
 def validate_source_metadata_fields(
     *,
     author_name: str,
@@ -109,6 +115,7 @@ def parse_archive_metadata_form(
         "metadata_status": (post_data.get("metadata_status") or "").strip(),
         "author_name": (post_data.get("author_name") or "").strip(),
         "source_title": (post_data.get("source_title") or "").strip(),
+        "public_note": parse_public_note(post_data.get("public_note")),
     }
 
     errors: list[str] = []

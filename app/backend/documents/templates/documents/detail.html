@@ -31,6 +31,7 @@
           {% if doc.archive_item %}
             <div class="archive-detail-meta document-detail-meta">
               {% include "documents/archive/partials/source_metadata.html" with item=doc.archive_item %}
+              {% include "documents/archive/partials/public_note_display.html" with item=doc.archive_item %}
               {% include "documents/archive/partials/discovery_metadata.html" with item=doc.archive_item %}
             </div>
           {% endif %}

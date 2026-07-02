@@ -252,6 +252,8 @@
     const visibility = document.getElementById("visibility").value || "private";
     const author_name = document.getElementById("author_name").value.trim();
     const source_title = document.getElementById("source_title").value.trim();
+    const publicNoteEl = document.getElementById("public_note");
+    const public_note = publicNoteEl ? publicNoteEl.value : "";
 
     const categoriesRaw = document.getElementById("categories").value;
     const eventsRaw = document.getElementById("events").value;
@@ -291,6 +293,7 @@
     if (language) meta.language = language;
     if (author_name) meta.author_name = author_name;
     if (source_title) meta.source_title = source_title;
+    if (public_note) meta.public_note = public_note;
     if (selected_categories.length) meta.selected_categories = selected_categories;
     if (selected_events.length) meta.selected_events = selected_events;
     if (selected_tags.length) meta.selected_tags = selected_tags;

@@ -333,6 +333,32 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         self.assertNotContains(resp, "מקור:")
         self.assertNotContains(resp, "Hidden source")
 
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value=PRESIGNED_URL,
+    )
+    def test_photo_detail_shows_public_note_when_present(self, _mock_presigned_get):
+        self.public_uploaded.public_note = "Photo archive note"
+        self.public_uploaded.save(update_fields=["public_note", "updated_at"])
+
+        resp = self.client.get(
+            reverse("archive-detail", kwargs={"item_id": self.public_uploaded.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "הערת הארכיון:")
+        self.assertContains(resp, "Photo archive note")
+
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value=PRESIGNED_URL,
+    )
+    def test_photo_detail_hides_empty_public_note_label(self, _mock_presigned_get):
+        resp = self.client.get(
+            reverse("archive-detail", kwargs={"item_id": self.public_uploaded.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "הערת הארכיון:")
+
 
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
 class PhotoArchiveDiscoveryBrowseTests(TestCase):

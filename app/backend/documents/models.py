@@ -33,6 +33,7 @@ class ArchiveItem(models.Model):
     title = models.CharField(max_length=255)
     author_name = models.CharField(max_length=255, blank=True, default="")
     source_title = models.CharField(max_length=255, blank=True, default="")
+    public_note = models.TextField(blank=True, default="")
     item_type = models.CharField(max_length=32, choices=ItemType.choices)
     visibility = models.CharField(
         max_length=16,

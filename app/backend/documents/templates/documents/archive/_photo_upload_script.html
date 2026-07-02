@@ -57,13 +57,18 @@
       const el = document.getElementById(id);
       return el ? (el.value || "").trim() : "";
     };
+    const getMultiline = (id) => {
+      const el = document.getElementById(id);
+      return el ? (el.value || "") : "";
+    };
     const meta = {
       title: get("title"),
       description: get("description"),
       location: get("location"),
-      context: get("context"),
+      context: getMultiline("context"),
       people_present: get("people_present"),
-      notes: get("notes"),
+      notes: getMultiline("notes"),
+      public_note: getMultiline("public_note"),
       visibility: get("visibility") || "private",
       date_start: get("date_start"),
       date_end: get("date_end"),

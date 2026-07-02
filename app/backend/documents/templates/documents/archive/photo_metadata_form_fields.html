@@ -29,6 +29,11 @@
 </div>
 
 <div class="field">
+  <label for="public_note">הערת הארכיון</label>
+  <textarea id="public_note" name="public_note" rows="3">{{ form_data.public_note }}</textarea>
+</div>
+
+<div class="field">
   <label for="visibility">נראות / גישה</label>
   <select id="visibility" name="visibility">
     {% for value, label in visibility_choices %}
