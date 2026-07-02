@@ -577,6 +577,55 @@ class TranscriptionEditSuggestion(models.Model):
         )
 
 
+class ArchiveMetadataSuggestion(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        APPROVED = "APPROVED", "Approved"
+        REJECTED = "REJECTED", "Rejected"
+
+    archive_item = models.ForeignKey(
+        ArchiveItem,
+        on_delete=models.CASCADE,
+        related_name="metadata_suggestions",
+    )
+    suggested_categories = models.TextField(blank=True, default="")
+    suggested_events = models.TextField(blank=True, default="")
+    suggested_tags = models.TextField(blank=True, default="")
+    submitter_name = models.CharField(max_length=255)
+    submitter_email = models.EmailField(blank=True, default="")
+    submitter_note = models.TextField(blank=True, default="")
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_archive_metadata_suggestions",
+    )
+    submitter_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="submitted_archive_metadata_suggestions",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return (
+            f"ArchiveMetadataSuggestion(id={self.id}, archive_item_id={self.archive_item_id}, "
+            f"status={self.status})"
+        )
+
+
 class CorrectionRequest(models.Model):
     class Status(models.TextChoices):
         OPEN = "OPEN", "Open"

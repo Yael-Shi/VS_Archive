@@ -33,6 +33,8 @@
               {% include "documents/archive/partials/source_metadata.html" with item=doc.archive_item %}
               {% include "documents/archive/partials/discovery_metadata.html" with item=doc.archive_item %}
             </div>
+            <div class="spacer-sm"></div>
+            <a class="btn" href="{% url 'archive-metadata-suggestion-new' item_id=doc.archive_item_id %}">הציעו קטגוריה, אירוע או תגית</a>
           {% endif %}
         </div>
 

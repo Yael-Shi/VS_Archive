@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - הצעת שיוך לפריט · {{ item.title }}{% endblock %}
+
+{% block content %}
+  <div class="card card--pad-lg">
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-detail' item_id=item.id %}">חזרה לפריט</a>
+    </div>
+
+    <div class="spacer"></div>
+
+    <header>
+      <h1 class="page-title">הצעת שיוך לפריט</h1>
+      <div class="page-lead">{{ item.title }}</div>
+    </header>
+
+    <div class="spacer"></div>
+
+    <p class="page-lead">
+      הציעו קטגוריות, אירועים או תגיות שיעזרו לשייך את הפריט בארכיון. ההצעה תיבדק לפני שינוי באתר.
+    </p>
+
+    {% if form_errors %}
+      <div class="spacer-sm"></div>
+      <div class="alert alert-danger">
+        <ul>
+          {% for error in form_errors %}
+            <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    <div class="spacer"></div>
+
+    <div class="two-col document-detail-layout">
+      <div class="card card--pad-lg">
+        <div class="section-title">שיוך נוכחי בארכיון</div>
+        <div class="archive-detail-meta archive-detail-meta-block">
+          <div class="archive-detail-meta-row">
+            <strong class="archive-detail-meta-label">קטגוריות:</strong>
+            <span class="archive-detail-meta-value">
+              {% if current_metadata.categories %}
+                {{ current_metadata.categories }}
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </span>
+          </div>
+          <div class="archive-detail-meta-row">
+            <strong class="archive-detail-meta-label">אירועים:</strong>
+            <span class="archive-detail-meta-value">
+              {% if current_metadata.events %}
+                {{ current_metadata.events }}
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </span>
+          </div>
+          <div class="archive-detail-meta-row">
+            <strong class="archive-detail-meta-label">תגיות:</strong>
+            <span class="archive-detail-meta-value">
+              {% if current_metadata.tags %}
+                {{ current_metadata.tags }}
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card card--pad-lg">
+        <form method="post" action="">
+          {% csrf_token %}
+
+          <div class="field">
+            <label for="metadata-suggestion-categories">קטגוריות מוצעות</label>
+            <textarea
+              id="metadata-suggestion-categories"
+              name="suggested_categories"
+              rows="3"
+            >{{ field_values.suggested_categories }}</textarea>
+          </div>
+
+          <div class="field">
+            <label for="metadata-suggestion-events">אירועים מוצעים</label>
+            <textarea
+              id="metadata-suggestion-events"
+              name="suggested_events"
+              rows="3"
+            >{{ field_values.suggested_events }}</textarea>
+          </div>
+
+          <div class="field">
+            <label for="metadata-suggestion-tags">תגיות מוצעות</label>
+            <textarea
+              id="metadata-suggestion-tags"
+              name="suggested_tags"
+              rows="3"
+            >{{ field_values.suggested_tags }}</textarea>
+          </div>
+
+          <div class="spacer"></div>
+
+          <div class="field">
+            <label for="metadata-suggestion-submitter-name">שם</label>
+            <input
+              id="metadata-suggestion-submitter-name"
+              type="text"
+              name="submitter_name"
+              value="{{ field_values.submitter_name }}"
+              maxlength="255"
+              required
+            />
+          </div>
+
+          <div class="field">
+            <label for="metadata-suggestion-submitter-email">אימייל</label>
+            <input
+              id="metadata-suggestion-submitter-email"
+              type="email"
+              name="submitter_email"
+              value="{{ field_values.submitter_email }}"
+            />
+          </div>
+
+          <div class="field">
+            <label for="metadata-suggestion-submitter-note">הערה למנהלי הארכיון</label>
+            <textarea
+              id="metadata-suggestion-submitter-note"
+              name="submitter_note"
+              rows="4"
+            >{{ field_values.submitter_note }}</textarea>
+          </div>
+
+          <div class="registration-honeypot" aria-hidden="true">
+            <label for="metadata-suggestion-company-name">שם חברה</label>
+            <input
+              id="metadata-suggestion-company-name"
+              type="text"
+              name="company_name"
+              tabindex="-1"
+              autocomplete="off"
+            />
+          </div>
+
+          <div class="spacer-sm"></div>
+          <p class="muted text-sm">ההצעה תיבדק לפני שינוי באתר.</p>
+
+          <div class="spacer-sm"></div>
+          <div class="form-actions">
+            <button class="btn btn-primary" type="submit">שליחת הצעה</button>
+            <a class="btn" href="{% url 'archive-detail' item_id=item.id %}">ביטול</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+{% endblock %}
