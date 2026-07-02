@@ -284,7 +284,7 @@ class TranscriptionEditSuggestionPublicFlowTests(TestCase):
         doc = self._create_public_doc_with_text()
         resp = self.client.get(self._detail_url(doc.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "הצע/י תיקון לתעתוק")
+        self.assertContains(resp, "הצעת תיקון לתעתוק")
         self.assertContains(resp, self._form_url(doc.id))
 
     def test_detail_button_hidden_when_no_displayable_text(self):
@@ -301,7 +301,7 @@ class TranscriptionEditSuggestionPublicFlowTests(TestCase):
         )
         resp = self.client.get(self._detail_url(doc.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, "הצע/י תיקון לתעתוק")
+        self.assertNotContains(resp, "הצעת תיקון לתעתוק")
 
 
 class TranscriptionDiffHelperTests(TestCase):

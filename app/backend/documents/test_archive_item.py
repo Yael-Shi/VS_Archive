@@ -2891,7 +2891,7 @@ class ArchiveItemSourceMetadataTests(TestCase):
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Regression OCR detail")
-        self.assertContains(resp, "טקסט שחולץ")
+        self.assertContains(resp, "טקסט לקריאה")
 
 
 class ArchiveItemDiscoveryMetadataDisplayTests(TestCase):

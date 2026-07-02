@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}VSArchive - הצעת שיוך לפריט · {{ item.title }}{% endblock %}
+{% block title %}VSArchive - הוספת מידע על הפריט · {{ item.title }}{% endblock %}
 
 {% block content %}
   <div class="card card--pad-lg">
@@ -10,14 +10,14 @@
     <div class="spacer"></div>
 
     <header>
-      <h1 class="page-title">הצעת שיוך לפריט</h1>
+      <h1 class="page-title">הוספת מידע על הפריט</h1>
       <div class="page-lead">{{ item.title }}</div>
     </header>
 
     <div class="spacer"></div>
 
     <p class="page-lead">
-      הציעו קטגוריות, אירועים או תגיות שיעזרו לשייך את הפריט בארכיון. ההצעה תיבדק לפני שינוי באתר.
+      אפשר להציע קטגוריות, אירועים, תגיות, או לשלוח הערה כללית למנהלי הארכיון.
     </p>
 
     {% if form_errors %}
@@ -35,7 +35,7 @@
 
     <div class="two-col document-detail-layout">
       <div class="card card--pad-lg">
-        <div class="section-title">שיוך נוכחי בארכיון</div>
+        <div class="section-title">מידע נוכחי בארכיון</div>
         <div class="archive-detail-meta archive-detail-meta-block">
           <div class="archive-detail-meta-row">
             <strong class="archive-detail-meta-label">קטגוריות:</strong>
