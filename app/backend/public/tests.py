@@ -28,6 +28,38 @@ class AboutPageCopyTests(TestCase):
         )
 
 
+class ForbiddenPageCopyTests(TestCase):
+    FORBIDDEN_MARKERS = (
+        "Admins only",
+        "is_staff",
+        "is_superuser",
+        "403",
+        "גישה חסומה",
+        "לפי הרשאות",
+    )
+
+    def setUp(self):
+        self.edit_url = reverse("public-content-edit")
+        self.viewer = User.objects.create_user(
+            username="forbidden_page_viewer",
+            password="test-pass",
+            is_staff=False,
+        )
+
+    def test_non_staff_forbidden_page_shows_family_friendly_hebrew_copy(self):
+        self.client.force_login(self.viewer)
+        resp = self.client.get(self.edit_url)
+        self.assertEqual(resp.status_code, 403)
+        self.assertContains(resp, "אין לך גישה לעמוד הזה", status_code=403)
+        self.assertContains(resp, reverse("archive-list"), status_code=403)
+        self.assertContains(resp, "חזרה לארכיון", status_code=403)
+        self.assertContains(resp, "חזרה לדף הבית", status_code=403)
+        html = resp.content.decode()
+        for marker in self.FORBIDDEN_MARKERS:
+            with self.subTest(marker=marker):
+                self.assertNotIn(marker, html)
+
+
 class PublicContentBlockTests(TestCase):
     def setUp(self):
         self.about_url = reverse("public-about")
