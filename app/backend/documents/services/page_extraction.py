@@ -38,7 +38,6 @@ def extract_pages(file_bytes: bytes, mime_type: Optional[str]) -> List[PageImage
     if mt == "application/pdf":
         doc = fitz.open(stream=file_bytes, filetype="pdf")
         pages: List[PageImage] = []
-        # Render each page to pixmap, convert to PNG bytes.
         for i in range(doc.page_count):
             page = doc.load_page(i)
             pix = page.get_pixmap(
@@ -52,12 +51,7 @@ def extract_pages(file_bytes: bytes, mime_type: Optional[str]) -> List[PageImage
             )
         return pages
 
-    if mt.startswith("image/") or mt in (
-        "image/png",
-        "image/jpeg",
-        "image/jpg",
-        "image/webp",
-    ):
+    if mt.startswith("image/"):
         png_bytes, out_mt = _normalize_image_to_png(file_bytes)
         return [PageImage(page_index=1, image_bytes=png_bytes, mime_type=out_mt)]
 
