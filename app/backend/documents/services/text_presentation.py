@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Optional, Literal
 
@@ -8,6 +9,8 @@ from documents.services.expected_outputs import expected_result_types_for_docume
 
 
 ResultTypeStr = Literal["SOURCE_TEXT", "HEBREW_TEXT"]
+
+PREFETCHED_DISPLAYABLE_TEXT_RESULTS_ATTR = "prefetched_displayable_text_results"
 
 
 @dataclass(frozen=True)
@@ -83,9 +86,36 @@ def text_block_display_meta(doc: Document, result_type: str) -> TextBlockDisplay
     )
 
 
+def _latest_displayable_from_rows(
+    rows: Iterable[DocumentTextResult], result_type: ResultTypeStr
+) -> Optional[DocumentTextResult]:
+    matching = [
+        row
+        for row in rows
+        if row.result_type == result_type and (row.text or "").strip()
+    ]
+    succeeded = [
+        row for row in matching if row.status == DocumentTextResult.Status.SUCCEEDED
+    ]
+    if succeeded:
+        return max(succeeded, key=lambda row: row.created_at)
+    needs_review = [
+        row
+        for row in matching
+        if row.status == DocumentTextResult.Status.NEEDS_REVIEW
+    ]
+    if needs_review:
+        return max(needs_review, key=lambda row: row.created_at)
+    return None
+
+
 def _latest_displayable(
     doc: Document, result_type: ResultTypeStr
 ) -> Optional[DocumentTextResult]:
+    prefetched = getattr(doc, PREFETCHED_DISPLAYABLE_TEXT_RESULTS_ATTR, None)
+    if prefetched is not None:
+        return _latest_displayable_from_rows(prefetched, result_type)
+
     qs = (
         doc.text_results.filter(result_type=result_type)
         .exclude(text__isnull=True)

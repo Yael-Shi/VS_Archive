@@ -24,6 +24,7 @@ from documents.models import (
     DocumentSourceFile,
     DocumentTextResult,
     ManualTextContent,
+    PhotoContent,
     Tag,
 )
 from documents.services.archive_items import (
@@ -46,9 +47,13 @@ from documents.services.archive_tags_validation import (
 )
 from documents.services.archive_item_access import ARCHIVE_FAMILY_GROUP_NAME
 from documents.services.archive_item_presentation import (
+    ARCHIVE_BROWSE_OCR_PREVIEW,
+    ARCHIVE_BROWSE_PREVIEW_EMPTY,
+    archive_browse_displayable_text_results_prefetch,
     archive_item_has_discovery_metadata,
     archive_item_type_label,
     archive_metadata_status_label,
+    build_archive_browse_card,
     language_label,
     visibility_label,
 )
@@ -3210,12 +3215,72 @@ class ArchiveItemPresentationUiTests(TestCase):
     def test_archive_list_shows_type_filter_buttons(self):
         self.client.force_login(self.staff)
         resp = self.client.get(reverse("archive-list"))
-        self.assertContains(resp, "הכול")
-        self.assertContains(resp, "מסמכים")
-        self.assertContains(resp, "טקסטים")
+        self.assertContains(resp, "הכל")
+        self.assertContains(resp, "מסמכים וטקסטים")
+        self.assertContains(resp, "תמונות")
         self.assertNotContains(resp, "מסמכים (OCR)")
 
-    def test_archive_list_item_type_filter_limits_results(self):
+    def test_archive_list_documents_and_texts_filter_includes_ocr_and_manual(self):
+        manual_item = create_manual_text_archive_item(
+            title="Filter manual combined",
+            body="x",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        ocr_doc = create_ocr_document(
+            title="Filter OCR combined",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        photo_item = ArchiveItem.objects.create(
+            item_type=ArchiveItem.ItemType.PHOTO,
+            title="Filter photo combined",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        PhotoContent.objects.create(
+            archive_item=photo_item,
+            original_file_key="photos/filter/original.jpg",
+            original_filename="photo.jpg",
+            original_mime_type="image/jpeg",
+            original_size_bytes=1024,
+            upload_status=PhotoContent.UploadStatus.UPLOADED,
+        )
+
+        resp = self.client.get(
+            reverse("archive-list"),
+            {"item_type": "documents_and_texts"},
+        )
+        self.assertContains(resp, manual_item.title)
+        self.assertContains(resp, ocr_doc.archive_item.title)
+        self.assertNotContains(resp, photo_item.title)
+
+    def test_archive_list_photo_filter_returns_photos_only(self):
+        manual_item = create_manual_text_archive_item(
+            title="Filter manual photo-only",
+            body="x",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        photo_item = ArchiveItem.objects.create(
+            item_type=ArchiveItem.ItemType.PHOTO,
+            title="Filter photo only",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        PhotoContent.objects.create(
+            archive_item=photo_item,
+            original_file_key="photos/filter-only/original.jpg",
+            original_filename="photo.jpg",
+            original_mime_type="image/jpeg",
+            original_size_bytes=1024,
+            upload_status=PhotoContent.UploadStatus.UPLOADED,
+        )
+
+        resp = self.client.get(reverse("archive-list"), {"item_type": "photo"})
+        self.assertContains(resp, photo_item.title)
+        self.assertNotContains(resp, manual_item.title)
+
+    def test_archive_list_documents_and_texts_public_slug_includes_manual_and_ocr(
+        self,
+    ):
         create_manual_text_archive_item(
             title="Filter manual only",
             body="x",
@@ -3227,13 +3292,91 @@ class ArchiveItemPresentationUiTests(TestCase):
             text_input_type=Document.TextInputType.PRINTED,
             visibility=Document.Visibility.PUBLIC,
         )
-        resp = self.client.get(reverse("archive-list"), {"item_type": "manual_text"})
+        resp = self.client.get(
+            reverse("archive-list"),
+            {"item_type": "documents_and_texts"},
+        )
         self.assertContains(resp, "Filter manual only")
-        self.assertNotContains(resp, "Filter OCR only")
+        self.assertContains(resp, "Filter OCR only")
+
+    def _public_archive_type_filter_fixture_items(self):
+        manual_item = create_manual_text_archive_item(
+            title="Legacy filter manual",
+            body="x",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        ocr_doc = create_ocr_document(
+            title="Legacy filter OCR",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        photo_item = ArchiveItem.objects.create(
+            item_type=ArchiveItem.ItemType.PHOTO,
+            title="Legacy filter photo",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        PhotoContent.objects.create(
+            archive_item=photo_item,
+            original_file_key="photos/legacy-filter/original.jpg",
+            original_filename="photo.jpg",
+            original_mime_type="image/jpeg",
+            original_size_bytes=1024,
+            upload_status=PhotoContent.UploadStatus.UPLOADED,
+        )
+        return manual_item, ocr_doc, photo_item
+
+    def test_legacy_manual_text_filter_url_maps_to_documents_and_texts(self):
+        manual_item, ocr_doc, photo_item = self._public_archive_type_filter_fixture_items()
+
+        resp = self.client.get(reverse("archive-list"), {"item_type": "manual_text"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "מסמכים וטקסטים")
+        self.assertContains(resp, 'class="archive-type-filter__option is-active"')
+        self.assertContains(resp, "?item_type=documents_and_texts")
+        self.assertContains(resp, manual_item.title)
+        self.assertContains(resp, ocr_doc.archive_item.title)
+        self.assertNotContains(resp, photo_item.title)
+
+    def test_legacy_ocr_document_filter_url_maps_to_documents_and_texts(self):
+        manual_item, ocr_doc, photo_item = self._public_archive_type_filter_fixture_items()
 
         resp = self.client.get(reverse("archive-list"), {"item_type": "ocr_document"})
-        self.assertContains(resp, "Filter OCR only")
-        self.assertNotContains(resp, "Filter manual only")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "מסמכים וטקסטים")
+        self.assertContains(resp, 'class="archive-type-filter__option is-active"')
+        self.assertContains(resp, "?item_type=documents_and_texts")
+        self.assertContains(resp, manual_item.title)
+        self.assertContains(resp, ocr_doc.archive_item.title)
+        self.assertNotContains(resp, photo_item.title)
+
+    def test_archive_list_clear_link_preserves_active_type_filter(self):
+        item = create_manual_text_archive_item(
+            title="Clear link preserve type",
+            body="x",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        resp = self.client.get(
+            reverse("archive-list"),
+            {"item_type": "documents_and_texts", "q": "preserve-type-query"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(
+            resp,
+            reverse("archive-list") + "?item_type=documents_and_texts",
+        )
+        self.assertContains(resp, 'class="archive-search-form__clear"')
+        self.assertContains(resp, 'value="preserve-type-query"')
+
+        cleared = self.client.get(
+            reverse("archive-list"),
+            {"item_type": "documents_and_texts"},
+        )
+        self.assertEqual(cleared.status_code, 200)
+        self.assertContains(cleared, item.title)
+        self.assertNotContains(cleared, 'value="preserve-type-query"')
+        self.assertContains(cleared, 'class="archive-type-filter__option is-active"')
+        self.assertContains(cleared, "?item_type=documents_and_texts")
 
     def test_archive_list_filter_respects_anonymous_visibility(self):
         create_manual_text_archive_item(
@@ -3246,7 +3389,10 @@ class ArchiveItemPresentationUiTests(TestCase):
             body="x",
             visibility=ArchiveItem.Visibility.PRIVATE,
         )
-        resp = self.client.get(reverse("archive-list"), {"item_type": "manual_text"})
+        resp = self.client.get(
+            reverse("archive-list"),
+            {"item_type": "documents_and_texts"},
+        )
         self.assertContains(resp, "Public manual filter")
         self.assertNotContains(resp, "Private manual filter")
 
@@ -3260,7 +3406,7 @@ class ArchiveItemPresentationUiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'name="q"')
         self.assertContains(resp, 'value="preserve-query"')
-        self.assertContains(resp, "חיפוש בארכיון")
+        self.assertContains(resp, "חפשו בארכיון")
 
     def test_archive_manage_list_shows_hebrew_visibility_and_metadata(self):
         create_manual_text_archive_item(
@@ -3300,6 +3446,267 @@ class ArchiveItemPresentationUiTests(TestCase):
         self.assertContains(resp, "פרטים הושלמו")
         self.assertNotContains(resp, "MANUAL_TEXT")
         self.assertNotContains(resp, "COMPLETED")
+
+
+class ArchiveBrowseCardPresentationTests(TestCase):
+    def _browse_item(self, item_id: int) -> ArchiveItem:
+        return (
+            ArchiveItem.objects.select_related(
+                "manual_text_content",
+                "ocr_document",
+                "photo_content",
+            )
+            .prefetch_related(
+                "categories",
+                "events",
+                "tags",
+                archive_browse_displayable_text_results_prefetch(),
+            )
+            .get(pk=item_id)
+        )
+
+    def test_manual_text_preview_uses_body_snippet(self):
+        item = create_manual_text_archive_item(
+            title="Manual preview",
+            body="First line of family story.\nSecond line continues here.",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        card = build_archive_browse_card(item)
+        self.assertIn("First line of family story.", card.preview_text)
+        self.assertNotIn("\n", card.preview_text)
+
+    def test_manual_text_empty_body_uses_fallback_preview(self):
+        item = create_manual_text_archive_item(
+            title="Empty manual",
+            body="   ",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        card = build_archive_browse_card(item)
+        self.assertEqual(card.preview_text, ARCHIVE_BROWSE_PREVIEW_EMPTY)
+
+    def test_ocr_document_uses_gentle_fallback_preview(self):
+        doc = create_ocr_document(
+            title="OCR preview card",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        card = build_archive_browse_card(self._browse_item(doc.archive_item_id))
+        self.assertEqual(card.preview_text, ARCHIVE_BROWSE_OCR_PREVIEW)
+        self.assertEqual(card.type_marker, "ocr")
+
+    def test_ocr_preview_uses_displayable_transcription_text(self):
+        doc = create_ocr_document(
+            title="OCR text preview card",
+            doc_type=Document.DocType.PDF,
+            language=Document.Language.ENGLISH,
+            text_input_type=Document.TextInputType.PRINTED,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="gemini-test",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="Opening lines from the scanned family letter.",
+        )
+        card = build_archive_browse_card(self._browse_item(doc.archive_item_id))
+        self.assertIn("Opening lines from the scanned family letter.", card.preview_text)
+        self.assertNotEqual(card.preview_text, ARCHIVE_BROWSE_OCR_PREVIEW)
+
+    def test_manual_text_card_type_marker(self):
+        item = create_manual_text_archive_item(
+            title="Manual marker",
+            body="Body",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        card = build_archive_browse_card(item)
+        self.assertEqual(card.type_marker, "manual")
+
+    def test_photo_card_type_marker(self):
+        item = ArchiveItem.objects.create(
+            item_type=ArchiveItem.ItemType.PHOTO,
+            title="Photo marker",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        PhotoContent.objects.create(
+            archive_item=item,
+            original_file_key="photos/2/original.jpg",
+            original_filename="photo.jpg",
+            original_mime_type="image/jpeg",
+            original_size_bytes=1024,
+            upload_status=PhotoContent.UploadStatus.UPLOADED,
+        )
+        card = build_archive_browse_card(item)
+        self.assertEqual(card.type_marker, "photo")
+
+    def test_unknown_item_type_uses_generic_marker(self):
+        item = create_manual_text_archive_item(
+            title="Future type marker",
+            body="Body",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        item.item_type = "FUTURE_TYPE"
+        card = build_archive_browse_card(item)
+        self.assertEqual(card.type_marker, "generic")
+
+    def test_photo_preview_prefers_description_then_context(self):
+        item = ArchiveItem.objects.create(
+            item_type=ArchiveItem.ItemType.PHOTO,
+            title="Photo preview",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        PhotoContent.objects.create(
+            archive_item=item,
+            original_file_key="photos/1/original.jpg",
+            original_filename="photo.jpg",
+            original_mime_type="image/jpeg",
+            original_size_bytes=1024,
+            upload_status=PhotoContent.UploadStatus.UPLOADED,
+            description="",
+            context="Family gathering in Cairo",
+        )
+        card = build_archive_browse_card(item)
+        self.assertEqual(card.preview_text, "Family gathering in Cairo")
+
+    def test_browse_card_includes_author_when_present(self):
+        item = create_manual_text_archive_item(
+            title="Author card",
+            body="Body",
+            author_name="רחל כהן",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        card = build_archive_browse_card(item)
+        self.assertEqual(card.author_display, "רחל כהן")
+
+    def test_browse_card_omits_author_when_absent(self):
+        item = create_manual_text_archive_item(
+            title="No author card",
+            body="Body",
+            author_name="",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        card = build_archive_browse_card(item)
+        self.assertEqual(card.author_display, "")
+
+    def test_archive_list_renders_author_on_card_when_present(self):
+        create_manual_text_archive_item(
+            title="Public author card item",
+            body="Body text",
+            author_name="Card author name",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        resp = self.client.get(reverse("archive-list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "מחבר/ת:")
+        self.assertContains(resp, "Card author name")
+        self.assertContains(resp, "archive-browse-card__author")
+
+    def test_archive_list_omits_author_on_card_when_absent(self):
+        create_manual_text_archive_item(
+            title="Public no-author card item",
+            body="Body text",
+            author_name="",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        resp = self.client.get(reverse("archive-list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Public no-author card item")
+        self.assertNotContains(resp, "archive-browse-card__author")
+
+    def test_archive_list_omits_page_subtitle(self):
+        resp = self.client.get(reverse("archive-list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "פריטי ארכיון לפי הרשאות הצפייה שלך.")
+
+    def test_browse_card_discovery_metadata_lines(self):
+        item = create_manual_text_archive_item(
+            title="Discovery lines card",
+            body="Body",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        category_a = ArchiveCategory.objects.create(
+            name="מצרים",
+            slug="egypt-discovery",
+        )
+        category_b = ArchiveCategory.objects.create(
+            name="הפרשה",
+            slug="parasha-discovery",
+        )
+        event = ArchiveEvent.objects.create(
+            name="חופשה",
+            slug="holiday-discovery",
+        )
+        tag = Tag.objects.create(name="תגית א׳")
+        item.categories.add(category_a, category_b)
+        item.events.add(event)
+        item.tags.add(tag)
+
+        card = build_archive_browse_card(self._browse_item(item.id))
+        self.assertEqual([link.name for link in card.category_links], ["הפרשה", "מצרים"])
+        self.assertEqual(
+            [link.href for link in card.category_links],
+            [
+                reverse("archive-category-browse", kwargs={"category_id": category_b.id}),
+                reverse("archive-category-browse", kwargs={"category_id": category_a.id}),
+            ],
+        )
+        self.assertEqual([link.name for link in card.related_links], ["חופשה", "תגית א׳"])
+        self.assertEqual(
+            [link.href for link in card.related_links],
+            [
+                reverse("archive-event-browse", kwargs={"event_id": event.id}),
+                reverse("archive-tag-browse", kwargs={"tag_id": tag.id}),
+            ],
+        )
+
+    def test_archive_list_renders_discovery_metadata_lines(self):
+        item = create_manual_text_archive_item(
+            title="Public card list item",
+            body="Snippet for the card preview area.",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        category = ArchiveCategory.objects.create(
+            name="Visible category line",
+            slug="visible-category-line",
+        )
+        event = ArchiveEvent.objects.create(
+            name="Visible event line",
+            slug="visible-event-line",
+        )
+        tag = Tag.objects.create(name="visible-tag-line")
+        item.categories.add(category)
+        item.events.add(event)
+        item.tags.add(tag)
+
+        resp = self.client.get(reverse("archive-list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "archive-browse-card")
+        self.assertContains(resp, "Snippet for the card preview area.")
+        self.assertContains(resp, "קטגוריה:")
+        self.assertContains(resp, "קשור ל־")
+        self.assertContains(resp, "Visible category line")
+        self.assertContains(resp, "Visible event line")
+        self.assertContains(resp, "visible-tag-line")
+        self.assertContains(resp, reverse("archive-category-browse", kwargs={"category_id": category.id}))
+        self.assertContains(resp, reverse("archive-event-browse", kwargs={"event_id": event.id}))
+        self.assertContains(resp, reverse("archive-tag-browse", kwargs={"tag_id": tag.id}))
+        self.assertContains(resp, reverse("archive-detail", kwargs={"item_id": item.id}))
+        self.assertContains(resp, "archive-browse-card__marker--manual")
+        self.assertNotContains(resp, "archive-browse-chip")
+
+    def test_anonymous_archive_list_hides_private_items(self):
+        create_manual_text_archive_item(
+            title="Hidden private card item",
+            body="Private body",
+            visibility=ArchiveItem.Visibility.PRIVATE,
+        )
+        resp = self.client.get(reverse("archive-list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "Hidden private card item")
 
 
 class ArchiveItemListSearchTests(TestCase):
@@ -3402,12 +3809,26 @@ class ArchiveItemListSearchTests(TestCase):
             text_input_type=Document.TextInputType.PRINTED,
             visibility=Document.Visibility.PUBLIC,
         )
+        photo_item = ArchiveItem.objects.create(
+            item_type=ArchiveItem.ItemType.PHOTO,
+            title="Search filter photo item",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        PhotoContent.objects.create(
+            archive_item=photo_item,
+            original_file_key="photos/search-filter/original.jpg",
+            original_filename="photo.jpg",
+            original_mime_type="image/jpeg",
+            original_size_bytes=1024,
+            upload_status=PhotoContent.UploadStatus.UPLOADED,
+        )
         resp = self.client.get(
             reverse("archive-list"),
-            {"q": "search filter", "item_type": "manual_text"},
+            {"q": "search filter", "item_type": "documents_and_texts"},
         )
         self.assertContains(resp, manual_item.title)
-        self.assertNotContains(resp, ocr_doc.title)
+        self.assertContains(resp, ocr_doc.archive_item.title)
+        self.assertNotContains(resp, photo_item.title)
 
     def test_whitespace_search_query_behaves_like_no_search(self):
         public_item = self._create_public_item(title="Whitespace search public")
