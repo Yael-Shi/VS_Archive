@@ -26,6 +26,7 @@
               <th>הערה</th>
               <th>תאריך</th>
               <th>סטטוס</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -82,6 +83,26 @@
                     <span class="badge badge-bad">נדחה</span>
                   {% else %}
                     <span class="badge">{{ row.status }}</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if row.status == "PENDING" %}
+                    <form
+                      method="post"
+                      action="{% url 'archive-metadata-suggestion-approve' suggestion_id=row.id %}"
+                      class="inline-form"
+                    >
+                      {% csrf_token %}
+                      <button type="submit" class="btn btn-primary">אישור</button>
+                    </form>
+                    <form
+                      method="post"
+                      action="{% url 'archive-metadata-suggestion-reject' suggestion_id=row.id %}"
+                      class="inline-form"
+                    >
+                      {% csrf_token %}
+                      <button type="submit" class="btn">דחייה</button>
+                    </form>
                   {% endif %}
                 </td>
               </tr>
