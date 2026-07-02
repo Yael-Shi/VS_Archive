@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% load document_date_display archive_labels %}
 {% block title %}VSArchive - {{ page_title }}{% endblock %}
 
 {% block content %}
@@ -14,7 +13,7 @@
     <div class="spacer"></div>
 
     {% if items %}
-      {% include "documents/archive/partials/item_list_table.html" with items=items %}
+      {% include "documents/archive/partials/item_list_cards.html" with browse_cards=browse_cards %}
     {% else %}
       <p class="muted">אין פריטי ארכיון להצגה.</p>
     {% endif %}

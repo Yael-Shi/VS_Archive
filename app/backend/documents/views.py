@@ -124,12 +124,15 @@ from documents.services.photo_metadata_validation import (
     parse_photo_staff_metadata_form,
 )
 from documents.services.archive_item_presentation import (
-    ARCHIVE_LIST_ITEM_TYPE_FILTER_CHOICES,
+    ARCHIVE_PUBLIC_LIST_TYPE_FILTER_CHOICES,
+    archive_browse_displayable_text_results_prefetch,
     archive_manage_item_type_ui_choices,
     archive_metadata_status_ui_choices,
     archive_visibility_ui_choices,
+    build_archive_browse_cards,
+    filter_archive_items_by_public_list_type,
     filter_archive_items_by_search_query,
-    normalize_archive_list_item_type_filter,
+    normalize_archive_public_list_type_filter,
     normalize_archive_list_search_query,
 )
 from documents.services.env_validation import EnvConfigError, validate_required_env
@@ -2444,6 +2447,11 @@ def _archive_browse_select_related(queryset):
         "manual_text_content",
         "ocr_document",
         "photo_content",
+    ).prefetch_related(
+        "categories",
+        "events",
+        "tags",
+        archive_browse_displayable_text_results_prefetch(),
     )
 
 
@@ -2457,6 +2465,7 @@ def _archive_browse_page_context(*, page_title: str, items) -> dict:
     return {
         "page_title": page_title,
         "items": items,
+        "browse_cards": build_archive_browse_cards(items),
     }
 
 
@@ -2512,31 +2521,24 @@ def archive_tag_browse_page(request, tag_id: int):
 
 
 def archive_list_page(request):
-    item_type_filter = normalize_archive_list_item_type_filter(
+    item_type_filter = normalize_archive_public_list_type_filter(
         request.GET.get("item_type")
     )
     search_query = normalize_archive_list_search_query(request.GET.get("q"))
     items = _archive_browse_select_related(
         archive_browse_queryset_for_user(request.user)
     ).order_by("-created_at")
-    if item_type_filter:
-        items = items.filter(item_type=item_type_filter)
+    items = filter_archive_items_by_public_list_type(items, item_type_filter)
     items = filter_archive_items_by_search_query(items, search_query)
-    item_type_filter_slug = ""
-    if item_type_filter == ArchiveItem.ItemType.OCR_DOCUMENT:
-        item_type_filter_slug = ARCHIVE_ITEM_TYPE_OCR_DOCUMENT
-    elif item_type_filter == ArchiveItem.ItemType.MANUAL_TEXT:
-        item_type_filter_slug = ARCHIVE_ITEM_TYPE_MANUAL_TEXT
-    elif item_type_filter == ArchiveItem.ItemType.PHOTO:
-        item_type_filter_slug = ARCHIVE_ITEM_TYPE_PHOTO
     return render(
         request,
         "documents/archive/list.html",
         context={
             "items": items,
+            "browse_cards": build_archive_browse_cards(items),
             "is_admin": _is_admin(request.user),
-            "item_type_filter": item_type_filter_slug,
-            "item_type_filter_choices": ARCHIVE_LIST_ITEM_TYPE_FILTER_CHOICES,
+            "item_type_filter": item_type_filter,
+            "item_type_filter_choices": ARCHIVE_PUBLIC_LIST_TYPE_FILTER_CHOICES,
             "q": search_query,
         },
     )

@@ -1,0 +1,57 @@
+<ul class="archive-browse-list">
+  {% for card in browse_cards %}
+    <li class="archive-browse-card">
+      <article class="archive-browse-card__article">
+        <div class="archive-browse-card__layout">
+          <div
+            class="archive-browse-card__marker archive-browse-card__marker--{{ card.type_marker }}"
+            role="img"
+            aria-label="{{ card.type_label }}"
+          ></div>
+
+          <div class="archive-browse-card__content">
+            <header class="archive-browse-card__header">
+              <h2 class="archive-browse-card__title">
+                <a href="{{ card.detail_url }}">{{ card.title }}</a>
+              </h2>
+              <div class="archive-browse-card__meta">
+                {% if card.author_display %}
+                  <span class="archive-browse-card__author">
+                    <span class="archive-browse-card__meta-label">מחבר/ת:</span>
+                    {{ card.author_display }}
+                  </span>
+                  <span class="archive-browse-card__meta-sep"> · </span>
+                {% endif %}
+                <span class="archive-browse-card__date">{{ card.date_display }}</span>
+              </div>
+            </header>
+
+            <p class="archive-browse-card__preview">{{ card.preview_text }}</p>
+
+            {% if card.category_links or card.related_links %}
+              <div class="archive-browse-card__discovery">
+                {% if card.category_links %}
+                  <p class="archive-browse-card__discovery-line">
+                    <span class="archive-browse-card__discovery-label">קטגוריה:</span>
+                    {% for link in card.category_links %}
+                      <a class="archive-browse-card__discovery-link" href="{{ link.href }}">{{ link.name }}</a>{% if not forloop.last %}<span class="archive-browse-card__discovery-sep archive-browse-card__discovery-sep--comma">, </span>{% endif %}
+                    {% endfor %}
+                  </p>
+                {% endif %}
+                {% if card.related_links %}
+                  <p class="archive-browse-card__discovery-line">
+                    <span class="archive-browse-card__discovery-label">קשור ל־</span>
+                    {% for link in card.related_links %}
+                      {% if not forloop.first %}<span class="archive-browse-card__discovery-sep archive-browse-card__discovery-sep--dot"> · </span>{% endif %}
+                      <a class="archive-browse-card__discovery-link" href="{{ link.href }}">{{ link.name }}</a>
+                    {% endfor %}
+                  </p>
+                {% endif %}
+              </div>
+            {% endif %}
+          </div>
+        </div>
+      </article>
+    </li>
+  {% endfor %}
+</ul>

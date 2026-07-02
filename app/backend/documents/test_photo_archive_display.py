@@ -85,7 +85,8 @@ class PhotoArchiveDisplayListTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, self.manual_item.title)
         self.assertContains(resp, self.uploaded_public.title)
-        self.assertContains(resp, "תצוגה מקדימה בדף הפריט")
+        self.assertContains(resp, "archive-browse-card")
+        self.assertContains(resp, "archive-browse-card__marker--photo")
 
     def test_public_archive_list_excludes_pending_and_failed_photo(self):
         resp = self.client.get(reverse("archive-list"))
