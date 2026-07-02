@@ -1,7 +1,7 @@
 {% load status_labels %}
 {% if is_admin or doc.processing_state_user == "READY" or doc.processing_state_user == "PROCESSING" %}
 <details class="review-details review-details--secondary document-detail-technical">
-  <summary>פרטים</summary>
+  <summary>פרטים טכניים</summary>
   <div class="review-details-body">
     {% if is_admin %}
       <div class="badge-row">
@@ -24,13 +24,13 @@
       </div>
     {% endif %}
 
-    {% if doc.processing_state_user == "READY" or doc.processing_state_user == "PROCESSING" %}
+    {% if doc.processing_state_user == "PROCESSING" or text_presentation.show_auto_ocr_disclaimer %}
       {% if is_admin %}<div class="spacer-sm"></div>{% endif %}
       <div class="page-lead">
-        {% if doc.processing_state_user == "READY" %}
-          הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות.
-        {% elif doc.processing_state_user == "PROCESSING" %}
+        {% if doc.processing_state_user == "PROCESSING" %}
           העיבוד האוטומטי עדיין רץ. הטקסט המלא יוצג לאחר סיום העיבוד.
+        {% elif text_presentation.show_auto_ocr_disclaimer %}
+          הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות.
         {% endif %}
       </div>
     {% endif %}
@@ -44,6 +44,26 @@
       {% if text_presentation.show_hebrew and text_presentation.hebrew %}
         <div class="spacer-sm"></div>
         {% include "documents/partials/detail_technical_text_result.html" with block=text_presentation.hebrew %}
+      {% endif %}
+
+      {% if admin_meta %}
+        <div class="spacer-sm"></div>
+        <div class="document-detail-technical-admin-meta">
+          <div class="document-detail-technical-admin-meta__title">מטא־דאטה למנהלים</div>
+          {% if admin_meta.donor %}<div><strong>תורם:</strong> {{ admin_meta.donor }}</div>{% endif %}
+          {% if admin_meta.collection %}<div><strong>אוסף:</strong> {{ admin_meta.collection }}</div>{% endif %}
+          {% if admin_meta.original_location %}<div><strong>מיקום מקור:</strong> {{ admin_meta.original_location }}</div>{% endif %}
+          {% if admin_meta.notes %}<div><strong>הערות:</strong> {{ admin_meta.notes }}</div>{% endif %}
+          {% if not admin_meta.donor and not admin_meta.collection and not admin_meta.original_location and not admin_meta.notes %}
+            <p class="muted">אין מידע מנהלים עדיין.</p>
+          {% endif %}
+        </div>
+      {% elif is_admin %}
+        <div class="spacer-sm"></div>
+        <div class="document-detail-technical-admin-meta">
+          <div class="document-detail-technical-admin-meta__title">מטא־דאטה למנהלים</div>
+          <p class="muted">אין מידע מנהלים עדיין.</p>
+        </div>
       {% endif %}
     {% endif %}
   </div>

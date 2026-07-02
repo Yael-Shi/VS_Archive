@@ -67,7 +67,8 @@ class ArchiveMetadataSuggestionPublicFlowTests(TestCase):
         item = self._create_public_manual_text_item()
         resp = self.client.get(self._form_url(item.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "הצעת שיוך לפריט")
+        self.assertContains(resp, "הוספת מידע על הפריט")
+        self.assertContains(resp, "אפשר להציע קטגוריות, אירועים, תגיות, או לשלוח הערה כללית למנהלי הארכיון.")
         self.assertContains(resp, "ההצעה תיבדק לפני שינוי באתר")
 
     def test_anonymous_cannot_access_private_item(self):
@@ -133,7 +134,7 @@ class ArchiveMetadataSuggestionPublicFlowTests(TestCase):
         self.assertContains(resp, "יש למלא שם.")
         self.assertEqual(ArchiveMetadataSuggestion.objects.count(), 0)
 
-    def test_at_least_one_metadata_field_required(self):
+    def test_at_least_one_suggestion_field_required(self):
         item = self._create_public_manual_text_item()
         resp = self.client.post(
             self._form_url(item.id),
@@ -141,11 +142,32 @@ class ArchiveMetadataSuggestionPublicFlowTests(TestCase):
                 suggested_categories="",
                 suggested_events="   ",
                 suggested_tags="",
+                submitter_note="",
             ),
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "יש להזין לפחות קטגוריה, אירוע או תגית מוצעים.")
+        self.assertContains(resp, "יש להזין מידע, קטגוריה, אירוע או תגית מוצעים.")
         self.assertEqual(ArchiveMetadataSuggestion.objects.count(), 0)
+
+    def test_post_accepts_note_only_suggestion(self):
+        item = self._create_public_manual_text_item()
+        resp = self.client.post(
+            self._form_url(item.id),
+            self._valid_post_data(
+                suggested_categories="",
+                suggested_events="",
+                suggested_tags="",
+                submitter_note="מידע כללי על הפריט",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], self._thanks_url(item.id))
+
+        suggestion = ArchiveMetadataSuggestion.objects.get()
+        self.assertEqual(suggestion.submitter_note, "מידע כללי על הפריט")
+        self.assertEqual(suggestion.suggested_categories, "")
+        self.assertEqual(suggestion.suggested_events, "")
+        self.assertEqual(suggestion.suggested_tags, "")
 
     def test_honeypot_does_not_create_suggestion(self):
         item = self._create_public_manual_text_item()
@@ -167,7 +189,7 @@ class ArchiveMetadataSuggestionPublicFlowTests(TestCase):
         item = self._create_public_manual_text_item()
         resp = self.client.get(self._detail_url(item.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "הציעו קטגוריה, אירוע או תגית")
+        self.assertContains(resp, "הוספת מידע על הפריט")
         self.assertContains(resp, self._form_url(item.id))
 
     def test_detail_button_shown_on_ocr_document_page(self):
@@ -198,7 +220,7 @@ class ArchiveMetadataSuggestionPublicFlowTests(TestCase):
             reverse("documents-detail-page", kwargs={"doc_id": doc.id})
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "הציעו קטגוריה, אירוע או תגית")
+        self.assertContains(resp, "הוספת מידע על הפריט")
         self.assertContains(resp, self._form_url(item_id))
 
 
@@ -275,6 +297,22 @@ class ArchiveMetadataSuggestionStaffUiTests(TestCase):
         self.assertContains(resp, "אירוע")
         self.assertContains(resp, "תגית")
         self.assertContains(resp, "הערה")
+
+    def test_backlog_displays_note_only_suggestion_in_note_column(self):
+        item = self._create_item(title="Note only item")
+        self._create_suggestion(
+            item,
+            submitter_note="מידע כללי מהציבור",
+            suggested_categories="",
+            suggested_events="",
+            suggested_tags="",
+        )
+
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._backlog_url())
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Note only item")
+        self.assertContains(resp, "מידע כללי מהציבור")
 
     def test_staff_nav_contains_backlog_link(self):
         self.client.force_login(self.staff)
@@ -388,6 +426,44 @@ class ArchiveMetadataSuggestionReviewTests(TestCase):
         self.assertEqual(ArchiveCategory.objects.count(), 1)
         self.assertEqual(ArchiveEvent.objects.count(), 1)
         self.assertEqual(Tag.objects.count(), 1)
+
+    def test_approve_note_only_suggestion_does_not_attach_metadata(self):
+        item = self._create_item()
+        suggestion = ArchiveMetadataSuggestion.objects.create(
+            archive_item=item,
+            submitter_name="מציע/ה",
+            submitter_note="מידע כללי בלבד",
+            suggested_categories="",
+            suggested_events="",
+            suggested_tags="",
+        )
+
+        approve_suggestion(suggestion.id, reviewer=self.staff)
+
+        item.refresh_from_db()
+        suggestion.refresh_from_db()
+        self.assertEqual(suggestion.status, ArchiveMetadataSuggestion.Status.APPROVED)
+        self.assertEqual(item.categories.count(), 0)
+        self.assertEqual(item.events.count(), 0)
+        self.assertEqual(item.tags.count(), 0)
+
+    def test_staff_can_reject_note_only_suggestion(self):
+        item = self._create_item()
+        suggestion = ArchiveMetadataSuggestion.objects.create(
+            archive_item=item,
+            submitter_name="מציע/ה",
+            submitter_note="מידע שנדחה",
+            suggested_categories="",
+            suggested_events="",
+            suggested_tags="",
+        )
+
+        self.client.force_login(self.staff)
+        resp = self.client.post(self._reject_url(suggestion.id))
+        self.assertEqual(resp.status_code, 302)
+
+        suggestion.refresh_from_db()
+        self.assertEqual(suggestion.status, ArchiveMetadataSuggestion.Status.REJECTED)
 
     def test_approve_preserves_existing_metadata(self):
         item = self._create_item()

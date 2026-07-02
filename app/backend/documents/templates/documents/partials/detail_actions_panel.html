@@ -1,0 +1,12 @@
+<aside class="document-detail-actions-panel" aria-labelledby="document-detail-actions-title">
+  <h2 id="document-detail-actions-title" class="document-detail-actions-title">פעולות</h2>
+  <nav class="document-detail-actions-list" aria-label="פעולות משניות">
+    {% if doc.archive_item_id %}
+      <a class="document-detail-actions-link" href="{% url 'archive-metadata-suggestion-new' item_id=doc.archive_item_id %}">הוספת מידע על הפריט</a>
+    {% endif %}
+    {% if displayed_transcription_text %}
+      <a class="document-detail-actions-link" href="{% url 'transcription-suggestion-new' doc_id=doc.id %}">הצעת תיקון לתעתוק</a>
+    {% endif %}
+    {% include "documents/partials/detail_technical_details.html" with doc=doc text_presentation=text_presentation is_admin=is_admin admin_meta=admin_meta %}
+  </nav>
+</aside>

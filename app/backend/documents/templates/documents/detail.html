@@ -33,8 +33,6 @@
               {% include "documents/archive/partials/source_metadata.html" with item=doc.archive_item %}
               {% include "documents/archive/partials/discovery_metadata.html" with item=doc.archive_item %}
             </div>
-            <div class="spacer-sm"></div>
-            <a class="btn" href="{% url 'archive-metadata-suggestion-new' item_id=doc.archive_item_id %}">הציעו קטגוריה, אירוע או תגית</a>
           {% endif %}
         </div>
 
@@ -46,119 +44,91 @@
           {% endif %}
 
           {% if is_admin %}
-            {# Actions for the current document #}
+            {# Primary actions for the current document #}
             {% if doc.archive_item_id %}
               <a class="btn btn-primary" href="{% url 'archive-manage-edit' item_id=doc.archive_item_id %}">עריכת מטא־דאטה</a>
             {% endif %}
             <a class="btn btn-primary" href="/api/ui/admin/review/{{ doc.id }}/">בקרת תעתוק למסמך זה</a>
-            {% if show_ocr_reprocess_action %}
-              <form
-                method="post"
-                action="{% url 'documents-ocr-reprocess' doc_id=doc.id %}"
-                class="inline-form"
-              >
-                {% csrf_token %}
-                <button type="submit" class="btn btn-primary">נסה עיבוד מחדש</button>
-              </form>
+
+            {% if show_ocr_reprocess_action or show_hebrew_translation_retry_action %}
+              <details class="review-details review-details--secondary document-detail-staff-actions">
+                <summary>פעולות נוספות</summary>
+                <div class="review-details-body document-detail-staff-actions-body">
+                  {% if show_ocr_reprocess_action %}
+                    <form
+                      method="post"
+                      action="{% url 'documents-ocr-reprocess' doc_id=doc.id %}"
+                      class="inline-form"
+                    >
+                      {% csrf_token %}
+                      <button type="submit" class="btn btn-primary">נסה עיבוד מחדש</button>
+                    </form>
+                  {% endif %}
+                  {% if show_hebrew_translation_retry_action %}
+                    <form
+                      method="post"
+                      action="{% url 'documents-hebrew-translation-retry' doc_id=doc.id %}"
+                      class="inline-form"
+                    >
+                      {% csrf_token %}
+                      <button type="submit" class="btn btn-primary">נסה תרגום לעברית מחדש</button>
+                    </form>
+                  {% endif %}
+                  <a class="btn btn-primary" href="/admin/documents/document/{{ doc.id }}/change/">עריכה טכנית (Django Admin)</a>
+                </div>
+              </details>
+            {% else %}
+              <a class="btn btn-primary" href="/admin/documents/document/{{ doc.id }}/change/">עריכה טכנית (Django Admin)</a>
             {% endif %}
-            {% if show_hebrew_translation_retry_action %}
-              <form
-                method="post"
-                action="{% url 'documents-hebrew-translation-retry' doc_id=doc.id %}"
-                class="inline-form"
-              >
-                {% csrf_token %}
-                <button type="submit" class="btn btn-primary">נסה תרגום לעברית מחדש</button>
-              </form>
-            {% endif %}
-            <a class="btn btn-primary" href="/admin/documents/document/{{ doc.id }}/change/">עריכה טכנית (Django Admin)</a>
           {% endif %}
         </div>
       </header>
-
-      <div class="spacer"></div>
-
-      {% include "documents/partials/detail_technical_details.html" with doc=doc text_presentation=text_presentation is_admin=is_admin %}
-
-      {# ===== Upload error (admin-only details) ===== #}
-      {% if doc.upload_status == "FAILED" %}
-        <div class="spacer"></div>
-        <div class="alert alert-danger">
-          <div class="alert-title">אין קובץ / העלאה נכשלה</div>
-          {% if is_admin and doc.upload_error %}
-            <div>{{ doc.upload_error }}</div>
-          {% else %}
-            <div class="muted text-sm">
-              פנו למנהל המערכת.
-            </div>
-          {% endif %}
-        </div>
-      {% endif %}
     </div>
 
-    <div class="spacer"></div>
-
-    <div class="two-col document-detail-layout">
-      {# ===== Left: Text output ===== #}
-      <div class="card card--pad-lg document-detail-text-panel">
-        <div class="section-title">טקסט שחולץ</div>
-
-        {% if text_presentation.missing %}
-          <div class="page-lead">
-            {% if is_admin %}
-              {% if doc.processing_state_user == "PROCESSING" %}
-                בעיבוד… חסר:
-                {% for rt in text_presentation.missing %}{{ rt|result_type_label }}{% if not forloop.last %}, {% endif %}{% endfor %}
-              {% else %}
-                חסרים פלטים:
-                {% for rt in text_presentation.missing %}{{ rt|result_type_label }}{% if not forloop.last %}, {% endif %}{% endfor %}
-              {% endif %}
-            {% elif doc.processing_state_user == "PROCESSING" %}
-              הטקסט עדיין בעיבוד.
-            {% else %}
-              הטקסט עדיין לא זמין.
-            {% endif %}
+    {% if doc.upload_status == "FAILED" %}
+      <div class="spacer-sm"></div>
+      <div class="alert alert-danger">
+        <div class="alert-title">אין קובץ / העלאה נכשלה</div>
+        {% if is_admin and doc.upload_error %}
+          <div>{{ doc.upload_error }}</div>
+        {% else %}
+          <div class="muted text-sm">
+            פנו למנהל המערכת.
           </div>
-          <div class="spacer-sm"></div>
-        {% endif %}
-
-        {% if text_presentation.show_source %}
-          {% include "documents/partials/detail_text_block.html" with meta=text_presentation.source_meta block=text_presentation.source is_admin=is_admin %}
-        {% endif %}
-
-        {% if text_presentation.show_source and text_presentation.show_hebrew %}
-          <div class="spacer"></div>
-        {% endif %}
-
-        {% if text_presentation.show_hebrew %}
-          {% include "documents/partials/detail_text_block.html" with meta=text_presentation.hebrew_meta block=text_presentation.hebrew is_admin=is_admin %}
-        {% endif %}
-
-        {% if displayed_transcription_text %}
-          <div class="spacer"></div>
-          <a class="btn" href="{% url 'transcription-suggestion-new' doc_id=doc.id %}">הצע/י תיקון לתעתוק</a>
         {% endif %}
       </div>
+    {% endif %}
 
-      {# ===== Right: File viewer + admin metadata ===== #}
+    <div class="spacer-sm"></div>
+
+    <div class="document-detail-workspace">
+      {# ===== Source document (first column in RTL: appears on the right) ===== #}
       <div class="card card--pad-lg document-detail-source-panel">
-        <div class="section-title">קובץ מקור</div>
+        <div class="document-detail-panel-head">
+          <h2 class="document-detail-panel-title">מסמך מקור</h2>
+        </div>
 
         {% if doc.upload_status == "FAILED" %}
-          <div class="muted">
-            אין קובץ להצגה (העלאה נכשלה).
+          <div class="document-detail-viewer document-detail-viewer-placeholder">
+            <div class="muted">
+              אין קובץ להצגה (העלאה נכשלה).
+            </div>
           </div>
         {% elif source_preview_items or source_preview_unavailable_count %}
           <div class="document-detail-source-previews">
             {% for item in source_preview_items %}
-              <div class="source-preview-page document-detail-viewer">
+              <div class="source-preview-page">
                 <div class="muted text-sm source-preview-page__label">
                   עמוד {{ item.display_number }}
                 </div>
                 {% if item.url %}
-                  <img src="{{ item.url }}" alt="עמוד {{ item.display_number }}" />
+                  <div class="viewer document-detail-viewer">
+                    <img src="{{ item.url }}" alt="עמוד {{ item.display_number }}" />
+                  </div>
                 {% else %}
-                  <div class="muted">לא ניתן לטעון תצוגה מקדימה לעמוד זה.</div>
+                  <div class="document-detail-viewer document-detail-viewer-placeholder">
+                    <div class="muted">לא ניתן לטעון תצוגה מקדימה לעמוד זה.</div>
+                  </div>
                 {% endif %}
                 {% if is_admin and item.original_name %}
                   <details class="review-details review-details--secondary">
@@ -179,18 +149,20 @@
             </div>
           {% endif %}
         {% elif not content_url %}
-          <div class="muted">
-            אין קובץ לצפייה עדיין.
-            {% if is_admin and not doc.file_s3_key %}
-              (חסר <code>file_s3_key</code>)
-            {% endif %}
+          <div class="document-detail-viewer document-detail-viewer-placeholder">
+            <div class="muted">
+              אין קובץ לצפייה עדיין.
+              {% if is_admin and not doc.file_s3_key %}
+                (חסר <code>file_s3_key</code>)
+              {% endif %}
+            </div>
           </div>
         {% else %}
           <div class="flex-row document-detail-source-actions">
             <a class="btn" href="{{ content_url }}" target="_blank" rel="noopener noreferrer">פתיחה בטאב חדש</a>
           </div>
 
-          <div class="spacer"></div>
+          <div class="spacer-sm"></div>
 
           <div class="viewer document-detail-viewer">
             {% if doc.doc_type == "IMAGE" %}
@@ -202,26 +174,49 @@
             {% endif %}
           </div>
         {% endif %}
+      </div>
 
-        {% if is_admin %}
-          <div class="admin-meta document-detail-admin-meta">
-            <h3>מטא־דאטה למנהלים</h3>
+      {# ===== Transcription and translation ===== #}
+      <div class="card card--pad-lg document-detail-text-panel">
+        <div class="document-detail-panel-head">
+          <h2 class="document-detail-panel-title">טקסט לקריאה</h2>
+        </div>
 
-            {% if admin_meta %}
-              {% if admin_meta.donor %}<div><strong>תורם:</strong> {{ admin_meta.donor }}</div>{% endif %}
-              {% if admin_meta.collection %}<div><strong>אוסף:</strong> {{ admin_meta.collection }}</div>{% endif %}
-              {% if admin_meta.original_location %}<div><strong>מיקום מקור:</strong> {{ admin_meta.original_location }}</div>{% endif %}
-              {% if admin_meta.notes %}<div><strong>הערות:</strong> {{ admin_meta.notes }}</div>{% endif %}
-
-              {% if not admin_meta.donor and not admin_meta.collection and not admin_meta.original_location and not admin_meta.notes %}
-                <p class="muted">אין מידע מנהלים עדיין.</p>
+        {% if text_presentation.missing %}
+          <div class="document-detail-status-note page-lead">
+            {% if is_admin %}
+              {% if doc.processing_state_user == "PROCESSING" %}
+                בעיבוד… חסר:
+                {% for rt in text_presentation.missing %}{{ rt|result_type_label }}{% if not forloop.last %}, {% endif %}{% endfor %}
+              {% else %}
+                חסרים פלטים:
+                {% for rt in text_presentation.missing %}{{ rt|result_type_label }}{% if not forloop.last %}, {% endif %}{% endfor %}
               {% endif %}
+            {% elif doc.processing_state_user == "PROCESSING" %}
+              הטקסט עדיין בעיבוד.
             {% else %}
-              <p class="muted">אין מידע מנהלים עדיין.</p>
+              הטקסט עדיין לא זמין.
             {% endif %}
           </div>
+          <div class="spacer-sm"></div>
         {% endif %}
+
+        <div class="document-detail-text-content">
+          {% if text_presentation.show_source %}
+            {% include "documents/partials/detail_text_block.html" with meta=text_presentation.source_meta block=text_presentation.source doc=doc is_admin=is_admin %}
+          {% endif %}
+
+          {% if text_presentation.show_source and text_presentation.show_hebrew %}
+            <div class="document-detail-text-divider" aria-hidden="true"></div>
+          {% endif %}
+
+          {% if text_presentation.show_hebrew %}
+            {% include "documents/partials/detail_text_block.html" with meta=text_presentation.hebrew_meta block=text_presentation.hebrew doc=doc is_admin=is_admin %}
+          {% endif %}
+        </div>
       </div>
+
+      {% include "documents/partials/detail_actions_panel.html" with doc=doc text_presentation=text_presentation is_admin=is_admin admin_meta=admin_meta displayed_transcription_text=displayed_transcription_text %}
     </div>
   </div>
 {% endblock %}

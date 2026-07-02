@@ -2191,6 +2191,7 @@ def archive_metadata_suggestion_form(request, item_id: int):
             suggested_categories=field_values["suggested_categories"],
             suggested_events=field_values["suggested_events"],
             suggested_tags=field_values["suggested_tags"],
+            submitter_note=field_values["submitter_note"],
         ):
             form_errors.append(SUGGESTION_CONTENT_REQUIRED_ERROR)
 

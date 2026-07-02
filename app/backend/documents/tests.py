@@ -10396,6 +10396,72 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertNotIn('<span class="badge', section)
         self.assertNotIn("document-detail-technical-text-result", section)
 
+    def test_detail_reading_layout_places_source_before_text_with_actions_sidebar(
+        self,
+    ):
+        doc = self._create_document()
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="טקסט לקריאה",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        technical_details_opening = (
+            '<details class="review-details review-details--secondary '
+            'document-detail-technical">'
+        )
+        workspace_start = html.index("document-detail-workspace")
+        source_start = html.index("document-detail-source-panel", workspace_start)
+        text_start = html.index("document-detail-text-panel", workspace_start)
+        actions_start = html.index("document-detail-actions-panel", workspace_start)
+        technical_start = html.index(technical_details_opening)
+        self.assertLess(source_start, text_start)
+        self.assertLess(text_start, actions_start)
+        self.assertLess(actions_start, technical_start)
+        self.assertNotContains(
+            resp,
+            "יש לכם מידע נוסף או תיקון? אפשר להציע מידע, קטגוריה, תגית, אירוע או תיקון לתעתוק.",
+        )
+        self.assertNotContains(resp, "document-detail-contribute-row")
+        self.assertContains(resp, "פעולות")
+        self.assertContains(resp, "הוספת מידע על הפריט")
+        self.assertContains(resp, "הצעת תיקון לתעתוק")
+        self.assertContains(resp, "פרטים טכניים")
+        self.assertContains(resp, "<details")
+        self.assertContains(resp, "מסמך מקור")
+        self.assertContains(resp, "טקסט לקריאה")
+        self.assertContains(resp, "document-detail-reading-prose")
+        actions_end = html.index("</aside>", actions_start)
+        self.assertLess(technical_start, actions_end)
+        after_actions = html[actions_end:]
+        self.assertNotIn(technical_details_opening, after_actions)
+        self.assertEqual(html.count(technical_details_opening), 1)
+        technical_section = self._technical_details_html(resp)
+        self.assertTrue(technical_section.startswith("<details"))
+        self.assertNotRegex(technical_section, r"<details[^>]*\sopen\b")
+        header_main_end = html.index("document-detail-toolbar")
+        header_main = html[html.index("document-detail-header-main") : header_main_end]
+        self.assertNotIn("הוספת מידע על הפריט", header_main)
+        self.assertNotIn("הצעת תיקון לתעתוק", header_main)
+
+    def test_actions_panel_hides_transcription_link_without_displayed_text(
+        self,
+    ):
+        doc = self._create_document(
+            visibility=Document.Visibility.PUBLIC,
+            processing_state_user=Document.ProcessingState.PROCESSING,
+        )
+        self.client.force_login(self.viewer)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "document-detail-actions-panel")
+        self.assertContains(resp, "הוספת מידע על הפריט")
+        self.assertNotContains(resp, "הצעת תיקון לתעתוק")
+        self.assertContains(resp, "פרטים טכניים")
+
     def test_hebrew_detail_prefers_single_hebrew_text_panel(self):
         doc = self._create_document()
         self._create_text_result(
@@ -10509,6 +10575,89 @@ class DocumentDetailTextGroupingTests(TestCase):
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "SOURCE_TEXT")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "NEEDS_REVIEW")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "UNVERIFIED")
+
+    AUTO_OCR_DISCLAIMER = (
+        "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות."
+    )
+
+    def test_unverified_displayed_text_shows_auto_ocr_disclaimer(self):
+        doc = self._create_document(visibility=Document.Visibility.PUBLIC)
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="טקסט לא מאומת",
+        )
+        self.client.force_login(self.viewer)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, self.AUTO_OCR_DISCLAIMER)
+
+    def test_verified_displayed_text_hides_auto_ocr_disclaimer(self):
+        doc = self._create_document(visibility=Document.Visibility.PUBLIC)
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+            text="טקסט מאומת",
+        )
+        self.client.force_login(self.viewer)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "טקסט מאומת")
+        self.assertContains(resp, "document-detail-technical")
+        self.assertNotContains(resp, self.AUTO_OCR_DISCLAIMER)
+
+    def test_mixed_verification_shows_auto_ocr_disclaimer_when_any_unverified(
+        self,
+    ):
+        doc = self._create_document(
+            language=Document.Language.ENGLISH,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+            text="Verified source",
+        )
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="Unverified translation",
+        )
+        self.client.force_login(self.viewer)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Verified source")
+        self.assertContains(resp, "Unverified translation")
+        self.assertContains(resp, self.AUTO_OCR_DISCLAIMER)
+
+    def test_all_verified_displayed_texts_hide_auto_ocr_disclaimer(self):
+        doc = self._create_document(
+            language=Document.Language.ENGLISH,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+            text="Verified source",
+        )
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+            text="Verified translation",
+        )
+        self.client.force_login(self.viewer)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Verified source")
+        self.assertContains(resp, "Verified translation")
+        self.assertContains(resp, "document-detail-technical")
+        self.assertNotContains(resp, self.AUTO_OCR_DISCLAIMER)
 
     def test_viewer_detail_hides_internal_text_labels_and_shows_auto_disclaimer(self):
         doc = self._create_document(visibility=Document.Visibility.PUBLIC)
@@ -10639,6 +10788,7 @@ class TextPresentationHelperTests(TestCase):
         presentation = get_text_presentation_for_document(doc)
         self.assertFalse(presentation.show_source)
         self.assertTrue(presentation.show_hebrew)
+        self.assertTrue(presentation.show_auto_ocr_disclaimer)
 
     def test_get_text_presentation_hebrew_falls_back_to_source_panel(self):
         from documents.services.text_presentation import (
@@ -10665,6 +10815,42 @@ class TextPresentationHelperTests(TestCase):
         presentation = get_text_presentation_for_document(doc)
         self.assertTrue(presentation.show_source)
         self.assertFalse(presentation.show_hebrew)
+        self.assertTrue(presentation.show_auto_ocr_disclaimer)
+
+    def test_get_text_presentation_hides_disclaimer_when_all_displayed_verified(self):
+        from documents.services.text_presentation import (
+            get_text_presentation_for_document,
+        )
+
+        doc = create_ocr_document(
+            title="Verified presentation doc",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.READY,
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="engine-a",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+            text="Verified source",
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="engine-a",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+            text="Verified translation",
+        )
+
+        presentation = get_text_presentation_for_document(doc)
+        self.assertTrue(presentation.show_source)
+        self.assertTrue(presentation.show_hebrew)
+        self.assertFalse(presentation.show_auto_ocr_disclaimer)
 
 
 class DocumentVisibilityAccessControlTests(TestCase):

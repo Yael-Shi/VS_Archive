@@ -3,13 +3,17 @@
     {% if is_admin %}
       <div class="detail-text-block__title">{{ meta.label }}</div>
     {% elif block.text %}
-      <div class="detail-text-block__title">תעתוק</div>
+      <div class="detail-text-block__title">
+        {% if block.result_type == "HEBREW_TEXT" and doc.language != "he" %}
+          תרגום לעברית
+        {% else %}
+          תעתוק
+        {% endif %}
+      </div>
     {% endif %}
 
     {% if block.text %}
-      <div class="detail-text-block__body">
-        <pre>{{ block.text }}</pre>
-      </div>
+      <div class="detail-text-block__body document-detail-reading-prose">{{ block.text }}</div>
     {% else %}
       <div class="muted">{{ meta.empty_message }}</div>
     {% endif %}
