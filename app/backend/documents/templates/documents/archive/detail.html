@@ -68,6 +68,9 @@
       {% include "documents/archive/partials/discovery_metadata.html" with item=item %}
     </div>
 
+    <div class="spacer-sm"></div>
+    <a class="btn" href="{% url 'archive-metadata-suggestion-new' item_id=item.id %}">הציעו קטגוריה, אירוע או תגית</a>
+
     {% if item.item_type == "MANUAL_TEXT" %}
       <div class="section-title archive-detail-text-heading">טקסט</div>
       <div class="archive-detail-text">

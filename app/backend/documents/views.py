@@ -35,6 +35,7 @@ from .models import (
     ArchiveCategory,
     ArchiveEvent,
     ArchiveItem,
+    ArchiveMetadataSuggestion,
     Document,
     DocumentMetadata,
     DocumentSourceFile,
@@ -105,6 +106,12 @@ from documents.services.archive_item_access import (
     ARCHIVE_FAMILY_GROUP_NAME,
     archive_browse_queryset_for_user,
     get_viewable_archive_item,
+)
+from documents.services.archive_metadata_suggestions import (
+    SUGGESTION_CONTENT_REQUIRED_ERROR,
+    format_current_metadata_labels,
+    has_suggestion_content,
+    normalize_suggestion_text,
 )
 from documents.services.archive_item_validation import (
     DATE_PRECISION_UI_CHOICES,
@@ -2124,6 +2131,154 @@ def transcription_suggestion_reject(request, suggestion_id: int):
         messages.error(request, str(exc))
 
     return redirect(detail_url)
+
+
+def _empty_archive_metadata_suggestion_field_values() -> dict[str, str]:
+    return {
+        "submitter_name": "",
+        "submitter_email": "",
+        "submitter_note": "",
+        "suggested_categories": "",
+        "suggested_events": "",
+        "suggested_tags": "",
+    }
+
+
+def _load_archive_metadata_suggestion_item(
+    request,
+    item_id: int,
+) -> ArchiveItem:
+    detail_qs = ArchiveItem.objects.prefetch_related("categories", "events", "tags")
+    return get_viewable_archive_item(request.user, item_id, queryset=detail_qs)
+
+
+def archive_metadata_suggestion_form(request, item_id: int):
+    try:
+        item = _load_archive_metadata_suggestion_item(request, item_id)
+    except Http404:
+        raise
+
+    form_errors: list[str] = []
+    field_values = _empty_archive_metadata_suggestion_field_values()
+    current_metadata = format_current_metadata_labels(item)
+
+    if request.method == "POST":
+        field_values = {
+            "submitter_name": (request.POST.get("submitter_name") or "").strip(),
+            "submitter_email": (request.POST.get("submitter_email") or "").strip(),
+            "submitter_note": (request.POST.get("submitter_note") or "").strip(),
+            "suggested_categories": request.POST.get("suggested_categories") or "",
+            "suggested_events": request.POST.get("suggested_events") or "",
+            "suggested_tags": request.POST.get("suggested_tags") or "",
+        }
+
+        if is_honeypot_triggered(request.POST):
+            return redirect(
+                reverse(
+                    "archive-metadata-suggestion-thanks",
+                    kwargs={"item_id": item.id},
+                )
+            )
+
+        if not field_values["submitter_name"]:
+            form_errors.append(NAME_REQUIRED_ERROR)
+        if not has_suggestion_content(
+            suggested_categories=field_values["suggested_categories"],
+            suggested_events=field_values["suggested_events"],
+            suggested_tags=field_values["suggested_tags"],
+        ):
+            form_errors.append(SUGGESTION_CONTENT_REQUIRED_ERROR)
+
+        if not form_errors:
+            submitter_user = (
+                request.user
+                if getattr(request.user, "is_authenticated", False)
+                else None
+            )
+            ArchiveMetadataSuggestion.objects.create(
+                archive_item=item,
+                suggested_categories=normalize_suggestion_text(
+                    field_values["suggested_categories"]
+                ),
+                suggested_events=normalize_suggestion_text(
+                    field_values["suggested_events"]
+                ),
+                suggested_tags=normalize_suggestion_text(
+                    field_values["suggested_tags"]
+                ),
+                submitter_name=field_values["submitter_name"],
+                submitter_email=field_values["submitter_email"],
+                submitter_note=field_values["submitter_note"],
+                submitter_user=submitter_user,
+            )
+            return redirect(
+                reverse(
+                    "archive-metadata-suggestion-thanks",
+                    kwargs={"item_id": item.id},
+                )
+            )
+
+    context = {
+        "item": item,
+        "current_metadata": current_metadata,
+        "form_errors": form_errors,
+        "field_values": field_values,
+    }
+    return render(
+        request,
+        "documents/archive/metadata_suggestion_form.html",
+        context,
+    )
+
+
+def archive_metadata_suggestion_thanks(request, item_id: int):
+    try:
+        item = _load_archive_metadata_suggestion_item(request, item_id)
+    except Http404:
+        raise
+
+    return render(
+        request,
+        "documents/archive/metadata_suggestion_thanks.html",
+        {"item": item},
+    )
+
+
+@login_required
+def archive_metadata_suggestion_backlog_page(request):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    suggestions = list(
+        ArchiveMetadataSuggestion.objects.select_related(
+            "archive_item",
+            "submitter_user",
+            "reviewed_by",
+        )
+        .annotate(
+            pending_first=Case(
+                When(
+                    status=ArchiveMetadataSuggestion.Status.PENDING,
+                    then=Value(0),
+                ),
+                default=Value(1),
+                output_field=IntegerField(),
+            )
+        )
+        .order_by("pending_first", "-created_at")
+    )
+
+    logger.info(
+        "archive_metadata_suggestion_backlog_page user=%s returned=%s",
+        getattr(request.user, "username", None),
+        len(suggestions),
+    )
+    return render(
+        request,
+        "documents/archive/metadata_suggestion_backlog.html",
+        {"suggestions": suggestions},
+    )
 
 
 @login_required

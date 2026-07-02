@@ -45,5 +45,15 @@ urlpatterns = [
         views.archive_manage_family_access_page,
         name="archive-manage-family-access",
     ),
+    path(
+        "<int:item_id>/metadata-suggestions/new/",
+        views.archive_metadata_suggestion_form,
+        name="archive-metadata-suggestion-new",
+    ),
+    path(
+        "<int:item_id>/metadata-suggestions/thanks/",
+        views.archive_metadata_suggestion_thanks,
+        name="archive-metadata-suggestion-thanks",
+    ),
     path("<int:item_id>/", views.archive_detail_page, name="archive-detail"),
 ]

@@ -101,4 +101,9 @@ urlpatterns = [
         views.transcription_suggestion_reject,
         name="transcription-suggestion-reject",
     ),
+    path(
+        "ui/admin/archive-metadata-suggestions/",
+        views.archive_metadata_suggestion_backlog_page,
+        name="archive-metadata-suggestion-backlog",
+    ),
 ]
