@@ -9,6 +9,16 @@ from public.services.public_content import (
 )
 
 
+class PublicNavTests(TestCase):
+    def test_public_nav_omits_redundant_home_link(self):
+        resp = self.client.get(reverse("archive-list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'class="nav-brand-link"')
+        self.assertContains(resp, "ארכיון")
+        self.assertContains(resp, "אודות")
+        self.assertNotContains(resp, '<a class="btn btn-link" href="/">דף הבית</a>')
+
+
 class AboutPageCopyTests(TestCase):
     def test_about_page_does_not_show_english_version_roadmap_copy(self):
         resp = self.client.get(reverse("public-about"))

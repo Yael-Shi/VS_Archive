@@ -3622,6 +3622,17 @@ class ArchiveBrowseCardPresentationTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, "פריטי ארכיון לפי הרשאות הצפייה שלך.")
 
+    def test_discovery_browse_pages_omit_permission_subtitle(self):
+        category = ArchiveCategory.objects.create(
+            name="Browse subtitle category",
+            slug="browse-subtitle-category",
+        )
+        resp = self.client.get(
+            reverse("archive-category-browse", kwargs={"category_id": category.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "פריטי ארכיון לפי הרשאות הצפייה שלך.")
+
     def test_browse_card_discovery_metadata_lines(self):
         item = create_manual_text_archive_item(
             title="Discovery lines card",
