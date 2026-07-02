@@ -10104,16 +10104,49 @@ class NavigationLabelTests(TestCase):
         self.assertContains(resp, "רשימת השלמת פרטים")
 
     def test_detail_admin_action_links_hidden_for_non_admin(self):
+        from django.urls import reverse
+
         doc = self._create_document(visibility=Document.Visibility.PUBLIC)
         self.client.force_login(self.user)
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        # Non-admin keeps the global "back to list" link...
-        self.assertContains(resp, "חזרה לרשימה")
-        # ...but admin navigation/actions stay hidden (gating unchanged).
+        html = resp.content.decode()
+        toolbar_start = html.index("document-detail-toolbar")
+        toolbar_section = html[toolbar_start : html.index("</header>", toolbar_start)]
+        self.assertContains(resp, "חזרה לארכיון")
+        self.assertIn(reverse("archive-list"), toolbar_section)
+        self.assertNotIn("חזרה לרשימה", toolbar_section)
+        self.assertNotIn('href="/api/ui/documents/"', toolbar_section)
+        # Admin navigation/actions stay hidden (gating unchanged).
         self.assertNotContains(resp, "בקרת תעתוק למסמך זה")
         self.assertNotContains(resp, "רשימת בקרת תעתוק")
         self.assertNotContains(resp, "/api/ui/admin/review/")
+
+    def test_anonymous_detail_back_link_returns_to_archive(self):
+        from django.urls import reverse
+
+        doc = self._create_document(visibility=Document.Visibility.PUBLIC)
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        toolbar_start = html.index("document-detail-toolbar")
+        toolbar_section = html[toolbar_start : html.index("</header>", toolbar_start)]
+        self.assertContains(resp, "חזרה לארכיון")
+        self.assertIn(reverse("archive-list"), toolbar_section)
+        self.assertNotIn("חזרה לרשימה", toolbar_section)
+        self.assertNotIn('href="/api/ui/documents/"', toolbar_section)
+
+    def test_detail_admin_back_link_returns_to_document_list(self):
+        doc = self._create_document()
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        toolbar_start = html.index("document-detail-toolbar")
+        toolbar_section = html[toolbar_start : html.index("</header>", toolbar_start)]
+        self.assertIn("חזרה לרשימה", toolbar_section)
+        self.assertIn('href="/api/ui/documents/"', toolbar_section)
+        self.assertNotIn("חזרה לארכיון", toolbar_section)
 
     def test_detail_metadata_edit_uses_primary_toolbar_button_style(self):
         doc = self._create_document()
@@ -10173,7 +10206,12 @@ class NavigationLabelTests(TestCase):
         self.client.force_login(family_user)
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "חזרה לרשימה")
+        html = resp.content.decode()
+        toolbar_start = html.index("document-detail-toolbar")
+        toolbar_section = html[toolbar_start : html.index("</header>", toolbar_start)]
+        self.assertContains(resp, "חזרה לארכיון")
+        self.assertNotIn("חזרה לרשימה", toolbar_section)
+        self.assertNotIn('href="/api/ui/documents/"', toolbar_section)
         self.assertNotContains(resp, "עריכת מטא־דאטה")
         self.assertNotContains(resp, "בקרת תעתוק למסמך זה")
         self.assertNotContains(resp, "עריכה טכנית (Django Admin)")
@@ -10340,6 +10378,24 @@ class DocumentDetailTextGroupingTests(TestCase):
     def _detail_url(self, doc_id: int) -> str:
         return f"/api/ui/documents/{doc_id}/"
 
+    def _technical_details_html(self, response) -> str:
+        html = response.content.decode()
+        opening = (
+            '<details class="review-details review-details--secondary '
+            'document-detail-technical">'
+        )
+        if opening not in html:
+            return ""
+        start = html.index(opening)
+        end = html.index("</details>", start) + len("</details>")
+        return html[start:end]
+
+    def _assert_viewer_technical_section_has_no_status_badges(self, response):
+        section = self._technical_details_html(response)
+        self.assertNotIn('<div class="badge-row">', section)
+        self.assertNotIn('<span class="badge', section)
+        self.assertNotIn("document-detail-technical-text-result", section)
+
     def test_hebrew_detail_prefers_single_hebrew_text_panel(self):
         doc = self._create_document()
         self._create_text_result(
@@ -10447,6 +10503,8 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertContains(resp, "ממתין לבקרת תעתוק")
         self.assertContains(resp, "טרם אושר")
         self.assertContains(resp, "transkribus-pylaia:1")
+        self.assertContains(resp, "מוכן לצפייה")
+        self.assertContains(resp, "הועלה")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "HEBREW_TEXT")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "SOURCE_TEXT")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "NEEDS_REVIEW")
@@ -10469,12 +10527,52 @@ class DocumentDetailTextGroupingTests(TestCase):
             resp, "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות."
         )
         self.assertNotContains(resp, "תעתוק אוטומטי")
+        self.assertNotContains(resp, "מוכן לצפייה")
+        self.assertNotContains(resp, "הועלה")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "HEBREW_TEXT")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "SOURCE_TEXT")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "NEEDS_REVIEW")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "UNVERIFIED")
         self.assertNotContains(resp, "transkribus-pylaia:1")
         self.assertNotContains(resp, "טקסט עברי לבדיקה")
+
+    def test_viewer_detail_omits_technical_details_without_public_copy(self):
+        doc = self._create_document(
+            visibility=Document.Visibility.PUBLIC,
+            processing_state_user=Document.ProcessingState.PARTIAL,
+        )
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="טקסט חלקי",
+        )
+        self.client.force_login(self.viewer)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "טקסט חלקי")
+        self.assertNotContains(resp, "document-detail-technical")
+        self.assertEqual(self._technical_details_html(resp), "")
+        self.assertNotIn('<span class="badge', resp.content.decode())
+
+    def test_viewer_processing_detail_shows_message_without_status_badges(self):
+        doc = self._create_document(
+            visibility=Document.Visibility.PUBLIC,
+            processing_state_user=Document.ProcessingState.PROCESSING,
+        )
+        self.client.force_login(self.viewer)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        technical_section = self._technical_details_html(resp)
+        self.assertTrue(technical_section)
+        self.assertContains(
+            resp,
+            "העיבוד האוטומטי עדיין רץ. הטקסט המלא יוצג לאחר סיום העיבוד.",
+        )
+        self.assertIn(
+            "העיבוד האוטומטי עדיין רץ. הטקסט המלא יוצג לאחר סיום העיבוד.",
+            technical_section,
+        )
+        self._assert_viewer_technical_section_has_no_status_badges(resp)
 
 
 class TextBlockDisplayMetaTests(SimpleTestCase):
