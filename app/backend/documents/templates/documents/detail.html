@@ -37,7 +37,11 @@
         </div>
 
         <div class="page-toolbar document-detail-toolbar">
-          <a class="btn btn-primary" href="/api/ui/documents/">חזרה לרשימה</a>
+          {% if is_admin %}
+            <a class="btn btn-primary" href="/api/ui/documents/">חזרה לרשימה</a>
+          {% else %}
+            <a class="btn btn-primary" href="{% url 'archive-list' %}">חזרה לארכיון</a>
+          {% endif %}
 
           {% if is_admin %}
             {# Actions for the current document #}

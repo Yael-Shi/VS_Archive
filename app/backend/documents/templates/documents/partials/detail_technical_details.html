@@ -1,30 +1,31 @@
 {% load status_labels %}
+{% if is_admin or doc.processing_state_user == "READY" or doc.processing_state_user == "PROCESSING" %}
 <details class="review-details review-details--secondary document-detail-technical">
   <summary>פרטים</summary>
   <div class="review-details-body">
-    <div class="badge-row">
-      {% upload_status_badge doc.upload_status %}
-      {% processing_state_badge doc.processing_state_user %}
+    {% if is_admin %}
+      <div class="badge-row">
+        {% upload_status_badge doc.upload_status %}
+        {% processing_state_badge doc.processing_state_user %}
 
-      <span class="badge">{{ doc.doc_type|doc_type_label }}</span>
+        <span class="badge">{{ doc.doc_type|doc_type_label }}</span>
 
-      {% if doc.language %}
-        <span class="badge">{{ doc.language|language_label }}</span>
-      {% else %}
-        <span class="badge">שפה: לא ידוע</span>
-      {% endif %}
+        {% if doc.language %}
+          <span class="badge">{{ doc.language|language_label }}</span>
+        {% else %}
+          <span class="badge">שפה: לא ידוע</span>
+        {% endif %}
 
-      {% if is_admin %}
         {% if doc.archive_item.visibility == "public" %}
           <span class="badge badge-ok">ציבורי</span>
         {% else %}
           <span class="badge">פרטי</span>
         {% endif %}
-      {% endif %}
-    </div>
+      </div>
+    {% endif %}
 
     {% if doc.processing_state_user == "READY" or doc.processing_state_user == "PROCESSING" %}
-      <div class="spacer-sm"></div>
+      {% if is_admin %}<div class="spacer-sm"></div>{% endif %}
       <div class="page-lead">
         {% if doc.processing_state_user == "READY" %}
           הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות.
@@ -47,3 +48,4 @@
     {% endif %}
   </div>
 </details>
+{% endif %}
