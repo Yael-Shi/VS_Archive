@@ -950,6 +950,41 @@ class ManualTextArchiveItemTests(TestCase):
         self.assertEqual(item.author_name, "Ada Lovelace")
         self.assertEqual(item.source_title, "The Times")
 
+    def test_create_manual_text_post_saves_public_note(self):
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.CREATE_URL,
+            data=self._valid_create_payload(
+                title="Manual with public note",
+                body="Body text.",
+                public_note="Curator note\nsecond line",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        item = ArchiveItem.objects.get(title="Manual with public note")
+        self.assertEqual(item.public_note, "Curator note\nsecond line")
+
+    def test_edit_manual_text_post_updates_public_note(self):
+        item = create_manual_text_archive_item(
+            title="Manual public note edit",
+            body="Body.",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        item.public_note = "Before note"
+        item.save(update_fields=["public_note", "updated_at"])
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=item.id),
+            data=self._valid_create_payload(
+                title="Manual public note edit",
+                body="Body.",
+                public_note="After note\nupdated",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        item.refresh_from_db()
+        self.assertEqual(item.public_note, "After note\nupdated")
+
     def test_edit_manual_text_post_updates_author_name_and_source_title(self):
         item = create_manual_text_archive_item(
             title="Manual source edit",
@@ -1529,6 +1564,26 @@ class OcrDocumentMetadataEditTests(TestCase):
         item.refresh_from_db()
         self.assertEqual(item.author_name, "יוסף לוי")
         self.assertEqual(item.source_title, "דבר")
+
+    def test_edit_ocr_post_updates_public_note_on_archive_item(self):
+        doc = create_ocr_document(
+            title="OCR public note edit",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._valid_metadata_payload(
+                title="OCR public note edit",
+                public_note="Archive curator note\nline two",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        item = doc.archive_item
+        item.refresh_from_db()
+        self.assertEqual(item.public_note, "Archive curator note\nline two")
 
     def test_edit_ocr_post_can_clear_author_name_and_source_title(self):
         doc = create_ocr_document(
@@ -2892,6 +2947,73 @@ class ArchiveItemSourceMetadataTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Regression OCR detail")
         self.assertContains(resp, "טקסט לקריאה")
+
+
+class ArchiveItemPublicNoteTests(TestCase):
+    def test_empty_public_note_not_shown_on_manual_text_detail(self):
+        item = create_manual_text_archive_item(
+            title="Manual without public note",
+            body="Only body text.",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Only body text.")
+        self.assertNotContains(resp, "הערת הארכיון:")
+
+    def test_manual_text_detail_shows_public_note_when_present(self):
+        item = create_manual_text_archive_item(
+            title="Manual with public note",
+            body="Typed body text.",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        item.public_note = "הערה ציבורית מהארכיון"
+        item.save(update_fields=["public_note", "updated_at"])
+
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "הערת הארכיון:")
+        self.assertContains(resp, "הערה ציבורית מהארכיון")
+
+    def test_manual_text_detail_preserves_public_note_line_breaks(self):
+        item = create_manual_text_archive_item(
+            title="Manual note line breaks",
+            body="Body.",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        item.public_note = "first line\nsecond line"
+        item.save(update_fields=["public_note", "updated_at"])
+
+        resp = self.client.get(f"/archive/{item.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "first line<br />second line", html=True)
+
+    def test_ocr_document_detail_shows_public_note_when_present(self):
+        doc = create_ocr_document(
+            title="OCR with public note",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
+            public_note="הערת מסמך מהארכיון",
+        )
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "הערת הארכיון:")
+        self.assertContains(resp, "הערת מסמך מהארכיון")
+
+    def test_empty_public_note_not_shown_on_ocr_document_detail(self):
+        doc = create_ocr_document(
+            title="OCR without public note",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "OCR without public note")
+        self.assertNotContains(resp, "הערת הארכיון:")
 
 
 class ArchiveItemDiscoveryMetadataDisplayTests(TestCase):

@@ -171,6 +171,18 @@ class PhotoManageEditTests(TestCase):
         self.assertEqual(photo.people_present, "Uncle Moshe, Aunt Rivka")
         self.assertEqual(photo.notes, "Scanned from album page 3")
 
+    def test_staff_can_update_photo_public_note(self):
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=self.photo_item.id),
+            data=self._photo_edit_payload(
+                public_note="Curator photo note\nline two",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.photo_item.refresh_from_db()
+        self.assertEqual(self.photo_item.public_note, "Curator photo note\nline two")
+
     def test_staff_can_update_photo_discovery_metadata(self):
         existing_cat = ArchiveCategory.objects.create(
             name="Photo topic",

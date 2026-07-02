@@ -69,6 +69,7 @@ def parse_photo_staff_metadata_form(
             "date_end": parsed_shared["date_end"],
             "date_precision": parsed_shared["date_precision"],
             "metadata_status": parsed_shared["metadata_status"],
+            "public_note": parsed_shared["public_note"],
             **photo_metadata,
         }
         return form_data, errors
@@ -89,6 +90,7 @@ def parse_photo_staff_metadata_form(
             "date_end": parsed_shared["date_end"],
             "date_precision": parsed_shared["date_precision"],
             "metadata_status": parsed_shared["metadata_status"],
+            "public_note": parsed_shared["public_note"],
             **photo_metadata,
         }
         return form_data, shared_errors
@@ -102,6 +104,7 @@ def parse_photo_staff_metadata_form(
         "metadata_status": parsed_shared["metadata_status"],
         "date_start_value": parsed_shared["date_start_value"],
         "date_end_value": parsed_shared["date_end_value"],
+        "public_note": parsed_shared["public_note"],
         **photo_metadata,
     }
     return parsed, []

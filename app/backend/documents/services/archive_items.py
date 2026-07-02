@@ -57,6 +57,7 @@ def _split_ocr_document_create_kwargs(
     source_metadata_kwargs = {
         "author_name": runtime_kwargs.pop("author_name", ""),
         "source_title": runtime_kwargs.pop("source_title", ""),
+        "public_note": runtime_kwargs.pop("public_note", ""),
     }
 
     return shared_kwargs, source_metadata_kwargs, runtime_kwargs
@@ -88,6 +89,7 @@ def create_ocr_document(**document_kwargs: Any):
         **archive_values,
         author_name=source_metadata_kwargs["author_name"],
         source_title=source_metadata_kwargs["source_title"],
+        public_note=source_metadata_kwargs["public_note"],
     )
     mirror_values = archive_item_field_values_from_archive_item(archive_item)
     return Document.objects.create(
@@ -109,6 +111,7 @@ def create_manual_text_archive_item(
     metadata_status: str | None = None,
     author_name: str = "",
     source_title: str = "",
+    public_note: str = "",
 ):
     """
     Create a MANUAL_TEXT ArchiveItem with linked ManualTextContent.
@@ -127,6 +130,7 @@ def create_manual_text_archive_item(
         metadata_status=metadata_status or ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
         author_name=author_name,
         source_title=source_title,
+        public_note=public_note,
     )
     ManualTextContent.objects.create(archive_item=archive_item, body=body)
     return archive_item
@@ -145,6 +149,7 @@ def update_manual_text_archive_item(
     metadata_status: str,
     author_name: str = "",
     source_title: str = "",
+    public_note: str = "",
 ):
     """
     Update a MANUAL_TEXT ArchiveItem and its ManualTextContent body.
@@ -164,6 +169,7 @@ def update_manual_text_archive_item(
     archive_item.metadata_status = metadata_status
     archive_item.author_name = author_name
     archive_item.source_title = source_title
+    archive_item.public_note = public_note
     archive_item.save()
 
     content = archive_item.manual_text_content
@@ -187,6 +193,7 @@ def update_photo_archive_item_metadata(
     context: str = "",
     people_present: str = "",
     notes: str = "",
+    public_note: str = "",
 ):
     """
     Update shared ArchiveItem metadata for a PHOTO item.
@@ -205,9 +212,11 @@ def update_photo_archive_item_metadata(
     archive_item.date_end = date_end
     archive_item.date_precision = date_precision
     archive_item.metadata_status = metadata_status
+    archive_item.public_note = public_note
     archive_item.save(
         update_fields=[
             *ARCHIVE_ITEM_SHARED_FIELD_NAMES,
+            "public_note",
             "updated_at",
         ]
     )
@@ -279,6 +288,7 @@ def update_ocr_document_metadata(
     metadata_status: str,
     author_name: str = "",
     source_title: str = "",
+    public_note: str = "",
 ):
     """
     Update shared archival metadata on an OCR-backed Document.
@@ -301,11 +311,13 @@ def update_ocr_document_metadata(
     archive_item.metadata_status = metadata_status
     archive_item.author_name = author_name
     archive_item.source_title = source_title
+    archive_item.public_note = public_note
     archive_item.save(
         update_fields=[
             *ARCHIVE_ITEM_SHARED_FIELD_NAMES,
             "author_name",
             "source_title",
+            "public_note",
             "updated_at",
         ]
     )
