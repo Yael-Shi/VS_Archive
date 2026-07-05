@@ -1612,6 +1612,24 @@ def _review_non_actionable_reason(row: DocumentTextResult) -> Optional[str]:
     return "פעולות בקרה אינן זמינות לתוצאה זו."
 
 
+def _document_source_preview_context(doc: Document) -> dict:
+    bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
+    source_preview = build_source_preview(doc, bucket)
+    content_url = None
+    if not is_multi_image_document(doc) and bucket and doc.file_s3_key:
+        content_url = create_presigned_get(
+            bucket=bucket,
+            key=doc.file_s3_key,
+            expires_in=PRESIGNED_GET_EXPIRY_SECONDS,
+        )
+
+    return {
+        "content_url": content_url,
+        "source_preview_items": source_preview.items,
+        "source_preview_unavailable_count": source_preview.non_uploaded_count,
+    }
+
+
 @login_required
 def review_detail_page(request, doc_id: int):
     deny = _require_admin_page(request)
@@ -1626,13 +1644,7 @@ def review_detail_page(request, doc_id: int):
     )
     admin_meta = getattr(doc, "admin_meta", None)
 
-    bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
-    source_preview = build_source_preview(doc, bucket)
-    content_url = None
-    if not is_multi_image_document(doc) and bucket and doc.file_s3_key:
-        content_url = create_presigned_get(
-            bucket=bucket, key=doc.file_s3_key, expires_in=PRESIGNED_GET_EXPIRY_SECONDS
-        )
+    source_context = _document_source_preview_context(doc)
 
     text_results = sorted(
         doc.text_results.all(),
@@ -1679,9 +1691,7 @@ def review_detail_page(request, doc_id: int):
     context = {
         "doc": doc,
         "admin_meta": admin_meta,
-        "content_url": content_url,
-        "source_preview_items": source_preview.items,
-        "source_preview_unavailable_count": source_preview.non_uploaded_count,
+        **source_context,
         "text_result_cards": text_result_cards,
         "latest_transkribus_run": latest_transkribus_run,
         "transkribus_run_count": len(transkribus_runs),
@@ -1835,23 +1845,14 @@ def document_detail_page(request, doc_id: int):
 
     admin_meta = getattr(doc, "admin_meta", None) if is_admin else None
 
-    bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
-    source_preview = build_source_preview(doc, bucket)
-    content_url = None
-
-    if not is_multi_image_document(doc) and bucket and doc.file_s3_key:
-        content_url = create_presigned_get(
-            bucket=bucket, key=doc.file_s3_key, expires_in=PRESIGNED_GET_EXPIRY_SECONDS
-        )
+    source_context = _document_source_preview_context(doc)
 
     text_presentation = get_text_presentation_for_document(doc)
     displayed_transcription_text = get_displayed_transcription_text(doc)
 
     context = {
         "doc": doc,
-        "content_url": content_url,
-        "source_preview_items": source_preview.items,
-        "source_preview_unavailable_count": source_preview.non_uploaded_count,
+        **source_context,
         "admin_meta": admin_meta,
         "text_presentation": text_presentation,
         "displayed_transcription_text": displayed_transcription_text,
@@ -1866,7 +1867,7 @@ def document_detail_page(request, doc_id: int):
         getattr(request.user, "username", None),
         doc.id,
         is_admin,
-        bool(content_url),
+        bool(source_context["content_url"]),
         doc.mime_type,
         text_presentation.missing,
     )
@@ -1905,18 +1906,7 @@ def _load_transcription_suggestion_document(
 
 
 def _transcription_suggestion_source_context(doc: Document) -> dict:
-    bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
-    source_preview = build_source_preview(doc, bucket)
-    content_url = None
-    if not is_multi_image_document(doc) and bucket and doc.file_s3_key:
-        content_url = create_presigned_get(
-            bucket=bucket, key=doc.file_s3_key, expires_in=PRESIGNED_GET_EXPIRY_SECONDS
-        )
-    return {
-        "content_url": content_url,
-        "source_preview_items": source_preview.items,
-        "source_preview_unavailable_count": source_preview.non_uploaded_count,
-    }
+    return _document_source_preview_context(doc)
 
 
 def _empty_suggestion_field_values() -> dict[str, str]:
@@ -2060,13 +2050,7 @@ def transcription_suggestion_detail_page(request, suggestion_id: int):
     )
     doc = suggestion.document
 
-    bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
-    source_preview = build_source_preview(doc, bucket)
-    content_url = None
-    if not is_multi_image_document(doc) and bucket and doc.file_s3_key:
-        content_url = create_presigned_get(
-            bucket=bucket, key=doc.file_s3_key, expires_in=PRESIGNED_GET_EXPIRY_SECONDS
-        )
+    source_context = _document_source_preview_context(doc)
 
     diff_html = render_transcription_diff_html(
         suggestion.current_text_snapshot,
@@ -2084,9 +2068,7 @@ def transcription_suggestion_detail_page(request, suggestion_id: int):
         {
             "suggestion": suggestion,
             "doc": doc,
-            "content_url": content_url,
-            "source_preview_items": source_preview.items,
-            "source_preview_unavailable_count": source_preview.non_uploaded_count,
+            **source_context,
             "diff_html": diff_html,
             "status_label": suggestion_status_label(suggestion.status),
             "live_text": live_text,
