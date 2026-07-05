@@ -144,13 +144,6 @@ def _merge_block(key: str, row: PublicContentBlock | None) -> PublicContent:
     return PublicContent(title=title, body=body)
 
 
-def get_public_content(key: str) -> PublicContent:
-    if key not in DEFAULT_PUBLIC_CONTENT:
-        raise KeyError(f"Unknown public content key: {key}")
-    row = PublicContentBlock.objects.filter(key=key).first()
-    return _merge_block(key, row)
-
-
 def get_all_public_content() -> dict[str, PublicContent]:
     rows = PublicContentBlock.objects.filter(key__in=DEFAULT_PUBLIC_CONTENT.keys())
     by_key = {row.key: row for row in rows}
