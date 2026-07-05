@@ -30,7 +30,7 @@ class GeminiAdapter:
 
         model_candidates = kwargs.pop(
             "model_candidates",
-            list(DEFAULT_GEMINI_MODEL_CANDIDATES),
+            DEFAULT_GEMINI_MODEL_CANDIDATES,
         )
         if not model_candidates:
             raise EnginePermanentError("No Gemini model candidates configured.")

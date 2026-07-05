@@ -2125,7 +2125,7 @@ class GeminiAdapterTests(SimpleTestCase):
             pages=[],
             language_hint="en",
             prompt_variant="printed",
-            model_candidates=list(DEFAULT_GEMINI_MODEL_CANDIDATES),
+            model_candidates=DEFAULT_GEMINI_MODEL_CANDIDATES,
         )
 
         self.assertEqual(result.engine_name, DEFAULT_GEMINI_MODEL_CANDIDATES[0])
@@ -2149,7 +2149,7 @@ class GeminiAdapterTests(SimpleTestCase):
             pages=[],
             language_hint="en",
             prompt_variant="printed",
-            model_candidates=list(DEFAULT_GEMINI_MODEL_CANDIDATES),
+            model_candidates=DEFAULT_GEMINI_MODEL_CANDIDATES,
         )
 
         self.assertEqual(result.engine_name, DEFAULT_GEMINI_MODEL_CANDIDATES[1])
@@ -2181,7 +2181,7 @@ class GeminiAdapterTests(SimpleTestCase):
                 pages=[],
                 language_hint="en",
                 prompt_variant="printed",
-                model_candidates=list(DEFAULT_GEMINI_MODEL_CANDIDATES),
+                model_candidates=DEFAULT_GEMINI_MODEL_CANDIDATES,
             )
 
 
