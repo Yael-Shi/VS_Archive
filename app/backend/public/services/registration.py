@@ -101,7 +101,6 @@ class RegistrationResult:
     errors: list[str] | None = None
     field_values: RegistrationFieldValues | None = None
     honeypot_triggered: bool = False
-    throttled: bool = False
 
 
 def _parse_field_values(post_data: Any) -> RegistrationFieldValues:
@@ -138,7 +137,6 @@ def process_registration(*, request, post_data: Any) -> RegistrationResult:
         return RegistrationResult(
             errors=[THROTTLE_ERROR],
             field_values=field_values,
-            throttled=True,
         )
 
     record_registration_attempt(
