@@ -29,6 +29,21 @@ def review_pending_text_result_filter() -> Q:
     )
 
 
+def _pending_result_exists(**extra_filters: str) -> Exists:
+    """``Exists`` over this document's review-pending ``DocumentTextResult`` rows.
+
+    Optional ``extra_filters`` are applied on top of the pending filter, matching
+    the per-filter subqueries used below. Output is identical to spelling the
+    subquery out inline; this only removes the repeated boilerplate.
+    """
+    subquery = DocumentTextResult.objects.filter(
+        document=OuterRef("pk"),
+    ).filter(review_pending_text_result_filter())
+    if extra_filters:
+        subquery = subquery.filter(**extra_filters)
+    return Exists(subquery)
+
+
 def documents_in_review_backlog(
     *,
     q: str = "",
@@ -39,15 +54,8 @@ def documents_in_review_backlog(
     result_type: str = "",
     verification_status: str = "",
 ) -> QuerySet[Document]:
-    pending = review_pending_text_result_filter()
     qs = (
-        Document.objects.filter(
-            Exists(
-                DocumentTextResult.objects.filter(
-                    document=OuterRef("pk"),
-                ).filter(pending)
-            )
-        )
+        Document.objects.filter(_pending_result_exists())
         .select_related("archive_item")
         .order_by("-updated_at")
         .distinct()
@@ -70,34 +78,12 @@ def documents_in_review_backlog(
         qs = qs.filter(processing_state_user=processing_state_user)
 
     if engine_key:
-        qs = qs.filter(
-            Exists(
-                DocumentTextResult.objects.filter(
-                    document=OuterRef("pk"),
-                )
-                .filter(pending)
-                .filter(engine_key=engine_key)
-            )
-        )
+        qs = qs.filter(_pending_result_exists(engine_key=engine_key))
     if result_type:
-        qs = qs.filter(
-            Exists(
-                DocumentTextResult.objects.filter(
-                    document=OuterRef("pk"),
-                )
-                .filter(pending)
-                .filter(result_type=result_type)
-            )
-        )
+        qs = qs.filter(_pending_result_exists(result_type=result_type))
     if verification_status:
         qs = qs.filter(
-            Exists(
-                DocumentTextResult.objects.filter(
-                    document=OuterRef("pk"),
-                )
-                .filter(pending)
-                .filter(verification_status=verification_status)
-            )
+            _pending_result_exists(verification_status=verification_status)
         )
 
     return qs
