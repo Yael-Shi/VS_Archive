@@ -8,15 +8,21 @@ from documents.services.expected_outputs import expected_result_types_for_docume
 
 def update_document_processing_state_for_engine(doc: Document, engine: str) -> None:
     expected_types = expected_result_types_for_document(doc)
-    qs = doc.text_results.filter(engine=engine, result_type__in=expected_types)
 
-    rows_by_type: dict[str, DocumentTextResult | None] = {}
-    for result_type in expected_types:
-        rows_by_type[result_type] = qs.filter(result_type=result_type).first()
+    # Fetch all expected rows in a single query. The (document, result_type, engine)
+    # unique constraint guarantees at most one row per result_type, so keying by
+    # result_type returns exactly the same rows as the previous per-type .first()
+    # lookups while avoiding one query per expected result type.
+    rows_by_type: dict[str, DocumentTextResult] = {
+        row.result_type: row
+        for row in doc.text_results.filter(
+            engine=engine, result_type__in=expected_types
+        )
+    }
 
     all_rows: list[DocumentTextResult] = []
     for result_type in expected_types:
-        row = rows_by_type[result_type]
+        row = rows_by_type.get(result_type)
         if row is None:
             doc.processing_state_user = Document.ProcessingState.PARTIAL
             return
