@@ -198,6 +198,8 @@ _VALID_ARCHIVE_ITEM_CREATE_TYPES = frozenset(
         ARCHIVE_ITEM_TYPE_PHOTO,
     }
 )
+DEFAULT_PAGE_SIZE = 50
+PRESIGNED_GET_EXPIRY_SECONDS = 3600
 
 
 def _bad(msg: str):
@@ -1307,7 +1309,12 @@ def documents_list_api(request):
     doc_type = (request.GET.get("doc_type") or "").strip()
     metadata_status = (request.GET.get("metadata_status") or "").strip()
 
-    limit = _parse_int(request.GET.get("limit"), default=50, min_value=1, max_value=200)
+    limit = _parse_int(
+        request.GET.get("limit"),
+        default=DEFAULT_PAGE_SIZE,
+        min_value=1,
+        max_value=200,
+    )
     offset = _parse_int(request.GET.get("offset"), default=0, min_value=0)
 
     is_admin = _is_admin(request.user)
@@ -1352,7 +1359,7 @@ def documents_list_page(request):
     doc_type = (request.GET.get("doc_type") or "").strip()
     metadata_status = (request.GET.get("metadata_status") or "").strip()
 
-    limit = 50
+    limit = DEFAULT_PAGE_SIZE
     offset = _parse_int(request.GET.get("offset"), default=0, min_value=0)
 
     is_admin = _is_admin(request.user)
@@ -1410,7 +1417,7 @@ def admin_backlog_page(request):
     if deny:
         return deny
 
-    limit = 50
+    limit = DEFAULT_PAGE_SIZE
     offset = _parse_int(request.GET.get("offset"), default=0, min_value=0)
 
     only_missing_tags = (request.GET.get("only_missing_tags") or "").strip() == "1"
@@ -1496,7 +1503,7 @@ def review_backlog_page(request):
     result_type = (request.GET.get("result_type") or "").strip()
     verification_status = (request.GET.get("verification_status") or "").strip()
 
-    limit = 50
+    limit = DEFAULT_PAGE_SIZE
     offset = _parse_int(request.GET.get("offset"), default=0, min_value=0)
 
     qs = documents_in_review_backlog(
@@ -1624,7 +1631,7 @@ def review_detail_page(request, doc_id: int):
     content_url = None
     if not is_multi_image_document(doc) and bucket and doc.file_s3_key:
         content_url = create_presigned_get(
-            bucket=bucket, key=doc.file_s3_key, expires_in=3600
+            bucket=bucket, key=doc.file_s3_key, expires_in=PRESIGNED_GET_EXPIRY_SECONDS
         )
 
     text_results = sorted(
@@ -1826,7 +1833,7 @@ def document_detail_page(request, doc_id: int):
 
     if not is_multi_image_document(doc) and bucket and doc.file_s3_key:
         content_url = create_presigned_get(
-            bucket=bucket, key=doc.file_s3_key, expires_in=3600
+            bucket=bucket, key=doc.file_s3_key, expires_in=PRESIGNED_GET_EXPIRY_SECONDS
         )
 
     text_presentation = get_text_presentation_for_document(doc)
@@ -1895,7 +1902,7 @@ def _transcription_suggestion_source_context(doc: Document) -> dict:
     content_url = None
     if not is_multi_image_document(doc) and bucket and doc.file_s3_key:
         content_url = create_presigned_get(
-            bucket=bucket, key=doc.file_s3_key, expires_in=3600
+            bucket=bucket, key=doc.file_s3_key, expires_in=PRESIGNED_GET_EXPIRY_SECONDS
         )
     return {
         "content_url": content_url,
@@ -2050,7 +2057,7 @@ def transcription_suggestion_detail_page(request, suggestion_id: int):
     content_url = None
     if not is_multi_image_document(doc) and bucket and doc.file_s3_key:
         content_url = create_presigned_get(
-            bucket=bucket, key=doc.file_s3_key, expires_in=3600
+            bucket=bucket, key=doc.file_s3_key, expires_in=PRESIGNED_GET_EXPIRY_SECONDS
         )
 
     diff_html = render_transcription_diff_html(
@@ -2780,7 +2787,7 @@ def archive_detail_page(request, item_id: int):
             photo_url = create_presigned_get(
                 bucket=bucket,
                 key=photo_content.original_file_key,
-                expires_in=3600,
+                expires_in=PRESIGNED_GET_EXPIRY_SECONDS,
             )
 
         return render(
