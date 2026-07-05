@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from documents.models import Document, DocumentTextResult, TranscriptionEditSuggestion
 from documents.services.text_presentation import (
-    _is_hebrew_language,
+    is_hebrew_language,
     resolve_displayed_transcription_result,
 )
 from documents.services.transcription_edit_suggestions import (
@@ -30,7 +30,7 @@ def _apply_approved_suggestion_text(
 ) -> None:
     verified = DocumentTextResult.VerificationStatus.VERIFIED
 
-    if _is_hebrew_language(doc):
+    if is_hebrew_language(doc):
         source = find_paired_source_row(doc, engine=target.engine)
         hebrew = find_paired_hebrew_row(doc, engine=target.engine)
         if source is None or hebrew is None:
