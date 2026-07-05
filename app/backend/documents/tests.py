@@ -9355,17 +9355,25 @@ class ReviewUiTests(TestCase):
         self.assertContains(resp, "אימות תעתוק")
         self.assertContains(resp, "פרטים טכניים")
 
-    def test_review_detail_verified_shows_non_actionable_reason(self):
+    def test_review_detail_verified_row_shows_verified_edit_form(self):
         doc = self._create_document()
-        self._create_text_result(
+        row = self._create_text_result(
             doc,
             verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
         )
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "התעתוק כבר אושר אנושית")
+        self.assertContains(resp, "עריכת תרגום מאושר")
+        self.assertContains(
+            resp,
+            f"/api/ui/admin/review/text-results/{row.id}/verified-edit/",
+        )
+        self.assertContains(resp, 'name="text"')
+        self.assertContains(resp, "שמור עריכה")
+        self.assertNotContains(resp, "התעתוק כבר אושר אנושית")
         self.assertNotContains(resp, "אשר תעתוק")
+        self.assertNotContains(resp, "דחה תעתוק")
 
     def test_review_detail_failed_row_shows_non_actionable_reason(self):
         doc = self._create_document()
@@ -9400,17 +9408,24 @@ class ReviewUiTests(TestCase):
         self.assertContains(resp, "ריצת Transkribus אחרונה")
         self.assertContains(resp, "888")
 
-    def test_review_detail_no_textarea_for_verified_row(self):
+    def test_review_detail_verified_row_uses_verified_edit_endpoint(self):
         doc = self._create_document()
-        self._create_text_result(
+        row = self._create_text_result(
             doc,
             verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
         )
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
+        self.assertContains(resp, 'name="text"')
+        self.assertContains(resp, "review-textarea")
+        self.assertContains(
+            resp,
+            f"/api/ui/admin/review/text-results/{row.id}/verified-edit/",
+        )
         self.assertNotContains(resp, "שמור טקסט")
-        self.assertNotContains(resp, 'name="text"')
-        self.assertNotContains(resp, "/text/")
+        self.assertNotContains(resp, f"/text-results/{row.id}/text/")
+        self.assertNotContains(resp, "אשר תעתוק")
+        self.assertNotContains(resp, "דחה תעתוק")
 
 
 class UploadPageTemplateTests(TestCase):
