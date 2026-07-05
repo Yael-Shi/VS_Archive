@@ -39,7 +39,7 @@
 
         <div class="page-toolbar document-detail-toolbar">
           {% if is_admin %}
-            <a class="btn btn-primary" href="/api/ui/documents/">חזרה לרשימה</a>
+            <a class="btn btn-primary" href="{% url 'documents-list-page' %}">חזרה לרשימה</a>
           {% else %}
             <a class="btn btn-primary" href="{% url 'archive-list' %}">חזרה לארכיון</a>
           {% endif %}
@@ -49,7 +49,7 @@
             {% if doc.archive_item_id %}
               <a class="btn btn-primary" href="{% url 'archive-manage-edit' item_id=doc.archive_item_id %}">עריכת מטא־דאטה</a>
             {% endif %}
-            <a class="btn btn-primary" href="/api/ui/admin/review/{{ doc.id }}/">בקרת תעתוק למסמך זה</a>
+            <a class="btn btn-primary" href="{% url 'review-detail-page' doc_id=doc.id %}">בקרת תעתוק למסמך זה</a>
 
             {% if show_ocr_reprocess_action or show_hebrew_translation_retry_action %}
               <details class="review-details review-details--secondary document-detail-staff-actions">
