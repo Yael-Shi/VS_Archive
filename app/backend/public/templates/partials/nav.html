@@ -1,12 +1,12 @@
 <div class="card nav-shell">
   <div class="nav-row">
     <div class="nav-brand">
-      <a href="/" class="nav-brand-link">VSArchive</a>
+      <a href="{% url 'public-home' %}" class="nav-brand-link">VSArchive</a>
     </div>
 
     <div class="nav-links">
       <a class="btn btn-link" href="{% url 'archive-list' %}">ארכיון</a>
-      <a class="btn btn-link" href="/about/">אודות</a>
+      <a class="btn btn-link" href="{% url 'public-about' %}">אודות</a>
     </div>
 
     <div class="nav-spacer" aria-hidden="true"></div>
@@ -17,7 +17,7 @@
           היי, {{ user.username }}
         </span>
 
-        <form action="/accounts/logout/" method="post" class="nav-form">
+        <form action="{% url 'logout' %}" method="post" class="nav-form">
           {% csrf_token %}
           <button type="submit" class="btn btn-danger">
             התנתקות
@@ -25,7 +25,7 @@
         </form>
       {% else %}
         <a class="btn btn-link" href="{% url 'public-register' %}">הרשמה</a>
-        <a class="btn btn-link" href="/accounts/login/">התחברות</a>
+        <a class="btn btn-link" href="{% url 'login' %}">התחברות</a>
       {% endif %}
     </div>
   </div>
@@ -39,13 +39,13 @@
       <div class="nav-links nav-staff-links">
         <a class="btn btn-link" href="{% url 'archive-manage-list' %}">ניהול ארכיון</a>
         <a class="btn btn-link" href="{% url 'archive-manage-new' %}">יצירת פריט חדש</a>
-        <a class="btn btn-link" href="/api/ui/admin/backlog/">רשימת השלמת פרטים</a>
-        <a class="btn btn-link" href="/api/ui/admin/review/">רשימת בקרת תעתוק</a>
+        <a class="btn btn-link" href="{% url 'admin-backlog-page' %}">רשימת השלמת פרטים</a>
+        <a class="btn btn-link" href="{% url 'review-backlog-page' %}">רשימת בקרת תעתוק</a>
         <a class="btn btn-link" href="{% url 'transcription-suggestion-backlog' %}">הצעות תיקון לתעתוקים</a>
         <a class="btn btn-link" href="{% url 'archive-metadata-suggestion-backlog' %}">הצעות שיוך לפריטי ארכיון</a>
         <a class="btn btn-link" href="{% url 'archive-manage-family-access' %}">ניהול גישת משפחה</a>
         <a class="btn btn-link" href="{% url 'public-content-edit' %}">עריכת תוכן ציבורי</a>
-        <a class="btn btn-link" href="/admin/">ניהול מערכת</a>
+        <a class="btn btn-link" href="{% url 'admin:index' %}">ניהול מערכת</a>
       </div>
     </div>
   {% endif %}
