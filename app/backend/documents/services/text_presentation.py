@@ -80,14 +80,14 @@ def presentation_show_auto_ocr_disclaimer(presentation: TextPresentation) -> boo
     )
 
 
-def _is_hebrew_language(doc: Document) -> bool:
+def is_hebrew_language(doc: Document) -> bool:
     lang = (doc.language or "").strip().lower()
     return lang in ("he", "heb", "hebrew")
 
 
 def text_block_display_meta(doc: Document, result_type: str) -> TextBlockDisplayMeta:
     """User-facing label and short explanation for a document detail text block."""
-    is_hebrew_doc = _is_hebrew_language(doc)
+    is_hebrew_doc = is_hebrew_language(doc)
 
     if result_type == "SOURCE_TEXT":
         if is_hebrew_doc:
@@ -249,7 +249,7 @@ def get_text_presentation_for_document(doc: Document) -> TextPresentation:
     source_meta = text_block_display_meta(doc, "SOURCE_TEXT")
     hebrew_meta = text_block_display_meta(doc, "HEBREW_TEXT")
 
-    if _is_hebrew_language(doc):
+    if is_hebrew_language(doc):
         # Display-only: one panel for Hebrew docs — prefer HEBREW_TEXT, else SOURCE_TEXT.
         if hebrew is not None:
             show_source = False
@@ -299,7 +299,7 @@ def resolve_displayed_transcription_result(
     Hebrew documents prefer displayable HEBREW_TEXT, then SOURCE_TEXT.
     Non-Hebrew documents prefer SOURCE_TEXT, then HEBREW_TEXT.
     """
-    if _is_hebrew_language(doc):
+    if is_hebrew_language(doc):
         hebrew_obj = _latest_displayable(doc, "HEBREW_TEXT")
         if hebrew_obj:
             return hebrew_obj
