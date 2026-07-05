@@ -61,6 +61,18 @@ class PublicRegistrationTests(TestCase):
         payload.update(overrides)
         return payload
 
+    def _post_register(self, **overrides):
+        return self.client.post(
+            self.REGISTER_URL, self._registration_payload(**overrides)
+        )
+
+    def _get_user_by_email(self, email: str):
+        return User.objects.get(username=normalize_email(email))
+
+    def _assert_redirect_to(self, resp, url: str):
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], url)
+
     def test_anonymous_user_can_view_registration_page(self):
         resp = self.client.get(self.REGISTER_URL)
         self.assertEqual(resp.status_code, 200)
@@ -69,13 +81,10 @@ class PublicRegistrationTests(TestCase):
 
     def test_valid_registration_creates_non_staff_non_superuser_user(self):
         email = self._unique_email("valid.user")
-        resp = self.client.post(
-            self.REGISTER_URL, self._registration_payload(email=email)
-        )
-        self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp["Location"], self.PENDING_URL)
+        resp = self._post_register(email=email)
+        self._assert_redirect_to(resp, self.PENDING_URL)
 
-        user = User.objects.get(username=normalize_email(email))
+        user = self._get_user_by_email(email)
         self.assertFalse(user.is_staff)
         self.assertFalse(user.is_superuser)
         self.assertEqual(user.first_name, "ישראל")
@@ -84,15 +93,12 @@ class PublicRegistrationTests(TestCase):
 
     def test_registered_user_is_not_added_to_archive_family(self):
         email = self._unique_email("not.family")
-        self.client.post(self.REGISTER_URL, self._registration_payload(email=email))
-        user = User.objects.get(username=normalize_email(email))
+        self._post_register(email=email)
+        user = self._get_user_by_email(email)
         self.assertFalse(user.groups.filter(name=ARCHIVE_FAMILY_GROUP_NAME).exists())
 
     def test_email_is_required(self):
-        resp = self.client.post(
-            self.REGISTER_URL,
-            self._registration_payload(email=""),
-        )
+        resp = self._post_register(email="")
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "יש למלא כתובת דוא״ל")
         self.assertEqual(User.objects.count(), 0)
@@ -103,33 +109,20 @@ class PublicRegistrationTests(TestCase):
             email="Existing@Example.com",
             password="test-pass",
         )
-        resp = self.client.post(
-            self.REGISTER_URL,
-            self._registration_payload(email="existing@EXAMPLE.com"),
-        )
+        resp = self._post_register(email="existing@EXAMPLE.com")
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, DUPLICATE_EMAIL_ERROR)
         self.assertEqual(User.objects.count(), 1)
 
     def test_password_validation_is_enforced(self):
         email = self._unique_email("weak.pass")
-        resp = self.client.post(
-            self.REGISTER_URL,
-            self._registration_payload(
-                email=email,
-                password1="123",
-                password2="123",
-            ),
-        )
+        resp = self._post_register(email=email, password1="123", password2="123")
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(User.objects.filter(username=normalize_email(email)).exists())
         self.assertContains(resp, WEAK_PASSWORD_ERROR)
 
     def test_honeypot_submission_does_not_create_user(self):
-        resp = self.client.post(
-            self.REGISTER_URL,
-            self._registration_payload(**{HONEYPOT_FIELD_NAME: "Acme Corp"}),
-        )
+        resp = self._post_register(**{HONEYPOT_FIELD_NAME: "Acme Corp"})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(User.objects.count(), 0)
 
@@ -139,10 +132,7 @@ class PublicRegistrationTests(TestCase):
             self._unique_email(f"ip-allowed-{i}") for i in range(IP_ATTEMPT_LIMIT)
         ]
         for index, email in enumerate(allowed_emails, start=1):
-            resp = self.client.post(
-                self.REGISTER_URL,
-                self._registration_payload(email=email, password2="wrong"),
-            )
+            resp = self._post_register(email=email, password2="wrong")
             self.assertEqual(
                 resp.status_code,
                 200,
@@ -151,10 +141,7 @@ class PublicRegistrationTests(TestCase):
             self.assertNotContains(resp, THROTTLE_ERROR)
 
         blocked_email = self._unique_email("ip-blocked")
-        blocked = self.client.post(
-            self.REGISTER_URL,
-            self._registration_payload(email=blocked_email, password2="wrong"),
-        )
+        blocked = self._post_register(email=blocked_email, password2="wrong")
         self.assertEqual(blocked.status_code, 200)
         self.assertContains(blocked, THROTTLE_ERROR)
         self.assertEqual(User.objects.count(), user_count_before)
@@ -165,17 +152,13 @@ class PublicRegistrationTests(TestCase):
 
     def test_throttle_allows_exactly_email_limit_then_blocks_next_attempt(self):
         email = self._unique_email("email-throttle")
-        mismatch_payload = self._registration_payload(email=email, password2="wrong")
 
         for index in range(EMAIL_ATTEMPT_LIMIT):
-            resp = self.client.post(self.REGISTER_URL, mismatch_payload)
+            resp = self._post_register(email=email, password2="wrong")
             self.assertEqual(resp.status_code, 200, msg=f"attempt {index + 1}")
             self.assertNotContains(resp, THROTTLE_ERROR)
 
-        blocked = self.client.post(
-            self.REGISTER_URL,
-            self._registration_payload(email=email),
-        )
+        blocked = self._post_register(email=email)
         self.assertEqual(blocked.status_code, 200)
         self.assertContains(blocked, THROTTLE_ERROR)
         self.assertFalse(User.objects.filter(username=normalize_email(email)).exists())
@@ -191,10 +174,7 @@ class PublicRegistrationTests(TestCase):
         self.assertEqual(result.errors, [DUPLICATE_EMAIL_ERROR])
 
     def test_pending_approval_message_is_shown_after_registration(self):
-        self.client.post(
-            self.REGISTER_URL,
-            self._registration_payload(email=self._unique_email("pending")),
-        )
+        self._post_register(email=self._unique_email("pending"))
         resp = self.client.get(self.PENDING_URL)
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "החשבון ממתין לאישור")
@@ -210,22 +190,17 @@ class PublicRegistrationTests(TestCase):
         self.client.force_login(family_user)
 
         register_resp = self.client.get(self.REGISTER_URL)
-        self.assertEqual(register_resp.status_code, 302)
-        self.assertEqual(register_resp["Location"], self.ARCHIVE_LIST_URL)
+        self._assert_redirect_to(register_resp, self.ARCHIVE_LIST_URL)
 
         pending_resp = self.client.get(self.PENDING_URL)
-        self.assertEqual(pending_resp.status_code, 302)
-        self.assertEqual(pending_resp["Location"], self.ARCHIVE_LIST_URL)
+        self._assert_redirect_to(pending_resp, self.ARCHIVE_LIST_URL)
 
     def test_visible_user_facing_copy_does_not_expose_archive_family(self):
         register_resp = self.client.get(self.REGISTER_URL)
         self.assertEqual(register_resp.status_code, 200)
         self.assertNotContains(register_resp, "archive_family")
 
-        self.client.post(
-            self.REGISTER_URL,
-            self._registration_payload(email=self._unique_email("copy-check")),
-        )
+        self._post_register(email=self._unique_email("copy-check"))
         pending_resp = self.client.get(self.PENDING_URL)
         self.assertEqual(pending_resp.status_code, 200)
         self.assertNotContains(pending_resp, "archive_family")
