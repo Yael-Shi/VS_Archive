@@ -1723,7 +1723,9 @@ def review_text_result_verify(request, result_id: int):
         row.id,
         row.document_id,
     )
-    return redirect(f"/api/ui/admin/review/{row.document_id}/")
+    return redirect(
+        reverse("review-detail-page", kwargs={"doc_id": row.document_id})
+    )
 
 
 @login_required
@@ -1746,7 +1748,9 @@ def review_text_result_reject(request, result_id: int):
         row.id,
         row.document_id,
     )
-    return redirect(f"/api/ui/admin/review/{row.document_id}/")
+    return redirect(
+        reverse("review-detail-page", kwargs={"doc_id": row.document_id})
+    )
 
 
 @login_required
@@ -1773,7 +1777,9 @@ def review_text_result_update_text(request, result_id: int):
         row.id,
         row.document_id,
     )
-    return redirect(f"/api/ui/admin/review/{row.document_id}/")
+    return redirect(
+        reverse("review-detail-page", kwargs={"doc_id": row.document_id})
+    )
 
 
 @login_required
@@ -1804,7 +1810,9 @@ def review_text_result_verified_edit(request, result_id: int):
         row.id,
         row.document_id,
     )
-    return redirect(f"/api/ui/admin/review/{row.document_id}/")
+    return redirect(
+        reverse("review-detail-page", kwargs={"doc_id": row.document_id})
+    )
 
 
 def document_detail_page(request, doc_id: int):
