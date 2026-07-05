@@ -10411,7 +10411,7 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertNotIn('<span class="badge', section)
         self.assertNotIn("document-detail-technical-text-result", section)
 
-    def test_detail_reading_layout_places_source_before_text_with_actions_sidebar(
+    def test_detail_reading_layout_places_source_before_text_with_actions_dropdown(
         self,
     ):
         doc = self._create_document()
@@ -10428,20 +10428,24 @@ class DocumentDetailTextGroupingTests(TestCase):
             '<details class="review-details review-details--secondary '
             'document-detail-technical">'
         )
+        actions_start = html.index("document-detail-actions-panel")
         workspace_start = html.index("document-detail-workspace")
         source_start = html.index("document-detail-source-panel", workspace_start)
         text_start = html.index("document-detail-text-panel", workspace_start)
-        actions_start = html.index("document-detail-actions-panel", workspace_start)
         technical_start = html.index(technical_details_opening)
+        self.assertLess(actions_start, workspace_start)
         self.assertLess(source_start, text_start)
-        self.assertLess(text_start, actions_start)
         self.assertLess(actions_start, technical_start)
         self.assertNotContains(
             resp,
             "יש לכם מידע נוסף או תיקון? אפשר להציע מידע, קטגוריה, תגית, אירוע או תיקון לתעתוק.",
         )
         self.assertNotContains(resp, "document-detail-contribute-row")
-        self.assertContains(resp, "פעולות")
+        self.assertContains(resp, "מידע והשתתפות")
+        self.assertContains(resp, 'aria-expanded="false"')
+        self.assertContains(resp, 'class="document-detail-actions-panel"', count=1)
+        self.assertContains(resp, "hidden")
+        self.assertContains(resp, "▾")
         self.assertContains(resp, "הוספת מידע על הפריט")
         self.assertContains(resp, "הצעת תיקון לתעתוק")
         self.assertContains(resp, "פרטים טכניים")
@@ -10449,7 +10453,7 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertContains(resp, "מסמך מקור")
         self.assertContains(resp, "טקסט לקריאה")
         self.assertContains(resp, "document-detail-reading-prose")
-        actions_end = html.index("</aside>", actions_start)
+        actions_end = html.index("<script>", actions_start)
         self.assertLess(technical_start, actions_end)
         after_actions = html[actions_end:]
         self.assertNotIn(technical_details_opening, after_actions)
@@ -10473,6 +10477,10 @@ class DocumentDetailTextGroupingTests(TestCase):
         resp = self.client.get(self._detail_url(doc.id))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "document-detail-actions-panel")
+        self.assertContains(resp, "חזרה לארכיון")
+        self.assertContains(resp, "←")
+        self.assertContains(resp, "מידע והשתתפות")
+        self.assertContains(resp, 'aria-expanded="false"')
         self.assertContains(resp, "הוספת מידע על הפריט")
         self.assertNotContains(resp, "הצעת תיקון לתעתוק")
         self.assertContains(resp, "פרטים טכניים")

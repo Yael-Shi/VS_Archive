@@ -38,11 +38,18 @@
         </div>
 
         <div class="page-toolbar document-detail-toolbar">
-          {% if is_admin %}
-            <a class="btn btn-primary" href="{% url 'documents-list-page' %}">חזרה לרשימה</a>
-          {% else %}
-            <a class="btn btn-primary" href="{% url 'archive-list' %}">חזרה לארכיון</a>
-          {% endif %}
+          <div class="document-detail-navigation-actions">
+            {% if is_admin %}
+              <a class="btn btn-primary" href="{% url 'documents-list-page' %}">חזרה לרשימה</a>
+            {% else %}
+              <a class="btn btn-primary" href="{% url 'archive-list' %}">
+                <span>חזרה לארכיון</span>
+                <span aria-hidden="true">←</span>
+              </a>
+            {% endif %}
+
+            {% include "documents/partials/detail_actions_panel.html" with doc=doc text_presentation=text_presentation is_admin=is_admin admin_meta=admin_meta displayed_transcription_text=displayed_transcription_text %}
+          </div>
 
           {% if is_admin %}
             {# Primary actions for the current document #}
@@ -216,8 +223,6 @@
           {% endif %}
         </div>
       </div>
-
-      {% include "documents/partials/detail_actions_panel.html" with doc=doc text_presentation=text_presentation is_admin=is_admin admin_meta=admin_meta displayed_transcription_text=displayed_transcription_text %}
     </div>
   </div>
 {% endblock %}
