@@ -36,6 +36,15 @@ class GeminiResult:
     review_reasons: List[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class _HebrewTranslationChunkAttemptResult:
+    text: str
+    data: Dict[str, Any]
+    finish_reason: Optional[str]
+    finish_message: Optional[str]
+    usage: Dict[str, Optional[int]]
+
+
 _HANDWRITTEN_LATIN_PROMPT = (
     "You are an expert paleographer and historian.\n"
     "TASK: Transcribe the handwritten text in the image as faithfully as possible.\n"
@@ -134,6 +143,7 @@ _PROMPT_BY_VARIANT = {
 
 _REQUIRED_KEYS = ("text", "has_unclear", "unclear_count")
 _TRANSLATION_CHUNK_MAX_CHARS = 2200
+_TRANSLATION_MAX_TOKENS_SPLIT_MAX_CHARS = 1100
 _MIN_TRANSLATION_LENGTH_RATIO = 0.20
 _TRUNCATION_RETRY_MIN_OUTPUT_TOKENS = 8192
 
@@ -288,6 +298,18 @@ def _split_text_for_translation(
     return [chunk for chunk in chunks if chunk]
 
 
+def _split_translation_chunk_for_max_tokens_retry(chunk: str) -> List[str]:
+    stripped = (chunk or "").strip()
+    if not stripped:
+        return []
+
+    max_chars = min(
+        _TRANSLATION_MAX_TOKENS_SPLIT_MAX_CHARS,
+        max(1, (len(stripped) + 1) // 2),
+    )
+    return _split_text_for_translation(stripped, max_chars=max_chars)
+
+
 def _first_response_candidate(resp: Any) -> Any:
     candidates = getattr(resp, "candidates", None)
     if not candidates:
@@ -420,6 +442,87 @@ def _strip_outer_source_excerpt_wrapper(text: str) -> str:
 
     inner = stripped[len(_SOURCE_EXCERPT_OPEN_TAG) : -len(_SOURCE_EXCERPT_CLOSE_TAG)]
     return inner.strip()
+
+
+def _generate_hebrew_translation_chunk(
+    client: Any,
+    chunk: str,
+    language_hint: Optional[str],
+    *,
+    chunk_index: int,
+    total_chunks: int,
+    model_name: str,
+    temperature: float,
+    top_k: int,
+    top_p: float,
+    max_output_tokens: Optional[int],
+) -> _HebrewTranslationChunkAttemptResult:
+    prompt = _build_hebrew_translation_prompt(chunk, language_hint)
+
+    success = False
+    attempts = 0
+    finish_reason: Optional[str] = None
+    finish_message: Optional[str] = None
+    usage: Dict[str, Optional[int]] = {}
+    data: Dict[str, Any] = {}
+
+    while not success and attempts < 2:
+        try:
+            contents = [types.Part.from_text(text=prompt)]
+            resp = client.models.generate_content(
+                model=model_name,
+                contents=cast(types.ContentListUnionDict, contents),
+                config=types.GenerateContentConfig(
+                    temperature=temperature,
+                    top_k=top_k,
+                    top_p=top_p,
+                    max_output_tokens=max_output_tokens,
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                ),
+            )
+            finish_reason = _extract_finish_reason(resp)
+            finish_message = _extract_finish_message(resp)
+            usage = _extract_response_usage(resp)
+            data = _plain_text_response_to_page_data(
+                resp.text or "",
+                page_index=chunk_index,
+            )
+            success = True
+        except GeminiError as e:
+            if _is_retryable_gemini_response_error(e):
+                attempts += 1
+                if attempts < 2:
+                    logger.warning(
+                        "Retrying Gemini translation response format failure on chunk %s/%s "
+                        "with model %s: %s",
+                        chunk_index,
+                        total_chunks,
+                        model_name,
+                        e,
+                    )
+                    continue
+            raise
+        except Exception as e:
+            err_str = str(e).upper()
+            if any(x in err_str for x in ["429", "RESOURCE_EXHAUSTED", "QUOTA"]):
+                if "LIMIT: 0" in err_str:
+                    raise GeminiError(f"QUOTA_EXHAUSTED: {model_name}")
+                time.sleep(5)
+                attempts += 1
+                continue
+
+            raise GeminiError(f"Gemini API Error: {e}")
+
+    if not success:
+        raise GeminiError(f"QUOTA_EXHAUSTED: {model_name} after retries")
+
+    return _HebrewTranslationChunkAttemptResult(
+        text=_strip_outer_source_excerpt_wrapper(data["text"]),
+        data=data,
+        finish_reason=finish_reason,
+        finish_message=finish_message,
+        usage=usage,
+    )
 
 
 def _parse_page_json_strict(raw: str, *, page_index: int) -> Dict[str, Any]:
@@ -718,67 +821,23 @@ def translate_text_to_hebrew_with_gemini(
 
         for truncation_pass in range(2):
             is_truncation_retry = truncation_pass == 1
-            prompt = _build_hebrew_translation_prompt(chunk, language_hint)
-
-            success = False
-            attempts = 0
-            finish_reason: Optional[str] = None
-            finish_message: Optional[str] = None
-            usage: Dict[str, Optional[int]] = {}
-
-            while not success and attempts < 2:
-                try:
-                    contents = [types.Part.from_text(text=prompt)]
-                    resp = client.models.generate_content(
-                        model=model_name,
-                        contents=cast(types.ContentListUnionDict, contents),
-                        config=types.GenerateContentConfig(
-                            temperature=temperature,
-                            top_k=top_k,
-                            top_p=top_p,
-                            max_output_tokens=chunk_max_output_tokens,
-                            thinking_config=types.ThinkingConfig(thinking_budget=0),
-                        ),
-                    )
-                    finish_reason = _extract_finish_reason(resp)
-                    finish_message = _extract_finish_message(resp)
-                    usage = _extract_response_usage(resp)
-                    data = _plain_text_response_to_page_data(
-                        resp.text or "",
-                        page_index=index,
-                    )
-                    success = True
-                except GeminiError as e:
-                    if _is_retryable_gemini_response_error(e):
-                        attempts += 1
-                        if attempts < 2:
-                            logger.warning(
-                                "Retrying Gemini translation response format failure on chunk %s/%s with model %s: %s",
-                                index,
-                                len(chunks),
-                                model_name,
-                                e,
-                            )
-                            continue
-                    raise
-                except Exception as e:
-                    err_str = str(e).upper()
-                    if any(
-                        x in err_str for x in ["429", "RESOURCE_EXHAUSTED", "QUOTA"]
-                    ):
-                        if "LIMIT: 0" in err_str:
-                            raise GeminiError(f"QUOTA_EXHAUSTED: {model_name}")
-                        time.sleep(5)
-                        attempts += 1
-                        continue
-
-                    raise GeminiError(f"Gemini API Error: {e}")
-
-            if not success:
-                raise GeminiError(f"QUOTA_EXHAUSTED: {model_name} after retries")
-
-            translated_text = _strip_outer_source_excerpt_wrapper(data["text"])
-            max_tokens_truncated = _is_max_tokens_finish_reason(finish_reason)
+            attempt_result = _generate_hebrew_translation_chunk(
+                client,
+                chunk,
+                language_hint,
+                chunk_index=index,
+                total_chunks=len(chunks),
+                model_name=model_name,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                max_output_tokens=chunk_max_output_tokens,
+            )
+            translated_text = attempt_result.text
+            data = attempt_result.data
+            max_tokens_truncated = _is_max_tokens_finish_reason(
+                attempt_result.finish_reason
+            )
             ratio_truncated = _is_translation_chunk_truncated(
                 chunk,
                 translated_text,
@@ -789,20 +848,22 @@ def translate_text_to_hebrew_with_gemini(
                 "Gemini Hebrew translation chunk %s/%s: source_length=%s output_length=%s "
                 "finish_reason=%s finish_message=%r max_output_tokens=%s "
                 "truncation_retry=%s prompt_token_count=%s candidates_token_count=%s "
-                "thoughts_token_count=%s total_token_count=%s model=%s",
+                "thoughts_token_count=%s total_token_count=%s model=%s "
+                "split_retry_used=%s",
                 index,
                 len(chunks),
                 chunk_source_len,
                 len(translated_text),
-                finish_reason,
-                finish_message,
+                attempt_result.finish_reason,
+                attempt_result.finish_message,
                 chunk_max_output_tokens,
                 is_truncation_retry,
-                usage.get("prompt_token_count"),
-                usage.get("candidates_token_count"),
-                usage.get("thoughts_token_count"),
-                usage.get("total_token_count"),
+                attempt_result.usage.get("prompt_token_count"),
+                attempt_result.usage.get("candidates_token_count"),
+                attempt_result.usage.get("thoughts_token_count"),
+                attempt_result.usage.get("total_token_count"),
                 model_name,
+                False,
             )
 
             if max_tokens_truncated or ratio_truncated:
@@ -814,32 +875,147 @@ def translate_text_to_hebrew_with_gemini(
                         "Retrying truncated Gemini Hebrew translation chunk %s/%s "
                         "with model %s: max_output_tokens=%s finish_reason=%s "
                         "finish_message=%r source_length=%s output_length=%s "
-                        "truncation_retry=%s",
+                        "truncation_retry=%s split_retry_used=%s",
                         index,
                         len(chunks),
                         model_name,
                         chunk_max_output_tokens,
-                        finish_reason,
-                        finish_message,
+                        attempt_result.finish_reason,
+                        attempt_result.finish_message,
                         chunk_source_len,
                         len(translated_text),
                         True,
+                        False,
                     )
                     continue
+
+                if max_tokens_truncated:
+                    split_chunks = _split_translation_chunk_for_max_tokens_retry(chunk)
+                    logger.warning(
+                        "Splitting truncated Gemini Hebrew translation chunk %s/%s "
+                        "after MAX_TOKENS with model %s: source_length=%s "
+                        "output_length=%s finish_reason=%s finish_message=%r "
+                        "split_chunk_count=%s max_output_tokens=%s",
+                        index,
+                        len(chunks),
+                        model_name,
+                        chunk_source_len,
+                        len(translated_text),
+                        attempt_result.finish_reason,
+                        attempt_result.finish_message,
+                        len(split_chunks),
+                        chunk_max_output_tokens,
+                    )
+
+                    split_translated_chunks: List[str] = []
+                    split_has_unclear = False
+                    for split_index, split_chunk in enumerate(split_chunks, start=1):
+                        split_result = _generate_hebrew_translation_chunk(
+                            client,
+                            split_chunk,
+                            language_hint,
+                            chunk_index=index,
+                            total_chunks=len(chunks),
+                            model_name=model_name,
+                            temperature=temperature,
+                            top_k=top_k,
+                            top_p=top_p,
+                            max_output_tokens=chunk_max_output_tokens,
+                        )
+                        split_text = split_result.text
+                        split_max_tokens_truncated = _is_max_tokens_finish_reason(
+                            split_result.finish_reason
+                        )
+                        split_ratio_truncated = _is_translation_chunk_truncated(
+                            split_chunk,
+                            split_text,
+                            min_text_length=min_text_length,
+                        )
+
+                        logger.info(
+                            "Gemini Hebrew translation split retry chunk %s/%s.%s/%s: "
+                            "source_length=%s output_length=%s finish_reason=%s "
+                            "finish_message=%r max_output_tokens=%s "
+                            "prompt_token_count=%s candidates_token_count=%s "
+                            "thoughts_token_count=%s total_token_count=%s model=%s "
+                            "split_retry_used=%s",
+                            index,
+                            len(chunks),
+                            split_index,
+                            len(split_chunks),
+                            len(split_chunk),
+                            len(split_text),
+                            split_result.finish_reason,
+                            split_result.finish_message,
+                            chunk_max_output_tokens,
+                            split_result.usage.get("prompt_token_count"),
+                            split_result.usage.get("candidates_token_count"),
+                            split_result.usage.get("thoughts_token_count"),
+                            split_result.usage.get("total_token_count"),
+                            model_name,
+                            True,
+                        )
+
+                        if split_max_tokens_truncated or split_ratio_truncated:
+                            raise GeminiError(
+                                "Gemini Hebrew translation split retry chunk appears truncated: "
+                                f"chunk_index={index}/{len(chunks)}, "
+                                f"split_chunk_index={split_index}/{len(split_chunks)}, "
+                                f"source_length={len(split_chunk)}, "
+                                f"translation_length={len(split_text)}, "
+                                f"finish_reason={split_result.finish_reason}, "
+                                f"finish_message={split_result.finish_message!r}, "
+                                f"max_output_tokens={chunk_max_output_tokens}, "
+                                f"split_retry_used=True, "
+                                f"prompt_token_count={split_result.usage.get('prompt_token_count')}, "
+                                f"candidates_token_count={split_result.usage.get('candidates_token_count')}, "
+                                f"thoughts_token_count={split_result.usage.get('thoughts_token_count')}, "
+                                f"total_token_count={split_result.usage.get('total_token_count')}, "
+                                f"model={model_name}"
+                            )
+
+                        split_translated_chunks.append(split_text)
+                        split_has_unclear = split_has_unclear or bool(
+                            split_result.data.get("has_unclear")
+                        )
+
+                    translated_text = "\n\n".join(split_translated_chunks).strip()
+                    data = {
+                        "text": translated_text,
+                        "has_unclear": split_has_unclear,
+                    }
+                    if _is_translation_chunk_truncated(
+                        chunk,
+                        translated_text,
+                        min_text_length=min_text_length,
+                    ):
+                        raise GeminiError(
+                            "Gemini Hebrew translation split retry output appears truncated: "
+                            f"chunk_index={index}/{len(chunks)}, "
+                            f"source_length={chunk_source_len}, "
+                            f"translation_length={len(translated_text)}, "
+                            f"finish_reason={attempt_result.finish_reason}, "
+                            f"finish_message={attempt_result.finish_message!r}, "
+                            f"max_output_tokens={chunk_max_output_tokens}, "
+                            f"split_retry_used=True, "
+                            f"model={model_name}"
+                        )
+                    break
 
                 raise GeminiError(
                     "Gemini Hebrew translation chunk appears truncated after retry: "
                     f"chunk_index={index}/{len(chunks)}, "
                     f"source_length={chunk_source_len}, "
                     f"translation_length={len(translated_text)}, "
-                    f"finish_reason={finish_reason}, "
-                    f"finish_message={finish_message!r}, "
+                    f"finish_reason={attempt_result.finish_reason}, "
+                    f"finish_message={attempt_result.finish_message!r}, "
                     f"max_output_tokens={chunk_max_output_tokens}, "
                     f"truncation_retry={is_truncation_retry}, "
-                    f"prompt_token_count={usage.get('prompt_token_count')}, "
-                    f"candidates_token_count={usage.get('candidates_token_count')}, "
-                    f"thoughts_token_count={usage.get('thoughts_token_count')}, "
-                    f"total_token_count={usage.get('total_token_count')}, "
+                    f"split_retry_used=False, "
+                    f"prompt_token_count={attempt_result.usage.get('prompt_token_count')}, "
+                    f"candidates_token_count={attempt_result.usage.get('candidates_token_count')}, "
+                    f"thoughts_token_count={attempt_result.usage.get('thoughts_token_count')}, "
+                    f"total_token_count={attempt_result.usage.get('total_token_count')}, "
                     f"model={model_name}"
                 )
             break

@@ -7806,7 +7806,44 @@ class GeminiHebrewTranslationTests(SimpleTestCase):
 
     @patch("documents.services.gemini_engine._create_client")
     @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
-    def test_translation_raises_after_repeated_max_tokens(
+    def test_translation_splits_repeated_max_tokens_chunk_and_succeeds(
+        self, _mock_get_key, mock_create_client
+    ):
+        source_text = self._long_source_text()
+        split_translation_one = "א" * 250
+        split_translation_two = "ב" * 260
+        mock_client = Mock()
+        mock_client.models.generate_content.side_effect = [
+            self._translation_response("partial-" * 20, finish_reason="MAX_TOKENS"),
+            self._translation_response(
+                "still-partial-" * 20,
+                finish_reason="MAX_TOKENS",
+            ),
+            self._translation_response(split_translation_one, finish_reason="STOP"),
+            self._translation_response(split_translation_two, finish_reason="STOP"),
+        ]
+        mock_create_client.return_value = mock_client
+
+        result = translate_text_to_hebrew_with_gemini(
+            source_text,
+            "en",
+            max_output_tokens=2048,
+        )
+
+        self.assertEqual(
+            result.text,
+            split_translation_one + "\n\n" + split_translation_two,
+        )
+        self.assertNotIn("partial-", result.text)
+        self.assertEqual(mock_client.models.generate_content.call_count, 4)
+        split_retry_config = mock_client.models.generate_content.call_args_list[
+            2
+        ].kwargs["config"]
+        self.assertEqual(split_retry_config.max_output_tokens, 8192)
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_translation_raises_when_split_retry_still_hits_max_tokens(
         self, _mock_get_key, mock_create_client
     ):
         source_text = self._long_source_text()
@@ -7815,6 +7852,11 @@ class GeminiHebrewTranslationTests(SimpleTestCase):
             self._translation_response("partial-" * 20, finish_reason="MAX_TOKENS"),
             self._translation_response(
                 "still-partial-" * 20,
+                finish_reason="MAX_TOKENS",
+                finish_message="Maximum output tokens reached",
+            ),
+            self._translation_response(
+                "split-partial-" * 10,
                 finish_reason="MAX_TOKENS",
                 finish_message="Maximum output tokens reached",
             ),
@@ -7831,11 +7873,12 @@ class GeminiHebrewTranslationTests(SimpleTestCase):
 
         message = str(ctx.exception)
         self.assertIn("chunk_index=1/1", message)
+        self.assertIn("split_chunk_index=1/2", message)
         self.assertIn("MAX_TOKENS", message)
         self.assertIn("max_output_tokens=8192", message)
-        self.assertIn("truncation_retry=True", message)
+        self.assertIn("split_retry_used=True", message)
         self.assertIn("model=test-model", message)
-        self.assertEqual(mock_client.models.generate_content.call_count, 2)
+        self.assertEqual(mock_client.models.generate_content.call_count, 3)
 
     @patch("documents.services.gemini_engine._create_client")
     @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
