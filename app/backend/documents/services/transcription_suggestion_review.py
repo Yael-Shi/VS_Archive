@@ -13,34 +13,14 @@ from documents.services.text_presentation import (
 from documents.services.transcription_edit_suggestions import (
     normalize_transcription_text,
 )
+from documents.services.verified_text_result_edit import (
+    find_paired_hebrew_row,
+    find_paired_source_row,
+)
 
 
 class TranscriptionSuggestionReviewError(Exception):
     """Validation or eligibility failure for suggestion review actions."""
-
-
-def _find_paired_source_row(
-    doc: Document,
-    *,
-    engine: str,
-) -> DocumentTextResult | None:
-    return DocumentTextResult.objects.filter(
-        document=doc,
-        result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
-        engine=engine,
-    ).first()
-
-
-def _find_paired_hebrew_row(
-    doc: Document,
-    *,
-    engine: str,
-) -> DocumentTextResult | None:
-    return DocumentTextResult.objects.filter(
-        document=doc,
-        result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
-        engine=engine,
-    ).first()
 
 
 def _apply_approved_suggestion_text(
@@ -51,8 +31,8 @@ def _apply_approved_suggestion_text(
     verified = DocumentTextResult.VerificationStatus.VERIFIED
 
     if _is_hebrew_language(doc):
-        source = _find_paired_source_row(doc, engine=target.engine)
-        hebrew = _find_paired_hebrew_row(doc, engine=target.engine)
+        source = find_paired_source_row(doc, engine=target.engine)
+        hebrew = find_paired_hebrew_row(doc, engine=target.engine)
         if source is None or hebrew is None:
             raise TranscriptionSuggestionReviewError(
                 "חסרה תוצאת טקסט מקור או עברי מקושרת; לא ניתן לאשר את ההצעה."
@@ -105,7 +85,7 @@ def _apply_approved_suggestion_text(
         )
         return
 
-    paired_source = _find_paired_source_row(doc, engine=target.engine)
+    paired_source = find_paired_source_row(doc, engine=target.engine)
     if paired_source is None:
         raise TranscriptionSuggestionReviewError("אין תעתוק מקור לקישור גרסת תרגום.")
 
