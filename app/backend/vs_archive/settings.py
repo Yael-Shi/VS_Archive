@@ -15,7 +15,6 @@ if google_json:
     tfile.write(google_json.encode("utf-8"))
     tfile.close()
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = tfile.name
-# --------------------------------------------------------
 
 _LOCAL_DEV_SECRET_KEY = "django-insecure-local-dev-only-change-me"
 _LOCAL_DEV_ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
@@ -110,10 +109,6 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "vs_archive.wsgi.application"
 
-
-# Database
-# https://docs.djangoproject.com/en/6.0/ref/settings/#databases
-
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
@@ -124,10 +119,6 @@ DATABASES = {
         "PORT": os.getenv("DB_PORT", "5432"),
     }
 }
-
-
-# Password validation
-# https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -144,10 +135,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-
-# Internationalization
-# https://docs.djangoproject.com/en/6.0/topics/i18n/
-
 LANGUAGE_CODE = "en-us"
 
 TIME_ZONE = "UTC"
@@ -156,15 +143,10 @@ USE_I18N = True
 
 USE_TZ = True
 
-
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/6.0/howto/static-files/
-
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 WHITENOISE_USE_FINDERS = DEBUG
 
-# Auth redirects
 LOGIN_URL = "/accounts/login/"
 LOGIN_REDIRECT_URL = "/api/ui/documents/"
 LOGOUT_REDIRECT_URL = "/"
@@ -216,5 +198,3 @@ LOGGING = {
         "urllib3": {"level": "WARNING"},
     },
 }
-
-# build v2.2

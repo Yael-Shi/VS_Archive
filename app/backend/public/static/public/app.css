@@ -1774,8 +1774,6 @@ pre {
   }
 }
 
-/* Responsive */
-
 @media (max-width: 900px) {
   .grid-3 {
     grid-template-columns: 1fr;
@@ -1889,7 +1887,7 @@ pre {
   text-decoration: none;
 }
 
-/* Public archive browse — compact card grid (replaces table partial) */
+/* Public archive browse — compact card grid */
 
 .archive-search-panel {
   margin-top: var(--space-4);
