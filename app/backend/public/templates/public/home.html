@@ -10,8 +10,8 @@
         שימור, ארגון והנגשה של מסמכים, תמונות וזיכרונות הקשורים לד״ר חיים (ויקטור) סעדיה ז״ל ולסיפור המשפחתי וההיסטורי שסביבו.
       </p>
       <div class="form-actions page-header-note">
-        <a class="btn btn-primary" href="/archive/">עיון בארכיון</a>
-        <a class="btn" href="/about/">על הארכיון</a>
+        <a class="btn btn-primary" href="{% url 'archive-list' %}">עיון בארכיון</a>
+        <a class="btn" href="{% url 'public-about' %}">על הארכיון</a>
       </div>
     </div>
   </section>
@@ -27,7 +27,7 @@
         הארכיון הזה מבקש לשמר ולהנגיש את החומרים, הזיכרונות והעדויות הקשורים לחייו ולמורשתו.
       </p>
       <p class="page-header-note">
-        <a class="btn" href="/about/">קראו עוד על ד״ר סעדיה והארכיון</a>
+        <a class="btn" href="{% url 'public-about' %}">קראו עוד על ד״ר סעדיה והארכיון</a>
       </p>
     </div>
     <img
