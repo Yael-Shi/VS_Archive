@@ -10,7 +10,7 @@
     <div class="backlog-explainer">כאן משלימים פרטי מסמך וקטלוג (תגיות, תורם, אוסף, הערות). סטטוס «דרושה השלמת פרטים» אינו קשור לבדיקת תעתוק אוטומטי.</div>
 
     <div class="page-toolbar">
-      <a class="btn" href="/api/ui/documents/">חזרה למסמכים</a>
+      <a class="btn" href="{% url 'documents-list-page' %}">חזרה למסמכים</a>
     </div>
 
     {% if not user.is_staff and not user.is_superuser %}
@@ -29,27 +29,27 @@
 
         <div class="flex-row filter-chips filter-chips--controls">
           <a class="btn {% if not only_missing_tags and not only_missing_admin_meta %}btn-primary{% endif %}"
-             href="/api/ui/admin/backlog/">
+             href="{% url 'admin-backlog-page' %}">
             הכל
           </a>
 
           <a class="btn {% if only_missing_tags and not only_missing_admin_meta %}btn-primary{% endif %}"
-             href="/api/ui/admin/backlog/?only_missing_tags=1">
+             href="{% url 'admin-backlog-page' %}?only_missing_tags=1">
             בלי תגיות
           </a>
 
           <a class="btn {% if not only_missing_tags and only_missing_admin_meta %}btn-primary{% endif %}"
-             href="/api/ui/admin/backlog/?only_missing_admin_meta=1">
+             href="{% url 'admin-backlog-page' %}?only_missing_admin_meta=1">
             מטא־דאטה ריק
           </a>
 
           <a class="btn {% if only_missing_tags and only_missing_admin_meta %}btn-primary{% endif %}"
-             href="/api/ui/admin/backlog/?only_missing_tags=1&amp;only_missing_admin_meta=1">
+             href="{% url 'admin-backlog-page' %}?only_missing_tags=1&amp;only_missing_admin_meta=1">
             בלי תגיות + מטא־דאטה ריק
           </a>
 
           {% if only_missing_tags or only_missing_admin_meta %}
-            <a class="btn" href="/api/ui/admin/backlog/">ניקוי פילטרים</a>
+            <a class="btn" href="{% url 'admin-backlog-page' %}">ניקוי פילטרים</a>
           {% endif %}
         </div>
 
@@ -65,7 +65,7 @@
               <span class="filter-chip"><span class="filter-chip__key">מטא־דאטה:</span> שדות ריקים</span>
             {% endif %}
 
-            <a class="filter-chip filter-chip--action" href="/api/ui/admin/backlog/">ניקוי הכל</a>
+            <a class="filter-chip filter-chip--action" href="{% url 'admin-backlog-page' %}">ניקוי הכל</a>
           </div>
         {% endif %}
 
@@ -102,7 +102,7 @@
             <tr>
               <td>
                 <div class="cell-title">
-                  <a href="/api/ui/documents/{{ d.id }}/">{{ d.archive_item.title }}</a>
+                  <a href="{% url 'documents-detail-page' doc_id=d.id %}">{{ d.archive_item.title }}</a>
                 </div>
 
                 <div class="cell-meta">
@@ -172,7 +172,7 @@
                   <div class="empty-state__title">אין מסמכים ברשימה</div>
                   {% if only_missing_tags or only_missing_admin_meta %}
                     <p>אין מסמכים התואמים את הפילטרים שנבחרו. נסו לנקות את הפילטרים או לבחור קריטריון אחר.</p>
-                    <a class="btn" href="/api/ui/admin/backlog/">ניקוי פילטרים</a>
+                    <a class="btn" href="{% url 'admin-backlog-page' %}">ניקוי פילטרים</a>
                   {% else %}
                     <p>כרגע אין מסמכים שדורשים השלמת פרטי קטלוג או מטא־דאטה.</p>
                   {% endif %}

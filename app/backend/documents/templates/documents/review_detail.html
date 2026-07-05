@@ -8,7 +8,7 @@
       <div class="review-header-toolbar">
         <div class="flex-spacer"></div>
         {# Actions for the current document #}
-        <a class="btn" href="/api/ui/documents/{{ doc.id }}/">תצוגת מסמך</a>
+        <a class="btn" href="{% url 'documents-detail-page' doc_id=doc.id %}">תצוגת מסמך</a>
         {% if doc.archive_item_id %}
           <a class="btn" href="{% url 'archive-manage-edit' item_id=doc.archive_item_id %}">עריכת מטא־דאטה</a>
         {% endif %}
@@ -139,7 +139,7 @@
             <div class="review-zone review-zone--primary">
               <div class="review-zone-title">טקסט שחולץ</div>
               {% if card.is_editable %}
-                <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/text/" class="inline-form">
+                <form method="post" action="{% url 'review-text-result-update-text' result_id=card.row.id %}" class="inline-form">
                   {% csrf_token %}
                   <textarea class="review-textarea" name="text" rows="12">{{ card.row.text }}</textarea>
                   <div class="review-zone-actions review-zone-actions--spaced">
@@ -177,13 +177,13 @@
                 <div class="review-zone-title">אימות תעתוק</div>
                 <div class="review-zone-actions">
                   {% if card.row.verification_status != "VERIFIED" %}
-                    <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/verify/" class="inline-form">
+                    <form method="post" action="{% url 'review-text-result-verify' result_id=card.row.id %}" class="inline-form">
                       {% csrf_token %}
                       <button class="btn btn-primary" type="submit">אשר תעתוק</button>
                     </form>
                   {% endif %}
                   {% if card.row.verification_status != "REJECTED" %}
-                    <form method="post" action="/api/ui/admin/review/text-results/{{ card.row.id }}/reject/" class="inline-form">
+                    <form method="post" action="{% url 'review-text-result-reject' result_id=card.row.id %}" class="inline-form">
                       {% csrf_token %}
                       <button class="btn" type="submit">דחה תעתוק</button>
                     </form>

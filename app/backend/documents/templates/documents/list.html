@@ -64,7 +64,7 @@
         <div class="field field--actions">
           <div class="form-actions">
             <button class="btn btn-primary" type="submit">החלה</button>
-            <a class="btn" href="/api/ui/documents/">ניקוי</a>
+            <a class="btn" href="{% url 'documents-list-page' %}">ניקוי</a>
           </div>
         </div>
       </form>
@@ -99,7 +99,7 @@
             </span>
           {% endif %}
 
-          <a class="filter-chip filter-chip--action" href="/api/ui/documents/">ניקוי הכל</a>
+          <a class="filter-chip filter-chip--action" href="{% url 'documents-list-page' %}">ניקוי הכל</a>
         </div>
       {% endif %}
     </div>
@@ -125,7 +125,7 @@
           <tr>
             <td>
               <div class="cell-title">
-                <a href="/api/ui/documents/{{ d.id }}/">{{ d.archive_item.title }}</a>
+                <a href="{% url 'documents-detail-page' doc_id=d.id %}">{{ d.archive_item.title }}</a>
               </div>
 
               <div class="cell-meta">
@@ -169,7 +169,7 @@
                 <div class="empty-state__title">לא נמצאו מסמכים</div>
                 {% if q or doc_type or metadata_status or upload_status or visibility %}
                   <p>אין מסמכים התואמים את הסינון הנוכחי. נסו לשנות את החיפוש או לנקות את הפילטרים.</p>
-                  <a class="btn" href="/api/ui/documents/">ניקוי פילטרים</a>
+                  <a class="btn" href="{% url 'documents-list-page' %}">ניקוי פילטרים</a>
                 {% else %}
                   <p>עדיין לא הועלו מסמכים למערכת.</p>
                 {% endif %}
@@ -185,7 +185,7 @@
 
   <div class="pagination-bar">
     {% if is_admin %}
-      <a class="btn btn-primary" href="/api/ui/upload/">העלאת מסמך חדש</a>
+      <a class="btn btn-primary" href="{% url 'upload-page' %}">העלאת מסמך חדש</a>
     {% endif %}
 
     <div class="flex-spacer"></div>
