@@ -42,6 +42,8 @@ from documents.services.ocr_reprocess import (
 from documents.services.ocr_routing import OcrRouteConfig, select_ocr_route
 from documents.services.review_reasons import (
     AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW,
+    HAS_UNCLEAR,
+    MIN_TEXT_LENGTH,
     NEEDS_REVIEW_FLAG,
 )
 from documents.services.page_extraction import extract_pages, source_file_bytes_to_page
@@ -405,9 +407,9 @@ class Command(BaseCommand):
 
         stripped = (text or "").strip()
         if len(stripped) < self._cfg.min_text_length:
-            reasons.append("MIN_TEXT_LENGTH")
+            reasons.append(MIN_TEXT_LENGTH)
         if "[UNCLEAR]" in stripped:
-            reasons.append("HAS_UNCLEAR")
+            reasons.append(HAS_UNCLEAR)
 
         if engine_reasons:
             for r in engine_reasons:

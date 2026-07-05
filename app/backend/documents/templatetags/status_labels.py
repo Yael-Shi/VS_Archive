@@ -20,6 +20,8 @@ from documents.services.archive_item_presentation import (
 from documents.services.archive_item_validation import TEXT_INPUT_TYPE_UI_CHOICES
 from documents.services.review_reasons import (
     AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW,
+    HAS_UNCLEAR,
+    MIN_TEXT_LENGTH,
     NEEDS_REVIEW_FLAG,
 )
 
@@ -71,8 +73,8 @@ _ENGINE_KEY: dict[str, str] = {
 _REVIEW_REASON: dict[str, str] = {
     AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW: "נדרשת בקרת תעתוק אנושית",
     NEEDS_REVIEW_FLAG: "סימון חוסר ודאות מהמנוע",
-    "MIN_TEXT_LENGTH": "טקסט קצר מדי",
-    "HAS_UNCLEAR": "יש קטעים לא ברורים",
+    MIN_TEXT_LENGTH: "טקסט קצר מדי",
+    HAS_UNCLEAR: "יש קטעים לא ברורים",
 }
 
 _VERIFICATION_STATUS: dict[str, Tuple[str, str]] = {

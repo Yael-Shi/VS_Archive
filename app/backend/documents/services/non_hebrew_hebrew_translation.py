@@ -9,6 +9,8 @@ from documents.models import Document, DocumentTextResult
 from documents.services.gemini_engine import GeminiResult
 from documents.services.review_reasons import (
     AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW,
+    HAS_UNCLEAR,
+    MIN_TEXT_LENGTH,
     NEEDS_REVIEW_FLAG,
 )
 
@@ -39,9 +41,9 @@ def derive_hebrew_translation_review_reasons(
 
     stripped = (text or "").strip()
     if len(stripped) < min_text_length:
-        reasons.append("MIN_TEXT_LENGTH")
+        reasons.append(MIN_TEXT_LENGTH)
     if "[UNCLEAR]" in stripped:
-        reasons.append("HAS_UNCLEAR")
+        reasons.append(HAS_UNCLEAR)
 
     if engine_reasons:
         for reason in engine_reasons:
