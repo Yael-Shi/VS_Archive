@@ -1,6 +1,21 @@
-<aside class="document-detail-actions-panel" aria-labelledby="document-detail-actions-title">
-  <h2 id="document-detail-actions-title" class="document-detail-actions-title">פעולות</h2>
-  <nav class="document-detail-actions-list" aria-label="פעולות משניות">
+<div class="document-detail-actions-menu">
+  <button
+    type="button"
+    class="btn document-detail-actions-toggle"
+    aria-expanded="false"
+    aria-controls="document-detail-actions-panel-{{ doc.id }}"
+    data-document-detail-actions-toggle
+  >
+    <span>מידע והשתתפות</span>
+    <span class="document-detail-actions-toggle__chevron" aria-hidden="true">▾</span>
+  </button>
+  <div
+    id="document-detail-actions-panel-{{ doc.id }}"
+    class="document-detail-actions-panel"
+    hidden
+    data-document-detail-actions-panel
+  >
+    <nav class="document-detail-actions-list" aria-label="מידע והשתתפות">
     {% if doc.archive_item_id %}
       <a class="document-detail-actions-link" href="{% url 'archive-metadata-suggestion-new' item_id=doc.archive_item_id %}">הוספת מידע על הפריט</a>
     {% endif %}
@@ -8,5 +23,58 @@
       <a class="document-detail-actions-link" href="{% url 'transcription-suggestion-new' doc_id=doc.id %}">הצעת תיקון לתעתוק</a>
     {% endif %}
     {% include "documents/partials/detail_technical_details.html" with doc=doc text_presentation=text_presentation is_admin=is_admin admin_meta=admin_meta %}
-  </nav>
-</aside>
+    </nav>
+  </div>
+</div>
+<script>
+  (() => {
+    const button = document.querySelector('[aria-controls="document-detail-actions-panel-{{ doc.id }}"]');
+    const panel = document.getElementById('document-detail-actions-panel-{{ doc.id }}');
+
+    if (!button || !panel) {
+      return;
+    }
+
+    const menu = button.closest('.document-detail-actions-menu');
+
+    const closePanel = ({ restoreFocus = false } = {}) => {
+      button.setAttribute('aria-expanded', 'false');
+      panel.hidden = true;
+
+      if (restoreFocus) {
+        button.focus();
+      }
+    };
+
+    const openPanel = () => {
+      button.setAttribute('aria-expanded', 'true');
+      panel.hidden = false;
+    };
+
+    button.addEventListener('click', () => {
+      const expanded = button.getAttribute('aria-expanded') === 'true';
+
+      if (expanded) {
+        closePanel();
+      } else {
+        openPanel();
+      }
+    });
+
+    document.addEventListener('click', (event) => {
+      if (panel.hidden || menu?.contains(event.target)) {
+        return;
+      }
+
+      closePanel();
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || panel.hidden) {
+        return;
+      }
+
+      closePanel({ restoreFocus: true });
+    });
+  })();
+</script>

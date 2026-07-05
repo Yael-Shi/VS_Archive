@@ -5,7 +5,10 @@
 {% block content %}
   <div class="card card--pad-lg archive-detail-page">
     <div class="page-toolbar archive-detail-toolbar">
-      <a class="btn" href="{% url 'archive-list' %}">חזרה לארכיון</a>
+      <a class="btn" href="{% url 'archive-list' %}">
+        <span>חזרה לארכיון</span>
+        <span aria-hidden="true">←</span>
+      </a>
       {% if is_admin %}
         {% if item.item_type == "MANUAL_TEXT" or item.item_type == "PHOTO" %}
           <a class="btn" href="{% url 'archive-manage-edit' item_id=item.id %}">עריכה</a>
