@@ -158,11 +158,8 @@ class TranskribusAdapter:
                     bearer=bearer,
                 )
                 trp.mark_succeeded(run, engine_runtime=engine_runtime)
-                return HtrResult(
-                    text=outcome.text,
-                    needs_review=bool(outcome.review_reasons),
-                    engine_name=engine_runtime,
-                    review_reasons=list(outcome.review_reasons),
+                return self._htr_result_from_outcome(
+                    outcome, engine_runtime=engine_runtime
                 )
         except tr.TranskribusRetryableError as exc:
             trp.mark_failed(
@@ -351,11 +348,8 @@ class TranskribusAdapter:
                     bearer=bearer,
                 )
                 trp.mark_succeeded(run, engine_runtime=engine_runtime)
-                return HtrResult(
-                    text=outcome.text,
-                    needs_review=bool(outcome.review_reasons),
-                    engine_name=engine_runtime,
-                    review_reasons=list(outcome.review_reasons),
+                return self._htr_result_from_outcome(
+                    outcome, engine_runtime=engine_runtime
                 )
         except tr.TranskribusRetryableError as exc:
             trp.mark_failed(
@@ -422,11 +416,8 @@ class TranskribusAdapter:
                     bearer=bearer,
                 )
                 trp.mark_succeeded(run, engine_runtime=engine_runtime)
-                return HtrResult(
-                    text=outcome.text,
-                    needs_review=bool(outcome.review_reasons),
-                    engine_name=engine_runtime,
-                    review_reasons=list(outcome.review_reasons),
+                return self._htr_result_from_outcome(
+                    outcome, engine_runtime=engine_runtime
                 )
         except tr.TranskribusRetryableError as exc:
             error_code = (
@@ -444,6 +435,19 @@ class TranskribusAdapter:
             )
             trp.mark_failed(run, error_code=error_code, error_details=str(exc))
             raise EnginePermanentError(str(exc)) from exc
+
+    @staticmethod
+    def _htr_result_from_outcome(
+        outcome: tr.PylaiaTranscriptionOutcome,
+        *,
+        engine_runtime: str,
+    ) -> HtrResult:
+        return HtrResult(
+            text=outcome.text,
+            needs_review=bool(outcome.review_reasons),
+            engine_name=engine_runtime,
+            review_reasons=list(outcome.review_reasons),
+        )
 
     @staticmethod
     def _resolve_upload_title(*, document_id: int) -> str:
