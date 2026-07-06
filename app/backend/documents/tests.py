@@ -20,6 +20,7 @@ from PIL import Image
 
 from documents.management.commands.run_worker import Command
 from documents.models import (
+    ArchiveItem,
     Document,
     DocumentSourceFile,
     DocumentTextResult,
@@ -388,6 +389,28 @@ class TranskribusAdapterTests(TestCase):
         title = TranskribusAdapter._resolve_upload_title(document_id=doc.id)
 
         self.assertEqual(title, "מכתב משפחתי מתל אביב (עברית)")
+
+    def test_resolve_upload_title_falls_back_to_generic_when_archive_item_title_empty(
+        self,
+    ):
+        doc = self._create_document()
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(title="")
+        Document.objects.filter(pk=doc.pk).update(title="Stale mirror title")
+
+        title = TranskribusAdapter._resolve_upload_title(document_id=doc.id)
+
+        self.assertEqual(title, f"VS-Archive document {doc.id}")
+
+    def test_resolve_upload_title_ignores_document_mirror_title_when_drifted(self):
+        doc = self._create_document()
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
+            title="Canonical archive title"
+        )
+        Document.objects.filter(pk=doc.pk).update(title="Stale mirror only title")
+
+        title = TranskribusAdapter._resolve_upload_title(document_id=doc.id)
+
+        self.assertEqual(title, "Canonical archive title")
 
     def test_execute_fails_fast_when_no_dev_mode_enabled(self):
         from documents.services.env_validation import WorkerEnvConfig
