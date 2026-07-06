@@ -322,7 +322,13 @@ class Document(models.Model):
     objects = DocumentQuerySet.as_manager()
 
     def __str__(self) -> str:
-        return str(self.title)
+        if self.archive_item_id:
+            title = (self.archive_item.title or "").strip()
+            if title:
+                return title
+        if self.pk is not None:
+            return f"Document {self.pk}"
+        return "Document"
 
     def delete(
         self,

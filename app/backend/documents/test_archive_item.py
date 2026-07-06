@@ -14,11 +14,19 @@ from django.test import (
 )
 from django.urls import reverse
 
-from documents.admin import ArchiveItemAdmin, DocumentAdmin, ManualTextContentAdmin
+from documents.admin import (
+    ArchiveItemAdmin,
+    CorrectionRequestAdmin,
+    DocumentAdmin,
+    DocumentTextResultAdmin,
+    ManualTextContentAdmin,
+    TranskribusRunAdmin,
+)
 from documents.models import (
     ArchiveCategory,
     ArchiveEvent,
     ArchiveItem,
+    CorrectionRequest,
     Document,
     DocumentMetadata,
     DocumentSourceFile,
@@ -26,6 +34,7 @@ from documents.models import (
     ManualTextContent,
     PhotoContent,
     Tag,
+    TranskribusRun,
 )
 from documents.services.archive_items import (
     ARCHIVE_ITEM_SHARED_FIELD_NAMES,
@@ -449,6 +458,97 @@ class ArchiveItemAdminPolicyTests(TestCase):
         self.assertEqual(doc.title, before_title)
         self.assertEqual(doc.visibility, before_visibility)
         self.assertEqual(doc.metadata_status, before_metadata_status)
+
+
+class DocumentMirrorReadEliminationTests(TestCase):
+    def test_str_returns_archive_item_title(self):
+        doc = create_ocr_document(
+            title="Archive canonical str title",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        self.assertEqual(str(doc), "Archive canonical str title")
+
+    def test_str_prefers_archive_item_title_when_drifted_from_mirror(self):
+        doc = create_ocr_document(
+            title="Mirror title for str",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
+            title="Canonical archive str title"
+        )
+        Document.objects.filter(pk=doc.pk).update(title="Stale mirror str title")
+        doc.refresh_from_db()
+
+        self.assertEqual(str(doc), "Canonical archive str title")
+
+    def test_str_falls_back_to_document_id_when_archive_item_title_empty(self):
+        doc = create_ocr_document(
+            title="Ignored after empty archive title",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(title="")
+        doc.refresh_from_db()
+
+        self.assertEqual(str(doc), f"Document {doc.id}")
+
+
+class DocumentRelatedAdminSearchTests(TestCase):
+    def setUp(self):
+        self.request = RequestFactory().get("/admin/")
+        self.request.user = User.objects.create_superuser(
+            username="document_related_admin_search",
+            password="test-pass",
+            email="admin-search@example.com",
+        )
+        self.site = AdminSite()
+
+    def test_correction_request_admin_search_fields_use_archive_item_title(self):
+        admin = CorrectionRequestAdmin(CorrectionRequest, self.site)
+        self.assertIn("document__archive_item__title", admin.search_fields)
+        self.assertNotIn("document__title", admin.search_fields)
+
+    def test_document_text_result_admin_search_fields_use_archive_item_title(self):
+        admin = DocumentTextResultAdmin(DocumentTextResult, self.site)
+        self.assertIn("document__archive_item__title", admin.search_fields)
+        self.assertNotIn("document__title", admin.search_fields)
+
+    def test_transkribus_run_admin_search_fields_use_archive_item_title(self):
+        admin = TranskribusRunAdmin(TranskribusRun, self.site)
+        self.assertIn("document__archive_item__title", admin.search_fields)
+        self.assertNotIn("document__title", admin.search_fields)
+
+    def test_document_text_result_admin_search_finds_by_archive_item_title(self):
+        doc = create_ocr_document(
+            title="Mirror-only stale title",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+        )
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
+            title="UniqueArchiveSearchTokenXYZ"
+        )
+        Document.objects.filter(pk=doc.pk).update(title="Mirror-only stale title")
+        text_result = DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="engine_v1",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            text="שורת בדיקה",
+        )
+
+        admin = DocumentTextResultAdmin(DocumentTextResult, self.site)
+        qs = admin.get_queryset(self.request)
+        qs, _may_have_duplicates = admin.get_search_results(
+            self.request,
+            qs,
+            "UniqueArchiveSearchTokenXYZ",
+        )
+
+        self.assertIn(text_result, qs)
 
 
 class ArchiveItemUploadIntegrationTests(TestCase):

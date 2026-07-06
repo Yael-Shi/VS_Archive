@@ -280,7 +280,7 @@ class DocumentAdmin(admin.ModelAdmin):
 class CorrectionRequestAdmin(admin.ModelAdmin):
     list_display = ("id", "document", "status", "scope", "created_at")
     list_filter = ("status", "scope")
-    search_fields = ("document__title", "message")
+    search_fields = ("document__archive_item__title", "message")
     ordering = ("-created_at",)
 
 
@@ -297,7 +297,7 @@ class DocumentTextResultAdmin(admin.ModelAdmin):
         "updated_at",
     )
     list_filter = ("result_type", "engine", "status", "verification_status")
-    search_fields = ("document__id", "document__title")
+    search_fields = ("document__id", "document__archive_item__title")
     ordering = ("-created_at",)
 
     # Read-only right now (v2). In the future will add an edit option.
@@ -337,7 +337,7 @@ class TranskribusRunAdmin(admin.ModelAdmin):
     list_filter = ("status", "mode")
     search_fields = (
         "document__id",
-        "document__title",
+        "document__archive_item__title",
         "remote_doc_id",
         "ingest_job_id",
         "recognition_job_id",

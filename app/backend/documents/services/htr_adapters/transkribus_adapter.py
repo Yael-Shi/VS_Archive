@@ -454,7 +454,7 @@ class TranskribusAdapter:
         try:
             document = (
                 Document.objects.select_related("archive_item")
-                .only("id", "title", "archive_item__title")
+                .only("id", "archive_item__title")
                 .get(pk=document_id)
             )
         except Document.DoesNotExist as exc:
@@ -465,10 +465,6 @@ class TranskribusAdapter:
         archive_title = str(document.archive_item.title or "").strip()
         if archive_title:
             return archive_title
-
-        document_title = str(document.title or "").strip()
-        if document_title:
-            return document_title
 
         return f"VS-Archive document {document_id}"
 
