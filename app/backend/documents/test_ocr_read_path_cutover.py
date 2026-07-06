@@ -76,17 +76,15 @@ class OcrReadPathCutoverTests(TestCase):
         )
         return doc
 
-    def test_list_page_displays_archive_item_shared_fields_when_drifted(self):
-        doc = self._create_drifted_doc()
+    def test_list_page_displays_archive_item_shared_fields(self):
+        self._create_drifted_doc()
         self._create_drifted_doc(title="Other document title")
-        Document.objects.filter(pk=doc.pk).update(title="Stale mirror only title")
         self.client.force_login(self.staff)
         resp = self.client.get("/api/ui/documents/")
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
         self.assertIn("ArchiveItem-side title", html)
         self.assertNotIn("Document-side title", html)
-        self.assertNotIn("Stale mirror only title", html)
         self.assertIn("15/06/1950", html)
         self.assertIn("פרטים הושלמו", html)
         self.assertIn("ציבורי", html)
@@ -309,13 +307,12 @@ class OcrReadPathCutoverTests(TestCase):
         )
         self.assertIn(doc.id, ids)
 
-    def test_review_backlog_membership_unchanged_when_metadata_status_drifts(self):
+    def test_review_backlog_membership_not_controlled_by_archive_item_metadata_status(
+        self,
+    ):
         doc = self._create_review_pending_doc()
         ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
             metadata_status=ArchiveItem.MetadataStatus.COMPLETED,
-        )
-        Document.objects.filter(pk=doc.pk).update(
-            metadata_status=Document.MetadataStatus.NEEDS_COMPLETION,
         )
         ids = set(documents_in_review_backlog().values_list("id", flat=True))
         self.assertIn(doc.id, ids)

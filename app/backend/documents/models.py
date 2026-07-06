@@ -235,17 +235,7 @@ class Document(models.Model):
         UNKNOWN = "UNKNOWN", "Unknown"
 
     # Required for V1
-    title = models.CharField(max_length=255)
     doc_type = models.CharField(max_length=16, choices=DocType.choices)
-
-    # Optional metadata (often unknown at upload time)
-    date_start = models.DateField(null=True, blank=True)
-    date_end = models.DateField(null=True, blank=True)
-    date_precision = models.CharField(
-        max_length=16,
-        choices=DatePrecision.choices,
-        default=DatePrecision.UNKNOWN,
-    )
 
     language = models.CharField(
         max_length=8,
@@ -262,18 +252,6 @@ class Document(models.Model):
 
     tags_m2m: models.ManyToManyField[Tag, Tag] = models.ManyToManyField(
         "Tag", blank=True, related_name="documents"
-    )
-
-    metadata_status = models.CharField(
-        max_length=32,
-        choices=MetadataStatus.choices,
-        default=MetadataStatus.NEEDS_COMPLETION,
-    )
-
-    visibility = models.CharField(
-        max_length=16,
-        choices=Visibility.choices,
-        default=Visibility.PRIVATE,
     )
 
     upload_status = models.CharField(
