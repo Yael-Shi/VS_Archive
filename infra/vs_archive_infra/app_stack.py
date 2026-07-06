@@ -199,8 +199,8 @@ class VsArchiveAppStack(Stack):
             f"{cfg.prefix}-web-td",
             cpu=256,
             memory_limit_mib=512,
-            task_role=task_role,
-            execution_role=exec_role,
+            task_role=cast(iam.IRole, task_role),
+            execution_role=cast(iam.IRole, exec_role),
         )
 
         web_repo = ecr.Repository.from_repository_name(
@@ -281,8 +281,8 @@ class VsArchiveAppStack(Stack):
             f"{cfg.prefix}-worker-td",
             cpu=256,
             memory_limit_mib=512,
-            task_role=task_role,
-            execution_role=exec_role,
+            task_role=cast(iam.IRole, task_role),
+            execution_role=cast(iam.IRole, exec_role),
         )
 
         image_tag = self.node.try_get_context("image_tag") or "dev"
@@ -422,6 +422,9 @@ class VsArchiveAppStack(Stack):
             f"{cfg.prefix}-apex-alias",
             zone=zone,
             target=route53.RecordTarget.from_alias(
-                route53_targets.LoadBalancerTarget(alb)
+                cast(
+                    route53.IAliasRecordTarget,
+                    route53_targets.LoadBalancerTarget(alb),
+                )
             ),
         )
