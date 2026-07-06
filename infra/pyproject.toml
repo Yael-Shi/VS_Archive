@@ -14,6 +14,7 @@ constructs = "^10.0.0"
 black = "^24.0.0"
 ruff = "0.14.14"
 mypy = "^1.10.0"
+pyright = ">=1.1.408,<2.0.0"
 
 [build-system]
 requires = ["poetry-core"]
@@ -27,7 +28,15 @@ exclude = [
 
 [tool.pyright]
 typeCheckingMode = "standard"
+include = [
+  "app.py",
+  "vs_archive_infra",
+]
 exclude = [
   "cdk.out/**",
   "**/__pycache__/**",
+  ".venv/**",
+  ".mypy_cache/**",
+  ".ruff_cache/**",
 ]
+useLibraryCodeForTypes = false
