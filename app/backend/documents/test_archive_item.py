@@ -71,17 +71,6 @@ from documents.services.manual_text_body_display import (
 )
 
 
-def assert_ocr_shared_fields_match(test_case, doc: Document) -> None:
-    """Assert all six shared archival fields match between Document and ArchiveItem."""
-    item = doc.archive_item
-    for name in ARCHIVE_ITEM_SHARED_FIELD_NAMES:
-        test_case.assertEqual(
-            getattr(doc, name),
-            getattr(item, name),
-            msg=f"shared field mismatch: {name}",
-        )
-
-
 class ArchiveItemFoundationTests(TestCase):
     def test_create_ocr_document_links_archive_item_with_shared_fields(self):
         doc = create_ocr_document(
@@ -95,11 +84,31 @@ class ArchiveItemFoundationTests(TestCase):
         self.assertIsNotNone(doc.archive_item_id)
         item = doc.archive_item
         self.assertEqual(item.item_type, ArchiveItem.ItemType.OCR_DOCUMENT)
-        self.assertEqual(item.title, doc.title)
-        self.assertEqual(item.visibility, doc.visibility)
-        self.assertEqual(item.date_precision, doc.date_precision)
-        self.assertEqual(item.metadata_status, doc.metadata_status)
-        assert_ocr_shared_fields_match(self, doc)
+        self.assertEqual(item.title, "Shared fields test")
+        self.assertEqual(item.visibility, ArchiveItem.Visibility.PUBLIC)
+        self.assertEqual(item.date_precision, ArchiveItem.DatePrecision.YEAR)
+        self.assertEqual(item.metadata_status, ArchiveItem.MetadataStatus.COMPLETED)
+
+    def test_create_ocr_document_does_not_maintain_document_mirror_fields(self):
+        doc = create_ocr_document(
+            title="Mirror not maintained at create",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            visibility=Document.Visibility.PUBLIC,
+            metadata_status=Document.MetadataStatus.COMPLETED,
+            date_precision=Document.DatePrecision.YEAR,
+        )
+        item = doc.archive_item
+        self.assertEqual(item.title, "Mirror not maintained at create")
+        self.assertEqual(item.visibility, ArchiveItem.Visibility.PUBLIC)
+        self.assertEqual(item.metadata_status, ArchiveItem.MetadataStatus.COMPLETED)
+        self.assertEqual(item.date_precision, ArchiveItem.DatePrecision.YEAR)
+        self.assertEqual(doc.title, "")
+        self.assertEqual(doc.visibility, Document.Visibility.PRIVATE)
+        self.assertEqual(
+            doc.metadata_status, Document.MetadataStatus.NEEDS_COMPLETION
+        )
+        self.assertEqual(doc.date_precision, Document.DatePrecision.UNKNOWN)
 
     def test_create_ocr_document_all_six_shared_fields_match(self):
         date_start = datetime.date(1920, 3, 15)
@@ -121,7 +130,6 @@ class ArchiveItemFoundationTests(TestCase):
         self.assertEqual(item.date_start, date_start)
         self.assertEqual(item.date_end, date_end)
         self.assertEqual(item.date_precision, ArchiveItem.DatePrecision.RANGE)
-        assert_ocr_shared_fields_match(self, doc)
 
     def test_create_ocr_document_omitted_shared_fields_use_archive_item_defaults(self):
         doc = create_ocr_document(
@@ -137,7 +145,6 @@ class ArchiveItemFoundationTests(TestCase):
         self.assertIsNone(item.date_start)
         self.assertIsNone(item.date_end)
         self.assertEqual(item.date_precision, ArchiveItem.DatePrecision.UNKNOWN)
-        assert_ocr_shared_fields_match(self, doc)
 
     def test_create_ocr_document_runtime_fields_remain_document_side(self):
         doc = create_ocr_document(
@@ -176,6 +183,13 @@ class ArchiveItemFoundationTests(TestCase):
             metadata_status=Document.MetadataStatus.COMPLETED,
             date_precision=Document.DatePrecision.RANGE,
         )
+        Document.objects.filter(pk=doc.pk).update(
+            title="Copy test",
+            visibility=Document.Visibility.PUBLIC,
+            metadata_status=Document.MetadataStatus.COMPLETED,
+            date_precision=Document.DatePrecision.RANGE,
+        )
+        doc.refresh_from_db()
         values = archive_item_field_values_from_document(doc)
         self.assertEqual(values["title"], "Copy test")
         self.assertEqual(values["visibility"], Document.Visibility.PUBLIC)
@@ -229,15 +243,16 @@ class ArchiveItemFoundationTests(TestCase):
         self.assertEqual(doc.metadata_status, Document.MetadataStatus.COMPLETED)
         self.assertEqual(doc.date_precision, Document.DatePrecision.YEAR)
 
-    def test_update_ocr_document_metadata_keeps_document_and_archive_item_in_sync(
-        self,
-    ):
+    def test_update_ocr_document_metadata_updates_archive_item_only(self):
         doc = create_ocr_document(
             title="Service before",
             doc_type=Document.DocType.PDF,
             text_input_type=Document.TextInputType.PRINTED,
             visibility=Document.Visibility.PRIVATE,
         )
+        before_mirror_title = doc.title
+        before_mirror_visibility = doc.visibility
+        before_mirror_date_precision = doc.date_precision
         update_ocr_document_metadata(
             doc,
             title="Service after",
@@ -250,12 +265,12 @@ class ArchiveItemFoundationTests(TestCase):
         doc.refresh_from_db()
         item = doc.archive_item
         item.refresh_from_db()
-        self.assertEqual(doc.title, "Service after")
         self.assertEqual(item.title, "Service after")
-        self.assertEqual(doc.visibility, Document.Visibility.PUBLIC)
         self.assertEqual(item.visibility, ArchiveItem.Visibility.PUBLIC)
-        self.assertEqual(doc.date_precision, Document.DatePrecision.MONTH)
         self.assertEqual(item.date_precision, ArchiveItem.DatePrecision.MONTH)
+        self.assertEqual(doc.title, before_mirror_title)
+        self.assertEqual(doc.visibility, before_mirror_visibility)
+        self.assertEqual(doc.date_precision, before_mirror_date_precision)
 
     def test_update_ocr_document_metadata_writes_archive_item_canonical_when_drifted(
         self,
@@ -288,13 +303,13 @@ class ArchiveItemFoundationTests(TestCase):
         doc.refresh_from_db()
         item = doc.archive_item
         item.refresh_from_db()
-        for model in (doc, item):
-            self.assertEqual(model.title, "Submitted canonical title")
-            self.assertEqual(model.visibility, ArchiveItem.Visibility.PRIVATE)
-            self.assertEqual(
-                model.metadata_status, ArchiveItem.MetadataStatus.NEEDS_COMPLETION
-            )
-            self.assertEqual(model.date_precision, ArchiveItem.DatePrecision.MONTH)
+        self.assertEqual(item.title, "Submitted canonical title")
+        self.assertEqual(item.visibility, ArchiveItem.Visibility.PRIVATE)
+        self.assertEqual(
+            item.metadata_status, ArchiveItem.MetadataStatus.NEEDS_COMPLETION
+        )
+        self.assertEqual(item.date_precision, ArchiveItem.DatePrecision.MONTH)
+        self.assertNotEqual(doc.title, "Submitted canonical title")
 
     def test_archive_item_delete_cascades_document_and_text_results(self):
         doc = create_ocr_document(
@@ -426,6 +441,9 @@ class ArchiveItemAdminPolicyTests(TestCase):
         before_title = item.title
         before_visibility = item.visibility
         before_metadata_status = item.metadata_status
+        before_mirror_title = doc.title
+        before_mirror_visibility = doc.visibility
+        before_mirror_metadata_status = doc.metadata_status
 
         client = Client()
         user = self.request.user
@@ -455,9 +473,9 @@ class ArchiveItemAdminPolicyTests(TestCase):
         self.assertEqual(item.title, before_title)
         self.assertEqual(item.visibility, before_visibility)
         self.assertEqual(item.metadata_status, before_metadata_status)
-        self.assertEqual(doc.title, before_title)
-        self.assertEqual(doc.visibility, before_visibility)
-        self.assertEqual(doc.metadata_status, before_metadata_status)
+        self.assertEqual(doc.title, before_mirror_title)
+        self.assertEqual(doc.visibility, before_mirror_visibility)
+        self.assertEqual(doc.metadata_status, before_mirror_metadata_status)
 
 
 class DocumentMirrorReadEliminationTests(TestCase):
@@ -551,6 +569,48 @@ class DocumentRelatedAdminSearchTests(TestCase):
         self.assertIn(text_result, qs)
 
 
+class DocumentMirrorWriteStopTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="mirror_write_stop_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.client = Client()
+        self.client.force_login(self.staff)
+
+    def test_list_and_detail_use_archive_item_when_document_mirror_stale(self):
+        doc = create_ocr_document(
+            title="Canonical list/detail title",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PUBLIC,
+            metadata_status=Document.MetadataStatus.COMPLETED,
+        )
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
+            title="Canonical list/detail title",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+            metadata_status=ArchiveItem.MetadataStatus.COMPLETED,
+        )
+        Document.objects.filter(pk=doc.pk).update(
+            title="Stale mirror title",
+            visibility=Document.Visibility.PRIVATE,
+            metadata_status=Document.MetadataStatus.NEEDS_COMPLETION,
+        )
+
+        list_resp = self.client.get("/api/ui/documents/")
+        self.assertEqual(list_resp.status_code, 200)
+        list_html = list_resp.content.decode()
+        self.assertIn("Canonical list/detail title", list_html)
+        self.assertNotIn("Stale mirror title", list_html)
+
+        detail_resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(detail_resp.status_code, 200)
+        detail_html = detail_resp.content.decode()
+        self.assertIn("Canonical list/detail title", detail_html)
+        self.assertNotIn("Stale mirror title", detail_html)
+
+
 class ArchiveItemUploadIntegrationTests(TestCase):
     def setUp(self):
         from documents.s3 import S3HeadObjectResult
@@ -611,9 +671,8 @@ class ArchiveItemUploadIntegrationTests(TestCase):
         doc = Document.objects.get(id=resp.json()["document_id"])
         self.assertEqual(doc.archive_item.item_type, ArchiveItem.ItemType.OCR_DOCUMENT)
         self.assertEqual(doc.archive_item.visibility, Document.Visibility.PUBLIC)
-        self.assertEqual(doc.archive_item.title, doc.title)
-        self.assertEqual(doc.visibility, Document.Visibility.PUBLIC)
-        assert_ocr_shared_fields_match(self, doc)
+        self.assertEqual(doc.archive_item.title, "Upload archive item test")
+        self.assertEqual(doc.visibility, Document.Visibility.PRIVATE)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
     @patch(
@@ -631,7 +690,6 @@ class ArchiveItemUploadIntegrationTests(TestCase):
         self.assertEqual(doc.archive_item.item_type, ArchiveItem.ItemType.OCR_DOCUMENT)
         self.assertEqual(doc.archive_item.visibility, Document.Visibility.PRIVATE)
         self.assertEqual(DocumentSourceFile.objects.filter(document=doc).count(), 2)
-        assert_ocr_shared_fields_match(self, doc)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
     @patch(
@@ -1274,7 +1332,7 @@ class OcrDocumentMetadataEditTests(TestCase):
             reverse("documents-detail-page", kwargs={"doc_id": doc.id}),
         )
 
-    def test_shared_fields_updated_on_document_and_archive_item(self):
+    def test_shared_fields_updated_on_archive_item_only(self):
         doc = create_ocr_document(
             title="Shared fields before",
             doc_type=Document.DocType.PDF,
@@ -1283,6 +1341,12 @@ class OcrDocumentMetadataEditTests(TestCase):
             metadata_status=Document.MetadataStatus.NEEDS_COMPLETION,
             date_precision=Document.DatePrecision.UNKNOWN,
         )
+        before_mirror_title = doc.title
+        before_mirror_visibility = doc.visibility
+        before_mirror_metadata_status = doc.metadata_status
+        before_mirror_date_precision = doc.date_precision
+        before_mirror_date_start = doc.date_start
+        before_mirror_date_end = doc.date_end
         self.client.force_login(self.staff)
         self.client.post(
             self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
@@ -1298,17 +1362,22 @@ class OcrDocumentMetadataEditTests(TestCase):
         doc.refresh_from_db()
         item = doc.archive_item
         item.refresh_from_db()
-        for model in (doc, item):
-            self.assertEqual(model.title, "Shared fields after")
-            self.assertEqual(model.visibility, ArchiveItem.Visibility.PUBLIC)
-            self.assertEqual(
-                model.metadata_status, ArchiveItem.MetadataStatus.COMPLETED
-            )
-            self.assertEqual(model.date_precision, ArchiveItem.DatePrecision.RANGE)
-            self.assertEqual(str(model.date_start), "1920-03-01")
-            self.assertEqual(str(model.date_end), "1921-06-30")
+        self.assertEqual(item.title, "Shared fields after")
+        self.assertEqual(item.visibility, ArchiveItem.Visibility.PUBLIC)
+        self.assertEqual(
+            item.metadata_status, ArchiveItem.MetadataStatus.COMPLETED
+        )
+        self.assertEqual(item.date_precision, ArchiveItem.DatePrecision.RANGE)
+        self.assertEqual(str(item.date_start), "1920-03-01")
+        self.assertEqual(str(item.date_end), "1921-06-30")
+        self.assertEqual(doc.title, before_mirror_title)
+        self.assertEqual(doc.visibility, before_mirror_visibility)
+        self.assertEqual(doc.metadata_status, before_mirror_metadata_status)
+        self.assertEqual(doc.date_precision, before_mirror_date_precision)
+        self.assertEqual(doc.date_start, before_mirror_date_start)
+        self.assertEqual(doc.date_end, before_mirror_date_end)
 
-    def test_post_writes_archive_item_canonical_and_mirrors_document_when_drifted(
+    def test_post_writes_archive_item_canonical_and_leaves_document_mirror_stale_when_drifted(
         self,
     ):
         doc = create_ocr_document(
@@ -1323,6 +1392,8 @@ class OcrDocumentMetadataEditTests(TestCase):
             title="ArchiveItem drift POST",
             visibility=ArchiveItem.Visibility.PUBLIC,
         )
+        before_mirror_title = doc.title
+        before_mirror_visibility = doc.visibility
         self.client.force_login(self.staff)
         resp = self.client.post(
             self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
@@ -1347,15 +1418,16 @@ class OcrDocumentMetadataEditTests(TestCase):
         doc.refresh_from_db()
         item = doc.archive_item
         item.refresh_from_db()
-        for model in (doc, item):
-            self.assertEqual(model.title, "POST canonical title")
-            self.assertEqual(model.visibility, ArchiveItem.Visibility.PRIVATE)
-            self.assertEqual(
-                model.metadata_status, ArchiveItem.MetadataStatus.COMPLETED
-            )
-            self.assertEqual(model.date_precision, ArchiveItem.DatePrecision.YEAR)
-            self.assertEqual(str(model.date_start), "1930-01-01")
-            self.assertEqual(str(model.date_end), "1935-12-31")
+        self.assertEqual(item.title, "POST canonical title")
+        self.assertEqual(item.visibility, ArchiveItem.Visibility.PRIVATE)
+        self.assertEqual(
+            item.metadata_status, ArchiveItem.MetadataStatus.COMPLETED
+        )
+        self.assertEqual(item.date_precision, ArchiveItem.DatePrecision.YEAR)
+        self.assertEqual(str(item.date_start), "1930-01-01")
+        self.assertEqual(str(item.date_end), "1935-12-31")
+        self.assertEqual(doc.title, before_mirror_title)
+        self.assertEqual(doc.visibility, before_mirror_visibility)
         admin_meta = doc.admin_meta
         self.assertEqual(admin_meta.donor, "POST donor")
         self.assertEqual(admin_meta.collection, "POST collection")
@@ -1414,7 +1486,7 @@ class OcrDocumentMetadataEditTests(TestCase):
         )
         self.assertIn(resp.status_code, (302, 403))
         doc.refresh_from_db()
-        self.assertEqual(doc.title, "Anonymous OCR guard")
+        self.assertEqual(doc.archive_item.title, "Anonymous OCR guard")
 
     def test_family_user_cannot_edit_ocr_metadata(self):
         doc = create_ocr_document(
@@ -1429,7 +1501,7 @@ class OcrDocumentMetadataEditTests(TestCase):
         )
         self.assertEqual(resp.status_code, 403)
         doc.refresh_from_db()
-        self.assertEqual(doc.title, "Family OCR guard")
+        self.assertEqual(doc.archive_item.title, "Family OCR guard")
 
     def test_family_user_cannot_get_ocr_metadata_edit_form(self):
         doc = create_ocr_document(
@@ -1476,7 +1548,6 @@ class OcrDocumentMetadataEditTests(TestCase):
         doc.refresh_from_db()
         item = doc.archive_item
         item.refresh_from_db()
-        self.assertEqual(doc.title, "Before shared error")
         self.assertEqual(item.title, "ArchiveItem before shared error")
         self.assertEqual(item.visibility, ArchiveItem.Visibility.PUBLIC)
         self.assertEqual(doc.category_event, "Before event")
@@ -1506,7 +1577,7 @@ class OcrDocumentMetadataEditTests(TestCase):
         )
         self.assertEqual(resp.status_code, 403)
         doc.refresh_from_db()
-        self.assertEqual(doc.title, "User OCR guard")
+        self.assertEqual(doc.archive_item.title, "User OCR guard")
 
     def test_invalid_date_rejected_on_ocr_edit(self):
         doc = create_ocr_document(
@@ -2049,7 +2120,6 @@ class OcrDocumentCatalogMetadataEditTests(TestCase):
         self.assertContains(resp, "תורם/ת חייב להיות עד 255 תווים")
         doc.refresh_from_db()
         item.refresh_from_db()
-        self.assertEqual(doc.title, "Before catalog error")
         self.assertEqual(item.title, "ArchiveItem before catalog error")
         self.assertEqual(item.metadata_status, ArchiveItem.MetadataStatus.COMPLETED)
         self.assertFalse(DocumentMetadata.objects.filter(document=doc).exists())
@@ -2697,12 +2767,10 @@ class ArchiveNavigationTests(TestCase):
         self.assertContains(resp, "nav-staff-panel")
         self.assertContains(resp, reverse("archive-manage-list"))
         self.assertContains(resp, "ניהול ארכיון")
-        filters = html[
-            html.index("page-toolbar--archive-filters") : html.index(
-                '<div class="spacer"></div>'
-            )
-        ]
-        self.assertNotIn(reverse("archive-manage-list"), filters)
+        search_panel_start = html.index('class="archive-search-panel"')
+        search_panel_end = html.index("</section>", search_panel_start)
+        search_panel = html[search_panel_start:search_panel_end]
+        self.assertNotIn(reverse("archive-manage-list"), search_panel)
 
     def test_archive_list_page_hides_manage_toolbar_for_anonymous(self):
         resp = self.client.get(reverse("archive-list"))
@@ -4364,7 +4432,7 @@ class ArchiveItemDiscoveryBrowseTests(TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "תגית: legacy-only-browse-tag")
-        self.assertNotContains(resp, doc.title)
+        self.assertNotContains(resp, doc.archive_item.title)
 
     def test_existing_archive_search_still_works_after_browse_pages(self):
         item = self._create_public_item(title="Search still works browse regression")
@@ -5126,7 +5194,6 @@ class ArchiveItemDiscoveryMetadataEditTests(TestCase):
         doc.refresh_from_db()
         item = doc.archive_item
         item.refresh_from_db()
-        self.assertEqual(doc.title, "Before discovery error")
         self.assertEqual(item.title, "ArchiveItem before discovery error")
         self.assertEqual(doc.category_event, "Before event")
         self.assertEqual(
@@ -5208,8 +5275,8 @@ class ArchiveItemDiscoveryMetadataEditTests(TestCase):
         doc.refresh_from_db()
         item = doc.archive_item
         item.refresh_from_db()
-        self.assertEqual(doc.title, "Combined after")
         self.assertEqual(item.title, "Combined after")
+        self.assertNotEqual(doc.title, "Combined after")
         self.assertEqual(doc.admin_meta.donor, "Donor value")
         self.assertEqual(doc.category_event, "Legacy event")
         self.assertEqual(

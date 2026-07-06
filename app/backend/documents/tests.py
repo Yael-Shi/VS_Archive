@@ -4310,7 +4310,7 @@ class UploadApiTests(TestCase):
         resp = self._post_create(self._base_create_payload())
         self.assertEqual(resp.status_code, 201)
         doc = Document.objects.get(id=resp.json()["document_id"])
-        self.assertEqual(doc.visibility, Document.Visibility.PRIVATE)
+        self.assertEqual(doc.archive_item.visibility, Document.Visibility.PRIVATE)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
     @patch(
@@ -4322,7 +4322,6 @@ class UploadApiTests(TestCase):
         )
         self.assertEqual(resp.status_code, 201)
         doc = Document.objects.get(id=resp.json()["document_id"])
-        self.assertEqual(doc.date_precision, Document.DatePrecision.YEAR)
         self.assertEqual(doc.archive_item.date_precision, Document.DatePrecision.YEAR)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
@@ -4335,7 +4334,6 @@ class UploadApiTests(TestCase):
         )
         self.assertEqual(resp.status_code, 201)
         doc = Document.objects.get(id=resp.json()["document_id"])
-        self.assertEqual(doc.date_precision, Document.DatePrecision.YEAR)
         self.assertEqual(doc.archive_item.date_precision, Document.DatePrecision.YEAR)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
@@ -4348,7 +4346,6 @@ class UploadApiTests(TestCase):
         resp = self._post_create(self._base_create_payload())
         self.assertEqual(resp.status_code, 201)
         doc = Document.objects.get(id=resp.json()["document_id"])
-        self.assertEqual(doc.date_precision, Document.DatePrecision.UNKNOWN)
         self.assertEqual(
             doc.archive_item.date_precision, Document.DatePrecision.UNKNOWN
         )
@@ -9998,8 +9995,8 @@ class AdminBacklogMetadataEditLinkTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get("/api/ui/admin/backlog/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, needs.title)
-        self.assertNotContains(resp, completed.title)
+        self.assertContains(resp, needs.archive_item.title)
+        self.assertNotContains(resp, completed.archive_item.title)
 
     def test_completed_document_excluded_even_with_empty_tags_and_admin_meta(self):
         from documents.models import DocumentMetadata
@@ -10012,7 +10009,7 @@ class AdminBacklogMetadataEditLinkTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get("/api/ui/admin/backlog/")
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, doc.title)
+        self.assertNotContains(resp, doc.archive_item.title)
 
     def test_only_missing_tags_filter_unchanged(self):
         from documents.models import Tag
@@ -10025,8 +10022,8 @@ class AdminBacklogMetadataEditLinkTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get("/api/ui/admin/backlog/?only_missing_tags=1")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, missing.title)
-        self.assertNotContains(resp, tagged.title)
+        self.assertContains(resp, missing.archive_item.title)
+        self.assertNotContains(resp, tagged.archive_item.title)
 
     def test_only_missing_admin_meta_filter_unchanged(self):
         from documents.models import DocumentMetadata
@@ -10048,8 +10045,8 @@ class AdminBacklogMetadataEditLinkTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get("/api/ui/admin/backlog/?only_missing_admin_meta=1")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, empty_meta.title)
-        self.assertNotContains(resp, filled_meta.title)
+        self.assertContains(resp, empty_meta.archive_item.title)
+        self.assertNotContains(resp, filled_meta.archive_item.title)
 
     def test_review_backlog_does_not_link_to_archive_manage_edit(self):
         doc = self._create_document(title="Review only doc")
@@ -11001,7 +10998,7 @@ class DocumentVisibilityAccessControlTests(TestCase):
         )
         resp = self.client.get("/api/ui/documents/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, public_doc.title)
+        self.assertContains(resp, public_doc.archive_item.title)
         self.assertNotContains(resp, "Private list UI")
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
@@ -11081,7 +11078,7 @@ class DocumentVisibilityAccessControlTests(TestCase):
         )
         resp = self.client.get("/api/ui/documents/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, public_doc.title)
+        self.assertContains(resp, public_doc.archive_item.title)
         self.assertNotContains(resp, f"· #{public_doc.id}")
 
     def test_viewer_list_page_hides_internal_document_id_display(self):
@@ -11092,7 +11089,7 @@ class DocumentVisibilityAccessControlTests(TestCase):
         self.client.force_login(self.viewer)
         resp = self.client.get("/api/ui/documents/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, public_doc.title)
+        self.assertContains(resp, public_doc.archive_item.title)
         self.assertNotContains(resp, f"· #{public_doc.id}")
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
@@ -11249,7 +11246,7 @@ class DocumentDatePrecisionTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get("/api/ui/documents/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, doc.title)
+        self.assertContains(resp, doc.archive_item.title)
         self.assertContains(resp, "1948")
         self.assertNotContains(resp, "1948-01-01")
         self.assertNotContains(resp, "1948-12-31")

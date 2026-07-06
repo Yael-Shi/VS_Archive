@@ -38,8 +38,27 @@ class ReconcileOcrSharedFieldsCommandTests(TestCase):
             setattr(item, name, value)
         item.save(update_fields=[*fields.keys(), "updated_at"])
 
+    def _set_document_mirror_fields(self, doc, **fields):
+        """Set Document compatibility mirror columns (reconcile reads from Document)."""
+        if fields:
+            Document.objects.filter(pk=doc.pk).update(**fields)
+            doc.refresh_from_db()
+
+    def _align_document_mirror_with_archive_item(self, doc):
+        item = doc.archive_item
+        self._set_document_mirror_fields(
+            doc,
+            title=item.title,
+            visibility=item.visibility,
+            metadata_status=item.metadata_status,
+            date_start=item.date_start,
+            date_end=item.date_end,
+            date_precision=item.date_precision,
+        )
+
     def test_dry_run_all_in_sync_writes_nothing(self):
         doc = self._create_ocr_doc(title="In sync")
+        self._align_document_mirror_with_archive_item(doc)
         item = doc.archive_item
         item_updated_at = item.updated_at
 
@@ -54,6 +73,7 @@ class ReconcileOcrSharedFieldsCommandTests(TestCase):
 
     def test_dry_run_reports_field_drift(self):
         doc = self._create_ocr_doc(title="Document title")
+        self._set_document_mirror_fields(doc, title="Document title")
         self._drift_archive_item(doc, title="ArchiveItem title")
 
         stdout = StringIO()
@@ -69,6 +89,12 @@ class ReconcileOcrSharedFieldsCommandTests(TestCase):
     def test_dry_run_reports_per_field_counts(self):
         doc_one = self._create_ocr_doc(title="One")
         doc_two = self._create_ocr_doc(title="Two")
+        self._set_document_mirror_fields(doc_one, title="One")
+        self._set_document_mirror_fields(
+            doc_two,
+            title="Two",
+            metadata_status=Document.MetadataStatus.NEEDS_COMPLETION,
+        )
         self._drift_archive_item(doc_one, title="Drift one")
         self._drift_archive_item(
             doc_two,
@@ -88,6 +114,10 @@ class ReconcileOcrSharedFieldsCommandTests(TestCase):
             title="Vis doc",
             visibility=Document.Visibility.PRIVATE,
         )
+        self._set_document_mirror_fields(
+            doc,
+            visibility=Document.Visibility.PRIVATE,
+        )
         self._drift_archive_item(
             doc,
             visibility=ArchiveItem.Visibility.PUBLIC,
@@ -103,6 +133,7 @@ class ReconcileOcrSharedFieldsCommandTests(TestCase):
 
     def test_apply_reconciles_non_visibility_fields(self):
         doc = self._create_ocr_doc(title="Doc title")
+        self._set_document_mirror_fields(doc, title="Doc title")
         self._drift_archive_item(doc, title="Stale title")
 
         call_command("reconcile_ocr_shared_fields", "--apply", stdout=StringIO())
@@ -112,6 +143,11 @@ class ReconcileOcrSharedFieldsCommandTests(TestCase):
 
     def test_apply_leaves_visibility_unchanged(self):
         doc = self._create_ocr_doc(
+            title="Vis apply",
+            visibility=Document.Visibility.PRIVATE,
+        )
+        self._set_document_mirror_fields(
+            doc,
             title="Vis apply",
             visibility=Document.Visibility.PRIVATE,
         )
@@ -132,6 +168,10 @@ class ReconcileOcrSharedFieldsCommandTests(TestCase):
             title="Vis full",
             visibility=Document.Visibility.PRIVATE,
         )
+        self._set_document_mirror_fields(
+            doc,
+            visibility=Document.Visibility.PRIVATE,
+        )
         self._drift_archive_item(
             doc,
             visibility=ArchiveItem.Visibility.PUBLIC,
@@ -149,6 +189,7 @@ class ReconcileOcrSharedFieldsCommandTests(TestCase):
 
     def test_apply_is_idempotent(self):
         doc = self._create_ocr_doc(title="Idempotent")
+        self._set_document_mirror_fields(doc, title="Idempotent")
         self._drift_archive_item(doc, title="Drift")
 
         call_command("reconcile_ocr_shared_fields", "--apply", stdout=StringIO())
@@ -165,7 +206,8 @@ class ReconcileOcrSharedFieldsCommandTests(TestCase):
 
     def test_manual_text_ignored(self):
         create_manual_text_archive_item(title="Manual only", body="Hello")
-        self._create_ocr_doc(title="OCR only")
+        doc = self._create_ocr_doc(title="OCR only")
+        self._align_document_mirror_with_archive_item(doc)
 
         stdout = StringIO()
         call_command("reconcile_ocr_shared_fields", stdout=stdout)
@@ -177,6 +219,8 @@ class ReconcileOcrSharedFieldsCommandTests(TestCase):
     def test_document_id_filter(self):
         doc_one = self._create_ocr_doc(title="Filter one")
         doc_two = self._create_ocr_doc(title="Filter two")
+        self._set_document_mirror_fields(doc_one, title="Filter one")
+        self._set_document_mirror_fields(doc_two, title="Filter two")
         self._drift_archive_item(doc_one, title="Drift one")
         self._drift_archive_item(doc_two, title="Drift two")
 
@@ -197,6 +241,13 @@ class ReconcileOcrSharedFieldsCommandTests(TestCase):
 
     def test_apply_does_not_mutate_document_fields(self):
         doc = self._create_ocr_doc(
+            title="Doc unchanged",
+            visibility=Document.Visibility.PUBLIC,
+            metadata_status=Document.MetadataStatus.COMPLETED,
+            date_precision=Document.DatePrecision.YEAR,
+        )
+        self._set_document_mirror_fields(
+            doc,
             title="Doc unchanged",
             visibility=Document.Visibility.PUBLIC,
             metadata_status=Document.MetadataStatus.COMPLETED,
@@ -237,6 +288,7 @@ class ReconcileOcrSharedFieldsCommandTests(TestCase):
 
     def test_apply_does_not_touch_catalog_tags_or_text_results(self):
         doc = self._create_ocr_doc(title="Side effects")
+        self._set_document_mirror_fields(doc, title="Side effects")
         self._drift_archive_item(doc, title="Drift")
         DocumentMetadata.objects.create(
             document=doc,
@@ -274,6 +326,7 @@ class ReconcileOcrSharedFieldsCommandTests(TestCase):
 
     def test_json_output_is_parseable(self):
         doc = self._create_ocr_doc(title="JSON doc")
+        self._set_document_mirror_fields(doc, title="JSON doc")
         self._drift_archive_item(
             doc,
             title="Drift",
@@ -308,6 +361,12 @@ class ReconcileOcrSharedFieldsCommandTests(TestCase):
     def test_apply_with_dates(self):
         doc = self._create_ocr_doc(
             title="Dates",
+            date_start=date(1920, 1, 1),
+            date_end=date(1925, 12, 31),
+            date_precision=Document.DatePrecision.RANGE,
+        )
+        self._set_document_mirror_fields(
+            doc,
             date_start=date(1920, 1, 1),
             date_end=date(1925, 12, 31),
             date_precision=Document.DatePrecision.RANGE,
