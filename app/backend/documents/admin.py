@@ -13,21 +13,6 @@ from .models import (
     TranskribusRun,
 )
 
-_SHARED_MIRROR_READONLY_FIELDS = (
-    "title",
-    "visibility",
-    "metadata_status",
-    "date_start",
-    "date_end",
-    "date_precision",
-)
-
-_SHARED_MIRROR_FIELDSET_DESCRIPTION = (
-    "Read-only compatibility mirror. Edit canonical OCR metadata at "
-    "/archive/manage/<archive_item_id>/edit/."
-)
-
-
 @admin.register(Tag)
 class TagAdmin(admin.ModelAdmin):
     list_display = ("id", "name", "created_at", "updated_at")
@@ -208,13 +193,6 @@ class DocumentAdmin(admin.ModelAdmin):
     fieldsets = (
         ("Core", {"fields": ("archive_item", "doc_type", "text_input_type")}),
         (
-            "Shared archival fields — compatibility mirror",
-            {
-                "fields": _SHARED_MIRROR_READONLY_FIELDS,
-                "description": _SHARED_MIRROR_FIELDSET_DESCRIPTION,
-            },
-        ),
-        (
             "Processing status",
             {
                 "fields": (
@@ -249,7 +227,6 @@ class DocumentAdmin(admin.ModelAdmin):
     )
     readonly_fields = (
         "archive_item",
-        *_SHARED_MIRROR_READONLY_FIELDS,
         "created_at",
         "updated_at",
     )

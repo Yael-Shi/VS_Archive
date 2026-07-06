@@ -18,7 +18,7 @@ ARCHIVE_ITEM_SHARED_FIELD_NAMES = (
 
 
 def archive_item_field_values_from_archive_item(archive_item: Any) -> dict[str, Any]:
-    """Build Document mirror field values copied from an ArchiveItem (no inference)."""
+    """Build shared archival field values from an ArchiveItem (no inference)."""
     return {
         name: getattr(archive_item, name) for name in ARCHIVE_ITEM_SHARED_FIELD_NAMES
     }
@@ -63,7 +63,6 @@ def create_ocr_document(**document_kwargs: Any):
     Create an OCR-backed Document with a linked ArchiveItem (item_type=OCR_DOCUMENT).
 
     ArchiveItem is canonical at create for the six shared archival fields.
-    Document compatibility mirror columns are not updated at create.
     Document remains the OCR/runtime source of truth for processing-specific fields.
     """
     from documents.models import ArchiveItem, Document
@@ -84,10 +83,8 @@ def create_ocr_document(**document_kwargs: Any):
         source_title=source_metadata_kwargs["source_title"],
         public_note=source_metadata_kwargs["public_note"],
     )
-    # ``title`` is required on Document; canonical title lives on ArchiveItem only.
     return Document.objects.create(
         archive_item=archive_item,
-        title="",
         **runtime_kwargs,
     )
 
@@ -250,9 +247,8 @@ def update_ocr_document_metadata(
     """
     Update shared archival metadata on an OCR-backed Document.
 
-    ArchiveItem is canonical for the six shared archival fields. Document
-    compatibility mirror columns are not updated. Document remains OCR/runtime
-    source of truth for processing-specific fields.
+    ArchiveItem is canonical for the six shared archival fields. Document remains
+    OCR/runtime source of truth for processing-specific fields.
     """
     from documents.models import ArchiveItem
 
