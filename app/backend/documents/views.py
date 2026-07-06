@@ -240,6 +240,22 @@ def _parse_int(value, default, min_value=None, max_value=None):
     return n
 
 
+def _default_page_offset(request) -> int:
+    return _parse_int(request.GET.get("offset"), default=0, min_value=0)
+
+
+def _pagination_context(
+    *, total: int, offset: int, limit: int
+) -> dict[str, int | None]:
+    return {
+        "offset": offset,
+        "limit": limit,
+        "total": total,
+        "prev_offset": max(0, offset - limit),
+        "next_offset": (offset + limit) if (offset + limit) < total else None,
+    }
+
+
 def _parse_date_optional(value: Optional[str], field_name: str):
     if value is None:
         return None
@@ -1361,7 +1377,7 @@ def documents_list_page(request):
     metadata_status = (request.GET.get("metadata_status") or "").strip()
 
     limit = DEFAULT_PAGE_SIZE
-    offset = _parse_int(request.GET.get("offset"), default=0, min_value=0)
+    offset = _default_page_offset(request)
 
     is_admin = _is_admin(request.user)
 
@@ -1383,11 +1399,7 @@ def documents_list_page(request):
         "visibility": visibility if is_admin else "",
         "doc_type": doc_type,
         "metadata_status": metadata_status,
-        "offset": offset,
-        "limit": limit,
-        "total": total,
-        "prev_offset": max(0, offset - limit),
-        "next_offset": (offset + limit) if (offset + limit) < total else None,
+        **_pagination_context(total=total, offset=offset, limit=limit),
         "doc_type_choices": Document.DocType.choices,
         "metadata_status_choices": Document.MetadataStatus.choices,
         "upload_status_choices": Document.UploadStatus.choices,
@@ -1419,7 +1431,7 @@ def admin_backlog_page(request):
         return deny
 
     limit = DEFAULT_PAGE_SIZE
-    offset = _parse_int(request.GET.get("offset"), default=0, min_value=0)
+    offset = _default_page_offset(request)
 
     only_missing_tags = (request.GET.get("only_missing_tags") or "").strip() == "1"
     only_missing_admin_meta = (
@@ -1464,16 +1476,12 @@ def admin_backlog_page(request):
 
     context = {
         "docs": docs,
-        "offset": offset,
-        "limit": limit,
-        "total": total_filtered,
+        **_pagination_context(total=total_filtered, offset=offset, limit=limit),
         "total_backlog": total_backlog,
         "missing_tags_count": missing_tags_count,
         "missing_admin_meta_count": missing_admin_meta_count,
         "only_missing_tags": only_missing_tags,
         "only_missing_admin_meta": only_missing_admin_meta,
-        "prev_offset": max(0, offset - limit),
-        "next_offset": (offset + limit) if (offset + limit) < total_filtered else None,
     }
 
     logger.info(
@@ -1505,7 +1513,7 @@ def review_backlog_page(request):
     verification_status = (request.GET.get("verification_status") or "").strip()
 
     limit = DEFAULT_PAGE_SIZE
-    offset = _parse_int(request.GET.get("offset"), default=0, min_value=0)
+    offset = _default_page_offset(request)
 
     qs = documents_in_review_backlog(
         q=q,
@@ -1534,11 +1542,7 @@ def review_backlog_page(request):
         "engine_key": engine_key,
         "result_type": result_type,
         "verification_status": verification_status,
-        "offset": offset,
-        "limit": limit,
-        "total": total,
-        "prev_offset": max(0, offset - limit),
-        "next_offset": (offset + limit) if (offset + limit) < total else None,
+        **_pagination_context(total=total, offset=offset, limit=limit),
         "language_choices": Document.Language.choices,
         "text_input_type_choices": TEXT_INPUT_TYPE_UI_CHOICES,
         "processing_state_choices": Document.ProcessingState.choices,
