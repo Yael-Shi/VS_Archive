@@ -196,8 +196,6 @@ class TranscriptionEditSuggestionPublicFlowTests(TestCase):
         doc = self._create_public_doc_with_text()
         doc.archive_item.visibility = Document.Visibility.PRIVATE
         doc.archive_item.save(update_fields=["visibility"])
-        doc.visibility = Document.Visibility.PRIVATE
-        doc.save(update_fields=["visibility"])
 
         self.assertEqual(self.client.get(self._form_url(doc.id)).status_code, 404)
         self.assertEqual(
@@ -211,8 +209,6 @@ class TranscriptionEditSuggestionPublicFlowTests(TestCase):
         doc = self._create_public_doc_with_text()
         doc.archive_item.visibility = Document.Visibility.PRIVATE
         doc.archive_item.save(update_fields=["visibility"])
-        doc.visibility = Document.Visibility.PRIVATE
-        doc.save(update_fields=["visibility"])
 
         self.client.force_login(self._create_family_user())
         resp = self.client.get(self._form_url(doc.id))

@@ -20,7 +20,7 @@ def format_document_date(obj: Any) -> str:
     """Return a human-facing date label according to ``obj.date_precision``.
 
     Accepts any object with ``date_start``, ``date_end``, and ``date_precision``
-    (e.g. ``Document`` or ``ArchiveItem``). Normalized bounds are used only when
+    (e.g. ``ArchiveItem``). Normalized bounds are used only when
     precision is not ``UNKNOWN``. For ``UNKNOWN``, bounds are ignored (Option B).
     """
     precision = obj.date_precision or Document.DatePrecision.UNKNOWN

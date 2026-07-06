@@ -11170,7 +11170,7 @@ class DocumentDatePrecisionTests(TestCase):
         from documents.services.document_date import NO_DATE_LABEL, format_document_date
 
         doc = self._create_doc()
-        self.assertEqual(format_document_date(doc), NO_DATE_LABEL)
+        self.assertEqual(format_document_date(doc.archive_item), NO_DATE_LABEL)
 
     def test_format_unknown_ignores_normalized_bounds(self):
         from datetime import date
@@ -11182,7 +11182,7 @@ class DocumentDatePrecisionTests(TestCase):
             date_end=date(1948, 5, 12),
             date_precision=Document.DatePrecision.UNKNOWN,
         )
-        self.assertEqual(format_document_date(doc), NO_DATE_LABEL)
+        self.assertEqual(format_document_date(doc.archive_item), NO_DATE_LABEL)
 
     def test_format_exact_day_single_label(self):
         from datetime import date
@@ -11194,7 +11194,7 @@ class DocumentDatePrecisionTests(TestCase):
             date_end=date(1948, 5, 12),
             date_precision=Document.DatePrecision.EXACT_DAY,
         )
-        self.assertEqual(format_document_date(doc), "12/05/1948")
+        self.assertEqual(format_document_date(doc.archive_item), "12/05/1948")
 
     def test_format_month_year_not_day_bounds(self):
         from datetime import date
@@ -11206,9 +11206,9 @@ class DocumentDatePrecisionTests(TestCase):
             date_end=date(1948, 5, 31),
             date_precision=Document.DatePrecision.MONTH,
         )
-        self.assertEqual(format_document_date(doc), "05/1948")
-        self.assertNotIn("01/05/1948", format_document_date(doc))
-        self.assertNotIn("31/05/1948", format_document_date(doc))
+        self.assertEqual(format_document_date(doc.archive_item), "05/1948")
+        self.assertNotIn("01/05/1948", format_document_date(doc.archive_item))
+        self.assertNotIn("31/05/1948", format_document_date(doc.archive_item))
 
     def test_format_year_only(self):
         from datetime import date
@@ -11220,7 +11220,7 @@ class DocumentDatePrecisionTests(TestCase):
             date_end=date(1948, 12, 31),
             date_precision=Document.DatePrecision.YEAR,
         )
-        self.assertEqual(format_document_date(doc), "1948")
+        self.assertEqual(format_document_date(doc.archive_item), "1948")
 
     def test_format_range_uses_bound_labels(self):
         from datetime import date
@@ -11232,7 +11232,7 @@ class DocumentDatePrecisionTests(TestCase):
             date_end=date(1949, 12, 31),
             date_precision=Document.DatePrecision.RANGE,
         )
-        self.assertEqual(format_document_date(doc), "01/01/1947 - 31/12/1949")
+        self.assertEqual(format_document_date(doc.archive_item), "01/01/1947 - 31/12/1949")
 
     def test_list_page_uses_precision_aware_date_not_raw_bounds(self):
         from datetime import date
@@ -11256,8 +11256,8 @@ class DocumentDatePrecisionTests(TestCase):
             title="Unknown no bounds detail",
             date_precision=Document.DatePrecision.UNKNOWN,
         )
-        self.assertIsNone(doc.date_start)
-        self.assertIsNone(doc.date_end)
+        self.assertIsNone(doc.archive_item.date_start)
+        self.assertIsNone(doc.archive_item.date_end)
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
@@ -11299,9 +11299,11 @@ class DocumentDatePrecisionTests(TestCase):
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
         )
-        self.assertIsNone(doc.date_start)
-        self.assertIsNone(doc.date_end)
-        self.assertEqual(doc.date_precision, Document.DatePrecision.UNKNOWN)
+        self.assertIsNone(doc.archive_item.date_start)
+        self.assertIsNone(doc.archive_item.date_end)
+        self.assertEqual(
+            doc.archive_item.date_precision, Document.DatePrecision.UNKNOWN
+        )
 
     def test_date_precision_choices_include_v1_values(self):
         values = {choice.value for choice in Document.DatePrecision}
@@ -11333,7 +11335,9 @@ class DocumentDatePrecisionTests(TestCase):
         )
         self.assertEqual(resp.status_code, 201)
         doc = Document.objects.get(id=resp.json()["document_id"])
-        self.assertEqual(doc.date_precision, Document.DatePrecision.UNKNOWN)
+        self.assertEqual(
+            doc.archive_item.date_precision, Document.DatePrecision.UNKNOWN
+        )
 
 
 class DocumentAccessServiceTests(TestCase):
