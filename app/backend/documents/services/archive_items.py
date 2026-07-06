@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import Any
 
 from django.db import transaction
@@ -232,24 +231,6 @@ def update_photo_archive_item_metadata(
         ]
     )
     return archive_item
-
-
-def sync_document_shared_fields_from_archive_item(
-    document,
-    *,
-    field_names: Sequence[str] | None = None,
-) -> None:
-    """Mirror shared archival fields from linked ArchiveItem onto Document."""
-    names = (
-        tuple(field_names)
-        if field_names is not None
-        else ARCHIVE_ITEM_SHARED_FIELD_NAMES
-    )
-    archive_item = document.archive_item
-    values = archive_item_field_values_from_archive_item(archive_item)
-    for name in names:
-        setattr(document, name, values[name])
-    document.save(update_fields=[*names, "updated_at"])
 
 
 @transaction.atomic

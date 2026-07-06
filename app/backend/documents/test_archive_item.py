@@ -40,7 +40,6 @@ from documents.services.archive_items import (
     ARCHIVE_ITEM_SHARED_FIELD_NAMES,
     create_manual_text_archive_item,
     create_ocr_document,
-    sync_document_shared_fields_from_archive_item,
     update_archive_item_discovery_metadata,
     update_manual_text_archive_item,
     update_ocr_document_catalog_metadata,
@@ -171,34 +170,6 @@ class ArchiveItemFoundationTests(TestCase):
                 doc_type=Document.DocType.IMAGE,
                 text_input_type=Document.TextInputType.HANDWRITTEN,
             )
-
-    def test_sync_document_shared_fields_from_archive_item(self):
-        doc = create_ocr_document(
-            title="Document before mirror sync",
-            doc_type=Document.DocType.IMAGE,
-            text_input_type=Document.TextInputType.HANDWRITTEN,
-            visibility=Document.Visibility.PRIVATE,
-        )
-        item = doc.archive_item
-        item.title = "ArchiveItem after mirror sync"
-        item.visibility = ArchiveItem.Visibility.PUBLIC
-        item.metadata_status = ArchiveItem.MetadataStatus.COMPLETED
-        item.date_precision = ArchiveItem.DatePrecision.YEAR
-        item.save(
-            update_fields=[
-                "title",
-                "visibility",
-                "metadata_status",
-                "date_precision",
-                "updated_at",
-            ]
-        )
-        sync_document_shared_fields_from_archive_item(doc)
-        doc.refresh_from_db()
-        self.assertEqual(doc.title, "ArchiveItem after mirror sync")
-        self.assertEqual(doc.visibility, Document.Visibility.PUBLIC)
-        self.assertEqual(doc.metadata_status, Document.MetadataStatus.COMPLETED)
-        self.assertEqual(doc.date_precision, Document.DatePrecision.YEAR)
 
     def test_update_ocr_document_metadata_updates_archive_item_only(self):
         doc = create_ocr_document(
