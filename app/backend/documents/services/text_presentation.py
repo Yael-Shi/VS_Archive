@@ -4,6 +4,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Optional, Literal
 
+from django.db.models import Prefetch
+
 from documents.models import Document, DocumentTextResult
 from documents.services.expected_outputs import expected_result_types_for_document
 
@@ -11,6 +13,7 @@ from documents.services.expected_outputs import expected_result_types_for_docume
 ResultTypeStr = Literal["SOURCE_TEXT", "HEBREW_TEXT"]
 
 PREFETCHED_DISPLAYABLE_TEXT_RESULTS_ATTR = "prefetched_displayable_text_results"
+PREFETCHED_TEXT_PRESENTATION_RESULTS_ATTR = "prefetched_text_presentation_results"
 
 
 @dataclass(frozen=True)
@@ -145,9 +148,58 @@ def _latest_displayable_from_rows(
     return None
 
 
+def _latest_displayable_from_ordered_rows(
+    rows: Iterable[DocumentTextResult], result_type: ResultTypeStr
+) -> Optional[DocumentTextResult]:
+    matching = [
+        row
+        for row in rows
+        if row.result_type == result_type
+        and row.text is not None
+        and row.text != ""
+    ]
+    succeeded = [
+        row for row in matching if row.status == DocumentTextResult.Status.SUCCEEDED
+    ]
+    if succeeded:
+        return succeeded[0]
+    needs_review = [
+        row
+        for row in matching
+        if row.status == DocumentTextResult.Status.NEEDS_REVIEW
+    ]
+    if needs_review:
+        return needs_review[0]
+    return None
+
+
+def _latest_failed_from_ordered_rows(
+    rows: Iterable[DocumentTextResult], result_type: ResultTypeStr
+) -> Optional[DocumentTextResult]:
+    for row in rows:
+        if (
+            row.result_type == result_type
+            and row.status == DocumentTextResult.Status.FAILED
+        ):
+            return row
+    return None
+
+
+def text_presentation_results_prefetch() -> Prefetch:
+    return Prefetch(
+        "text_results",
+        queryset=DocumentTextResult.objects.order_by("-created_at"),
+        to_attr=PREFETCHED_TEXT_PRESENTATION_RESULTS_ATTR,
+    )
+
+
 def _latest_displayable(
     doc: Document, result_type: ResultTypeStr
 ) -> Optional[DocumentTextResult]:
+    presentation_rows = getattr(doc, PREFETCHED_TEXT_PRESENTATION_RESULTS_ATTR, None)
+    if presentation_rows is not None:
+        return _latest_displayable_from_ordered_rows(presentation_rows, result_type)
+
     prefetched = getattr(doc, PREFETCHED_DISPLAYABLE_TEXT_RESULTS_ATTR, None)
     if prefetched is not None:
         return _latest_displayable_from_rows(prefetched, result_type)
@@ -173,6 +225,10 @@ def _latest_displayable(
 def _latest_failed(
     doc: Document, result_type: ResultTypeStr
 ) -> Optional[DocumentTextResult]:
+    presentation_rows = getattr(doc, PREFETCHED_TEXT_PRESENTATION_RESULTS_ATTR, None)
+    if presentation_rows is not None:
+        return _latest_failed_from_ordered_rows(presentation_rows, result_type)
+
     return (
         doc.text_results.filter(
             result_type=result_type, status=DocumentTextResult.Status.FAILED

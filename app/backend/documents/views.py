@@ -158,6 +158,7 @@ from documents.services.sqs import send_process_document_message
 from documents.services.text_presentation import (
     get_displayed_transcription_text,
     get_text_presentation_for_document,
+    text_presentation_results_prefetch,
 )
 from documents.services.transcription_edit_suggestions import (
     IDENTICAL_TEXT_ERROR,
@@ -1831,7 +1832,7 @@ def document_detail_page(request, doc_id: int):
         "admin_meta",
         "archive_item",
     ).prefetch_related(
-        "text_results",
+        text_presentation_results_prefetch(),
         "source_files",
         "archive_item__categories",
         "archive_item__events",
