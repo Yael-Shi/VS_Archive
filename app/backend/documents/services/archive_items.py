@@ -18,11 +18,6 @@ ARCHIVE_ITEM_SHARED_FIELD_NAMES = (
 )
 
 
-def archive_item_field_values_from_document(document: Any) -> dict[str, Any]:
-    """Build ArchiveItem field values copied from a Document (no inference)."""
-    return {name: getattr(document, name) for name in ARCHIVE_ITEM_SHARED_FIELD_NAMES}
-
-
 def archive_item_field_values_from_archive_item(archive_item: Any) -> dict[str, Any]:
     """Build Document mirror field values copied from an ArchiveItem (no inference)."""
     return {
@@ -237,24 +232,6 @@ def update_photo_archive_item_metadata(
         ]
     )
     return archive_item
-
-
-def sync_archive_item_shared_fields_from_document(
-    document,
-    *,
-    field_names: Sequence[str] | None = None,
-) -> None:
-    """Mirror shared archival fields from Document onto its linked ArchiveItem."""
-    names = (
-        tuple(field_names)
-        if field_names is not None
-        else ARCHIVE_ITEM_SHARED_FIELD_NAMES
-    )
-    archive_item = document.archive_item
-    values = archive_item_field_values_from_document(document)
-    for name in names:
-        setattr(archive_item, name, values[name])
-    archive_item.save(update_fields=[*names, "updated_at"])
 
 
 def sync_document_shared_fields_from_archive_item(

@@ -38,10 +38,8 @@ from documents.models import (
 )
 from documents.services.archive_items import (
     ARCHIVE_ITEM_SHARED_FIELD_NAMES,
-    archive_item_field_values_from_document,
     create_manual_text_archive_item,
     create_ocr_document,
-    sync_archive_item_shared_fields_from_document,
     sync_document_shared_fields_from_archive_item,
     update_archive_item_discovery_metadata,
     update_manual_text_archive_item,
@@ -173,47 +171,6 @@ class ArchiveItemFoundationTests(TestCase):
                 doc_type=Document.DocType.IMAGE,
                 text_input_type=Document.TextInputType.HANDWRITTEN,
             )
-
-    def test_archive_item_field_values_from_document_copies_without_inference(self):
-        doc = create_ocr_document(
-            title="Copy test",
-            doc_type=Document.DocType.IMAGE,
-            text_input_type=Document.TextInputType.HANDWRITTEN,
-            visibility=Document.Visibility.PUBLIC,
-            metadata_status=Document.MetadataStatus.COMPLETED,
-            date_precision=Document.DatePrecision.RANGE,
-        )
-        Document.objects.filter(pk=doc.pk).update(
-            title="Copy test",
-            visibility=Document.Visibility.PUBLIC,
-            metadata_status=Document.MetadataStatus.COMPLETED,
-            date_precision=Document.DatePrecision.RANGE,
-        )
-        doc.refresh_from_db()
-        values = archive_item_field_values_from_document(doc)
-        self.assertEqual(values["title"], "Copy test")
-        self.assertEqual(values["visibility"], Document.Visibility.PUBLIC)
-        self.assertEqual(values["metadata_status"], Document.MetadataStatus.COMPLETED)
-        self.assertEqual(values["date_precision"], Document.DatePrecision.RANGE)
-
-    def test_sync_archive_item_shared_fields_from_document(self):
-        doc = create_ocr_document(
-            title="Before sync",
-            doc_type=Document.DocType.IMAGE,
-            text_input_type=Document.TextInputType.HANDWRITTEN,
-            visibility=Document.Visibility.PRIVATE,
-        )
-        doc.title = "After sync"
-        doc.visibility = Document.Visibility.PUBLIC
-        doc.metadata_status = Document.MetadataStatus.COMPLETED
-        doc.date_precision = Document.DatePrecision.YEAR
-        sync_archive_item_shared_fields_from_document(doc)
-        item = doc.archive_item
-        item.refresh_from_db()
-        self.assertEqual(item.title, "After sync")
-        self.assertEqual(item.visibility, ArchiveItem.Visibility.PUBLIC)
-        self.assertEqual(item.metadata_status, ArchiveItem.MetadataStatus.COMPLETED)
-        self.assertEqual(item.date_precision, ArchiveItem.DatePrecision.YEAR)
 
     def test_sync_document_shared_fields_from_archive_item(self):
         doc = create_ocr_document(
@@ -2203,7 +2160,9 @@ class OcrDocumentCatalogMetadataEditTests(TestCase):
             date_precision=Document.DatePrecision.UNKNOWN,
         )
         item = doc.archive_item
-        before = archive_item_field_values_from_document(doc)
+        before = {
+            name: getattr(item, name) for name in ARCHIVE_ITEM_SHARED_FIELD_NAMES
+        }
         self.client.force_login(self.staff)
         self.client.post(
             self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
@@ -2213,7 +2172,9 @@ class OcrDocumentCatalogMetadataEditTests(TestCase):
             ),
         )
         item.refresh_from_db()
-        after = archive_item_field_values_from_document(doc)
+        after = {
+            name: getattr(item, name) for name in ARCHIVE_ITEM_SHARED_FIELD_NAMES
+        }
         self.assertEqual(before, after)
 
     def test_catalog_edit_does_not_change_document_text_results(self):
