@@ -82,9 +82,7 @@ def documents_in_review_backlog(
     if result_type:
         qs = qs.filter(_pending_result_exists(result_type=result_type))
     if verification_status:
-        qs = qs.filter(
-            _pending_result_exists(verification_status=verification_status)
-        )
+        qs = qs.filter(_pending_result_exists(verification_status=verification_status))
 
     return qs
 

@@ -48,9 +48,7 @@ class TextPresentation:
     show_auto_ocr_disclaimer: bool
 
 
-AUTO_OCR_DISCLAIMER = (
-    "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות."
-)
+AUTO_OCR_DISCLAIMER = "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות."
 
 
 def _displayed_text_blocks_with_content(
@@ -139,9 +137,7 @@ def _latest_displayable_from_rows(
     if succeeded:
         return max(succeeded, key=lambda row: row.created_at)
     needs_review = [
-        row
-        for row in matching
-        if row.status == DocumentTextResult.Status.NEEDS_REVIEW
+        row for row in matching if row.status == DocumentTextResult.Status.NEEDS_REVIEW
     ]
     if needs_review:
         return max(needs_review, key=lambda row: row.created_at)
@@ -154,9 +150,7 @@ def _latest_displayable_from_ordered_rows(
     matching = [
         row
         for row in rows
-        if row.result_type == result_type
-        and row.text is not None
-        and row.text != ""
+        if row.result_type == result_type and row.text is not None and row.text != ""
     ]
     succeeded = [
         row for row in matching if row.status == DocumentTextResult.Status.SUCCEEDED
@@ -164,9 +158,7 @@ def _latest_displayable_from_ordered_rows(
     if succeeded:
         return succeeded[0]
     needs_review = [
-        row
-        for row in matching
-        if row.status == DocumentTextResult.Status.NEEDS_REVIEW
+        row for row in matching if row.status == DocumentTextResult.Status.NEEDS_REVIEW
     ]
     if needs_review:
         return needs_review[0]

@@ -107,7 +107,10 @@ class AntigravityEngineTests(SimpleTestCase):
             {"type": "tool_call", "content": []},
             {
                 "type": "model_output",
-                "content": [{"type": "text", "text": "line one"}, {"type": "text", "text": "line two"}],
+                "content": [
+                    {"type": "text", "text": "line one"},
+                    {"type": "text", "text": "line two"},
+                ],
             },
         ]
         self.assertEqual(output_text_from_steps(steps), "line one\nline two")
@@ -260,7 +263,9 @@ class AntigravityAdapterTests(SimpleTestCase):
             EnginePermanentError, "ENABLE_ANTIGRAVITY_ARABIC_PRINTED=true"
         ):
             adapter.execute(
-                pages=[PageImage(page_index=1, image_bytes=b"x", mime_type="image/png")],
+                pages=[
+                    PageImage(page_index=1, image_bytes=b"x", mime_type="image/png")
+                ],
                 language_hint="ar",
                 prompt_variant="printed",
                 worker_env=worker_env,
@@ -306,7 +311,9 @@ class AntigravityAdapterTests(SimpleTestCase):
 
         with self.assertRaisesMessage(EnginePermanentError, "HTTP 500: boom"):
             adapter.execute(
-                pages=[PageImage(page_index=1, image_bytes=b"x", mime_type="image/png")],
+                pages=[
+                    PageImage(page_index=1, image_bytes=b"x", mime_type="image/png")
+                ],
                 language_hint="ar",
                 prompt_variant="printed",
                 worker_env=_make_worker_env(),

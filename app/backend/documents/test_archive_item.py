@@ -1137,9 +1137,7 @@ class OcrDocumentMetadataEditTests(TestCase):
         item.refresh_from_db()
         self.assertEqual(item.title, "Shared fields after")
         self.assertEqual(item.visibility, ArchiveItem.Visibility.PUBLIC)
-        self.assertEqual(
-            item.metadata_status, ArchiveItem.MetadataStatus.COMPLETED
-        )
+        self.assertEqual(item.metadata_status, ArchiveItem.MetadataStatus.COMPLETED)
         self.assertEqual(item.date_precision, ArchiveItem.DatePrecision.RANGE)
         self.assertEqual(str(item.date_start), "1920-03-01")
         self.assertEqual(str(item.date_end), "1921-06-30")
@@ -1185,9 +1183,7 @@ class OcrDocumentMetadataEditTests(TestCase):
         item.refresh_from_db()
         self.assertEqual(item.title, "POST canonical title")
         self.assertEqual(item.visibility, ArchiveItem.Visibility.PRIVATE)
-        self.assertEqual(
-            item.metadata_status, ArchiveItem.MetadataStatus.COMPLETED
-        )
+        self.assertEqual(item.metadata_status, ArchiveItem.MetadataStatus.COMPLETED)
         self.assertEqual(item.date_precision, ArchiveItem.DatePrecision.YEAR)
         self.assertEqual(str(item.date_start), "1930-01-01")
         self.assertEqual(str(item.date_end), "1935-12-31")
@@ -1966,9 +1962,7 @@ class OcrDocumentCatalogMetadataEditTests(TestCase):
             date_precision=Document.DatePrecision.UNKNOWN,
         )
         item = doc.archive_item
-        before = {
-            name: getattr(item, name) for name in ARCHIVE_ITEM_SHARED_FIELD_NAMES
-        }
+        before = {name: getattr(item, name) for name in ARCHIVE_ITEM_SHARED_FIELD_NAMES}
         self.client.force_login(self.staff)
         self.client.post(
             self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
@@ -1978,9 +1972,7 @@ class OcrDocumentCatalogMetadataEditTests(TestCase):
             ),
         )
         item.refresh_from_db()
-        after = {
-            name: getattr(item, name) for name in ARCHIVE_ITEM_SHARED_FIELD_NAMES
-        }
+        after = {name: getattr(item, name) for name in ARCHIVE_ITEM_SHARED_FIELD_NAMES}
         self.assertEqual(before, after)
 
     def test_catalog_edit_does_not_change_document_text_results(self):
@@ -3384,7 +3376,9 @@ class ArchiveItemPresentationUiTests(TestCase):
         return manual_item, ocr_doc, photo_item
 
     def test_legacy_manual_text_filter_url_maps_to_documents_and_texts(self):
-        manual_item, ocr_doc, photo_item = self._public_archive_type_filter_fixture_items()
+        manual_item, ocr_doc, photo_item = (
+            self._public_archive_type_filter_fixture_items()
+        )
 
         resp = self.client.get(reverse("archive-list"), {"item_type": "manual_text"})
         self.assertEqual(resp.status_code, 200)
@@ -3396,7 +3390,9 @@ class ArchiveItemPresentationUiTests(TestCase):
         self.assertNotContains(resp, photo_item.title)
 
     def test_legacy_ocr_document_filter_url_maps_to_documents_and_texts(self):
-        manual_item, ocr_doc, photo_item = self._public_archive_type_filter_fixture_items()
+        manual_item, ocr_doc, photo_item = (
+            self._public_archive_type_filter_fixture_items()
+        )
 
         resp = self.client.get(reverse("archive-list"), {"item_type": "ocr_document"})
         self.assertEqual(resp.status_code, 200)
@@ -3571,7 +3567,9 @@ class ArchiveBrowseCardPresentationTests(TestCase):
             text="Opening lines from the scanned family letter.",
         )
         card = build_archive_browse_card(self._browse_item(doc.archive_item_id))
-        self.assertIn("Opening lines from the scanned family letter.", card.preview_text)
+        self.assertIn(
+            "Opening lines from the scanned family letter.", card.preview_text
+        )
         self.assertNotEqual(card.preview_text, ARCHIVE_BROWSE_OCR_PREVIEW)
 
     def test_manual_text_card_type_marker(self):
@@ -3714,15 +3712,23 @@ class ArchiveBrowseCardPresentationTests(TestCase):
         item.tags.add(tag)
 
         card = build_archive_browse_card(self._browse_item(item.id))
-        self.assertEqual([link.name for link in card.category_links], ["הפרשה", "מצרים"])
+        self.assertEqual(
+            [link.name for link in card.category_links], ["הפרשה", "מצרים"]
+        )
         self.assertEqual(
             [link.href for link in card.category_links],
             [
-                reverse("archive-category-browse", kwargs={"category_id": category_b.id}),
-                reverse("archive-category-browse", kwargs={"category_id": category_a.id}),
+                reverse(
+                    "archive-category-browse", kwargs={"category_id": category_b.id}
+                ),
+                reverse(
+                    "archive-category-browse", kwargs={"category_id": category_a.id}
+                ),
             ],
         )
-        self.assertEqual([link.name for link in card.related_links], ["חופשה", "תגית א׳"])
+        self.assertEqual(
+            [link.name for link in card.related_links], ["חופשה", "תגית א׳"]
+        )
         self.assertEqual(
             [link.href for link in card.related_links],
             [
@@ -3759,10 +3765,19 @@ class ArchiveBrowseCardPresentationTests(TestCase):
         self.assertContains(resp, "Visible category line")
         self.assertContains(resp, "Visible event line")
         self.assertContains(resp, "visible-tag-line")
-        self.assertContains(resp, reverse("archive-category-browse", kwargs={"category_id": category.id}))
-        self.assertContains(resp, reverse("archive-event-browse", kwargs={"event_id": event.id}))
-        self.assertContains(resp, reverse("archive-tag-browse", kwargs={"tag_id": tag.id}))
-        self.assertContains(resp, reverse("archive-detail", kwargs={"item_id": item.id}))
+        self.assertContains(
+            resp,
+            reverse("archive-category-browse", kwargs={"category_id": category.id}),
+        )
+        self.assertContains(
+            resp, reverse("archive-event-browse", kwargs={"event_id": event.id})
+        )
+        self.assertContains(
+            resp, reverse("archive-tag-browse", kwargs={"tag_id": tag.id})
+        )
+        self.assertContains(
+            resp, reverse("archive-detail", kwargs={"item_id": item.id})
+        )
         self.assertContains(resp, "archive-browse-card__marker--manual")
         self.assertNotContains(resp, "archive-browse-chip")
 

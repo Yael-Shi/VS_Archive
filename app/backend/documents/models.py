@@ -304,7 +304,7 @@ class Document(models.Model):
             title = (self.archive_item.title or "").strip()
             if title:
                 return title
-        if self.pk is not None:
+        if not self._state.adding:
             return f"Document {self.pk}"
         return "Document"
 

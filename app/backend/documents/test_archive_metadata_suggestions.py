@@ -14,7 +14,10 @@ from documents.models import (
     Tag,
 )
 from documents.services.archive_item_access import ARCHIVE_FAMILY_GROUP_NAME
-from documents.services.archive_items import create_manual_text_archive_item, create_ocr_document
+from documents.services.archive_items import (
+    create_manual_text_archive_item,
+    create_ocr_document,
+)
 from documents.services.archive_metadata_suggestion_review import (
     ArchiveMetadataSuggestionReviewError,
     approve_suggestion,
@@ -34,7 +37,9 @@ class ArchiveMetadataSuggestionPublicFlowTests(TestCase):
         user.groups.add(Group.objects.get(name=ARCHIVE_FAMILY_GROUP_NAME))
         return user
 
-    def _create_public_manual_text_item(self, *, title: str = "Public manual item") -> ArchiveItem:
+    def _create_public_manual_text_item(
+        self, *, title: str = "Public manual item"
+    ) -> ArchiveItem:
         return create_manual_text_archive_item(
             title=title,
             body="גוף הטקסט",
@@ -45,7 +50,9 @@ class ArchiveMetadataSuggestionPublicFlowTests(TestCase):
         return reverse("archive-metadata-suggestion-new", kwargs={"item_id": item_id})
 
     def _thanks_url(self, item_id: int) -> str:
-        return reverse("archive-metadata-suggestion-thanks", kwargs={"item_id": item_id})
+        return reverse(
+            "archive-metadata-suggestion-thanks", kwargs={"item_id": item_id}
+        )
 
     def _detail_url(self, item_id: int) -> str:
         return reverse("archive-detail", kwargs={"item_id": item_id})
@@ -68,7 +75,10 @@ class ArchiveMetadataSuggestionPublicFlowTests(TestCase):
         resp = self.client.get(self._form_url(item.id))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "הוספת מידע על הפריט")
-        self.assertContains(resp, "אפשר להציע קטגוריות, אירועים, תגיות, או לשלוח הערה כללית למנהלי הארכיון.")
+        self.assertContains(
+            resp,
+            "אפשר להציע קטגוריות, אירועים, תגיות, או לשלוח הערה כללית למנהלי הארכיון.",
+        )
         self.assertContains(resp, "ההצעה תיבדק לפני שינוי באתר")
 
     def test_anonymous_cannot_access_private_item(self):
@@ -121,7 +131,9 @@ class ArchiveMetadataSuggestionPublicFlowTests(TestCase):
 
         item.refresh_from_db()
         self.assertEqual(list(item.categories.values_list("name", flat=True)), ["קיים"])
-        self.assertEqual(list(item.events.values_list("name", flat=True)), ["אירוע קיים"])
+        self.assertEqual(
+            list(item.events.values_list("name", flat=True)), ["אירוע קיים"]
+        )
         self.assertEqual(list(item.tags.values_list("name", flat=True)), ["תגית-קיימת"])
 
     def test_name_required(self):

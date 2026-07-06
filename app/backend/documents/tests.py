@@ -11220,7 +11220,9 @@ class DocumentDatePrecisionTests(TestCase):
             date_end=date(1949, 12, 31),
             date_precision=Document.DatePrecision.RANGE,
         )
-        self.assertEqual(format_document_date(doc.archive_item), "01/01/1947 - 31/12/1949")
+        self.assertEqual(
+            format_document_date(doc.archive_item), "01/01/1947 - 31/12/1949"
+        )
 
     def test_list_page_uses_precision_aware_date_not_raw_bounds(self):
         from datetime import date
