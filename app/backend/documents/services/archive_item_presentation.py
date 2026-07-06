@@ -273,7 +273,9 @@ def _normalize_preview_source(text: str | None) -> str:
     return " ".join((text or "").split())
 
 
-def _truncate_preview(text: str, *, max_len: int = ARCHIVE_BROWSE_PREVIEW_MAX_LEN) -> str:
+def _truncate_preview(
+    text: str, *, max_len: int = ARCHIVE_BROWSE_PREVIEW_MAX_LEN
+) -> str:
     if len(text) <= max_len:
         return text
     return text[: max_len - 1].rstrip() + "…"
@@ -368,7 +370,9 @@ def _browse_links_for_relation(
     return tuple(links)
 
 
-def _category_links_for_item(archive_item: ArchiveItem) -> tuple[ArchiveBrowseLink, ...]:
+def _category_links_for_item(
+    archive_item: ArchiveItem,
+) -> tuple[ArchiveBrowseLink, ...]:
     return _browse_links_for_relation(
         archive_item,
         "categories",

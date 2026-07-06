@@ -144,9 +144,7 @@ def build_antigravity_ocr_prompt(image_labels: list[str]) -> str:
     )
 
 
-def build_multimodal_input(
-    prompt: str, pages: list[PageImage]
-) -> list[dict[str, Any]]:
+def build_multimodal_input(prompt: str, pages: list[PageImage]) -> list[dict[str, Any]]:
     input_blocks: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
     for page in pages:
         input_blocks.append(

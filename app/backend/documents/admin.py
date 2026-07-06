@@ -13,6 +13,7 @@ from .models import (
     TranskribusRun,
 )
 
+
 @admin.register(Tag)
 class TagAdmin(admin.ModelAdmin):
     list_display = ("id", "name", "created_at", "updated_at")
