@@ -476,6 +476,11 @@ class Command(BaseCommand):
                 max_output_tokens=self._cfg.gemini_max_output_tokens,
             )
         except Exception as e:
+            # Intentional broad catch: any Hebrew-translation failure is persisted as a
+            # failed HEBREW_TEXT row and must not fail the already-successful SOURCE_TEXT
+            # OCR persistence (this runs inside the Phase 3 save transaction). See
+            # architecture.mdc / docs/ocr-routing-reference.md (non-Hebrew translation
+            # failure -> HEBREW_TRANSLATION_FAILED, not an OCR failure).
             persist_hebrew_translation_result(
                 doc,
                 engine,
