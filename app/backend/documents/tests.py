@@ -10554,6 +10554,7 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertContains(resp, "טקסט עברי לבדיקה")
         self.assertNotContains(resp, "תעתוק מקור")
         self.assertContains(resp, "טקסט מקור עברי", count=1)
+        self.assertNotContains(resp, "קפיצה לתרגום לעברית")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "HEBREW_TEXT")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "SOURCE_TEXT")
 
@@ -10610,6 +10611,83 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertContains(resp, "תרגום לעברית")
         self.assertContains(resp, "אין תרגום לעברית עדיין.")
         self.assertContains(resp, "English source line")
+        self.assertContains(resp, 'id="document-detail-source-text"')
+        self.assertContains(resp, "detail-text-block__body--ltr")
+        self.assertNotContains(resp, "קפיצה לתרגום לעברית")
+
+    def test_non_hebrew_detail_shows_hebrew_jump_link_when_translation_present(self):
+        doc = self._create_document(language=Document.Language.ENGLISH)
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="English source line",
+        )
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="שורת תרגום",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'href="#document-detail-hebrew-text"')
+        self.assertContains(resp, "קפיצה לתרגום לעברית")
+        self.assertContains(resp, 'id="document-detail-hebrew-text"')
+        self.assertContains(resp, "detail-text-block__body--rtl", count=1)
+
+    def test_non_hebrew_detail_hides_hebrew_jump_link_when_translation_empty(self):
+        doc = self._create_document(language=Document.Language.ENGLISH)
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="English source line",
+        )
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "קפיצה לתרגום לעברית")
+
+    def test_arabic_source_detail_uses_rtl_alignment(self):
+        doc = self._create_document(language=Document.Language.ARABIC)
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="نص عربي",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "detail-text-block__body--rtl")
+        self.assertNotContains(resp, "detail-text-block__body--ltr")
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value="https://example.test/source.jpg",
+    )
+    def test_open_in_new_tab_uses_secondary_button_in_source_panel_head(
+        self, _mock_get
+    ):
+        doc = self._create_document(
+            language=Document.Language.ENGLISH,
+            file_s3_key="documents/test/sample.jpg",
+        )
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="English source line",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "btn-secondary document-detail-open-tab-btn")
+        self.assertContains(resp, "פתיחה בטאב חדש")
+        self.assertNotContains(resp, "document-detail-source-actions")
 
     def test_non_hebrew_missing_translation_still_shows_missing_section(self):
         doc = self._create_document(language=Document.Language.FRENCH)
@@ -10928,6 +11006,133 @@ class TextPresentationHelperTests(TestCase):
         self.assertTrue(presentation.show_source)
         self.assertTrue(presentation.show_hebrew)
         self.assertFalse(presentation.show_auto_ocr_disclaimer)
+
+    def test_get_text_presentation_sets_hebrew_jump_link_when_translation_has_text(
+        self,
+    ):
+        from documents.services.text_presentation import (
+            get_text_presentation_for_document,
+            presentation_show_hebrew_jump_link,
+        )
+
+        doc = create_ocr_document(
+            title="Jump link presentation doc",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.READY,
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="engine-a",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="English source",
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="engine-a",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="תרגום",
+        )
+
+        presentation = get_text_presentation_for_document(doc)
+        self.assertTrue(presentation.show_hebrew_jump_link)
+        self.assertTrue(
+            presentation_show_hebrew_jump_link(
+                doc=doc,
+                show_source=presentation.show_source,
+                show_hebrew=presentation.show_hebrew,
+                hebrew=presentation.hebrew,
+            )
+        )
+
+    def test_get_text_presentation_hides_hebrew_jump_link_for_hebrew_source_document(
+        self,
+    ):
+        from documents.services.text_presentation import (
+            get_text_presentation_for_document,
+        )
+
+        doc = create_ocr_document(
+            title="Hebrew jump link doc",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            language=Document.Language.HEBREW,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.READY,
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="engine-a",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="טקסט מקור",
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="engine-a",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="טקסט עברי",
+        )
+
+        presentation = get_text_presentation_for_document(doc)
+        self.assertFalse(presentation.show_hebrew_jump_link)
+
+    def test_get_text_presentation_hides_hebrew_jump_link_when_translation_empty(
+        self,
+    ):
+        from documents.services.text_presentation import (
+            get_text_presentation_for_document,
+        )
+
+        doc = create_ocr_document(
+            title="Jump link empty translation doc",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.READY,
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="engine-a",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="English source",
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="engine-a",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="   ",
+        )
+
+        presentation = get_text_presentation_for_document(doc)
+        self.assertFalse(presentation.show_hebrew_jump_link)
+
+
+class SourceTextDirectionTests(TestCase):
+    def test_source_text_is_rtl_for_hebrew_and_arabic(self):
+        from documents.services.text_presentation import source_text_is_rtl
+
+        he_doc = create_ocr_document(language=Document.Language.HEBREW)
+        ar_doc = create_ocr_document(language=Document.Language.ARABIC)
+        en_doc = create_ocr_document(language=Document.Language.ENGLISH)
+
+        self.assertTrue(source_text_is_rtl(he_doc))
+        self.assertTrue(source_text_is_rtl(ar_doc))
+        self.assertFalse(source_text_is_rtl(en_doc))
 
 
 class DocumentVisibilityAccessControlTests(TestCase):

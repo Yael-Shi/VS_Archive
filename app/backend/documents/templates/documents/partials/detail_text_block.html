@@ -1,4 +1,10 @@
-<div class="detail-text-block document-detail-text-block">
+{% load text_presentation %}
+<div
+  class="detail-text-block document-detail-text-block{% if block.result_type == 'SOURCE_TEXT' %} document-detail-text-block--source{% elif block.result_type == 'HEBREW_TEXT' %} document-detail-text-block--hebrew{% endif %}"
+  {% if block %}
+    {% if block.result_type == "SOURCE_TEXT" %}id="document-detail-source-text"{% elif block.result_type == "HEBREW_TEXT" %}id="document-detail-hebrew-text"{% endif %}
+  {% endif %}
+>
   {% if block %}
     {% if is_admin %}
       <div class="detail-text-block__title">{{ meta.label }}</div>
@@ -13,7 +19,12 @@
     {% endif %}
 
     {% if block.text %}
-      <div class="detail-text-block__body document-detail-reading-prose">{{ block.text }}</div>
+      <div class="detail-text-block__body document-detail-reading-prose{% if block.result_type == 'HEBREW_TEXT' or doc|source_text_is_rtl_filter %} detail-text-block__body--rtl{% else %} detail-text-block__body--ltr{% endif %}">{{ block.text }}</div>
+      {% if show_hebrew_jump_link %}
+        <p class="document-detail-hebrew-jump">
+          <a href="#document-detail-hebrew-text">קפיצה לתרגום לעברית</a>
+        </p>
+      {% endif %}
     {% else %}
       <div class="muted">{{ meta.empty_message }}</div>
     {% endif %}
