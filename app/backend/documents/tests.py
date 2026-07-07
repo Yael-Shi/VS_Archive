@@ -10653,6 +10653,7 @@ class DocumentDetailTextGroupingTests(TestCase):
     AUTO_OCR_DISCLAIMER = (
         "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות."
     )
+    VERIFIED_TECHNICAL_NOTE = "הטקסט המוצג עבר בקרה אנושית."
 
     def test_unverified_displayed_text_shows_auto_ocr_disclaimer(self):
         doc = self._create_document(visibility=Document.Visibility.PUBLIC)
@@ -10667,7 +10668,7 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, self.AUTO_OCR_DISCLAIMER)
 
-    def test_verified_displayed_text_hides_auto_ocr_disclaimer(self):
+    def test_verified_displayed_text_shows_verified_technical_note(self):
         doc = self._create_document(visibility=Document.Visibility.PUBLIC)
         self._create_text_result(
             doc,
@@ -10680,6 +10681,7 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "טקסט מאומת")
         self.assertContains(resp, "document-detail-technical")
+        self.assertContains(resp, self.VERIFIED_TECHNICAL_NOTE)
         self.assertNotContains(resp, self.AUTO_OCR_DISCLAIMER)
 
     def test_mixed_verification_shows_auto_ocr_disclaimer_when_any_unverified(
@@ -10708,7 +10710,7 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertContains(resp, "Unverified translation")
         self.assertContains(resp, self.AUTO_OCR_DISCLAIMER)
 
-    def test_all_verified_displayed_texts_hide_auto_ocr_disclaimer(self):
+    def test_all_verified_displayed_texts_show_verified_technical_note(self):
         doc = self._create_document(
             language=Document.Language.ENGLISH,
             visibility=Document.Visibility.PUBLIC,
@@ -10731,6 +10733,7 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertContains(resp, "Verified source")
         self.assertContains(resp, "Verified translation")
         self.assertContains(resp, "document-detail-technical")
+        self.assertContains(resp, self.VERIFIED_TECHNICAL_NOTE)
         self.assertNotContains(resp, self.AUTO_OCR_DISCLAIMER)
 
     def test_viewer_detail_hides_internal_text_labels_and_shows_auto_disclaimer(self):

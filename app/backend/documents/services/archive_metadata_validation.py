@@ -39,6 +39,35 @@ def parse_metadata_status(raw_value: str | None) -> str:
 
 SOURCE_METADATA_MAX_LENGTH = 255
 
+_EMPTY_METADATA_MARKERS = frozenset(
+    {
+        "אין",
+        "—",
+        "-",
+        "–",
+        "none",
+        "n/a",
+        "na",
+        "null",
+        "ללא",
+    }
+)
+
+
+def meaningful_metadata_value(value: Any) -> str:
+    """Return displayable metadata text, or empty when missing/placeholder."""
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    normalized = text.casefold()
+    if normalized in _EMPTY_METADATA_MARKERS:
+        return ""
+    if normalized.replace(" ", "") in _EMPTY_METADATA_MARKERS:
+        return ""
+    return text
+
 
 def parse_public_note(raw_value: Any) -> str:
     if raw_value is None:

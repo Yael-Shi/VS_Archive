@@ -267,6 +267,22 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         "documents.views.create_presigned_get",
         return_value=PRESIGNED_URL,
     )
+    def test_photo_detail_renders_context_metadata_row(self, _mock_presigned_get):
+        photo = self.public_uploaded.photo_content
+        photo.context = "חתונה בירושלים"
+        photo.save(update_fields=["context", "updated_at"])
+
+        resp = self.client.get(
+            reverse("archive-detail", kwargs={"item_id": self.public_uploaded.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "הקשר / נסיבות:")
+        self.assertContains(resp, "חתונה בירושלים")
+
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value=PRESIGNED_URL,
+    )
     def test_photo_detail_displays_non_empty_metadata(self, _mock_presigned_get):
         photo = self.public_uploaded.photo_content
         photo.description = "Family picnic"

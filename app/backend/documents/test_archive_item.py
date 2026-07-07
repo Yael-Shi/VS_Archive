@@ -2724,6 +2724,27 @@ class UnifiedArchiveItemCreatePageTests(TestCase):
         self.assertContains(resp, 'name="body"')
 
 
+class MeaningfulMetadataValueTests(SimpleTestCase):
+    def test_treats_empty_and_placeholder_values_as_missing(self):
+        from documents.services.archive_metadata_validation import (
+            meaningful_metadata_value,
+        )
+
+        self.assertEqual(meaningful_metadata_value(""), "")
+        self.assertEqual(meaningful_metadata_value("   "), "")
+        self.assertEqual(meaningful_metadata_value("אין"), "")
+        self.assertEqual(meaningful_metadata_value(" — "), "")
+        self.assertEqual(meaningful_metadata_value("none"), "")
+
+    def test_preserves_real_metadata_values(self):
+        from documents.services.archive_metadata_validation import (
+            meaningful_metadata_value,
+        )
+
+        self.assertEqual(meaningful_metadata_value("  דבר  "), "דבר")
+        self.assertEqual(meaningful_metadata_value("The Times"), "The Times")
+
+
 class ArchiveItemSourceMetadataTests(TestCase):
     def test_archive_item_stores_author_name_and_source_title(self):
         item = create_manual_text_archive_item(
@@ -2799,6 +2820,23 @@ class ArchiveItemSourceMetadataTests(TestCase):
         self.assertContains(resp, "OCR without source metadata")
         self.assertNotContains(resp, "מחבר/ת")
         self.assertNotContains(resp, "מקור:")
+
+    def test_ocr_document_detail_hides_placeholder_source_metadata(self):
+        doc = create_ocr_document(
+            title="OCR with placeholder source metadata",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
+            author_name="יוסף מרזוק",
+            source_title="אין",
+        )
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "יוסף מרזוק")
+        self.assertNotContains(resp, "מקור:")
+        self.assertNotContains(resp, "מקור: אין")
 
     def test_ocr_document_detail_hides_legacy_category_event_for_public_viewer(self):
         doc = create_ocr_document(

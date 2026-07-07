@@ -1,34 +1,39 @@
+{% load archive_labels %}
 {% if photo_content %}
-  <div class="archive-detail-meta-block archive-detail-meta-block--photo">
-    {% if photo_content.description %}
-      <div class="archive-detail-meta-row">
-        <strong class="archive-detail-meta-label">תיאור / כיתוב:</strong>
-        <span class="archive-detail-meta-value">{{ photo_content.description|linebreaksbr }}</span>
+  {% with description=photo_content.description|meaningful_archive_metadata location=photo_content.location|meaningful_archive_metadata photo_context=photo_content.context|meaningful_archive_metadata people_present=photo_content.people_present|meaningful_archive_metadata notes=photo_content.notes|meaningful_archive_metadata %}
+    {% if description or location or photo_context or people_present or notes %}
+      <div class="archive-detail-meta-block archive-detail-meta-block--photo">
+        {% if description %}
+          <div class="archive-detail-meta-row">
+            <strong class="archive-detail-meta-label">תיאור / כיתוב:</strong>
+            <span class="archive-detail-meta-value">{{ description|linebreaksbr }}</span>
+          </div>
+        {% endif %}
+        {% if location %}
+          <div class="archive-detail-meta-row">
+            <strong class="archive-detail-meta-label">מיקום:</strong>
+            <span class="archive-detail-meta-value">{{ location }}</span>
+          </div>
+        {% endif %}
+        {% if photo_context %}
+          <div class="archive-detail-meta-row">
+            <strong class="archive-detail-meta-label">הקשר / נסיבות:</strong>
+            <span class="archive-detail-meta-value">{{ photo_context|linebreaksbr }}</span>
+          </div>
+        {% endif %}
+        {% if people_present %}
+          <div class="archive-detail-meta-row">
+            <strong class="archive-detail-meta-label">נוכחים בתמונה:</strong>
+            <span class="archive-detail-meta-value">{{ people_present|linebreaksbr }}</span>
+          </div>
+        {% endif %}
+        {% if notes %}
+          <div class="archive-detail-meta-row">
+            <strong class="archive-detail-meta-label">הערות נוספות:</strong>
+            <span class="archive-detail-meta-value">{{ notes|linebreaksbr }}</span>
+          </div>
+        {% endif %}
       </div>
     {% endif %}
-    {% if photo_content.location %}
-      <div class="archive-detail-meta-row">
-        <strong class="archive-detail-meta-label">מיקום:</strong>
-        <span class="archive-detail-meta-value">{{ photo_content.location }}</span>
-      </div>
-    {% endif %}
-    {% if photo_content.context %}
-      <div class="archive-detail-meta-row">
-        <strong class="archive-detail-meta-label">הקשר / נסיבות:</strong>
-        <span class="archive-detail-meta-value">{{ photo_content.context|linebreaksbr }}</span>
-      </div>
-    {% endif %}
-    {% if photo_content.people_present %}
-      <div class="archive-detail-meta-row">
-        <strong class="archive-detail-meta-label">נוכחים בתמונה:</strong>
-        <span class="archive-detail-meta-value">{{ photo_content.people_present|linebreaksbr }}</span>
-      </div>
-    {% endif %}
-    {% if photo_content.notes %}
-      <div class="archive-detail-meta-row">
-        <strong class="archive-detail-meta-label">הערות נוספות:</strong>
-        <span class="archive-detail-meta-value">{{ photo_content.notes|linebreaksbr }}</span>
-      </div>
-    {% endif %}
-  </div>
+  {% endwith %}
 {% endif %}

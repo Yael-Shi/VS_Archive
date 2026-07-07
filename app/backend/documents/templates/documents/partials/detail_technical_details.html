@@ -33,6 +33,8 @@
           הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות.
         {% endif %}
       </div>
+    {% elif not is_admin %}
+      <div class="page-lead">הטקסט המוצג עבר בקרה אנושית.</div>
     {% endif %}
 
     {% if is_admin %}
