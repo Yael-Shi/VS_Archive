@@ -32,23 +32,7 @@
 
     <div class="spacer"></div>
 
-    {% if item.item_type == "PHOTO" %}
-      <details class="review-details review-details--secondary archive-detail-badges">
-        <summary>פרטים</summary>
-        <div class="review-details-body">
-          <div class="badge-row">
-            <span class="badge">{{ item.item_type|archive_item_type_label }}</span>
-            {% if is_admin %}
-              <span class="badge{% if item.visibility == 'public' %} badge-ok{% endif %}">
-                {{ item.visibility|archive_visibility_label }}
-              </span>
-              <span class="badge">{{ item.metadata_status|archive_metadata_status_label }}</span>
-            {% endif %}
-          </div>
-        </div>
-      </details>
-      <div class="spacer"></div>
-    {% else %}
+    {% if item.item_type != "PHOTO" %}
       <div class="badge-row archive-detail-badges">
         <span class="badge">{{ item.item_type|archive_item_type_label }}</span>
         {% if is_admin %}
@@ -59,6 +43,15 @@
         {% endif %}
       </div>
       <div class="spacer"></div>
+    {% elif is_admin %}
+      <div class="badge-row archive-detail-badges">
+        <span class="badge">{{ item.item_type|archive_item_type_label }}</span>
+        <span class="badge{% if item.visibility == 'public' %} badge-ok{% endif %}">
+          {{ item.visibility|archive_visibility_label }}
+        </span>
+        <span class="badge">{{ item.metadata_status|archive_metadata_status_label }}</span>
+      </div>
+      <div class="spacer-sm"></div>
     {% endif %}
 
     <div class="archive-detail-meta">
@@ -73,7 +66,10 @@
     </div>
 
     <div class="spacer-sm"></div>
-    <a class="btn" href="{% url 'archive-metadata-suggestion-new' item_id=item.id %}">הוספת מידע על הפריט</a>
+    <a
+      class="btn{% if item.item_type == 'PHOTO' %} btn-secondary archive-detail-suggest-btn{% endif %}"
+      href="{% url 'archive-metadata-suggestion-new' item_id=item.id %}"
+    >הוספת מידע על הפריט</a>
 
     {% if item.item_type == "MANUAL_TEXT" %}
       <div class="section-title archive-detail-text-heading">טקסט</div>

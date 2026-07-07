@@ -2412,6 +2412,18 @@ pre {
   overflow-wrap: anywhere;
 }
 
+.archive-detail-photo-description {
+  margin-bottom: var(--space-2);
+  font-size: var(--font-base);
+  line-height: var(--line-relaxed);
+  color: var(--text);
+}
+
+.archive-detail-suggest-btn {
+  align-self: flex-start;
+  max-width: 100%;
+}
+
 .archive-detail-text {
   min-width: 0;
 }
@@ -2533,6 +2545,53 @@ pre {
   gap: var(--space-4);
   align-items: start;
   min-width: 0;
+}
+
+.document-detail-jump-nav {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin-bottom: calc(-1 * var(--space-1));
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--card-muted);
+  font-size: var(--font-sm);
+  line-height: var(--line-relaxed);
+}
+
+.document-detail-jump-nav__link {
+  color: var(--accent);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.document-detail-jump-nav__link:hover {
+  color: var(--primary-hover);
+  text-decoration: underline;
+}
+
+.document-detail-back-to-top {
+  margin: var(--space-3) 0 0;
+  font-size: var(--font-sm);
+  line-height: var(--line-relaxed);
+}
+
+.document-detail-back-to-top a {
+  color: var(--accent);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.document-detail-back-to-top a:hover {
+  color: var(--primary-hover);
+  text-decoration: underline;
+}
+
+.document-detail-back-to-top--mobile-only {
+  display: none;
 }
 
 .document-detail-navigation-actions {
@@ -2894,23 +2953,6 @@ pre {
   text-align: right;
 }
 
-.document-detail-hebrew-jump {
-  margin: var(--space-3) 0 0;
-  font-size: var(--font-sm);
-  line-height: var(--line-relaxed);
-}
-
-.document-detail-hebrew-jump a {
-  color: var(--accent);
-  font-weight: 500;
-  text-decoration: none;
-}
-
-.document-detail-hebrew-jump a:hover {
-  color: var(--primary-hover);
-  text-decoration: underline;
-}
-
 .document-detail-text-panel .detail-text-block__body pre {
   max-width: 100%;
   overflow-x: auto;
@@ -3118,6 +3160,10 @@ pre {
   .document-detail-open-tab-btn {
     flex: 1 1 auto;
     justify-content: center;
+  }
+
+  .document-detail-back-to-top--mobile-only {
+    display: block;
   }
 
   .document-detail-source-panel .document-detail-viewer iframe {

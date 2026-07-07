@@ -156,6 +156,8 @@ from documents.services.hebrew_translation_retry import (
 )
 from documents.services.sqs import send_process_document_message
 from documents.services.text_presentation import (
+    build_document_detail_jump_nav,
+    document_detail_has_source_viewer,
     get_displayed_transcription_text,
     get_text_presentation_for_document,
     text_presentation_results_prefetch,
@@ -1846,12 +1848,25 @@ def document_detail_page(request, doc_id: int):
 
     text_presentation = get_text_presentation_for_document(doc)
     displayed_transcription_text = get_displayed_transcription_text(doc)
+    detail_jump_nav = build_document_detail_jump_nav(
+        doc,
+        text_presentation,
+        has_source_viewer=document_detail_has_source_viewer(
+            doc,
+            content_url=source_context["content_url"],
+            source_preview_items=source_context["source_preview_items"],
+            source_preview_unavailable_count=source_context[
+                "source_preview_unavailable_count"
+            ],
+        ),
+    )
 
     context = {
         "doc": doc,
         **source_context,
         "admin_meta": admin_meta,
         "text_presentation": text_presentation,
+        "detail_jump_nav": detail_jump_nav,
         "displayed_transcription_text": displayed_transcription_text,
         "is_admin": is_admin,
         "show_ocr_reprocess_action": is_admin and is_ocr_reprocess_ui_eligible(doc),

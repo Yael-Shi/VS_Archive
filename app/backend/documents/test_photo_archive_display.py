@@ -296,13 +296,14 @@ class PhotoArchiveDisplayDetailTests(TestCase):
             reverse("archive-detail", kwargs={"item_id": self.public_uploaded.id})
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "תיאור / כיתוב:")
         self.assertContains(resp, "Family picnic")
+        self.assertNotContains(resp, "תיאור / כיתוב:")
         self.assertContains(resp, "מיקום:")
         self.assertContains(resp, "Jerusalem")
         self.assertContains(resp, "הקשר / נסיבות:")
         self.assertContains(resp, "Summer outing")
-        self.assertContains(resp, "נוכחים בתמונה:")
+        self.assertContains(resp, "נוכחים:")
+        self.assertNotContains(resp, "נוכחים בתמונה:")
         self.assertContains(resp, "Grandpa, Grandma")
         self.assertContains(resp, "הערות נוספות:")
         self.assertContains(resp, "From album page 2")
@@ -322,8 +323,9 @@ class PhotoArchiveDisplayDetailTests(TestCase):
             reverse("archive-detail", kwargs={"item_id": self.public_uploaded.id})
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "תיאור / כיתוב:")
+        self.assertContains(resp, "archive-detail-photo-description")
         self.assertContains(resp, "Only caption filled")
+        self.assertNotContains(resp, "תיאור / כיתוב:")
         self.assertNotContains(resp, "מיקום:")
         self.assertNotContains(resp, "הקשר / נסיבות:")
         self.assertNotContains(resp, "נוכחים בתמונה:")
@@ -374,6 +376,19 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, "הערת הארכיון:")
+
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value=PRESIGNED_URL,
+    )
+    def test_photo_detail_public_view_omits_details_wrapper(self, _mock_presigned_get):
+        resp = self.client.get(
+            reverse("archive-detail", kwargs={"item_id": self.public_uploaded.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "<summary>פרטים</summary>")
+        self.assertContains(resp, "btn-secondary archive-detail-suggest-btn")
+        self.assertContains(resp, "הוספת מידע על הפריט")
 
 
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")

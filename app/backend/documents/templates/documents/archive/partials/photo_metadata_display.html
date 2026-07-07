@@ -4,10 +4,7 @@
     {% if description or location or photo_context or people_present or notes %}
       <div class="archive-detail-meta-block archive-detail-meta-block--photo">
         {% if description %}
-          <div class="archive-detail-meta-row">
-            <strong class="archive-detail-meta-label">תיאור / כיתוב:</strong>
-            <span class="archive-detail-meta-value">{{ description|linebreaksbr }}</span>
-          </div>
+          <div class="archive-detail-photo-description">{{ description|linebreaksbr }}</div>
         {% endif %}
         {% if location %}
           <div class="archive-detail-meta-row">
@@ -23,7 +20,7 @@
         {% endif %}
         {% if people_present %}
           <div class="archive-detail-meta-row">
-            <strong class="archive-detail-meta-label">נוכחים בתמונה:</strong>
+            <strong class="archive-detail-meta-label">נוכחים:</strong>
             <span class="archive-detail-meta-value">{{ people_present|linebreaksbr }}</span>
           </div>
         {% endif %}
