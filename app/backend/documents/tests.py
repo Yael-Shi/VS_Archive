@@ -10614,9 +10614,20 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertContains(resp, 'id="document-detail-source-text"')
         self.assertContains(resp, "detail-text-block__body--ltr")
         self.assertNotContains(resp, "קפיצה לתרגום לעברית")
+        self.assertNotContains(resp, "document-detail-jump-nav")
 
-    def test_non_hebrew_detail_shows_hebrew_jump_link_when_translation_present(self):
-        doc = self._create_document(language=Document.Language.ENGLISH)
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value="https://example.test/source.jpg",
+    )
+    def test_non_hebrew_detail_shows_top_jump_nav_when_translation_present(
+        self, _mock_get
+    ):
+        doc = self._create_document(
+            language=Document.Language.ENGLISH,
+            file_s3_key="documents/test/sample.jpg",
+        )
         self._create_text_result(
             doc,
             result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
@@ -10630,12 +10641,22 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(self._detail_url(doc.id))
         self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "document-detail-jump-nav")
+        self.assertContains(resp, 'href="#document-detail-source-panel"')
+        self.assertContains(resp, 'href="#document-detail-source-text"')
         self.assertContains(resp, 'href="#document-detail-hebrew-text"')
-        self.assertContains(resp, "קפיצה לתרגום לעברית")
-        self.assertContains(resp, 'id="document-detail-hebrew-text"')
+        self.assertContains(resp, "מסמך מקור")
+        self.assertContains(resp, "תעתוק")
+        self.assertContains(resp, "תרגום לעברית")
+        self.assertNotContains(resp, "קפיצה לתרגום לעברית")
+        self.assertContains(resp, 'id="document-detail-top"')
+        self.assertContains(resp, "חזרה לראש העמוד")
+        self.assertContains(resp, "document-detail-back-to-top--mobile-only")
         self.assertContains(resp, "detail-text-block__body--rtl", count=1)
 
-    def test_non_hebrew_detail_hides_hebrew_jump_link_when_translation_empty(self):
+    def test_non_hebrew_detail_jump_nav_hides_hebrew_link_when_translation_empty(
+        self,
+    ):
         doc = self._create_document(language=Document.Language.ENGLISH)
         self._create_text_result(
             doc,
@@ -10651,6 +10672,7 @@ class DocumentDetailTextGroupingTests(TestCase):
         resp = self.client.get(self._detail_url(doc.id))
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, "קפיצה לתרגום לעברית")
+        self.assertNotContains(resp, "document-detail-jump-nav")
 
     def test_arabic_source_detail_uses_rtl_alignment(self):
         doc = self._create_document(language=Document.Language.ARABIC)
@@ -11007,16 +11029,16 @@ class TextPresentationHelperTests(TestCase):
         self.assertTrue(presentation.show_hebrew)
         self.assertFalse(presentation.show_auto_ocr_disclaimer)
 
-    def test_get_text_presentation_sets_hebrew_jump_link_when_translation_has_text(
+    def test_build_document_detail_jump_nav_shows_hebrew_link_for_non_hebrew_doc(
         self,
     ):
         from documents.services.text_presentation import (
+            build_document_detail_jump_nav,
             get_text_presentation_for_document,
-            presentation_show_hebrew_jump_link,
         )
 
         doc = create_ocr_document(
-            title="Jump link presentation doc",
+            title="Jump nav presentation doc",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.PRINTED,
             language=Document.Language.ENGLISH,
@@ -11041,25 +11063,29 @@ class TextPresentationHelperTests(TestCase):
         )
 
         presentation = get_text_presentation_for_document(doc)
-        self.assertTrue(presentation.show_hebrew_jump_link)
-        self.assertTrue(
-            presentation_show_hebrew_jump_link(
-                doc=doc,
-                show_source=presentation.show_source,
-                show_hebrew=presentation.show_hebrew,
-                hebrew=presentation.hebrew,
-            )
+        jump_nav = build_document_detail_jump_nav(
+            doc,
+            presentation,
+            has_source_viewer=True,
+        )
+        self.assertTrue(jump_nav.show_nav)
+        self.assertTrue(jump_nav.show_transcription)
+        self.assertTrue(jump_nav.show_hebrew_translation)
+        self.assertEqual(
+            jump_nav.transcription_target_id,
+            "document-detail-source-text",
         )
 
-    def test_get_text_presentation_hides_hebrew_jump_link_for_hebrew_source_document(
+    def test_build_document_detail_jump_nav_hides_hebrew_link_for_hebrew_source_document(
         self,
     ):
         from documents.services.text_presentation import (
+            build_document_detail_jump_nav,
             get_text_presentation_for_document,
         )
 
         doc = create_ocr_document(
-            title="Hebrew jump link doc",
+            title="Hebrew jump nav doc",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
             language=Document.Language.HEBREW,
@@ -11084,17 +11110,29 @@ class TextPresentationHelperTests(TestCase):
         )
 
         presentation = get_text_presentation_for_document(doc)
-        self.assertFalse(presentation.show_hebrew_jump_link)
+        jump_nav = build_document_detail_jump_nav(
+            doc,
+            presentation,
+            has_source_viewer=True,
+        )
+        self.assertTrue(jump_nav.show_nav)
+        self.assertTrue(jump_nav.show_transcription)
+        self.assertFalse(jump_nav.show_hebrew_translation)
+        self.assertEqual(
+            jump_nav.transcription_target_id,
+            "document-detail-hebrew-text",
+        )
 
-    def test_get_text_presentation_hides_hebrew_jump_link_when_translation_empty(
+    def test_build_document_detail_jump_nav_hides_hebrew_link_when_translation_empty(
         self,
     ):
         from documents.services.text_presentation import (
+            build_document_detail_jump_nav,
             get_text_presentation_for_document,
         )
 
         doc = create_ocr_document(
-            title="Jump link empty translation doc",
+            title="Jump nav empty translation doc",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.PRINTED,
             language=Document.Language.ENGLISH,
@@ -11119,7 +11157,15 @@ class TextPresentationHelperTests(TestCase):
         )
 
         presentation = get_text_presentation_for_document(doc)
-        self.assertFalse(presentation.show_hebrew_jump_link)
+        jump_nav = build_document_detail_jump_nav(
+            doc,
+            presentation,
+            has_source_viewer=True,
+        )
+        self.assertTrue(jump_nav.show_nav)
+        self.assertTrue(jump_nav.show_source_document)
+        self.assertTrue(jump_nav.show_transcription)
+        self.assertFalse(jump_nav.show_hebrew_translation)
 
 
 class SourceTextDirectionTests(TestCase):

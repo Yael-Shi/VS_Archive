@@ -45,8 +45,22 @@ class TextPresentation:
     hebrew_meta: TextBlockDisplayMeta
     show_source: bool
     show_hebrew: bool
-    show_hebrew_jump_link: bool
     show_auto_ocr_disclaimer: bool
+
+
+DOCUMENT_DETAIL_TOP_ANCHOR_ID = "document-detail-top"
+DOCUMENT_DETAIL_SOURCE_PANEL_ANCHOR_ID = "document-detail-source-panel"
+DOCUMENT_DETAIL_SOURCE_TEXT_ANCHOR_ID = "document-detail-source-text"
+DOCUMENT_DETAIL_HEBREW_TEXT_ANCHOR_ID = "document-detail-hebrew-text"
+
+
+@dataclass(frozen=True)
+class DocumentDetailJumpNav:
+    show_nav: bool
+    show_source_document: bool
+    show_transcription: bool
+    show_hebrew_translation: bool
+    transcription_target_id: str
 
 
 AUTO_OCR_DISCLAIMER = "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות."
@@ -82,21 +96,62 @@ def presentation_show_auto_ocr_disclaimer(presentation: TextPresentation) -> boo
     )
 
 
-def presentation_show_hebrew_jump_link(
-    *,
+def build_document_detail_jump_nav(
     doc: Document,
-    show_source: bool,
-    show_hebrew: bool,
-    hebrew: Optional[DisplayTextBlock],
+    presentation: TextPresentation,
+    *,
+    has_source_viewer: bool,
+) -> DocumentDetailJumpNav:
+    """Section jump links for OCR document detail reading layout."""
+    source_text = presentation.source.text if presentation.source else ""
+    hebrew_text = presentation.hebrew.text if presentation.hebrew else ""
+    has_source_text = bool((source_text or "").strip())
+    has_hebrew_text = bool((hebrew_text or "").strip())
+
+    show_source_document = has_source_viewer
+    show_transcription = False
+    transcription_target_id = DOCUMENT_DETAIL_SOURCE_TEXT_ANCHOR_ID
+
+    if presentation.show_source and has_source_text:
+        show_transcription = True
+        transcription_target_id = DOCUMENT_DETAIL_SOURCE_TEXT_ANCHOR_ID
+    elif presentation.show_hebrew and has_hebrew_text and not presentation.show_source:
+        show_transcription = True
+        transcription_target_id = DOCUMENT_DETAIL_HEBREW_TEXT_ANCHOR_ID
+
+    show_hebrew_translation = (
+        presentation.show_hebrew
+        and has_hebrew_text
+        and presentation.show_source
+        and not is_hebrew_language(doc)
+    )
+
+    visible_sections = sum(
+        [
+            show_source_document,
+            show_transcription,
+            show_hebrew_translation,
+        ]
+    )
+    return DocumentDetailJumpNav(
+        show_nav=visible_sections >= 2,
+        show_source_document=show_source_document,
+        show_transcription=show_transcription,
+        show_hebrew_translation=show_hebrew_translation,
+        transcription_target_id=transcription_target_id,
+    )
+
+
+def document_detail_has_source_viewer(
+    doc: Document,
+    *,
+    content_url: str | None,
+    source_preview_items: Iterable[object],
+    source_preview_unavailable_count: int,
 ) -> bool:
-    """True for non-Hebrew docs when source and Hebrew panels both have readable Hebrew text."""
-    if is_hebrew_language(doc):
+    if doc.upload_status == Document.UploadStatus.FAILED:
         return False
-    if not show_source or not show_hebrew:
-        return False
-    if hebrew is None:
-        return False
-    return bool((hebrew.text or "").strip())
+    return bool(content_url or source_preview_items or source_preview_unavailable_count)
 
 
 def is_hebrew_language(doc: Document) -> bool:
@@ -336,13 +391,6 @@ def get_text_presentation_for_document(doc: Document) -> TextPresentation:
         show_source = "SOURCE_TEXT" in expected or source is not None
         show_hebrew = "HEBREW_TEXT" in expected or hebrew is not None
 
-    show_hebrew_jump_link = presentation_show_hebrew_jump_link(
-        doc=doc,
-        show_source=show_source,
-        show_hebrew=show_hebrew,
-        hebrew=hebrew,
-    )
-
     presentation_without_disclaimer_flag = TextPresentation(
         source=source,
         hebrew=hebrew,
@@ -352,7 +400,6 @@ def get_text_presentation_for_document(doc: Document) -> TextPresentation:
         hebrew_meta=hebrew_meta,
         show_source=show_source,
         show_hebrew=show_hebrew,
-        show_hebrew_jump_link=show_hebrew_jump_link,
         show_auto_ocr_disclaimer=False,
     )
     return TextPresentation(
@@ -364,7 +411,6 @@ def get_text_presentation_for_document(doc: Document) -> TextPresentation:
         hebrew_meta=hebrew_meta,
         show_source=show_source,
         show_hebrew=show_hebrew,
-        show_hebrew_jump_link=show_hebrew_jump_link,
         show_auto_ocr_disclaimer=presentation_show_auto_ocr_disclaimer(
             presentation_without_disclaimer_flag
         ),

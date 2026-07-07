@@ -109,9 +109,11 @@
 
     <div class="spacer-sm"></div>
 
-    <div class="document-detail-workspace">
+    <div id="document-detail-top" class="document-detail-workspace">
+      {% include "documents/partials/detail_jump_nav.html" with detail_jump_nav=detail_jump_nav %}
+
       {# ===== Source document (first column in RTL: appears on the right) ===== #}
-      <div class="card card--pad-lg document-detail-source-panel">
+      <div id="document-detail-source-panel" class="card card--pad-lg document-detail-source-panel">
         <div class="document-detail-panel-head{% if content_url and not source_preview_items %} document-detail-panel-head--with-actions{% endif %}">
           <h2 class="document-detail-panel-title">מסמך מקור</h2>
           {% if content_url and not source_preview_items %}
@@ -164,6 +166,7 @@
               חלק מהעמודים אינם זמינים לתצוגה מקדימה עדיין.
             </div>
           {% endif %}
+          {% include "documents/partials/detail_back_to_top.html" with mobile_only=True %}
         {% elif not content_url %}
           <div class="document-detail-viewer document-detail-viewer-placeholder">
             <div class="muted">
@@ -183,6 +186,7 @@
               <div class="muted">סוג קובץ לא נתמך: {{ doc.doc_type|doc_type_label }}</div>
             {% endif %}
           </div>
+          {% include "documents/partials/detail_back_to_top.html" with mobile_only=True %}
         {% endif %}
       </div>
 
@@ -213,7 +217,7 @@
 
         <div class="document-detail-text-content">
           {% if text_presentation.show_source %}
-            {% include "documents/partials/detail_text_block.html" with meta=text_presentation.source_meta block=text_presentation.source doc=doc is_admin=is_admin show_hebrew_jump_link=text_presentation.show_hebrew_jump_link %}
+            {% include "documents/partials/detail_text_block.html" with meta=text_presentation.source_meta block=text_presentation.source doc=doc is_admin=is_admin %}
           {% endif %}
 
           {% if text_presentation.show_source and text_presentation.show_hebrew %}

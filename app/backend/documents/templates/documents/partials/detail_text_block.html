@@ -20,11 +20,7 @@
 
     {% if block.text %}
       <div class="detail-text-block__body document-detail-reading-prose{% if block.result_type == 'HEBREW_TEXT' or doc|source_text_is_rtl_filter %} detail-text-block__body--rtl{% else %} detail-text-block__body--ltr{% endif %}">{{ block.text }}</div>
-      {% if show_hebrew_jump_link %}
-        <p class="document-detail-hebrew-jump">
-          <a href="#document-detail-hebrew-text">קפיצה לתרגום לעברית</a>
-        </p>
-      {% endif %}
+      {% include "documents/partials/detail_back_to_top.html" %}
     {% else %}
       <div class="muted">{{ meta.empty_message }}</div>
     {% endif %}
