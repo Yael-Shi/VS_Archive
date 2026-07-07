@@ -1,8 +1,11 @@
-{% if item.public_note %}
-  <div class="archive-detail-meta-block archive-detail-meta-block--public-note">
-    <div class="archive-detail-meta-row">
-      <strong class="archive-detail-meta-label">הערת הארכיון:</strong>
-      <span class="archive-detail-meta-value">{{ item.public_note|linebreaksbr }}</span>
+{% load archive_labels %}
+{% with public_note=item.public_note|meaningful_archive_metadata %}
+  {% if public_note %}
+    <div class="archive-detail-meta-block archive-detail-meta-block--public-note">
+      <div class="archive-detail-meta-row">
+        <strong class="archive-detail-meta-label">הערת הארכיון:</strong>
+        <span class="archive-detail-meta-value">{{ public_note|linebreaksbr }}</span>
+      </div>
     </div>
-  </div>
-{% endif %}
+  {% endif %}
+{% endwith %}

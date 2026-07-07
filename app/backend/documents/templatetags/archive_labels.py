@@ -4,8 +4,14 @@ from django import template
 
 from documents.services import archive_item_presentation as labels
 from documents.services import photo_presentation as photo_labels
+from documents.services.archive_metadata_validation import meaningful_metadata_value
 
 register = template.Library()
+
+
+@register.filter
+def meaningful_archive_metadata(value) -> str:
+    return meaningful_metadata_value(value)
 
 
 @register.filter
