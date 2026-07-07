@@ -45,6 +45,7 @@ class TextPresentation:
     hebrew_meta: TextBlockDisplayMeta
     show_source: bool
     show_hebrew: bool
+    show_hebrew_jump_link: bool
     show_auto_ocr_disclaimer: bool
 
 
@@ -81,9 +82,32 @@ def presentation_show_auto_ocr_disclaimer(presentation: TextPresentation) -> boo
     )
 
 
+def presentation_show_hebrew_jump_link(
+    *,
+    doc: Document,
+    show_source: bool,
+    show_hebrew: bool,
+    hebrew: Optional[DisplayTextBlock],
+) -> bool:
+    """True for non-Hebrew docs when source and Hebrew panels both have readable Hebrew text."""
+    if is_hebrew_language(doc):
+        return False
+    if not show_source or not show_hebrew:
+        return False
+    if hebrew is None:
+        return False
+    return bool((hebrew.text or "").strip())
+
+
 def is_hebrew_language(doc: Document) -> bool:
     lang = (doc.language or "").strip().lower()
     return lang in ("he", "heb", "hebrew")
+
+
+def source_text_is_rtl(doc: Document) -> bool:
+    """Whether the document source language reads right-to-left in the UI."""
+    lang = (doc.language or "").strip().lower()
+    return lang in ("he", "heb", "hebrew", "ar", "ara", "arabic")
 
 
 def text_block_display_meta(doc: Document, result_type: str) -> TextBlockDisplayMeta:
@@ -312,6 +336,13 @@ def get_text_presentation_for_document(doc: Document) -> TextPresentation:
         show_source = "SOURCE_TEXT" in expected or source is not None
         show_hebrew = "HEBREW_TEXT" in expected or hebrew is not None
 
+    show_hebrew_jump_link = presentation_show_hebrew_jump_link(
+        doc=doc,
+        show_source=show_source,
+        show_hebrew=show_hebrew,
+        hebrew=hebrew,
+    )
+
     presentation_without_disclaimer_flag = TextPresentation(
         source=source,
         hebrew=hebrew,
@@ -321,6 +352,7 @@ def get_text_presentation_for_document(doc: Document) -> TextPresentation:
         hebrew_meta=hebrew_meta,
         show_source=show_source,
         show_hebrew=show_hebrew,
+        show_hebrew_jump_link=show_hebrew_jump_link,
         show_auto_ocr_disclaimer=False,
     )
     return TextPresentation(
@@ -332,6 +364,7 @@ def get_text_presentation_for_document(doc: Document) -> TextPresentation:
         hebrew_meta=hebrew_meta,
         show_source=show_source,
         show_hebrew=show_hebrew,
+        show_hebrew_jump_link=show_hebrew_jump_link,
         show_auto_ocr_disclaimer=presentation_show_auto_ocr_disclaimer(
             presentation_without_disclaimer_flag
         ),
