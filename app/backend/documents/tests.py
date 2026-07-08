@@ -9533,7 +9533,7 @@ class UploadPageTemplateTests(TestCase):
         self.assertContains(resp, "appendStagedFiles")
         self.assertContains(resp, "removeStagedFile")
         self.assertContains(resp, "getStagedFiles")
-        self.assertContains(resp, 'label.textContent = `עמוד ${i + 1}`')
+        self.assertContains(resp, "label.textContent = `עמוד ${i + 1}`")
         self.assertContains(resp, "MULTI_IMAGE_MAX_FILES")
 
     def test_upload_page_renders_staged_files_preview_elements(self):
