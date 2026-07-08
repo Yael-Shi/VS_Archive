@@ -374,6 +374,52 @@ def _archive_public_list_href_suffix(
     return f"?{query}" if query else ""
 
 
+def _archive_public_list_page_number_sequence(
+    total_pages: int,
+    page: int,
+) -> list[int | None]:
+    """Return ordered page numbers and ellipsis markers for symmetric pagination."""
+    if total_pages <= 0:
+        return []
+    if total_pages <= 6:
+        return list(range(1, total_pages + 1))
+
+    if page <= 3:
+        left_end = 3 if page >= 3 else page + 1
+    else:
+        left_end = 2
+
+    if page >= total_pages - 2:
+        if page >= total_pages:
+            right_start = total_pages - 1
+        elif page == total_pages - 1:
+            right_start = page - 1
+        else:
+            right_start = page
+    else:
+        right_start = total_pages - 1
+
+    visible: set[int] = set(range(1, left_end + 1))
+    visible.update(range(right_start, total_pages + 1))
+
+    if page > left_end and page < right_start:
+        visible.add(page)
+        if total_pages > 7:
+            if page - 1 > left_end:
+                visible.add(page - 1)
+            if page + 1 < right_start:
+                visible.add(page + 1)
+
+    sequence: list[int | None] = []
+    previous_page: int | None = None
+    for page_number in sorted(visible):
+        if previous_page is not None and page_number - previous_page > 1:
+            sequence.append(None)
+        sequence.append(page_number)
+        previous_page = page_number
+    return sequence
+
+
 def build_archive_public_list_page_number_items(
     *,
     total_pages: int,
@@ -381,28 +427,9 @@ def build_archive_public_list_page_number_items(
     q: str = "",
     item_type_filter: str = "",
     per_page: int = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
-    max_all_pages: int = 7,
-    window: int = 1,
 ) -> list[dict[str, object]]:
     """Numbered page link metadata for public archive list pagination."""
-    if total_pages <= 0:
-        return []
-
-    if total_pages <= max_all_pages:
-        page_numbers: list[int | None] = list(range(1, total_pages + 1))
-    else:
-        visible_pages = {1, total_pages}
-        for candidate in range(page - window, page + window + 1):
-            if 1 <= candidate <= total_pages:
-                visible_pages.add(candidate)
-        sorted_pages = sorted(visible_pages)
-        page_numbers = []
-        previous_page: int | None = None
-        for visible_page in sorted_pages:
-            if previous_page is not None and visible_page - previous_page > 1:
-                page_numbers.append(None)
-            page_numbers.append(visible_page)
-            previous_page = visible_page
+    page_numbers = _archive_public_list_page_number_sequence(total_pages, page)
 
     items: list[dict[str, object]] = []
     for page_number in page_numbers:
@@ -439,8 +466,6 @@ def archive_public_list_pagination_context(
     show_page_nav = total_pages > 1
     prev_href_suffix = ""
     next_href_suffix = ""
-    first_href_suffix = ""
-    last_href_suffix = ""
     if page > 1:
         prev_href_suffix = _archive_public_list_href_suffix(
             q=q,
@@ -448,23 +473,11 @@ def archive_public_list_pagination_context(
             page=page - 1,
             per_page=per_page,
         )
-        first_href_suffix = _archive_public_list_href_suffix(
-            q=q,
-            item_type_filter=item_type_filter,
-            page=1,
-            per_page=per_page,
-        )
     if page < total_pages:
         next_href_suffix = _archive_public_list_href_suffix(
             q=q,
             item_type_filter=item_type_filter,
             page=page + 1,
-            per_page=per_page,
-        )
-        last_href_suffix = _archive_public_list_href_suffix(
-            q=q,
-            item_type_filter=item_type_filter,
-            page=total_pages,
             per_page=per_page,
         )
     return {
@@ -482,10 +495,6 @@ def archive_public_list_pagination_context(
             item_type_filter=item_type_filter,
             per_page=per_page,
         ),
-        "show_first_link": page > 2,
-        "show_last_link": page < total_pages - 1,
-        "first_href_suffix": first_href_suffix,
-        "last_href_suffix": last_href_suffix,
         "prev_href_suffix": prev_href_suffix,
         "next_href_suffix": next_href_suffix,
     }

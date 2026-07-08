@@ -16,6 +16,12 @@ from documents.services.archive_item_presentation import (
 from documents.services.archive_items import create_manual_text_archive_item
 
 
+def _page_number_sequence(items: list[dict[str, object]]) -> list[object]:
+    return [
+        item["kind"] if item["kind"] == "ellipsis" else item["page"] for item in items
+    ]
+
+
 class ArchivePublicListPaginationHelperTests(SimpleTestCase):
     def test_default_per_page_is_48(self):
         self.assertEqual(normalize_archive_public_list_per_page(None), 48)
@@ -90,12 +96,27 @@ class ArchivePublicListPaginationHelperTests(SimpleTestCase):
             page=8,
         )
         self.assertEqual(
-            [
-                item["kind"] if item["kind"] == "ellipsis" else item["page"]
-                for item in items
-            ],
-            [1, "ellipsis", 7, 8, 9, "ellipsis", 20],
+            _page_number_sequence(items),
+            [1, 2, "ellipsis", 7, 8, 9, "ellipsis", 19, 20],
         )
+
+    def test_page_number_items_symmetric_for_seven_pages(self):
+        cases = {
+            1: [1, 2, "ellipsis", 6, 7],
+            2: [1, 2, 3, "ellipsis", 6, 7],
+            3: [1, 2, 3, "ellipsis", 6, 7],
+            4: [1, 2, "ellipsis", 4, "ellipsis", 6, 7],
+            5: [1, 2, "ellipsis", 5, 6, 7],
+            6: [1, 2, "ellipsis", 5, 6, 7],
+            7: [1, 2, "ellipsis", 6, 7],
+        }
+        for page, expected in cases.items():
+            with self.subTest(page=page):
+                items = build_archive_public_list_page_number_items(
+                    total_pages=7,
+                    page=page,
+                )
+                self.assertEqual(_page_number_sequence(items), expected)
 
     def test_page_number_items_omit_page_one_from_links(self):
         items = build_archive_public_list_page_number_items(
@@ -138,28 +159,6 @@ class ArchivePublicListPaginationHelperTests(SimpleTestCase):
         self.assertEqual(next_href_suffix, "?page=3")
         self.assertNotIn("per_page", prev_href_suffix)
         self.assertNotIn("page=1", prev_href_suffix)
-
-    def test_first_and_last_links_when_useful(self):
-        context = archive_public_list_pagination_context(
-            total_count=200,
-            page=5,
-            per_page=24,
-            q="",
-            item_type_filter="",
-        )
-        self.assertTrue(context["show_first_link"])
-        self.assertTrue(context["show_last_link"])
-        self.assertEqual(str(context["first_href_suffix"]), "?per_page=24")
-        self.assertIn("page=9", str(context["last_href_suffix"]))
-
-        near_start = archive_public_list_pagination_context(
-            total_count=200,
-            page=2,
-            per_page=24,
-            q="",
-            item_type_filter="",
-        )
-        self.assertFalse(near_start["show_first_link"])
 
 
 class ArchivePublicListPaginationViewTests(TestCase):
@@ -244,6 +243,9 @@ class ArchivePublicListPaginationViewTests(TestCase):
         self.assertIn('aria-label="עמוד 3"', html)
         self.assertIn("הקודם", html)
         self.assertIn("הבא", html)
+        self.assertNotIn("ראשון", html)
+        self.assertNotIn("אחרון", html)
+        self.assertIn("archive-list-pagination__page-list", html)
 
     def test_pagination_links_preserve_search_filter_and_per_page(self):
         resp = self.client.get(
