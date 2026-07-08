@@ -8,6 +8,7 @@
   const submitBtn = document.getElementById("submitBtn");
 
   const fileEl = document.getElementById("file");
+  const cameraFileEl = document.getElementById("cameraFile");
   const docTypeEl = document.getElementById("doc_type");
   const selectedFilesEl = document.getElementById("selectedFiles");
   const selectedFilesSummaryEl = document.getElementById("selectedFilesSummary");
@@ -109,8 +110,9 @@
     return stagedFiles.slice();
   }
 
-  function clearFileInputValue() {
-    fileEl.value = "";
+  function clearFileInputValue(inputEl) {
+    if (!inputEl) return;
+    inputEl.value = "";
   }
 
   function applyFileInputMode() {
@@ -123,9 +125,9 @@
     } else {
       fileEl.setAttribute("accept", "application/pdf,image/*");
     }
-    // `capture` conflicts with multi-select; staged append supports one-at-a-time
-    // mobile capture without forcing camera-only on this input.
-    fileEl.removeAttribute("capture");
+
+    cameraFileEl.setAttribute("accept", "image/*");
+    cameraFileEl.setAttribute("capture", "environment");
   }
 
   function updateDocTypeFromStaged() {
@@ -159,14 +161,14 @@
     renderSelectedFiles();
   }
 
-  function appendStagedFiles(selectedFiles) {
+  function appendStagedFiles(selectedFiles, sourceInputEl) {
     const incoming = Array.isArray(selectedFiles)
       ? selectedFiles.slice()
       : Array.from(selectedFiles || []);
 
     if (incoming.length === 0) {
       setMessage("error", "לא התקבל קובץ מהמצלמה. נסי לצלם שוב או לבחור מהגלריה.");
-      clearFileInputValue();
+      clearFileInputValue(sourceInputEl);
       return;
     }
 
@@ -175,13 +177,13 @@
 
     if (stagedHasPdf) {
       setMessage("error", "PDF כבר נבחר. יש להסיר אותו לפני הוספת קבצים נוספים.");
-      clearFileInputValue();
+      clearFileInputValue(sourceInputEl);
       return;
     }
     if (incomingHasPdf) {
       if (stagedFiles.length > 0 || incoming.length > 1) {
         setMessage("error", "PDF יש להעלות כקובץ יחיד.");
-        clearFileInputValue();
+        clearFileInputValue(sourceInputEl);
         return;
       }
     }
@@ -189,14 +191,14 @@
     const unsupported = incoming.filter((f) => !isImageFile(f) && !isPdfFile(f));
     if (unsupported.length > 0) {
       setMessage("error", "ניתן להעלות תמונות או PDF בלבד.");
-      clearFileInputValue();
+      clearFileInputValue(sourceInputEl);
       return;
     }
 
     const nonImages = incoming.filter((f) => !isImageFile(f));
     if (stagedFiles.length > 0 && nonImages.length > 0) {
       setMessage("error", "בהעלאת ריבוי קבצים יש לבחור תמונות בלבד.");
-      clearFileInputValue();
+      clearFileInputValue(sourceInputEl);
       return;
     }
 
@@ -206,7 +208,7 @@
         "error",
         `ניתן להעלות עד ${MULTI_IMAGE_MAX_FILES} תמונות במסמך אחד (כרגע ${stagedFiles.length}).`
       );
-      clearFileInputValue();
+      clearFileInputValue(sourceInputEl);
       return;
     }
 
@@ -214,7 +216,7 @@
     setMessage("", "");
     updateDocTypeFromStaged();
     renderSelectedFiles();
-    clearFileInputValue();
+    clearFileInputValue(sourceInputEl);
   }
 
   function renderSelectedFiles() {
@@ -510,8 +512,11 @@
     }
   });
 
-  fileEl.addEventListener("change", () => {
-    const selectedFiles = Array.from(fileEl.files || []);
-    appendStagedFiles(selectedFiles);
-  });
+  function onFileInputChange(inputEl) {
+    const selectedFiles = Array.from(inputEl.files || []);
+    appendStagedFiles(selectedFiles, inputEl);
+  }
+
+  fileEl.addEventListener("change", () => onFileInputChange(fileEl));
+  cameraFileEl.addEventListener("change", () => onFileInputChange(cameraFileEl));
 </script>

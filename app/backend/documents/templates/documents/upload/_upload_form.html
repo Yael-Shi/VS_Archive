@@ -9,14 +9,30 @@
         <form id="uploadForm">
           {% csrf_token %}
           <div class="field">
-            <label for="file">קובץ *</label>
-            <input id="file" name="file" type="file" multiple />
-            <div class="field-hint">
-              ניתן לבחור כמה תמונות יחד בחלון הבחירה (Ctrl/Cmd, או לחיצה ארוכה בנייד).
+            <span class="field-label" id="uploadFileLabel">קובץ *</span>
+            <div class="upload-file-actions" role="group" aria-labelledby="uploadFileLabel">
+              <input
+                id="cameraFile"
+                class="upload-file-input-hidden"
+                type="file"
+                accept="image/*"
+                capture="environment"
+                tabindex="-1"
+                aria-hidden="true"
+              />
+              <label for="cameraFile" class="btn btn-secondary upload-file-action">צילום עמוד</label>
+
+              <input id="file" name="file" type="file" multiple class="upload-file-input-hidden" tabindex="-1" aria-hidden="true" />
+              <label for="file" class="btn btn-secondary upload-file-action">בחירה מקבצים</label>
             </div>
             <div class="field-hint">
-              בנייד: ניתן לצלם או לבחור תמונה, ואז לפתוח שוב את בחירת הקובץ — כל תמונה חדשה
-              <strong>מתווספת</strong> לרשימת העמודים (לא מחליפה את הקודמת).
+              <strong>צילום עמוד</strong> — מצלמת הנייד, עמוד אחד בכל פעם (מתווסף לרשימה).
+            </div>
+            <div class="field-hint">
+              <strong>בחירה מקבצים</strong> — גלריה או קבצים קיימים; ניתן לבחור כמה תמונות יחד (Ctrl/Cmd, או לחיצה ארוכה בנייד).
+            </div>
+            <div class="field-hint">
+              כל תמונה חדשה <strong>מתווספת</strong> לרשימת העמודים (לא מחליפה את הקודמת).
             </div>
             <div class="field-hint">
               קובץ אחד = העלאה רגילה (תמונה או PDF).<br />
