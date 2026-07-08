@@ -9509,7 +9509,9 @@ class UploadPageTemplateTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'id="file"')
         self.assertContains(resp, 'name="file" type="file" multiple')
-        self.assertNotContains(resp, 'id="file" name="file" type="file" multiple capture')
+        self.assertNotContains(
+            resp, 'id="file" name="file" type="file" multiple capture'
+        )
 
     def test_upload_page_renders_separate_camera_and_gallery_actions(self):
         resp = self._get_page()
@@ -9546,7 +9548,7 @@ class UploadPageTemplateTests(TestCase):
         self.assertContains(resp, "appendStagedFiles")
         self.assertContains(resp, "removeStagedFile")
         self.assertContains(resp, "getStagedFiles")
-        self.assertContains(resp, "label.textContent = `עמוד ${i + 1}`")
+        self.assertContains(resp, "label.textContent = `עמוד ${i + 1} — נקלט`")
         self.assertContains(resp, "MULTI_IMAGE_MAX_FILES")
         self.assertContains(resp, "cameraFileEl")
         self.assertContains(resp, "onFileInputChange")
@@ -9561,16 +9563,17 @@ class UploadPageTemplateTests(TestCase):
             "לא התקבל קובץ מהמצלמה. נסי לצלם שוב או לבחור מהגלריה.",
         )
 
-    def test_upload_page_renders_staged_files_preview_elements(self):
+    def test_upload_page_renders_staged_files_list_elements(self):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'id="selectedFilesSummary"')
         self.assertContains(resp, 'id="stagingDiagnostics"')
         self.assertContains(resp, 'id="selectedFiles"')
         self.assertContains(resp, "selected-files-remove")
-        self.assertContains(resp, "selected-files-thumb")
-        self.assertContains(resp, "URL.createObjectURL")
-        self.assertContains(resp, "URL.revokeObjectURL")
+        self.assertContains(resp, "עמוד ${i + 1} — נקלט")
+        self.assertNotContains(resp, "URL.createObjectURL")
+        self.assertNotContains(resp, "URL.revokeObjectURL")
+        self.assertNotContains(resp, "selected-files-thumb")
 
     def test_upload_page_still_renders_key_metadata_fields(self):
         resp = self._get_page()

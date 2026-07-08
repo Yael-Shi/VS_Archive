@@ -54,41 +54,6 @@
   }
 
   patchStagingDiagnostics({ stagedBefore: 0, stagedAfter: 0, stagedAfterRender: 0 });
-  /** @type {Map<File, string>} */
-  const previewObjectUrls = new Map();
-
-  function revokePreviewUrl(file) {
-    const url = previewObjectUrls.get(file);
-    if (!url) return;
-    URL.revokeObjectURL(url);
-    previewObjectUrls.delete(file);
-  }
-
-  function revokeAllPreviewUrls() {
-    for (const url of previewObjectUrls.values()) {
-      URL.revokeObjectURL(url);
-    }
-    previewObjectUrls.clear();
-  }
-
-  function cleanupPreviewUrls() {
-    const current = new Set(stagedFiles);
-    for (const [file, url] of [...previewObjectUrls.entries()]) {
-      if (!current.has(file)) {
-        URL.revokeObjectURL(url);
-        previewObjectUrls.delete(file);
-      }
-    }
-  }
-
-  function getPreviewUrl(file) {
-    if (!isImageFile(file)) return null;
-    const existing = previewObjectUrls.get(file);
-    if (existing) return existing;
-    const url = URL.createObjectURL(file);
-    previewObjectUrls.set(file, url);
-    return url;
-  }
 
   function setMessage(kind, text) {
     msgEl.className = "msg";
@@ -193,8 +158,6 @@
   function removeStagedFile(index) {
     if (index < 0 || index >= stagedFiles.length) return;
     const stagedBefore = stagedFiles.length;
-    const removed = stagedFiles[index];
-    revokePreviewUrl(removed);
     stagedFiles.splice(index, 1);
     patchStagingDiagnostics({
       lastEvent: "removeStagedFile",
@@ -314,16 +277,14 @@
       renderEmptyBranch: false,
     });
     selectedFilesEl.innerHTML = "";
-    cleanupPreviewUrls();
 
     if (stagedFiles.length === 0) {
       patchStagingDiagnostics({
-        lastEvent: "renderSelectedFiles:empty+revokeAllPreviewUrls",
+        lastEvent: "renderSelectedFiles:empty",
         renderEmptyBranch: true,
         stagedAfterRender: 0,
-        lastClear: "empty_branch+revokeAllPreviewUrls",
+        lastClear: "empty_branch",
       });
-      revokeAllPreviewUrls();
       selectedFilesSummaryEl.hidden = true;
       selectedFilesSummaryEl.textContent = "";
       renderStagingDiagnostics();
@@ -357,17 +318,7 @@
       if (isSinglePdf) {
         label.textContent = `קובץ: ${f.name || "PDF"}`;
       } else {
-        label.textContent = `עמוד ${i + 1}`;
-      }
-
-      if (isImageFile(f)) {
-        const thumb = document.createElement("img");
-        thumb.className = "selected-files-thumb";
-        thumb.src = getPreviewUrl(f);
-        thumb.alt = `תצוגה מקדימה של עמוד ${i + 1}`;
-        thumb.loading = "lazy";
-        thumb.decoding = "async";
-        main.appendChild(thumb);
+        label.textContent = `עמוד ${i + 1} — נקלט`;
       }
 
       main.appendChild(label);
