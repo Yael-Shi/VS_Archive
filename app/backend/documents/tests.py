@@ -9535,6 +9535,14 @@ class UploadPageTemplateTests(TestCase):
         self.assertContains(resp, "getStagedFiles")
         self.assertContains(resp, "label.textContent = `עמוד ${i + 1}`")
         self.assertContains(resp, "MULTI_IMAGE_MAX_FILES")
+        self.assertContains(
+            resp,
+            "const selectedFiles = Array.from(fileEl.files || []);",
+        )
+        self.assertContains(
+            resp,
+            "לא התקבל קובץ מהמצלמה. נסי לצלם שוב או לבחור מהגלריה.",
+        )
 
     def test_upload_page_renders_staged_files_preview_elements(self):
         resp = self._get_page()
