@@ -12,9 +12,48 @@
   const docTypeEl = document.getElementById("doc_type");
   const selectedFilesEl = document.getElementById("selectedFiles");
   const selectedFilesSummaryEl = document.getElementById("selectedFilesSummary");
+  const stagingDiagnosticsEl = document.getElementById("stagingDiagnostics");
 
   /** Client-side staging; array order is page order (capture/add order). */
   let stagedFiles = [];
+  /** TEMP DIAG: staging reset — remove when mobile camera issue is resolved. */
+  const stagingDiagState = {
+    sourceInputId: "-",
+    selectedFilesLen: "-",
+    stagedBefore: 0,
+    stagedAfter: 0,
+    stagedAfterRender: 0,
+    renderEmptyBranch: false,
+    lastEvent: "init",
+    lastClear: "-",
+  };
+
+  function renderStagingDiagnostics() {
+    if (!stagingDiagnosticsEl) return;
+    const d = stagingDiagState;
+    stagingDiagnosticsEl.hidden = false;
+    stagingDiagnosticsEl.textContent = [
+      "[staging diag]",
+      `src=${d.sourceInputId}`,
+      `sel=${d.selectedFilesLen}`,
+      `before=${d.stagedBefore}`,
+      `after=${d.stagedAfter}`,
+      `render=${d.stagedAfterRender}`,
+      `empty=${d.renderEmptyBranch ? "Y" : "N"}`,
+      `evt=${d.lastEvent}`,
+      d.lastClear !== "-" ? `clear=${d.lastClear}` : null,
+      d.appendReject ? `reject=${d.appendReject}` : null,
+    ]
+      .filter(Boolean)
+      .join(" | ");
+  }
+
+  function patchStagingDiagnostics(patch) {
+    Object.assign(stagingDiagState, patch);
+    renderStagingDiagnostics();
+  }
+
+  patchStagingDiagnostics({ stagedBefore: 0, stagedAfter: 0, stagedAfterRender: 0 });
   /** @type {Map<File, string>} */
   const previewObjectUrls = new Map();
 
@@ -153,9 +192,16 @@
 
   function removeStagedFile(index) {
     if (index < 0 || index >= stagedFiles.length) return;
+    const stagedBefore = stagedFiles.length;
     const removed = stagedFiles[index];
     revokePreviewUrl(removed);
     stagedFiles.splice(index, 1);
+    patchStagingDiagnostics({
+      lastEvent: "removeStagedFile",
+      stagedBefore: stagedBefore,
+      stagedAfter: stagedFiles.length,
+      appendReject: null,
+    });
     setMessage("", "");
     updateDocTypeFromStaged();
     renderSelectedFiles();
@@ -166,7 +212,20 @@
       ? selectedFiles.slice()
       : Array.from(selectedFiles || []);
 
+    patchStagingDiagnostics({
+      sourceInputId: sourceInputEl && sourceInputEl.id ? sourceInputEl.id : "-",
+      selectedFilesLen: incoming.length,
+      stagedBefore: stagedFiles.length,
+      lastEvent: "appendStagedFiles:start",
+      appendReject: null,
+    });
+
     if (incoming.length === 0) {
+      patchStagingDiagnostics({
+        lastEvent: "appendStagedFiles:reject",
+        appendReject: "incoming_empty",
+        stagedAfter: stagedFiles.length,
+      });
       setMessage("error", "לא התקבל קובץ מהמצלמה. נסי לצלם שוב או לבחור מהגלריה.");
       clearFileInputValue(sourceInputEl);
       return;
@@ -176,12 +235,22 @@
     const incomingHasPdf = incoming.some((f) => isPdfFile(f));
 
     if (stagedHasPdf) {
+      patchStagingDiagnostics({
+        lastEvent: "appendStagedFiles:reject",
+        appendReject: "staged_has_pdf",
+        stagedAfter: stagedFiles.length,
+      });
       setMessage("error", "PDF כבר נבחר. יש להסיר אותו לפני הוספת קבצים נוספים.");
       clearFileInputValue(sourceInputEl);
       return;
     }
     if (incomingHasPdf) {
       if (stagedFiles.length > 0 || incoming.length > 1) {
+        patchStagingDiagnostics({
+          lastEvent: "appendStagedFiles:reject",
+          appendReject: "pdf_not_single",
+          stagedAfter: stagedFiles.length,
+        });
         setMessage("error", "PDF יש להעלות כקובץ יחיד.");
         clearFileInputValue(sourceInputEl);
         return;
@@ -190,6 +259,11 @@
 
     const unsupported = incoming.filter((f) => !isImageFile(f) && !isPdfFile(f));
     if (unsupported.length > 0) {
+      patchStagingDiagnostics({
+        lastEvent: "appendStagedFiles:reject",
+        appendReject: "unsupported_type",
+        stagedAfter: stagedFiles.length,
+      });
       setMessage("error", "ניתן להעלות תמונות או PDF בלבד.");
       clearFileInputValue(sourceInputEl);
       return;
@@ -197,6 +271,11 @@
 
     const nonImages = incoming.filter((f) => !isImageFile(f));
     if (stagedFiles.length > 0 && nonImages.length > 0) {
+      patchStagingDiagnostics({
+        lastEvent: "appendStagedFiles:reject",
+        appendReject: "non_image_with_staged",
+        stagedAfter: stagedFiles.length,
+      });
       setMessage("error", "בהעלאת ריבוי קבצים יש לבחור תמונות בלבד.");
       clearFileInputValue(sourceInputEl);
       return;
@@ -204,6 +283,11 @@
 
     const totalAfter = stagedFiles.length + incoming.length;
     if (totalAfter > MULTI_IMAGE_MAX_FILES) {
+      patchStagingDiagnostics({
+        lastEvent: "appendStagedFiles:reject",
+        appendReject: "max_files",
+        stagedAfter: stagedFiles.length,
+      });
       setMessage(
         "error",
         `ניתן להעלות עד ${MULTI_IMAGE_MAX_FILES} תמונות במסמך אחד (כרגע ${stagedFiles.length}).`
@@ -213,6 +297,10 @@
     }
 
     stagedFiles.push(...incoming);
+    patchStagingDiagnostics({
+      lastEvent: "appendStagedFiles:push",
+      stagedAfter: stagedFiles.length,
+    });
     setMessage("", "");
     updateDocTypeFromStaged();
     renderSelectedFiles();
@@ -220,13 +308,25 @@
   }
 
   function renderSelectedFiles() {
+    patchStagingDiagnostics({
+      lastEvent: "renderSelectedFiles:start",
+      lastClear: "selectedFilesEl.innerHTML",
+      renderEmptyBranch: false,
+    });
     selectedFilesEl.innerHTML = "";
     cleanupPreviewUrls();
 
     if (stagedFiles.length === 0) {
+      patchStagingDiagnostics({
+        lastEvent: "renderSelectedFiles:empty+revokeAllPreviewUrls",
+        renderEmptyBranch: true,
+        stagedAfterRender: 0,
+        lastClear: "empty_branch+revokeAllPreviewUrls",
+      });
       revokeAllPreviewUrls();
       selectedFilesSummaryEl.hidden = true;
       selectedFilesSummaryEl.textContent = "";
+      renderStagingDiagnostics();
       return;
     }
 
@@ -282,6 +382,12 @@
       li.appendChild(main);
       li.appendChild(removeBtn);
       selectedFilesEl.appendChild(li);
+    });
+
+    patchStagingDiagnostics({
+      lastEvent: "renderSelectedFiles:done",
+      stagedAfterRender: stagedFiles.length,
+      renderEmptyBranch: false,
     });
   }
 
@@ -514,6 +620,12 @@
 
   function onFileInputChange(inputEl) {
     const selectedFiles = Array.from(inputEl.files || []);
+    patchStagingDiagnostics({
+      sourceInputId: inputEl && inputEl.id ? inputEl.id : "-",
+      selectedFilesLen: selectedFiles.length,
+      lastEvent: "fileInputChange",
+      appendReject: null,
+    });
     appendStagedFiles(selectedFiles, inputEl);
   }
 

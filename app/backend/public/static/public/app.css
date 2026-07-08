@@ -452,6 +452,15 @@ label {
   font-weight: 600;
 }
 
+.staging-diagnostics {
+  margin-top: var(--space-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--text-muted, #666);
+  word-break: break-word;
+}
+
 .selected-files-list {
   margin: var(--space-2) 0 0;
   padding-inline-start: 0;

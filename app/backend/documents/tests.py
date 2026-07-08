@@ -9550,6 +9550,8 @@ class UploadPageTemplateTests(TestCase):
         self.assertContains(resp, "MULTI_IMAGE_MAX_FILES")
         self.assertContains(resp, "cameraFileEl")
         self.assertContains(resp, "onFileInputChange")
+        self.assertContains(resp, "stagingDiagnosticsEl")
+        self.assertContains(resp, "patchStagingDiagnostics")
         self.assertContains(
             resp,
             "const selectedFiles = Array.from(inputEl.files || []);",
@@ -9563,6 +9565,7 @@ class UploadPageTemplateTests(TestCase):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'id="selectedFilesSummary"')
+        self.assertContains(resp, 'id="stagingDiagnostics"')
         self.assertContains(resp, 'id="selectedFiles"')
         self.assertContains(resp, "selected-files-remove")
         self.assertContains(resp, "selected-files-thumb")
