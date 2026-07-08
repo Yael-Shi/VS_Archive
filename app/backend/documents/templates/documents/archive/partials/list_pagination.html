@@ -1,28 +1,52 @@
 <nav class="archive-list-pagination" aria-label="דפדוף בארכיון">
-  <div class="archive-list-pagination__per-page" role="group" aria-label="מספר פריטים בעמוד">
-    <span class="archive-list-pagination__label">פריטים בעמוד:</span>
-    {% for link in per_page_links %}
-      {% if link.is_active %}
-        <span class="archive-list-pagination__per-page-option is-active">{{ link.value }}</span>
-      {% else %}
-        <a
-          class="archive-list-pagination__per-page-option"
-          href="{% url 'archive-list' %}{{ link.href_suffix }}"
-        >{{ link.value }}</a>
-      {% endif %}
-    {% endfor %}
-  </div>
+  <form method="get" class="archive-list-pagination__per-page">
+    {% if q %}
+      <input type="hidden" name="q" value="{{ q }}">
+    {% endif %}
+    {% if item_type_filter %}
+      <input type="hidden" name="item_type" value="{{ item_type_filter }}">
+    {% endif %}
+    <label class="archive-list-pagination__label" for="archive-list-per-page">פריטים בעמוד:</label>
+    <select
+      id="archive-list-per-page"
+      class="archive-list-pagination__per-page-select"
+      name="per_page"
+      onchange="if(this.value==='48'){this.removeAttribute('name');}else{this.name='per_page';}this.form.submit();"
+    >
+      {% for option in per_page_options %}
+        <option value="{{ option }}" {% if option == per_page %}selected{% endif %}>{{ option }}</option>
+      {% endfor %}
+    </select>
+  </form>
 
   {% if show_page_nav %}
-    <div class="archive-list-pagination__pages">
-      {% if prev_href_suffix %}
-        <a class="archive-list-pagination__page-link" href="{% url 'archive-list' %}{{ prev_href_suffix }}">הקודם</a>
+    <div class="archive-list-pagination__pages" role="group" aria-label="מספרי עמודים">
+      {% if show_first_link %}
+        <a class="archive-list-pagination__nav-link" href="{% url 'archive-list' %}{{ first_href_suffix }}">ראשון</a>
       {% endif %}
-      <span class="archive-list-pagination__status muted">
-        עמוד {{ page }} מתוך {{ total_pages }}
-      </span>
+      {% if prev_href_suffix %}
+        <a class="archive-list-pagination__nav-link" href="{% url 'archive-list' %}{{ prev_href_suffix }}">הקודם</a>
+      {% endif %}
+
+      {% for item in page_number_items %}
+        {% if item.kind == "ellipsis" %}
+          <span class="archive-list-pagination__ellipsis" aria-hidden="true">…</span>
+        {% elif item.is_current %}
+          <span class="archive-list-pagination__page-number is-current" aria-current="page">{{ item.page }}</span>
+        {% else %}
+          <a
+            class="archive-list-pagination__page-number"
+            href="{% url 'archive-list' %}{{ item.href_suffix }}"
+            aria-label="עמוד {{ item.page }}"
+          >{{ item.page }}</a>
+        {% endif %}
+      {% endfor %}
+
       {% if next_href_suffix %}
-        <a class="archive-list-pagination__page-link" href="{% url 'archive-list' %}{{ next_href_suffix }}">הבא</a>
+        <a class="archive-list-pagination__nav-link" href="{% url 'archive-list' %}{{ next_href_suffix }}">הבא</a>
+      {% endif %}
+      {% if show_last_link %}
+        <a class="archive-list-pagination__nav-link" href="{% url 'archive-list' %}{{ last_href_suffix }}">אחרון</a>
       {% endif %}
     </div>
   {% endif %}

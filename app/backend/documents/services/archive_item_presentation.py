@@ -358,6 +358,73 @@ def archive_public_list_filter_context(
     }
 
 
+def _archive_public_list_href_suffix(
+    *,
+    q: str = "",
+    item_type_filter: str = "",
+    page: int = 1,
+    per_page: int = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
+) -> str:
+    query = build_archive_public_list_query(
+        q=q,
+        item_type_filter=item_type_filter,
+        page=page,
+        per_page=per_page,
+    )
+    return f"?{query}" if query else ""
+
+
+def build_archive_public_list_page_number_items(
+    *,
+    total_pages: int,
+    page: int,
+    q: str = "",
+    item_type_filter: str = "",
+    per_page: int = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
+    max_all_pages: int = 7,
+    window: int = 1,
+) -> list[dict[str, object]]:
+    """Numbered page link metadata for public archive list pagination."""
+    if total_pages <= 0:
+        return []
+
+    if total_pages <= max_all_pages:
+        page_numbers: list[int | None] = list(range(1, total_pages + 1))
+    else:
+        visible_pages = {1, total_pages}
+        for candidate in range(page - window, page + window + 1):
+            if 1 <= candidate <= total_pages:
+                visible_pages.add(candidate)
+        sorted_pages = sorted(visible_pages)
+        page_numbers = []
+        previous_page: int | None = None
+        for visible_page in sorted_pages:
+            if previous_page is not None and visible_page - previous_page > 1:
+                page_numbers.append(None)
+            page_numbers.append(visible_page)
+            previous_page = visible_page
+
+    items: list[dict[str, object]] = []
+    for page_number in page_numbers:
+        if page_number is None:
+            items.append({"kind": "ellipsis"})
+            continue
+        items.append(
+            {
+                "kind": "page",
+                "page": page_number,
+                "is_current": page_number == page,
+                "href_suffix": _archive_public_list_href_suffix(
+                    q=q,
+                    item_type_filter=item_type_filter,
+                    page=page_number,
+                    per_page=per_page,
+                ),
+            }
+        )
+    return items
+
+
 def archive_public_list_pagination_context(
     *,
     total_count: int,
@@ -370,48 +437,36 @@ def archive_public_list_pagination_context(
     total_pages = (total_count + per_page - 1) // per_page if total_count > 0 else 0
     show_pagination = total_count > 0
     show_page_nav = total_pages > 1
-    list_query = build_archive_public_list_query(
-        q=q,
-        item_type_filter=item_type_filter,
-        page=page,
-        per_page=per_page,
-    )
-    per_page_links = []
-    for option in ARCHIVE_PUBLIC_LIST_PER_PAGE_OPTIONS:
-        option_query = build_archive_public_list_query(
+    prev_href_suffix = ""
+    next_href_suffix = ""
+    first_href_suffix = ""
+    last_href_suffix = ""
+    if page > 1:
+        prev_href_suffix = _archive_public_list_href_suffix(
+            q=q,
+            item_type_filter=item_type_filter,
+            page=page - 1,
+            per_page=per_page,
+        )
+        first_href_suffix = _archive_public_list_href_suffix(
             q=q,
             item_type_filter=item_type_filter,
             page=1,
-            per_page=option,
-        )
-        suffix = f"?{option_query}" if option_query else ""
-        per_page_links.append(
-            {
-                "value": option,
-                "href_suffix": suffix,
-                "is_active": option == per_page,
-            }
-        )
-    prev_page = page - 1 if page > 1 else None
-    next_page = page + 1 if page < total_pages else None
-    prev_href_suffix = ""
-    next_href_suffix = ""
-    if prev_page is not None:
-        prev_query = build_archive_public_list_query(
-            q=q,
-            item_type_filter=item_type_filter,
-            page=prev_page,
             per_page=per_page,
         )
-        prev_href_suffix = f"?{prev_query}" if prev_query else ""
-    if next_page is not None:
-        next_query = build_archive_public_list_query(
+    if page < total_pages:
+        next_href_suffix = _archive_public_list_href_suffix(
             q=q,
             item_type_filter=item_type_filter,
-            page=next_page,
+            page=page + 1,
             per_page=per_page,
         )
-        next_href_suffix = f"?{next_query}" if next_query else ""
+        last_href_suffix = _archive_public_list_href_suffix(
+            q=q,
+            item_type_filter=item_type_filter,
+            page=total_pages,
+            per_page=per_page,
+        )
     return {
         "page": page,
         "per_page": per_page,
@@ -419,8 +474,18 @@ def archive_public_list_pagination_context(
         "total_pages": total_pages,
         "show_pagination": show_pagination,
         "show_page_nav": show_page_nav,
-        "list_query_suffix": f"?{list_query}" if list_query else "",
-        "per_page_links": per_page_links,
+        "per_page_options": ARCHIVE_PUBLIC_LIST_PER_PAGE_OPTIONS,
+        "page_number_items": build_archive_public_list_page_number_items(
+            total_pages=total_pages,
+            page=page,
+            q=q,
+            item_type_filter=item_type_filter,
+            per_page=per_page,
+        ),
+        "show_first_link": page > 2,
+        "show_last_link": page < total_pages - 1,
+        "first_href_suffix": first_href_suffix,
+        "last_href_suffix": last_href_suffix,
         "prev_href_suffix": prev_href_suffix,
         "next_href_suffix": next_href_suffix,
     }

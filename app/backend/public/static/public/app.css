@@ -2086,7 +2086,30 @@ pre {
   color: var(--muted);
 }
 
-.archive-list-pagination__per-page-option {
+.archive-list-pagination__per-page-select {
+  width: auto;
+  min-width: 4.5rem;
+  padding: 0.35rem 0.5rem;
+}
+
+.archive-list-pagination__pages {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+.archive-list-pagination__nav-link {
+  color: var(--accent);
+  text-decoration: none;
+  padding: 0.15rem 0.25rem;
+}
+
+.archive-list-pagination__nav-link:hover {
+  text-decoration: underline;
+}
+
+.archive-list-pagination__page-number {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2099,37 +2122,23 @@ pre {
   line-height: 1.2;
 }
 
-.archive-list-pagination__per-page-option:hover {
+.archive-list-pagination__page-number:hover {
   border-color: var(--border-strong);
   color: var(--accent);
   text-decoration: none;
 }
 
-.archive-list-pagination__per-page-option.is-active {
+.archive-list-pagination__page-number.is-current {
   border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;
 }
 
-.archive-list-pagination__pages {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.archive-list-pagination__page-link {
-  color: var(--accent);
-  text-decoration: none;
-}
-
-.archive-list-pagination__page-link:hover {
-  text-decoration: underline;
-}
-
-.archive-list-pagination__status {
-  white-space: nowrap;
+.archive-list-pagination__ellipsis {
+  color: var(--muted);
+  padding: 0 0.15rem;
+  user-select: none;
 }
 
 .archive-list-pagination__top-link {
