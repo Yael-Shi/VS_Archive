@@ -10,6 +10,45 @@
   const fileEl = document.getElementById("file");
   const docTypeEl = document.getElementById("doc_type");
   const selectedFilesEl = document.getElementById("selectedFiles");
+  const selectedFilesSummaryEl = document.getElementById("selectedFilesSummary");
+
+  /** Client-side staging; array order is page order (capture/add order). */
+  let stagedFiles = [];
+  /** @type {Map<File, string>} */
+  const previewObjectUrls = new Map();
+
+  function revokePreviewUrl(file) {
+    const url = previewObjectUrls.get(file);
+    if (!url) return;
+    URL.revokeObjectURL(url);
+    previewObjectUrls.delete(file);
+  }
+
+  function revokeAllPreviewUrls() {
+    for (const url of previewObjectUrls.values()) {
+      URL.revokeObjectURL(url);
+    }
+    previewObjectUrls.clear();
+  }
+
+  function cleanupPreviewUrls() {
+    const current = new Set(stagedFiles);
+    for (const [file, url] of [...previewObjectUrls.entries()]) {
+      if (!current.has(file)) {
+        URL.revokeObjectURL(url);
+        previewObjectUrls.delete(file);
+      }
+    }
+  }
+
+  function getPreviewUrl(file) {
+    if (!isImageFile(file)) return null;
+    const existing = previewObjectUrls.get(file);
+    if (existing) return existing;
+    const url = URL.createObjectURL(file);
+    previewObjectUrls.set(file, url);
+    return url;
+  }
 
   function setMessage(kind, text) {
     msgEl.className = "msg";
@@ -61,6 +100,19 @@
     return (f.type || "").toLowerCase().startsWith("image/");
   }
 
+  function isPdfFile(f) {
+    const mt = (f.type || "").toLowerCase();
+    return mt === "application/pdf" || (f.name || "").toLowerCase().endsWith(".pdf");
+  }
+
+  function getStagedFiles() {
+    return stagedFiles.slice();
+  }
+
+  function clearFileInputValue() {
+    fileEl.value = "";
+  }
+
   function applyFileInputMode() {
     const dt = docTypeEl.value;
 
@@ -71,19 +123,150 @@
     } else {
       fileEl.setAttribute("accept", "application/pdf,image/*");
     }
-    // `capture` conflicts with multi-select; multi-image upload needs gallery
-    // multi-pick, so we do not force camera capture on this input.
+    // `capture` conflicts with multi-select; staged append supports one-at-a-time
+    // mobile capture without forcing camera-only on this input.
     fileEl.removeAttribute("capture");
   }
 
+  function updateDocTypeFromStaged() {
+    if (stagedFiles.length >= MULTI_IMAGE_MIN_FILES) {
+      docTypeEl.value = "IMAGE";
+      applyFileInputMode();
+      return;
+    }
+
+    const f = stagedFiles[0];
+    if (!f) {
+      applyFileInputMode();
+      return;
+    }
+
+    if (isPdfFile(f)) {
+      docTypeEl.value = "PDF";
+    } else if (isImageFile(f)) {
+      docTypeEl.value = "IMAGE";
+    }
+    applyFileInputMode();
+  }
+
+  function removeStagedFile(index) {
+    if (index < 0 || index >= stagedFiles.length) return;
+    const removed = stagedFiles[index];
+    revokePreviewUrl(removed);
+    stagedFiles.splice(index, 1);
+    setMessage("", "");
+    updateDocTypeFromStaged();
+    renderSelectedFiles();
+  }
+
+  function appendStagedFiles(newFiles) {
+    const incoming = Array.from(newFiles || []);
+    clearFileInputValue();
+    if (incoming.length === 0) return;
+
+    const stagedHasPdf = stagedFiles.some((f) => isPdfFile(f));
+    const incomingHasPdf = incoming.some((f) => isPdfFile(f));
+
+    if (stagedHasPdf) {
+      setMessage("error", "PDF כבר נבחר. יש להסיר אותו לפני הוספת קבצים נוספים.");
+      return;
+    }
+    if (incomingHasPdf) {
+      if (stagedFiles.length > 0 || incoming.length > 1) {
+        setMessage("error", "PDF יש להעלות כקובץ יחיד.");
+        return;
+      }
+    }
+
+    const unsupported = incoming.filter((f) => !isImageFile(f) && !isPdfFile(f));
+    if (unsupported.length > 0) {
+      setMessage("error", "ניתן להעלות תמונות או PDF בלבד.");
+      return;
+    }
+
+    const nonImages = incoming.filter((f) => !isImageFile(f));
+    if (stagedFiles.length > 0 && nonImages.length > 0) {
+      setMessage("error", "בהעלאת ריבוי קבצים יש לבחור תמונות בלבד.");
+      return;
+    }
+
+    const totalAfter = stagedFiles.length + incoming.length;
+    if (totalAfter > MULTI_IMAGE_MAX_FILES) {
+      setMessage(
+        "error",
+        `ניתן להעלות עד ${MULTI_IMAGE_MAX_FILES} תמונות במסמך אחד (כרגע ${stagedFiles.length}).`
+      );
+      return;
+    }
+
+    stagedFiles.push(...incoming);
+    setMessage("", "");
+    updateDocTypeFromStaged();
+    renderSelectedFiles();
+  }
+
   function renderSelectedFiles() {
-    const files = Array.from(fileEl.files || []);
     selectedFilesEl.innerHTML = "";
-    // Only the multi-image case has a meaningful page order to show.
-    if (files.length < MULTI_IMAGE_MIN_FILES) return;
-    files.forEach((f, i) => {
+    cleanupPreviewUrls();
+
+    if (stagedFiles.length === 0) {
+      revokeAllPreviewUrls();
+      selectedFilesSummaryEl.hidden = true;
+      selectedFilesSummaryEl.textContent = "";
+      return;
+    }
+
+    const isMulti = stagedFiles.length >= MULTI_IMAGE_MIN_FILES;
+    const isSinglePdf = stagedFiles.length === 1 && isPdfFile(stagedFiles[0]);
+
+    if (isMulti) {
+      selectedFilesSummaryEl.hidden = false;
+      selectedFilesSummaryEl.textContent =
+        `${stagedFiles.length} / ${MULTI_IMAGE_MAX_FILES} עמודים — סדר לפי סדר ההוספה`;
+    } else if (!isSinglePdf) {
+      selectedFilesSummaryEl.hidden = false;
+      selectedFilesSummaryEl.textContent = "עמוד 1 — ניתן להוסיף עמודים נוספים לפני ההעלאה";
+    } else {
+      selectedFilesSummaryEl.hidden = true;
+      selectedFilesSummaryEl.textContent = "";
+    }
+
+    stagedFiles.forEach((f, i) => {
       const li = document.createElement("li");
-      li.textContent = `עמוד ${i + 1}: ${f.name}`;
+      li.className = "selected-files-item";
+
+      const main = document.createElement("div");
+      main.className = "selected-files-main";
+
+      const label = document.createElement("span");
+      label.className = "selected-files-label";
+      if (isSinglePdf) {
+        label.textContent = `קובץ: ${f.name || "PDF"}`;
+      } else {
+        label.textContent = `עמוד ${i + 1}`;
+      }
+
+      if (isImageFile(f)) {
+        const thumb = document.createElement("img");
+        thumb.className = "selected-files-thumb";
+        thumb.src = getPreviewUrl(f);
+        thumb.alt = `תצוגה מקדימה של עמוד ${i + 1}`;
+        thumb.loading = "lazy";
+        thumb.decoding = "async";
+        main.appendChild(thumb);
+      }
+
+      main.appendChild(label);
+
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "btn btn-link selected-files-remove";
+      removeBtn.textContent = "הסרה";
+      removeBtn.setAttribute("aria-label", isSinglePdf ? "הסרת הקובץ" : `הסרת עמוד ${i + 1}`);
+      removeBtn.addEventListener("click", () => removeStagedFile(i));
+
+      li.appendChild(main);
+      li.appendChild(removeBtn);
       selectedFilesEl.appendChild(li);
     });
   }
@@ -233,7 +416,7 @@
     e.preventDefault();
     setMessage("", "");
 
-    const files = Array.from(fileEl.files || []);
+    const files = getStagedFiles();
     if (files.length === 0) {
       setMessage("error", "חובה לבחור קובץ.");
       return;
@@ -316,23 +499,6 @@
   });
 
   fileEl.addEventListener("change", () => {
-    const files = Array.from(fileEl.files || []);
-    renderSelectedFiles();
-
-    if (files.length >= MULTI_IMAGE_MIN_FILES) {
-      // Multi-image V1 is image-only; force IMAGE so the field stays valid/consistent.
-      docTypeEl.value = "IMAGE";
-      applyFileInputMode();
-      return;
-    }
-
-    const f = files[0];
-    if (!f) return;
-    if (!docTypeEl.value) {
-      const mt = (f.type || "").toLowerCase();
-      if (mt === "application/pdf") docTypeEl.value = "PDF";
-      else if (mt.startsWith("image/")) docTypeEl.value = "IMAGE";
-    }
-    applyFileInputMode();
+    appendStagedFiles(fileEl.files);
   });
 </script>

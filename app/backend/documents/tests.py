@@ -9513,15 +9513,38 @@ class UploadPageTemplateTests(TestCase):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "לבחור כמה תמונות יחד")
+        self.assertContains(resp, "מתווספת")
+        self.assertContains(resp, "לא מחליפה את הקודמת")
         self.assertContains(
-            resp, "2–35 תמונות / עמודים / חלקים = מסמך אחד לפי סדר הבחירה"
+            resp, "2–35 תמונות / עמודים / חלקים = מסמך אחד לפי סדר ההוספה"
         )
         self.assertContains(resp, "ריבוי קבצים תומך בתמונות בלבד")
         self.assertContains(resp, "PDF יש להעלות כקובץ יחיד")
         self.assertContains(resp, "מומלץ להעלות כמה תמונות חלקיות לפי סדר הקריאה")
-        self.assertContains(resp, "סדר ההעלאה קובע את סדר התעתוק")
+        self.assertContains(resp, "סדר ההוספה קובע את סדר התעתוק")
+        self.assertContains(resp, "אין שינוי סדר ידני בגרסה זו")
         self.assertContains(resp, "מהטור הימני לשמאלי")
         self.assertContains(resp, "המערכת תתעתק כל תמונה לפי הסדר ותחבר את הטקסט")
+
+    def test_upload_page_js_stages_files_client_side(self):
+        resp = self._get_page()
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "let stagedFiles = []")
+        self.assertContains(resp, "appendStagedFiles")
+        self.assertContains(resp, "removeStagedFile")
+        self.assertContains(resp, "getStagedFiles")
+        self.assertContains(resp, 'label.textContent = `עמוד ${i + 1}`')
+        self.assertContains(resp, "MULTI_IMAGE_MAX_FILES")
+
+    def test_upload_page_renders_staged_files_preview_elements(self):
+        resp = self._get_page()
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'id="selectedFilesSummary"')
+        self.assertContains(resp, 'id="selectedFiles"')
+        self.assertContains(resp, "selected-files-remove")
+        self.assertContains(resp, "selected-files-thumb")
+        self.assertContains(resp, "URL.createObjectURL")
+        self.assertContains(resp, "URL.revokeObjectURL")
 
     def test_upload_page_still_renders_key_metadata_fields(self):
         resp = self._get_page()
