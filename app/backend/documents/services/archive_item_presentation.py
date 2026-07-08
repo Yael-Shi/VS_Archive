@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from urllib.parse import urlencode
 
 from django.db.models import Prefetch, Q, QuerySet
 from django.urls import reverse
@@ -236,6 +237,193 @@ def filter_archive_items_by_search_query(
         | Q(events__name__icontains=q)
         | Q(tags__name__icontains=q)
     ).distinct()
+
+
+ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE = 48
+ARCHIVE_PUBLIC_LIST_PER_PAGE_OPTIONS: tuple[int, ...] = (24, 48, 96)
+
+
+def normalize_archive_public_list_per_page(raw: str | None) -> int:
+    """Return supported public archive list page size, defaulting to 48."""
+    if raw is None:
+        return ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE
+    try:
+        per_page = int(raw)
+    except ValueError:
+        return ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE
+    if per_page in ARCHIVE_PUBLIC_LIST_PER_PAGE_OPTIONS:
+        return per_page
+    return ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE
+
+
+def normalize_archive_public_list_page(
+    raw: str | None,
+    *,
+    total_count: int,
+    per_page: int,
+) -> int:
+    """Return a 1-based page number bounded to the filtered result set."""
+    if raw is None:
+        page = 1
+    else:
+        try:
+            page = int(raw)
+        except ValueError:
+            page = 1
+    if page < 1:
+        page = 1
+    if total_count <= 0:
+        return 1
+    total_pages = (total_count + per_page - 1) // per_page
+    return min(page, total_pages)
+
+
+def build_archive_public_list_query(
+    *,
+    q: str = "",
+    item_type_filter: str = "",
+    page: int = 1,
+    per_page: int = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
+) -> str:
+    """Build a query string for public ``/archive/`` list links."""
+    params: list[tuple[str, str]] = []
+    if q:
+        params.append(("q", q))
+    if item_type_filter:
+        params.append(("item_type", item_type_filter))
+    if page > 1:
+        params.append(("page", str(page)))
+    if per_page != ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE:
+        params.append(("per_page", str(per_page)))
+    return urlencode(params)
+
+
+def archive_public_list_clear_search_query_suffix(
+    *,
+    item_type_filter: str = "",
+    per_page: int = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
+) -> str:
+    """Query suffix for clearing archive search while preserving type/per-page."""
+    query = build_archive_public_list_query(
+        item_type_filter=item_type_filter,
+        per_page=per_page,
+    )
+    return f"?{query}" if query else ""
+
+
+def build_archive_public_list_type_filter_links(
+    *,
+    q: str = "",
+    per_page: int = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
+    active_item_type_filter: str = "",
+) -> list[dict[str, object]]:
+    """Link metadata for public archive list type-filter controls."""
+    links: list[dict[str, object]] = []
+    for slug, label in ARCHIVE_PUBLIC_LIST_TYPE_FILTER_CHOICES:
+        query = build_archive_public_list_query(
+            q=q,
+            item_type_filter=slug,
+            per_page=per_page,
+        )
+        links.append(
+            {
+                "label": label,
+                "href_suffix": f"?{query}" if query else "",
+                "is_active": active_item_type_filter == slug
+                if slug
+                else not active_item_type_filter,
+            }
+        )
+    return links
+
+
+def archive_public_list_filter_context(
+    *,
+    q: str = "",
+    item_type_filter: str = "",
+    per_page: int = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
+) -> dict[str, object]:
+    """Template context for archive list search/filter query preservation."""
+    return {
+        "preserve_per_page_in_query": per_page != ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
+        "item_type_filter_links": build_archive_public_list_type_filter_links(
+            q=q,
+            per_page=per_page,
+            active_item_type_filter=item_type_filter,
+        ),
+        "clear_search_query_suffix": archive_public_list_clear_search_query_suffix(
+            item_type_filter=item_type_filter,
+            per_page=per_page,
+        ),
+    }
+
+
+def archive_public_list_pagination_context(
+    *,
+    total_count: int,
+    page: int,
+    per_page: int,
+    q: str,
+    item_type_filter: str,
+) -> dict[str, object]:
+    """Template context for public archive list pagination controls."""
+    total_pages = (total_count + per_page - 1) // per_page if total_count > 0 else 0
+    show_pagination = total_count > 0
+    show_page_nav = total_pages > 1
+    list_query = build_archive_public_list_query(
+        q=q,
+        item_type_filter=item_type_filter,
+        page=page,
+        per_page=per_page,
+    )
+    per_page_links = []
+    for option in ARCHIVE_PUBLIC_LIST_PER_PAGE_OPTIONS:
+        option_query = build_archive_public_list_query(
+            q=q,
+            item_type_filter=item_type_filter,
+            page=1,
+            per_page=option,
+        )
+        suffix = f"?{option_query}" if option_query else ""
+        per_page_links.append(
+            {
+                "value": option,
+                "href_suffix": suffix,
+                "is_active": option == per_page,
+            }
+        )
+    prev_page = page - 1 if page > 1 else None
+    next_page = page + 1 if page < total_pages else None
+    prev_href_suffix = ""
+    next_href_suffix = ""
+    if prev_page is not None:
+        prev_query = build_archive_public_list_query(
+            q=q,
+            item_type_filter=item_type_filter,
+            page=prev_page,
+            per_page=per_page,
+        )
+        prev_href_suffix = f"?{prev_query}" if prev_query else ""
+    if next_page is not None:
+        next_query = build_archive_public_list_query(
+            q=q,
+            item_type_filter=item_type_filter,
+            page=next_page,
+            per_page=per_page,
+        )
+        next_href_suffix = f"?{next_query}" if next_query else ""
+    return {
+        "page": page,
+        "per_page": per_page,
+        "total_count": total_count,
+        "total_pages": total_pages,
+        "show_pagination": show_pagination,
+        "show_page_nav": show_page_nav,
+        "list_query_suffix": f"?{list_query}" if list_query else "",
+        "per_page_links": per_page_links,
+        "prev_href_suffix": prev_href_suffix,
+        "next_href_suffix": next_href_suffix,
+    }
 
 
 ARCHIVE_BROWSE_PREVIEW_MAX_LEN = 160
