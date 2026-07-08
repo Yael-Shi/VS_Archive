@@ -2096,40 +2096,58 @@ pre {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-1) var(--space-2);
+  gap: var(--space-2);
 }
 
 .archive-list-pagination__nav-link {
   color: var(--accent);
   text-decoration: none;
   padding: 0.15rem 0.25rem;
+  white-space: nowrap;
 }
 
 .archive-list-pagination__nav-link:hover {
   text-decoration: underline;
 }
 
-.archive-list-pagination__page-number {
+.archive-list-pagination__page-list {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  overflow: hidden;
+}
+
+.archive-list-pagination__page-number,
+.archive-list-pagination__ellipsis {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-width: 2rem;
-  padding: 0.2rem 0.45rem;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  color: var(--text);
-  text-decoration: none;
+  padding: 0.35rem 0.5rem;
   line-height: 1.2;
+  border-inline-end: 1px solid var(--border);
+}
+
+.archive-list-pagination__page-list > :last-child {
+  border-inline-end: none;
+}
+
+.archive-list-pagination__page-number {
+  color: var(--text-soft);
+  text-decoration: none;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .archive-list-pagination__page-number:hover {
-  border-color: var(--border-strong);
   color: var(--accent);
+  background: var(--accent-soft);
   text-decoration: none;
 }
 
 .archive-list-pagination__page-number.is-current {
-  border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;
@@ -2137,7 +2155,6 @@ pre {
 
 .archive-list-pagination__ellipsis {
   color: var(--muted);
-  padding: 0 0.15rem;
   user-select: none;
 }
 
