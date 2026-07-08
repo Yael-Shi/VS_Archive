@@ -159,21 +159,29 @@
     renderSelectedFiles();
   }
 
-  function appendStagedFiles(newFiles) {
-    const incoming = Array.from(newFiles || []);
-    clearFileInputValue();
-    if (incoming.length === 0) return;
+  function appendStagedFiles(selectedFiles) {
+    const incoming = Array.isArray(selectedFiles)
+      ? selectedFiles.slice()
+      : Array.from(selectedFiles || []);
+
+    if (incoming.length === 0) {
+      setMessage("error", "לא התקבל קובץ מהמצלמה. נסי לצלם שוב או לבחור מהגלריה.");
+      clearFileInputValue();
+      return;
+    }
 
     const stagedHasPdf = stagedFiles.some((f) => isPdfFile(f));
     const incomingHasPdf = incoming.some((f) => isPdfFile(f));
 
     if (stagedHasPdf) {
       setMessage("error", "PDF כבר נבחר. יש להסיר אותו לפני הוספת קבצים נוספים.");
+      clearFileInputValue();
       return;
     }
     if (incomingHasPdf) {
       if (stagedFiles.length > 0 || incoming.length > 1) {
         setMessage("error", "PDF יש להעלות כקובץ יחיד.");
+        clearFileInputValue();
         return;
       }
     }
@@ -181,12 +189,14 @@
     const unsupported = incoming.filter((f) => !isImageFile(f) && !isPdfFile(f));
     if (unsupported.length > 0) {
       setMessage("error", "ניתן להעלות תמונות או PDF בלבד.");
+      clearFileInputValue();
       return;
     }
 
     const nonImages = incoming.filter((f) => !isImageFile(f));
     if (stagedFiles.length > 0 && nonImages.length > 0) {
       setMessage("error", "בהעלאת ריבוי קבצים יש לבחור תמונות בלבד.");
+      clearFileInputValue();
       return;
     }
 
@@ -196,6 +206,7 @@
         "error",
         `ניתן להעלות עד ${MULTI_IMAGE_MAX_FILES} תמונות במסמך אחד (כרגע ${stagedFiles.length}).`
       );
+      clearFileInputValue();
       return;
     }
 
@@ -203,6 +214,7 @@
     setMessage("", "");
     updateDocTypeFromStaged();
     renderSelectedFiles();
+    clearFileInputValue();
   }
 
   function renderSelectedFiles() {
@@ -499,6 +511,7 @@
   });
 
   fileEl.addEventListener("change", () => {
-    appendStagedFiles(fileEl.files);
+    const selectedFiles = Array.from(fileEl.files || []);
+    appendStagedFiles(selectedFiles);
   });
 </script>
