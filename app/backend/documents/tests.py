@@ -9507,7 +9507,20 @@ class UploadPageTemplateTests(TestCase):
     def test_upload_page_file_input_allows_multiple(self):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'id="file"')
         self.assertContains(resp, 'name="file" type="file" multiple')
+        self.assertNotContains(resp, 'id="file" name="file" type="file" multiple capture')
+
+    def test_upload_page_renders_separate_camera_and_gallery_actions(self):
+        resp = self._get_page()
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'id="cameraFile"')
+        self.assertContains(resp, 'capture="environment"')
+        self.assertContains(resp, "צילום עמוד")
+        self.assertContains(resp, "בחירה מקבצים")
+        self.assertContains(resp, 'for="cameraFile"')
+        self.assertContains(resp, 'for="file"')
+        self.assertContains(resp, "upload-file-actions")
 
     def test_upload_page_contains_multi_image_explanatory_copy(self):
         resp = self._get_page()
@@ -9535,9 +9548,11 @@ class UploadPageTemplateTests(TestCase):
         self.assertContains(resp, "getStagedFiles")
         self.assertContains(resp, "label.textContent = `עמוד ${i + 1}`")
         self.assertContains(resp, "MULTI_IMAGE_MAX_FILES")
+        self.assertContains(resp, "cameraFileEl")
+        self.assertContains(resp, "onFileInputChange")
         self.assertContains(
             resp,
-            "const selectedFiles = Array.from(fileEl.files || []);",
+            "const selectedFiles = Array.from(inputEl.files || []);",
         )
         self.assertContains(
             resp,
