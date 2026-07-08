@@ -132,14 +132,17 @@ from documents.services.photo_metadata_validation import (
     parse_photo_staff_metadata_form,
 )
 from documents.services.archive_item_presentation import (
-    ARCHIVE_PUBLIC_LIST_TYPE_FILTER_CHOICES,
     archive_browse_displayable_text_results_prefetch,
     archive_manage_item_type_ui_choices,
     archive_metadata_status_ui_choices,
+    archive_public_list_filter_context,
+    archive_public_list_pagination_context,
     archive_visibility_ui_choices,
     build_archive_browse_cards,
     filter_archive_items_by_public_list_type,
     filter_archive_items_by_search_query,
+    normalize_archive_public_list_page,
+    normalize_archive_public_list_per_page,
     normalize_archive_public_list_type_filter,
     normalize_archive_list_search_query,
 )
@@ -2738,16 +2741,36 @@ def archive_list_page(request):
     ).order_by("-created_at")
     items = filter_archive_items_by_public_list_type(items, item_type_filter)
     items = filter_archive_items_by_search_query(items, search_query)
+    total_count = items.count()
+    per_page = normalize_archive_public_list_per_page(request.GET.get("per_page"))
+    page = normalize_archive_public_list_page(
+        request.GET.get("page"),
+        total_count=total_count,
+        per_page=per_page,
+    )
+    offset = (page - 1) * per_page
+    page_items = list(items[offset : offset + per_page])
     return render(
         request,
         "documents/archive/list.html",
         context={
-            "items": items,
-            "browse_cards": build_archive_browse_cards(items),
+            "items": page_items,
+            "browse_cards": build_archive_browse_cards(page_items),
             "is_admin": _is_admin(request.user),
             "item_type_filter": item_type_filter,
-            "item_type_filter_choices": ARCHIVE_PUBLIC_LIST_TYPE_FILTER_CHOICES,
             "q": search_query,
+            **archive_public_list_filter_context(
+                q=search_query,
+                item_type_filter=item_type_filter,
+                per_page=per_page,
+            ),
+            **archive_public_list_pagination_context(
+                total_count=total_count,
+                page=page,
+                per_page=per_page,
+                q=search_query,
+                item_type_filter=item_type_filter,
+            ),
         },
     )
 

@@ -1,0 +1,31 @@
+<nav class="archive-list-pagination" aria-label="דפדוף בארכיון">
+  <div class="archive-list-pagination__per-page" role="group" aria-label="מספר פריטים בעמוד">
+    <span class="archive-list-pagination__label">פריטים בעמוד:</span>
+    {% for link in per_page_links %}
+      {% if link.is_active %}
+        <span class="archive-list-pagination__per-page-option is-active">{{ link.value }}</span>
+      {% else %}
+        <a
+          class="archive-list-pagination__per-page-option"
+          href="{% url 'archive-list' %}{{ link.href_suffix }}"
+        >{{ link.value }}</a>
+      {% endif %}
+    {% endfor %}
+  </div>
+
+  {% if show_page_nav %}
+    <div class="archive-list-pagination__pages">
+      {% if prev_href_suffix %}
+        <a class="archive-list-pagination__page-link" href="{% url 'archive-list' %}{{ prev_href_suffix }}">הקודם</a>
+      {% endif %}
+      <span class="archive-list-pagination__status muted">
+        עמוד {{ page }} מתוך {{ total_pages }}
+      </span>
+      {% if next_href_suffix %}
+        <a class="archive-list-pagination__page-link" href="{% url 'archive-list' %}{{ next_href_suffix }}">הבא</a>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <a class="archive-list-pagination__top-link" href="#archive-top">חזרה לראש העמוד</a>
+</nav>
