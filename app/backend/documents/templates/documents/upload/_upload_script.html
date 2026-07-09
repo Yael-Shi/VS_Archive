@@ -87,6 +87,17 @@
     return stagedFiles.slice();
   }
 
+  function resetIncrementalCameraState() {
+    incrementalDocumentId = null;
+    incrementalPages = [];
+    cameraUploadInProgress = false;
+    incrementalTerminalFailed = false;
+    clearFileInputValue(cameraFileEl);
+    renderPageList();
+    updateDocTypeFromSelection();
+    updateSubmitButtonState();
+  }
+
   function isIncrementalCameraMode() {
     return incrementalDocumentId !== null || incrementalPages.length > 0;
   }
@@ -597,6 +608,8 @@
       body: JSON.stringify({ success: true }),
     });
     setMessage("ok", "בוצע. מעבירה לעמוד המסמך…");
+    // Clear incremental state before navigation so bfcache/back restores a clean form.
+    resetIncrementalCameraState();
     window.location.href = `/api/ui/documents/${documentId}/`;
   }
 
@@ -773,4 +786,12 @@
 
   fileEl.addEventListener("change", () => onGalleryInputChange(fileEl));
   cameraFileEl.addEventListener("change", () => onCameraInputChange(cameraFileEl));
+
+  window.addEventListener("pageshow", (event) => {
+    if (!event.persisted) return;
+    stagedFiles = [];
+    clearFileInputValue(fileEl);
+    resetIncrementalCameraState();
+    setMessage("", "");
+  });
 </script>
