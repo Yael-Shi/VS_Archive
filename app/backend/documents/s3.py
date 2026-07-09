@@ -153,3 +153,31 @@ def get_object_bytes(bucket: str, key: str) -> Tuple[bytes, Optional[str]]:
     body = resp["Body"].read()
     content_type = resp.get("ContentType")
     return body, content_type
+
+
+@dataclass(frozen=True)
+class S3DeleteObjectResult:
+    deleted: bool
+    not_found: bool = False
+
+
+def delete_s3_object(bucket: str, key: str) -> S3DeleteObjectResult:
+    """
+    Delete an S3 object.
+
+    Returns ``not_found=True`` when the key is already absent. Raises
+    ``ClientError`` for unexpected AWS failures.
+    """
+    normalized_key = (key or "").strip()
+    if not normalized_key:
+        return S3DeleteObjectResult(deleted=False, not_found=True)
+
+    s3 = get_s3_client()
+    try:
+        s3.delete_object(Bucket=bucket, Key=normalized_key)
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code in _S3_NOT_FOUND_ERROR_CODES:
+            return S3DeleteObjectResult(deleted=False, not_found=True)
+        raise
+    return S3DeleteObjectResult(deleted=True)

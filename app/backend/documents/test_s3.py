@@ -5,6 +5,7 @@ from django.test import SimpleTestCase
 
 from documents.s3 import (
     S3HeadObjectResult,
+    delete_s3_object,
     head_s3_object,
     photo_mime_to_s3_extension,
     s3_object_exists,
@@ -67,6 +68,54 @@ class S3HeadObjectTests(SimpleTestCase):
 
         with self.assertRaises(ClientError):
             head_s3_object("bucket", "documents/1/original.jpg")
+
+
+class S3DeleteObjectTests(SimpleTestCase):
+    def _client_error(self, code: str) -> ClientError:
+        return ClientError(
+            {"Error": {"Code": code, "Message": "not found"}},
+            "DeleteObject",
+        )
+
+    @patch("documents.s3.get_s3_client")
+    def test_deletes_existing_object(self, mock_get_client):
+        result = delete_s3_object("bucket", "documents/1/source/0.jpeg")
+
+        self.assertTrue(result.deleted)
+        self.assertFalse(result.not_found)
+        mock_get_client.return_value.delete_object.assert_called_once_with(
+            Bucket="bucket",
+            Key="documents/1/source/0.jpeg",
+        )
+
+    @patch("documents.s3.get_s3_client")
+    def test_empty_key_is_treated_as_not_found(self, mock_get_client):
+        result = delete_s3_object("bucket", "   ")
+
+        self.assertFalse(result.deleted)
+        self.assertTrue(result.not_found)
+        mock_get_client.return_value.delete_object.assert_not_called()
+
+    @patch("documents.s3.get_s3_client")
+    def test_not_found_codes_are_idempotent(self, mock_get_client):
+        for code in ("404", "NoSuchKey", "NotFound"):
+            with self.subTest(code=code):
+                mock_get_client.reset_mock()
+                mock_get_client.return_value.delete_object.side_effect = (
+                    self._client_error(code)
+                )
+                result = delete_s3_object("bucket", "missing/key")
+                self.assertFalse(result.deleted)
+                self.assertTrue(result.not_found)
+
+    @patch("documents.s3.get_s3_client")
+    def test_reraises_unexpected_client_errors(self, mock_get_client):
+        mock_get_client.return_value.delete_object.side_effect = self._client_error(
+            "AccessDenied"
+        )
+
+        with self.assertRaises(ClientError):
+            delete_s3_object("bucket", "documents/1/source/0.jpeg")
 
 
 class S3ObjectExistsTests(SimpleTestCase):
