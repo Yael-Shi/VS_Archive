@@ -148,22 +148,38 @@ class IncrementalUploadApiTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    def test_incremental_finalize_rejects_fewer_than_two_uploaded_parts(
-        self, _mock_put
-    ):
+    def test_incremental_finalize_succeeds_with_one_uploaded_part(self, _mock_put):
         create_resp = self._post_create_incremental()
         doc_id = create_resp.json()["document_id"]
 
         self._post_part_add(doc_id)
         self._post_part_complete(
-            doc_id, 0, {"success": True, "file_mime": "image/jpeg"}
+            doc_id, 0, {"success": True, "file_size": 100, "file_mime": "image/jpeg"}
         )
+
+        with patch("documents.views.send_process_document_message") as mock_enqueue:
+            finalize_resp = self._post_finalize(doc_id)
+
+        self.assertEqual(finalize_resp.status_code, 200)
+        mock_enqueue.assert_called_once_with(document_id=doc_id)
+
+        doc = Document.objects.get(id=doc_id)
+        self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADED)
+        self.assertEqual(doc.expected_source_file_count, 1)
+        self.assertTrue(doc.file_s3_key.endswith("/source/0.jpeg"))
+
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
+    def test_incremental_finalize_rejects_zero_uploaded_parts(self, _mock_put):
+        create_resp = self._post_create_incremental()
+        doc_id = create_resp.json()["document_id"]
 
         with patch("documents.views.send_process_document_message") as mock_enqueue:
             resp = self._post_finalize(doc_id)
 
         self.assertEqual(resp.status_code, 400)
-        self.assertIn("at least 2", resp.json()["error"])
+        self.assertIn("at least 1", resp.json()["error"])
         mock_enqueue.assert_not_called()
 
         doc = Document.objects.get(id=doc_id)

@@ -9587,8 +9587,9 @@ class UploadPageTemplateTests(TestCase):
         self.assertContains(resp, "incremental: true")
         self.assertContains(resp, "updateSubmitButtonState")
         self.assertContains(resp, "updateCameraCaptureButtonState")
-        self.assertContains(resp, "נדרשים לפחות ${MULTI_IMAGE_MIN_FILES} עמודים")
-        self.assertContains(resp, "לפני סיום")
+        self.assertContains(resp, "INCREMENTAL_CAMERA_MIN_PAGES")
+        self.assertContains(resp, "ניתן להוסיף עמודים או לסיים את המסמך")
+        self.assertNotContains(resp, "נדרשים לפחות ${MULTI_IMAGE_MIN_FILES} עמודים")
         self.assertContains(resp, "AWAITING_CAMERA")
         self.assertContains(resp, "ממתינה למצלמה…")
         self.assertContains(resp, "מעלה…")
@@ -9606,17 +9607,19 @@ class UploadPageTemplateTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         script = resp.content.decode("utf-8")
         session_idx = script.index("function startCameraCaptureSession")
-        session_fn = script[session_idx : session_idx + 4500]
+        session_fn = script[session_idx : session_idx + 6500]
         self.assertIn("PAGE_STATUS.AWAITING_CAMERA", session_fn)
         self.assertIn("פותחת מצלמה", session_fn)
         self.assertIn('document.createElement("input")', session_fn)
         self.assertIn("PAGE_STATUS.CANCELLED", session_fn)
-        self.assertIn(
-            "לא נבחר קובץ — הצילום בוטל או לא התקבל מהמצלמה",
-            session_fn,
-        )
+        self.assertIn("הצילום בוטל או לא התקבל מהמצלמה", session_fn)
         self.assertIn("PAGE_STATUS.NO_RESPONSE", session_fn)
         self.assertIn("לא התקבלה תמונה מהמצלמה", session_fn)
+        self.assertIn("CAMERA_EMPTY_CHANGE_GRACE_MS", session_fn)
+        self.assertIn("scheduleStallWatchdog", session_fn)
+        self.assertIn("CAMERA_STALL_NO_RESPONSE_MS", session_fn)
+        self.assertIn("CAMERA_HIDDEN_STALL_MS", session_fn)
+        self.assertIn("requestAnimationFrame", script)
         self.assertIn("CAMERA_CAPTURE_TIMEOUT_MS", script)
         self.assertIn("incrementalPages.push(pageEntry)", session_fn)
         self.assertIn("ממתינה לסיום העלאת העמוד הקודם", script)
