@@ -2596,7 +2596,7 @@ def document_hebrew_translation_retry(request, doc_id: int):
     return redirect("documents-detail-page", doc_id=doc.id)
 
 
-UPLOAD_UI_REVISION = "2026-07-09.2"
+UPLOAD_UI_REVISION = "2026-07-09.3"
 
 
 def _upload_form_context() -> dict:

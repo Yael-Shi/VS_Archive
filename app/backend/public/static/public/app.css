@@ -512,6 +512,44 @@ label {
   margin-top: var(--space-1);
 }
 
+.upload-mobile-primary {
+  display: none;
+}
+
+.upload-desktop-primary {
+  display: inline-flex;
+}
+
+.upload-mobile-hint {
+  display: none;
+}
+
+.upload-desktop-hint {
+  display: block;
+}
+
+@media (max-width: 768px), (hover: none) and (pointer: coarse) {
+  .upload-mobile-primary {
+    display: inline-flex;
+  }
+
+  .upload-desktop-primary {
+    display: none;
+  }
+
+  .upload-mobile-hint {
+    display: block;
+  }
+
+  .upload-desktop-hint {
+    display: none;
+  }
+
+  .upload-file-action--experimental {
+    display: none !important;
+  }
+}
+
 .upload-file-input-hidden {
   position: absolute;
   width: 1px;
@@ -522,6 +560,12 @@ label {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+.upload-file-action.is-disabled {
+  opacity: 0.55;
+  pointer-events: none;
+  cursor: not-allowed;
 }
 
 .field-label {

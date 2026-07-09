@@ -2,7 +2,7 @@
 <script>
   const MULTI_IMAGE_MIN_FILES = 2;
   const MULTI_IMAGE_MAX_FILES = 35;
-  const INCREMENTAL_CAMERA_MIN_PAGES = 1;
+  const INCREMENTAL_MIN_PAGES = 1;
   const CAMERA_CAPTURE_TIMEOUT_MS = 90000;
   const CAMERA_FOCUS_GRACE_MS = 1500;
   const CAMERA_FOCUS_DEBOUNCE_MS = 1200;
@@ -24,22 +24,29 @@
   const submitBtn = document.getElementById("submitBtn");
 
   const fileEl = document.getElementById("file");
+  const galleryAddPageLabel = document.getElementById("galleryAddPageLabel");
+  const desktopFilePickLabel = document.getElementById("desktopFilePickLabel");
   const cameraCaptureBtn = document.getElementById("cameraCaptureBtn");
+  const galleryMultiSelectOrderHint = document.getElementById("galleryMultiSelectOrderHint");
   const docTypeEl = document.getElementById("doc_type");
   const selectedFilesEl = document.getElementById("selectedFiles");
   const selectedFilesSummaryEl = document.getElementById("selectedFilesSummary");
 
-  /** Gallery/batch staging only; camera captures use incremental upload (no File retention). */
+  /** PDF-only staging; gallery images use incremental upload (no File retention). */
   let stagedFiles = [];
 
-  /** Incremental camera-upload state (metadata + page status only; no retained File objects). */
+  /** Incremental image-upload state (metadata + page status only; no retained File objects). */
   let incrementalDocumentId = null;
   let incrementalPages = [];
   let captureSeqCounter = 0;
   let cameraSessionActive = false;
-  let cameraUploadInProgress = false;
+  let incrementalUploadInProgress = false;
   /** Active one-shot capture session cleanup handle, if any. */
   let activeCaptureSession = null;
+
+  function isMobileUploadUi() {
+    return window.matchMedia("(max-width: 768px), (hover: none) and (pointer: coarse)").matches;
+  }
 
   function setMessage(kind, text) {
     msgEl.className = "msg";
@@ -100,8 +107,8 @@
     return stagedFiles.slice();
   }
 
-  function isCameraBusy() {
-    return cameraSessionActive || cameraUploadInProgress;
+  function isIncrementalBusy() {
+    return cameraSessionActive || incrementalUploadInProgress;
   }
 
   function abortActiveCaptureSession() {
@@ -110,23 +117,28 @@
     }
     activeCaptureSession = null;
     cameraSessionActive = false;
+    updateGalleryPickState();
     updateCameraCaptureButtonState();
     updateSubmitButtonState();
   }
 
-  function resetIncrementalCameraState() {
+  function resetIncrementalState() {
     abortActiveCaptureSession();
     incrementalDocumentId = null;
     incrementalPages = [];
     captureSeqCounter = 0;
-    cameraUploadInProgress = false;
+    incrementalUploadInProgress = false;
+    if (galleryMultiSelectOrderHint) {
+      galleryMultiSelectOrderHint.hidden = true;
+    }
     renderPageList();
     updateDocTypeFromSelection();
+    updateGalleryPickState();
     updateCameraCaptureButtonState();
     updateSubmitButtonState();
   }
 
-  function isIncrementalCameraMode() {
+  function isIncrementalImageMode() {
     return incrementalDocumentId !== null || incrementalPages.length > 0;
   }
 
@@ -152,14 +164,14 @@
   }
 
   function updateDocTypeFromSelection() {
-    const incrementalCount = incrementalPages.length;
-    if (stagedFiles.length >= MULTI_IMAGE_MIN_FILES || incrementalCount >= MULTI_IMAGE_MIN_FILES) {
+    const incrementalCount = countIncrementalUploadedPages();
+    if (incrementalCount >= MULTI_IMAGE_MIN_FILES) {
       docTypeEl.value = "IMAGE";
       applyFileInputMode();
       return;
     }
 
-    if (incrementalCount === 1 || stagedFiles.length === 1) {
+    if (incrementalCount === 1) {
       docTypeEl.value = "IMAGE";
       applyFileInputMode();
       return;
@@ -167,7 +179,7 @@
 
     const f = stagedFiles[0];
     if (!f) {
-      if (incrementalCount > 0) {
+      if (incrementalPages.length > 0) {
         docTypeEl.value = "IMAGE";
       }
       applyFileInputMode();
@@ -182,16 +194,30 @@
     applyFileInputMode();
   }
 
+  function updateGalleryPickState() {
+    const disablePick =
+      isIncrementalBusy() || countIncrementalUploadedPages() >= MULTI_IMAGE_MAX_FILES;
+    fileEl.disabled = disablePick;
+    if (galleryAddPageLabel) {
+      galleryAddPageLabel.classList.toggle("is-disabled", disablePick);
+      galleryAddPageLabel.setAttribute("aria-disabled", disablePick ? "true" : "false");
+    }
+    if (desktopFilePickLabel) {
+      desktopFilePickLabel.classList.toggle("is-disabled", disablePick);
+      desktopFilePickLabel.setAttribute("aria-disabled", disablePick ? "true" : "false");
+    }
+  }
+
   function updateCameraCaptureButtonState() {
     if (!cameraCaptureBtn) return;
     cameraCaptureBtn.disabled =
-      isCameraBusy() || countIncrementalUploadedPages() >= MULTI_IMAGE_MAX_FILES;
+      isIncrementalBusy() || countIncrementalUploadedPages() >= MULTI_IMAGE_MAX_FILES;
   }
 
   function updateSubmitButtonState() {
-    if (isIncrementalCameraMode()) {
+    if (isIncrementalImageMode()) {
       const uploaded = countIncrementalUploadedPages();
-      submitBtn.disabled = uploaded < INCREMENTAL_CAMERA_MIN_PAGES || isCameraBusy();
+      submitBtn.disabled = uploaded < INCREMENTAL_MIN_PAGES || isIncrementalBusy();
       return;
     }
     submitBtn.disabled = false;
@@ -222,67 +248,29 @@
     updateSubmitButtonState();
   }
 
-  function appendStagedFiles(selectedFiles, sourceInputEl) {
-    const incoming = Array.isArray(selectedFiles)
-      ? selectedFiles.slice()
-      : Array.from(selectedFiles || []);
-
-    if (incoming.length === 0) {
-      setMessage("error", "לא התקבל קובץ. נסי לבחור שוב מהגלריה.");
-      clearFileInputValue(sourceInputEl);
-      return;
-    }
-
-    if (isIncrementalCameraMode()) {
+  function appendStagedPdfFile(file, sourceInputEl) {
+    if (isIncrementalImageMode()) {
       setMessage(
         "error",
-        "כבר התחלתם צילום עמודים. לא ניתן לערבב עם בחירה מקבצים. רעננו את הדף להתחלה חדשה."
+        "כבר התחלתם הוספת עמודי תמונה. לא ניתן לערבב עם PDF. רעננו את הדף להתחלה חדשה."
       );
       clearFileInputValue(sourceInputEl);
       return;
     }
 
-    const stagedHasPdf = stagedFiles.some((f) => isPdfFile(f));
-    const incomingHasPdf = incoming.some((f) => isPdfFile(f));
-
-    if (stagedHasPdf) {
+    if (stagedFiles.length > 0) {
       setMessage("error", "PDF כבר נבחר. יש להסיר אותו לפני הוספת קבצים נוספים.");
       clearFileInputValue(sourceInputEl);
       return;
     }
-    if (incomingHasPdf) {
-      if (stagedFiles.length > 0 || incoming.length > 1) {
-        setMessage("error", "PDF יש להעלות כקובץ יחיד.");
-        clearFileInputValue(sourceInputEl);
-        return;
-      }
-    }
 
-    const unsupported = incoming.filter((f) => !isImageFile(f) && !isPdfFile(f));
-    if (unsupported.length > 0) {
-      setMessage("error", "ניתן להעלות תמונות או PDF בלבד.");
+    if (!isPdfFile(file)) {
+      setMessage("error", "PDF יש להעלות כקובץ יחיד.");
       clearFileInputValue(sourceInputEl);
       return;
     }
 
-    const nonImages = incoming.filter((f) => !isImageFile(f));
-    if (stagedFiles.length > 0 && nonImages.length > 0) {
-      setMessage("error", "בהעלאת ריבוי קבצים יש לבחור תמונות בלבד.");
-      clearFileInputValue(sourceInputEl);
-      return;
-    }
-
-    const totalAfter = stagedFiles.length + incoming.length;
-    if (totalAfter > MULTI_IMAGE_MAX_FILES) {
-      setMessage(
-        "error",
-        `ניתן להעלות עד ${MULTI_IMAGE_MAX_FILES} תמונות במסמך אחד (כרגע ${stagedFiles.length}).`
-      );
-      clearFileInputValue(sourceInputEl);
-      return;
-    }
-
-    stagedFiles.push(...incoming);
+    stagedFiles.push(file);
     setMessage("", "");
     updateDocTypeFromSelection();
     renderPageList();
@@ -306,20 +294,13 @@
     if (incrementalCount > 0) {
       selectedFilesSummaryEl.hidden = false;
       let summary =
-        `${uploadedIncremental} / ${MULTI_IMAGE_MAX_FILES} עמודים צולמו — סדר לפי סדר הצילום`;
-      if (uploadedIncremental >= INCREMENTAL_CAMERA_MIN_PAGES) {
+        `${uploadedIncremental} / ${MULTI_IMAGE_MAX_FILES} עמודים הועלו — סדר לפי סדר ההוספה`;
+      if (uploadedIncremental >= INCREMENTAL_MIN_PAGES) {
         summary += " (ניתן להוסיף עמודים או לסיים את המסמך)";
       } else {
         summary += " (המתיני להעלאת עמוד ראשון לפני סיום)";
       }
       selectedFilesSummaryEl.textContent = summary;
-    } else if (stagedCount >= MULTI_IMAGE_MIN_FILES) {
-      selectedFilesSummaryEl.hidden = false;
-      selectedFilesSummaryEl.textContent =
-        `${stagedCount} / ${MULTI_IMAGE_MAX_FILES} עמודים — סדר לפי סדר ההוספה`;
-    } else if (stagedCount === 1 && !isPdfFile(stagedFiles[0])) {
-      selectedFilesSummaryEl.hidden = false;
-      selectedFilesSummaryEl.textContent = "עמוד 1 — ניתן להוסיף עמודים נוספים לפני ההעלאה";
     } else if (stagedCount === 1 && isPdfFile(stagedFiles[0])) {
       selectedFilesSummaryEl.hidden = true;
       selectedFilesSummaryEl.textContent = "";
@@ -347,8 +328,7 @@
       selectedFilesEl.appendChild(li);
     });
 
-    const isSinglePdf = stagedCount === 1 && isPdfFile(stagedFiles[0]);
-    stagedFiles.forEach((f, i) => {
+    stagedFiles.forEach((f) => {
       const li = document.createElement("li");
       li.className = "selected-files-item";
 
@@ -357,11 +337,7 @@
 
       const label = document.createElement("span");
       label.className = "selected-files-label";
-      if (isSinglePdf) {
-        label.textContent = `קובץ: ${f.name || "PDF"}`;
-      } else {
-        label.textContent = `עמוד ${i + 1} — נקלט`;
-      }
+      label.textContent = `קובץ: ${f.name || "PDF"}`;
 
       main.appendChild(label);
 
@@ -369,8 +345,8 @@
       removeBtn.type = "button";
       removeBtn.className = "btn btn-link selected-files-remove";
       removeBtn.textContent = "הסרה";
-      removeBtn.setAttribute("aria-label", isSinglePdf ? "הסרת הקובץ" : `הסרת עמוד ${i + 1}`);
-      removeBtn.addEventListener("click", () => removeStagedFile(i));
+      removeBtn.setAttribute("aria-label", "הסרת הקובץ");
+      removeBtn.addEventListener("click", () => removeStagedFile(0));
 
       li.appendChild(main);
       li.appendChild(removeBtn);
@@ -437,13 +413,14 @@
     const title = document.getElementById("title").value.trim();
     const text_input_type = document.getElementById("text_input_type").value || "";
     if (!title || !text_input_type) {
-      return "נא למלא לפחות כותרת וסוג טקסט לפני צילום עמודים.";
+      return "נא למלא לפחות כותרת וסוג טקסט לפני הוספת עמודים.";
     }
     return null;
   }
 
   applyFileInputMode();
   docTypeEl.addEventListener("change", () => applyFileInputMode());
+  updateGalleryPickState();
   updateCameraCaptureButtonState();
   updateSubmitButtonState();
 
@@ -518,11 +495,12 @@
     return incrementalDocumentId;
   }
 
-  async function uploadCameraCaptureFile(pageEntry, file) {
-    cameraUploadInProgress = true;
+  async function uploadIncrementalPageFile(pageEntry, file) {
+    incrementalUploadInProgress = true;
     pageEntry.status = PAGE_STATUS.UPLOADING;
     pageEntry.label = file.name || "";
     renderPageList();
+    updateGalleryPickState();
     updateCameraCaptureButtonState();
     updateSubmitButtonState();
 
@@ -542,7 +520,7 @@
       }
 
       if (!isImageFile(file)) {
-        throw new Error("צילום ממצלמה תומך בתמונות בלבד.");
+        throw new Error("העלאת עמודים תומכת בתמונות בלבד.");
       }
 
       const uploadedCount = countIncrementalUploadedPages();
@@ -609,18 +587,115 @@
     } catch (err) {
       pageEntry.status = PAGE_STATUS.FAILED;
       const errText = String(err && err.message ? err.message : err);
-      setMessage("error", `${errText} ניתן לצלם עמוד נוסף או לרענן את הדף.`);
+      setMessage("error", `${errText} ניתן להוסיף עמוד נוסף או לרענן את הדף.`);
     } finally {
-      cameraUploadInProgress = false;
+      incrementalUploadInProgress = false;
       renderPageList();
       updateDocTypeFromSelection();
+      updateGalleryPickState();
       updateCameraCaptureButtonState();
       updateSubmitButtonState();
     }
   }
 
+  async function processGalleryImagesIncrementally(selectedFiles, sourceInputEl) {
+    const incoming = Array.isArray(selectedFiles)
+      ? selectedFiles.slice()
+      : Array.from(selectedFiles || []);
+
+    if (incoming.length === 0) {
+      setMessage("error", "לא התקבל קובץ. נסי לבחור שוב מהגלריה.");
+      clearFileInputValue(sourceInputEl);
+      return;
+    }
+
+    if (stagedFiles.length > 0) {
+      setMessage(
+        "error",
+        "כבר נבחר PDF. לא ניתן לערבב עם תמונות. רעננו את הדף להתחלה חדשה."
+      );
+      clearFileInputValue(sourceInputEl);
+      return;
+    }
+
+    const unsupported = incoming.filter((f) => !isImageFile(f));
+    if (unsupported.length > 0) {
+      setMessage("error", "ניתן להעלות תמונות או PDF בלבד.");
+      clearFileInputValue(sourceInputEl);
+      return;
+    }
+
+    const metaErr = validateMetaForDraftCreate();
+    if (metaErr) {
+      setMessage("error", metaErr);
+      clearFileInputValue(sourceInputEl);
+      return;
+    }
+
+    if (isIncrementalBusy()) {
+      setMessage("ok", "ממתינה לסיום העלאת העמוד הקודם…");
+      clearFileInputValue(sourceInputEl);
+      return;
+    }
+
+    const uploadedBefore = countIncrementalUploadedPages();
+    const totalAfter = uploadedBefore + incoming.length;
+    if (totalAfter > MULTI_IMAGE_MAX_FILES) {
+      setMessage(
+        "error",
+        `ניתן להעלות עד ${MULTI_IMAGE_MAX_FILES} תמונות במסמך אחד (כרגע ${uploadedBefore}).`
+      );
+      clearFileInputValue(sourceInputEl);
+      return;
+    }
+
+    if (galleryMultiSelectOrderHint) {
+      galleryMultiSelectOrderHint.hidden = incoming.length <= 1;
+    }
+
+    if (incoming.length > 1) {
+      setMessage(
+        "ok",
+        "מעלה את התמונות לפי סדר הבחירה — ודאו שהסדר ברשימה נכון לפני הסיום."
+      );
+    }
+
+    clearFileInputValue(sourceInputEl);
+
+    for (const file of incoming) {
+      if (isIncrementalBusy()) {
+        setMessage("ok", "ממתינה לסיום העלאת העמוד הקודם…");
+        return;
+      }
+
+      captureSeqCounter += 1;
+      const pageEntry = {
+        captureSeq: captureSeqCounter,
+        orderIndex: -1,
+        label: file.name || "",
+        status: PAGE_STATUS.UPLOADING,
+      };
+      incrementalPages.push(pageEntry);
+      renderPageList();
+      updateDocTypeFromSelection();
+      updateGalleryPickState();
+      updateCameraCaptureButtonState();
+      updateSubmitButtonState();
+
+      await uploadIncrementalPageFile(pageEntry, file);
+    }
+  }
+
   function startCameraCaptureSession() {
-    if (isCameraBusy()) {
+    if (isMobileUploadUi()) {
+      setMessage(
+        "error",
+        "צילום ישיר מהדפדפן לא מומלץ בנייד. צלמו באפליקציית המצלמה של הטלפון ואז הוסיפו מהגלריה."
+      );
+      return;
+    }
+
+    if (isIncrementalBusy()) {
       setMessage("ok", "ממתינה לסיום העלאת העמוד הקודם…");
       return;
     }
@@ -634,7 +709,7 @@
     if (stagedFiles.length > 0) {
       setMessage(
         "error",
-        "כבר נבחרו קבצים מהגלריה. לא ניתן לערבב עם צילום ממצלמה. רעננו את הדף."
+        "כבר נבחר PDF. לא ניתן לערבב עם צילום ישיר. רעננו את הדף."
       );
       return;
     }
@@ -664,6 +739,7 @@
     setMessage("ok", `עמוד ${displayNum} — פותחת מצלמה…`);
     renderPageList();
     updateDocTypeFromSelection();
+    updateGalleryPickState();
     updateCameraCaptureButtonState();
     updateSubmitButtonState();
 
@@ -735,6 +811,7 @@
         activeCaptureSession = null;
       }
       cameraSessionActive = false;
+      updateGalleryPickState();
       updateCameraCaptureButtonState();
       updateSubmitButtonState();
     }
@@ -752,7 +829,7 @@
         pageEntry.status = PAGE_STATUS.NO_RESPONSE;
         setMessage(
           "error",
-          `עמוד ${displayNum} — לא התקבלה תמונה מהמצלמה. נסי לצלם שוב.`
+          `עמוד ${displayNum} — לא התקבלה תמונה מהמצלמה. נסי שוב או הוסיפי מהגלריה.`
         );
         renderPageList();
       });
@@ -763,7 +840,7 @@
         pageEntry.status = PAGE_STATUS.CANCELLED;
         setMessage(
           "error",
-          `עמוד ${displayNum} — הצילום בוטל או לא התקבל מהמצלמה. נסי לצלם שוב.`
+          `עמוד ${displayNum} — הצילום בוטל או לא התקבל מהמצלמה. נסי שוב או הוסיפי מהגלריה.`
         );
         renderPageList();
       });
@@ -782,7 +859,7 @@
           const retryFiles = Array.from(input.files || []);
           if (retryFiles.length === 1) {
             settleOnce(() => {
-              uploadCameraCaptureFile(pageEntry, retryFiles[0]);
+              uploadIncrementalPageFile(pageEntry, retryFiles[0]);
             });
             return;
           }
@@ -791,7 +868,7 @@
           } else {
             settleOnce(() => {
               pageEntry.status = PAGE_STATUS.FAILED;
-              setMessage("error", "צילום ממצלמה מוסיף עמוד אחד בכל פעם.");
+              setMessage("error", "צילום ישיר מוסיף עמוד אחד בכל פעם.");
               renderPageList();
             });
           }
@@ -807,14 +884,14 @@
       if (selectedFiles.length > 1) {
         settleOnce(() => {
           pageEntry.status = PAGE_STATUS.FAILED;
-          setMessage("error", "צילום ממצלמה מוסיף עמוד אחד בכל פעם.");
+          setMessage("error", "צילום ישיר מוסיף עמוד אחד בכל פעם.");
           renderPageList();
         });
         return;
       }
 
       settleOnce(() => {
-        uploadCameraCaptureFile(pageEntry, selectedFiles[0]);
+        uploadIncrementalPageFile(pageEntry, selectedFiles[0]);
       });
     }
 
@@ -887,88 +964,7 @@
       body: JSON.stringify({ success: true }),
     });
     setMessage("ok", "בוצע. מעבירה לעמוד המסמך…");
-    // Clear incremental state before navigation so bfcache/back restores a clean form.
-    resetIncrementalCameraState();
-    window.location.href = `/api/ui/documents/${documentId}/`;
-  }
-
-  async function runMultiImageUpload(files, meta) {
-    if (files.length > MULTI_IMAGE_MAX_FILES) {
-      throw new Error(`ניתן להעלות עד ${MULTI_IMAGE_MAX_FILES} תמונות במסמך אחד.`);
-    }
-    if (files.some((f) => !isImageFile(f))) {
-      throw new Error("בהעלאת ריבוי קבצים יש לבחור תמונות בלבד. PDF יש להעלות כקובץ יחיד.");
-    }
-
-    setMessage("ok", "יוצרת מסמך…");
-
-    const createPayload = Object.assign({}, meta, {
-      doc_type: "IMAGE",
-      files: files.map((f) => ({
-        original_name: f.name,
-        mime_type: f.type || "image/*",
-        size_bytes: f.size
-      }))
-    });
-
-    const created = await jsonFetch("/api/uploads/create/", {
-      method: "POST",
-      body: JSON.stringify(createPayload)
-    });
-
-    const documentId = created.document_id;
-    const uploads = Array.isArray(created.uploads) ? created.uploads : null;
-    if (!documentId || !uploads || uploads.length !== files.length) {
-      throw new Error("Create response missing document_id or uploads[]");
-    }
-
-    const total = files.length;
-    const restartMsg = "ההעלאה מרובת־התמונות נכשלה ויש להתחיל העלאה חדשה (אין ניסיון חוזר לעמוד בודד בגרסה זו).";
-
-    for (let i = 0; i < uploads.length; i++) {
-      const entry = uploads[i];
-      const orderIndex = entry.order_index;
-      const file = files[orderIndex];
-      const mime_type = file.type || entry.mime_type || "image/*";
-
-      setMessage("ok", `מעלה עמוד ${orderIndex + 1} מתוך ${total}…`);
-
-      let putRes;
-      try {
-        putRes = await fetch(entry.upload_url, {
-          method: "PUT",
-          headers: {"Content-Type": mime_type},
-          body: file
-        });
-      } catch (netErr) {
-        await reportPartFailure(documentId, orderIndex, `network error: ${netErr}`);
-        throw new Error(`העלאת עמוד ${orderIndex + 1} נכשלה. ${restartMsg}`);
-      }
-      if (!putRes.ok) {
-        const putText = await putRes.text().catch(() => "");
-        await reportPartFailure(documentId, orderIndex, `S3 PUT failed: HTTP ${putRes.status} ${putText}`);
-        throw new Error(`העלאת עמוד ${orderIndex + 1} נכשלה. ${restartMsg}`);
-      }
-
-      setMessage("ok", `מאשרת עמוד ${orderIndex + 1} מתוך ${total}…`);
-      try {
-        await jsonFetch(`/api/uploads/${documentId}/parts/${orderIndex}/complete/`, {
-          method: "POST",
-          body: JSON.stringify({ success: true, file_size: file.size, file_mime: mime_type })
-        });
-      } catch (completeErr) {
-        await reportPartFailure(documentId, orderIndex, `part complete failed: ${completeErr && completeErr.message ? completeErr.message : completeErr}`);
-        throw new Error(`אישור עמוד ${orderIndex + 1} נכשל. ${restartMsg}`);
-      }
-    }
-
-    setMessage("ok", "מסיימת מסמך…");
-    await jsonFetch(`/api/uploads/${documentId}/finalize/`, {
-      method: "POST",
-      body: JSON.stringify({ success: true })
-    });
-
-    setMessage("ok", "בוצע. מעבירה לעמוד המסמך…");
+    resetIncrementalState();
     window.location.href = `/api/ui/documents/${documentId}/`;
   }
 
@@ -976,13 +972,13 @@
     e.preventDefault();
     setMessage("", "");
 
-    if (isIncrementalCameraMode()) {
-      if (isCameraBusy()) {
-        setMessage("ok", "ממתינה לסיום צילום/העלאת העמודים…");
+    if (isIncrementalImageMode()) {
+      if (isIncrementalBusy()) {
+        setMessage("ok", "ממתינה לסיום העלאת העמודים…");
         return;
       }
       const uploaded = countIncrementalUploadedPages();
-      if (uploaded < INCREMENTAL_CAMERA_MIN_PAGES) {
+      if (uploaded < INCREMENTAL_MIN_PAGES) {
         setMessage(
           "error",
           "נדרש לפחות עמוד אחד שהועלה לפני סיום."
@@ -1006,11 +1002,10 @@
       return;
     }
 
-    const isMulti = files.length >= MULTI_IMAGE_MIN_FILES;
     const meta = buildFormMeta();
     const doc_type = docTypeEl.value;
 
-    if (!meta.title || !meta.text_input_type || (!isMulti && !doc_type)) {
+    if (!meta.title || !meta.text_input_type || !doc_type) {
       setMessage("error", "נא למלא שדות חובה: כותרת + סוג מסמך + סוג טקסט.");
       return;
     }
@@ -1018,11 +1013,7 @@
     submitBtn.disabled = true;
 
     try {
-      if (isMulti) {
-        await runMultiImageUpload(files, meta);
-      } else {
-        await runSingleFileUpload(files[0], doc_type, meta);
-      }
+      await runSingleFileUpload(files[0], doc_type, meta);
     } catch (err) {
       setMessage("error", String(err && err.message ? err.message : err));
       submitBtn.disabled = false;
@@ -1030,7 +1021,33 @@
   });
 
   function onGalleryInputChange(inputEl) {
-    appendStagedFiles(Array.from(inputEl.files || []), inputEl);
+    const incoming = Array.from(inputEl.files || []);
+    if (incoming.length === 0) {
+      setMessage("error", "לא התקבל קובץ. נסי לבחור שוב מהגלריה.");
+      clearFileInputValue(inputEl);
+      return;
+    }
+
+    const hasPdf = incoming.some((f) => isPdfFile(f));
+    const hasImage = incoming.some((f) => isImageFile(f));
+
+    if (hasPdf && hasImage) {
+      setMessage("error", "PDF יש להעלות כקובץ יחיד, בנפרד מתמונות.");
+      clearFileInputValue(inputEl);
+      return;
+    }
+
+    if (hasPdf) {
+      if (incoming.length > 1) {
+        setMessage("error", "PDF יש להעלות כקובץ יחיד.");
+        clearFileInputValue(inputEl);
+        return;
+      }
+      appendStagedPdfFile(incoming[0], inputEl);
+      return;
+    }
+
+    void processGalleryImagesIncrementally(incoming, inputEl);
   }
 
   fileEl.addEventListener("change", () => onGalleryInputChange(fileEl));
@@ -1042,7 +1059,7 @@
     if (!event.persisted) return;
     stagedFiles = [];
     clearFileInputValue(fileEl);
-    resetIncrementalCameraState();
+    resetIncrementalState();
     setMessage("", "");
   });
 </script>
