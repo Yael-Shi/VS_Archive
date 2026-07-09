@@ -28,6 +28,8 @@ from django.http import (
 )
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils.cache import add_never_cache_headers
+from django.views.decorators.cache import never_cache
 from django.utils.http import urlencode
 from django.views.decorators.http import require_POST
 
@@ -2594,6 +2596,9 @@ def document_hebrew_translation_retry(request, doc_id: int):
     return redirect("documents-detail-page", doc_id=doc.id)
 
 
+UPLOAD_UI_REVISION = "2026-07-09.1"
+
+
 def _upload_form_context() -> dict:
     return {
         "doc_type_choices": Document.DocType.choices,
@@ -2602,6 +2607,7 @@ def _upload_form_context() -> dict:
         "form_data": empty_discovery_metadata_form_fields(),
         "discovery_tags_input_name": "discovery_tags",
         "discovery_tags_input_id": "discovery_tags",
+        "upload_ui_revision": UPLOAD_UI_REVISION,
         **discovery_metadata_option_querysets(),
     }
 
@@ -2623,6 +2629,7 @@ def _photo_upload_form_context() -> dict:
 
 
 @login_required
+@never_cache
 def upload_page(request):
     deny = _require_admin_page(request)
     if deny:
@@ -3067,11 +3074,14 @@ def archive_manage_new_page(request):
         context.update(_upload_form_context())
     elif item_type == ARCHIVE_ITEM_TYPE_PHOTO:
         context.update(_photo_upload_form_context())
-    return render(
+    response = render(
         request,
         "documents/archive/manage_new.html",
         context=context,
     )
+    if item_type == ARCHIVE_ITEM_TYPE_OCR_DOCUMENT:
+        add_never_cache_headers(response)
+    return response
 
 
 @login_required

@@ -2,12 +2,17 @@
 <script>
   const MULTI_IMAGE_MIN_FILES = 2;
   const MULTI_IMAGE_MAX_FILES = 35;
+  const CAMERA_CAPTURE_TIMEOUT_MS = 90000;
+  const CAMERA_FOCUS_GRACE_MS = 1500;
+  const CAMERA_FOCUS_DEBOUNCE_MS = 800;
 
   const PAGE_STATUS = {
-    QUEUED: "queued",
+    AWAITING_CAMERA: "awaiting_camera",
     UPLOADING: "uploading",
     UPLOADED: "uploaded",
     FAILED: "failed",
+    CANCELLED: "cancelled",
+    NO_RESPONSE: "no_response",
   };
 
   const form = document.getElementById("uploadForm");
@@ -15,7 +20,7 @@
   const submitBtn = document.getElementById("submitBtn");
 
   const fileEl = document.getElementById("file");
-  const cameraFileEl = document.getElementById("cameraFile");
+  const cameraCaptureBtn = document.getElementById("cameraCaptureBtn");
   const docTypeEl = document.getElementById("doc_type");
   const selectedFilesEl = document.getElementById("selectedFiles");
   const selectedFilesSummaryEl = document.getElementById("selectedFilesSummary");
@@ -27,9 +32,10 @@
   let incrementalDocumentId = null;
   let incrementalPages = [];
   let captureSeqCounter = 0;
-  /** Pending captures waiting for the single-flight uploader ({ pageEntry, file }). */
-  let pendingCameraCaptures = [];
+  let cameraSessionActive = false;
   let cameraUploadInProgress = false;
+  /** Active one-shot capture session cleanup handle, if any. */
+  let activeCaptureSession = null;
 
   function setMessage(kind, text) {
     msgEl.className = "msg";
@@ -90,15 +96,29 @@
     return stagedFiles.slice();
   }
 
+  function isCameraBusy() {
+    return cameraSessionActive || cameraUploadInProgress;
+  }
+
+  function abortActiveCaptureSession() {
+    if (activeCaptureSession && typeof activeCaptureSession.abort === "function") {
+      activeCaptureSession.abort();
+    }
+    activeCaptureSession = null;
+    cameraSessionActive = false;
+    updateCameraCaptureButtonState();
+    updateSubmitButtonState();
+  }
+
   function resetIncrementalCameraState() {
+    abortActiveCaptureSession();
     incrementalDocumentId = null;
     incrementalPages = [];
     captureSeqCounter = 0;
-    pendingCameraCaptures = [];
     cameraUploadInProgress = false;
-    clearFileInputValue(cameraFileEl);
     renderPageList();
     updateDocTypeFromSelection();
+    updateCameraCaptureButtonState();
     updateSubmitButtonState();
   }
 
@@ -125,9 +145,6 @@
     } else {
       fileEl.setAttribute("accept", "application/pdf,image/*");
     }
-
-    cameraFileEl.setAttribute("accept", "image/*");
-    cameraFileEl.setAttribute("capture", "environment");
   }
 
   function updateDocTypeFromSelection() {
@@ -161,23 +178,28 @@
     applyFileInputMode();
   }
 
+  function updateCameraCaptureButtonState() {
+    if (!cameraCaptureBtn) return;
+    cameraCaptureBtn.disabled =
+      isCameraBusy() || countIncrementalUploadedPages() >= MULTI_IMAGE_MAX_FILES;
+  }
+
   function updateSubmitButtonState() {
     if (isIncrementalCameraMode()) {
       const uploaded = countIncrementalUploadedPages();
-      submitBtn.disabled =
-        uploaded < MULTI_IMAGE_MIN_FILES ||
-        cameraUploadInProgress ||
-        pendingCameraCaptures.length > 0;
+      submitBtn.disabled = uploaded < MULTI_IMAGE_MIN_FILES || isCameraBusy();
       return;
     }
     submitBtn.disabled = false;
   }
 
   function incrementalPageStatusLabel(page) {
-    if (page.status === PAGE_STATUS.QUEUED) return "בתור…";
+    if (page.status === PAGE_STATUS.AWAITING_CAMERA) return "ממתינה למצלמה…";
     if (page.status === PAGE_STATUS.UPLOADING) return "מעלה…";
     if (page.status === PAGE_STATUS.UPLOADED) return "הועלה";
     if (page.status === PAGE_STATUS.FAILED) return "נכשל";
+    if (page.status === PAGE_STATUS.CANCELLED) return "בוטל";
+    if (page.status === PAGE_STATUS.NO_RESPONSE) return "לא התקבלה תמונה";
     return "";
   }
 
@@ -185,10 +207,6 @@
     if (page.orderIndex >= 0) return page.orderIndex + 1;
     if (page.captureSeq > 0) return page.captureSeq;
     return listIndex + 1;
-  }
-
-  function countActiveIncrementalPages() {
-    return incrementalPages.filter((p) => p.status !== PAGE_STATUS.FAILED).length;
   }
 
   function removeStagedFile(index) {
@@ -419,6 +437,7 @@
 
   applyFileInputMode();
   docTypeEl.addEventListener("change", () => applyFileInputMode());
+  updateCameraCaptureButtonState();
   updateSubmitButtonState();
 
   async function runSingleFileUpload(file, doc_type, meta) {
@@ -492,57 +511,18 @@
     return incrementalDocumentId;
   }
 
-  function enqueueCameraCapture(file) {
-    captureSeqCounter += 1;
-    const pageEntry = {
-      captureSeq: captureSeqCounter,
-      orderIndex: -1,
-      label: file.name || "",
-      status: PAGE_STATUS.QUEUED,
-    };
-    incrementalPages.push(pageEntry);
-    pendingCameraCaptures.push({ pageEntry, file });
-    renderPageList();
-    updateDocTypeFromSelection();
-    updateSubmitButtonState();
-
-    const displayNum = incrementalPageDisplayNum(pageEntry, incrementalPages.length - 1);
-    const queuedCount = pendingCameraCaptures.length;
-    if (cameraUploadInProgress || queuedCount > 1) {
-      setMessage(
-        "ok",
-        `עמוד ${displayNum} נקלט — ממתינה לסיום העלאת העמוד הקודם` +
-          (queuedCount > 1 ? ` (${queuedCount - 1} בתור)` : "") +
-          "…"
-      );
-    } else {
-      setMessage("ok", `עמוד ${displayNum} נקלט — מתחילה העלאה…`);
-    }
-
-    drainCameraCaptureQueue();
-  }
-
-  async function drainCameraCaptureQueue() {
-    if (cameraUploadInProgress) return;
-
-    const job = pendingCameraCaptures.shift();
-    if (!job) {
-      updateSubmitButtonState();
-      return;
-    }
-
-    await runQueuedCameraCapture(job);
-    await drainCameraCaptureQueue();
-  }
-
-  async function runQueuedCameraCapture(job) {
-    const { pageEntry, file } = job;
-    const displayNum = incrementalPageDisplayNum(pageEntry, incrementalPages.indexOf(pageEntry));
-
+  async function uploadCameraCaptureFile(pageEntry, file) {
     cameraUploadInProgress = true;
     pageEntry.status = PAGE_STATUS.UPLOADING;
+    pageEntry.label = file.name || "";
     renderPageList();
+    updateCameraCaptureButtonState();
     updateSubmitButtonState();
+
+    const displayNum = incrementalPageDisplayNum(
+      pageEntry,
+      incrementalPages.indexOf(pageEntry)
+    );
     setMessage("ok", `מעלה עמוד ${displayNum}…`);
 
     let documentId = null;
@@ -625,10 +605,192 @@
       setMessage("error", `${errText} ניתן לצלם עמוד נוסף או לרענן את הדף.`);
     } finally {
       cameraUploadInProgress = false;
-      clearFileInputValue(cameraFileEl);
       renderPageList();
       updateDocTypeFromSelection();
+      updateCameraCaptureButtonState();
       updateSubmitButtonState();
+    }
+  }
+
+  function startCameraCaptureSession() {
+    if (isCameraBusy()) {
+      setMessage("ok", "ממתינה לסיום העלאת העמוד הקודם…");
+      return;
+    }
+
+    const metaErr = validateMetaForDraftCreate();
+    if (metaErr) {
+      setMessage("error", metaErr);
+      return;
+    }
+
+    if (stagedFiles.length > 0) {
+      setMessage(
+        "error",
+        "כבר נבחרו קבצים מהגלריה. לא ניתן לערבב עם צילום ממצלמה. רעננו את הדף."
+      );
+      return;
+    }
+
+    if (countIncrementalUploadedPages() >= MULTI_IMAGE_MAX_FILES) {
+      setMessage(
+        "error",
+        `ניתן להעלות עד ${MULTI_IMAGE_MAX_FILES} תמונות במסמך אחד.`
+      );
+      return;
+    }
+
+    captureSeqCounter += 1;
+    const pageEntry = {
+      captureSeq: captureSeqCounter,
+      orderIndex: -1,
+      label: "",
+      status: PAGE_STATUS.AWAITING_CAMERA,
+    };
+    incrementalPages.push(pageEntry);
+    cameraSessionActive = true;
+
+    const displayNum = incrementalPageDisplayNum(
+      pageEntry,
+      incrementalPages.length - 1
+    );
+    setMessage("ok", `עמוד ${displayNum} — פותחת מצלמה…`);
+    renderPageList();
+    updateDocTypeFromSelection();
+    updateCameraCaptureButtonState();
+    updateSubmitButtonState();
+
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.setAttribute("capture", "environment");
+    input.style.display = "none";
+    document.body.appendChild(input);
+
+    let settled = false;
+    let cleanedUp = false;
+    let timeoutId = null;
+    let focusDebounceId = null;
+    const sessionStartedAt = Date.now();
+
+    function cleanupSession() {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      if (focusDebounceId !== null) {
+        clearTimeout(focusDebounceId);
+        focusDebounceId = null;
+      }
+      window.removeEventListener("focus", onWindowFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (input.parentNode) {
+        input.parentNode.removeChild(input);
+      }
+      if (activeCaptureSession && activeCaptureSession.abort === abort) {
+        activeCaptureSession = null;
+      }
+      cameraSessionActive = false;
+      updateCameraCaptureButtonState();
+      updateSubmitButtonState();
+    }
+
+    function settleOnce(run) {
+      if (settled) return;
+      settled = true;
+      run();
+      cleanupSession();
+    }
+
+    function markNoResponse() {
+      settleOnce(() => {
+        if (pageEntry.status !== PAGE_STATUS.AWAITING_CAMERA) return;
+        pageEntry.status = PAGE_STATUS.NO_RESPONSE;
+        setMessage(
+          "error",
+          "לא התקבלה תמונה מהמצלמה. נסי לצלם שוב."
+        );
+        renderPageList();
+      });
+    }
+
+    function onInputChange() {
+      const selectedFiles = Array.from(input.files || []);
+
+      if (selectedFiles.length === 0) {
+        settleOnce(() => {
+          pageEntry.status = PAGE_STATUS.CANCELLED;
+          setMessage(
+            "error",
+            "לא נבחר קובץ — הצילום בוטל או לא התקבל מהמצלמה. נסי לצלם שוב."
+          );
+          renderPageList();
+        });
+        return;
+      }
+
+      if (selectedFiles.length > 1) {
+        settleOnce(() => {
+          pageEntry.status = PAGE_STATUS.FAILED;
+          setMessage("error", "צילום ממצלמה מוסיף עמוד אחד בכל פעם.");
+          renderPageList();
+        });
+        return;
+      }
+
+      settleOnce(() => {
+        uploadCameraCaptureFile(pageEntry, selectedFiles[0]);
+      });
+    }
+
+    function scheduleNoResponseCheck() {
+      if (settled || pageEntry.status !== PAGE_STATUS.AWAITING_CAMERA) return;
+      if (Date.now() - sessionStartedAt < CAMERA_FOCUS_GRACE_MS) return;
+      if (focusDebounceId !== null) {
+        clearTimeout(focusDebounceId);
+      }
+      focusDebounceId = setTimeout(() => {
+        focusDebounceId = null;
+        if (!settled && pageEntry.status === PAGE_STATUS.AWAITING_CAMERA) {
+          markNoResponse();
+        }
+      }, CAMERA_FOCUS_DEBOUNCE_MS);
+    }
+
+    function onWindowFocus() {
+      scheduleNoResponseCheck();
+    }
+
+    function onVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        scheduleNoResponseCheck();
+      }
+    }
+
+    function abort() {
+      if (!settled) {
+        settled = true;
+      }
+      cleanupSession();
+    }
+
+    input.addEventListener("change", onInputChange, { once: true });
+    window.addEventListener("focus", onWindowFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    timeoutId = setTimeout(markNoResponse, CAMERA_CAPTURE_TIMEOUT_MS);
+
+    activeCaptureSession = { abort };
+
+    try {
+      input.click();
+    } catch (_) {
+      settleOnce(() => {
+        pageEntry.status = PAGE_STATUS.FAILED;
+        setMessage("error", "לא ניתן לפתוח את המצלמה. נסי שוב.");
+        renderPageList();
+      });
     }
   }
 
@@ -729,8 +891,8 @@
     setMessage("", "");
 
     if (isIncrementalCameraMode()) {
-      if (cameraUploadInProgress || pendingCameraCaptures.length > 0) {
-        setMessage("ok", "ממתינה לסיום העלאת העמודים…");
+      if (isCameraBusy()) {
+        setMessage("ok", "ממתינה לסיום צילום/העלאת העמודים…");
         return;
       }
       const uploaded = countIncrementalUploadedPages();
@@ -785,47 +947,10 @@
     appendStagedFiles(Array.from(inputEl.files || []), inputEl);
   }
 
-  function onCameraInputChange(inputEl) {
-    const selectedFiles = Array.from(inputEl.files || []);
-    clearFileInputValue(inputEl);
-
-    if (selectedFiles.length === 0) {
-      setMessage(
-        "error",
-        "לא נבחר קובץ — הצילום בוטל או לא התקבל מהמצלמה. נסי לצלם שוב."
-      );
-      return;
-    }
-
-    if (stagedFiles.length > 0) {
-      setMessage(
-        "error",
-        "כבר נבחרו קבצים מהגלריה. לא ניתן לערבב עם צילום ממצלמה. רעננו את הדף."
-      );
-      return;
-    }
-
-    if (selectedFiles.length > 1) {
-      setMessage("error", "צילום ממצלמה מוסיף עמוד אחד בכל פעם.");
-      return;
-    }
-
-    if (
-      countActiveIncrementalPages() + pendingCameraCaptures.length >=
-      MULTI_IMAGE_MAX_FILES
-    ) {
-      setMessage(
-        "error",
-        `ניתן להעלות עד ${MULTI_IMAGE_MAX_FILES} תמונות במסמך אחד.`
-      );
-      return;
-    }
-
-    enqueueCameraCapture(selectedFiles[0]);
-  }
-
   fileEl.addEventListener("change", () => onGalleryInputChange(fileEl));
-  cameraFileEl.addEventListener("change", () => onCameraInputChange(cameraFileEl));
+  if (cameraCaptureBtn) {
+    cameraCaptureBtn.addEventListener("click", startCameraCaptureSession);
+  }
 
   window.addEventListener("pageshow", (event) => {
     if (!event.persisted) return;

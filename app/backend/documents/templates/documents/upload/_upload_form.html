@@ -11,16 +11,9 @@
           <div class="field">
             <span class="field-label" id="uploadFileLabel">קובץ *</span>
             <div class="upload-file-actions" role="group" aria-labelledby="uploadFileLabel">
-              <input
-                id="cameraFile"
-                class="upload-file-input-hidden"
-                type="file"
-                accept="image/*"
-                capture="environment"
-                tabindex="-1"
-                aria-hidden="true"
-              />
-              <label for="cameraFile" class="btn btn-secondary upload-file-action">צילום עמוד</label>
+              <button type="button" id="cameraCaptureBtn" class="btn btn-secondary upload-file-action">
+                צילום עמוד
+              </button>
 
               <input id="file" name="file" type="file" multiple class="upload-file-input-hidden" tabindex="-1" aria-hidden="true" />
               <label for="file" class="btn btn-secondary upload-file-action">בחירה מקבצים</label>
@@ -48,6 +41,9 @@
             </div>
             <div id="selectedFilesSummary" class="field-hint selected-files-summary" hidden></div>
             <ul id="selectedFiles" class="field-hint selected-files-list"></ul>
+            <p class="field-hint upload-ui-revision" id="uploadUiRevision">
+              גרסת העלאה: {{ upload_ui_revision }}
+            </p>
           </div>
 
           <div class="field">
