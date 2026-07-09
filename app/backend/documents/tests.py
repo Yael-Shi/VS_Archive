@@ -9541,7 +9541,7 @@ class UploadPageTemplateTests(TestCase):
         self.assertContains(resp, "מהטור הימני לשמאלי")
         self.assertContains(resp, "המערכת תתעתק כל תמונה לפי הסדר ותחבר את הטקסט")
 
-    def test_upload_page_js_stages_files_client_side(self):
+    def test_upload_page_js_stages_gallery_files_client_side(self):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "let stagedFiles = []")
@@ -9550,11 +9550,28 @@ class UploadPageTemplateTests(TestCase):
         self.assertContains(resp, "getStagedFiles")
         self.assertContains(resp, "label.textContent = `עמוד ${i + 1} — נקלט`")
         self.assertContains(resp, "MULTI_IMAGE_MAX_FILES")
-        self.assertContains(resp, "cameraFileEl")
-        self.assertContains(resp, "onFileInputChange")
+        self.assertContains(resp, "onGalleryInputChange")
         self.assertContains(
-            resp, "appendStagedFiles(Array.from(inputEl.files || []), inputEl)"
+            resp,
+            "appendStagedFiles(Array.from(inputEl.files || []), inputEl)",
         )
+
+    def test_upload_page_js_wires_incremental_camera_upload(self):
+        resp = self._get_page()
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "let incrementalDocumentId = null")
+        self.assertContains(resp, "uploadIncrementalCameraFile")
+        self.assertContains(resp, "onCameraInputChange")
+        self.assertContains(resp, "runIncrementalFinalize")
+        self.assertContains(resp, "/parts/add/")
+        self.assertContains(resp, "incremental: true")
+        self.assertContains(resp, "updateSubmitButtonState")
+        self.assertContains(resp, "נדרשים לפחות ${MULTI_IMAGE_MIN_FILES} עמודים")
+        self.assertContains(resp, "לפני סיום")
+        self.assertContains(resp, "מעלה…")
+        self.assertContains(resp, "הועלה")
+        self.assertContains(resp, "נכשל")
+        self.assertContains(resp, "cameraFileEl")
         self.assertContains(
             resp,
             "לא התקבל קובץ מהמצלמה. נסי לצלם שוב או לבחור מהגלריה.",

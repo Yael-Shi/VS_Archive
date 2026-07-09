@@ -3,6 +3,12 @@
   const MULTI_IMAGE_MIN_FILES = 2;
   const MULTI_IMAGE_MAX_FILES = 35;
 
+  const PAGE_STATUS = {
+    UPLOADING: "uploading",
+    UPLOADED: "uploaded",
+    FAILED: "failed",
+  };
+
   const form = document.getElementById("uploadForm");
   const msgEl = document.getElementById("msg");
   const submitBtn = document.getElementById("submitBtn");
@@ -13,8 +19,14 @@
   const selectedFilesEl = document.getElementById("selectedFiles");
   const selectedFilesSummaryEl = document.getElementById("selectedFilesSummary");
 
-  /** Client-side staging; array order is page order (capture/add order). */
+  /** Gallery/batch staging only; camera captures use incremental upload (no File retention). */
   let stagedFiles = [];
+
+  /** Incremental camera-upload state (metadata + page status only). */
+  let incrementalDocumentId = null;
+  let incrementalPages = [];
+  let cameraUploadInProgress = false;
+  let incrementalTerminalFailed = false;
 
   function setMessage(kind, text) {
     msgEl.className = "msg";
@@ -75,6 +87,14 @@
     return stagedFiles.slice();
   }
 
+  function isIncrementalCameraMode() {
+    return incrementalDocumentId !== null || incrementalPages.length > 0;
+  }
+
+  function countIncrementalUploadedPages() {
+    return incrementalPages.filter((p) => p.status === PAGE_STATUS.UPLOADED).length;
+  }
+
   function clearFileInputValue(inputEl) {
     if (!inputEl) return;
     inputEl.value = "";
@@ -95,8 +115,15 @@
     cameraFileEl.setAttribute("capture", "environment");
   }
 
-  function updateDocTypeFromStaged() {
-    if (stagedFiles.length >= MULTI_IMAGE_MIN_FILES) {
+  function updateDocTypeFromSelection() {
+    const incrementalCount = incrementalPages.length;
+    if (stagedFiles.length >= MULTI_IMAGE_MIN_FILES || incrementalCount >= MULTI_IMAGE_MIN_FILES) {
+      docTypeEl.value = "IMAGE";
+      applyFileInputMode();
+      return;
+    }
+
+    if (incrementalCount === 1 || stagedFiles.length === 1) {
       docTypeEl.value = "IMAGE";
       applyFileInputMode();
       return;
@@ -104,6 +131,9 @@
 
     const f = stagedFiles[0];
     if (!f) {
+      if (incrementalCount > 0) {
+        docTypeEl.value = "IMAGE";
+      }
       applyFileInputMode();
       return;
     }
@@ -116,12 +146,32 @@
     applyFileInputMode();
   }
 
+  function updateSubmitButtonState() {
+    if (isIncrementalCameraMode()) {
+      const uploaded = countIncrementalUploadedPages();
+      submitBtn.disabled =
+        uploaded < MULTI_IMAGE_MIN_FILES ||
+        cameraUploadInProgress ||
+        incrementalTerminalFailed;
+      return;
+    }
+    submitBtn.disabled = false;
+  }
+
+  function incrementalPageStatusLabel(page) {
+    if (page.status === PAGE_STATUS.UPLOADING) return "מעלה…";
+    if (page.status === PAGE_STATUS.UPLOADED) return "הועלה";
+    if (page.status === PAGE_STATUS.FAILED) return "נכשל";
+    return "";
+  }
+
   function removeStagedFile(index) {
     if (index < 0 || index >= stagedFiles.length) return;
     stagedFiles.splice(index, 1);
     setMessage("", "");
-    updateDocTypeFromStaged();
-    renderSelectedFiles();
+    updateDocTypeFromSelection();
+    renderPageList();
+    updateSubmitButtonState();
   }
 
   function appendStagedFiles(selectedFiles, sourceInputEl) {
@@ -130,7 +180,16 @@
       : Array.from(selectedFiles || []);
 
     if (incoming.length === 0) {
-      setMessage("error", "לא התקבל קובץ מהמצלמה. נסי לצלם שוב או לבחור מהגלריה.");
+      setMessage("error", "לא התקבל קובץ. נסי לבחור שוב מהגלריה.");
+      clearFileInputValue(sourceInputEl);
+      return;
+    }
+
+    if (isIncrementalCameraMode()) {
+      setMessage(
+        "error",
+        "כבר התחלתם צילום עמודים. לא ניתן לערבב עם בחירה מקבצים. רעננו את הדף להתחלה חדשה."
+      );
       clearFileInputValue(sourceInputEl);
       return;
     }
@@ -177,35 +236,67 @@
 
     stagedFiles.push(...incoming);
     setMessage("", "");
-    updateDocTypeFromStaged();
-    renderSelectedFiles();
+    updateDocTypeFromSelection();
+    renderPageList();
+    updateSubmitButtonState();
     clearFileInputValue(sourceInputEl);
   }
 
-  function renderSelectedFiles() {
+  function renderPageList() {
     selectedFilesEl.innerHTML = "";
 
-    if (stagedFiles.length === 0) {
+    const stagedCount = stagedFiles.length;
+    const incrementalCount = incrementalPages.length;
+    const uploadedIncremental = countIncrementalUploadedPages();
+
+    if (stagedCount === 0 && incrementalCount === 0) {
       selectedFilesSummaryEl.hidden = true;
       selectedFilesSummaryEl.textContent = "";
       return;
     }
 
-    const isMulti = stagedFiles.length >= MULTI_IMAGE_MIN_FILES;
-    const isSinglePdf = stagedFiles.length === 1 && isPdfFile(stagedFiles[0]);
-
-    if (isMulti) {
+    if (incrementalCount > 0) {
       selectedFilesSummaryEl.hidden = false;
       selectedFilesSummaryEl.textContent =
-        `${stagedFiles.length} / ${MULTI_IMAGE_MAX_FILES} עמודים — סדר לפי סדר ההוספה`;
-    } else if (!isSinglePdf) {
+        `${uploadedIncremental} / ${MULTI_IMAGE_MAX_FILES} עמודים צולמו — סדר לפי סדר הצילום` +
+        (uploadedIncremental < MULTI_IMAGE_MIN_FILES
+          ? ` (נדרשים לפחות ${MULTI_IMAGE_MIN_FILES} עמודים לפני סיום)`
+          : "");
+    } else if (stagedCount >= MULTI_IMAGE_MIN_FILES) {
+      selectedFilesSummaryEl.hidden = false;
+      selectedFilesSummaryEl.textContent =
+        `${stagedCount} / ${MULTI_IMAGE_MAX_FILES} עמודים — סדר לפי סדר ההוספה`;
+    } else if (stagedCount === 1 && !isPdfFile(stagedFiles[0])) {
       selectedFilesSummaryEl.hidden = false;
       selectedFilesSummaryEl.textContent = "עמוד 1 — ניתן להוסיף עמודים נוספים לפני ההעלאה";
+    } else if (stagedCount === 1 && isPdfFile(stagedFiles[0])) {
+      selectedFilesSummaryEl.hidden = true;
+      selectedFilesSummaryEl.textContent = "";
     } else {
       selectedFilesSummaryEl.hidden = true;
       selectedFilesSummaryEl.textContent = "";
     }
 
+    incrementalPages.forEach((page, i) => {
+      const li = document.createElement("li");
+      li.className = "selected-files-item";
+
+      const main = document.createElement("div");
+      main.className = "selected-files-main";
+
+      const label = document.createElement("span");
+      label.className = "selected-files-label";
+      const displayNum = page.orderIndex >= 0 ? page.orderIndex + 1 : i + 1;
+      const namePart = page.label ? ` — ${page.label}` : "";
+      label.textContent =
+        `עמוד ${displayNum}${namePart} — ${incrementalPageStatusLabel(page)}`;
+
+      main.appendChild(label);
+      li.appendChild(main);
+      selectedFilesEl.appendChild(li);
+    });
+
+    const isSinglePdf = stagedCount === 1 && isPdfFile(stagedFiles[0]);
     stagedFiles.forEach((f, i) => {
       const li = document.createElement("li");
       li.className = "selected-files-item";
@@ -236,8 +327,73 @@
     });
   }
 
+  function readSelectedIds(selectId) {
+    const el = document.getElementById(selectId);
+    if (!el) return [];
+    return Array.from(el.selectedOptions)
+      .map((option) => parseInt(option.value, 10))
+      .filter((id) => !Number.isNaN(id));
+  }
+
+  function buildFormMeta() {
+    const title = document.getElementById("title").value.trim();
+    const date_start = document.getElementById("date_start").value || null;
+    const date_end = document.getElementById("date_end").value || null;
+    const date_precision = document.getElementById("date_precision").value || "UNKNOWN";
+    const language = document.getElementById("language").value || "";
+    const text_input_type = document.getElementById("text_input_type").value || "";
+    const visibility = document.getElementById("visibility").value || "private";
+    const author_name = document.getElementById("author_name").value.trim();
+    const source_title = document.getElementById("source_title").value.trim();
+    const publicNoteEl = document.getElementById("public_note");
+    const public_note = publicNoteEl ? publicNoteEl.value : "";
+
+    const categoriesRaw = document.getElementById("categories").value;
+    const eventsRaw = document.getElementById("events").value;
+    const discoveryTagsRaw = document.getElementById("discovery_tags").value;
+
+    const selected_categories = readSelectedIds("selected_categories");
+    const selected_events = readSelectedIds("selected_events");
+    const selected_tags = readSelectedIds("selected_tags");
+
+    const donor = document.getElementById("donor").value.trim();
+    const collection = document.getElementById("collection").value.trim();
+    const original_location = document.getElementById("original_location").value.trim();
+    const notes = document.getElementById("notes").value.trim();
+
+    const categories = parseTags(categoriesRaw);
+    const events = parseTags(eventsRaw);
+    const discovery_tags = parseTags(discoveryTagsRaw);
+    const admin_meta = { donor, collection, original_location, notes };
+
+    const meta = { title, text_input_type, visibility, admin_meta, date_precision };
+    if (date_start) meta.date_start = date_start;
+    if (date_end) meta.date_end = date_end;
+    if (language) meta.language = language;
+    if (author_name) meta.author_name = author_name;
+    if (source_title) meta.source_title = source_title;
+    if (public_note) meta.public_note = public_note;
+    if (selected_categories.length) meta.selected_categories = selected_categories;
+    if (selected_events.length) meta.selected_events = selected_events;
+    if (selected_tags.length) meta.selected_tags = selected_tags;
+    if (categories.length) meta.categories = categories;
+    if (events.length) meta.events = events;
+    if (discovery_tags.length) meta.discovery_tags = discovery_tags;
+    return meta;
+  }
+
+  function validateMetaForDraftCreate() {
+    const title = document.getElementById("title").value.trim();
+    const text_input_type = document.getElementById("text_input_type").value || "";
+    if (!title || !text_input_type) {
+      return "נא למלא לפחות כותרת וסוג טקסט לפני צילום עמודים.";
+    }
+    return null;
+  }
+
   applyFileInputMode();
   docTypeEl.addEventListener("change", () => applyFileInputMode());
+  updateSubmitButtonState();
 
   async function runSingleFileUpload(file, doc_type, meta) {
     setMessage("ok", "יוצרת מסמך…");
@@ -285,8 +441,6 @@
   }
 
   async function reportPartFailure(documentId, orderIndex, message) {
-    // Best-effort: mark this part (and therefore the upload) FAILED on the backend.
-    // V1 failed-part policy is terminal; there is no per-part retry/replace.
     try {
       await jsonFetch(`/api/uploads/${documentId}/parts/${orderIndex}/complete/`, {
         method: "POST",
@@ -295,6 +449,155 @@
     } catch (_) {
       // Already in a failure path; ignore secondary errors.
     }
+  }
+
+  async function ensureIncrementalDraft(meta) {
+    if (incrementalDocumentId) {
+      return incrementalDocumentId;
+    }
+    const created = await jsonFetch("/api/uploads/create/", {
+      method: "POST",
+      body: JSON.stringify(Object.assign({}, meta, { incremental: true, doc_type: "IMAGE" }))
+    });
+    if (!created.document_id) {
+      throw new Error("Create response missing document_id");
+    }
+    incrementalDocumentId = created.document_id;
+    return incrementalDocumentId;
+  }
+
+  async function uploadIncrementalCameraFile(file) {
+    const metaErr = validateMetaForDraftCreate();
+    if (metaErr) {
+      setMessage("error", metaErr);
+      return;
+    }
+
+    if (!isImageFile(file)) {
+      setMessage("error", "צילום ממצלמה תומך בתמונות בלבד.");
+      return;
+    }
+
+    if (incrementalPages.length >= MULTI_IMAGE_MAX_FILES) {
+      setMessage(
+        "error",
+        `ניתן להעלות עד ${MULTI_IMAGE_MAX_FILES} תמונות במסמך אחד.`
+      );
+      return;
+    }
+
+    if (incrementalTerminalFailed) {
+      setMessage(
+        "error",
+        "העלאת עמוד נכשלה. יש לרענן את הדף ולהתחיל העלאה חדשה."
+      );
+      return;
+    }
+
+    if (cameraUploadInProgress) {
+      return;
+    }
+
+    cameraUploadInProgress = true;
+    updateSubmitButtonState();
+
+    const pageEntry = {
+      orderIndex: -1,
+      label: file.name || "",
+      status: PAGE_STATUS.UPLOADING,
+    };
+    incrementalPages.push(pageEntry);
+    renderPageList();
+    updateDocTypeFromSelection();
+
+    const displayNum = incrementalPages.length;
+    setMessage("ok", `מעלה עמוד ${displayNum}…`);
+
+    let documentId = null;
+    let orderIndex = null;
+
+    try {
+      const meta = buildFormMeta();
+      documentId = await ensureIncrementalDraft(meta);
+
+      const mime_type = file.type || "image/jpeg";
+      const addResp = await jsonFetch(`/api/uploads/${documentId}/parts/add/`, {
+        method: "POST",
+        body: JSON.stringify({
+          original_name: file.name || "page.jpg",
+          mime_type,
+          size_bytes: file.size,
+        }),
+      });
+
+      orderIndex = addResp.order_index;
+      pageEntry.orderIndex = orderIndex;
+      pageEntry.label = addResp.original_name || pageEntry.label;
+      renderPageList();
+
+      const uploadUrl = addResp.upload_url;
+      if (uploadUrl == null || uploadUrl === "") {
+        throw new Error("parts/add response missing upload_url");
+      }
+
+      let putRes;
+      try {
+        putRes = await fetch(uploadUrl, {
+          method: "PUT",
+          headers: {"Content-Type": mime_type},
+          body: file,
+        });
+      } catch (netErr) {
+        await reportPartFailure(documentId, orderIndex, `network error: ${netErr}`);
+        throw new Error(`העלאת עמוד ${orderIndex + 1} נכשלה.`);
+      }
+
+      if (!putRes.ok) {
+        const putText = await putRes.text().catch(() => "");
+        await reportPartFailure(
+          documentId,
+          orderIndex,
+          `S3 PUT failed: HTTP ${putRes.status} ${putText}`
+        );
+        throw new Error(`העלאת עמוד ${orderIndex + 1} נכשלה.`);
+      }
+
+      await jsonFetch(`/api/uploads/${documentId}/parts/${orderIndex}/complete/`, {
+        method: "POST",
+        body: JSON.stringify({
+          success: true,
+          file_size: file.size,
+          file_mime: mime_type,
+        }),
+      });
+
+      pageEntry.status = PAGE_STATUS.UPLOADED;
+      setMessage("ok", `עמוד ${orderIndex + 1} הועלה.`);
+    } catch (err) {
+      pageEntry.status = PAGE_STATUS.FAILED;
+      incrementalTerminalFailed = true;
+      const errText = String(err && err.message ? err.message : err);
+      setMessage(
+        "error",
+        `${errText} יש לרענן את הדף ולהתחיל העלאה חדשה.`
+      );
+    } finally {
+      cameraUploadInProgress = false;
+      clearFileInputValue(cameraFileEl);
+      renderPageList();
+      updateDocTypeFromSelection();
+      updateSubmitButtonState();
+    }
+  }
+
+  async function runIncrementalFinalize(documentId) {
+    setMessage("ok", "מסיימת מסמך…");
+    await jsonFetch(`/api/uploads/${documentId}/finalize/`, {
+      method: "POST",
+      body: JSON.stringify({ success: true }),
+    });
+    setMessage("ok", "בוצע. מעבירה לעמוד המסמך…");
+    window.location.href = `/api/ui/documents/${documentId}/`;
   }
 
   async function runMultiImageUpload(files, meta) {
@@ -381,6 +684,34 @@
     e.preventDefault();
     setMessage("", "");
 
+    if (isIncrementalCameraMode()) {
+      if (incrementalTerminalFailed) {
+        setMessage("error", "העלאת עמוד נכשלה. יש לרענן את הדף ולהתחיל העלאה חדשה.");
+        return;
+      }
+      if (cameraUploadInProgress) {
+        setMessage("ok", "ממתינה לסיום העלאת העמוד…");
+        return;
+      }
+      const uploaded = countIncrementalUploadedPages();
+      if (uploaded < MULTI_IMAGE_MIN_FILES) {
+        setMessage(
+          "error",
+          `נדרשים לפחות ${MULTI_IMAGE_MIN_FILES} עמודים שהועלו לפני סיום.`
+        );
+        return;
+      }
+
+      submitBtn.disabled = true;
+      try {
+        await runIncrementalFinalize(incrementalDocumentId);
+      } catch (err) {
+        setMessage("error", String(err && err.message ? err.message : err));
+        updateSubmitButtonState();
+      }
+      return;
+    }
+
     const files = getStagedFiles();
     if (files.length === 0) {
       setMessage("error", "חובה לבחור קובץ.");
@@ -388,66 +719,13 @@
     }
 
     const isMulti = files.length >= MULTI_IMAGE_MIN_FILES;
-
-    const title = document.getElementById("title").value.trim();
+    const meta = buildFormMeta();
     const doc_type = docTypeEl.value;
 
-    const date_start = document.getElementById("date_start").value || null;
-    const date_end = document.getElementById("date_end").value || null;
-    const date_precision = document.getElementById("date_precision").value || "UNKNOWN";
-    const language = document.getElementById("language").value || "";
-    const text_input_type = document.getElementById("text_input_type").value || "";
-    const visibility = document.getElementById("visibility").value || "private";
-    const author_name = document.getElementById("author_name").value.trim();
-    const source_title = document.getElementById("source_title").value.trim();
-    const publicNoteEl = document.getElementById("public_note");
-    const public_note = publicNoteEl ? publicNoteEl.value : "";
-
-    const categoriesRaw = document.getElementById("categories").value;
-    const eventsRaw = document.getElementById("events").value;
-    const discoveryTagsRaw = document.getElementById("discovery_tags").value;
-
-    function readSelectedIds(selectId) {
-      const el = document.getElementById(selectId);
-      if (!el) return [];
-      return Array.from(el.selectedOptions)
-        .map((option) => parseInt(option.value, 10))
-        .filter((id) => !Number.isNaN(id));
-    }
-
-    const selected_categories = readSelectedIds("selected_categories");
-    const selected_events = readSelectedIds("selected_events");
-    const selected_tags = readSelectedIds("selected_tags");
-
-    const donor = document.getElementById("donor").value.trim();
-    const collection = document.getElementById("collection").value.trim();
-    const original_location = document.getElementById("original_location").value.trim();
-    const notes = document.getElementById("notes").value.trim();
-
-    // Multi-image forces doc_type=IMAGE, so doc_type is only required for single-file.
-    if (!title || !text_input_type || (!isMulti && !doc_type)) {
+    if (!meta.title || !meta.text_input_type || (!isMulti && !doc_type)) {
       setMessage("error", "נא למלא שדות חובה: כותרת + סוג מסמך + סוג טקסט.");
       return;
     }
-
-    const categories = parseTags(categoriesRaw);
-    const events = parseTags(eventsRaw);
-    const discovery_tags = parseTags(discoveryTagsRaw);
-    const admin_meta = { donor, collection, original_location, notes };
-
-    const meta = { title, text_input_type, visibility, admin_meta, date_precision };
-    if (date_start) meta.date_start = date_start;
-    if (date_end) meta.date_end = date_end;
-    if (language) meta.language = language;
-    if (author_name) meta.author_name = author_name;
-    if (source_title) meta.source_title = source_title;
-    if (public_note) meta.public_note = public_note;
-    if (selected_categories.length) meta.selected_categories = selected_categories;
-    if (selected_events.length) meta.selected_events = selected_events;
-    if (selected_tags.length) meta.selected_tags = selected_tags;
-    if (categories.length) meta.categories = categories;
-    if (events.length) meta.events = events;
-    if (discovery_tags.length) meta.discovery_tags = discovery_tags;
 
     submitBtn.disabled = true;
 
@@ -463,10 +741,36 @@
     }
   });
 
-  function onFileInputChange(inputEl) {
+  function onGalleryInputChange(inputEl) {
     appendStagedFiles(Array.from(inputEl.files || []), inputEl);
   }
 
-  fileEl.addEventListener("change", () => onFileInputChange(fileEl));
-  cameraFileEl.addEventListener("change", () => onFileInputChange(cameraFileEl));
+  async function onCameraInputChange(inputEl) {
+    const selectedFiles = Array.from(inputEl.files || []);
+    if (selectedFiles.length === 0) {
+      setMessage("error", "לא התקבל קובץ מהמצלמה. נסי לצלם שוב או לבחור מהגלריה.");
+      clearFileInputValue(inputEl);
+      return;
+    }
+
+    if (stagedFiles.length > 0) {
+      setMessage(
+        "error",
+        "כבר נבחרו קבצים מהגלריה. לא ניתן לערבב עם צילום ממצלמה. רעננו את הדף."
+      );
+      clearFileInputValue(inputEl);
+      return;
+    }
+
+    if (selectedFiles.length > 1) {
+      setMessage("error", "צילום ממצלמה מוסיף עמוד אחד בכל פעם.");
+      clearFileInputValue(inputEl);
+      return;
+    }
+
+    await uploadIncrementalCameraFile(selectedFiles[0]);
+  }
+
+  fileEl.addEventListener("change", () => onGalleryInputChange(fileEl));
+  cameraFileEl.addEventListener("change", () => onCameraInputChange(cameraFileEl));
 </script>
