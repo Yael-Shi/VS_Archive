@@ -9560,10 +9560,13 @@ class UploadPageTemplateTests(TestCase):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "let incrementalDocumentId = null")
+        self.assertContains(resp, "let pendingCameraCaptures = []")
         self.assertContains(resp, "function resetIncrementalCameraState()")
+        self.assertContains(resp, "function enqueueCameraCapture(")
+        self.assertContains(resp, "function drainCameraCaptureQueue(")
+        self.assertContains(resp, "function runQueuedCameraCapture(")
         self.assertContains(resp, "resetIncrementalCameraState();")
         self.assertContains(resp, "event.persisted")
-        self.assertContains(resp, "uploadIncrementalCameraFile")
         self.assertContains(resp, "onCameraInputChange")
         self.assertContains(resp, "runIncrementalFinalize")
         self.assertContains(resp, "/parts/add/")
@@ -9571,14 +9574,33 @@ class UploadPageTemplateTests(TestCase):
         self.assertContains(resp, "updateSubmitButtonState")
         self.assertContains(resp, "נדרשים לפחות ${MULTI_IMAGE_MIN_FILES} עמודים")
         self.assertContains(resp, "לפני סיום")
+        self.assertContains(resp, "QUEUED")
+        self.assertContains(resp, "בתור…")
         self.assertContains(resp, "מעלה…")
         self.assertContains(resp, "הועלה")
         self.assertContains(resp, "נכשל")
         self.assertContains(resp, "cameraFileEl")
-        self.assertContains(
-            resp,
-            "לא התקבל קובץ מהמצלמה. נסי לצלם שוב או לבחור מהגלריה.",
+        self.assertNotContains(resp, "incrementalTerminalFailed")
+        self.assertNotContains(resp, "uploadIncrementalCameraFile")
+
+    def test_upload_page_js_camera_capture_always_gives_visible_feedback(self):
+        resp = self._get_page()
+        self.assertEqual(resp.status_code, 200)
+        script = resp.content.decode("utf-8")
+        # Clear input immediately so mobile can fire change on every capture.
+        camera_change_idx = script.index("function onCameraInputChange")
+        camera_fn = script[camera_change_idx : camera_change_idx + 1200]
+        self.assertIn("clearFileInputValue(inputEl)", camera_fn)
+        self.assertIn(
+            "לא נבחר קובץ — הצילום בוטל או לא התקבל מהמצלמה",
+            camera_fn,
         )
+        self.assertIn("enqueueCameraCapture(selectedFiles[0])", camera_fn)
+        self.assertNotIn("if (cameraUploadInProgress) {\n      return;", camera_fn)
+        self.assertIn("incrementalPages.push(pageEntry)", script)
+        self.assertIn("ממתינה לסיום העלאת העמוד הקודם", script)
+        self.assertIn("cameraUploadInProgress = false", script)
+        self.assertIn("finally {", script)
 
     def test_upload_page_renders_staged_files_list_elements(self):
         resp = self._get_page()

@@ -4,6 +4,7 @@
   const MULTI_IMAGE_MAX_FILES = 35;
 
   const PAGE_STATUS = {
+    QUEUED: "queued",
     UPLOADING: "uploading",
     UPLOADED: "uploaded",
     FAILED: "failed",
@@ -22,11 +23,13 @@
   /** Gallery/batch staging only; camera captures use incremental upload (no File retention). */
   let stagedFiles = [];
 
-  /** Incremental camera-upload state (metadata + page status only). */
+  /** Incremental camera-upload state (metadata + page status only; no retained File objects). */
   let incrementalDocumentId = null;
   let incrementalPages = [];
+  let captureSeqCounter = 0;
+  /** Pending captures waiting for the single-flight uploader ({ pageEntry, file }). */
+  let pendingCameraCaptures = [];
   let cameraUploadInProgress = false;
-  let incrementalTerminalFailed = false;
 
   function setMessage(kind, text) {
     msgEl.className = "msg";
@@ -90,8 +93,9 @@
   function resetIncrementalCameraState() {
     incrementalDocumentId = null;
     incrementalPages = [];
+    captureSeqCounter = 0;
+    pendingCameraCaptures = [];
     cameraUploadInProgress = false;
-    incrementalTerminalFailed = false;
     clearFileInputValue(cameraFileEl);
     renderPageList();
     updateDocTypeFromSelection();
@@ -163,17 +167,28 @@
       submitBtn.disabled =
         uploaded < MULTI_IMAGE_MIN_FILES ||
         cameraUploadInProgress ||
-        incrementalTerminalFailed;
+        pendingCameraCaptures.length > 0;
       return;
     }
     submitBtn.disabled = false;
   }
 
   function incrementalPageStatusLabel(page) {
+    if (page.status === PAGE_STATUS.QUEUED) return "בתור…";
     if (page.status === PAGE_STATUS.UPLOADING) return "מעלה…";
     if (page.status === PAGE_STATUS.UPLOADED) return "הועלה";
     if (page.status === PAGE_STATUS.FAILED) return "נכשל";
     return "";
+  }
+
+  function incrementalPageDisplayNum(page, listIndex) {
+    if (page.orderIndex >= 0) return page.orderIndex + 1;
+    if (page.captureSeq > 0) return page.captureSeq;
+    return listIndex + 1;
+  }
+
+  function countActiveIncrementalPages() {
+    return incrementalPages.filter((p) => p.status !== PAGE_STATUS.FAILED).length;
   }
 
   function removeStagedFile(index) {
@@ -297,7 +312,7 @@
 
       const label = document.createElement("span");
       label.className = "selected-files-label";
-      const displayNum = page.orderIndex >= 0 ? page.orderIndex + 1 : i + 1;
+      const displayNum = incrementalPageDisplayNum(page, i);
       const namePart = page.label ? ` — ${page.label}` : "";
       label.textContent =
         `עמוד ${displayNum}${namePart} — ${incrementalPageStatusLabel(page)}`;
@@ -477,57 +492,77 @@
     return incrementalDocumentId;
   }
 
-  async function uploadIncrementalCameraFile(file) {
-    const metaErr = validateMetaForDraftCreate();
-    if (metaErr) {
-      setMessage("error", metaErr);
-      return;
-    }
-
-    if (!isImageFile(file)) {
-      setMessage("error", "צילום ממצלמה תומך בתמונות בלבד.");
-      return;
-    }
-
-    if (incrementalPages.length >= MULTI_IMAGE_MAX_FILES) {
-      setMessage(
-        "error",
-        `ניתן להעלות עד ${MULTI_IMAGE_MAX_FILES} תמונות במסמך אחד.`
-      );
-      return;
-    }
-
-    if (incrementalTerminalFailed) {
-      setMessage(
-        "error",
-        "העלאת עמוד נכשלה. יש לרענן את הדף ולהתחיל העלאה חדשה."
-      );
-      return;
-    }
-
-    if (cameraUploadInProgress) {
-      return;
-    }
-
-    cameraUploadInProgress = true;
-    updateSubmitButtonState();
-
+  function enqueueCameraCapture(file) {
+    captureSeqCounter += 1;
     const pageEntry = {
+      captureSeq: captureSeqCounter,
       orderIndex: -1,
       label: file.name || "",
-      status: PAGE_STATUS.UPLOADING,
+      status: PAGE_STATUS.QUEUED,
     };
     incrementalPages.push(pageEntry);
+    pendingCameraCaptures.push({ pageEntry, file });
     renderPageList();
     updateDocTypeFromSelection();
+    updateSubmitButtonState();
 
-    const displayNum = incrementalPages.length;
+    const displayNum = incrementalPageDisplayNum(pageEntry, incrementalPages.length - 1);
+    const queuedCount = pendingCameraCaptures.length;
+    if (cameraUploadInProgress || queuedCount > 1) {
+      setMessage(
+        "ok",
+        `עמוד ${displayNum} נקלט — ממתינה לסיום העלאת העמוד הקודם` +
+          (queuedCount > 1 ? ` (${queuedCount - 1} בתור)` : "") +
+          "…"
+      );
+    } else {
+      setMessage("ok", `עמוד ${displayNum} נקלט — מתחילה העלאה…`);
+    }
+
+    drainCameraCaptureQueue();
+  }
+
+  async function drainCameraCaptureQueue() {
+    if (cameraUploadInProgress) return;
+
+    const job = pendingCameraCaptures.shift();
+    if (!job) {
+      updateSubmitButtonState();
+      return;
+    }
+
+    await runQueuedCameraCapture(job);
+    await drainCameraCaptureQueue();
+  }
+
+  async function runQueuedCameraCapture(job) {
+    const { pageEntry, file } = job;
+    const displayNum = incrementalPageDisplayNum(pageEntry, incrementalPages.indexOf(pageEntry));
+
+    cameraUploadInProgress = true;
+    pageEntry.status = PAGE_STATUS.UPLOADING;
+    renderPageList();
+    updateSubmitButtonState();
     setMessage("ok", `מעלה עמוד ${displayNum}…`);
 
     let documentId = null;
     let orderIndex = null;
 
     try {
+      const metaErr = validateMetaForDraftCreate();
+      if (metaErr) {
+        throw new Error(metaErr);
+      }
+
+      if (!isImageFile(file)) {
+        throw new Error("צילום ממצלמה תומך בתמונות בלבד.");
+      }
+
+      const uploadedCount = countIncrementalUploadedPages();
+      if (uploadedCount >= MULTI_IMAGE_MAX_FILES) {
+        throw new Error(`ניתן להעלות עד ${MULTI_IMAGE_MAX_FILES} תמונות במסמך אחד.`);
+      }
+
       const meta = buildFormMeta();
       documentId = await ensureIncrementalDraft(meta);
 
@@ -586,12 +621,8 @@
       setMessage("ok", `עמוד ${orderIndex + 1} הועלה.`);
     } catch (err) {
       pageEntry.status = PAGE_STATUS.FAILED;
-      incrementalTerminalFailed = true;
       const errText = String(err && err.message ? err.message : err);
-      setMessage(
-        "error",
-        `${errText} יש לרענן את הדף ולהתחיל העלאה חדשה.`
-      );
+      setMessage("error", `${errText} ניתן לצלם עמוד נוסף או לרענן את הדף.`);
     } finally {
       cameraUploadInProgress = false;
       clearFileInputValue(cameraFileEl);
@@ -698,12 +729,8 @@
     setMessage("", "");
 
     if (isIncrementalCameraMode()) {
-      if (incrementalTerminalFailed) {
-        setMessage("error", "העלאת עמוד נכשלה. יש לרענן את הדף ולהתחיל העלאה חדשה.");
-        return;
-      }
-      if (cameraUploadInProgress) {
-        setMessage("ok", "ממתינה לסיום העלאת העמוד…");
+      if (cameraUploadInProgress || pendingCameraCaptures.length > 0) {
+        setMessage("ok", "ממתינה לסיום העלאת העמודים…");
         return;
       }
       const uploaded = countIncrementalUploadedPages();
@@ -758,11 +785,15 @@
     appendStagedFiles(Array.from(inputEl.files || []), inputEl);
   }
 
-  async function onCameraInputChange(inputEl) {
+  function onCameraInputChange(inputEl) {
     const selectedFiles = Array.from(inputEl.files || []);
+    clearFileInputValue(inputEl);
+
     if (selectedFiles.length === 0) {
-      setMessage("error", "לא התקבל קובץ מהמצלמה. נסי לצלם שוב או לבחור מהגלריה.");
-      clearFileInputValue(inputEl);
+      setMessage(
+        "error",
+        "לא נבחר קובץ — הצילום בוטל או לא התקבל מהמצלמה. נסי לצלם שוב."
+      );
       return;
     }
 
@@ -771,17 +802,26 @@
         "error",
         "כבר נבחרו קבצים מהגלריה. לא ניתן לערבב עם צילום ממצלמה. רעננו את הדף."
       );
-      clearFileInputValue(inputEl);
       return;
     }
 
     if (selectedFiles.length > 1) {
       setMessage("error", "צילום ממצלמה מוסיף עמוד אחד בכל פעם.");
-      clearFileInputValue(inputEl);
       return;
     }
 
-    await uploadIncrementalCameraFile(selectedFiles[0]);
+    if (
+      countActiveIncrementalPages() + pendingCameraCaptures.length >=
+      MULTI_IMAGE_MAX_FILES
+    ) {
+      setMessage(
+        "error",
+        `ניתן להעלות עד ${MULTI_IMAGE_MAX_FILES} תמונות במסמך אחד.`
+      );
+      return;
+    }
+
+    enqueueCameraCapture(selectedFiles[0]);
   }
 
   fileEl.addEventListener("change", () => onGalleryInputChange(fileEl));
