@@ -5,7 +5,7 @@ from __future__ import annotations
 from django.db.models import Q, QuerySet
 from django.http import Http404
 
-from documents.models import ArchiveItem, PhotoContent
+from documents.models import ArchiveItem, Document, PhotoContent
 from documents.services.document_access import is_document_admin
 
 ARCHIVE_FAMILY_GROUP_NAME = "archive_family"
@@ -58,23 +58,39 @@ def archive_item_queryset_for_user(user) -> QuerySet[ArchiveItem]:
     return filter_archive_items_for_user(user, ArchiveItem.objects.all())
 
 
-def filter_browse_renderable_photo_items(
+def filter_browse_renderable_archive_items(
     queryset: QuerySet[ArchiveItem],
 ) -> QuerySet[ArchiveItem]:
     """
-    Keep non-PHOTO rows; include PHOTO only when linked ``PhotoContent`` is complete.
+    Restrict ``/archive/`` browse/detail to items with completed uploads where required.
 
-    PHOTO is renderable on ``/archive/`` surfaces only when:
-    - linked ``PhotoContent`` exists
-    - ``upload_status == UPLOADED``
-    - ``original_file_key`` is non-empty
+    PHOTO is renderable only when linked ``PhotoContent`` is uploaded with a key.
+    OCR_DOCUMENT is renderable only when linked ``Document.upload_status`` is UPLOADED.
+    Other item types (e.g. MANUAL_TEXT) are unchanged.
     """
     uploaded_photo = Q(
         item_type=ArchiveItem.ItemType.PHOTO,
         photo_content__upload_status=PhotoContent.UploadStatus.UPLOADED,
         photo_content__original_file_key__gt="",
     )
-    return queryset.filter(~Q(item_type=ArchiveItem.ItemType.PHOTO) | uploaded_photo)
+    uploaded_ocr = Q(
+        item_type=ArchiveItem.ItemType.OCR_DOCUMENT,
+        ocr_document__upload_status=Document.UploadStatus.UPLOADED,
+    )
+    other_types = ~Q(
+        item_type__in=(
+            ArchiveItem.ItemType.PHOTO,
+            ArchiveItem.ItemType.OCR_DOCUMENT,
+        )
+    )
+    return queryset.filter(uploaded_photo | uploaded_ocr | other_types)
+
+
+def filter_browse_renderable_photo_items(
+    queryset: QuerySet[ArchiveItem],
+) -> QuerySet[ArchiveItem]:
+    """Backward-compatible alias; prefer ``filter_browse_renderable_archive_items``."""
+    return filter_browse_renderable_archive_items(queryset)
 
 
 def archive_browse_queryset_for_user(user) -> QuerySet[ArchiveItem]:
@@ -82,9 +98,9 @@ def archive_browse_queryset_for_user(user) -> QuerySet[ArchiveItem]:
     Items currently renderable on ``/archive/`` list, detail, and discovery browse.
 
     Applies visibility/access via ``archive_item_queryset_for_user``. Applies PHOTO
-    upload-completion eligibility via ``filter_browse_renderable_photo_items``.
+    upload-completion eligibility via ``filter_browse_renderable_archive_items``.
     """
-    return filter_browse_renderable_photo_items(archive_item_queryset_for_user(user))
+    return filter_browse_renderable_archive_items(archive_item_queryset_for_user(user))
 
 
 def get_viewable_archive_item(
@@ -96,11 +112,13 @@ def get_viewable_archive_item(
     """
     Return an archive item currently renderable on ``/archive/<id>/``, or raise Http404.
 
-    Applies visibility/access rules and PHOTO upload-completion eligibility.
-    Uses 404 for missing ids, unauthorized items, and non-renderable PHOTO rows.
+    Applies visibility/access rules and upload-completion eligibility for PHOTO/OCR.
+    Uses 404 for missing ids, unauthorized items, and non-renderable rows.
     """
     base = queryset if queryset is not None else ArchiveItem.objects.all()
-    qs = filter_browse_renderable_photo_items(filter_archive_items_for_user(user, base))
+    qs = filter_browse_renderable_archive_items(
+        filter_archive_items_for_user(user, base)
+    )
     try:
         return qs.select_related(
             "manual_text_content",

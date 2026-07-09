@@ -4,6 +4,11 @@ from . import views
 urlpatterns = [
     path("uploads/create/", views.create_upload, name="uploads-create"),
     path(
+        "uploads/<int:doc_id>/parts/add/",
+        views.upload_part_add,
+        name="uploads-part-add",
+    ),
+    path(
         "uploads/<int:doc_id>/complete/", views.upload_complete, name="uploads-complete"
     ),
     path(

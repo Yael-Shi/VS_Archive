@@ -46,6 +46,83 @@ def is_multi_image_document(document: Document) -> bool:
     return count is not None and count >= MULTI_IMAGE_MIN_FILES
 
 
+def is_incremental_multi_image_draft(document: Document) -> bool:
+    """
+    In-progress incremental multi-image upload: IMAGE doc with no fixed part count yet.
+
+    Distinguished from single-file uploads in progress by an empty ``file_s3_key``.
+    """
+    if document.doc_type != Document.DocType.IMAGE:
+        return False
+    if document.expected_source_file_count is not None:
+        return False
+    if document.upload_status == Document.UploadStatus.UPLOADED:
+        return False
+    if (document.file_s3_key or "").strip():
+        return False
+    return True
+
+
+def uses_multi_image_part_endpoints(document: Document) -> bool:
+    """Whether this document uses part-complete / finalize (batch or incremental)."""
+    return is_multi_image_document(document) or is_incremental_multi_image_draft(
+        document
+    )
+
+
+def ordered_source_files_for_document(document: Document) -> List[DocumentSourceFile]:
+    return list(document.source_files.order_by("order_index"))
+
+
+def validate_incremental_finalize_ready(
+    document: Document,
+) -> tuple[bool, str, int]:
+    """
+    Validate an incremental draft is ready to finalize.
+
+    Returns (ok, error_message, uploaded_count). On success, ``uploaded_count`` is
+    the contiguous part count (>= ``MULTI_IMAGE_MIN_FILES``).
+    """
+    if not is_incremental_multi_image_draft(document):
+        return False, "not an incremental multi-image draft", 0
+
+    sources = ordered_source_files_for_document(document)
+    if len(sources) < MULTI_IMAGE_MIN_FILES:
+        return (
+            False,
+            f"incremental finalize requires at least {MULTI_IMAGE_MIN_FILES} "
+            "uploaded image parts",
+            len(sources),
+        )
+
+    for order_index, source in enumerate(sources):
+        if source.order_index != order_index:
+            return False, "source file order_index values are not contiguous", 0
+        if source.upload_status == DocumentSourceFile.UploadStatus.PENDING:
+            return False, f"source file still pending for order_index={order_index}", 0
+        if source.upload_status == DocumentSourceFile.UploadStatus.FAILED:
+            return False, f"source file failed for order_index={order_index}", 0
+        if source.upload_status != DocumentSourceFile.UploadStatus.UPLOADED:
+            return False, f"source file not uploaded for order_index={order_index}", 0
+        if not (source.file_s3_key or "").strip():
+            return (
+                False,
+                f"source file has empty file_s3_key for order_index={order_index}",
+                0,
+            )
+        _validate_source_file_image_metadata(source, order_index)
+
+    return True, "", len(sources)
+
+
+def next_incremental_part_order_index(document: Document) -> int:
+    """Return the next zero-based order_index for an incremental draft."""
+    last = document.source_files.order_by("-order_index").first()
+    if last is None:
+        return 0
+    return last.order_index + 1
+
+
 def sync_primary_document_source_file(document: Document) -> DocumentSourceFile:
     """
     Upsert the primary (order_index=0) source file row from Document file metadata.

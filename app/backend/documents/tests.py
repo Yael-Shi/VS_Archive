@@ -9552,11 +9552,8 @@ class UploadPageTemplateTests(TestCase):
         self.assertContains(resp, "MULTI_IMAGE_MAX_FILES")
         self.assertContains(resp, "cameraFileEl")
         self.assertContains(resp, "onFileInputChange")
-        self.assertContains(resp, "stagingDiagnosticsEl")
-        self.assertContains(resp, "patchStagingDiagnostics")
         self.assertContains(
-            resp,
-            "const selectedFiles = Array.from(inputEl.files || []);",
+            resp, "appendStagedFiles(Array.from(inputEl.files || []), inputEl)"
         )
         self.assertContains(
             resp,
@@ -9567,7 +9564,6 @@ class UploadPageTemplateTests(TestCase):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'id="selectedFilesSummary"')
-        self.assertContains(resp, 'id="stagingDiagnostics"')
         self.assertContains(resp, 'id="selectedFiles"')
         self.assertContains(resp, "selected-files-remove")
         self.assertContains(resp, "עמוד ${i + 1} — נקלט")
@@ -11646,12 +11642,14 @@ class DocumentAccessServiceTests(TestCase):
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
             visibility=Document.Visibility.PUBLIC,
+            upload_status=Document.UploadStatus.UPLOADED,
         )
         private_doc = create_ocr_document(
             title="Private svc",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
             visibility=Document.Visibility.PRIVATE,
+            upload_status=Document.UploadStatus.UPLOADED,
         )
         staff = User.objects.create_user(username="svc_staff", is_staff=True)
         viewer = User.objects.create_user(username="svc_viewer", is_staff=False)

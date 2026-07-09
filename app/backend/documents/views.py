@@ -95,9 +95,13 @@ from documents.services.source_files import (
     all_expected_source_files_uploaded,
     build_source_preview,
     get_source_file_for_order,
+    is_incremental_multi_image_draft,
     is_multi_image_document,
     mirror_primary_document_from_source_file,
+    next_incremental_part_order_index,
     sync_primary_document_source_file,
+    uses_multi_image_part_endpoints,
+    validate_incremental_finalize_ready,
 )
 from documents.services.document_access import (
     document_queryset_for_user,
@@ -575,6 +579,130 @@ def _apply_upload_discovery_metadata(doc: Document, discovery_metadata: dict) ->
     )
 
 
+def _parse_image_file_entry(
+    entry: dict,
+    *,
+    field_prefix: str,
+) -> tuple[_ParsedImageFileMeta | None, HttpResponseBadRequest | None]:
+    if not isinstance(entry, dict):
+        return None, _bad(f"{field_prefix} must be an object")
+
+    original_name = (entry.get("original_name") or "").strip()
+    if not original_name:
+        return None, _bad(f"{field_prefix}.original_name is required")
+
+    mime_type = (entry.get("mime_type") or entry.get("content_type") or "").strip()
+    file_err = validate_image_upload_metadata(
+        mime_type=mime_type,
+        original_name=original_name,
+        field_prefix=field_prefix,
+    )
+    if file_err:
+        return None, _bad(file_err)
+
+    size_bytes = entry.get("size_bytes")
+    if size_bytes is not None and not isinstance(size_bytes, int):
+        return None, _bad(f"{field_prefix}.size_bytes must be an integer")
+
+    return {
+        "original_name": original_name,
+        "mime_type": mime_type,
+        "size_bytes": size_bytes if isinstance(size_bytes, int) else None,
+    }, None
+
+
+def _create_source_file_presigned_upload(
+    *,
+    doc: Document,
+    bucket: str,
+    order_index: int,
+    file_meta: _ParsedImageFileMeta,
+) -> dict:
+    key = build_document_source_file_s3_key(
+        document_id=doc.id,
+        order_index=order_index,
+        mime_type=file_meta["mime_type"],
+    )
+    DocumentSourceFile.objects.create(
+        document=doc,
+        order_index=order_index,
+        file_s3_key=key,
+        file_original_name=file_meta["original_name"],
+        mime_type=file_meta["mime_type"],
+        size_bytes=file_meta["size_bytes"],
+        upload_status=DocumentSourceFile.UploadStatus.PENDING,
+    )
+    upload_url = create_presigned_put(
+        bucket=bucket,
+        key=key,
+        content_type=file_meta["mime_type"],
+    )
+    return {
+        "order_index": order_index,
+        "s3_key": key,
+        "upload_url": upload_url,
+        "original_name": file_meta["original_name"],
+        "mime_type": file_meta["mime_type"],
+        "size_bytes": file_meta["size_bytes"],
+    }
+
+
+def _create_incremental_multi_image_upload(
+    request, payload: dict, common: _CreateUploadCommon
+):
+    if payload.get("files") is not None:
+        return _bad("incremental upload must not include files[]")
+
+    legacy_file_fields = [
+        field
+        for field in ("original_name", "mime_type", "content_type", "size_bytes")
+        if field in payload
+    ]
+    if legacy_file_fields:
+        joined = ", ".join(legacy_file_fields)
+        return _bad(
+            "incremental upload must not include top-level single-file fields: "
+            f"{joined}"
+        )
+
+    doc_type = (payload.get("doc_type") or "").strip()
+    if doc_type and doc_type != Document.DocType.IMAGE:
+        return _bad("incremental upload requires doc_type=IMAGE")
+
+    bucket_or_response = _uploads_bucket_or_error()
+    if isinstance(bucket_or_response, JsonResponse):
+        return bucket_or_response
+
+    doc = create_ocr_document(
+        title=common["title"],
+        doc_type=Document.DocType.IMAGE,
+        date_start=common["date_start"],
+        date_end=common["date_end"],
+        date_precision=common["date_precision"],
+        language=common["language"],
+        text_input_type=common["text_input_type"],
+        visibility=common["visibility"],
+        author_name=common["author_name"],
+        source_title=common["source_title"],
+        public_note=common["public_note"],
+        upload_status=Document.UploadStatus.UPLOADING,
+        expected_source_file_count=None,
+    )
+    _attach_document_admin_metadata(doc, common["admin_meta"])
+    _apply_upload_discovery_metadata(doc, common["discovery_metadata"])
+
+    return JsonResponse(
+        {
+            "document_id": doc.id,
+            "upload_status": doc.upload_status,
+            "doc_type": doc.doc_type,
+            "incremental": True,
+            "expected_source_file_count": None,
+        },
+        status=201,
+    )
+
+
 def _create_multi_image_upload(request, payload: dict, common: _CreateUploadCommon):
     files_raw = payload.get("files")
     if not isinstance(files_raw, list):
@@ -609,37 +737,19 @@ def _create_multi_image_upload(request, payload: dict, common: _CreateUploadComm
 
     parsed_files: list[_ParsedImageFileMeta] = []
     for index, entry in enumerate(files_raw):
-        if not isinstance(entry, dict):
-            return _bad(f"files[{index}] must be an object")
         if "order_index" in entry:
             return _bad(
                 "order_index must not be provided; order is defined by files[] position"
             )
 
-        original_name = (entry.get("original_name") or "").strip()
-        if not original_name:
-            return _bad(f"files[{index}].original_name is required")
-
-        mime_type = (entry.get("mime_type") or entry.get("content_type") or "").strip()
-        file_err = validate_image_upload_metadata(
-            mime_type=mime_type,
-            original_name=original_name,
+        parsed, parse_err = _parse_image_file_entry(
+            entry,
             field_prefix=f"files[{index}]",
         )
-        if file_err:
-            return _bad(file_err)
-
-        size_bytes = entry.get("size_bytes")
-        if size_bytes is not None and not isinstance(size_bytes, int):
-            return _bad(f"files[{index}].size_bytes must be an integer")
-
-        parsed_files.append(
-            {
-                "original_name": original_name,
-                "mime_type": mime_type,
-                "size_bytes": size_bytes if isinstance(size_bytes, int) else None,
-            }
-        )
+        if parse_err is not None:
+            return parse_err
+        assert parsed is not None
+        parsed_files.append(parsed)
 
     bucket_or_response = _uploads_bucket_or_error()
     if isinstance(bucket_or_response, JsonResponse):
@@ -666,34 +776,13 @@ def _create_multi_image_upload(request, payload: dict, common: _CreateUploadComm
 
     uploads = []
     for order_index, file_meta in enumerate(parsed_files):
-        key = build_document_source_file_s3_key(
-            document_id=doc.id,
-            order_index=order_index,
-            mime_type=file_meta["mime_type"],
-        )
-        DocumentSourceFile.objects.create(
-            document=doc,
-            order_index=order_index,
-            file_s3_key=key,
-            file_original_name=file_meta["original_name"],
-            mime_type=file_meta["mime_type"],
-            size_bytes=file_meta["size_bytes"],
-            upload_status=DocumentSourceFile.UploadStatus.PENDING,
-        )
-        upload_url = create_presigned_put(
-            bucket=bucket,
-            key=key,
-            content_type=file_meta["mime_type"],
-        )
         uploads.append(
-            {
-                "order_index": order_index,
-                "s3_key": key,
-                "upload_url": upload_url,
-                "original_name": file_meta["original_name"],
-                "mime_type": file_meta["mime_type"],
-                "size_bytes": file_meta["size_bytes"],
-            }
+            _create_source_file_presigned_upload(
+                doc=doc,
+                bucket=bucket,
+                order_index=order_index,
+                file_meta=file_meta,
+            )
         )
 
     return JsonResponse(
@@ -791,6 +880,9 @@ def create_upload(request):
         return err
     assert common is not None
 
+    if payload.get("incremental") is True:
+        return _create_incremental_multi_image_upload(request, payload, common)
+
     if "files" in payload:
         return _create_multi_image_upload(request, payload, common)
 
@@ -820,7 +912,7 @@ def upload_complete(request, doc_id: int):
     except Document.DoesNotExist:
         return JsonResponse({"error": "not found"}, status=404)
 
-    if is_multi_image_document(doc):
+    if uses_multi_image_part_endpoints(doc):
         return JsonResponse(
             {
                 "error": (
@@ -979,6 +1071,78 @@ def _multi_image_upload_terminal_failed_response(doc: Document) -> JsonResponse:
 
 
 @login_required
+def upload_part_add(request, doc_id: int):
+    deny = _require_admin(request)
+    if deny:
+        return deny
+
+    if request.method != "POST":
+        return _bad("POST only")
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return _bad("invalid json")
+
+    try:
+        doc = Document.objects.get(id=doc_id)
+    except Document.DoesNotExist:
+        return JsonResponse({"error": "not found"}, status=404)
+
+    if not is_incremental_multi_image_draft(doc):
+        return JsonResponse(
+            {
+                "error": "incremental part add requires an incremental multi-image draft",
+                "document_id": doc.id,
+            },
+            status=400,
+        )
+
+    if doc.upload_status == Document.UploadStatus.FAILED:
+        return _multi_image_upload_terminal_failed_response(doc)
+
+    if doc.upload_status != Document.UploadStatus.UPLOADING:
+        return JsonResponse(
+            {
+                "error": "document is not accepting new parts",
+                "document_id": doc.id,
+            },
+            status=400,
+        )
+
+    file_meta, parse_err = _parse_image_file_entry(payload, field_prefix="file")
+    if parse_err is not None:
+        return parse_err
+    assert file_meta is not None
+
+    order_index = next_incremental_part_order_index(doc)
+    if order_index >= MULTI_IMAGE_MAX_FILES:
+        return _bad(
+            f"documents may contain at most {MULTI_IMAGE_MAX_FILES} image parts"
+        )
+
+    bucket_or_response = _uploads_bucket_or_error()
+    if isinstance(bucket_or_response, JsonResponse):
+        return bucket_or_response
+    bucket = bucket_or_response
+
+    upload_entry = _create_source_file_presigned_upload(
+        doc=doc,
+        bucket=bucket,
+        order_index=order_index,
+        file_meta=file_meta,
+    )
+
+    return JsonResponse(
+        {
+            "document_id": doc.id,
+            **upload_entry,
+        },
+        status=201,
+    )
+
+
+@login_required
 def upload_part_complete(request, doc_id: int, order_index: int):
     deny = _require_admin(request)
     if deny:
@@ -995,7 +1159,7 @@ def upload_part_complete(request, doc_id: int, order_index: int):
     except Document.DoesNotExist:
         return JsonResponse({"error": "not found"}, status=404)
 
-    if not is_multi_image_document(doc):
+    if not uses_multi_image_part_endpoints(doc):
         return JsonResponse(
             {"error": "not a multi-image document", "document_id": doc.id},
             status=400,
@@ -1004,16 +1168,28 @@ def upload_part_complete(request, doc_id: int, order_index: int):
     if doc.upload_status == Document.UploadStatus.FAILED and success:
         return _multi_image_upload_terminal_failed_response(doc)
 
-    expected = doc.expected_source_file_count
-    assert expected is not None  # guaranteed when is_multi_image_document is true
-    if order_index < 0 or order_index >= expected:
+    if is_multi_image_document(doc):
+        expected = doc.expected_source_file_count
+        assert expected is not None
+        if order_index < 0 or order_index >= expected:
+            return JsonResponse(
+                {
+                    "error": (
+                        f"order_index must be between 0 and {expected - 1} inclusive"
+                    ),
+                    "document_id": doc.id,
+                },
+                status=400,
+            )
+    elif is_incremental_multi_image_draft(doc):
+        if order_index < 0:
+            return JsonResponse(
+                {"error": "order_index must be >= 0", "document_id": doc.id},
+                status=400,
+            )
+    else:
         return JsonResponse(
-            {
-                "error": (
-                    f"order_index must be between 0 and {expected - 1} inclusive"
-                ),
-                "document_id": doc.id,
-            },
+            {"error": "not a multi-image document", "document_id": doc.id},
             status=400,
         )
 
@@ -1134,7 +1310,7 @@ def upload_finalize(request, doc_id: int):
     except Document.DoesNotExist:
         return JsonResponse({"error": "not found"}, status=404)
 
-    if not is_multi_image_document(doc):
+    if not uses_multi_image_part_endpoints(doc):
         return JsonResponse(
             {"error": "not a multi-image document", "document_id": doc.id},
             status=400,
@@ -1154,12 +1330,22 @@ def upload_finalize(request, doc_id: int):
         )
         return _finalize_response(doc)
 
-    ready, ready_err = all_expected_source_files_uploaded(doc)
-    if not ready:
-        return JsonResponse(
-            {"error": ready_err, "document_id": doc.id},
-            status=400,
-        )
+    if is_incremental_multi_image_draft(doc):
+        ready, ready_err, uploaded_count = validate_incremental_finalize_ready(doc)
+        if not ready:
+            return JsonResponse(
+                {"error": ready_err, "document_id": doc.id},
+                status=400,
+            )
+        doc.expected_source_file_count = uploaded_count
+        doc.save(update_fields=["expected_source_file_count", "updated_at"])
+    else:
+        ready, ready_err = all_expected_source_files_uploaded(doc)
+        if not ready:
+            return JsonResponse(
+                {"error": ready_err, "document_id": doc.id},
+                status=400,
+            )
 
     primary = get_source_file_for_order(doc, 0)
     if primary is None:
