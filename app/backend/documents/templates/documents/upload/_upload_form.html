@@ -11,27 +11,43 @@
           <div class="field">
             <span class="field-label" id="uploadFileLabel">קובץ *</span>
             <div class="upload-file-actions" role="group" aria-labelledby="uploadFileLabel">
-              <button type="button" id="cameraCaptureBtn" class="btn btn-secondary upload-file-action">
-                צילום עמוד
-              </button>
-
               <input id="file" name="file" type="file" multiple class="upload-file-input-hidden" tabindex="-1" aria-hidden="true" />
-              <label for="file" class="btn btn-secondary upload-file-action">בחירה מקבצים</label>
+              <label for="file" id="galleryAddPageLabel" class="btn btn-primary upload-file-action upload-mobile-primary">
+                הוספת עמוד מהגלריה
+              </label>
+              <label for="file" id="desktopFilePickLabel" class="btn btn-secondary upload-file-action upload-desktop-primary">
+                בחירה מקבצים
+              </label>
+              <button type="button" id="cameraCaptureBtn" class="btn btn-secondary upload-file-action upload-file-action--experimental">
+                צילום ישיר (ניסיוני)
+              </button>
+            </div>
+            <div class="field-hint upload-mobile-hint">
+              <strong>העלאת תמונות מהנייד (מומלץ)</strong><br />
+              1. צלמו את כל העמודים <strong>באפליקציית המצלמה של הטלפון</strong>, לפי הסדר הרצוי.<br />
+              2. חזרו לכאן ולחצו <strong>«הוספת עמוד מהגלריה»</strong> — עמוד אחר עמוד, או בבחירה מרובה אם הטלפון מאפשר.<br />
+              3. <strong>סדר ההוספה כאן קובע את סדר התעתוק.</strong><br />
+              4. ניתן לסיים מסמך עם <strong>עמוד אחד</strong>, או להוסיף עד <strong>35 עמודים</strong>.
             </div>
             <div class="field-hint">
-              <strong>צילום עמוד</strong> — מצלמת הנייד, עמוד אחד בכל פעם; כל עמוד מועלה מיד לשרת (לא נשמר בזיכרון הדפדפן). עמוד אחד מספיק לסיום, או 2–35 עמודים למסמך מרובה.
+              <strong>הוספת עמוד מהגלריה</strong> — גלריה או קבצים קיימים; כל תמונה מועלה מיד לשרת (לא נשמרת בזיכרון הדפדפן). עמוד אחד מספיק לסיום, או 2–35 עמודים למסמך מרובה.
             </div>
             <div class="field-hint">
-              <strong>בחירה מקבצים</strong> — גלריה או קבצים קיימים; ניתן לבחור כמה תמונות יחד (Ctrl/Cmd, או לחיצה ארוכה בנייד).
+              ניתן לבחור כמה תמונות יחד (Ctrl/Cmd, או לחיצה ארוכה בנייד). כל תמונה חדשה <strong>מתווספת</strong> לרשימת העמודים (לא מחליפה את הקודמת).
+            </div>
+            <div class="field-hint" id="galleryMultiSelectOrderHint" hidden>
+              אם בחרתם כמה תמונות יחד, ודאו שהן מופיעות <strong>בסדר הנכון</strong> ברשימה לפני הסיום. במידת הצורך, הוסיפו עמוד-עמוד.
+            </div>
+            <div class="field-hint upload-desktop-hint">
+              <strong>בחירה מקבצים</strong> — PDF או תמונה בודדת מהמחשב; תמונות מרובות מועלות עמוד-עמוד לשרת.
+            </div>
+            <div class="field-hint upload-file-action--experimental">
+              <strong>צילום ישיר (ניסיוני)</strong> — לא מומלץ בנייד; ב-Android Chrome עלול להיכשל. העדיפו מצלמת הטלפון ואז גלריה.
             </div>
             <div class="field-hint">
-              כל תמונה חדשה <strong>מתווספת</strong> לרשימת העמודים (לא מחליפה את הקודמת).
-            </div>
-            <div class="field-hint">
-              קובץ אחד = העלאה רגילה (תמונה או PDF).<br />
-              2–35 תמונות / עמודים / חלקים = מסמך אחד לפי סדר ההוספה.<br />
-              ריבוי קבצים תומך בתמונות בלבד.<br />
-              PDF יש להעלות כקובץ יחיד.
+              PDF יש להעלות כקובץ יחיד.<br />
+              2–35 תמונות / עמודים = מסמך אחד לפי סדר ההוספה.<br />
+              ריבוי תמונות תומך בתמונות בלבד.
             </div>
             <div class="field-hint">
               למסמכים צפופים, עיתונים או טקסט בכמה טורים, מומלץ להעלות כמה תמונות חלקיות לפי סדר הקריאה.

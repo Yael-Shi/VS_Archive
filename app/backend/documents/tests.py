@@ -9513,15 +9513,19 @@ class UploadPageTemplateTests(TestCase):
             resp, 'id="file" name="file" type="file" multiple capture'
         )
 
-    def test_upload_page_renders_separate_camera_and_gallery_actions(self):
+    def test_upload_page_renders_gallery_first_actions(self):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'id="cameraCaptureBtn"')
-        self.assertContains(resp, 'type="button"')
-        self.assertContains(resp, "צילום עמוד")
+        self.assertContains(resp, 'id="galleryAddPageLabel"')
+        self.assertContains(resp, "הוספת עמוד מהגלריה")
+        self.assertContains(resp, 'id="desktopFilePickLabel"')
         self.assertContains(resp, "בחירה מקבצים")
         self.assertContains(resp, 'for="file"')
         self.assertContains(resp, "upload-file-actions")
+        self.assertContains(resp, 'id="cameraCaptureBtn"')
+        self.assertContains(resp, "צילום ישיר (ניסיוני)")
+        self.assertContains(resp, "upload-file-action--experimental")
+        self.assertNotContains(resp, ">צילום עמוד<")
         self.assertNotContains(resp, 'id="cameraFile"')
         self.assertNotContains(resp, 'for="cameraFile"')
 
@@ -9539,99 +9543,85 @@ class UploadPageTemplateTests(TestCase):
         cache_control = resp.headers.get("Cache-Control", "")
         self.assertIn("no-cache", cache_control.lower())
 
-    def test_upload_page_contains_multi_image_explanatory_copy(self):
+    def test_upload_page_contains_mobile_gallery_first_copy(self):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "העלאת תמונות מהנייד (מומלץ)")
+        self.assertContains(resp, "באפליקציית המצלמה של הטלפון")
+        self.assertContains(resp, "סדר ההוספה כאן קובע את סדר התעתוק")
+        self.assertContains(resp, "עמוד אחד")
+        self.assertContains(resp, "35 עמודים")
         self.assertContains(resp, "לבחור כמה תמונות יחד")
         self.assertContains(resp, "מתווספת")
         self.assertContains(resp, "לא מחליפה את הקודמת")
-        self.assertContains(
-            resp, "2–35 תמונות / עמודים / חלקים = מסמך אחד לפי סדר ההוספה"
-        )
-        self.assertContains(resp, "ריבוי קבצים תומך בתמונות בלבד")
         self.assertContains(resp, "PDF יש להעלות כקובץ יחיד")
         self.assertContains(resp, "מומלץ להעלות כמה תמונות חלקיות לפי סדר הקריאה")
         self.assertContains(resp, "סדר ההוספה קובע את סדר התעתוק")
         self.assertContains(resp, "אין שינוי סדר ידני בגרסה זו")
         self.assertContains(resp, "מהטור הימני לשמאלי")
         self.assertContains(resp, "המערכת תתעתק כל תמונה לפי הסדר ותחבר את הטקסט")
+        self.assertContains(resp, "upload-mobile-hint")
+        self.assertContains(resp, "galleryMultiSelectOrderHint")
 
-    def test_upload_page_js_stages_gallery_files_client_side(self):
+    def test_upload_page_js_stages_pdf_only_client_side(self):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "let stagedFiles = []")
-        self.assertContains(resp, "appendStagedFiles")
+        self.assertContains(resp, "appendStagedPdfFile")
         self.assertContains(resp, "removeStagedFile")
         self.assertContains(resp, "getStagedFiles")
-        self.assertContains(resp, "label.textContent = `עמוד ${i + 1} — נקלט`")
         self.assertContains(resp, "MULTI_IMAGE_MAX_FILES")
         self.assertContains(resp, "onGalleryInputChange")
-        self.assertContains(
-            resp,
-            "appendStagedFiles(Array.from(inputEl.files || []), inputEl)",
-        )
+        self.assertNotContains(resp, "appendStagedFiles")
+        self.assertNotContains(resp, "runMultiImageUpload")
+        self.assertNotContains(resp, "label.textContent = `עמוד ${i + 1} — נקלט`")
 
-    def test_upload_page_js_wires_incremental_camera_upload(self):
+    def test_upload_page_js_wires_gallery_incremental_upload(self):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "let incrementalDocumentId = null")
-        self.assertContains(resp, "function resetIncrementalCameraState()")
-        self.assertContains(resp, "function startCameraCaptureSession(")
-        self.assertContains(resp, "function uploadCameraCaptureFile(")
-        self.assertContains(resp, 'document.createElement("input")')
-        self.assertContains(resp, 'input.setAttribute("capture", "environment")')
-        self.assertContains(resp, "resetIncrementalCameraState();")
+        self.assertContains(resp, "function resetIncrementalState()")
+        self.assertContains(resp, "function processGalleryImagesIncrementally(")
+        self.assertContains(resp, "function uploadIncrementalPageFile(")
+        self.assertContains(resp, "resetIncrementalState();")
         self.assertContains(resp, "event.persisted")
         self.assertContains(resp, "runIncrementalFinalize")
         self.assertContains(resp, "/parts/add/")
         self.assertContains(resp, "incremental: true")
         self.assertContains(resp, "updateSubmitButtonState")
-        self.assertContains(resp, "updateCameraCaptureButtonState")
-        self.assertContains(resp, "INCREMENTAL_CAMERA_MIN_PAGES")
+        self.assertContains(resp, "updateGalleryPickState")
+        self.assertContains(resp, "INCREMENTAL_MIN_PAGES")
         self.assertContains(resp, "ניתן להוסיף עמודים או לסיים את המסמך")
-        self.assertNotContains(resp, "נדרשים לפחות ${MULTI_IMAGE_MIN_FILES} עמודים")
-        self.assertContains(resp, "AWAITING_CAMERA")
-        self.assertContains(resp, "ממתינה למצלמה…")
+        self.assertContains(resp, "incrementalUploadInProgress")
         self.assertContains(resp, "מעלה…")
         self.assertContains(resp, "הועלה")
         self.assertContains(resp, "נכשל")
-        self.assertContains(resp, "cameraCaptureBtn")
-        self.assertNotContains(resp, "let pendingCameraCaptures")
-        self.assertNotContains(resp, "cameraFileEl")
-        self.assertNotContains(resp, "onCameraInputChange")
-        self.assertNotContains(resp, "incrementalTerminalFailed")
-        self.assertNotContains(resp, "uploadIncrementalCameraFile")
+        self.assertContains(resp, "isMobileUploadUi")
+        self.assertContains(resp, "galleryMultiSelectOrderHint")
+        self.assertNotContains(resp, "INCREMENTAL_CAMERA_MIN_PAGES")
+        self.assertNotContains(resp, "uploadCameraCaptureFile")
+        self.assertNotContains(resp, "resetIncrementalCameraState")
 
-    def test_upload_page_js_camera_capture_always_gives_visible_feedback(self):
+    def test_upload_page_js_keeps_experimental_desktop_camera(self):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "function startCameraCaptureSession(")
+        self.assertContains(resp, 'input.setAttribute("capture", "environment")')
+        self.assertContains(resp, "cameraCaptureBtn")
+        self.assertContains(resp, "צילום ישיר (ניסיוני)")
+        self.assertContains(resp, "לא מומלץ בנייד")
         script = resp.content.decode("utf-8")
         session_idx = script.index("function startCameraCaptureSession")
-        session_fn = script[session_idx : session_idx + 6500]
-        self.assertIn("PAGE_STATUS.AWAITING_CAMERA", session_fn)
-        self.assertIn("פותחת מצלמה", session_fn)
-        self.assertIn('document.createElement("input")', session_fn)
-        self.assertIn("PAGE_STATUS.CANCELLED", session_fn)
-        self.assertIn("הצילום בוטל או לא התקבל מהמצלמה", session_fn)
-        self.assertIn("PAGE_STATUS.NO_RESPONSE", session_fn)
-        self.assertIn("לא התקבלה תמונה מהמצלמה", session_fn)
-        self.assertIn("CAMERA_EMPTY_CHANGE_GRACE_MS", session_fn)
-        self.assertIn("scheduleStallWatchdog", session_fn)
-        self.assertIn("CAMERA_STALL_NO_RESPONSE_MS", session_fn)
-        self.assertIn("CAMERA_HIDDEN_STALL_MS", session_fn)
-        self.assertIn("requestAnimationFrame", script)
-        self.assertIn("CAMERA_CAPTURE_TIMEOUT_MS", script)
-        self.assertIn("incrementalPages.push(pageEntry)", session_fn)
-        self.assertIn("ממתינה לסיום העלאת העמוד הקודם", script)
-        self.assertNotContains(resp, "pendingCameraCaptures")
+        session_fn = script[session_idx : session_idx + 800]
+        self.assertIn("isMobileUploadUi()", session_fn)
+        self.assertIn("לא מומלץ בנייד", session_fn)
 
-    def test_upload_page_renders_staged_files_list_elements(self):
+    def test_upload_page_renders_page_list_elements(self):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'id="selectedFilesSummary"')
         self.assertContains(resp, 'id="selectedFiles"')
         self.assertContains(resp, "selected-files-remove")
-        self.assertContains(resp, "עמוד ${i + 1} — נקלט")
         self.assertNotContains(resp, "URL.createObjectURL")
         self.assertNotContains(resp, "URL.revokeObjectURL")
         self.assertNotContains(resp, "selected-files-thumb")
@@ -9690,7 +9680,15 @@ class UploadPageTemplateTests(TestCase):
         self.assertContains(resp, 'value="HANDWRITTEN"')
         self.assertContains(resp, 'value="PRINTED"')
 
-    def test_upload_page_js_references_multi_image_endpoints(self):
+    def test_upload_page_js_keeps_single_file_pdf_upload_path(self):
+        resp = self._get_page()
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "runSingleFileUpload")
+        self.assertContains(resp, "/api/uploads/create/")
+        self.assertContains(resp, "/complete/")
+        self.assertContains(resp, "appendStagedPdfFile")
+
+    def test_upload_page_js_references_incremental_endpoints(self):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "/parts/")
@@ -9715,10 +9713,10 @@ class UploadPageTemplateTests(TestCase):
         self.assertGreater(csrf_pos, form_start)
         self.assertGreater(csrf_pos, nav_pos)
 
-    def test_upload_page_shows_terminal_restart_copy_for_failed_multi_image(self):
+    def test_upload_page_shows_incremental_failure_restart_copy(self):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "ויש להתחיל העלאה חדשה")
+        self.assertContains(resp, "ניתן להוסיף עמוד נוסף או לרענן את הדף")
 
     def test_upload_page_requires_admin(self):
         self.client.force_login(self.viewer)
