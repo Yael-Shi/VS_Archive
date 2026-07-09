@@ -2653,6 +2653,30 @@ class UnifiedArchiveItemCreatePageTests(TestCase):
         self.assertNotContains(resp, ">Image<")
         self.assertNotContains(resp, "OCR/HTR")
 
+    def test_ocr_document_branch_is_not_cached(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.NEW_URL, {"item_type": "ocr_document"})
+        self.assertEqual(resp.status_code, 200)
+        cache_control = resp.headers.get("Cache-Control", "")
+        self.assertIn("no-cache", cache_control.lower())
+
+    def test_ocr_document_branch_renders_upload_ui_revision_stamp(self):
+        self.client.force_login(self.staff)
+        from documents.views import UPLOAD_UI_REVISION
+
+        resp = self.client.get(self.NEW_URL, {"item_type": "ocr_document"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'id="uploadUiRevision"')
+        self.assertContains(resp, f"גרסת העלאה: {UPLOAD_UI_REVISION}")
+
+    def test_manual_text_branch_is_not_forced_no_cache(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.NEW_URL, {"item_type": "manual_text"})
+        self.assertEqual(resp.status_code, 200)
+        cache_control = resp.headers.get("Cache-Control", "").lower()
+        self.assertNotIn("no-store", cache_control)
+        self.assertNotIn("no-cache", cache_control)
+
     def test_ocr_document_branch_includes_key_upload_fields(self):
         self.client.force_login(self.staff)
         resp = self.client.get(self.NEW_URL, {"item_type": "ocr_document"})
