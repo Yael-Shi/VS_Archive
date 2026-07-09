@@ -2,9 +2,13 @@
 <script>
   const MULTI_IMAGE_MIN_FILES = 2;
   const MULTI_IMAGE_MAX_FILES = 35;
+  const INCREMENTAL_CAMERA_MIN_PAGES = 1;
   const CAMERA_CAPTURE_TIMEOUT_MS = 90000;
   const CAMERA_FOCUS_GRACE_MS = 1500;
-  const CAMERA_FOCUS_DEBOUNCE_MS = 800;
+  const CAMERA_FOCUS_DEBOUNCE_MS = 1200;
+  const CAMERA_EMPTY_CHANGE_GRACE_MS = 700;
+  const CAMERA_STALL_NO_RESPONSE_MS = 18000;
+  const CAMERA_HIDDEN_STALL_MS = 45000;
 
   const PAGE_STATUS = {
     AWAITING_CAMERA: "awaiting_camera",
@@ -187,7 +191,7 @@
   function updateSubmitButtonState() {
     if (isIncrementalCameraMode()) {
       const uploaded = countIncrementalUploadedPages();
-      submitBtn.disabled = uploaded < MULTI_IMAGE_MIN_FILES || isCameraBusy();
+      submitBtn.disabled = uploaded < INCREMENTAL_CAMERA_MIN_PAGES || isCameraBusy();
       return;
     }
     submitBtn.disabled = false;
@@ -198,8 +202,8 @@
     if (page.status === PAGE_STATUS.UPLOADING) return "מעלה…";
     if (page.status === PAGE_STATUS.UPLOADED) return "הועלה";
     if (page.status === PAGE_STATUS.FAILED) return "נכשל";
-    if (page.status === PAGE_STATUS.CANCELLED) return "בוטל";
-    if (page.status === PAGE_STATUS.NO_RESPONSE) return "לא התקבלה תמונה";
+    if (page.status === PAGE_STATUS.CANCELLED) return "בוטל — לא התקבלה תמונה";
+    if (page.status === PAGE_STATUS.NO_RESPONSE) return "לא התקבלה תמונה — נסי שוב";
     return "";
   }
 
@@ -301,11 +305,14 @@
 
     if (incrementalCount > 0) {
       selectedFilesSummaryEl.hidden = false;
-      selectedFilesSummaryEl.textContent =
-        `${uploadedIncremental} / ${MULTI_IMAGE_MAX_FILES} עמודים צולמו — סדר לפי סדר הצילום` +
-        (uploadedIncremental < MULTI_IMAGE_MIN_FILES
-          ? ` (נדרשים לפחות ${MULTI_IMAGE_MIN_FILES} עמודים לפני סיום)`
-          : "");
+      let summary =
+        `${uploadedIncremental} / ${MULTI_IMAGE_MAX_FILES} עמודים צולמו — סדר לפי סדר הצילום`;
+      if (uploadedIncremental >= INCREMENTAL_CAMERA_MIN_PAGES) {
+        summary += " (ניתן להוסיף עמודים או לסיים את המסמך)";
+      } else {
+        summary += " (המתיני להעלאת עמוד ראשון לפני סיום)";
+      }
+      selectedFilesSummaryEl.textContent = summary;
     } else if (stagedCount >= MULTI_IMAGE_MIN_FILES) {
       selectedFilesSummaryEl.hidden = false;
       selectedFilesSummaryEl.textContent =
@@ -671,7 +678,36 @@
     let cleanedUp = false;
     let timeoutId = null;
     let focusDebounceId = null;
+    let emptyChangeGraceId = null;
+    let stallWatchdogId = null;
     const sessionStartedAt = Date.now();
+
+    function clearStallWatchdog() {
+      if (stallWatchdogId !== null) {
+        clearTimeout(stallWatchdogId);
+        stallWatchdogId = null;
+      }
+    }
+
+    function scheduleStallWatchdog() {
+      clearStallWatchdog();
+      if (settled || pageEntry.status !== PAGE_STATUS.AWAITING_CAMERA) return;
+
+      const delay =
+        document.visibilityState === "hidden"
+          ? CAMERA_HIDDEN_STALL_MS
+          : CAMERA_STALL_NO_RESPONSE_MS;
+
+      stallWatchdogId = setTimeout(() => {
+        stallWatchdogId = null;
+        if (settled || pageEntry.status !== PAGE_STATUS.AWAITING_CAMERA) return;
+        if (document.visibilityState === "hidden") {
+          scheduleStallWatchdog();
+          return;
+        }
+        markNoResponse();
+      }, delay);
+    }
 
     function cleanupSession() {
       if (cleanedUp) return;
@@ -684,6 +720,12 @@
         clearTimeout(focusDebounceId);
         focusDebounceId = null;
       }
+      if (emptyChangeGraceId !== null) {
+        clearTimeout(emptyChangeGraceId);
+        emptyChangeGraceId = null;
+      }
+      clearStallWatchdog();
+      input.removeEventListener("change", onInputChange);
       window.removeEventListener("focus", onWindowFocus);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       if (input.parentNode) {
@@ -710,7 +752,18 @@
         pageEntry.status = PAGE_STATUS.NO_RESPONSE;
         setMessage(
           "error",
-          "לא התקבלה תמונה מהמצלמה. נסי לצלם שוב."
+          `עמוד ${displayNum} — לא התקבלה תמונה מהמצלמה. נסי לצלם שוב.`
+        );
+        renderPageList();
+      });
+    }
+
+    function settleCancelled() {
+      settleOnce(() => {
+        pageEntry.status = PAGE_STATUS.CANCELLED;
+        setMessage(
+          "error",
+          `עמוד ${displayNum} — הצילום בוטל או לא התקבל מהמצלמה. נסי לצלם שוב.`
         );
         renderPageList();
       });
@@ -720,15 +773,35 @@
       const selectedFiles = Array.from(input.files || []);
 
       if (selectedFiles.length === 0) {
-        settleOnce(() => {
-          pageEntry.status = PAGE_STATUS.CANCELLED;
-          setMessage(
-            "error",
-            "לא נבחר קובץ — הצילום בוטל או לא התקבל מהמצלמה. נסי לצלם שוב."
-          );
-          renderPageList();
-        });
+        if (emptyChangeGraceId !== null) {
+          clearTimeout(emptyChangeGraceId);
+        }
+        emptyChangeGraceId = setTimeout(() => {
+          emptyChangeGraceId = null;
+          if (settled || pageEntry.status !== PAGE_STATUS.AWAITING_CAMERA) return;
+          const retryFiles = Array.from(input.files || []);
+          if (retryFiles.length === 1) {
+            settleOnce(() => {
+              uploadCameraCaptureFile(pageEntry, retryFiles[0]);
+            });
+            return;
+          }
+          if (retryFiles.length === 0) {
+            settleCancelled();
+          } else {
+            settleOnce(() => {
+              pageEntry.status = PAGE_STATUS.FAILED;
+              setMessage("error", "צילום ממצלמה מוסיף עמוד אחד בכל פעם.");
+              renderPageList();
+            });
+          }
+        }, CAMERA_EMPTY_CHANGE_GRACE_MS);
         return;
+      }
+
+      if (emptyChangeGraceId !== null) {
+        clearTimeout(emptyChangeGraceId);
+        emptyChangeGraceId = null;
       }
 
       if (selectedFiles.length > 1) {
@@ -747,6 +820,7 @@
 
     function scheduleNoResponseCheck() {
       if (settled || pageEntry.status !== PAGE_STATUS.AWAITING_CAMERA) return;
+      if (document.visibilityState === "hidden") return;
       if (Date.now() - sessionStartedAt < CAMERA_FOCUS_GRACE_MS) return;
       if (focusDebounceId !== null) {
         clearTimeout(focusDebounceId);
@@ -760,12 +834,18 @@
     }
 
     function onWindowFocus() {
+      if (document.visibilityState === "hidden") return;
       scheduleNoResponseCheck();
     }
 
     function onVisibilityChange() {
+      if (document.visibilityState === "hidden") {
+        scheduleStallWatchdog();
+        return;
+      }
       if (document.visibilityState === "visible") {
         scheduleNoResponseCheck();
+        scheduleStallWatchdog();
       }
     }
 
@@ -776,22 +856,28 @@
       cleanupSession();
     }
 
-    input.addEventListener("change", onInputChange, { once: true });
+    input.addEventListener("change", onInputChange);
     window.addEventListener("focus", onWindowFocus);
     document.addEventListener("visibilitychange", onVisibilityChange);
     timeoutId = setTimeout(markNoResponse, CAMERA_CAPTURE_TIMEOUT_MS);
 
     activeCaptureSession = { abort };
 
-    try {
-      input.click();
-    } catch (_) {
-      settleOnce(() => {
-        pageEntry.status = PAGE_STATUS.FAILED;
-        setMessage("error", "לא ניתן לפתוח את המצלמה. נסי שוב.");
-        renderPageList();
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (settled) return;
+        scheduleStallWatchdog();
+        try {
+          input.click();
+        } catch (_) {
+          settleOnce(() => {
+            pageEntry.status = PAGE_STATUS.FAILED;
+            setMessage("error", "לא ניתן לפתוח את המצלמה. נסי שוב.");
+            renderPageList();
+          });
+        }
       });
-    }
+    });
   }
 
   async function runIncrementalFinalize(documentId) {
@@ -896,10 +982,10 @@
         return;
       }
       const uploaded = countIncrementalUploadedPages();
-      if (uploaded < MULTI_IMAGE_MIN_FILES) {
+      if (uploaded < INCREMENTAL_CAMERA_MIN_PAGES) {
         setMessage(
           "error",
-          `נדרשים לפחות ${MULTI_IMAGE_MIN_FILES} עמודים שהועלו לפני סיום.`
+          "נדרש לפחות עמוד אחד שהועלה לפני סיום."
         );
         return;
       }

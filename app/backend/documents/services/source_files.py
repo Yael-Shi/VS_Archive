@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 MULTI_IMAGE_MIN_FILES = 2
 MULTI_IMAGE_MAX_FILES = 35
+INCREMENTAL_CAMERA_MIN_PARTS = 1
 
 
 class MultiImageSourceFilesError(ValueError):
@@ -81,17 +82,17 @@ def validate_incremental_finalize_ready(
     Validate an incremental draft is ready to finalize.
 
     Returns (ok, error_message, uploaded_count). On success, ``uploaded_count`` is
-    the contiguous part count (>= ``MULTI_IMAGE_MIN_FILES``).
+    the contiguous part count (>= ``INCREMENTAL_CAMERA_MIN_PARTS``).
     """
     if not is_incremental_multi_image_draft(document):
         return False, "not an incremental multi-image draft", 0
 
     sources = ordered_source_files_for_document(document)
-    if len(sources) < MULTI_IMAGE_MIN_FILES:
+    if len(sources) < INCREMENTAL_CAMERA_MIN_PARTS:
         return (
             False,
-            f"incremental finalize requires at least {MULTI_IMAGE_MIN_FILES} "
-            "uploaded image parts",
+            f"incremental finalize requires at least {INCREMENTAL_CAMERA_MIN_PARTS} "
+            "uploaded image part",
             len(sources),
         )
 
