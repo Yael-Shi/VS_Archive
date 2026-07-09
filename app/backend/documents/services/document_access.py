@@ -35,7 +35,10 @@ def filter_documents_for_user(user, queryset: QuerySet[Document]) -> QuerySet[Do
         user,
         ArchiveItem.objects.filter(item_type=ArchiveItem.ItemType.OCR_DOCUMENT),
     ).values_list("pk", flat=True)
-    return queryset.filter(archive_item_id__in=visible_archive_item_ids)
+    return queryset.filter(
+        archive_item_id__in=visible_archive_item_ids,
+        upload_status=Document.UploadStatus.UPLOADED,
+    )
 
 
 def document_queryset_for_user(user) -> QuerySet[Document]:
