@@ -316,7 +316,226 @@ class OcrReprocessServiceTests(TestCase):
                 collection_id=COLLECTION_ID,
                 model_id=MODEL_ID,
             )
-        self.assertIn("FAILED", str(ctx.exception))
+        self.assertIn("not eligible for OCR reprocess", str(ctx.exception))
+
+
+def _gemini_partial_failed_source_document(**kwargs) -> Document:
+    defaults = {
+        "title": "Gemini partial OCR failure",
+        "doc_type": Document.DocType.IMAGE,
+        "language": Document.Language.ENGLISH,
+        "text_input_type": Document.TextInputType.HANDWRITTEN,
+        "upload_status": Document.UploadStatus.UPLOADED,
+        "processing_state_user": Document.ProcessingState.PARTIAL,
+        "file_s3_key": "documents/232/source/0.jpeg",
+        "mime_type": "image/jpeg",
+    }
+    defaults.update(kwargs)
+    doc = create_ocr_document(**defaults)
+    DocumentTextResult.objects.create(
+        document=doc,
+        result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+        engine="ocr-dispatch",
+        engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+        prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+        status=DocumentTextResult.Status.FAILED,
+        error_code="OCR_FAILED",
+        error_details="Gemini OCR failed for test",
+        text=None,
+    )
+    return doc
+
+
+class GeminiPartialOcrReprocessTests(TestCase):
+    def test_partial_failed_source_ocr_is_eligible(self):
+        doc = _gemini_partial_failed_source_document()
+
+        assessment = assess_ocr_reprocess(
+            doc.id,
+            collection_id=COLLECTION_ID,
+            model_id=MODEL_ID,
+        )
+
+        self.assertEqual(assessment.retry_mode, OcrRetryMode.NORMAL_REENQUEUE)
+        self.assertIsNone(assessment.source_transkribus_run_id)
+
+    @patch("documents.services.ocr_reprocess.send_process_document_message")
+    def test_partial_failed_source_ocr_apply_enqueues_normal_gemini_flow(
+        self, mock_enqueue
+    ):
+        doc = _gemini_partial_failed_source_document()
+
+        assessment = apply_ocr_reprocess(
+            doc.id,
+            collection_id=COLLECTION_ID,
+            model_id=MODEL_ID,
+        )
+
+        self.assertEqual(assessment.retry_mode, OcrRetryMode.NORMAL_REENQUEUE)
+        doc.refresh_from_db()
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.PROCESSING)
+        mock_enqueue.assert_called_once_with(doc.id)
+
+    def test_translation_only_partial_is_ineligible(self):
+        doc = _gemini_partial_failed_source_document()
+        DocumentTextResult.objects.filter(document=doc).delete()
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="gemini-2.0-flash",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            text="usable source text",
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="gemini-2.0-flash",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+            status=DocumentTextResult.Status.FAILED,
+            error_code="HEBREW_TRANSLATION_FAILED",
+            text=None,
+        )
+
+        with self.assertRaises(OcrReprocessError) as ctx:
+            assess_ocr_reprocess(
+                doc.id,
+                collection_id=COLLECTION_ID,
+                model_id=MODEL_ID,
+            )
+        self.assertIn("not eligible for OCR reprocess", str(ctx.exception))
+
+    def test_usable_source_text_blocks_partial_retry(self):
+        doc = _gemini_partial_failed_source_document()
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="gemini-2.0-flash",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            text="recovered on a later attempt",
+        )
+
+        with self.assertRaises(OcrReprocessError):
+            assess_ocr_reprocess(
+                doc.id,
+                collection_id=COLLECTION_ID,
+                model_id=MODEL_ID,
+            )
+
+    def test_verified_source_blocks_partial_retry(self):
+        doc = _gemini_partial_failed_source_document()
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="gemini-2.0-flash",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.SUCCEEDED,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+            text="verified ground truth",
+        )
+
+        with self.assertRaises(OcrReprocessError):
+            assess_ocr_reprocess(
+                doc.id,
+                collection_id=COLLECTION_ID,
+                model_id=MODEL_ID,
+            )
+
+    def test_generic_partial_without_failed_source_ocr_is_ineligible(self):
+        doc = _gemini_partial_failed_source_document()
+        DocumentTextResult.objects.filter(document=doc).delete()
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="gemini-2.0-flash",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            text="source ok",
+        )
+
+        with self.assertRaises(OcrReprocessError):
+            assess_ocr_reprocess(
+                doc.id,
+                collection_id=COLLECTION_ID,
+                model_id=MODEL_ID,
+            )
+
+    def test_failed_ocr_retry_behavior_unchanged(self):
+        doc = _failed_ocr_document()
+
+        assessment = assess_ocr_reprocess(
+            doc.id,
+            collection_id=COLLECTION_ID,
+            model_id=MODEL_ID,
+        )
+
+        self.assertEqual(assessment.retry_mode, OcrRetryMode.NORMAL_REENQUEUE)
+
+    @patch(
+        "documents.management.commands.reprocess_failed_ocr_document.validate_required_env"
+    )
+    def test_command_dry_run_and_apply_support_gemini_partial_case(
+        self, mock_validate_env
+    ):
+        doc = _gemini_partial_failed_source_document()
+        mock_validate_env.return_value = WorkerEnvConfig(
+            gemini_api_key="key",
+            gemini_confidence_threshold=0.7,
+            min_text_length=20,
+            max_retries=3,
+            retry_delay_seconds_1=30,
+            retry_delay_seconds_2=300,
+            report_window_start="00:00",
+            report_send_time="08:00",
+            free_tier_alert_pct=80,
+            gemini_free_daily_request_limit=1500,
+            gemini_free_daily_image_limit=1000,
+            transkribus_free_monthly_credits=500,
+            enable_hybrid_htr=False,
+            enable_daily_report=False,
+            smtp_host=None,
+            smtp_port=None,
+            smtp_username=None,
+            smtp_password=None,
+            default_from_email=None,
+            gemini_temperature=0.2,
+            gemini_top_k=40,
+            gemini_top_p=0.95,
+            gemini_max_output_tokens=2048,
+            gemini_double_pass=False,
+            gemini_consistency_min_ratio=0.7,
+            **_TRANSKRIBUS_WORKER_ENV_FIELDS,
+        )
+
+        stdout = StringIO()
+        call_command("reprocess_failed_ocr_document", doc.id, stdout=stdout)
+        output = stdout.getvalue()
+        self.assertIn("mode=dry-run", output)
+        self.assertIn("retry_mode=normal_reenqueue", output)
+        doc.refresh_from_db()
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.PARTIAL)
+
+        with patch(
+            "documents.services.ocr_reprocess.send_process_document_message"
+        ) as mock_enqueue:
+            stdout = StringIO()
+            call_command(
+                "reprocess_failed_ocr_document",
+                doc.id,
+                "--apply",
+                stdout=stdout,
+            )
+            mock_enqueue.assert_called_once_with(doc.id)
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.PROCESSING)
+        self.assertIn("enqueued PROCESS_DOCUMENT", stdout.getvalue())
 
 
 class SendProcessDocumentMessageTests(SimpleTestCase):

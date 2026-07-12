@@ -133,6 +133,76 @@ class OcrReprocessUiTests(TestCase):
         resp = self.client.get(self._detail_url(doc.id))
         self.assertNotContains(resp, "נסה עיבוד מחדש")
 
+    def test_staff_sees_retry_button_for_gemini_partial_failed_source_ocr(self):
+        doc = create_ocr_document(
+            title="Gemini partial OCR failure",
+            doc_type=Document.DocType.IMAGE,
+            language=Document.Language.ENGLISH,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.PARTIAL,
+            file_s3_key="documents/232/source/0.jpeg",
+            mime_type="image/jpeg",
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="ocr-dispatch",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.FAILED,
+            error_code="OCR_FAILED",
+            error_details="Gemini OCR failed for test",
+            text=None,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, self._reprocess_url(doc.id))
+        self.assertContains(resp, "נסה עיבוד מחדש")
+
+    def test_ineligible_translation_only_partial_hides_retry_button(self):
+        doc = create_ocr_document(
+            title="Translation-only partial",
+            doc_type=Document.DocType.PDF,
+            language=Document.Language.ENGLISH,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.PARTIAL,
+            file_s3_key="doc.pdf",
+            mime_type="application/pdf",
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="gemini-2.0-flash",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            text="usable source text",
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="gemini-2.0-flash",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+            status=DocumentTextResult.Status.FAILED,
+            error_code="HEBREW_TRANSLATION_FAILED",
+            text=None,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertNotContains(resp, "נסה עיבוד מחדש")
+
+    def test_ineligible_generic_partial_hides_retry_button(self):
+        doc = _failed_ocr_document(
+            processing_state_user=Document.ProcessingState.PARTIAL,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertNotContains(resp, "נסה עיבוד מחדש")
+
     def test_ineligible_verified_text_hides_retry_button(self):
         doc = _failed_ocr_document()
         DocumentTextResult.objects.create(

@@ -9,6 +9,7 @@ from django.db import transaction
 
 from documents.models import ArchiveItem, Document, DocumentTextResult, TranskribusRun
 from documents.services import transkribus_run_persistence as trp
+from documents.services.ocr_routing import select_ocr_route
 from documents.services.sqs import send_process_document_message
 
 
@@ -39,6 +40,59 @@ def _get_document(document_id: int) -> Document:
         raise OcrReprocessError(f"Document id={document_id} does not exist.") from exc
 
 
+def _document_routes_to_gemini(doc: Document) -> bool:
+    try:
+        route = select_ocr_route(doc.language, doc.text_input_type)
+    except ValueError:
+        return False
+    return route.engine_key == DocumentTextResult.OcrEngineKey.GEMINI
+
+
+def _source_text_row_is_usable(row: DocumentTextResult) -> bool:
+    if row.status not in (
+        DocumentTextResult.Status.SUCCEEDED,
+        DocumentTextResult.Status.NEEDS_REVIEW,
+    ):
+        return False
+    return bool((row.text or "").strip())
+
+
+def _has_usable_source_text(doc: Document) -> bool:
+    rows = DocumentTextResult.objects.filter(
+        document_id=doc.id,
+        result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+    )
+    return any(_source_text_row_is_usable(row) for row in rows)
+
+
+def _has_failed_source_ocr(doc: Document) -> bool:
+    return DocumentTextResult.objects.filter(
+        document_id=doc.id,
+        result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+        status=DocumentTextResult.Status.FAILED,
+        error_code="OCR_FAILED",
+    ).exists()
+
+
+def _is_gemini_recoverable_partial_ocr_failure(doc: Document) -> bool:
+    """Gemini OCR failed with no usable source text; missing translation keeps PARTIAL."""
+    if doc.processing_state_user != Document.ProcessingState.PARTIAL:
+        return False
+    if not _document_routes_to_gemini(doc):
+        return False
+    if _has_usable_source_text(doc):
+        return False
+    if not _has_failed_source_ocr(doc):
+        return False
+    return True
+
+
+def _processing_state_allows_ocr_reprocess(doc: Document) -> bool:
+    if doc.processing_state_user == Document.ProcessingState.FAILED:
+        return True
+    return _is_gemini_recoverable_partial_ocr_failure(doc)
+
+
 def validate_document_for_ocr_reprocess(doc: Document) -> None:
     if doc.upload_status != Document.UploadStatus.UPLOADED:
         raise OcrReprocessError(
@@ -46,10 +100,10 @@ def validate_document_for_ocr_reprocess(doc: Document) -> None:
             "must be UPLOADED."
         )
 
-    if doc.processing_state_user != Document.ProcessingState.FAILED:
+    if not _processing_state_allows_ocr_reprocess(doc):
         raise OcrReprocessError(
             f"Document id={doc.id} processing_state_user="
-            f"{doc.processing_state_user!r} must be FAILED."
+            f"{doc.processing_state_user!r} is not eligible for OCR reprocess."
         )
 
     if not doc.archive_item_id:
