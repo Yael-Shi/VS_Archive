@@ -1,12 +1,24 @@
 <ul class="archive-browse-list">
   {% for card in browse_cards %}
-    <li class="archive-browse-card{% if card.type_marker == "photo" and card.thumbnail_url %} archive-browse-card--photo-preview{% endif %}">
+    <li class="archive-browse-card{% if card.type_marker == "photo" and card.thumbnail_url %} archive-browse-card--photo-preview{% elif card.type_marker == "ocr" and card.thumbnail_url %} archive-browse-card--document-preview{% endif %}">
       <article class="archive-browse-card__article">
-        <div class="archive-browse-card__layout{% if card.type_marker == "photo" and card.thumbnail_url %} archive-browse-card__layout--photo-preview{% endif %}">
+        <div class="archive-browse-card__layout{% if card.type_marker == "photo" and card.thumbnail_url %} archive-browse-card__layout--photo-preview{% elif card.type_marker == "ocr" and card.thumbnail_url %} archive-browse-card__layout--document-preview{% endif %}">
           {% if card.type_marker == "photo" and card.thumbnail_url %}
             <div class="archive-browse-card__photo-preview">
               <img
                 class="archive-browse-card__photo-preview-image"
+                src="{{ card.thumbnail_url }}"
+                alt="{{ card.title }}"
+                width="400"
+                height="160"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+          {% elif card.type_marker == "ocr" and card.thumbnail_url %}
+            <div class="archive-browse-card__document-preview">
+              <img
+                class="archive-browse-card__document-preview-image"
                 src="{{ card.thumbnail_url }}"
                 alt="{{ card.title }}"
                 width="400"
