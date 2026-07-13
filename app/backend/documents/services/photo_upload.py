@@ -22,6 +22,7 @@ from documents.services.upload_validation import (
     validate_image_upload_metadata,
 )
 from documents.services.photo_metadata_validation import photo_metadata_from_mapping
+from documents.services.photo_thumbnail import generate_and_persist_photo_thumbnail
 
 _UPLOAD_ERROR_MAX_LENGTH = 512
 
@@ -153,6 +154,81 @@ def create_photo_upload_plan(
 
 
 @transaction.atomic
+def _finalize_photo_upload_in_transaction(
+    photo_content: PhotoContent,
+    *,
+    bucket: str,
+    success: bool,
+    file_mime: str | None,
+    client_error: str | None = None,
+) -> tuple[PhotoContent, Optional[PhotoS3VerificationError], bool]:
+    """
+    Lock, validate, verify, and persist original upload state.
+
+    Returns ``(photo_content, verify_err, should_generate_thumbnail)``.
+    Thumbnail generation is intentionally deferred until after this transaction
+    commits successfully.
+    """
+    photo_content = (
+        PhotoContent.objects.select_for_update()
+        .select_related("archive_item")
+        .get(pk=photo_content.pk)
+    )
+
+    if photo_content.upload_status == PhotoContent.UploadStatus.UPLOADED:
+        return photo_content, None, False
+
+    if not success:
+        err = _safe_upload_error(client_error or "upload failed")
+        return _mark_photo_upload_failed(photo_content, err), None, False
+
+    expected_mime = normalize_upload_mime_type(
+        file_mime or photo_content.original_mime_type
+    )
+    metadata_err = validate_image_upload_metadata(
+        mime_type=expected_mime,
+        original_name=photo_content.original_filename,
+    )
+    if metadata_err:
+        return (
+            _mark_photo_upload_failed(photo_content, metadata_err),
+            PhotoS3VerificationError(metadata_err, 400),
+            False,
+        )
+
+    verify_err, head = verify_photo_s3_upload(
+        bucket=bucket,
+        key=photo_content.original_file_key,
+        expected_mime=expected_mime,
+    )
+    if verify_err:
+        if verify_err.retryable:
+            return photo_content, verify_err, False
+        return (
+            _mark_photo_upload_failed(photo_content, verify_err.message),
+            verify_err,
+            False,
+        )
+
+    assert head is not None
+    content_length = head.content_length
+    assert content_length is not None
+    photo_content.original_mime_type = expected_mime
+    photo_content.original_size_bytes = content_length
+    photo_content.upload_status = PhotoContent.UploadStatus.UPLOADED
+    photo_content.upload_error = ""
+    photo_content.save(
+        update_fields=[
+            "original_mime_type",
+            "original_size_bytes",
+            "upload_status",
+            "upload_error",
+            "updated_at",
+        ]
+    )
+    return photo_content, None, True
+
+
 def finalize_photo_upload(
     photo_content: PhotoContent,
     *,
@@ -172,62 +248,22 @@ def finalize_photo_upload(
     Retryable S3 verification failures (502) leave ``upload_status=PENDING``.
     Validation/verification/client failures set ``upload_status=FAILED``.
     Re-upload/retry after ``FAILED`` is deferred (not implemented in PR3).
+
+    Best-effort thumbnail generation runs only after the upload finalize
+    transaction commits successfully.
     """
-    photo_content = (
-        PhotoContent.objects.select_for_update()
-        .select_related("archive_item")
-        .get(pk=photo_content.pk)
-    )
-
-    if photo_content.upload_status == PhotoContent.UploadStatus.UPLOADED:
-        return photo_content, None
-
-    if not success:
-        err = _safe_upload_error(client_error or "upload failed")
-        return _mark_photo_upload_failed(photo_content, err), None
-
-    expected_mime = normalize_upload_mime_type(
-        file_mime or photo_content.original_mime_type
-    )
-    metadata_err = validate_image_upload_metadata(
-        mime_type=expected_mime,
-        original_name=photo_content.original_filename,
-    )
-    if metadata_err:
-        return _mark_photo_upload_failed(
-            photo_content, metadata_err
-        ), PhotoS3VerificationError(
-            metadata_err,
-            400,
+    photo_content, verify_err, should_generate_thumbnail = (
+        _finalize_photo_upload_in_transaction(
+            photo_content,
+            bucket=bucket,
+            success=success,
+            file_mime=file_mime,
+            client_error=client_error,
         )
-
-    verify_err, head = verify_photo_s3_upload(
-        bucket=bucket,
-        key=photo_content.original_file_key,
-        expected_mime=expected_mime,
     )
-    if verify_err:
-        if verify_err.retryable:
-            return photo_content, verify_err
-        return _mark_photo_upload_failed(photo_content, verify_err.message), verify_err
-
-    assert head is not None
-    content_length = head.content_length
-    assert content_length is not None
-    photo_content.original_mime_type = expected_mime
-    photo_content.original_size_bytes = content_length
-    photo_content.upload_status = PhotoContent.UploadStatus.UPLOADED
-    photo_content.upload_error = ""
-    photo_content.save(
-        update_fields=[
-            "original_mime_type",
-            "original_size_bytes",
-            "upload_status",
-            "upload_error",
-            "updated_at",
-        ]
-    )
-    return photo_content, None
+    if should_generate_thumbnail:
+        generate_and_persist_photo_thumbnail(photo_content, bucket=bucket)
+    return photo_content, verify_err
 
 
 def _json_value_as_discovery_string(value) -> str:
