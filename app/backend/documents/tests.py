@@ -3989,15 +3989,25 @@ class UploadCompleteSourceFileTests(TestCase):
         self.assertEqual(DocumentSourceFile.objects.filter(document=doc).count(), 0)
 
     @patch("documents.views.send_process_document_message")
-    def test_success_without_file_s3_key_returns_400_and_no_source_file(
+    def test_legacy_complete_rejects_incremental_image_draft_and_no_source_file(
         self, mock_enqueue
     ):
-        doc = self._create_uploading_document(file_s3_key="")
+        # Incremental multi-image drafts have no primary file_s3_key yet; they must
+        # use part completion and finalize endpoints, not legacy upload_complete.
+        doc = self._create_uploading_document(
+            file_s3_key="",
+            expected_source_file_count=None,
+        )
 
         resp = self._post_complete(doc.id, {"success": True})
 
         self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.json()["error"], "file_s3_key missing")
+        body = resp.json()
+        self.assertEqual(
+            body["error"],
+            "multi-image documents use part completion and finalize endpoints",
+        )
+        self.assertEqual(body["document_id"], doc.id)
         mock_enqueue.assert_not_called()
         self.assertEqual(DocumentSourceFile.objects.filter(document=doc).count(), 0)
 
