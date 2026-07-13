@@ -279,6 +279,12 @@ class Document(models.Model):
     size_bytes = models.BigIntegerField(null=True, blank=True)
     upload_error = models.TextField(null=True, blank=True)
 
+    thumbnail_file_key = models.CharField(max_length=1024, blank=True, default="")
+    thumbnail_mime_type = models.CharField(max_length=128, blank=True, default="")
+    thumbnail_size_bytes = models.PositiveBigIntegerField(null=True, blank=True)
+    first_page_width = models.PositiveIntegerField(null=True, blank=True)
+    first_page_height = models.PositiveIntegerField(null=True, blank=True)
+
     expected_source_file_count = models.IntegerField(
         null=True,
         blank=True,

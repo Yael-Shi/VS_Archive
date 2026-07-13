@@ -98,6 +98,9 @@ from documents.services.exif_orientation import (
     is_upload_image_mime,
     normalize_uploaded_image_exif_in_s3,
 )
+from documents.services.document_thumbnail import (
+    schedule_document_thumbnail_after_upload,
+)
 from documents.services.source_files import (
     MULTI_IMAGE_MAX_FILES,
     all_expected_source_files_uploaded,
@@ -1034,28 +1037,34 @@ def upload_complete(request, doc_id: int):
 
         already_uploaded = doc.upload_status == Document.UploadStatus.UPLOADED
 
-        doc.upload_status = Document.UploadStatus.UPLOADED
-        doc.upload_error = None
+        with transaction.atomic():
+            doc.upload_status = Document.UploadStatus.UPLOADED
+            doc.upload_error = None
 
-        if norm_result.rewritten and norm_result.size_bytes is not None:
-            doc.size_bytes = norm_result.size_bytes
-        elif isinstance(payload.get("file_size"), int):
-            doc.size_bytes = payload["file_size"]
-        if file_mime:
-            doc.mime_type = file_mime
+            if norm_result.rewritten and norm_result.size_bytes is not None:
+                doc.size_bytes = norm_result.size_bytes
+            elif isinstance(payload.get("file_size"), int):
+                doc.size_bytes = payload["file_size"]
+            if file_mime:
+                doc.mime_type = file_mime
 
-        doc.processing_state_user = Document.ProcessingState.PROCESSING
-        doc.save(
-            update_fields=[
-                "upload_status",
-                "upload_error",
-                "size_bytes",
-                "mime_type",
-                "processing_state_user",
-            ]
-        )
+            doc.processing_state_user = Document.ProcessingState.PROCESSING
+            doc.save(
+                update_fields=[
+                    "upload_status",
+                    "upload_error",
+                    "size_bytes",
+                    "mime_type",
+                    "processing_state_user",
+                ]
+            )
 
-        sync_primary_document_source_file(doc)
+            sync_primary_document_source_file(doc)
+            schedule_document_thumbnail_after_upload(
+                doc,
+                bucket=bucket,
+                already_uploaded=already_uploaded,
+            )
 
         if not already_uploaded:
             try:
@@ -1430,24 +1439,35 @@ def upload_finalize(request, doc_id: int):
             status=400,
         )
 
+    bucket_or_response = _uploads_bucket_or_error()
+    if isinstance(bucket_or_response, JsonResponse):
+        return bucket_or_response
+    bucket = bucket_or_response
+
     already_uploaded = doc.upload_status == Document.UploadStatus.UPLOADED
 
-    mirror_primary_document_from_source_file(doc, primary)
-    doc.upload_status = Document.UploadStatus.UPLOADED
-    doc.upload_error = None
-    if not already_uploaded:
-        doc.processing_state_user = Document.ProcessingState.PROCESSING
-    doc.save(
-        update_fields=[
-            "file_s3_key",
-            "file_original_name",
-            "mime_type",
-            "size_bytes",
-            "upload_status",
-            "upload_error",
-            "processing_state_user",
-        ]
-    )
+    with transaction.atomic():
+        mirror_primary_document_from_source_file(doc, primary)
+        doc.upload_status = Document.UploadStatus.UPLOADED
+        doc.upload_error = None
+        if not already_uploaded:
+            doc.processing_state_user = Document.ProcessingState.PROCESSING
+        doc.save(
+            update_fields=[
+                "file_s3_key",
+                "file_original_name",
+                "mime_type",
+                "size_bytes",
+                "upload_status",
+                "upload_error",
+                "processing_state_user",
+            ]
+        )
+        schedule_document_thumbnail_after_upload(
+            doc,
+            bucket=bucket,
+            already_uploaded=already_uploaded,
+        )
 
     if not already_uploaded:
         try:

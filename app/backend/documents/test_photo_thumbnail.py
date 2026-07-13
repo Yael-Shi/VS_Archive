@@ -12,10 +12,12 @@ from PIL import Image
 
 from documents.models import ArchiveItem, PhotoContent
 from documents.s3 import S3HeadObjectResult, build_photo_thumbnail_s3_key
-from documents.services.photo_thumbnail import (
+from documents.services.image_thumbnail import (
     THUMBNAIL_JPEG_MIME,
     THUMBNAIL_MAX_EDGE,
     compute_thumbnail_dimensions,
+)
+from documents.services.photo_thumbnail import (
     generate_and_persist_photo_thumbnail,
     generate_photo_thumbnail_bytes,
 )
