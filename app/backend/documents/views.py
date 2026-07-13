@@ -143,6 +143,9 @@ from documents.services.photo_metadata_validation import (
     photo_metadata_form_data_from_content,
     parse_photo_staff_metadata_form,
 )
+from documents.services.photo_archive_urls import (
+    apply_photo_thumbnail_urls_to_browse_cards,
+)
 from documents.services.archive_item_presentation import (
     archive_browse_displayable_text_results_prefetch,
     archive_manage_item_type_ui_choices,
@@ -2936,11 +2939,21 @@ def _archive_browse_items_queryset(user, **filter_kwargs):
     ).order_by("-created_at")
 
 
+def _archive_browse_cards_for_items(items):
+    cards = build_archive_browse_cards(items)
+    bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
+    return apply_photo_thumbnail_urls_to_browse_cards(
+        cards,
+        bucket=bucket,
+        expires_in=PRESIGNED_GET_EXPIRY_SECONDS,
+    )
+
+
 def _archive_browse_page_context(*, page_title: str, items) -> dict:
     return {
         "page_title": page_title,
         "items": items,
-        "browse_cards": build_archive_browse_cards(items),
+        "browse_cards": _archive_browse_cards_for_items(items),
     }
 
 
@@ -3019,7 +3032,7 @@ def archive_list_page(request):
         "documents/archive/list.html",
         context={
             "items": page_items,
-            "browse_cards": build_archive_browse_cards(page_items),
+            "browse_cards": _archive_browse_cards_for_items(page_items),
             "is_admin": _is_admin(request.user),
             "item_type_filter": item_type_filter,
             "q": search_query,

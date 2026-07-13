@@ -529,6 +529,7 @@ class ArchiveBrowseCard:
     preview_text: str
     category_links: tuple[ArchiveBrowseLink, ...]
     related_links: tuple[ArchiveBrowseLink, ...]
+    thumbnail_url: str | None = None
 
 
 def _normalize_preview_source(text: str | None) -> str:
