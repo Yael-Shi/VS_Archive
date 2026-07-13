@@ -4,8 +4,9 @@ from unittest.mock import patch
 
 from botocore.exceptions import ClientError
 from django.contrib.auth.models import User
+from django.conf import settings
 from django.db import connection
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
@@ -18,7 +19,10 @@ from documents.services.archive_items import (
 from documents.services.document_archive_urls import (
     apply_document_thumbnail_urls_to_browse_cards,
 )
-from documents.views import _archive_browse_cards_for_items, _archive_browse_select_related
+from documents.views import (
+    _archive_browse_cards_for_items,
+    _archive_browse_select_related,
+)
 from documents.services.archive_item_access import archive_browse_queryset_for_user
 
 
@@ -370,3 +374,17 @@ class DocumentArchiveBrowseQueryCountTests(TestCase):
         count_for_three = self._browse_cards_query_count(item_count=3)
         count_for_six = self._browse_cards_query_count(item_count=6)
         self.assertEqual(count_for_three, count_for_six)
+
+
+class DocumentArchiveBrowsePreviewStyleTests(SimpleTestCase):
+    def test_document_preview_css_fills_preview_area_from_top(self):
+        css_path = settings.BASE_DIR / "public" / "static" / "public" / "app.css"
+        css = css_path.read_text(encoding="utf-8")
+        image_block_start = css.index(".archive-browse-card__document-preview-image")
+        image_block = css[image_block_start : css.index("}", image_block_start) + 1]
+
+        self.assertIn("object-fit: cover", image_block)
+        self.assertIn("object-position: top center", image_block)
+        self.assertNotIn("object-fit: contain", image_block)
+        self.assertNotIn("border:", image_block)
+        self.assertNotIn("box-shadow:", image_block)
