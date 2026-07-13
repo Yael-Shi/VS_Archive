@@ -155,6 +155,25 @@ def get_object_bytes(bucket: str, key: str) -> Tuple[bytes, Optional[str]]:
     return body, content_type
 
 
+def put_object_bytes(
+    bucket: str,
+    key: str,
+    body: bytes,
+    content_type: str,
+) -> int:
+    """
+    Upload bytes to S3 at the given key, returning the stored content length.
+    """
+    s3 = get_s3_client()
+    s3.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=body,
+        ContentType=content_type,
+    )
+    return len(body)
+
+
 @dataclass(frozen=True)
 class S3DeleteObjectResult:
     deleted: bool

@@ -3869,6 +3869,15 @@ class UploadCompleteSourceFileTests(TestCase):
         self.mock_s3_head = self.s3_head_patcher.start()
         self.addCleanup(self.s3_head_patcher.stop)
 
+        from documents.test_exif_orientation import minimal_upright_jpeg_bytes
+
+        self.s3_get_patcher = patch(
+            "documents.services.exif_orientation.get_object_bytes",
+            return_value=(minimal_upright_jpeg_bytes(), "image/jpeg"),
+        )
+        self.s3_get_patcher.start()
+        self.addCleanup(self.s3_get_patcher.stop)
+
         self.staff = User.objects.create_user(
             username="upload_complete_staff",
             password="test-pass",
@@ -4206,6 +4215,15 @@ class UploadApiTests(TestCase):
         )
         self.mock_s3_head = self.s3_head_patcher.start()
         self.addCleanup(self.s3_head_patcher.stop)
+
+        from documents.test_exif_orientation import minimal_upright_jpeg_bytes
+
+        self.s3_get_patcher = patch(
+            "documents.services.exif_orientation.get_object_bytes",
+            return_value=(minimal_upright_jpeg_bytes(), "image/jpeg"),
+        )
+        self.s3_get_patcher.start()
+        self.addCleanup(self.s3_get_patcher.stop)
 
         self.staff = User.objects.create_user(
             username="upload_api_staff",
@@ -5393,6 +5411,15 @@ class UploadApiCsrfTests(TestCase):
         )
         self.mock_s3_head = self.s3_head_patcher.start()
         self.addCleanup(self.s3_head_patcher.stop)
+
+        from documents.test_exif_orientation import minimal_upright_jpeg_bytes
+
+        self.s3_get_patcher = patch(
+            "documents.services.exif_orientation.get_object_bytes",
+            return_value=(minimal_upright_jpeg_bytes(), "image/jpeg"),
+        )
+        self.s3_get_patcher.start()
+        self.addCleanup(self.s3_get_patcher.stop)
 
         self.staff = User.objects.create_user(
             username="upload_csrf_staff",
