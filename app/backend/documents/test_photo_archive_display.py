@@ -487,7 +487,9 @@ class PhotoArchiveBrowseThumbnailTests(TestCase):
         "documents.services.photo_archive_urls.create_presigned_get",
         return_value=THUMBNAIL_PRESIGNED_URL,
     )
-    def test_photo_with_thumbnail_presigns_and_renders_thumbnail(self, mock_presigned_get):
+    def test_photo_with_thumbnail_presigns_and_renders_thumbnail(
+        self, mock_presigned_get
+    ):
         photo = _create_photo_archive_item(
             title="Photo with browse thumbnail",
             thumbnail_file_key=self.THUMBNAIL_KEY,
@@ -501,8 +503,11 @@ class PhotoArchiveBrowseThumbnailTests(TestCase):
         )
         self.assertContains(resp, photo.title)
         self.assertContains(resp, self.THUMBNAIL_PRESIGNED_URL)
-        self.assertContains(resp, 'class="archive-browse-card__marker-thumbnail"')
+        self.assertContains(resp, 'class="archive-browse-card__photo-preview"')
+        self.assertContains(resp, 'class="archive-browse-card__photo-preview-image"')
         self.assertContains(resp, 'alt="Photo with browse thumbnail"')
+        self.assertContains(resp, 'class="archive-browse-card__photo-type-label"')
+        self.assertNotContains(resp, "archive-browse-card__marker-thumbnail")
 
     @patch(
         "documents.services.photo_archive_urls.create_presigned_get",
@@ -534,6 +539,7 @@ class PhotoArchiveBrowseThumbnailTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         mock_presigned_get.assert_not_called()
         self.assertContains(resp, "archive-browse-card__marker--photo")
+        self.assertNotContains(resp, "archive-browse-card__photo-preview")
         self.assertNotContains(resp, "archive-browse-card__marker-thumbnail")
         self.assertContains(resp, photo.title)
 
@@ -553,6 +559,7 @@ class PhotoArchiveBrowseThumbnailTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, photo.title)
         self.assertContains(resp, "archive-browse-card__marker--photo")
+        self.assertNotContains(resp, "archive-browse-card__photo-preview")
         self.assertNotContains(resp, "archive-browse-card__marker-thumbnail")
 
     @override_settings(UPLOADS_BUCKET_NAME="")
@@ -565,6 +572,7 @@ class PhotoArchiveBrowseThumbnailTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, photo.title)
         self.assertContains(resp, "archive-browse-card__marker--photo")
+        self.assertNotContains(resp, "archive-browse-card__photo-preview")
         self.assertNotContains(resp, "archive-browse-card__marker-thumbnail")
 
     @patch(
@@ -581,5 +589,6 @@ class PhotoArchiveBrowseThumbnailTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, manual_item.title)
         self.assertContains(resp, "archive-browse-card__marker--manual")
+        self.assertNotContains(resp, "archive-browse-card__photo-preview")
         self.assertNotContains(resp, 'alt="Manual browse unchanged"')
         mock_presigned_get.assert_not_called()
