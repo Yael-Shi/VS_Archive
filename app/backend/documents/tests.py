@@ -9570,25 +9570,62 @@ class UploadPageTemplateTests(TestCase):
         cache_control = resp.headers.get("Cache-Control", "")
         self.assertIn("no-cache", cache_control.lower())
 
-    def test_upload_page_contains_mobile_gallery_first_copy(self):
+    def _upload_instructions_details_html(self, response, summary_text: str) -> str:
+        html = response.content.decode()
+        marker = f"<summary>{summary_text}</summary>"
+        start = html.index(marker)
+        details_start = html.rfind("<details", 0, start)
+        details_end = html.index("</details>", start) + len("</details>")
+        return html[details_start:details_end]
+
+    def test_upload_page_renders_collapsed_instruction_sections(self):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "העלאת תמונות מהנייד (מומלץ)")
-        self.assertContains(resp, "באפליקציית המצלמה של הטלפון")
-        self.assertContains(resp, "סדר ההוספה כאן קובע את סדר התעתוק")
-        self.assertContains(resp, "עמוד אחד")
-        self.assertContains(resp, "35 עמודים")
-        self.assertContains(resp, "לבחור כמה תמונות יחד")
-        self.assertContains(resp, "מתווספת")
-        self.assertContains(resp, "לא מחליפה את הקודמת")
-        self.assertContains(resp, "PDF יש להעלות כקובץ יחיד")
-        self.assertContains(resp, "מומלץ להעלות כמה תמונות חלקיות לפי סדר הקריאה")
-        self.assertContains(resp, "סדר ההוספה קובע את סדר התעתוק")
-        self.assertContains(resp, "אין שינוי סדר ידני בגרסה זו")
-        self.assertContains(resp, "מהטור הימני לשמאלי")
-        self.assertContains(resp, "המערכת תתעתק כל תמונה לפי הסדר ותחבר את הטקסט")
-        self.assertContains(resp, "upload-mobile-hint")
-        self.assertContains(resp, "galleryMultiSelectOrderHint")
+        self.assertContains(resp, "הוראות העלאה מהטלפון")
+        self.assertContains(resp, "הוראות העלאה מהמחשב")
+        self.assertContains(resp, "upload-instructions-details")
+        for summary in ("הוראות העלאה מהטלפון", "הוראות העלאה מהמחשב"):
+            section = self._upload_instructions_details_html(resp, summary)
+            self.assertTrue(section.startswith("<details"))
+            self.assertNotRegex(section, r"<details[^>]*\sopen\b")
+
+    def test_upload_page_mobile_instructions_contain_key_points(self):
+        resp = self._get_page()
+        self.assertEqual(resp.status_code, 200)
+        section = self._upload_instructions_details_html(resp, "הוראות העלאה מהטלפון")
+        for needle in (
+            "באפליקציית המצלמה של הטלפון",
+            "חזרו לאתר",
+            "הוספת עמוד מהגלריה",
+            "מועלה מיד לשרת",
+            "עמוד אחד",
+            "35 עמודים",
+            "התחלת תעתוק",
+        ):
+            self.assertIn(needle, section)
+
+    def test_upload_page_desktop_instructions_contain_key_points(self):
+        resp = self._get_page()
+        self.assertEqual(resp.status_code, 200)
+        section = self._upload_instructions_details_html(resp, "הוראות העלאה מהמחשב")
+        for needle in (
+            "קובץ PDF אחד",
+            "מתווספת לרשימת העמודים",
+            "מועלית מיד",
+            "סדר התצוגה ברשימה",
+            "סדר התעתוק",
+            "35 עמודים",
+            "מסמכים צפופים",
+            "סדר הקריאה",
+        ):
+            self.assertIn(needle, section)
+        self.assertNotIn("זרימת PDF הקיימת", section)
+
+    def test_upload_page_keeps_gallery_multi_select_order_hint(self):
+        resp = self._get_page()
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'id="galleryMultiSelectOrderHint"')
+        self.assertContains(resp, "בסדר הנכון")
 
     def test_upload_page_js_stages_pdf_only_client_side(self):
         resp = self._get_page()

@@ -520,12 +520,21 @@ label {
   display: inline-flex;
 }
 
-.upload-mobile-hint {
-  display: none;
+.upload-instructions {
+  margin-top: var(--space-2);
 }
 
-.upload-desktop-hint {
-  display: block;
+.upload-instructions-details + .upload-instructions-details {
+  margin-top: var(--space-2);
+}
+
+.upload-instructions-list {
+  margin: 0;
+  padding-inline-start: 1.25rem;
+}
+
+.upload-instructions-list > li + li {
+  margin-top: var(--space-2);
 }
 
 @media (max-width: 768px), (hover: none) and (pointer: coarse) {
@@ -534,14 +543,6 @@ label {
   }
 
   .upload-desktop-primary {
-    display: none;
-  }
-
-  .upload-mobile-hint {
-    display: block;
-  }
-
-  .upload-desktop-hint {
     display: none;
   }
 }
