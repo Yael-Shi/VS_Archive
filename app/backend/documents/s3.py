@@ -60,6 +60,11 @@ def build_photo_thumbnail_s3_key(photo_content_id: int) -> str:
     return f"photos/{photo_content_id}/thumb_400.jpg"
 
 
+def build_document_thumbnail_s3_key(document_id: int) -> str:
+    """Deterministic private S3 key for an OCR document JPEG thumbnail (max edge 400)."""
+    return f"documents/{document_id}/thumb_400.jpg"
+
+
 def create_presigned_put(
     bucket: str,
     key: str,
