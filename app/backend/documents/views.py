@@ -146,6 +146,9 @@ from documents.services.photo_metadata_validation import (
     photo_metadata_form_data_from_content,
     parse_photo_staff_metadata_form,
 )
+from documents.services.document_archive_urls import (
+    apply_document_thumbnail_urls_to_browse_cards,
+)
 from documents.services.photo_archive_urls import (
     apply_photo_thumbnail_urls_to_browse_cards,
 )
@@ -2962,7 +2965,12 @@ def _archive_browse_items_queryset(user, **filter_kwargs):
 def _archive_browse_cards_for_items(items):
     cards = build_archive_browse_cards(items)
     bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
-    return apply_photo_thumbnail_urls_to_browse_cards(
+    cards = apply_photo_thumbnail_urls_to_browse_cards(
+        cards,
+        bucket=bucket,
+        expires_in=PRESIGNED_GET_EXPIRY_SECONDS,
+    )
+    return apply_document_thumbnail_urls_to_browse_cards(
         cards,
         bucket=bucket,
         expires_in=PRESIGNED_GET_EXPIRY_SECONDS,
