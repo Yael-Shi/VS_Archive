@@ -544,10 +544,6 @@ label {
   .upload-desktop-hint {
     display: none;
   }
-
-  .upload-file-action--experimental {
-    display: none !important;
-  }
 }
 
 .upload-file-input-hidden {
