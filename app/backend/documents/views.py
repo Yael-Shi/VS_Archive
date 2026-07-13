@@ -92,6 +92,12 @@ from documents.services.upload_validation import (
     validate_image_upload_metadata,
     validate_single_file_upload_metadata,
 )
+from documents.services.exif_orientation import (
+    ExifNormalizationError,
+    ExifNormalizationResult,
+    is_upload_image_mime,
+    normalize_uploaded_image_exif_in_s3,
+)
 from documents.services.source_files import (
     MULTI_IMAGE_MAX_FILES,
     all_expected_source_files_uploaded,
@@ -472,6 +478,48 @@ def _verify_uploaded_s3_object_metadata(
         return JsonResponse(body, status=400)
 
     return None
+
+
+def _normalize_uploaded_image_exif_or_error(
+    *,
+    bucket: str,
+    key: str,
+    mime_type: str,
+    document_id: int,
+    order_index: Optional[int] = None,
+) -> tuple[ExifNormalizationResult, Optional[JsonResponse]]:
+    """
+    Normalize EXIF orientation for supported image uploads after S3 verification.
+
+    Returns (result, error_response). error_response is set when normalization fails.
+    """
+    if not is_upload_image_mime(mime_type):
+        return ExifNormalizationResult(rewritten=False), None
+
+    try:
+        result = normalize_uploaded_image_exif_in_s3(
+            bucket=bucket,
+            key=key,
+            mime_type=mime_type,
+        )
+    except ExifNormalizationError:
+        logger.exception(
+            "image exif normalization failed during upload completion",
+            extra={
+                "document_id": document_id,
+                "order_index": order_index,
+                "s3_key": key,
+            },
+        )
+        body: dict = {
+            "error": "image exif normalization failed",
+            "document_id": document_id,
+        }
+        if order_index is not None:
+            body["order_index"] = order_index
+        return ExifNormalizationResult(rewritten=False), JsonResponse(body, status=500)
+
+    return result, None
 
 
 def _json_value_as_discovery_string(value) -> str:
@@ -972,12 +1020,23 @@ def upload_complete(request, doc_id: int):
         if s3_err:
             return s3_err
 
+        norm_result, norm_err = _normalize_uploaded_image_exif_or_error(
+            bucket=bucket,
+            key=doc.file_s3_key,
+            mime_type=expected_mime,
+            document_id=doc.id,
+        )
+        if norm_err:
+            return norm_err
+
         already_uploaded = doc.upload_status == Document.UploadStatus.UPLOADED
 
         doc.upload_status = Document.UploadStatus.UPLOADED
         doc.upload_error = None
 
-        if isinstance(payload.get("file_size"), int):
+        if norm_result.rewritten and norm_result.size_bytes is not None:
+            doc.size_bytes = norm_result.size_bytes
+        elif isinstance(payload.get("file_size"), int):
             doc.size_bytes = payload["file_size"]
         if file_mime:
             doc.mime_type = file_mime
@@ -1255,10 +1314,22 @@ def upload_part_complete(request, doc_id: int, order_index: int):
         if s3_err:
             return s3_err
 
+        norm_result, norm_err = _normalize_uploaded_image_exif_or_error(
+            bucket=bucket,
+            key=source_file.file_s3_key,
+            mime_type=expected_mime,
+            document_id=doc.id,
+            order_index=order_index,
+        )
+        if norm_err:
+            return norm_err
+
         source_file.upload_status = DocumentSourceFile.UploadStatus.UPLOADED
         source_file.upload_error = None
         file_size = payload.get("file_size")
-        if isinstance(file_size, int):
+        if norm_result.rewritten and norm_result.size_bytes is not None:
+            source_file.size_bytes = norm_result.size_bytes
+        elif isinstance(file_size, int):
             source_file.size_bytes = file_size
         if isinstance(file_mime, str) and file_mime:
             source_file.mime_type = file_mime

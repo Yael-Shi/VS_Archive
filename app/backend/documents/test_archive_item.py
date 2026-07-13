@@ -402,6 +402,15 @@ class ArchiveItemUploadIntegrationTests(TestCase):
         self.s3_head_patcher.start()
         self.addCleanup(self.s3_head_patcher.stop)
 
+        from documents.test_exif_orientation import minimal_upright_jpeg_bytes
+
+        self.s3_get_patcher = patch(
+            "documents.services.exif_orientation.get_object_bytes",
+            return_value=(minimal_upright_jpeg_bytes(), "image/jpeg"),
+        )
+        self.s3_get_patcher.start()
+        self.addCleanup(self.s3_get_patcher.stop)
+
         self.staff = User.objects.create_user(
             username="archive_item_upload_staff",
             password="test-pass",
