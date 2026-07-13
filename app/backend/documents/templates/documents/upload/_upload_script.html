@@ -28,7 +28,7 @@
   /** Incremental image-upload state (metadata + page status only; no retained File objects). */
   let incrementalDocumentId = null;
   let incrementalPages = [];
-  let captureSeqCounter = 0;
+  let addSeqCounter = 0;
   let incrementalUploadInProgress = false;
 
   function setMessage(kind, text) {
@@ -97,7 +97,7 @@
   function resetIncrementalState() {
     incrementalDocumentId = null;
     incrementalPages = [];
-    captureSeqCounter = 0;
+    addSeqCounter = 0;
     incrementalUploadInProgress = false;
     if (galleryMultiSelectOrderHint) {
       galleryMultiSelectOrderHint.hidden = true;
@@ -196,7 +196,7 @@
 
   function incrementalPageDisplayNum(page, listIndex) {
     if (page.orderIndex >= 0) return page.orderIndex + 1;
-    if (page.captureSeq > 0) return page.captureSeq;
+    if (page.addSeq > 0) return page.addSeq;
     return listIndex + 1;
   }
 
@@ -626,9 +626,9 @@
         return;
       }
 
-      captureSeqCounter += 1;
+      addSeqCounter += 1;
       const pageEntry = {
-        captureSeq: captureSeqCounter,
+        addSeq: addSeqCounter,
         orderIndex: -1,
         label: file.name || "",
         status: PAGE_STATUS.UPLOADING,
