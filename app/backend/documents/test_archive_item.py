@@ -3668,6 +3668,7 @@ class ArchiveBrowseCardPresentationTests(TestCase):
         )
         card = build_archive_browse_card(item)
         self.assertEqual(card.type_marker, "photo")
+        self.assertIsNone(card.thumbnail_url)
 
     def test_unknown_item_type_uses_generic_marker(self):
         item = create_manual_text_archive_item(

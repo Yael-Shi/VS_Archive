@@ -2350,6 +2350,23 @@ pre {
   background-repeat: no-repeat;
 }
 
+.archive-browse-card__marker--has-thumbnail {
+  overflow: hidden;
+  padding: 0;
+}
+
+.archive-browse-card__marker--has-thumbnail::before {
+  content: none;
+  display: none;
+}
+
+.archive-browse-card__marker-thumbnail {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .archive-browse-card__marker--generic::before {
   content: "";
   display: block;

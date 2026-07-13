@@ -4,10 +4,24 @@
       <article class="archive-browse-card__article">
         <div class="archive-browse-card__layout">
           <div
-            class="archive-browse-card__marker archive-browse-card__marker--{{ card.type_marker }}"
+            class="archive-browse-card__marker archive-browse-card__marker--{{ card.type_marker }}{% if card.thumbnail_url %} archive-browse-card__marker--has-thumbnail{% endif %}"
+            {% if not card.thumbnail_url %}
             role="img"
             aria-label="{{ card.type_label }}"
-          ></div>
+            {% endif %}
+          >
+            {% if card.thumbnail_url %}
+              <img
+                class="archive-browse-card__marker-thumbnail"
+                src="{{ card.thumbnail_url }}"
+                alt="{{ card.title }}"
+                width="48"
+                height="48"
+                loading="lazy"
+                decoding="async"
+              />
+            {% endif %}
+          </div>
 
           <div class="archive-browse-card__content">
             <header class="archive-browse-card__header">

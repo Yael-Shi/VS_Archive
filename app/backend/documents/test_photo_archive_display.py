@@ -2,6 +2,7 @@
 
 from unittest.mock import patch
 
+from botocore.exceptions import ClientError
 from django.contrib.auth.models import Group, User
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -24,6 +25,7 @@ def _create_photo_archive_item(
     visibility=ArchiveItem.Visibility.PUBLIC,
     upload_status=PhotoContent.UploadStatus.UPLOADED,
     original_file_key: str = "photos/42/original.jpg",
+    thumbnail_file_key: str = "",
 ) -> ArchiveItem:
     item = ArchiveItem.objects.create(
         item_type=ArchiveItem.ItemType.PHOTO,
@@ -38,6 +40,9 @@ def _create_photo_archive_item(
         original_size_bytes=2048,
         upload_status=upload_status,
         upload_error="",
+        thumbnail_file_key=thumbnail_file_key,
+        thumbnail_mime_type="image/jpeg" if thumbnail_file_key else "",
+        thumbnail_size_bytes=512 if thumbnail_file_key else None,
     )
     return item
 
@@ -95,10 +100,12 @@ class PhotoArchiveDisplayListTests(TestCase):
         self.assertNotContains(resp, self.failed_public.title)
 
     @patch(
-        "documents.views.create_presigned_get",
+        "documents.services.photo_archive_urls.create_presigned_get",
         return_value="https://s3.example/presigned",
     )
-    def test_archive_list_does_not_generate_presigned_get(self, mock_presigned_get):
+    def test_archive_list_does_not_generate_presigned_get_without_thumbnails(
+        self, mock_presigned_get
+    ):
         resp = self.client.get(reverse("archive-list"))
         self.assertEqual(resp.status_code, 200)
         mock_presigned_get.assert_not_called()
@@ -469,3 +476,110 @@ class PhotoArchiveManageListTests(TestCase):
         self.assertContains(resp, self.uploaded.title)
         self.assertContains(resp, self.pending.title)
         self.assertContains(resp, self.failed.title)
+
+
+@override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
+class PhotoArchiveBrowseThumbnailTests(TestCase):
+    THUMBNAIL_PRESIGNED_URL = "https://s3.example/presigned-thumb"
+    THUMBNAIL_KEY = "photos/42/thumb_400.jpg"
+
+    @patch(
+        "documents.services.photo_archive_urls.create_presigned_get",
+        return_value=THUMBNAIL_PRESIGNED_URL,
+    )
+    def test_photo_with_thumbnail_presigns_and_renders_thumbnail(self, mock_presigned_get):
+        photo = _create_photo_archive_item(
+            title="Photo with browse thumbnail",
+            thumbnail_file_key=self.THUMBNAIL_KEY,
+        )
+        resp = self.client.get(reverse("archive-list"))
+        self.assertEqual(resp.status_code, 200)
+        mock_presigned_get.assert_called_once_with(
+            bucket="test-uploads-bucket",
+            key=self.THUMBNAIL_KEY,
+            expires_in=3600,
+        )
+        self.assertContains(resp, photo.title)
+        self.assertContains(resp, self.THUMBNAIL_PRESIGNED_URL)
+        self.assertContains(resp, 'class="archive-browse-card__marker-thumbnail"')
+        self.assertContains(resp, 'alt="Photo with browse thumbnail"')
+
+    @patch(
+        "documents.services.photo_archive_urls.create_presigned_get",
+        return_value=THUMBNAIL_PRESIGNED_URL,
+    )
+    def test_archive_list_never_presigns_original_file_key(self, mock_presigned_get):
+        _create_photo_archive_item(
+            title="Photo original key guard",
+            original_file_key="photos/77/original.jpg",
+            thumbnail_file_key=self.THUMBNAIL_KEY,
+        )
+        resp = self.client.get(reverse("archive-list"))
+        self.assertEqual(resp.status_code, 200)
+        mock_presigned_get.assert_called_once()
+        for call in mock_presigned_get.call_args_list:
+            self.assertNotEqual(call.kwargs.get("key"), "photos/77/original.jpg")
+            self.assertEqual(call.kwargs.get("key"), self.THUMBNAIL_KEY)
+
+    def test_photo_without_thumbnail_keeps_css_marker_fallback(self):
+        photo = _create_photo_archive_item(
+            title="Photo without browse thumbnail",
+            original_file_key="photos/99/original.jpg",
+        )
+        with patch(
+            "documents.services.photo_archive_urls.create_presigned_get",
+            return_value="https://s3.example/should-not-be-used",
+        ) as mock_presigned_get:
+            resp = self.client.get(reverse("archive-list"))
+        self.assertEqual(resp.status_code, 200)
+        mock_presigned_get.assert_not_called()
+        self.assertContains(resp, "archive-browse-card__marker--photo")
+        self.assertNotContains(resp, "archive-browse-card__marker-thumbnail")
+        self.assertContains(resp, photo.title)
+
+    @patch(
+        "documents.services.photo_archive_urls.create_presigned_get",
+        side_effect=ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "denied"}},
+            "GetObject",
+        ),
+    )
+    def test_presign_failure_renders_css_marker_fallback(self, _mock_presigned_get):
+        photo = _create_photo_archive_item(
+            title="Photo presign failure fallback",
+            thumbnail_file_key=self.THUMBNAIL_KEY,
+        )
+        resp = self.client.get(reverse("archive-list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, photo.title)
+        self.assertContains(resp, "archive-browse-card__marker--photo")
+        self.assertNotContains(resp, "archive-browse-card__marker-thumbnail")
+
+    @override_settings(UPLOADS_BUCKET_NAME="")
+    def test_missing_bucket_config_keeps_css_marker_fallback(self):
+        photo = _create_photo_archive_item(
+            title="Photo missing bucket fallback",
+            thumbnail_file_key=self.THUMBNAIL_KEY,
+        )
+        resp = self.client.get(reverse("archive-list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, photo.title)
+        self.assertContains(resp, "archive-browse-card__marker--photo")
+        self.assertNotContains(resp, "archive-browse-card__marker-thumbnail")
+
+    @patch(
+        "documents.services.photo_archive_urls.create_presigned_get",
+        return_value=THUMBNAIL_PRESIGNED_URL,
+    )
+    def test_non_photo_cards_remain_unchanged(self, mock_presigned_get):
+        manual_item = create_manual_text_archive_item(
+            title="Manual browse unchanged",
+            body="manual body",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        resp = self.client.get(reverse("archive-list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, manual_item.title)
+        self.assertContains(resp, "archive-browse-card__marker--manual")
+        self.assertNotContains(resp, 'alt="Manual browse unchanged"')
+        mock_presigned_get.assert_not_called()
