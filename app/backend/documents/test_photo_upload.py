@@ -177,6 +177,12 @@ class PhotoUploadFlowTests(TestCase):
         )
         self.mock_s3_head = self.s3_head_patcher.start()
         self.addCleanup(self.s3_head_patcher.stop)
+        self.thumbnail_patcher = patch(
+            "documents.services.photo_upload.generate_and_persist_photo_thumbnail",
+            return_value=None,
+        )
+        self.mock_thumbnail = self.thumbnail_patcher.start()
+        self.addCleanup(self.thumbnail_patcher.stop)
 
     def _valid_create_payload(self, **overrides):
         payload = {
