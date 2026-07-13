@@ -15,7 +15,8 @@ from documents.services.document_s3_orphan_cleanup import (
 class Command(BaseCommand):
     help = (
         "Audit and optionally delete orphaned S3 objects under documents/ that are "
-        "not referenced by Document or DocumentSourceFile rows. Default is dry-run."
+        "not referenced by Document or DocumentSourceFile rows (including "
+        "Document.thumbnail_file_key). Default is dry-run."
     )
 
     def add_arguments(self, parser):
