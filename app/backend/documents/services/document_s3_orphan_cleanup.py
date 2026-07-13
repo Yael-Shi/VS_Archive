@@ -14,8 +14,14 @@ from documents.s3 import delete_s3_object, get_s3_client
 # Database fields that may legitimately reference S3 objects under documents/.
 DOCUMENT_S3_REFERENCE_FIELDS: tuple[tuple[str, str], ...] = (
     ("Document", "file_s3_key"),
+    ("Document", "thumbnail_file_key"),
     ("DocumentSourceFile", "file_s3_key"),
 )
+
+_DOCUMENT_S3_REFERENCE_MODELS: dict[str, type] = {
+    "Document": Document,
+    "DocumentSourceFile": DocumentSourceFile,
+}
 
 _DOCUMENTS_PREFIX_ROOT = "documents/"
 
@@ -107,14 +113,12 @@ def normalize_and_validate_s3_prefix(prefix: str) -> str:
 
 def collect_referenced_document_s3_keys() -> set[str]:
     keys: set[str] = set()
-    for key in Document.objects.values_list("file_s3_key", flat=True):
-        normalized = (key or "").strip()
-        if normalized:
-            keys.add(normalized)
-    for key in DocumentSourceFile.objects.values_list("file_s3_key", flat=True):
-        normalized = (key or "").strip()
-        if normalized:
-            keys.add(normalized)
+    for model_name, field_name in DOCUMENT_S3_REFERENCE_FIELDS:
+        model = _DOCUMENT_S3_REFERENCE_MODELS[model_name]
+        for key in model.objects.values_list(field_name, flat=True):
+            normalized = (key or "").strip()
+            if normalized:
+                keys.add(normalized)
     return keys
 
 

@@ -76,17 +76,20 @@ class CleanupDocumentS3OrphansCommandTests(TestCase):
             return_value=objects,
         )
 
-    def test_reference_fields_constant_documents_both_s3_key_fields(self):
+    def test_reference_fields_constant_documents_s3_key_and_thumbnail_fields(self):
         self.assertEqual(
             DOCUMENT_S3_REFERENCE_FIELDS,
             (
                 ("Document", "file_s3_key"),
+                ("Document", "thumbnail_file_key"),
                 ("DocumentSourceFile", "file_s3_key"),
             ),
         )
 
     def test_collect_referenced_keys_includes_document_and_source_file_fields(self):
         doc = self._create_document(file_s3_key="documents/10/original.jpg")
+        doc.thumbnail_file_key = f"documents/{doc.pk}/thumb_400.jpg"
+        doc.save(update_fields=["thumbnail_file_key", "updated_at"])
         source = self._add_source_file(
             doc,
             order_index=0,
@@ -101,6 +104,7 @@ class CleanupDocumentS3OrphansCommandTests(TestCase):
         referenced = collect_referenced_document_s3_keys()
 
         self.assertIn(doc.file_s3_key, referenced)
+        self.assertIn(doc.thumbnail_file_key, referenced)
         self.assertIn(source.file_s3_key, referenced)
         self.assertIn("documents/10/source/1.jpeg", referenced)
 
@@ -521,6 +525,8 @@ class CleanupDocumentS3OrphansCommandTests(TestCase):
 
     def test_whitespace_only_reference_keys_are_ignored(self):
         doc = self._create_document(file_s3_key="   ")
+        doc.thumbnail_file_key = "  \t  "
+        doc.save(update_fields=["thumbnail_file_key", "updated_at"])
         DocumentSourceFile.objects.create(
             document=doc,
             order_index=0,
@@ -541,6 +547,78 @@ class CleanupDocumentS3OrphansCommandTests(TestCase):
 
         self.assertIn(orphan_key, stdout.getvalue())
         self.assertEqual(collect_referenced_document_s3_keys(), set())
+
+    def test_referenced_thumbnail_is_excluded_from_candidates(self):
+        doc = self._create_document()
+        thumb_key = f"documents/{doc.pk}/thumb_400.jpg"
+        doc.thumbnail_file_key = thumb_key
+        doc.save(update_fields=["thumbnail_file_key", "updated_at"])
+        orphan_key = f"documents/{doc.pk}/orphan.jpg"
+
+        objects = [
+            self._listed_object(thumb_key),
+            self._listed_object(orphan_key),
+        ]
+
+        stdout = StringIO()
+        with self._mock_list_objects(objects):
+            call_command(
+                "cleanup_document_s3_orphans",
+                "--older-than-hours=24",
+                stdout=stdout,
+            )
+
+        output = stdout.getvalue()
+        self.assertNotIn(thumb_key, output)
+        self.assertIn(orphan_key, output)
+        self.assertIn("Candidates: 1", output)
+
+    def test_unreferenced_thumbnail_matching_key_pattern_is_orphan_candidate(self):
+        doc = self._create_document()
+        unreferenced_thumb_key = f"documents/{doc.pk}/thumb_400.jpg"
+        self.assertEqual(doc.thumbnail_file_key, "")
+
+        objects = [self._listed_object(unreferenced_thumb_key)]
+
+        stdout = StringIO()
+        with self._mock_list_objects(objects):
+            call_command(
+                "cleanup_document_s3_orphans",
+                "--older-than-hours=24",
+                stdout=stdout,
+            )
+
+        output = stdout.getvalue()
+        self.assertIn(unreferenced_thumb_key, output)
+        self.assertIn("Candidates: 1", output)
+
+    def test_commit_does_not_delete_referenced_thumbnail(self):
+        doc = self._create_document()
+        thumb_key = f"documents/{doc.pk}/thumb_400.jpg"
+        doc.thumbnail_file_key = thumb_key
+        doc.save(update_fields=["thumbnail_file_key", "updated_at"])
+        orphan_key = f"documents/{doc.pk}/orphan.jpg"
+
+        objects = [
+            self._listed_object(thumb_key),
+            self._listed_object(orphan_key),
+        ]
+
+        with (
+            self._mock_list_objects(objects),
+            patch(
+                f"{self.SERVICE_MODULE}.delete_s3_object",
+                return_value=S3DeleteObjectResult(deleted=True),
+            ) as mock_delete,
+        ):
+            call_command(
+                "cleanup_document_s3_orphans",
+                "--commit",
+                "--older-than-hours=24",
+                stdout=StringIO(),
+            )
+
+        mock_delete.assert_called_once_with("test-uploads-bucket", orphan_key)
 
     def test_naive_s3_last_modified_is_handled(self):
         naive_modified = datetime.now(dt_timezone.utc).replace(tzinfo=None) - timedelta(
