@@ -506,7 +506,6 @@ class PhotoArchiveBrowseThumbnailTests(TestCase):
         self.assertContains(resp, 'class="archive-browse-card__photo-preview"')
         self.assertContains(resp, 'class="archive-browse-card__photo-preview-image"')
         self.assertContains(resp, 'alt="Photo with browse thumbnail"')
-        self.assertContains(resp, 'class="archive-browse-card__photo-type-label"')
         self.assertNotContains(resp, "archive-browse-card__marker-thumbnail")
 
     @patch(

@@ -2380,20 +2380,6 @@ pre {
   object-position: center;
 }
 
-.archive-browse-card__photo-type-label {
-  position: absolute;
-  inset-inline-end: var(--space-2);
-  bottom: var(--space-2);
-  padding: 0.15rem 0.5rem;
-  border-radius: var(--radius-sm);
-  background: rgba(31, 41, 51, 0.72);
-  color: #fff;
-  font-size: var(--font-xs);
-  font-weight: 600;
-  line-height: var(--line-tight);
-  pointer-events: none;
-}
-
 .archive-browse-card__marker--generic::before {
   content: "";
   display: block;
