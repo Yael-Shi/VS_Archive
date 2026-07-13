@@ -2350,21 +2350,48 @@ pre {
   background-repeat: no-repeat;
 }
 
-.archive-browse-card__marker--has-thumbnail {
-  overflow: hidden;
+.archive-browse-card--photo-preview {
   padding: 0;
+  overflow: hidden;
 }
 
-.archive-browse-card__marker--has-thumbnail::before {
-  content: none;
-  display: none;
+.archive-browse-card__layout--photo-preview {
+  gap: 0;
 }
 
-.archive-browse-card__marker-thumbnail {
+.archive-browse-card--photo-preview .archive-browse-card__content {
+  padding: var(--space-4);
+}
+
+.archive-browse-card__photo-preview {
+  position: relative;
+  width: 100%;
+  height: 160px;
+  flex-shrink: 0;
+  overflow: hidden;
+  background: var(--accent-soft);
+}
+
+.archive-browse-card__photo-preview-image {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center;
+}
+
+.archive-browse-card__photo-type-label {
+  position: absolute;
+  inset-inline-end: var(--space-2);
+  bottom: var(--space-2);
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: rgba(31, 41, 51, 0.72);
+  color: #fff;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  line-height: var(--line-tight);
+  pointer-events: none;
 }
 
 .archive-browse-card__marker--generic::before {
@@ -2545,6 +2572,10 @@ pre {
   }
 
   .archive-browse-card {
+    padding: var(--space-3);
+  }
+
+  .archive-browse-card--photo-preview .archive-browse-card__content {
     padding: var(--space-3);
   }
 

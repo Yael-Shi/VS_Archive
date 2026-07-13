@@ -1,27 +1,29 @@
 <ul class="archive-browse-list">
   {% for card in browse_cards %}
-    <li class="archive-browse-card">
+    <li class="archive-browse-card{% if card.type_marker == "photo" and card.thumbnail_url %} archive-browse-card--photo-preview{% endif %}">
       <article class="archive-browse-card__article">
-        <div class="archive-browse-card__layout">
-          <div
-            class="archive-browse-card__marker archive-browse-card__marker--{{ card.type_marker }}{% if card.thumbnail_url %} archive-browse-card__marker--has-thumbnail{% endif %}"
-            {% if not card.thumbnail_url %}
-            role="img"
-            aria-label="{{ card.type_label }}"
-            {% endif %}
-          >
-            {% if card.thumbnail_url %}
+        <div class="archive-browse-card__layout{% if card.type_marker == "photo" and card.thumbnail_url %} archive-browse-card__layout--photo-preview{% endif %}">
+          {% if card.type_marker == "photo" and card.thumbnail_url %}
+            <div class="archive-browse-card__photo-preview">
               <img
-                class="archive-browse-card__marker-thumbnail"
+                class="archive-browse-card__photo-preview-image"
                 src="{{ card.thumbnail_url }}"
                 alt="{{ card.title }}"
-                width="48"
-                height="48"
+                width="400"
+                height="160"
                 loading="lazy"
                 decoding="async"
               />
-            {% endif %}
-          </div>
+              <span class="archive-browse-card__photo-type-label" aria-hidden="true">{{ card.type_label }}</span>
+            </div>
+          {% else %}
+            <div
+              class="archive-browse-card__marker archive-browse-card__marker--{{ card.type_marker }}"
+              role="img"
+              aria-label="{{ card.type_label }}"
+            >
+            </div>
+          {% endif %}
 
           <div class="archive-browse-card__content">
             <header class="archive-browse-card__header">
