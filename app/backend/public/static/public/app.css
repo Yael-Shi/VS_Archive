@@ -928,10 +928,6 @@ textarea {
   flex: 0 0 auto;
 }
 
-.archive-date-part[hidden] {
-  display: none;
-}
-
 .archive-date-separator {
   color: var(--muted);
   font-size: var(--font-sm);

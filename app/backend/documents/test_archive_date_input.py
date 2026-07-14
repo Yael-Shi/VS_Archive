@@ -644,6 +644,10 @@ class ArchiveDateInitialMarkupTests(TestCase):
         return area[start:end]
 
     @staticmethod
+    def _logical_field_count_in_block(block: str) -> int:
+        return block.count('class="archive-date-logical-field"')
+
+    @staticmethod
     def _active_logical_control_count(content: str) -> int:
         mobile = _mobile_ui_html(content)
         if not mobile:
@@ -662,34 +666,21 @@ class ArchiveDateInitialMarkupTests(TestCase):
                 mobile[match.end() :],
             )
             block_end = match.end() + next_group.start() if next_group else len(mobile)
-            count += mobile[block_start:block_end].count("data-date-logical-control")
+            count += ArchiveDateInitialMarkupTests._logical_field_count_in_block(
+                mobile[block_start:block_end]
+            )
         return count
 
     @staticmethod
-    def _mobile_logical_control_count(content: str) -> int:
-        mobile = _mobile_ui_html(content)
-        return mobile.count("data-date-logical-control")
-
-    @staticmethod
     def _visible_desktop_precision_fields(content: str, precision: str) -> int:
-        desktop = _desktop_ui_html(content)
-        visible = 0
-        for match in re.finditer(
-            rf'(<div[^>]*data-date-precision-field="{re.escape(precision)}"[^>]*>)',
-            desktop,
-            re.DOTALL,
+        if ArchiveDateInitialMarkupTests._precision_group_is_hidden(
+            content, precision, ui="desktop"
         ):
-            if "hidden" not in match.group(1):
-                visible += 1
-        return visible
-
-    @staticmethod
-    def _logical_control_count(content: str) -> int:
-        return content.count("data-date-logical-control")
-
-    @staticmethod
-    def _archive_date_control_count(content: str) -> int:
-        return content.count('class="archive-date-control"')
+            return 0
+        block = ArchiveDateInitialMarkupTests._precision_group_block(
+            content, precision, ui="desktop"
+        )
+        return ArchiveDateInitialMarkupTests._logical_field_count_in_block(block)
 
     @staticmethod
     def _input_tag_for_id(content: str, input_id: str):
@@ -1166,7 +1157,7 @@ class ArchiveDateSharedFormLocationTests(TestCase):
         content = resp.content.decode()
         self.assertIn('id="archiveDateEntry"', content)
         self.assertIn('class="archive-date-control"', content)
-        self.assertIn("data-date-logical-control", content)
+        self.assertIn('class="archive-date-logical-field"', content)
         self.assertNotContains(resp, 'type="number"')
         self.assertEqual(content.count('id="date_precision"'), 1)
 
@@ -1553,7 +1544,10 @@ class ArchiveDateDualUiMarkupTests(TestCase):
         )
         self.assertNotIn('type="month"', desktop)
         self.assertEqual(_enabled_native_input_count(desktop, "month"), 0)
-        self.assertEqual(month_block.count("data-date-logical-control"), 1)
+        self.assertEqual(
+            ArchiveDateInitialMarkupTests._logical_field_count_in_block(month_block),
+            1,
+        )
         self.assertIn('placeholder="MM"', month_block)
         self.assertIn('placeholder="YYYY"', month_block)
         self.assertEqual(_enabled_named_input_count(desktop, "date_start_month"), 1)
@@ -1587,7 +1581,12 @@ class ArchiveDateDualUiMarkupTests(TestCase):
         )
         self.assertNotIn('type="month"', desktop)
         self.assertEqual(_enabled_native_input_count(desktop, "month"), 0)
-        self.assertEqual(range_month_block.count("data-date-logical-control"), 2)
+        self.assertEqual(
+            ArchiveDateInitialMarkupTests._logical_field_count_in_block(
+                range_month_block
+            ),
+            2,
+        )
         self.assertEqual(range_month_block.count('placeholder="MM"'), 2)
         self.assertEqual(range_month_block.count('placeholder="YYYY"'), 2)
         self.assertEqual(_enabled_named_input_count(desktop, "date_start_month"), 1)

@@ -8,7 +8,6 @@ from typing import Any
 from documents.models import ArchiveItem
 from documents.services.archive_date_input import (
     DATE_COMPONENT_FIELD_NAMES,
-    archive_date_entry_flags,
     archive_date_form_data,
     empty_date_component_form_data,
     parse_archive_date_bounds,
@@ -190,7 +189,6 @@ def parse_archive_metadata_form(
         parsed = {
             **form_data,
             **date_components,
-            **archive_date_entry_flags(date_precision),
             "visibility": form_data["visibility"] or ArchiveItem.Visibility.PRIVATE,
             "metadata_status": form_data["metadata_status"]
             or ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
@@ -233,7 +231,6 @@ def parse_archive_metadata_form(
     parsed = {
         **form_data,
         **date_components,
-        **archive_date_entry_flags(date_precision),
         "visibility": visibility,
         "metadata_status": metadata_status,
         "date_precision": date_precision,
