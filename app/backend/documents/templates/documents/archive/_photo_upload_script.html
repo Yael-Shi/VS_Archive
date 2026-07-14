@@ -70,14 +70,14 @@
       notes: getMultiline("notes"),
       public_note: getMultiline("public_note"),
       visibility: get("visibility") || "private",
-      date_start: get("date_start"),
-      date_end: get("date_end"),
-      date_precision: get("date_precision") || "UNKNOWN",
       metadata_status: get("metadata_status") || "NEEDS_COMPLETION",
       categories: get("categories"),
       events: get("events"),
       discovery_tags: get("discovery_tags"),
     };
+    if (window.vsArchiveDateEntry && window.vsArchiveDateEntry.collectMeta) {
+      window.vsArchiveDateEntry.collectMeta(meta);
+    }
     const selected_categories = readSelectedIds("selected_categories");
     const selected_events = readSelectedIds("selected_events");
     const selected_tags = readSelectedIds("selected_tags");

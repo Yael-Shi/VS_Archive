@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from unittest.mock import patch
 
 from django.contrib.auth.models import Group, User
@@ -147,6 +148,77 @@ class PhotoUploadValidationTests(TestCase):
     def test_photo_mime_to_s3_extension_rejects_unknown_mime(self):
         with self.assertRaises(ValueError):
             photo_mime_to_s3_extension("image/gif")
+
+    def test_parse_photo_upload_metadata_normalizes_range_year(self):
+        from documents.services.photo_upload import parse_create_photo_upload_metadata
+
+        parsed, err = parse_create_photo_upload_metadata(
+            {
+                "title": "Range year photo",
+                "visibility": ArchiveItem.Visibility.PRIVATE,
+                "metadata_status": ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
+                "date_precision": ArchiveItem.DatePrecision.RANGE_YEAR,
+                "date_start_year": "1953",
+                "date_end_year": "1954",
+                "original_name": "photo.jpg",
+                "mime_type": "image/jpeg",
+            }
+        )
+        self.assertIsNone(err)
+        assert parsed is not None
+        self.assertEqual(parsed["date_precision"], ArchiveItem.DatePrecision.RANGE_YEAR)
+        self.assertEqual(parsed["date_start"], date(1953, 1, 1))
+        self.assertEqual(parsed["date_end"], date(1954, 12, 31))
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
+    def test_parse_photo_upload_metadata_normalizes_range_month(self):
+        from documents.services.photo_upload import parse_create_photo_upload_metadata
+
+        parsed, err = parse_create_photo_upload_metadata(
+            {
+                "title": "Range month photo",
+                "visibility": ArchiveItem.Visibility.PRIVATE,
+                "metadata_status": ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
+                "date_precision": ArchiveItem.DatePrecision.RANGE_MONTH,
+                "date_start_year": "2021",
+                "date_start_month": "12",
+                "date_end_year": "2022",
+                "date_end_month": "2",
+                "original_name": "photo.jpg",
+                "mime_type": "image/jpeg",
+            }
+        )
+        self.assertIsNone(err)
+        assert parsed is not None
+        self.assertEqual(
+            parsed["date_precision"], ArchiveItem.DatePrecision.RANGE_MONTH
+        )
+        self.assertEqual(parsed["date_start"], date(2021, 12, 1))
+        self.assertEqual(parsed["date_end"], date(2022, 2, 28))
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
+    def test_photo_upload_create_persists_range_year(self):
+        resp = self.client.post(
+            self.CREATE_URL,
+            data=json.dumps(
+                {
+                    "title": "Photo range year create",
+                    "visibility": ArchiveItem.Visibility.PRIVATE,
+                    "metadata_status": ArchiveItem.MetadataStatus.COMPLETED,
+                    "date_precision": ArchiveItem.DatePrecision.RANGE_YEAR,
+                    "date_start_year": "1953",
+                    "date_end_year": "1954",
+                    "original_name": "photo.jpg",
+                    "mime_type": "image/jpeg",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        item = ArchiveItem.objects.get(id=resp.json()["archive_item_id"])
+        self.assertEqual(item.date_precision, ArchiveItem.DatePrecision.RANGE_YEAR)
+        self.assertEqual(item.date_start, date(1953, 1, 1))
+        self.assertEqual(item.date_end, date(1954, 12, 31))
 
 
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")

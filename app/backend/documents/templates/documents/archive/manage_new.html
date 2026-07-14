@@ -73,7 +73,9 @@
   </div>
   {% if item_type == "ocr_document" %}
     {% include "documents/upload/_upload_script.html" %}
+    {% include "documents/archive/archive_date_form_script.html" %}
   {% elif item_type == "photo" %}
     {% include "documents/archive/_photo_upload_script.html" %}
+    {% include "documents/archive/archive_date_form_script.html" %}
   {% endif %}
 {% endblock %}

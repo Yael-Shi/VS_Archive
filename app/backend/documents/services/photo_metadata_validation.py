@@ -49,6 +49,14 @@ def parse_photo_metadata_form(
     return parsed, []
 
 
+def _photo_staff_form_data(parsed_shared: dict[str, Any], photo_metadata: dict[str, str]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in parsed_shared.items()
+        if not key.endswith("_value")
+    } | photo_metadata
+
+
 def parse_photo_staff_metadata_form(
     post_data: dict[str, Any],
 ) -> tuple[dict[str, Any], list[str]]:
@@ -62,17 +70,7 @@ def parse_photo_staff_metadata_form(
     errors = errors + photo_errors
 
     if errors:
-        form_data = {
-            "title": parsed_shared["title"],
-            "visibility": parsed_shared["visibility"],
-            "date_start": parsed_shared["date_start"],
-            "date_end": parsed_shared["date_end"],
-            "date_precision": parsed_shared["date_precision"],
-            "metadata_status": parsed_shared["metadata_status"],
-            "public_note": parsed_shared["public_note"],
-            **photo_metadata,
-        }
-        return form_data, errors
+        return _photo_staff_form_data(parsed_shared, photo_metadata), errors
 
     shared_errors = validate_archive_metadata_fields(
         title=parsed_shared["title"],
@@ -83,28 +81,9 @@ def parse_photo_staff_metadata_form(
         date_end=parsed_shared["date_end_value"],
     )
     if shared_errors:
-        form_data = {
-            "title": parsed_shared["title"],
-            "visibility": parsed_shared["visibility"],
-            "date_start": parsed_shared["date_start"],
-            "date_end": parsed_shared["date_end"],
-            "date_precision": parsed_shared["date_precision"],
-            "metadata_status": parsed_shared["metadata_status"],
-            "public_note": parsed_shared["public_note"],
-            **photo_metadata,
-        }
-        return form_data, shared_errors
+        return _photo_staff_form_data(parsed_shared, photo_metadata), shared_errors
 
-    parsed = {
-        "title": parsed_shared["title"],
-        "visibility": parsed_shared["visibility"],
-        "date_start": parsed_shared["date_start"],
-        "date_end": parsed_shared["date_end"],
-        "date_precision": parsed_shared["date_precision"],
-        "metadata_status": parsed_shared["metadata_status"],
-        "date_start_value": parsed_shared["date_start_value"],
-        "date_end_value": parsed_shared["date_end_value"],
-        "public_note": parsed_shared["public_note"],
-        **photo_metadata,
-    }
+    parsed = _photo_staff_form_data(parsed_shared, photo_metadata)
+    parsed["date_start_value"] = parsed_shared["date_start_value"]
+    parsed["date_end_value"] = parsed_shared["date_end_value"]
     return parsed, []

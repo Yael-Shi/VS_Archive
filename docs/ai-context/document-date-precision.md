@@ -6,6 +6,8 @@ This note defines how VS-Archive should represent, display, and eventually filte
 
 **Implemented (display helper / list-detail):** `format_document_date()` in `documents/services/document_date.py` + `document_date_display` template filter; list/detail templates use precision-aware labels. For `UNKNOWN`, display is always **ללא תאריך** (normalized bounds are not shown), including when bounds are null. Implemented **before** upload/edit precision UI. Upload/edit save-by-precision, filtering/search, and backfill are **not** implemented yet.
 
+**Implemented (typed entry + partial ranges — 2026-07-14):** Segmented year/month/day inputs replace native `type="date"` on archive create/edit/upload surfaces. New precisions `RANGE_MONTH` and `RANGE_YEAR`; existing `RANGE` remains exact-day range. Parsing/normalization in `documents/services/archive_date_input.py`; migration `0037`. See `docs/ai-context/decision-log.md` for storage/display mapping.
+
 ## 1. Problem statement
 
 Real archive documents often do not have a single exact calendar day. Catalogers may know only:
@@ -79,7 +81,9 @@ Small practical set for first implementation:
 | `EXACT_DAY` | Full calendar date known (single day or same start/end day). |
 | `MONTH` | Month + year known; day not known. |
 | `YEAR` | Year only known; month/day not known. |
-| `RANGE` | Interval between two partial or exact dates (may span years). |
+| `RANGE` | Exact-day interval between two calendar dates (legacy exact-day range). |
+| `RANGE_MONTH` | Month+year interval between two months (may span years). |
+| `RANGE_YEAR` | Year-only interval between two years. |
 | `UNKNOWN` | No date information; explicit “no date”. |
 
 **Optional / future types (document only — not V1):**
@@ -122,16 +126,34 @@ Normalization rules apply when the cataloger saves metadata. **Display** uses pr
 | **Precision** | `YEAR` |
 | **Display** | 1948 — **not** 01/01/1948–31/12/1948 |
 
-### Range
+### Range (exact day — legacy `RANGE`)
 
 | | |
 |--|--|
-| **Input/display** | 1947–1949 |
-| **Normalized** | `start=1947-01-01`, `end=1949-12-31` (when ends are year-only; tighten if sub-precision known on each side) |
+| **Input/display** | 12 Mar 1953 – 19 Apr 1954 |
+| **Normalized** | exact start/end calendar days |
 | **Precision** | `RANGE` |
-| **Display** | 1947–1949 (preserve cataloger phrasing where possible) |
+| **Display** | full start/end dates |
 
-**Range with mixed precision (future detail):** e.g. May 1947 – 1949 may normalize to `1947-05-01` … `1949-12-31` with display `May 1947–1949` and precision `RANGE`; exact rules for partial endpoints belong in the UI PR.
+### Month range (`RANGE_MONTH`)
+
+| | |
+|--|--|
+| **Input/display** | Dec 2021 – Feb 2022 |
+| **Normalized** | `start=2021-12-01`, `end=2022-02-28` |
+| **Precision** | `RANGE_MONTH` |
+| **Display** | `12/2021 - 02/2022` — not normalized day labels |
+
+### Year range (`RANGE_YEAR`)
+
+| | |
+|--|--|
+| **Input/display** | 1953–1954 |
+| **Normalized** | `start=1953-01-01`, `end=1954-12-31` |
+| **Precision** | `RANGE_YEAR` |
+| **Display** | `1953 - 1954` — not Jan/Dec day labels |
+
+**Supported model scope:** typed entry + new range precisions apply to **`ArchiveItem`** create/edit/upload surfaces (`OCR_DOCUMENT`, `PHOTO`, `MANUAL_TEXT`). `ArchiveEvent` shares `ArchiveItem.DatePrecision.choices` at the ORM level but has no dedicated typed-entry UI in this implementation.
 
 ### Unknown
 

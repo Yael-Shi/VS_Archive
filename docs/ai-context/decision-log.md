@@ -179,6 +179,36 @@ Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`s
 
 **Current state:** **`date_precision`** (and other shared date fields) now live on **`ArchiveItem`** only; removed from **`Document`** in migration **0035**.
 
+## Archive item date precision — typed entry and partial ranges (2026-07-14)
+
+**Decision:** Add precision-aware segmented date entry (year/month/day text fields with `inputmode="numeric"`) and two new range precisions while keeping existing **`RANGE`** as exact-day range semantics.
+
+**New `DatePrecision` values (ArchiveItem only):**
+
+| Value | Meaning | Normalized storage | Public display |
+|-------|---------|-------------------|----------------|
+| `RANGE` | Exact-day range (unchanged) | Exact start/end calendar days | `DD/MM/YYYY - DD/MM/YYYY` |
+| `RANGE_MONTH` | Month+year range | Start → first day of start month; end → last day of end month | `MM/YYYY - MM/YYYY` |
+| `RANGE_YEAR` | Year-only range | Start → Jan 1 of start year; end → Dec 31 of end year | `YYYY - YYYY` |
+
+**Single-value normalized bounds:**
+
+| Value | `date_start` | `date_end` |
+|-------|--------------|------------|
+| `EXACT_DAY` | exact day | same day |
+| `MONTH` | first day of month | last day of month |
+| `YEAR` | Jan 1 | Dec 31 |
+
+**Backward compatibility:** Existing rows with `date_precision=RANGE` are **not** reinterpreted. No inference of month/year range precision from normalized boundary values. Legacy API/form `date_start`/`date_end` ISO fields map into components when segmented fields are absent.
+
+**Form safety:** Shared partial `archive_date_form_fields.html` is the single source for precision select + segmented inputs. Server-rendered `hidden`/`disabled` state matches precision before JS runs; `archive_date_entry.js` updates the same state on change.
+
+**Scope:** `ArchiveItem` only for typed entry and new range precisions. `Document.DatePrecision` remains the legacy five-value enum (date fields removed from Document in 0035). `ArchiveEvent.date_precision` reuses `ArchiveItem.DatePrecision.choices` at runtime but has **no** dedicated typed-entry UI; migration 0037 alters **ArchiveItem** only.
+
+**Implementation:** `documents/services/archive_date_input.py` (parse/normalize/validate/repopulate); shared template `archive_date_form_fields.html`; `format_document_date()` extended for `RANGE_MONTH` / `RANGE_YEAR`. Migration **0037** updates `ArchiveItem.date_precision` choices.
+
+**Deferred:** Date-based filtering/search overlap queries (unchanged).
+
 ## Document date precision — list/detail display
 
 **Decision:** Add **`format_document_date(document)`** for list/detail UI. **`UNKNOWN`** always displays **ללא תאריך** and **does not** show `date_start`/`date_end` even when populated (Option B). Other precisions format from bounds without exposing normalized first/last days for month/year.

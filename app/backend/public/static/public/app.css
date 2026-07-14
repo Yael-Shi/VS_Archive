@@ -851,6 +851,54 @@ textarea {
   margin-top: var(--space-2);
 }
 
+.archive-date-entry {
+  margin-top: var(--space-2);
+}
+
+.archive-date-group + .archive-date-group {
+  margin-top: var(--space-3);
+}
+
+.archive-date-group-label {
+  font-size: var(--font-sm);
+  font-weight: 700;
+  color: var(--muted);
+  margin-bottom: var(--space-2);
+}
+
+.archive-date-range-block + .archive-date-range-block {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.archive-date-components {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.archive-date-component {
+  flex: 1 1 5.5rem;
+  min-width: 0;
+  margin-top: 0;
+}
+
+.archive-date-input {
+  width: 100%;
+}
+
+@media (max-width: 900px) {
+  .archive-date-components {
+    flex-direction: column;
+  }
+
+  .archive-date-component {
+    flex-basis: 100%;
+  }
+}
+
+
 .meta-item {
   border: 1px solid var(--border-subtle);
   background: var(--card-elevated);

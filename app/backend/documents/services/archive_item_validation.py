@@ -9,7 +9,9 @@ DATE_PRECISION_UI_CHOICES = (
     (ArchiveItem.DatePrecision.YEAR, "שנה בלבד"),
     (ArchiveItem.DatePrecision.MONTH, "חודש"),
     (ArchiveItem.DatePrecision.EXACT_DAY, "יום מדויק"),
-    (ArchiveItem.DatePrecision.RANGE, "טווח"),
+    (ArchiveItem.DatePrecision.RANGE_YEAR, "טווח שנים"),
+    (ArchiveItem.DatePrecision.RANGE_MONTH, "טווח חודשים"),
+    (ArchiveItem.DatePrecision.RANGE, "טווח ימים"),
 )
 
 TEXT_INPUT_TYPE_UI_CHOICES = (

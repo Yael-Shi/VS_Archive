@@ -6,6 +6,14 @@ from datetime import date, datetime
 from typing import Any
 
 from documents.models import ArchiveItem
+from documents.services.archive_date_input import (
+    DATE_COMPONENT_FIELD_NAMES,
+    archive_date_entry_flags,
+    archive_date_form_data,
+    empty_date_component_form_data,
+    parse_archive_date_bounds,
+    scalar_post_field,
+)
 from documents.services.archive_item_validation import parse_date_precision
 
 
@@ -131,37 +139,82 @@ def validate_archive_metadata_fields(
     return errors
 
 
-def parse_archive_metadata_form(
-    post_data: dict[str, Any],
-) -> tuple[dict[str, Any], list[str]]:
-    """Parse POST fields for shared archive metadata and return normalized data plus errors."""
-    form_data = {
+def _base_form_data_from_post(post_data: dict[str, Any]) -> dict[str, Any]:
+    component_values = {
+        name: scalar_post_field(post_data, name) for name in DATE_COMPONENT_FIELD_NAMES
+    }
+    return {
         "title": (post_data.get("title") or "").strip(),
         "visibility": (post_data.get("visibility") or "").strip(),
-        "date_start": (post_data.get("date_start") or "").strip(),
-        "date_end": (post_data.get("date_end") or "").strip(),
         "date_precision": (post_data.get("date_precision") or "").strip(),
         "metadata_status": (post_data.get("metadata_status") or "").strip(),
         "author_name": (post_data.get("author_name") or "").strip(),
         "source_title": (post_data.get("source_title") or "").strip(),
         "public_note": parse_public_note(post_data.get("public_note")),
+        "date_start": scalar_post_field(post_data, "date_start"),
+        "date_end": scalar_post_field(post_data, "date_end"),
+        **component_values,
     }
 
+
+def parse_archive_metadata_form(
+    post_data: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    """Parse POST fields for shared archive metadata and return normalized data plus errors."""
     errors: list[str] = []
-    date_start = None
-    date_end = None
+    date_components = empty_date_component_form_data()
+    date_start: date | None = None
+    date_end: date | None = None
     visibility: str = ArchiveItem.Visibility.PRIVATE
     metadata_status: str = ArchiveItem.MetadataStatus.NEEDS_COMPLETION
     date_precision: str = ArchiveItem.DatePrecision.UNKNOWN
+    try:
+        form_data = _base_form_data_from_post(post_data)
+    except ValueError as exc:
+        errors.append(str(exc))
+        form_data = {
+            "title": (post_data.get("title") or "").strip(),
+            "visibility": (post_data.get("visibility") or "").strip(),
+            "date_precision": (post_data.get("date_precision") or "").strip(),
+            "metadata_status": (post_data.get("metadata_status") or "").strip(),
+            "author_name": (post_data.get("author_name") or "").strip(),
+            "source_title": (post_data.get("source_title") or "").strip(),
+            "public_note": parse_public_note(post_data.get("public_note")),
+            "date_start": "",
+            "date_end": "",
+            **date_components,
+        }
+        date_precision = (
+            form_data["date_precision"] or ArchiveItem.DatePrecision.UNKNOWN
+        )
+        parsed = {
+            **form_data,
+            **date_components,
+            **archive_date_entry_flags(date_precision),
+            "visibility": form_data["visibility"] or ArchiveItem.Visibility.PRIVATE,
+            "metadata_status": form_data["metadata_status"]
+            or ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
+            "date_precision": date_precision,
+            "date_start": "",
+            "date_end": "",
+            "date_start_value": None,
+            "date_end_value": None,
+        }
+        return parsed, errors
 
     try:
         visibility = parse_visibility(form_data["visibility"])
         metadata_status = parse_metadata_status(form_data["metadata_status"])
         date_precision = parse_date_precision(form_data["date_precision"])
-        date_start = parse_optional_date(form_data["date_start"], "date_start")
-        date_end = parse_optional_date(form_data["date_end"], "date_end")
     except ValueError as exc:
         errors.append(str(exc))
+
+    if not errors:
+        date_start, date_end, date_components, date_errors = parse_archive_date_bounds(
+            date_precision=date_precision,
+            post_data=post_data,
+        )
+        errors.extend(date_errors)
 
     if not errors:
         errors.extend(
@@ -179,10 +232,41 @@ def parse_archive_metadata_form(
 
     parsed = {
         **form_data,
+        **date_components,
+        **archive_date_entry_flags(date_precision),
         "visibility": visibility,
         "metadata_status": metadata_status,
         "date_precision": date_precision,
+        "date_start": date_start.isoformat() if date_start else "",
+        "date_end": date_end.isoformat() if date_end else "",
         "date_start_value": date_start,
         "date_end_value": date_end,
     }
     return parsed, errors
+
+
+def archive_metadata_form_data_for_template(
+    *,
+    title: str,
+    visibility: str,
+    date_start: date | None,
+    date_end: date | None,
+    date_precision: str,
+    metadata_status: str,
+    author_name: str = "",
+    source_title: str = "",
+    public_note: str = "",
+) -> dict[str, Any]:
+    return {
+        "title": title,
+        "visibility": visibility,
+        "metadata_status": metadata_status,
+        "author_name": author_name,
+        "source_title": source_title,
+        "public_note": public_note,
+        **archive_date_form_data(
+            date_start=date_start,
+            date_end=date_end,
+            date_precision=date_precision,
+        ),
+    }
