@@ -853,6 +853,15 @@ textarea {
 
 .archive-date-entry {
   margin-top: var(--space-2);
+  max-width: 100%;
+}
+
+.archive-date-entry [hidden] {
+  display: none !important;
+}
+
+.archive-date-group {
+  max-width: 100%;
 }
 
 .archive-date-group + .archive-date-group {
@@ -860,41 +869,120 @@ textarea {
 }
 
 .archive-date-group-label {
+  display: block;
   font-size: var(--font-sm);
   font-weight: 700;
   color: var(--muted);
   margin-bottom: var(--space-2);
 }
 
-.archive-date-range-block + .archive-date-range-block {
-  margin-top: var(--space-3);
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--border-subtle);
-}
-
-.archive-date-components {
+.archive-date-group--range {
   display: flex;
+  flex-direction: row;
   flex-wrap: wrap;
-  gap: var(--space-2);
+  gap: var(--space-3);
+  align-items: flex-start;
+  max-width: 100%;
 }
 
-.archive-date-component {
-  flex: 1 1 5.5rem;
+.archive-date-logical-field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 100%;
   min-width: 0;
-  margin-top: 0;
 }
 
-.archive-date-input {
-  width: 100%;
+.archive-date-control {
+  display: inline-flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  direction: ltr;
+  unicode-bidi: isolate;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card-input);
+  padding: 0 6px;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    background-color 0.15s ease;
 }
 
-@media (max-width: 900px) {
-  .archive-date-components {
+.archive-date-control:focus-within {
+  border-color: var(--accent-muted);
+  background: var(--card-elevated);
+  box-shadow: var(--focus-ring);
+}
+
+.archive-date-part {
+  display: inline-flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.archive-date-part[hidden] {
+  display: none;
+}
+
+.archive-date-separator {
+  color: var(--muted);
+  font-size: var(--font-sm);
+  line-height: 1;
+  padding: 0 1px;
+  user-select: none;
+  flex: 0 0 auto;
+}
+
+.archive-date-control .archive-date-input {
+  box-sizing: content-box;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 6px 0;
+  text-align: center;
+  font-size: var(--font-sm);
+  direction: ltr;
+}
+
+.archive-date-control .archive-date-input:focus {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+}
+
+.archive-date-control .archive-date-input-day,
+.archive-date-control .archive-date-input-month {
+  width: 2ch;
+  min-width: 2ch;
+  max-width: 2ch;
+  flex: 0 0 2ch;
+}
+
+.archive-date-control .archive-date-input-year {
+  width: 4ch;
+  min-width: 4ch;
+  max-width: 4ch;
+  flex: 0 0 4ch;
+}
+
+.archive-date-ui[data-date-ui="desktop"] input[type="date"] {
+  width: auto;
+  max-width: 100%;
+}
+
+@media (max-width: 640px) {
+  .archive-date-group--range {
     flex-direction: column;
-  }
-
-  .archive-date-component {
-    flex-basis: 100%;
   }
 }
 

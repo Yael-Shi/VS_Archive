@@ -9769,9 +9769,11 @@ class UploadPageTemplateTests(TestCase):
         self.assertEqual(content.count('id="date_precision"'), 1)
         self.assertEqual(content.count('name="date_precision"'), 1)
         self.assertContains(resp, "archive-date-entry")
+        self.assertContains(resp, 'data-date-ui="desktop"')
+        self.assertContains(resp, 'data-date-ui="mobile"')
         self.assertContains(resp, "archive_date_entry.js")
         self.assertContains(resp, 'inputmode="numeric"')
-        self.assertNotContains(resp, 'type="date"')
+        self.assertNotContains(resp, 'type="number"')
 
     def test_upload_page_renders_hebrew_text_input_type_labels(self):
         resp = self._get_page()

@@ -5,6 +5,9 @@ from __future__ import annotations
 from datetime import date
 import json
 import re
+import shutil
+import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
@@ -362,7 +365,8 @@ class ArchiveDateFormIntegrationTests(TestCase):
         self.assertContains(resp, 'value="1948"', html=False)
         self.assertContains(resp, 'name="date_start_month"')
         self.assertContains(resp, 'value="5"', html=False)
-        self.assertNotContains(resp, 'type="date"')
+        self.assertContains(resp, 'placeholder="MM"')
+        self.assertContains(resp, 'id="date_start_month_desktop_month"')
 
     def test_public_detail_shows_month_range_label(self):
         item = create_manual_text_archive_item(
@@ -399,8 +403,11 @@ class ArchiveDateFormIntegrationTests(TestCase):
         self.assertContains(resp, 'name="date_start_year"')
         self.assertContains(resp, 'inputmode="numeric"')
         self.assertContains(resp, "archive-date-entry")
+        self.assertContains(resp, 'data-date-ui="desktop"')
+        self.assertContains(resp, 'data-date-ui="mobile"')
+        self.assertContains(resp, 'class="archive-date-control"')
         self.assertContains(resp, "archive_date_entry.js")
-        self.assertNotContains(resp, 'type="date"')
+        self.assertNotContains(resp, 'type="number"')
 
 
 class ArchiveDateMetadataFormTests(TestCase):
@@ -465,6 +472,87 @@ def _count_substrings(content: bytes, needle: str) -> int:
     return content.decode().count(needle)
 
 
+def _ui_area_html(content: str, ui: str) -> str:
+    marker = f'data-date-ui="{ui}"'
+    marker_pos = content.find(marker)
+    if marker_pos == -1:
+        return ""
+    div_start = content.rfind("<div", 0, marker_pos)
+    if div_start == -1:
+        return ""
+    nested = 0
+    index = div_start
+    while index < len(content):
+        if content.startswith("<div", index):
+            nested += 1
+        elif content.startswith("</div>", index):
+            nested -= 1
+            if nested == 0:
+                return content[div_start : index + len("</div>")]
+        index += 1
+    return content[div_start:]
+
+
+def _desktop_ui_html(content: str) -> str:
+    return _ui_area_html(content, "desktop")
+
+
+def _mobile_ui_html(content: str) -> str:
+    return _ui_area_html(content, "mobile")
+
+
+def _archive_date_entry_html(content: str) -> str:
+    marker = 'id="archiveDateEntry"'
+    marker_pos = content.find(marker)
+    if marker_pos == -1:
+        return ""
+    div_start = content.rfind("<div", 0, marker_pos)
+    if div_start == -1:
+        return ""
+    nested = 0
+    index = div_start
+    while index < len(content):
+        if content.startswith("<div", index):
+            nested += 1
+        elif content.startswith("</div>", index):
+            nested -= 1
+            if nested == 0:
+                return content[div_start : index + len("</div>")]
+        index += 1
+    return content[div_start:]
+
+
+def _html_id_values(html: str) -> list[str]:
+    return re.findall(r'\bid="([^"]+)"', html)
+
+
+def _enabled_named_input_count(html: str, field_name: str) -> int:
+    count = 0
+    for match in re.finditer(
+        rf'<input\b[^>]*\bname="{re.escape(field_name)}"[^>]*>',
+        html,
+        re.IGNORECASE,
+    ):
+        if re.search(r"\bdisabled\b", match.group(0)):
+            continue
+        count += 1
+    return count
+
+
+def _enabled_native_input_count(html: str, input_type: str) -> int:
+    count = 0
+    for match in re.finditer(
+        rf"<input\b[^>]*\btype=\"{re.escape(input_type)}\"[^>]*>",
+        html,
+        re.IGNORECASE,
+    ):
+        tag = match.group(0)
+        if re.search(r"\bdisabled\b", tag):
+            continue
+        count += 1
+    return count
+
+
 class ArchiveDateDuplicateControlTests(TestCase):
     def setUp(self):
         self.client = Client()
@@ -522,15 +610,86 @@ class ArchiveDateDuplicateControlTests(TestCase):
 
 class ArchiveDateInitialMarkupTests(TestCase):
     @staticmethod
-    def _date_group_is_hidden(content: str, group: str) -> bool:
+    def _precision_group_is_hidden(content: str, precision: str, *, ui: str) -> bool:
+        area = (
+            _desktop_ui_html(content) if ui == "desktop" else _mobile_ui_html(content)
+        )
         match = re.search(
-            rf'(<div[^>]*class="archive-date-group archive-date-group--{group}"[^>]*>)',
-            content,
+            rf'(<div[^>]*data-date-precision-group="{re.escape(precision)}"[^>]*>)',
+            area,
             re.DOTALL,
         )
         if not match:
-            return False
+            return True
         return "hidden" in match.group(1)
+
+    @staticmethod
+    def _precision_group_block(content: str, precision: str, *, ui: str) -> str:
+        area = (
+            _desktop_ui_html(content) if ui == "desktop" else _mobile_ui_html(content)
+        )
+        match = re.search(
+            rf'<div[^>]*data-date-precision-group="{re.escape(precision)}"[^>]*>',
+            area,
+            re.DOTALL,
+        )
+        if not match:
+            return ""
+        start = match.start()
+        next_group = re.search(
+            r'<div[^>]*data-date-precision-group="',
+            area[match.end() :],
+        )
+        end = match.end() + next_group.start() if next_group else len(area)
+        return area[start:end]
+
+    @staticmethod
+    def _active_logical_control_count(content: str) -> int:
+        mobile = _mobile_ui_html(content)
+        if not mobile:
+            return 0
+        count = 0
+        for match in re.finditer(
+            r'(<div[^>]*data-date-precision-group="[^"]+"[^>]*>)',
+            mobile,
+            re.DOTALL,
+        ):
+            if "hidden" in match.group(1):
+                continue
+            block_start = match.start()
+            next_group = re.search(
+                r'<div[^>]*data-date-precision-group="',
+                mobile[match.end() :],
+            )
+            block_end = match.end() + next_group.start() if next_group else len(mobile)
+            count += mobile[block_start:block_end].count("data-date-logical-control")
+        return count
+
+    @staticmethod
+    def _mobile_logical_control_count(content: str) -> int:
+        mobile = _mobile_ui_html(content)
+        return mobile.count("data-date-logical-control")
+
+    @staticmethod
+    def _visible_desktop_precision_fields(content: str, precision: str) -> int:
+        desktop = _desktop_ui_html(content)
+        visible = 0
+        for match in re.finditer(
+            rf'(<div[^>]*data-date-precision-field="{re.escape(precision)}"[^>]*>)',
+            desktop,
+            re.DOTALL,
+        ):
+            if "hidden" not in match.group(1):
+                visible += 1
+        return visible
+
+    @staticmethod
+    def _logical_control_count(content: str) -> int:
+        return content.count("data-date-logical-control")
+
+    @staticmethod
+    def _archive_date_control_count(content: str) -> int:
+        return content.count('class="archive-date-control"')
 
     @staticmethod
     def _input_tag_for_id(content: str, input_id: str):
@@ -566,26 +725,44 @@ class ArchiveDateInitialMarkupTests(TestCase):
     def _get_manual_text_edit(self, item):
         return self.client.get(f"/archive/manage/{item.id}/edit/")
 
-    def _assert_group_state(self, resp, *, single_active: bool, range_active: bool):
+    def _assert_precision_group_state(self, resp, *, active_precision: str | None):
         content = resp.content.decode()
-        if single_active:
-            self.assertFalse(self._date_group_is_hidden(content, "single"))
-        else:
-            self.assertTrue(self._date_group_is_hidden(content, "single"))
-
-        if range_active:
-            self.assertFalse(self._date_group_is_hidden(content, "range"))
-        else:
-            self.assertTrue(self._date_group_is_hidden(content, "range"))
+        for precision in (
+            "YEAR",
+            "MONTH",
+            "EXACT_DAY",
+            "RANGE_YEAR",
+            "RANGE_MONTH",
+            "RANGE",
+        ):
+            should_hide = precision != active_precision
+            self.assertEqual(
+                self._precision_group_is_hidden(content, precision, ui="desktop"),
+                should_hide,
+            )
+            self.assertEqual(
+                self._precision_group_is_hidden(content, precision, ui="mobile"),
+                should_hide,
+            )
 
     def test_unknown_initial_markup_hides_and_disables_all_groups(self):
         item = create_manual_text_archive_item(title="Unknown markup", body="x")
         resp = self._get_manual_text_edit(item)
         self.assertEqual(resp.status_code, 200)
-        self._assert_group_state(resp, single_active=False, range_active=False)
+        self._assert_precision_group_state(resp, active_precision=None)
         content = resp.content.decode()
         self.assertTrue(
-            self._input_tag_has_attr(content, "date_start_year", "disabled")
+            self._input_tag_has_attr(content, "date_start_year_mobile_year", "disabled")
+        )
+        self.assertTrue(
+            self._input_tag_has_attr(
+                content, "date_start_month_mobile_month", "disabled"
+            )
+        )
+        self.assertTrue(
+            self._input_tag_has_attr(
+                content, "date_start_day_mobile_exact_day", "disabled"
+            )
         )
 
     def test_year_initial_markup_enables_single_year_only(self):
@@ -597,13 +774,19 @@ class ArchiveDateInitialMarkupTests(TestCase):
             date_precision=ArchiveItem.DatePrecision.YEAR,
         )
         resp = self._get_manual_text_edit(item)
-        self._assert_group_state(resp, single_active=True, range_active=False)
+        self._assert_precision_group_state(resp, active_precision="YEAR")
         content = resp.content.decode()
-        self.assertIn('id="date_start_year"', content)
+        self.assertIn('id="date_start_year_mobile_year"', content)
         self.assertTrue(
-            self._input_tag_has_attr(content, "date_start_month", "disabled")
+            self._input_tag_has_attr(
+                content, "date_start_month_mobile_month", "disabled"
+            )
         )
-        self.assertTrue(self._input_tag_has_attr(content, "date_start_day", "disabled"))
+        self.assertTrue(
+            self._input_tag_has_attr(
+                content, "date_start_day_mobile_exact_day", "disabled"
+            )
+        )
 
     def test_month_initial_markup_enables_single_year_and_month(self):
         item = create_manual_text_archive_item(
@@ -614,10 +797,14 @@ class ArchiveDateInitialMarkupTests(TestCase):
             date_precision=ArchiveItem.DatePrecision.MONTH,
         )
         resp = self._get_manual_text_edit(item)
-        self._assert_group_state(resp, single_active=True, range_active=False)
+        self._assert_precision_group_state(resp, active_precision="MONTH")
         content = resp.content.decode()
-        self.assertIn('id="date_start_month"', content)
-        self.assertTrue(self._input_tag_has_attr(content, "date_start_day", "disabled"))
+        self.assertIn('id="date_start_month_mobile_month"', content)
+        self.assertTrue(
+            self._input_tag_has_attr(
+                content, "date_start_day_mobile_exact_day", "disabled"
+            )
+        )
 
     def test_exact_day_initial_markup_enables_all_single_parts(self):
         item = create_manual_text_archive_item(
@@ -628,11 +815,13 @@ class ArchiveDateInitialMarkupTests(TestCase):
             date_precision=ArchiveItem.DatePrecision.EXACT_DAY,
         )
         resp = self._get_manual_text_edit(item)
-        self._assert_group_state(resp, single_active=True, range_active=False)
+        self._assert_precision_group_state(resp, active_precision="EXACT_DAY")
         content = resp.content.decode()
-        self.assertIn('id="date_start_day"', content)
+        self.assertIn('id="date_start_desktop_exact_day"', content)
         self.assertTrue(
-            self._input_tag_lacks_attr(content, "date_start_day", "disabled")
+            self._input_tag_lacks_attr(
+                content, "date_start_desktop_exact_day", "disabled"
+            )
         )
 
     def test_range_year_initial_markup_enables_range_year_only(self):
@@ -644,12 +833,18 @@ class ArchiveDateInitialMarkupTests(TestCase):
             date_precision=ArchiveItem.DatePrecision.RANGE_YEAR,
         )
         resp = self._get_manual_text_edit(item)
-        self._assert_group_state(resp, single_active=False, range_active=True)
+        self._assert_precision_group_state(resp, active_precision="RANGE_YEAR")
         content = resp.content.decode()
-        self.assertIn('id="date_end_year"', content)
-        self.assertTrue(self._input_tag_has_attr(content, "date_end_month", "disabled"))
+        self.assertIn('id="date_end_year_mobile_range_year"', content)
         self.assertTrue(
-            self._input_tag_has_attr(content, "date_start_month_range", "disabled")
+            self._input_tag_has_attr(
+                content, "date_end_month_mobile_range_month", "disabled"
+            )
+        )
+        self.assertTrue(
+            self._input_tag_has_attr(
+                content, "date_start_month_mobile_range_month", "disabled"
+            )
         )
 
     def test_range_month_initial_markup_enables_range_month_parts(self):
@@ -661,10 +856,12 @@ class ArchiveDateInitialMarkupTests(TestCase):
             date_precision=ArchiveItem.DatePrecision.RANGE_MONTH,
         )
         resp = self._get_manual_text_edit(item)
-        self._assert_group_state(resp, single_active=False, range_active=True)
+        self._assert_precision_group_state(resp, active_precision="RANGE_MONTH")
         content = resp.content.decode()
-        self.assertIn('id="date_end_month"', content)
-        self.assertTrue(self._input_tag_has_attr(content, "date_end_day", "disabled"))
+        self.assertIn('id="date_end_month_mobile_range_month"', content)
+        self.assertTrue(
+            self._input_tag_has_attr(content, "date_end_day_mobile_range", "disabled")
+        )
 
     def test_range_initial_markup_enables_all_range_parts(self):
         item = create_manual_text_archive_item(
@@ -675,10 +872,367 @@ class ArchiveDateInitialMarkupTests(TestCase):
             date_precision=ArchiveItem.DatePrecision.RANGE,
         )
         resp = self._get_manual_text_edit(item)
-        self._assert_group_state(resp, single_active=False, range_active=True)
+        self._assert_precision_group_state(resp, active_precision="RANGE")
         content = resp.content.decode()
-        self.assertIn('id="date_end_day"', content)
-        self.assertTrue(self._input_tag_lacks_attr(content, "date_end_day", "disabled"))
+        self.assertIn('id="date_end_desktop_range"', content)
+        self.assertTrue(
+            self._input_tag_lacks_attr(content, "date_end_desktop_range", "disabled")
+        )
+        self.assertEqual(self._active_logical_control_count(content), 2)
+        self.assertEqual(
+            self._visible_desktop_precision_fields(content, "RANGE"),
+            2,
+        )
+
+    def test_unknown_initial_markup_has_no_active_logical_controls(self):
+        item = create_manual_text_archive_item(title="Unknown compact", body="x")
+        resp = self._get_manual_text_edit(item)
+        content = resp.content.decode()
+        self.assertEqual(self._active_logical_control_count(content), 0)
+
+    def test_exact_day_renders_one_active_logical_control(self):
+        item = create_manual_text_archive_item(
+            title="Exact compact",
+            body="x",
+            date_start=date(1952, 3, 12),
+            date_end=date(1952, 3, 12),
+            date_precision=ArchiveItem.DatePrecision.EXACT_DAY,
+        )
+        resp = self._get_manual_text_edit(item)
+        content = resp.content.decode()
+        self.assertEqual(self._active_logical_control_count(content), 1)
+        self.assertEqual(
+            self._visible_desktop_precision_fields(content, "EXACT_DAY"),
+            1,
+        )
+        mobile = _mobile_ui_html(content)
+        self.assertIn('dir="ltr"', mobile)
+        self.assertIn('aria-label="יום"', mobile)
+        self.assertIn('aria-label="חודש"', mobile)
+        self.assertIn('aria-label="שנה"', mobile)
+
+    def test_year_renders_one_active_logical_control(self):
+        item = create_manual_text_archive_item(
+            title="Year compact",
+            body="x",
+            date_start=date(1954, 1, 1),
+            date_end=date(1954, 12, 31),
+            date_precision=ArchiveItem.DatePrecision.YEAR,
+        )
+        resp = self._get_manual_text_edit(item)
+        content = resp.content.decode()
+        self.assertEqual(self._active_logical_control_count(content), 1)
+        self.assertEqual(
+            self._visible_desktop_precision_fields(content, "YEAR"),
+            1,
+        )
+
+    def test_range_year_renders_two_active_logical_controls(self):
+        item = create_manual_text_archive_item(
+            title="Range year compact",
+            body="x",
+            date_start=date(1953, 1, 1),
+            date_end=date(1954, 12, 31),
+            date_precision=ArchiveItem.DatePrecision.RANGE_YEAR,
+        )
+        resp = self._get_manual_text_edit(item)
+        content = resp.content.decode()
+        self.assertEqual(self._active_logical_control_count(content), 2)
+        self.assertEqual(
+            self._visible_desktop_precision_fields(content, "RANGE_YEAR"),
+            2,
+        )
+        self.assertIn("מתאריך", content)
+        self.assertIn("עד תאריך", content)
+
+    def test_month_renders_one_active_logical_control(self):
+        item = create_manual_text_archive_item(
+            title="Month compact",
+            body="x",
+            date_start=date(1948, 5, 1),
+            date_end=date(1948, 5, 31),
+            date_precision=ArchiveItem.DatePrecision.MONTH,
+        )
+        resp = self._get_manual_text_edit(item)
+        content = resp.content.decode()
+        self.assertEqual(self._active_logical_control_count(content), 1)
+        self.assertEqual(
+            self._visible_desktop_precision_fields(content, "MONTH"),
+            1,
+        )
+
+    def test_range_month_renders_two_active_logical_controls(self):
+        item = create_manual_text_archive_item(
+            title="Range month compact",
+            body="x",
+            date_start=date(2021, 12, 1),
+            date_end=date(2022, 2, 28),
+            date_precision=ArchiveItem.DatePrecision.RANGE_MONTH,
+        )
+        resp = self._get_manual_text_edit(item)
+        content = resp.content.decode()
+        self.assertEqual(self._active_logical_control_count(content), 2)
+        self.assertEqual(
+            self._visible_desktop_precision_fields(content, "RANGE_MONTH"),
+            2,
+        )
+
+    def test_markup_preserves_component_field_names(self):
+        item = create_manual_text_archive_item(
+            title="Field names",
+            body="x",
+            date_start=date(1953, 3, 12),
+            date_end=date(1954, 4, 19),
+            date_precision=ArchiveItem.DatePrecision.RANGE,
+        )
+        resp = self._get_manual_text_edit(item)
+        content = resp.content.decode()
+        for field_name in (
+            "date_start_year",
+            "date_start_month",
+            "date_start_day",
+            "date_end_year",
+            "date_end_month",
+            "date_end_day",
+        ):
+            self.assertIn(f'name="{field_name}"', content)
+
+    def test_compact_css_does_not_stack_date_parts_vertically(self):
+        css_path = (
+            Path(__file__).resolve().parents[1]
+            / "public"
+            / "static"
+            / "public"
+            / "app.css"
+        )
+        css = css_path.read_text(encoding="utf-8")
+        self.assertIn(".archive-date-control", css)
+        self.assertNotIn(".archive-date-components", css)
+        self.assertNotRegex(
+            css,
+            r"\.archive-date-(?:components|control)[^{]*\{[^}]*flex-direction:\s*column",
+        )
+
+    def test_compact_css_uses_intrinsic_width_and_flex_range(self):
+        css_path = (
+            Path(__file__).resolve().parents[1]
+            / "public"
+            / "static"
+            / "public"
+            / "app.css"
+        )
+        css = css_path.read_text(encoding="utf-8")
+        archive_date_css = re.search(
+            r"/\* Grids \*/.*?\.meta-item\s*\{",
+            css,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(archive_date_css)
+        block = archive_date_css.group(0)
+        self.assertIn("width: fit-content", block)
+        self.assertIn("unicode-bidi: isolate", block)
+        self.assertNotIn("max-content", block)
+        self.assertRegex(
+            block,
+            r"\.archive-date-group--range\s*\{[^}]*display:\s*flex",
+        )
+        self.assertRegex(
+            block,
+            r"\.archive-date-group--range\s*\{[^}]*flex-direction:\s*row",
+        )
+        base_range_rule = re.search(
+            r"\.archive-date-group--range\s*\{[^}]+\}",
+            block,
+        )
+        self.assertIsNotNone(base_range_rule)
+        self.assertNotIn("flex-direction: column", base_range_rule.group(0))
+        mobile_range_rule = re.search(
+            r"@media \(max-width: 640px\)\s*\{[^}]*\.archive-date-group--range\s*\{[^}]+\}",
+            block,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(mobile_range_rule)
+        self.assertIn("flex-direction: column", mobile_range_rule.group(0))
+        self.assertRegex(
+            block,
+            r"\.archive-date-control \.archive-date-input-year\s*\{[^}]*width:\s*4ch",
+        )
+
+    def test_logical_field_does_not_force_full_row_width(self):
+        css_path = (
+            Path(__file__).resolve().parents[1]
+            / "public"
+            / "static"
+            / "public"
+            / "app.css"
+        )
+        css = css_path.read_text(encoding="utf-8")
+        logical_field_rule = re.search(
+            r"\.archive-date-logical-field\s*\{[^}]+\}",
+            css,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(logical_field_rule)
+        rule = logical_field_rule.group(0)
+        self.assertRegex(rule, r"flex:\s*0\s+0\s+auto")
+        self.assertNotRegex(rule, r"(?<![a-z-])width:\s*100%")
+        self.assertNotRegex(rule, r"flex:\s*1")
+
+    def test_exact_day_control_uses_ltr_isolated_context(self):
+        item = create_manual_text_archive_item(
+            title="LTR order",
+            body="x",
+            date_start=date(1952, 3, 12),
+            date_end=date(1952, 3, 12),
+            date_precision=ArchiveItem.DatePrecision.EXACT_DAY,
+        )
+        resp = self._get_manual_text_edit(item)
+        content = resp.content.decode()
+        exact_day_mobile = ArchiveDateInitialMarkupTests._precision_group_block(
+            content,
+            "EXACT_DAY",
+            ui="mobile",
+        )
+        self.assertIn('dir="ltr"', content)
+        self.assertIn('lang="en"', content)
+        day_pos = exact_day_mobile.index('id="date_start_day_mobile_exact_day"')
+        month_pos = exact_day_mobile.index('id="date_start_month_mobile_exact_day"')
+        year_pos = exact_day_mobile.index('id="date_start_year_mobile_exact_day"')
+        self.assertLess(day_pos, month_pos)
+        self.assertLess(month_pos, year_pos)
+
+    def _get_range_markup(self):
+        item = create_manual_text_archive_item(
+            title="Range polish markup",
+            body="x",
+            date_start=date(1953, 3, 12),
+            date_end=date(1954, 4, 19),
+            date_precision=ArchiveItem.DatePrecision.RANGE,
+        )
+        resp = self._get_manual_text_edit(item)
+        self.assertEqual(resp.status_code, 200)
+        return resp.content.decode()
+
+    def test_compact_placeholders_use_dd_mm_yyyy(self):
+        content = self._get_range_markup()
+        mobile = _mobile_ui_html(content)
+        range_block = ArchiveDateInitialMarkupTests._precision_group_block(
+            content,
+            "RANGE",
+            ui="mobile",
+        )
+        self.assertNotIn('placeholder="1-31"', content)
+        self.assertNotIn('placeholder="1-12"', content)
+        self.assertNotIn('placeholder="למשל 1952"', content)
+        self.assertEqual(range_block.count('placeholder="DD"'), 2)
+        self.assertEqual(range_block.count('placeholder="MM"'), 2)
+        self.assertEqual(range_block.count('placeholder="YYYY"'), 2)
+        self.assertEqual(mobile.count('placeholder="DD"'), 3)
+
+    def test_logical_controls_use_group_labelling(self):
+        content = self._get_range_markup()
+        desktop = _desktop_ui_html(content)
+        range_mobile = ArchiveDateInitialMarkupTests._precision_group_block(
+            content,
+            "RANGE",
+            ui="mobile",
+        )
+        self.assertNotIn('<label class="archive-date-group-label"', range_mobile)
+        self.assertIn('<label class="archive-date-group-label"', desktop)
+        self.assertEqual(range_mobile.count('role="group"'), 2)
+        labelled_controls = re.findall(
+            r'aria-labelledby="(archive_date_[^"]+)"',
+            range_mobile,
+        )
+        self.assertEqual(len(labelled_controls), 0)
+        self.assertIn('aria-label="מתאריך"', range_mobile)
+        self.assertIn('aria-label="עד תאריך"', range_mobile)
+        self.assertEqual(content.count('id="archive_date_range_start_mobile_label"'), 1)
+        self.assertEqual(content.count('id="archive_date_range_end_mobile_label"'), 1)
+
+
+class ArchiveDateSharedFormLocationTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.staff = User.objects.create_user(
+            username="date_location_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.client.force_login(self.staff)
+
+    def _assert_compact_date_markup(self, resp):
+        self.assertEqual(resp.status_code, 200)
+        content = resp.content.decode()
+        self.assertIn('id="archiveDateEntry"', content)
+        self.assertIn('class="archive-date-control"', content)
+        self.assertIn("data-date-logical-control", content)
+        self.assertNotContains(resp, 'type="number"')
+        self.assertEqual(content.count('id="date_precision"'), 1)
+
+    def test_upload_page_renders_compact_date_control(self):
+        self._assert_compact_date_markup(self.client.get("/api/ui/upload/"))
+
+    def test_manual_text_create_renders_compact_date_control(self):
+        self._assert_compact_date_markup(
+            self.client.get("/archive/manage/new/manual-text/")
+        )
+
+    def test_shared_date_component_html_ids_are_unique(self):
+        resp = self.client.get("/archive/manage/new/manual-text/")
+        self.assertEqual(resp.status_code, 200)
+        content = resp.content.decode()
+        entry_html = _archive_date_entry_html(content)
+        self.assertTrue(entry_html)
+        ids = _html_id_values(entry_html)
+        self.assertTrue(ids)
+        duplicates = sorted({id_value for id_value in ids if ids.count(id_value) > 1})
+        self.assertEqual(
+            duplicates,
+            [],
+            msg=f"duplicate archive date ids: {duplicates}",
+        )
+
+    def test_photo_create_renders_compact_date_control(self):
+        self._assert_compact_date_markup(
+            self.client.get("/archive/manage/new/?item_type=photo")
+        )
+
+    def test_manual_text_edit_renders_compact_date_control(self):
+        item = create_manual_text_archive_item(title="Location edit", body="x")
+        self._assert_compact_date_markup(
+            self.client.get(f"/archive/manage/{item.id}/edit/")
+        )
+
+    def test_ocr_edit_renders_compact_date_control(self):
+        doc = create_ocr_document(
+            title="Location OCR edit",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.PRINTED,
+        )
+        self._assert_compact_date_markup(
+            self.client.get(f"/archive/manage/{doc.archive_item_id}/edit/")
+        )
+
+    def test_photo_edit_renders_compact_date_control(self):
+        from documents.models import PhotoContent
+
+        photo_item = ArchiveItem.objects.create(
+            item_type=ArchiveItem.ItemType.PHOTO,
+            title="Location photo edit",
+            visibility=ArchiveItem.Visibility.PRIVATE,
+        )
+        PhotoContent.objects.create(
+            archive_item=photo_item,
+            original_file_key="photos/1/original.jpg",
+            original_filename="photo.jpg",
+            original_mime_type="image/jpeg",
+            original_size_bytes=100,
+            upload_status=PhotoContent.UploadStatus.UPLOADED,
+        )
+        self._assert_compact_date_markup(
+            self.client.get(f"/archive/manage/{photo_item.id}/edit/")
+        )
 
 
 class ArchiveDateUploadIntegrationTests(TestCase):
@@ -819,3 +1373,262 @@ class ArchiveDateScriptIncludeTests(TestCase):
         self._assert_single_script_include(
             self.client.get(f"/archive/manage/{item.id}/edit/")
         )
+
+
+def _archive_date_js_path() -> Path:
+    return (
+        Path(__file__).resolve().parents[1]
+        / "public"
+        / "static"
+        / "public"
+        / "archive_date_entry.js"
+    )
+
+
+def _sanitize_archive_date_digits_python(raw_value, max_length=None):
+    """Mirror of archive_date_entry.js::sanitizeArchiveDateDigits for spec tests."""
+    digits = re.sub(r"\D", "", str(raw_value if raw_value is not None else ""))
+    if max_length is not None and max_length > 0:
+        return digits[:max_length]
+    return digits
+
+
+class ArchiveDateDigitInputScriptTests(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.js_source = _archive_date_js_path().read_text(encoding="utf-8")
+
+    def test_script_declares_digit_sanitizer_and_input_binding(self):
+        self.assertIn("function sanitizeArchiveDateDigits", self.js_source)
+        self.assertIn('addEventListener("input"', self.js_source)
+        self.assertIn("sanitizeDigits: sanitizeArchiveDateDigits", self.js_source)
+        for field_name in (
+            "date_start_day",
+            "date_start_month",
+            "date_start_year",
+            "date_end_day",
+            "date_end_month",
+            "date_end_year",
+        ):
+            self.assertIn(f'"{field_name}"', self.js_source)
+
+    def test_script_does_not_use_keydown_only_filtering(self):
+        self.assertNotIn('addEventListener("keydown"', self.js_source)
+
+    def test_upload_page_includes_dual_representations(self):
+        client = Client()
+        staff = User.objects.create_user(
+            username="date_digit_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        client.force_login(staff)
+        resp = client.get("/api/ui/upload/")
+        self.assertEqual(resp.status_code, 200)
+        content = resp.content.decode()
+        desktop = _desktop_ui_html(content)
+        mobile = _mobile_ui_html(content)
+        self.assertIn("archive_date_entry.js", content)
+        self.assertIn('type="date"', desktop)
+        self.assertNotIn('type="month"', content)
+        self.assertNotIn('type="date"', mobile)
+        self.assertNotIn('type="number"', content)
+        for field_name in (
+            "date_start_day",
+            "date_start_month",
+            "date_start_year",
+            "date_end_day",
+            "date_end_month",
+            "date_end_year",
+        ):
+            self.assertIn(f'name="{field_name}"', mobile)
+
+    def test_digit_sanitizer_removes_non_digits(self):
+        self.assertEqual(_sanitize_archive_date_digits_python("ab12-3"), "123")
+        self.assertEqual(_sanitize_archive_date_digits_python("19x52"), "1952")
+        self.assertEqual(_sanitize_archive_date_digits_python("1"), "1")
+
+    def test_digit_sanitizer_respects_maxlength(self):
+        self.assertEqual(_sanitize_archive_date_digits_python("123456", 2), "12")
+        self.assertEqual(_sanitize_archive_date_digits_python("19x52789", 4), "1952")
+
+    def test_js_sanitize_digits_matches_python_spec(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node not available for JavaScript execution checks")
+        match = re.search(
+            r"function sanitizeArchiveDateDigits\(rawValue, maxLength\)\s*\{.*?\n  \}",
+            self.js_source,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match)
+        script = (
+            match.group(0)
+            + """
+const cases = [
+  ["ab12-3", 2, "12"],
+  ["19x52", 4, "1952"],
+  ["1", 2, "1"],
+  ["", 4, ""],
+];
+for (const [raw, maxLen, expected] of cases) {
+  const got = sanitizeArchiveDateDigits(raw, maxLen);
+  if (got !== expected) {
+    throw new Error(
+      `sanitizeDigits(${JSON.stringify(raw)}, ${maxLen}) => ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`
+    );
+  }
+}
+"""
+        )
+        subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
+
+
+class ArchiveDateDualUiMarkupTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.staff = User.objects.create_user(
+            username="dual_ui_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.client.force_login(self.staff)
+
+    def _edit_content(self, item):
+        resp = self.client.get(f"/archive/manage/{item.id}/edit/")
+        self.assertEqual(resp.status_code, 200)
+        return resp.content.decode()
+
+    def test_exact_day_desktop_has_native_date_mobile_has_grouped_control(self):
+        item = create_manual_text_archive_item(
+            title="Dual exact",
+            body="x",
+            date_start=date(1952, 3, 12),
+            date_end=date(1952, 3, 12),
+            date_precision=ArchiveItem.DatePrecision.EXACT_DAY,
+        )
+        content = self._edit_content(item)
+        desktop = _desktop_ui_html(content)
+        mobile = _mobile_ui_html(content)
+        self.assertEqual(_enabled_native_input_count(desktop, "date"), 1)
+        self.assertEqual(_enabled_native_input_count(desktop, "month"), 0)
+        self.assertNotIn('type="date"', mobile)
+        self.assertEqual(
+            ArchiveDateInitialMarkupTests._active_logical_control_count(content),
+            1,
+        )
+        self.assertIn('role="group"', mobile)
+
+    def test_range_desktop_has_two_native_dates(self):
+        item = create_manual_text_archive_item(
+            title="Dual range",
+            body="x",
+            date_start=date(1953, 3, 12),
+            date_end=date(1954, 4, 19),
+            date_precision=ArchiveItem.DatePrecision.RANGE,
+        )
+        content = self._edit_content(item)
+        desktop = _desktop_ui_html(content)
+        self.assertEqual(_enabled_native_input_count(desktop, "date"), 2)
+        self.assertEqual(
+            ArchiveDateInitialMarkupTests._active_logical_control_count(content),
+            2,
+        )
+
+    def test_month_desktop_has_segmented_month_year_control(self):
+        item = create_manual_text_archive_item(
+            title="Dual month",
+            body="x",
+            date_start=date(1948, 5, 1),
+            date_end=date(1948, 5, 31),
+            date_precision=ArchiveItem.DatePrecision.MONTH,
+        )
+        content = self._edit_content(item)
+        desktop = _desktop_ui_html(content)
+        month_block = ArchiveDateInitialMarkupTests._precision_group_block(
+            content,
+            "MONTH",
+            ui="desktop",
+        )
+        self.assertNotIn('type="month"', desktop)
+        self.assertEqual(_enabled_native_input_count(desktop, "month"), 0)
+        self.assertEqual(month_block.count("data-date-logical-control"), 1)
+        self.assertIn('placeholder="MM"', month_block)
+        self.assertIn('placeholder="YYYY"', month_block)
+        self.assertEqual(_enabled_named_input_count(desktop, "date_start_month"), 1)
+        self.assertEqual(_enabled_named_input_count(desktop, "date_start_year"), 1)
+        self.assertEqual(_enabled_named_input_count(desktop, "date_start_day"), 0)
+        self.assertTrue(
+            ArchiveDateInitialMarkupTests._input_tag_lacks_attr(
+                month_block, "date_start_month_desktop_month", "disabled"
+            )
+        )
+        self.assertTrue(
+            ArchiveDateInitialMarkupTests._input_tag_lacks_attr(
+                month_block, "date_start_year_desktop_month", "disabled"
+            )
+        )
+
+    def test_range_month_desktop_has_two_segmented_month_year_controls(self):
+        item = create_manual_text_archive_item(
+            title="Dual range month",
+            body="x",
+            date_start=date(2021, 12, 1),
+            date_end=date(2022, 2, 28),
+            date_precision=ArchiveItem.DatePrecision.RANGE_MONTH,
+        )
+        content = self._edit_content(item)
+        desktop = _desktop_ui_html(content)
+        range_month_block = ArchiveDateInitialMarkupTests._precision_group_block(
+            content,
+            "RANGE_MONTH",
+            ui="desktop",
+        )
+        self.assertNotIn('type="month"', desktop)
+        self.assertEqual(_enabled_native_input_count(desktop, "month"), 0)
+        self.assertEqual(range_month_block.count("data-date-logical-control"), 2)
+        self.assertEqual(range_month_block.count('placeholder="MM"'), 2)
+        self.assertEqual(range_month_block.count('placeholder="YYYY"'), 2)
+        self.assertEqual(_enabled_named_input_count(desktop, "date_start_month"), 1)
+        self.assertEqual(_enabled_named_input_count(desktop, "date_start_year"), 1)
+        self.assertEqual(_enabled_named_input_count(desktop, "date_end_month"), 1)
+        self.assertEqual(_enabled_named_input_count(desktop, "date_end_year"), 1)
+        self.assertEqual(_enabled_named_input_count(desktop, "date_start_day"), 0)
+        self.assertEqual(_enabled_named_input_count(desktop, "date_end_day"), 0)
+
+    def test_year_desktop_uses_numeric_year_not_native_date(self):
+        item = create_manual_text_archive_item(
+            title="Dual year",
+            body="x",
+            date_start=date(1954, 1, 1),
+            date_end=date(1954, 12, 31),
+            date_precision=ArchiveItem.DatePrecision.YEAR,
+        )
+        content = self._edit_content(item)
+        desktop = _desktop_ui_html(content)
+        self.assertEqual(_enabled_native_input_count(desktop, "date"), 0)
+        self.assertEqual(_enabled_native_input_count(desktop, "month"), 0)
+        self.assertIn('name="date_start_year"', desktop)
+
+    def test_mobile_area_initially_disabled(self):
+        item = create_manual_text_archive_item(
+            title="Dual disabled mobile",
+            body="x",
+            date_start=date(1952, 3, 12),
+            date_end=date(1952, 3, 12),
+            date_precision=ArchiveItem.DatePrecision.EXACT_DAY,
+        )
+        content = self._edit_content(item)
+        self.assertRegex(content, r'data-date-ui="mobile"[^>]*\bhidden\b')
+        self.assertTrue(
+            ArchiveDateInitialMarkupTests._input_tag_has_attr(
+                content, "date_start_day_mobile_exact_day", "disabled"
+            )
+        )
+
+    def test_script_uses_matchmedia_for_responsive_mode(self):
+        js_source = _archive_date_js_path().read_text(encoding="utf-8")
+        self.assertIn("matchMedia", js_source)
+        self.assertIn("(max-width: 640px)", js_source)
+        self.assertIn("prepareSubmission", js_source)
