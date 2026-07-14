@@ -1,12 +1,12 @@
 # PHOTO Archive Items — Design / Scope
 
-Design and implementation scope for **`PHOTO`** archive items: one photo per **`ArchiveItem`**, private S3 storage, presigned display, and no OCR/HTR pipeline.
+Design and implementation scope for **`PHOTO`** archive items: one photo per **`ArchiveItem`**, private S3 storage, presigned display, browse-card thumbnails, and no OCR/HTR pipeline.
 
-**Status:** Design (PR1) + **model foundation (PR2)** + **staff create/upload V1 (PR3)** + **public/archive display V1 (PR4)** + **staff metadata edit/delete V1 (PR5)** + **staff manage status clarity (PR6)**. Thumbnail generation and re-upload/retry remain deferred.
+**Status:** Design (PR1) through staff manage status clarity (PR6) are **implemented**. **Browse-card thumbnail generation**, **upload-time thumbnail persistence**, and **idempotent backfill commands** are **implemented**. Re-upload/retry after **`FAILED`**, S3 delete on PHOTO delete, and multi-photo albums remain **not implemented**.
 
 **Related docs:**
 
-- `docs/ai-context/decision-log.md` — durable decisions and PR history
+- `docs/ai-context/decision-log.md` — durable decisions and PR history (see end of log for current browse/thumbnail state)
 - `docs/ai-context/vs-archive-context.md` — broad project context
 - `docs/ai-context/archive-discovery-catalog-design.md` — ArchiveItem discovery metadata direction
 - `docs/ai-context/unified-ocr-upload-flow.md` — completed OCR upload flow (separate from PHOTO)
@@ -14,11 +14,106 @@ Design and implementation scope for **`PHOTO`** archive items: one photo per **`
 **Key code references (current behavior):**
 
 - `documents/models.py` — **`ArchiveItem`**, **`ManualTextContent`**, **`PhotoContent`**
-- `documents/services/archive_item_access.py` — visibility access control for **`/archive/`**
-- `documents/services/archive_items.py` — create/edit helpers for **`OCR_DOCUMENT`** and **`MANUAL_TEXT`**
-- `documents/services/upload_validation.py` — MIME/extension validation (OCR upload today)
-- `documents/s3.py` — presigned PUT/GET helpers, **`S3HeadObjectResult`**
+- `documents/services/archive_item_access.py` — visibility and browse renderability
+- `documents/services/archive_item_presentation.py` — **`ArchiveBrowseCard`**, text preview, type markers
+- `documents/services/photo_archive_urls.py` — presigned browse thumbnails for PHOTO
+- `documents/services/document_archive_urls.py` — presigned browse thumbnails for image OCR documents
+- `documents/services/photo_thumbnail.py` — upload-time PHOTO thumbnail generation
+- `documents/services/document_thumbnail.py` — upload-time OCR image-document thumbnail generation
+- `documents/services/photo_upload.py` — PHOTO create/upload/finalize
+- `documents/services/photo_presentation.py` — staff manage upload/renderability labels
+- `documents/management/commands/backfill_photo_thumbnails.py` — operational PHOTO thumbnail backfill
+- `documents/management/commands/backfill_document_thumbnails.py` — operational OCR image thumbnail backfill
+- `documents/templates/documents/archive/partials/item_list_cards.html` — public browse cards
+- `documents/s3.py` — presigned PUT/GET helpers, deterministic thumbnail key builders
 - `documents/views.py` — **`/archive/`** list/detail, unified create at **`/archive/manage/new/`**
+
+---
+
+## Current authoritative state
+
+This section describes **implemented runtime behavior**. Historical PR notes below may describe earlier deferred states; treat this section as source of truth for operations and UI.
+
+### ArchiveItem and item types
+
+- **`ArchiveItem`** is the source of truth for shared archival metadata (title, visibility, dates, metadata status, author/source display, discovery M2M, public note) across **`PHOTO`**, **`OCR_DOCUMENT`**, and **`MANUAL_TEXT`**.
+- **`PHOTO`** — backed by **`PhotoContent`**; no **`Document`**, worker, or **`DocumentTextResult`**.
+- **`OCR_DOCUMENT`** — backed by **`Document`** (+ **`DocumentSourceFile`** where applicable); OCR/HTR via worker. Shared display metadata is read from **`ArchiveItem`**; OCR-specific fields remain on **`Document`**.
+- **`MANUAL_TEXT`** — backed by **`ManualTextContent.body`**; no file upload.
+
+### Public browse-card visual previews (`/archive/`, discovery browse pages)
+
+Browse cards are server-rendered in **`item_list_cards.html`**. Each card has:
+
+1. **Visual preview** — stored JPEG thumbnail **or** CSS type-marker fallback (mutually exclusive branches).
+2. **Text preview** — truncated metadata/transcription paragraph (`card.preview_text`), separate from the visual preview.
+
+| Item type | Visual when thumbnail available | Visual fallback | Presign key for browse |
+|-----------|--------------------------------|-----------------|------------------------|
+| **PHOTO** | `<img>` from **`PhotoContent.thumbnail_file_key`** | CSS marker `--photo` | `photos/{id}/thumb_400.jpg` only |
+| **OCR_DOCUMENT (IMAGE)** | `<img>` from **`Document.thumbnail_file_key`** | CSS marker `--ocr` | `documents/{id}/thumb_400.jpg` only |
+| **OCR_DOCUMENT (PDF)** | Never (generation skipped) | CSS marker `--ocr` | N/A |
+| **MANUAL_TEXT** | Never (no thumbnail enrichment) | CSS marker `--manual` | N/A |
+
+**Rules (all item types):**
+
+- Browse cards **never** presign **`PhotoContent.original_file_key`**, **`Document.file_s3_key`**, or any source-file key for list previews.
+- When **`thumbnail_url`** is set, the template renders the image branch only — **no** type-marker icon is shown on the same card.
+- Missing **`thumbnail_file_key`**, empty bucket config, or presign failure leaves **`thumbnail_url=None`** → CSS marker fallback.
+- PDF OCR documents are excluded from document thumbnail presigning even if **`thumbnail_file_key`** is populated.
+
+**Detail pages (unchanged from PR4 intent):**
+
+- **PHOTO detail** (`/archive/<id>/`) — presigned GET for **`original_file_key`** (full original), not the browse thumbnail.
+- **OCR detail** — `/archive/<id>/` redirects to the OCR document detail page.
+
+### Thumbnail generation (forward path)
+
+- **PHOTO:** after successful upload finalize (`upload_status=UPLOADED`), **`generate_and_persist_photo_thumbnail`** runs best-effort. Downloads the validated original from S3, applies EXIF-aware resize to max edge 400, uploads fixed JPEG key, persists **`width`**, **`height`**, and **`thumbnail_*`** on **`PhotoContent`**. Upload success is not rolled back on thumbnail failure.
+- **OCR image documents:** after upload complete/finalize commits, **`schedule_document_thumbnail_after_upload`** runs **`generate_and_persist_document_thumbnail`** on commit. Uses the **first source page** (`DocumentSourceFile` at **`order_index=0`**). Persists **`first_page_width`**, **`first_page_height`**, and **`thumbnail_*`** on **`Document`**. **PDF** documents are excluded (**`should_generate_document_thumbnail`** returns false).
+- Shared encoder: **`documents/services/image_thumbnail.py`** (`THUMBNAIL_MAX_EDGE=400`, JPEG output).
+- Worker (`run_worker.py`) does **not** generate browse thumbnails.
+
+### Thumbnail backfill (operational / repair)
+
+Supported management commands (not temporary one-off scripts):
+
+| Command | Targets | Default mode |
+|---------|---------|--------------|
+| **`backfill_photo_thumbnails`** | **`PhotoContent`**: `UPLOADED`, non-empty **`original_file_key`**, empty **`thumbnail_file_key`** | Dry-run; **`--commit`** writes S3 + DB |
+| **`backfill_document_thumbnails`** | **`Document`**: `doc_type=IMAGE`, `UPLOADED`, empty **`thumbnail_file_key`**, valid primary source at `order_index=0` | Dry-run; **`--commit`** writes S3 + DB |
+
+Both commands support **`--limit`**, **`--json`**, and single-id filters (`--photo-id`, `--document-id`). Re-runs are **idempotent** (rows with existing thumbnails are skipped). Completed production backfills do **not** obsolete these commands.
+
+### S3 key convention (implemented)
+
+```
+photos/{photo_content_id}/original.{ext}     # validated MIME extension
+photos/{photo_content_id}/thumb_400.jpg      # fixed JPEG browse thumbnail
+
+documents/{document_id}/thumb_400.jpg        # fixed JPEG browse thumbnail (image OCR only)
+```
+
+Thumbnail keys are **always** `thumb_400.jpg` (not `thumb_400.{ext}`).
+
+### S3 orphan cleanup (document scope only)
+
+- **`cleanup_document_s3_orphans`** scans under **`documents/`** and protects keys referenced in the database from:
+  - **`Document.file_s3_key`**
+  - **`Document.thumbnail_file_key`**
+  - **`DocumentSourceFile.file_s3_key`**
+- Protection is by **DB reference**, not filename pattern. Unreferenced thumbnail derivatives under **`documents/`** remain valid orphan-delete candidates.
+- Objects under **`photos/`** are **outside** this command’s scope.
+
+### Browse eligibility
+
+**`archive_browse_queryset_for_user`** applies visibility via **`archive_item_queryset_for_user`**, then **`filter_browse_renderable_archive_items`**:
+
+- **PHOTO** — linked **`PhotoContent`**, **`upload_status=UPLOADED`**, non-empty **`original_file_key`**
+- **OCR_DOCUMENT** — **`ocr_document.upload_status=UPLOADED`**
+- **MANUAL_TEXT** — no upload gate
+
+**`PENDING`** / **`FAILED`** PHOTO rows are omitted from public browse and return **404** on detail. Staff **`/archive/manage/`** lists all PHOTO rows regardless of upload status.
 
 ---
 
@@ -38,7 +133,7 @@ A **`PHOTO`** archive item is a **single historical/family photograph** cataloge
 | Primary payload | Scanned document / PDF for text extraction | Photograph for viewing |
 | Processing | S3 upload → SQS → worker → OCR/HTR → **`DocumentTextResult`** | Direct create/upload → store in S3 → display via presigned GET |
 | Text results | **`DocumentTextResult`** rows, review/verification lifecycle | **None** — no OCR/HTR, no worker, no Gemini/Transkribus |
-| Runtime source of truth | **`Document`** for OCR/processing; **`ArchiveItem`** for shared fields (cutover in progress) | **`ArchiveItem`** + **`PhotoContent`** from the start |
+| Runtime source of truth | **`ArchiveItem`** for shared metadata; **`Document`** for OCR/processing | **`ArchiveItem`** + **`PhotoContent`** |
 | Staff workflows | Upload, transcription review, metadata edit, processing state | Create/upload photo, edit shared metadata, view in archive |
 
 **Non-negotiable:** PHOTO must **not** be routed through **`Document`**, the OCR upload pipeline, worker, SQS, or any OCR/HTR provider.
@@ -49,11 +144,11 @@ A **`PHOTO`** archive item is a **single historical/family photograph** cataloge
 |--------|-------------------|-------------|
 | Backing model | **`ManualTextContent.body`** (typed text) | **`PhotoContent`** (image file metadata + S3 keys) |
 | Primary payload | Plain text in DB | Binary image in private S3 |
-| Display | Auto-escaped text + line breaks in templates | `<img>` (or equivalent) via presigned GET URL after permission check |
+| Display | Auto-escaped text + line breaks in templates | `<img>` via presigned GET URL after permission check |
 | Upload | Inline form POST (no S3 file upload) | Staff image upload to private S3 |
 | Processing | None | None (no worker) |
 
-Both types share the same **`ArchiveItem`** shell: title, visibility, dates, metadata status, author/source display fields, and (where implemented) discovery metadata (categories, events, tags).
+Both types share the same **`ArchiveItem`** shell: title, visibility, dates, metadata status, author/source display fields, and discovery metadata (categories, events, tags).
 
 ---
 
@@ -64,7 +159,7 @@ Both types share the same **`ArchiveItem`** shell: title, visibility, dates, met
 ```
 ArchiveItem (item_type=PHOTO)
     └── OneToOne ── PhotoContent
-                      └── S3 keys + file metadata
+                      └── S3 keys + file metadata + thumbnail metadata
 ```
 
 **Rationale:**
@@ -76,13 +171,13 @@ ArchiveItem (item_type=PHOTO)
 **Runtime source of truth (PHOTO):**
 
 - **`ArchiveItem`** — shared archival and discovery metadata, visibility.
-- **`PhotoContent`** — image storage identity and file metadata.
+- **`PhotoContent`** — image storage identity, file metadata, and browse thumbnail metadata.
 
 ---
 
 ## 3. PhotoContent fields
 
-**Status:** Model + migration in **PR2**; staff create/upload (**PR3**), public archive display (**PR4**), staff metadata edit/delete (**PR5**), and staff manage status clarity (**PR6**) are implemented. Thumbnail generation, dimension extraction, S3 cleanup on delete, and re-upload/retry remain deferred.
+**Status:** Model foundation (PR2) through staff manage clarity (PR6) and browse thumbnail generation are **implemented**.
 
 | Field | Type | Notes |
 |-------|------|-------|
@@ -91,19 +186,17 @@ ArchiveItem (item_type=PHOTO)
 | **`original_filename`** | **`CharField`** | Client/original filename for display/audit |
 | **`original_mime_type`** | **`CharField`** | Validated MIME type (e.g. `image/jpeg`) |
 | **`original_size_bytes`** | **`PositiveBigIntegerField`** | Size from S3 HeadObject **`ContentLength`** after finalize |
-| **`upload_status`** | **`CharField`** | **`PENDING`** / **`UPLOADED`** / **`FAILED`** (PR3) |
+| **`upload_status`** | **`CharField`** | **`PENDING`** / **`UPLOADED`** / **`FAILED`** |
 | **`upload_error`** | **`CharField`** | Safe error text when **`upload_status=FAILED`** |
-| **`width`** | **`PositiveIntegerField`, nullable** | Optional; may be populated at upload or deferred |
-| **`height`** | **`PositiveIntegerField`, nullable** | Optional; may be populated at upload or deferred |
-| **`thumbnail_file_key`** | **`CharField`, nullable** | **Future** — not populated in V1 |
-| **`thumbnail_mime_type`** | **`CharField`, nullable** | **Future** |
-| **`thumbnail_size_bytes`** | **`PositiveBigIntegerField`, nullable** | **Future** |
+| **`width`** | **`PositiveIntegerField`, nullable** | Populated on successful thumbnail generation (transposed dimensions) |
+| **`height`** | **`PositiveIntegerField`, nullable** | Populated on successful thumbnail generation |
+| **`thumbnail_file_key`** | **`CharField`, nullable** | Deterministic S3 key `photos/{id}/thumb_400.jpg` when generation succeeds |
+| **`thumbnail_mime_type`** | **`CharField`, nullable** | `image/jpeg` when thumbnail exists |
+| **`thumbnail_size_bytes`** | **`PositiveBigIntegerField`, nullable** | JPEG byte size when thumbnail exists |
 | **`created_at`** | **`DateTimeField(auto_now_add=True)`** | |
 | **`updated_at`** | **`DateTimeField(auto_now=True)`** | |
 
-**Thumbnail foundation:** Thumbnail columns may be added in PR2 as nullable fields even though V1 does not generate thumbnails. Alternatively, thumbnail columns may be deferred to a later migration — **but** the S3 key convention and model design must not block adding them later. Do not store thumbnails inline in the DB.
-
-**Validation invariant:** **`ArchiveItem.item_type`** must be **`PHOTO`** when a **`PhotoContent`** row exists. **`PhotoContent.clean()`** enforces this on **`full_clean()`**; create/update services in later PRs should enforce it at write time (same pattern as **`ManualTextContent`** + **`MANUAL_TEXT`**).
+**Validation invariant:** **`ArchiveItem.item_type`** must be **`PHOTO`** when a **`PhotoContent`** row exists. **`PhotoContent.clean()`** enforces this on **`full_clean()`**.
 
 ---
 
@@ -111,33 +204,27 @@ ArchiveItem (item_type=PHOTO)
 
 ### Privacy
 
-- Original images are stored as **private S3 objects** (same bucket pattern as existing document uploads; no public ACL / no public bucket policy for photo keys).
+- Original images and thumbnails are stored as **private S3 objects** (same bucket pattern as document uploads; no public ACL).
 - Display uses **presigned GET URLs** generated only after **`archive_item_access`** permission checks.
 
 ### Key convention
 
-Use a dedicated prefix keyed by **`PhotoContent`** primary key (not **`Document`** id):
+Use a dedicated prefix keyed by **`PhotoContent`** primary key:
 
 ```
 photos/{photo_content_id}/original.{ext}
-photos/{photo_content_id}/thumb_400.{ext}   # reserved for future thumbnails
+photos/{photo_content_id}/thumb_400.jpg
 ```
 
 **Notes:**
 
-- **`{ext}`** should come from validated upload MIME/extension mapping (e.g. `jpg`, `png`, `webp`), not from unvalidated client filenames alone.
-- Thumbnail key path is **defined now** but **unused in V1** — avoids ad-hoc key migrations when thumbnail generation lands.
-- If width/height are extracted at upload time (Pillow or similar), they are stored on **`PhotoContent`**; extraction failure should not block V1 upload if size/MIME verification succeeds (dimensions remain nullable).
+- **`{ext}`** on originals comes from validated upload MIME/extension mapping (e.g. `jpg`, `png`, `webp`).
+- Browse thumbnails are **always** fixed JPEG at **`thumb_400.jpg`**.
+- Thumbnail generation failure does not block upload finalize; browse cards fall back to the CSS photo marker.
 
 ### S3 object deletion on PHOTO delete
 
-**Recommendation (V1):** On staff/admin **ArchiveItem** delete for **`PHOTO`**, attempt **best-effort S3 deletion** of **`original_file_key`** (and any future thumbnail keys) **after** DB row removal succeeds, inside the same request/service flow, with failures logged but not blocking DB delete.
-
-**Rationale:** Orphan private objects are low risk (not public) but accumulate cost and clutter; best-effort delete matches staff expectation that “delete item” removes the photo. Strict two-phase “DB only until batch cleanup” is acceptable only if operational concerns arise — document in PR5 if deferred.
-
-**Open alternative (explicit decision point):** Defer all S3 deletion to a later cleanup job (like Transkribus retention reporting). If chosen, staff delete must still remove **`ArchiveItem`** / **`PhotoContent`** rows and presigned URLs must stop working because keys are no longer served.
-
-**PR5** should finalize delete UX (staff manage delete link, confirmation copy) and lock the S3 deletion policy if not implemented in PR3.
+**Current behavior (PR5):** Staff delete removes **`ArchiveItem`** + **`PhotoContent`** DB rows only. **S3 object cleanup is not implemented** on delete — neither **`original_file_key`** nor **`thumbnail_file_key`** objects are deleted in the delete request. Orphaned private keys require separate operational cleanup.
 
 ---
 
@@ -145,9 +232,7 @@ photos/{photo_content_id}/thumb_400.{ext}   # reserved for future thumbnails
 
 ### Visibility / access control
 
-**PHOTO does not introduce a new visibility level and does not redefine access control.** PHOTO reuses the existing **`ArchiveItem.visibility`** behavior exactly — the enum has **only two values** (`public`, `private`). There is **no** `FAMILY` visibility level and **no** three-tier PUBLIC/FAMILY/PRIVATE model.
-
-Current behavior (unchanged for PHOTO; centralized in **`documents/services/archive_item_access.py`**):
+**PHOTO does not introduce a new visibility level.** Reuse existing **`ArchiveItem.visibility`** (`public` / `private` only). Helpers in **`documents/services/archive_item_access.py`**.
 
 | Viewer | Can view |
 |--------|----------|
@@ -156,22 +241,23 @@ Current behavior (unchanged for PHOTO; centralized in **`documents/services/arch
 | Authenticated **`archive_family`** group members | **`public`** + **`private`** |
 | Everyone else | **`public`** only |
 
-- **`public`** — visible to everyone (including anonymous) in **`/archive/`** and detail.
-- **`private`** — visible to authenticated **`archive_family`** group members **and** staff/admin. **`private`** means private **family** archive content — **not** staff-only.
+Non-viewable items return **404**.
 
-Non-viewable items return **404** through the existing helpers (same as **`MANUAL_TEXT`** and other item types today). PHOTO must not add photo-specific permission checks beyond these shared helpers.
+### Presigned GET flow (detail)
 
-### Presigned GET flow
-
-1. Viewer requests **`/archive/<archive_item_id>/`** (or a dedicated image URL endpoint if added in PR4).
+1. Viewer requests **`/archive/<archive_item_id>/`**.
 2. View loads **`ArchiveItem`** + **`PhotoContent`** with **`select_related`**.
-3. **`can_view_archive_item(request.user, item)`** (or equivalent) runs **before** any S3 URL is built.
-4. On success, backend calls existing **`create_presigned_get(bucket, key, expires_in=…)`** for **`original_file_key`**.
-5. Template renders the image using the presigned URL. URL TTL should be short enough for page view (e.g. 1 hour, consistent with existing document presigned GET usage).
+3. Access check runs **before** any S3 URL is built.
+4. On success, backend calls **`create_presigned_get`** for **`original_file_key`** (full original).
+5. Template renders the image. TTL is 1 hour (`PRESIGNED_GET_EXPIRY_SECONDS=3600`), consistent with other presigned GET usage.
 
-**Public items, private objects:** An item may be **`visibility=public`** at the **`ArchiveItem`** level while the S3 object remains **private**. Public archive browsing still uses presigned GET URLs issued by the backend after the item is determined to be viewable — do **not** make S3 objects public for “public” items.
+**Public items, private objects:** S3 objects stay private; public browsing uses backend-issued presigned GET after access checks.
 
-**List page (V1):** Do **not** presign and load full original images for every row in **`/archive/`** — see §6.
+### List / browse cards
+
+- When **`thumbnail_file_key`** is set and presign succeeds, browse cards show a **presigned thumbnail** (`apply_photo_thumbnail_urls_to_browse_cards`).
+- Otherwise cards show the **CSS photo type marker** — not the full original.
+- Browse list **never** presigns **`original_file_key`**.
 
 ---
 
@@ -179,98 +265,84 @@ Non-viewable items return **404** through the existing helpers (same as **`MANUA
 
 ### Create / manage (staff/admin)
 
-- Staff create **one PHOTO** via a **PHOTO-specific** flow (recommended: new branch on **`/archive/manage/new/?item_type=photo`** in PR3 — mirror unified create pattern, not OCR upload API).
-- **`/archive/manage/`** lists PHOTO items alongside other types (existing manage list extended in later PRs).
-- Edit shared metadata at **`/archive/manage/<id>/edit/`** (PHOTO branch in PR5 or alongside display PRs) — reuse **`ArchiveItem`** fields; do not invent a large photo-specific metadata schema in V1.
+- Staff create **one PHOTO** via **`/archive/manage/new/?item_type=photo`**.
+- **`/archive/manage/`** lists PHOTO items with upload-status and archive-renderability badges.
+- Edit shared metadata at **`/archive/manage/<id>/edit/`** — metadata only; no file replace.
 
 ### Public / family archive surfaces
 
-| Surface | V1 behavior |
-|---------|-------------|
-| **`/archive/`** | PHOTO rows appear with title, dates, type indicator; **placeholder/icon** for preview — **not** full original image |
-| **`/archive/<id>/`** | Detail page shows **original image** via presigned GET after permission check |
+| Surface | Current behavior |
+|---------|------------------|
+| **`/archive/`** and discovery browse | PHOTO rows show title, dates, text preview, and **stored thumbnail** when available; **CSS photo marker** when not |
+| **`/archive/<id>/`** | Detail shows **full original** via presigned GET after permission check |
 | Visibility | Same rules as other item types |
 
-### Reuse ArchiveItem fields (V1)
+### Reuse ArchiveItem fields
 
-Use existing shared fields only:
+Use existing shared fields: **`title`**, **`visibility`**, **`metadata_status`**, dates, **`author_name`**, **`source_title`**, **`categories`**, **`events`**, **`tags`**.
 
-- **`title`**, **`visibility`**, **`metadata_status`**
-- **`date_start`**, **`date_end`**, **`date_precision`**
-- **`author_name`**, **`source_title`** where relevant
-- **`categories`**, **`events`**, **`tags`** (ArchiveItem-level discovery metadata — align with unified OCR upload direction; no separate photo taxonomy)
-
-**Out of scope for V1 UI:** captions as rich text, EXIF-driven auto-metadata, face boxes, comments, transformations, public self-service upload.
+**Out of scope:** captions as rich text, EXIF-driven auto-metadata, face boxes, comments, transformations, public self-service upload.
 
 ---
 
 ## 7. Upload approach
 
-### Options considered
+### Recommended direction (implemented in PR3)
 
-| Option | Summary | Verdict |
-|--------|---------|---------|
-| **Reuse OCR upload API** (`/api/uploads/create/`, `create_ocr_document`, multipart flow) | Would create **`Document`**, **`DocumentSourceFile`**, enqueue worker | **Reject** — violates PHOTO non-OCR decision; spreads PHOTO conditionals through OCR code |
-| **PHOTO-specific upload/create flow** | Dedicated endpoints or archive manage POST + presigned PUT; creates **`ArchiveItem`** + **`PhotoContent`** only | **Recommended** |
+- **PHOTO-specific** create/upload path — **not** OCR **`/api/uploads/*`**.
+- Reuses shared image validation, presigned S3 PUT, HeadObject verification, and **`ArchiveItem`** services.
 
-### Recommended direction
-
-- **Do not** push PHOTO through **`Document`**, OCR upload pipeline, or worker enqueue.
-- **Do** implement a **PHOTO-specific** create/upload path that reuses safe shared utilities:
-  - **`upload_validation`** (or a thin photo-specific wrapper) — image MIME/extension allowlist
-  - **`create_presigned_put`** / **`create_presigned_get`** from **`documents/s3.py`**
-  - **`S3HeadObjectResult`** / HeadObject verification — confirm object exists and **`ContentType`** matches expected image type after client PUT
-  - **`create_*` / `update_*` patterns** in **`archive_items.py`** — transactional **`ArchiveItem`** + **`PhotoContent`** creation
-  - **`parse_archive_item_discovery_metadata_form`** / **`update_archive_item_discovery_metadata`** — if discovery fields are on the create form (consistent with OCR PR3)
-- **Avoid** duplicating security logic poorly; **avoid** branching OCR upload views/services with many **`if photo`** paths.
-
-**Implemented flow (PR3):**
+**Implemented flow:**
 
 1. Staff open **`/archive/manage/new/?item_type=photo`** and submit metadata + one image file.
-2. **`POST /api/photo-uploads/create/`** validates MIME/extension, creates **`ArchiveItem`** (`PHOTO`) + **`PhotoContent`** with **`upload_status=PENDING`**, applies discovery metadata, returns presigned PUT for **`photos/{photo_content_id}/original.{ext}`**.
+2. **`POST /api/photo-uploads/create/`** creates **`ArchiveItem`** (`PHOTO`) + **`PhotoContent`** (`PENDING`), returns presigned PUT for **`photos/{photo_content_id}/original.{ext}`**.
 3. Browser uploads to private S3 via presigned PUT.
-4. **`POST /api/photo-uploads/<photo_content_id>/complete/`** runs HeadObject, verifies S3 **`ContentType`** matches expected MIME, persists **`original_size_bytes`** from S3 **`ContentLength`**, sets **`upload_status=UPLOADED`**. Validation/verification/client failures set **`upload_status=FAILED`** + **`upload_error`**. Retryable AWS failures return **502** and leave **`PENDING`**.
+4. **`POST /api/photo-uploads/<photo_content_id>/complete/`** runs HeadObject, sets **`UPLOADED`** or **`FAILED`**, then best-effort **`generate_and_persist_photo_thumbnail`**.
 
-**PR3 create-order decision:** Create **`ArchiveItem`** + **`PhotoContent`** **before** client S3 upload (same pattern as OCR **`Document`** `UPLOADING` + predetermined key). Upload lifecycle is explicit via **`upload_status`** / **`upload_error`** — not inferred from size. **Do not** route through **`/api/uploads/*`** or **`create_ocr_document`**.
+**Create-order:** **`ArchiveItem`** + **`PhotoContent`** created **before** client S3 upload. **`upload_status`** / **`upload_error`** are explicit.
 
-**PR4 browse eligibility:** **`archive_browse_queryset_for_user`** includes **`PHOTO`** only when linked **`PhotoContent.upload_status == UPLOADED`** and **`original_file_key`** is non-empty (visibility/access unchanged). **`PENDING`** / **`FAILED`** PHOTO rows stay hidden from **`/archive/`** list/detail/discovery browse. Staff **`/archive/manage/`** still lists all PHOTO items regardless of upload status.
+**Re-upload/retry after `FAILED`:** not implemented.
 
-**PR4 detail display:** After **`get_viewable_archive_item`** permission/eligibility checks, detail generates presigned GET for **`original_file_key`** only (not in list V1). Missing bucket config fails safely on detail (no broken URL).
+### OCR upload behavior (cross-reference)
 
-**PR5 staff manage edit/delete:** Staff/admin edit PHOTO shared **`ArchiveItem`** metadata at **`/archive/manage/<id>/edit/`** (title, visibility, dates, metadata status, author/source, categories/events/tags). **No** file replace/re-upload on edit. Successful edit redirects to **`/archive/manage/`** (not public detail — non-uploaded PHOTO may 404 on **`/archive/<id>/`**). Staff/admin delete at **`/archive/manage/<id>/delete/`** (GET confirmation, POST-only delete) removes **`ArchiveItem`** + **`PhotoContent`** DB rows and redirects to **`/archive/manage/`**. **S3 object cleanup is deferred** — no delete-object call in PR5; orphaned private S3 keys require a future cleanup runbook/job.
+Where staff upload scanned documents (separate from PHOTO), the current first-party upload UI (`documents/templates/documents/upload/`) implements:
 
-**PR6 staff manage status clarity:** **`/archive/manage/`** PHOTO rows show Hebrew upload-status label and archive-renderability signal (uploaded + non-empty key). PHOTO edit/delete pages add staff-only guidance: metadata-only edit, no file replacement, public archive after successful upload; delete removes DB rows only with deferred S3 cleanup. Helpers in **`documents/services/photo_presentation.py`**. **No** presigned GET in manage list, thumbnails, or behavior changes to public browse.
+- **Mobile gallery-first** — primary action «הוספת עמוד מהגלריה»; users photograph pages in the device camera app, then add from gallery.
+- **Direct in-browser camera capture removed** — no `capture` attribute on the file input.
+- **Image documents:** 1–35 pages per document; pages upload **incrementally** (each selection uploads immediately via incremental create + part endpoints).
+- **PDF:** separate single-file path (not mixed with gallery images).
+- **EXIF orientation:** server-side normalization for supported uploaded images via **`normalize_uploaded_image_exif_in_s3`** before processing/thumbnail generation.
+
+See **`docs/ai-context/decision-log.md`** for OCR upload API history and current incremental-flow entry.
 
 ---
 
-## 8. Explicit V1 out of scope
+## 8. Explicit out of scope
 
 - Multi-photo albums / galleries per item
-- Thumbnail generation (fields/key paths may exist; no worker/job in V1)
-- Image transformations (resize, rotate, watermark, CDN)
+- Image transformations beyond thumbnail resize (watermark, CDN, etc.)
 - OCR/HTR on photos
-- Worker / SQS processing
+- Worker / SQS processing for PHOTO
 - Face recognition, people tagging, comments
 - Public (unauthenticated) upload
-- Rich text captions or body content
-- Legacy **`Document`** schema cleanup
-- Using full-size originals as list “thumbnails” if performance becomes heavy
-- Reusing OCR transcription review or **`DocumentTextResult`** semantics
+- Rich text captions
+- S3 delete on PHOTO staff delete
+- Re-upload/retry after **`upload_status=FAILED`**
+- PDF browse thumbnails for OCR documents
 
 ---
 
-## 9. Suggested PR sequence
+## 9. PR sequence (historical)
 
-| PR | Scope |
-|----|--------|
-| **PR1** (this doc) | Design/scope documentation only |
-| **PR2** | **`PhotoContent`** model + migration + admin (view-only) + focused model tests; **no** upload UI |
-| **PR3** | Staff create/upload V1 — one photo, private S3, MIME/extension/ContentType validation, **`ArchiveItem`** + discovery metadata on create (**implemented**) |
-| **PR4** | **`/archive/`** list + **`/archive/<id>/`** detail for PHOTO — visibility checks, presigned GET on detail, list placeholder/icon |
-| **PR5** | Edit/delete polish — shared metadata edit, staff delete, S3 deletion policy if not done in PR3 |
-| **Later** | Thumbnail generation (`thumb_400`), gallery polish, multi-photo albums, captions, advanced metadata |
-
-**Parallel constraints:** Do not mix PHOTO PRs with rich-text work, OCR cutover PRs, or legacy **`Document`** field removal.
+| PR | Scope | Status |
+|----|--------|--------|
+| **PR1** | Design/scope documentation | Done |
+| **PR2** | **`PhotoContent`** model + migration + admin | Done |
+| **PR3** | Staff create/upload V1 | Done |
+| **PR4** | Public archive list/detail for PHOTO | Done (browse visual preview extended later — see **Current authoritative state**) |
+| **PR5** | Staff metadata edit/delete | Done |
+| **PR6** | Staff manage status clarity | Done |
+| **Post-PR6** | Browse-card thumbnails + upload-time generation + backfill commands | **Implemented** — see decision log |
 
 ---
 
@@ -280,17 +352,9 @@ Use existing shared fields only:
 |------|-----|
 | **Do not route PHOTO to OCR worker** | Prevents spurious **`DocumentTextResult`**, cost, and wrong product semantics |
 | **Do not use `Document` as PHOTO backing model** | Avoids OCR bridge confusion and accidental processing |
-| **Do not expose private S3 objects publicly** | S3 objects stay private; access is gated by existing **`ArchiveItem.visibility`** + presigned GET |
-| **Do not introduce PHOTO-specific visibility levels or access rules** | Reuse **`archive_item_access.py`** only; no `FAMILY` tier, no staff-only **`private`** semantics |
-| **Do not load full originals in archive list as fake thumbnails** | Performance and bandwidth; list uses icon/placeholder in V1 |
+| **Do not expose private S3 objects publicly** | Access gated by **`ArchiveItem.visibility`** + presigned GET |
+| **Do not presign originals for browse list previews** | Performance and bandwidth; use stored thumbnails or CSS markers |
 | **Do not skip MIME/extension/ContentType validation** | Prevents malicious or mistaken uploads |
-| **Do not mix PHOTO with rich text or legacy schema cleanup** | Keeps PRs reviewable and reduces regression risk |
-
-**Known follow-ups (non-blockers for V1):**
-
-- Thumbnail worker or on-upload generation
-- Whether **`/archive/manage/new/`** post-create redirect goes to **`/archive/<id>/`** (align with future OCR redirect decision in unified upload doc)
-- Dimension extraction library choice (Pillow) vs deferred null dimensions
 
 ---
 
@@ -298,6 +362,6 @@ Use existing shared fields only:
 
 | `item_type` | Backing | Processing | Archive list/detail |
 |-------------|---------|------------|---------------------|
-| **`OCR_DOCUMENT`** | **`Document`** | Worker + OCR/HTR | Bridge: OCR detail redirect; archive metadata on **`ArchiveItem`** |
-| **`MANUAL_TEXT`** | **`ManualTextContent`** | None | **`/archive/`** + **`/archive/<id>/`** |
-| **`PHOTO`** | **`PhotoContent`** | None | **`/archive/`** + **`/archive/<id>/`** (V1) |
+| **`OCR_DOCUMENT`** | **`Document`** | Worker + OCR/HTR | Browse card: image thumbnail or `--ocr` marker; detail via OCR document page |
+| **`MANUAL_TEXT`** | **`ManualTextContent`** | None | Browse card: `--manual` marker; **`/archive/<id>/`** body text |
+| **`PHOTO`** | **`PhotoContent`** | None | Browse card: photo thumbnail or `--photo` marker; detail shows full original |
