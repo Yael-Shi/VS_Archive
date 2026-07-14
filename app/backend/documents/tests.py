@@ -7,6 +7,7 @@ import tempfile
 from dataclasses import replace
 from datetime import timedelta
 from io import BytesIO, StringIO
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -10343,6 +10344,8 @@ class NavigationLabelTests(TestCase):
         self.assertIn('href="/api/ui/upload/"', pagination)
 
     def test_detail_distinguishes_global_list_from_current_doc_action(self):
+        from django.urls import reverse
+
         doc = self._create_document()
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
@@ -10353,7 +10356,9 @@ class NavigationLabelTests(TestCase):
         main_section = html[main_start:toolbar_start]
         toolbar_section = html[toolbar_start : html.index("</header>", toolbar_start)]
         self.assertNotIn("חזרה לרשימה", main_section)
-        self.assertIn("חזרה לרשימה", toolbar_section)
+        self.assertIn("חזרה לארכיון", toolbar_section)
+        self.assertIn(reverse("archive-list"), toolbar_section)
+        self.assertNotIn('href="/api/ui/documents/"', toolbar_section)
         self.assertNotIn("רשימת בקרת תעתוק", toolbar_section)
         self.assertNotIn("רשימת השלמת פרטים", toolbar_section)
         self.assertContains(resp, "nav-staff-panel")
@@ -10397,7 +10402,9 @@ class NavigationLabelTests(TestCase):
         self.assertNotIn("חזרה לרשימה", toolbar_section)
         self.assertNotIn('href="/api/ui/documents/"', toolbar_section)
 
-    def test_detail_admin_back_link_returns_to_document_list(self):
+    def test_detail_admin_back_link_returns_to_archive(self):
+        from django.urls import reverse
+
         doc = self._create_document()
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
@@ -10405,9 +10412,53 @@ class NavigationLabelTests(TestCase):
         html = resp.content.decode()
         toolbar_start = html.index("document-detail-toolbar")
         toolbar_section = html[toolbar_start : html.index("</header>", toolbar_start)]
-        self.assertIn("חזרה לרשימה", toolbar_section)
-        self.assertIn('href="/api/ui/documents/"', toolbar_section)
-        self.assertNotIn("חזרה לארכיון", toolbar_section)
+        self.assertIn("חזרה לארכיון", toolbar_section)
+        self.assertIn("←", toolbar_section)
+        self.assertIn(reverse("archive-list"), toolbar_section)
+        self.assertNotIn("חזרה לרשימה", toolbar_section)
+        self.assertNotIn('href="/api/ui/documents/"', toolbar_section)
+
+    def test_detail_staff_management_actions_use_vertical_layout(self):
+        doc = self._create_document()
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertContains(resp, "document-detail-staff-management-actions")
+        management_start = html.index("document-detail-staff-management-actions")
+        self.assertLess(
+            html.index("עריכת מטא־דאטה", management_start),
+            html.index("בקרת תעתוק למסמך זה", management_start),
+        )
+        self.assertLess(
+            html.index("בקרת תעתוק למסמך זה", management_start),
+            html.index("עריכה טכנית (Django Admin)", management_start),
+        )
+        nav_start = html.index("document-detail-navigation-actions")
+        self.assertLess(nav_start, management_start)
+
+    def test_detail_technical_details_panel_uses_content_sized_css(self):
+        css_path = (
+            Path(__file__).resolve().parents[1]
+            / "public"
+            / "static"
+            / "public"
+            / "app.css"
+        )
+        css = css_path.read_text(encoding="utf-8")
+        self.assertIn(
+            ".document-detail-actions-panel .document-detail-technical[open] "
+            ".review-details-body",
+            css,
+        )
+        self.assertIn("width: max-content;", css)
+        self.assertIn("max-width: min(80vw, 420px);", css)
+        self.assertNotIn(
+            ".document-detail-actions-panel:has(.document-detail-technical[open])",
+            css,
+        )
+        self.assertIn(".document-detail-staff-management-actions", css)
+        self.assertIn("flex-direction: column;", css)
 
     def test_detail_metadata_edit_uses_primary_toolbar_button_style(self):
         doc = self._create_document()

@@ -39,55 +39,50 @@
 
         <div class="page-toolbar document-detail-toolbar">
           <div class="document-detail-navigation-actions">
-            {% if is_admin %}
-              <a class="btn btn-primary" href="{% url 'documents-list-page' %}">חזרה לרשימה</a>
-            {% else %}
-              <a class="btn btn-primary" href="{% url 'archive-list' %}">
-                <span>חזרה לארכיון</span>
-                <span aria-hidden="true">←</span>
-              </a>
-            {% endif %}
+            {% include "documents/partials/detail_back_to_archive.html" %}
 
             {% include "documents/partials/detail_actions_panel.html" with doc=doc text_presentation=text_presentation is_admin=is_admin admin_meta=admin_meta displayed_transcription_text=displayed_transcription_text %}
           </div>
 
           {% if is_admin %}
-            {# Primary actions for the current document #}
-            {% if doc.archive_item_id %}
-              <a class="btn btn-primary" href="{% url 'archive-manage-edit' item_id=doc.archive_item_id %}">עריכת מטא־דאטה</a>
-            {% endif %}
-            <a class="btn btn-primary" href="{% url 'review-detail-page' doc_id=doc.id %}">בקרת תעתוק למסמך זה</a>
+            <div class="document-detail-staff-management-actions">
+              {# Primary actions for the current document #}
+              {% if doc.archive_item_id %}
+                <a class="btn btn-primary" href="{% url 'archive-manage-edit' item_id=doc.archive_item_id %}">עריכת מטא־דאטה</a>
+              {% endif %}
+              <a class="btn btn-primary" href="{% url 'review-detail-page' doc_id=doc.id %}">בקרת תעתוק למסמך זה</a>
 
-            {% if show_ocr_reprocess_action or show_hebrew_translation_retry_action %}
-              <details class="review-details review-details--secondary document-detail-staff-actions">
-                <summary>פעולות נוספות</summary>
-                <div class="review-details-body document-detail-staff-actions-body">
-                  {% if show_ocr_reprocess_action %}
-                    <form
-                      method="post"
-                      action="{% url 'documents-ocr-reprocess' doc_id=doc.id %}"
-                      class="inline-form"
-                    >
-                      {% csrf_token %}
-                      <button type="submit" class="btn btn-primary">נסה עיבוד מחדש</button>
-                    </form>
-                  {% endif %}
-                  {% if show_hebrew_translation_retry_action %}
-                    <form
-                      method="post"
-                      action="{% url 'documents-hebrew-translation-retry' doc_id=doc.id %}"
-                      class="inline-form"
-                    >
-                      {% csrf_token %}
-                      <button type="submit" class="btn btn-primary">נסה תרגום לעברית מחדש</button>
-                    </form>
-                  {% endif %}
-                  <a class="btn btn-primary" href="/admin/documents/document/{{ doc.id }}/change/">עריכה טכנית (Django Admin)</a>
-                </div>
-              </details>
-            {% else %}
-              <a class="btn btn-primary" href="/admin/documents/document/{{ doc.id }}/change/">עריכה טכנית (Django Admin)</a>
-            {% endif %}
+              {% if show_ocr_reprocess_action or show_hebrew_translation_retry_action %}
+                <details class="review-details review-details--secondary document-detail-staff-actions">
+                  <summary>פעולות נוספות</summary>
+                  <div class="review-details-body document-detail-staff-actions-body">
+                    {% if show_ocr_reprocess_action %}
+                      <form
+                        method="post"
+                        action="{% url 'documents-ocr-reprocess' doc_id=doc.id %}"
+                        class="inline-form"
+                      >
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-primary">נסה עיבוד מחדש</button>
+                      </form>
+                    {% endif %}
+                    {% if show_hebrew_translation_retry_action %}
+                      <form
+                        method="post"
+                        action="{% url 'documents-hebrew-translation-retry' doc_id=doc.id %}"
+                        class="inline-form"
+                      >
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-primary">נסה תרגום לעברית מחדש</button>
+                      </form>
+                    {% endif %}
+                    <a class="btn btn-primary" href="/admin/documents/document/{{ doc.id }}/change/">עריכה טכנית (Django Admin)</a>
+                  </div>
+                </details>
+              {% else %}
+                <a class="btn btn-primary" href="/admin/documents/document/{{ doc.id }}/change/">עריכה טכנית (Django Admin)</a>
+              {% endif %}
+            </div>
           {% endif %}
         </div>
       </header>

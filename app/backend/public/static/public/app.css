@@ -2936,11 +2936,6 @@ pre {
   box-shadow: var(--shadow-soft);
 }
 
-.document-detail-actions-panel:has(.document-detail-technical[open]) {
-  width: min(420px, calc(100vw - var(--space-4) - var(--space-4)));
-  max-width: min(420px, calc(100vw - var(--space-4) - var(--space-4)));
-}
-
 .document-detail-actions-panel[hidden] {
   display: none;
 }
@@ -2972,7 +2967,9 @@ pre {
 
 .document-detail-actions-panel .document-detail-technical {
   margin-top: var(--space-1);
-  width: 100%;
+  align-self: flex-end;
+  width: max-content;
+  max-width: 100%;
 }
 
 .document-detail-actions-panel .document-detail-technical.review-details--secondary {
@@ -3028,6 +3025,11 @@ pre {
   padding-top: var(--space-2);
   border-top: 1px solid var(--border-subtle);
   overflow: visible;
+}
+
+.document-detail-actions-panel .document-detail-technical[open] .review-details-body {
+  width: max-content;
+  max-width: min(80vw, 420px);
 }
 
 .document-detail-actions-panel .document-detail-technical[open] .review-details-body,
@@ -3145,8 +3147,22 @@ pre {
   margin-bottom: 6px;
 }
 
+.document-detail-staff-management-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.document-detail-staff-management-actions > .btn,
+.document-detail-staff-management-actions > .document-detail-staff-actions {
+  width: 100%;
+}
+
 .document-detail-staff-actions {
-  flex: 1 1 100%;
+  flex: 0 0 auto;
+  width: 100%;
   margin-top: 0;
 }
 
@@ -3391,6 +3407,11 @@ pre {
     text-align: center;
   }
 
+  .document-detail-staff-management-actions > .btn {
+    flex: none;
+    width: 100%;
+  }
+
   .document-detail-toolbar .inline-form {
     flex: 1 1 calc(50% - var(--space-2));
   }
@@ -3477,5 +3498,10 @@ pre {
   .document-detail-toolbar .btn,
   .document-detail-toolbar .inline-form {
     flex: 1 1 calc(50% - var(--space-2));
+  }
+
+  .document-detail-staff-management-actions > .btn {
+    flex: none;
+    width: 100%;
   }
 }
