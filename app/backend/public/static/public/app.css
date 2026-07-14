@@ -2924,9 +2924,9 @@ pre {
   inset-inline-end: 0;
   width: max-content;
   min-width: 220px;
-  max-width: min(80vw, 360px);
+  max-width: min(80vw, 420px);
   max-height: min(70vh, 560px);
-  overflow-x: hidden;
+  overflow-x: clip;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: var(--space-3);
@@ -3009,6 +3009,12 @@ pre {
   transform: rotate(180deg);
 }
 
+.document-detail-actions-panel .document-detail-technical[open] {
+  align-self: stretch;
+  width: auto;
+  max-width: 100%;
+}
+
 .document-detail-actions-panel .document-detail-technical[open] > summary,
 .document-detail-actions-panel .document-detail-technical[open] .review-details-body {
   margin-inline-start: auto;
@@ -3028,8 +3034,12 @@ pre {
 }
 
 .document-detail-actions-panel .document-detail-technical[open] .review-details-body {
-  width: max-content;
-  max-width: min(80vw, 420px);
+  box-sizing: border-box;
+  width: auto;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .document-detail-actions-panel .document-detail-technical[open] .review-details-body,
@@ -3037,6 +3047,7 @@ pre {
 .document-detail-actions-panel .document-detail-technical[open] .muted,
 .document-detail-actions-panel .document-detail-technical[open] .document-detail-technical-admin-meta {
   text-align: left;
+  white-space: normal;
 }
 
 .document-detail-actions-panel .document-detail-technical[open] .badge-row {
@@ -3099,6 +3110,7 @@ pre {
   margin-bottom: 0;
   max-width: 100%;
   justify-content: flex-end;
+  align-items: flex-start;
   align-content: flex-start;
 }
 
@@ -3362,7 +3374,7 @@ pre {
   }
 
   .document-detail-actions-panel {
-    max-width: min(90vw, 360px);
+    max-width: min(90vw, 420px);
   }
 
   .document-detail-actions-list {

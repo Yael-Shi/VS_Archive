@@ -10437,6 +10437,41 @@ class NavigationLabelTests(TestCase):
         nav_start = html.index("document-detail-navigation-actions")
         self.assertLess(nav_start, management_start)
 
+    def test_detail_staff_toolbar_top_aligns_navigation_group(self):
+        css_path = (
+            Path(__file__).resolve().parents[1]
+            / "public"
+            / "static"
+            / "public"
+            / "app.css"
+        )
+        css = css_path.read_text(encoding="utf-8")
+        toolbar_rule_start = css.index(".document-detail-toolbar {")
+        toolbar_rule_end = css.index("}", toolbar_rule_start)
+        toolbar_rule = css[toolbar_rule_start:toolbar_rule_end]
+        self.assertIn("align-items: flex-start;", toolbar_rule)
+
+        doc = self._create_document()
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        toolbar_start = html.index("document-detail-toolbar")
+        toolbar_section = html[toolbar_start : html.index("</header>", toolbar_start)]
+        nav_start = toolbar_section.index("document-detail-navigation-actions")
+        management_start = toolbar_section.index(
+            "document-detail-staff-management-actions"
+        )
+        self.assertLess(nav_start, management_start)
+        self.assertNotIn(
+            "document-detail-staff-management-actions",
+            toolbar_section[
+                nav_start : toolbar_section.index(
+                    "</div>", nav_start + len("document-detail-navigation-actions")
+                )
+            ],
+        )
+
     def test_detail_technical_details_panel_uses_content_sized_css(self):
         css_path = (
             Path(__file__).resolve().parents[1]
@@ -10451,14 +10486,45 @@ class NavigationLabelTests(TestCase):
             ".review-details-body",
             css,
         )
-        self.assertIn("width: max-content;", css)
-        self.assertIn("max-width: min(80vw, 420px);", css)
+        body_rule_start = css.rindex(
+            ".document-detail-actions-panel .document-detail-technical[open] "
+            ".review-details-body {"
+        )
+        body_rule_end = css.index("}", body_rule_start)
+        body_rule = css[body_rule_start:body_rule_end]
+        self.assertIn("width: auto;", body_rule)
+        self.assertIn("max-width: 100%;", body_rule)
+        self.assertIn("overflow-wrap: anywhere;", body_rule)
+        self.assertNotIn("width: max-content;", body_rule)
+        self.assertNotIn(
+            "overflow-x: hidden;",
+            css[
+                css.index(".document-detail-actions-panel {") : css.index(
+                    ".document-detail-actions-panel[hidden]"
+                )
+            ],
+        )
         self.assertNotIn(
             ".document-detail-actions-panel:has(.document-detail-technical[open])",
             css,
         )
         self.assertIn(".document-detail-staff-management-actions", css)
         self.assertIn("flex-direction: column;", css)
+
+    def test_anonymous_detail_navigation_structure_unchanged(self):
+        from django.urls import reverse
+
+        doc = self._create_document(visibility=Document.Visibility.PUBLIC)
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        toolbar_start = html.index("document-detail-toolbar")
+        toolbar_section = html[toolbar_start : html.index("</header>", toolbar_start)]
+        self.assertIn("document-detail-navigation-actions", toolbar_section)
+        self.assertIn("חזרה לארכיון", toolbar_section)
+        self.assertIn("מידע והשתתפות", toolbar_section)
+        self.assertIn(reverse("archive-list"), toolbar_section)
+        self.assertNotIn("document-detail-staff-management-actions", toolbar_section)
 
     def test_detail_metadata_edit_uses_primary_toolbar_button_style(self):
         doc = self._create_document()
