@@ -87,25 +87,7 @@
             <div class="field-hint">שאר המטא־דאטה ניתן להשלים בהמשך.</div>
           </div>
 
-          <div class="meta-grid">
-            <div class="field">
-              <label for="date_start">תאריך התחלה</label>
-              <input id="date_start" name="date_start" type="date" />
-            </div>
-            <div class="field">
-              <label for="date_end">תאריך סיום</label>
-              <input id="date_end" name="date_end" type="date" />
-            </div>
-          </div>
-
-          <div class="field">
-            <label for="date_precision">דיוק תאריך</label>
-            <select id="date_precision" name="date_precision">
-              {% for value, label in date_precision_choices %}
-                <option value="{{ value }}"{% if value == "UNKNOWN" %} selected{% endif %}>{{ label }}</option>
-              {% endfor %}
-            </select>
-          </div>
+          {% include "documents/archive/archive_date_form_fields.html" with form_data=empty_date_form_data %}
 
           <div class="meta-grid">
             <div class="field">

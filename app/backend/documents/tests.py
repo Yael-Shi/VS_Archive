@@ -4335,7 +4335,10 @@ class UploadApiTests(TestCase):
     )
     def test_single_file_create_accepts_year_date_precision(self, _mock_put):
         resp = self._post_create(
-            self._base_create_payload(date_precision=Document.DatePrecision.YEAR)
+            self._base_create_payload(
+                date_precision=Document.DatePrecision.YEAR,
+                date_start_year="1948",
+            )
         )
         self.assertEqual(resp.status_code, 201)
         doc = Document.objects.get(id=resp.json()["document_id"])
@@ -4347,7 +4350,10 @@ class UploadApiTests(TestCase):
     )
     def test_multi_image_create_accepts_year_date_precision(self, _mock_put):
         resp = self._post_create(
-            self._multi_files_payload(date_precision=Document.DatePrecision.YEAR)
+            self._multi_files_payload(
+                date_precision=Document.DatePrecision.YEAR,
+                date_start_year="1948",
+            )
         )
         self.assertEqual(resp.status_code, 201)
         doc = Document.objects.get(id=resp.json()["document_id"])
@@ -9749,10 +9755,23 @@ class UploadPageTemplateTests(TestCase):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "דיוק תאריך")
-        for label in ("ללא תאריך", "שנה בלבד", "חודש", "יום מדויק", "טווח"):
+        for label in (
+            "ללא תאריך",
+            "שנה בלבד",
+            "חודש",
+            "יום מדויק",
+            "טווח ימים",
+            "טווח חודשים",
+            "טווח שנים",
+        ):
             self.assertContains(resp, label)
-        self.assertContains(resp, 'getElementById("date_precision")')
-        self.assertContains(resp, "date_precision")
+        content = resp.content.decode()
+        self.assertEqual(content.count('id="date_precision"'), 1)
+        self.assertEqual(content.count('name="date_precision"'), 1)
+        self.assertContains(resp, "archive-date-entry")
+        self.assertContains(resp, "archive_date_entry.js")
+        self.assertContains(resp, 'inputmode="numeric"')
+        self.assertNotContains(resp, 'type="date"')
 
     def test_upload_page_renders_hebrew_text_input_type_labels(self):
         resp = self._get_page()
@@ -11866,6 +11885,21 @@ class DocumentDatePrecisionTests(TestCase):
         self.assertEqual(
             values,
             {"EXACT_DAY", "MONTH", "YEAR", "RANGE", "UNKNOWN"},
+        )
+
+    def test_archive_item_date_precision_includes_range_variants(self):
+        values = {choice.value for choice in ArchiveItem.DatePrecision}
+        self.assertEqual(
+            values,
+            {
+                "EXACT_DAY",
+                "MONTH",
+                "YEAR",
+                "RANGE",
+                "RANGE_MONTH",
+                "RANGE_YEAR",
+                "UNKNOWN",
+            },
         )
 
     @patch(

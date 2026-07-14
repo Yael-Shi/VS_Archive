@@ -81,9 +81,15 @@ from documents.services.review_backlog import (
     is_review_pending_text_result,
     parse_review_reasons,
 )
+from documents.services.archive_date_input import (
+    archive_date_form_data,
+    parse_archive_date_bounds,
+)
 from documents.services.archive_metadata_validation import (
+    archive_metadata_form_data_for_template,
     parse_archive_metadata_form,
     parse_public_note,
+    validate_archive_metadata_fields,
     validate_source_metadata_fields,
 )
 from documents.services.upload_validation import (
@@ -564,20 +570,34 @@ def _parse_create_upload_common(
     if not title:
         return None, _bad("title required")
 
-    date_start_raw = payload.get("date_start")
-    date_end_raw = payload.get("date_end")
     language = (payload.get("language") or "").strip() or None
     text_input_type_raw = payload.get("text_input_type")
     visibility = (payload.get("visibility") or "private").strip()
     admin_meta = payload.get("admin_meta", None)
 
     try:
-        ds = _parse_date_optional(date_start_raw, "date_start")
-        de = _parse_date_optional(date_end_raw, "date_end")
         text_input_type = _parse_text_input_type(text_input_type_raw)
         date_precision = parse_date_precision(payload.get("date_precision"))
+        ds, de, _, date_errors = parse_archive_date_bounds(
+            date_precision=date_precision,
+            post_data=payload,
+        )
     except ValueError as e:
         return None, _bad(str(e))
+
+    if date_errors:
+        return None, _bad(date_errors[0])
+
+    field_errors = validate_archive_metadata_fields(
+        title=title,
+        visibility=visibility,
+        metadata_status=ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
+        date_precision=date_precision,
+        date_start=ds,
+        date_end=de,
+    )
+    if field_errors:
+        return None, _bad(field_errors[0])
 
     if admin_meta is None:
         admin_meta = {}
@@ -2701,6 +2721,11 @@ def _upload_form_context() -> dict:
         "doc_type_choices": Document.DocType.choices,
         "text_input_type_choices": TEXT_INPUT_TYPE_UI_CHOICES,
         "date_precision_choices": DATE_PRECISION_UI_CHOICES,
+        "empty_date_form_data": archive_date_form_data(
+            date_start=None,
+            date_end=None,
+            date_precision=ArchiveItem.DatePrecision.UNKNOWN,
+        ),
         "form_data": empty_discovery_metadata_form_fields(),
         "discovery_tags_input_name": "discovery_tags",
         "discovery_tags_input_id": "discovery_tags",
@@ -2783,17 +2808,17 @@ def _archive_metadata_form_data(
     source_title: str = "",
     public_note: str = "",
 ) -> dict:
-    return {
-        "title": title,
-        "visibility": visibility,
-        "date_start": date_start.isoformat() if date_start else "",
-        "date_end": date_end.isoformat() if date_end else "",
-        "date_precision": date_precision,
-        "metadata_status": metadata_status,
-        "author_name": author_name,
-        "source_title": source_title,
-        "public_note": public_note,
-    }
+    return archive_metadata_form_data_for_template(
+        title=title,
+        visibility=visibility,
+        date_start=date_start,
+        date_end=date_end,
+        date_precision=date_precision,
+        metadata_status=metadata_status,
+        author_name=author_name,
+        source_title=source_title,
+        public_note=public_note,
+    )
 
 
 def _archive_metadata_form_data_from_document(document: Document) -> dict:

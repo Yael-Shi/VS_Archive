@@ -36,6 +36,7 @@ from documents.models import (
     Tag,
     TranskribusRun,
 )
+from documents.test_archive_date_payloads import merge_default_date_fields
 from documents.services.archive_items import (
     ARCHIVE_ITEM_SHARED_FIELD_NAMES,
     create_manual_text_archive_item,
@@ -66,6 +67,12 @@ from documents.services.archive_item_presentation import (
 from documents.services.manual_text_body_display import (
     format_manual_text_body_for_display,
 )
+
+
+def create_viewable_ocr_document(**kwargs):
+    """OCR fixture visible to non-admin browse/detail when visibility allows."""
+    kwargs.setdefault("upload_status", Document.UploadStatus.UPLOADED)
+    return create_ocr_document(**kwargs)
 
 
 class ArchiveItemFoundationTests(TestCase):
@@ -427,6 +434,7 @@ class ArchiveItemUploadIntegrationTests(TestCase):
             "text_input_type": "HANDWRITTEN",
             "visibility": "public",
             "date_precision": "YEAR",
+            "date_start_year": "1948",
             "metadata_status": "COMPLETED",
         }
         payload.update(overrides)
@@ -532,7 +540,7 @@ class ManualTextArchiveItemTests(TestCase):
             "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
         }
         payload.update(overrides)
-        return payload
+        return merge_default_date_fields(payload)
 
     @patch("documents.services.sqs.send_process_document_message")
     def test_create_manual_text_archive_item_sets_item_type(self, mock_enqueue):
@@ -661,7 +669,15 @@ class ManualTextArchiveItemTests(TestCase):
         resp = self.client.get(self.CREATE_URL)
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "דיוק תאריך")
-        for label in ("ללא תאריך", "שנה בלבד", "חודש", "יום מדויק", "טווח"):
+        for label in (
+            "ללא תאריך",
+            "שנה בלבד",
+            "חודש",
+            "יום מדויק",
+            "טווח ימים",
+            "טווח חודשים",
+            "טווח שנים",
+        ):
             self.assertContains(resp, label)
 
     def test_staff_can_create_manual_text_through_ui(self):
@@ -805,8 +821,9 @@ class ManualTextArchiveItemTests(TestCase):
         resp = self.client.post(
             self.CREATE_URL,
             data=self._valid_create_payload(
-                date_start="2020-01-02",
-                date_end="2020-01-01",
+                date_precision=ArchiveItem.DatePrecision.RANGE_YEAR,
+                date_start_year="2020",
+                date_end_year="2019",
             ),
         )
         self.assertEqual(resp.status_code, 200)
@@ -1081,7 +1098,7 @@ class OcrDocumentMetadataEditTests(TestCase):
             "date_precision": ArchiveItem.DatePrecision.YEAR,
         }
         payload.update(overrides)
-        return payload
+        return merge_default_date_fields(payload)
 
     def test_staff_can_get_ocr_metadata_edit_form(self):
         doc = create_ocr_document(
@@ -1195,7 +1212,7 @@ class OcrDocumentMetadataEditTests(TestCase):
         self.assertEqual(item.metadata_status, ArchiveItem.MetadataStatus.COMPLETED)
         self.assertEqual(item.date_precision, ArchiveItem.DatePrecision.YEAR)
         self.assertEqual(str(item.date_start), "1930-01-01")
-        self.assertEqual(str(item.date_end), "1935-12-31")
+        self.assertEqual(str(item.date_end), "1930-12-31")
         admin_meta = doc.admin_meta
         self.assertEqual(admin_meta.donor, "POST donor")
         self.assertEqual(admin_meta.collection, "POST collection")
@@ -1213,6 +1230,7 @@ class OcrDocumentMetadataEditTests(TestCase):
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
             visibility=Document.Visibility.PRIVATE,
+            upload_status=Document.UploadStatus.UPLOADED,
         )
         detail_url = f"/api/ui/documents/{doc.id}/"
         self.assertEqual(self.client.get(detail_url).status_code, 404)
@@ -2326,7 +2344,7 @@ class OcrDocumentArchiveItemAccessTests(TestCase):
         return user
 
     def test_public_ocr_document_visible_to_anonymous_via_document_url(self):
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="Public OCR doc",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -2346,7 +2364,7 @@ class OcrDocumentArchiveItemAccessTests(TestCase):
         self.assertEqual(resp.status_code, 404)
 
     def test_private_ocr_document_visible_to_family_user(self):
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="Private OCR family doc",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -2357,7 +2375,7 @@ class OcrDocumentArchiveItemAccessTests(TestCase):
         self.assertEqual(resp.status_code, 200)
 
     def test_private_ocr_document_visible_to_staff(self):
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="Private OCR staff doc",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -2368,7 +2386,7 @@ class OcrDocumentArchiveItemAccessTests(TestCase):
         self.assertEqual(resp.status_code, 200)
 
     def test_document_detail_uses_archive_item_visibility_not_document_visibility(self):
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="Bridge mismatch doc",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -2395,7 +2413,7 @@ class OcrDocumentArchiveItemAccessTests(TestCase):
         self.assertEqual(resp.status_code, 404)
 
     def test_archive_detail_redirects_public_ocr_document_for_anonymous(self):
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="Public OCR archive route",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -2823,7 +2841,7 @@ class ArchiveItemSourceMetadataTests(TestCase):
         self.assertNotContains(resp, "מקור:")
 
     def test_ocr_document_detail_shows_source_metadata_when_present(self):
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="OCR with source metadata",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -2842,7 +2860,7 @@ class ArchiveItemSourceMetadataTests(TestCase):
         self.assertContains(resp, "OCR with source metadata")
 
     def test_ocr_document_detail_hides_empty_source_metadata_labels(self):
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="OCR without source metadata",
             doc_type=Document.DocType.PDF,
             text_input_type=Document.TextInputType.PRINTED,
@@ -2855,7 +2873,7 @@ class ArchiveItemSourceMetadataTests(TestCase):
         self.assertNotContains(resp, "מקור:")
 
     def test_ocr_document_detail_hides_placeholder_source_metadata(self):
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="OCR with placeholder source metadata",
             doc_type=Document.DocType.PDF,
             text_input_type=Document.TextInputType.PRINTED,
@@ -2872,7 +2890,7 @@ class ArchiveItemSourceMetadataTests(TestCase):
         self.assertNotContains(resp, "מקור: אין")
 
     def test_ocr_document_detail_hides_legacy_category_event_for_public_viewer(self):
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="Legacy category event hidden",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -2895,7 +2913,7 @@ class ArchiveItemSourceMetadataTests(TestCase):
             password="test-pass",
             is_staff=True,
         )
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="Staff legacy tags hidden",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -2931,7 +2949,7 @@ class ArchiveItemSourceMetadataTests(TestCase):
     def test_existing_ocr_document_detail_behavior_unchanged_without_source_metadata(
         self,
     ):
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="Regression OCR detail",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -2987,7 +3005,7 @@ class ArchiveItemPublicNoteTests(TestCase):
         self.assertContains(resp, "first line<br />second line", html=True)
 
     def test_ocr_document_detail_shows_public_note_when_present(self):
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="OCR with public note",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -3002,7 +3020,7 @@ class ArchiveItemPublicNoteTests(TestCase):
         self.assertContains(resp, "הערת מסמך מהארכיון")
 
     def test_empty_public_note_not_shown_on_ocr_document_detail(self):
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="OCR without public note",
             doc_type=Document.DocType.PDF,
             text_input_type=Document.TextInputType.PRINTED,
@@ -3078,7 +3096,7 @@ class ArchiveItemDiscoveryMetadataDisplayTests(TestCase):
         self.assertNotContains(resp, "תגיות")
 
     def test_ocr_document_detail_shows_archive_item_discovery_metadata(self):
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="OCR discovery display",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -3099,7 +3117,7 @@ class ArchiveItemDiscoveryMetadataDisplayTests(TestCase):
     def test_ocr_document_detail_hides_duplicate_legacy_catalog_when_archive_item_has_discovery(
         self,
     ):
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="OCR no duplicate discovery",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -3124,7 +3142,7 @@ class ArchiveItemDiscoveryMetadataDisplayTests(TestCase):
     def test_ocr_document_detail_hides_legacy_category_event_when_archive_item_categories_empty(
         self,
     ):
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="OCR legacy category hidden",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -3142,7 +3160,7 @@ class ArchiveItemDiscoveryMetadataDisplayTests(TestCase):
     def test_ocr_document_detail_hides_legacy_tags_when_archive_item_tags_empty(
         self,
     ):
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="OCR legacy tags hidden",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -3178,7 +3196,7 @@ class ArchiveItemDiscoveryMetadataDisplayTests(TestCase):
         self.assertEqual(resp.status_code, 404)
 
     def test_staff_sees_public_discovery_metadata_and_existing_admin_controls(self):
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="Staff discovery display",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -3206,7 +3224,7 @@ class ArchiveItemDiscoveryMetadataDisplayTests(TestCase):
         self.assertContains(resp, "Private notes")
 
     def test_document_metadata_remains_staff_admin_only_for_anonymous(self):
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="Anonymous admin metadata guard",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
@@ -3318,7 +3336,7 @@ class ArchiveItemPresentationUiTests(TestCase):
             body="body",
             visibility=ArchiveItem.Visibility.PUBLIC,
         )
-        create_ocr_document(
+        create_viewable_ocr_document(
             title="Label OCR",
             doc_type=Document.DocType.PDF,
             text_input_type=Document.TextInputType.PRINTED,
@@ -3346,7 +3364,7 @@ class ArchiveItemPresentationUiTests(TestCase):
             body="x",
             visibility=ArchiveItem.Visibility.PUBLIC,
         )
-        ocr_doc = create_ocr_document(
+        ocr_doc = create_viewable_ocr_document(
             title="Filter OCR combined",
             doc_type=Document.DocType.PDF,
             text_input_type=Document.TextInputType.PRINTED,
@@ -3406,7 +3424,7 @@ class ArchiveItemPresentationUiTests(TestCase):
             body="x",
             visibility=ArchiveItem.Visibility.PUBLIC,
         )
-        create_ocr_document(
+        create_viewable_ocr_document(
             title="Filter OCR only",
             doc_type=Document.DocType.PDF,
             text_input_type=Document.TextInputType.PRINTED,
@@ -3425,7 +3443,7 @@ class ArchiveItemPresentationUiTests(TestCase):
             body="x",
             visibility=ArchiveItem.Visibility.PUBLIC,
         )
-        ocr_doc = create_ocr_document(
+        ocr_doc = create_viewable_ocr_document(
             title="Legacy filter OCR",
             doc_type=Document.DocType.PDF,
             text_input_type=Document.TextInputType.PRINTED,
@@ -3958,7 +3976,7 @@ class ArchiveItemListSearchTests(TestCase):
 
     def test_search_preserves_item_type_filter(self):
         manual_item = self._create_public_item(title="Search filter manual item")
-        ocr_doc = create_ocr_document(
+        ocr_doc = create_viewable_ocr_document(
             title="Search filter OCR item",
             doc_type=Document.DocType.PDF,
             text_input_type=Document.TextInputType.PRINTED,
@@ -4011,7 +4029,7 @@ class ArchiveItemListSearchTests(TestCase):
         )
 
     def test_search_does_not_match_document_metadata_fields(self):
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="Metadata isolation search item",
             doc_type=Document.DocType.PDF,
             text_input_type=Document.TextInputType.PRINTED,
@@ -4036,7 +4054,7 @@ class ArchiveItemListSearchTests(TestCase):
             self.assertNotContains(resp, "Metadata isolation search item")
 
     def test_search_does_not_match_legacy_document_category_event_or_tags(self):
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="Legacy discovery search isolation item",
             doc_type=Document.DocType.PDF,
             text_input_type=Document.TextInputType.PRINTED,
@@ -4460,7 +4478,7 @@ class ManualTextArchiveItemDeleteTests(TestCase):
         self.assertContains(resp, "מחיקה")
 
     def test_delete_action_still_hidden_for_staff_on_ocr_document_detail(self):
-        doc = create_ocr_document(
+        doc = create_viewable_ocr_document(
             title="OCR detail no delete action",
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,

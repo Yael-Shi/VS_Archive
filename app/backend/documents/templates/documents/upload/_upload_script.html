@@ -325,9 +325,6 @@
 
   function buildFormMeta() {
     const title = document.getElementById("title").value.trim();
-    const date_start = document.getElementById("date_start").value || null;
-    const date_end = document.getElementById("date_end").value || null;
-    const date_precision = document.getElementById("date_precision").value || "UNKNOWN";
     const language = document.getElementById("language").value || "";
     const text_input_type = document.getElementById("text_input_type").value || "";
     const visibility = document.getElementById("visibility").value || "private";
@@ -354,9 +351,10 @@
     const discovery_tags = parseTags(discoveryTagsRaw);
     const admin_meta = { donor, collection, original_location, notes };
 
-    const meta = { title, text_input_type, visibility, admin_meta, date_precision };
-    if (date_start) meta.date_start = date_start;
-    if (date_end) meta.date_end = date_end;
+    const meta = { title, text_input_type, visibility, admin_meta };
+    if (window.vsArchiveDateEntry && window.vsArchiveDateEntry.collectMeta) {
+      window.vsArchiveDateEntry.collectMeta(meta);
+    }
     if (language) meta.language = language;
     if (author_name) meta.author_name = author_name;
     if (source_title) meta.source_title = source_title;

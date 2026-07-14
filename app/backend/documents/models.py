@@ -27,7 +27,9 @@ class ArchiveItem(models.Model):
         EXACT_DAY = "EXACT_DAY", "Exact day"
         MONTH = "MONTH", "Month"
         YEAR = "YEAR", "Year"
-        RANGE = "RANGE", "Range"
+        RANGE = "RANGE", "Exact day range"
+        RANGE_MONTH = "RANGE_MONTH", "Month range"
+        RANGE_YEAR = "RANGE_YEAR", "Year range"
         UNKNOWN = "UNKNOWN", "Unknown"
 
     title = models.CharField(max_length=255)

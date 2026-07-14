@@ -291,20 +291,25 @@ def parse_create_photo_upload_metadata(
         parse_archive_item_discovery_metadata_form,
     )
     from documents.services.archive_item_validation import parse_date_precision
+    from documents.services.archive_date_input import parse_archive_date_bounds
     from documents.services.archive_metadata_validation import (
         parse_metadata_status,
-        parse_optional_date,
         parse_public_note,
         validate_archive_metadata_fields,
     )
 
     try:
-        date_start = parse_optional_date(payload.get("date_start"), "date_start")
-        date_end = parse_optional_date(payload.get("date_end"), "date_end")
         date_precision = parse_date_precision(payload.get("date_precision"))
         metadata_status = parse_metadata_status(payload.get("metadata_status"))
+        date_start, date_end, _, date_errors = parse_archive_date_bounds(
+            date_precision=date_precision,
+            post_data=payload,
+        )
     except ValueError as exc:
         return None, str(exc)
+
+    if date_errors:
+        return None, date_errors[0]
 
     field_errors = validate_archive_metadata_fields(
         title=title,
