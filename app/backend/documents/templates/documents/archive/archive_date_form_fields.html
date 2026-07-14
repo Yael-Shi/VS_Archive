@@ -10,188 +10,635 @@
 </div>
 
 <div class="archive-date-entry" id="archiveDateEntry">
-  <div
-    class="archive-date-group archive-date-group--single"
-    data-date-precision-group="EXACT_DAY MONTH YEAR"
-    {% if not form_data.date_single_group_active %}hidden{% endif %}
-  >
-    <div class="archive-date-group-label">תאריך</div>
-    <div class="archive-date-components">
-      <div class="field archive-date-component">
-        <label for="date_start_year">שנה</label>
-        <input
-          id="date_start_year"
-          name="date_start_year"
-          type="text"
-          inputmode="numeric"
-          autocomplete="off"
-          maxlength="4"
-          placeholder="למשל 1952"
-          value="{{ form_data.date_start_year }}"
-          class="archive-date-input"
-          {% if not form_data.date_single_group_active %}disabled{% endif %}
-        />
-      </div>
-      <div
-        class="field archive-date-component archive-date-part-month"
-        data-date-part="month"
-        {% if not form_data.date_show_month %}hidden{% endif %}
-      >
-        <label for="date_start_month">חודש</label>
-        <input
-          id="date_start_month"
-          name="date_start_month"
-          type="text"
-          inputmode="numeric"
-          autocomplete="off"
-          maxlength="2"
-          placeholder="1-12"
-          value="{{ form_data.date_start_month }}"
-          class="archive-date-input"
-          {% if not form_data.date_single_group_active or not form_data.date_show_month %}disabled{% endif %}
-        />
-      </div>
-      <div
-        class="field archive-date-component archive-date-part-day"
-        data-date-part="day"
-        {% if not form_data.date_show_day %}hidden{% endif %}
-      >
-        <label for="date_start_day">יום</label>
-        <input
-          id="date_start_day"
-          name="date_start_day"
-          type="text"
-          inputmode="numeric"
-          autocomplete="off"
-          maxlength="2"
-          placeholder="1-31"
-          value="{{ form_data.date_start_day }}"
-          class="archive-date-input"
-          {% if not form_data.date_single_group_active or not form_data.date_show_day %}disabled{% endif %}
-        />
-      </div>
-    </div>
-  </div>
-
-  <div
-    class="archive-date-group archive-date-group--range"
-    data-date-precision-group="RANGE RANGE_MONTH RANGE_YEAR"
-    {% if not form_data.date_range_group_active %}hidden{% endif %}
-  >
-    <div class="archive-date-range-block">
-      <div class="archive-date-group-label">מתאריך</div>
-      <div class="archive-date-components">
-        <div class="field archive-date-component">
-          <label for="date_start_year_range">שנה</label>
+  <div class="archive-date-ui" data-date-ui="desktop">
+    <div
+      class="archive-date-group archive-date-group--single"
+      data-date-precision-group="YEAR"
+      {% if form_data.date_precision != "YEAR" %}hidden{% endif %}
+    >
+      <div class="archive-date-logical-field" data-date-precision-field="YEAR">
+        <label class="archive-date-group-label" for="date_start_year_desktop_year">תאריך</label>
+        <div class="archive-date-control archive-date-control--year" dir="ltr" lang="en">
           <input
-            id="date_start_year_range"
+            id="date_start_year_desktop_year"
             name="date_start_year"
             type="text"
             inputmode="numeric"
             autocomplete="off"
             maxlength="4"
-            placeholder="למשל 1953"
+            placeholder="YYYY"
             value="{{ form_data.date_start_year }}"
-            class="archive-date-input"
-            {% if not form_data.date_range_group_active %}disabled{% endif %}
-          />
-        </div>
-        <div
-          class="field archive-date-component archive-date-part-month"
-          data-date-part="month"
-          {% if not form_data.date_show_month %}hidden{% endif %}
-        >
-          <label for="date_start_month_range">חודש</label>
-          <input
-            id="date_start_month_range"
-            name="date_start_month"
-            type="text"
-            inputmode="numeric"
-            autocomplete="off"
-            maxlength="2"
-            placeholder="1-12"
-            value="{{ form_data.date_start_month }}"
-            class="archive-date-input"
-            {% if not form_data.date_range_group_active or not form_data.date_show_month %}disabled{% endif %}
-          />
-        </div>
-        <div
-          class="field archive-date-component archive-date-part-day"
-          data-date-part="day"
-          {% if not form_data.date_show_day %}hidden{% endif %}
-        >
-          <label for="date_start_day_range">יום</label>
-          <input
-            id="date_start_day_range"
-            name="date_start_day"
-            type="text"
-            inputmode="numeric"
-            autocomplete="off"
-            maxlength="2"
-            placeholder="1-31"
-            value="{{ form_data.date_start_day }}"
-            class="archive-date-input"
-            {% if not form_data.date_range_group_active or not form_data.date_show_day %}disabled{% endif %}
+            class="archive-date-input archive-date-input-year"
+            {% if form_data.date_precision != "YEAR" %}disabled{% endif %}
           />
         </div>
       </div>
     </div>
 
-    <div class="archive-date-range-block">
-      <div class="archive-date-group-label">עד תאריך</div>
-      <div class="archive-date-components">
-        <div class="field archive-date-component">
-          <label for="date_end_year">שנה</label>
+    <div
+      class="archive-date-group archive-date-group--single"
+      data-date-precision-group="MONTH"
+      {% if form_data.date_precision != "MONTH" %}hidden{% endif %}
+    >
+      <div class="archive-date-logical-field" data-date-precision-field="MONTH" data-date-logical-control>
+        <label class="archive-date-group-label" id="archive_date_month_desktop_label" for="date_start_month_desktop_month">תאריך</label>
+        <div
+          class="archive-date-control"
+          dir="ltr"
+          lang="en"
+          role="group"
+          aria-labelledby="archive_date_month_desktop_label"
+        >
+          <span class="archive-date-part archive-date-part-month">
+            <input
+              id="date_start_month_desktop_month"
+              name="date_start_month"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="2"
+              placeholder="MM"
+              value="{{ form_data.date_start_month }}"
+              class="archive-date-input archive-date-input-month"
+              aria-label="חודש"
+              {% if form_data.date_precision != "MONTH" %}disabled{% endif %}
+            />
+            <span class="archive-date-separator" aria-hidden="true">/</span>
+          </span>
+          <span class="archive-date-part archive-date-part-year">
+            <input
+              id="date_start_year_desktop_month"
+              name="date_start_year"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="4"
+              placeholder="YYYY"
+              value="{{ form_data.date_start_year }}"
+              class="archive-date-input archive-date-input-year"
+              aria-label="שנה"
+              {% if form_data.date_precision != "MONTH" %}disabled{% endif %}
+            />
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div
+      class="archive-date-group archive-date-group--single"
+      data-date-precision-group="EXACT_DAY"
+      {% if form_data.date_precision != "EXACT_DAY" %}hidden{% endif %}
+    >
+      <div class="archive-date-logical-field" data-date-precision-field="EXACT_DAY">
+        <label class="archive-date-group-label" for="date_start_desktop_exact_day">תאריך</label>
+        <input
+          id="date_start_desktop_exact_day"
+          name="date_start"
+          type="date"
+          class="archive-date-native-input"
+          data-date-native="start-date"
+          value="{{ form_data.date_start }}"
+          {% if form_data.date_precision != "EXACT_DAY" %}disabled{% endif %}
+        />
+      </div>
+    </div>
+
+    <div
+      class="archive-date-group archive-date-group--range"
+      data-date-precision-group="RANGE_YEAR"
+      {% if form_data.date_precision != "RANGE_YEAR" %}hidden{% endif %}
+    >
+      <div class="archive-date-logical-field" data-date-precision-field="RANGE_YEAR">
+        <label class="archive-date-group-label" for="date_start_year_desktop_range_year">מתאריך</label>
+        <div class="archive-date-control archive-date-control--year" dir="ltr" lang="en">
           <input
-            id="date_end_year"
+            id="date_start_year_desktop_range_year"
+            name="date_start_year"
+            type="text"
+            inputmode="numeric"
+            autocomplete="off"
+            maxlength="4"
+            placeholder="YYYY"
+            value="{{ form_data.date_start_year }}"
+            class="archive-date-input archive-date-input-year"
+            {% if form_data.date_precision != "RANGE_YEAR" %}disabled{% endif %}
+          />
+        </div>
+      </div>
+      <div class="archive-date-logical-field" data-date-precision-field="RANGE_YEAR">
+        <label class="archive-date-group-label" for="date_end_year_desktop_range_year">עד תאריך</label>
+        <div class="archive-date-control archive-date-control--year" dir="ltr" lang="en">
+          <input
+            id="date_end_year_desktop_range_year"
             name="date_end_year"
             type="text"
             inputmode="numeric"
             autocomplete="off"
             maxlength="4"
-            placeholder="למשל 1954"
+            placeholder="YYYY"
             value="{{ form_data.date_end_year }}"
-            class="archive-date-input"
-            {% if not form_data.date_range_group_active %}disabled{% endif %}
+            class="archive-date-input archive-date-input-year"
+            {% if form_data.date_precision != "RANGE_YEAR" %}disabled{% endif %}
           />
         </div>
+      </div>
+    </div>
+
+    <div
+      class="archive-date-group archive-date-group--range"
+      data-date-precision-group="RANGE_MONTH"
+      {% if form_data.date_precision != "RANGE_MONTH" %}hidden{% endif %}
+    >
+      <div class="archive-date-logical-field" data-date-precision-field="RANGE_MONTH" data-date-logical-control>
+        <label class="archive-date-group-label" id="archive_date_range_month_start_desktop_label" for="date_start_month_desktop_range_month">מתאריך</label>
         <div
-          class="field archive-date-component archive-date-part-month"
-          data-date-part="month"
-          {% if not form_data.date_show_month %}hidden{% endif %}
+          class="archive-date-control"
+          dir="ltr"
+          lang="en"
+          role="group"
+          aria-labelledby="archive_date_range_month_start_desktop_label"
         >
-          <label for="date_end_month">חודש</label>
-          <input
-            id="date_end_month"
-            name="date_end_month"
-            type="text"
-            inputmode="numeric"
-            autocomplete="off"
-            maxlength="2"
-            placeholder="1-12"
-            value="{{ form_data.date_end_month }}"
-            class="archive-date-input"
-            {% if not form_data.date_range_group_active or not form_data.date_show_month %}disabled{% endif %}
-          />
+          <span class="archive-date-part archive-date-part-month">
+            <input
+              id="date_start_month_desktop_range_month"
+              name="date_start_month"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="2"
+              placeholder="MM"
+              value="{{ form_data.date_start_month }}"
+              class="archive-date-input archive-date-input-month"
+              aria-label="חודש"
+              {% if form_data.date_precision != "RANGE_MONTH" %}disabled{% endif %}
+            />
+            <span class="archive-date-separator" aria-hidden="true">/</span>
+          </span>
+          <span class="archive-date-part archive-date-part-year">
+            <input
+              id="date_start_year_desktop_range_month"
+              name="date_start_year"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="4"
+              placeholder="YYYY"
+              value="{{ form_data.date_start_year }}"
+              class="archive-date-input archive-date-input-year"
+              aria-label="שנה"
+              {% if form_data.date_precision != "RANGE_MONTH" %}disabled{% endif %}
+            />
+          </span>
         </div>
+      </div>
+      <div class="archive-date-logical-field" data-date-precision-field="RANGE_MONTH" data-date-logical-control>
+        <label class="archive-date-group-label" id="archive_date_range_month_end_desktop_label" for="date_end_month_desktop_range_month">עד תאריך</label>
         <div
-          class="field archive-date-component archive-date-part-day"
-          data-date-part="day"
-          {% if not form_data.date_show_day %}hidden{% endif %}
+          class="archive-date-control"
+          dir="ltr"
+          lang="en"
+          role="group"
+          aria-labelledby="archive_date_range_month_end_desktop_label"
         >
-          <label for="date_end_day">יום</label>
-          <input
-            id="date_end_day"
-            name="date_end_day"
-            type="text"
-            inputmode="numeric"
-            autocomplete="off"
-            maxlength="2"
-            placeholder="1-31"
-            value="{{ form_data.date_end_day }}"
-            class="archive-date-input"
-            {% if not form_data.date_range_group_active or not form_data.date_show_day %}disabled{% endif %}
-          />
+          <span class="archive-date-part archive-date-part-month">
+            <input
+              id="date_end_month_desktop_range_month"
+              name="date_end_month"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="2"
+              placeholder="MM"
+              value="{{ form_data.date_end_month }}"
+              class="archive-date-input archive-date-input-month"
+              aria-label="חודש"
+              {% if form_data.date_precision != "RANGE_MONTH" %}disabled{% endif %}
+            />
+            <span class="archive-date-separator" aria-hidden="true">/</span>
+          </span>
+          <span class="archive-date-part archive-date-part-year">
+            <input
+              id="date_end_year_desktop_range_month"
+              name="date_end_year"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="4"
+              placeholder="YYYY"
+              value="{{ form_data.date_end_year }}"
+              class="archive-date-input archive-date-input-year"
+              aria-label="שנה"
+              {% if form_data.date_precision != "RANGE_MONTH" %}disabled{% endif %}
+            />
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div
+      class="archive-date-group archive-date-group--range"
+      data-date-precision-group="RANGE"
+      {% if form_data.date_precision != "RANGE" %}hidden{% endif %}
+    >
+      <div class="archive-date-logical-field" data-date-precision-field="RANGE">
+        <label class="archive-date-group-label" for="date_start_desktop_range">מתאריך</label>
+        <input
+          id="date_start_desktop_range"
+          name="date_start"
+          type="date"
+          class="archive-date-native-input"
+          data-date-native="start-date"
+          value="{{ form_data.date_start }}"
+          {% if form_data.date_precision != "RANGE" %}disabled{% endif %}
+        />
+      </div>
+      <div class="archive-date-logical-field" data-date-precision-field="RANGE">
+        <label class="archive-date-group-label" for="date_end_desktop_range">עד תאריך</label>
+        <input
+          id="date_end_desktop_range"
+          name="date_end"
+          type="date"
+          class="archive-date-native-input"
+          data-date-native="end-date"
+          value="{{ form_data.date_end }}"
+          {% if form_data.date_precision != "RANGE" %}disabled{% endif %}
+        />
+      </div>
+    </div>
+  </div>
+
+  <div class="archive-date-ui" data-date-ui="mobile" hidden>
+    <div
+      class="archive-date-group archive-date-group--single"
+      data-date-precision-group="YEAR"
+      {% if form_data.date_precision != "YEAR" %}hidden{% endif %}
+    >
+      <div class="archive-date-logical-field" data-date-logical-control>
+        <div class="archive-date-control" dir="ltr" lang="en" role="group" aria-label="תאריך">
+          <span class="archive-date-part archive-date-part-year">
+            <input
+              id="date_start_year_mobile_year"
+              name="date_start_year"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="4"
+              placeholder="YYYY"
+              value="{{ form_data.date_start_year }}"
+              class="archive-date-input archive-date-input-year"
+              aria-label="שנה"
+              disabled
+            />
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div
+      class="archive-date-group archive-date-group--single"
+      data-date-precision-group="MONTH"
+      {% if form_data.date_precision != "MONTH" %}hidden{% endif %}
+    >
+      <div class="archive-date-logical-field" data-date-logical-control>
+        <div class="archive-date-control" dir="ltr" lang="en" role="group" aria-label="תאריך">
+          <span class="archive-date-part archive-date-part-month">
+            <input
+              id="date_start_month_mobile_month"
+              name="date_start_month"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="2"
+              placeholder="MM"
+              value="{{ form_data.date_start_month }}"
+              class="archive-date-input archive-date-input-month"
+              aria-label="חודש"
+              disabled
+            />
+            <span class="archive-date-separator" aria-hidden="true">/</span>
+          </span>
+          <span class="archive-date-part archive-date-part-year">
+            <input
+              id="date_start_year_mobile_month"
+              name="date_start_year"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="4"
+              placeholder="YYYY"
+              value="{{ form_data.date_start_year }}"
+              class="archive-date-input archive-date-input-year"
+              aria-label="שנה"
+              disabled
+            />
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div
+      class="archive-date-group archive-date-group--single"
+      data-date-precision-group="EXACT_DAY"
+      {% if form_data.date_precision != "EXACT_DAY" %}hidden{% endif %}
+    >
+      <div class="archive-date-logical-field" data-date-logical-control>
+        <div class="archive-date-control" dir="ltr" lang="en" role="group" aria-label="תאריך">
+          <span class="archive-date-part archive-date-part-day">
+            <input
+              id="date_start_day_mobile_exact_day"
+              name="date_start_day"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="2"
+              placeholder="DD"
+              value="{{ form_data.date_start_day }}"
+              class="archive-date-input archive-date-input-day"
+              aria-label="יום"
+              disabled
+            />
+            <span class="archive-date-separator" aria-hidden="true">/</span>
+          </span>
+          <span class="archive-date-part archive-date-part-month">
+            <input
+              id="date_start_month_mobile_exact_day"
+              name="date_start_month"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="2"
+              placeholder="MM"
+              value="{{ form_data.date_start_month }}"
+              class="archive-date-input archive-date-input-month"
+              aria-label="חודש"
+              disabled
+            />
+            <span class="archive-date-separator" aria-hidden="true">/</span>
+          </span>
+          <span class="archive-date-part archive-date-part-year">
+            <input
+              id="date_start_year_mobile_exact_day"
+              name="date_start_year"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="4"
+              placeholder="YYYY"
+              value="{{ form_data.date_start_year }}"
+              class="archive-date-input archive-date-input-year"
+              aria-label="שנה"
+              disabled
+            />
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div
+      class="archive-date-group archive-date-group--range"
+      data-date-precision-group="RANGE_YEAR"
+      {% if form_data.date_precision != "RANGE_YEAR" %}hidden{% endif %}
+    >
+      <div class="archive-date-logical-field" data-date-logical-control>
+        <div class="archive-date-group-label" id="archive_date_range_start_mobile_label">מתאריך</div>
+        <div
+          class="archive-date-control"
+          dir="ltr"
+          lang="en"
+          role="group"
+          aria-labelledby="archive_date_range_start_mobile_label"
+        >
+          <span class="archive-date-part archive-date-part-year">
+            <input
+              id="date_start_year_mobile_range_year"
+              name="date_start_year"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="4"
+              placeholder="YYYY"
+              value="{{ form_data.date_start_year }}"
+              class="archive-date-input archive-date-input-year"
+              aria-label="שנה"
+              disabled
+            />
+          </span>
+        </div>
+      </div>
+      <div class="archive-date-logical-field" data-date-logical-control>
+        <div class="archive-date-group-label" id="archive_date_range_end_mobile_label">עד תאריך</div>
+        <div
+          class="archive-date-control"
+          dir="ltr"
+          lang="en"
+          role="group"
+          aria-labelledby="archive_date_range_end_mobile_label"
+        >
+          <span class="archive-date-part archive-date-part-year">
+            <input
+              id="date_end_year_mobile_range_year"
+              name="date_end_year"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="4"
+              placeholder="YYYY"
+              value="{{ form_data.date_end_year }}"
+              class="archive-date-input archive-date-input-year"
+              aria-label="שנה"
+              disabled
+            />
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div
+      class="archive-date-group archive-date-group--range"
+      data-date-precision-group="RANGE_MONTH"
+      {% if form_data.date_precision != "RANGE_MONTH" %}hidden{% endif %}
+    >
+      <div class="archive-date-logical-field" data-date-logical-control>
+        <div class="archive-date-group-label">מתאריך</div>
+        <div class="archive-date-control" dir="ltr" lang="en" role="group" aria-label="מתאריך">
+          <span class="archive-date-part archive-date-part-month">
+            <input
+              id="date_start_month_mobile_range_month"
+              name="date_start_month"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="2"
+              placeholder="MM"
+              value="{{ form_data.date_start_month }}"
+              class="archive-date-input archive-date-input-month"
+              aria-label="חודש"
+              disabled
+            />
+            <span class="archive-date-separator" aria-hidden="true">/</span>
+          </span>
+          <span class="archive-date-part archive-date-part-year">
+            <input
+              id="date_start_year_mobile_range_month"
+              name="date_start_year"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="4"
+              placeholder="YYYY"
+              value="{{ form_data.date_start_year }}"
+              class="archive-date-input archive-date-input-year"
+              aria-label="שנה"
+              disabled
+            />
+          </span>
+        </div>
+      </div>
+      <div class="archive-date-logical-field" data-date-logical-control>
+        <div class="archive-date-group-label">עד תאריך</div>
+        <div class="archive-date-control" dir="ltr" lang="en" role="group" aria-label="עד תאריך">
+          <span class="archive-date-part archive-date-part-month">
+            <input
+              id="date_end_month_mobile_range_month"
+              name="date_end_month"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="2"
+              placeholder="MM"
+              value="{{ form_data.date_end_month }}"
+              class="archive-date-input archive-date-input-month"
+              aria-label="חודש"
+              disabled
+            />
+            <span class="archive-date-separator" aria-hidden="true">/</span>
+          </span>
+          <span class="archive-date-part archive-date-part-year">
+            <input
+              id="date_end_year_mobile_range_month"
+              name="date_end_year"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="4"
+              placeholder="YYYY"
+              value="{{ form_data.date_end_year }}"
+              class="archive-date-input archive-date-input-year"
+              aria-label="שנה"
+              disabled
+            />
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div
+      class="archive-date-group archive-date-group--range"
+      data-date-precision-group="RANGE"
+      {% if form_data.date_precision != "RANGE" %}hidden{% endif %}
+    >
+      <div class="archive-date-logical-field" data-date-logical-control>
+        <div class="archive-date-group-label">מתאריך</div>
+        <div class="archive-date-control" dir="ltr" lang="en" role="group" aria-label="מתאריך">
+          <span class="archive-date-part archive-date-part-day">
+            <input
+              id="date_start_day_mobile_range"
+              name="date_start_day"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="2"
+              placeholder="DD"
+              value="{{ form_data.date_start_day }}"
+              class="archive-date-input archive-date-input-day"
+              aria-label="יום"
+              disabled
+            />
+            <span class="archive-date-separator" aria-hidden="true">/</span>
+          </span>
+          <span class="archive-date-part archive-date-part-month">
+            <input
+              id="date_start_month_mobile_range"
+              name="date_start_month"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="2"
+              placeholder="MM"
+              value="{{ form_data.date_start_month }}"
+              class="archive-date-input archive-date-input-month"
+              aria-label="חודש"
+              disabled
+            />
+            <span class="archive-date-separator" aria-hidden="true">/</span>
+          </span>
+          <span class="archive-date-part archive-date-part-year">
+            <input
+              id="date_start_year_mobile_range"
+              name="date_start_year"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="4"
+              placeholder="YYYY"
+              value="{{ form_data.date_start_year }}"
+              class="archive-date-input archive-date-input-year"
+              aria-label="שנה"
+              disabled
+            />
+          </span>
+        </div>
+      </div>
+      <div class="archive-date-logical-field" data-date-logical-control>
+        <div class="archive-date-group-label">עד תאריך</div>
+        <div class="archive-date-control" dir="ltr" lang="en" role="group" aria-label="עד תאריך">
+          <span class="archive-date-part archive-date-part-day">
+            <input
+              id="date_end_day_mobile_range"
+              name="date_end_day"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="2"
+              placeholder="DD"
+              value="{{ form_data.date_end_day }}"
+              class="archive-date-input archive-date-input-day"
+              aria-label="יום"
+              disabled
+            />
+            <span class="archive-date-separator" aria-hidden="true">/</span>
+          </span>
+          <span class="archive-date-part archive-date-part-month">
+            <input
+              id="date_end_month_mobile_range"
+              name="date_end_month"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="2"
+              placeholder="MM"
+              value="{{ form_data.date_end_month }}"
+              class="archive-date-input archive-date-input-month"
+              aria-label="חודש"
+              disabled
+            />
+            <span class="archive-date-separator" aria-hidden="true">/</span>
+          </span>
+          <span class="archive-date-part archive-date-part-year">
+            <input
+              id="date_end_year_mobile_range"
+              name="date_end_year"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              maxlength="4"
+              placeholder="YYYY"
+              value="{{ form_data.date_end_year }}"
+              class="archive-date-input archive-date-input-year"
+              aria-label="שנה"
+              disabled
+            />
+          </span>
         </div>
       </div>
     </div>
