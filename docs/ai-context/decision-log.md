@@ -167,6 +167,8 @@ Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`s
 
 **Docs:** `docs/ai-context/ocr-archiveitem-cutover.md` (PR5f implementation note).
 
+**Current state (supersedes “optional PR5g” above):** Migration **`0035_remove_document_date_end_and_more`** removed the six duplicated shared archival columns from **`Document`** (`title`, `visibility`, `metadata_status`, `date_start`, `date_end`, `date_precision`). **`ArchiveItem`** is now the **only** database home for those fields. **`Document`** retains OCR/runtime fields only. See **“ArchiveItem — Document shared-metadata mirror column removal (0035)”** below.
+
 ## Document date precision — schema foundation (PR 2)
 
 **Decision:** Add **`Document.date_precision`** (`DatePrecision`: `EXACT_DAY`, `MONTH`, `YEAR`, `RANGE`, `UNKNOWN`) with Django default **`UNKNOWN`**. Migration adds the column with that default for **all** existing rows — **no** inference from `date_start`/`date_end` in this PR.
@@ -174,6 +176,8 @@ Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`s
 **Scope (PR 2):** Model + migration + minimal admin fieldset + focused tests + design-doc pointer update only. **No** upload/UI/display/filtering changes, **no** `date_display` / `date_note` / estimated-date fields, **no** backfill script beyond the migration default.
 
 **Deferred:** Precision-aware save/display (PR 3–5 in `docs/ai-context/document-date-precision.md`); automated backfill rules (section 8 of that doc) require explicit approval before any data migration beyond `UNKNOWN`.
+
+**Current state:** **`date_precision`** (and other shared date fields) now live on **`ArchiveItem`** only; removed from **`Document`** in migration **0035**.
 
 ## Document date precision — list/detail display
 
@@ -1323,7 +1327,9 @@ Category/event/tag names on archive detail pages link to these browse pages. Bro
 
 **Decision:** Approve V1 design for **`PHOTO`** archive items before implementation. **`PHOTO`** is one photo per **`ArchiveItem`**, backed by a dedicated **`PhotoContent`** model (**not** **`Document`**), with private S3 storage and presigned GET display after **`ArchiveItem.visibility`** checks. **No** OCR/HTR, worker, SQS, **`DocumentTextResult`**, Gemini, or Transkribus.
 
-**Product (V1):** Staff/admin create one image; item appears in **`/archive/`** and **`/archive/<id>/`**; list uses placeholder/icon (not full original); detail shows original via presigned URL. Reuse existing **`ArchiveItem`** shared and discovery metadata fields — no large photo-specific metadata system in V1.
+**Product (V1, historical):** Staff/admin create one image; item appears in **`/archive/`** and **`/archive/<id>/`**; list uses placeholder/icon (not full original); detail shows original via presigned URL. Reuse existing **`ArchiveItem`** shared and discovery metadata fields — no large photo-specific metadata system in V1.
+
+**Current state (supersedes list preview above):** Browse list uses stored **`thumb_400.jpg`** thumbnails when available; CSS markers when not. Detail still shows the full original. See **“Archive browse card thumbnails — current state”**.
 
 **Access:** PHOTO does **not** introduce a new visibility level or redefine access control. Reuse existing **`ArchiveItem.visibility`** exactly (**`public`** / **`private`** only — no **`FAMILY`** tier). **`public`:** everyone; **`private`:** authenticated **`archive_family`** + staff/admin (**not** staff-only). Helpers in **`archive_item_access.py`**; non-viewable → **404**.
 
@@ -1361,7 +1367,9 @@ Category/event/tag names on archive detail pages link to these browse pages. Bro
 
 **Size source of truth:** Persist **`original_size_bytes`** from S3 HeadObject **`ContentLength`** only — not client **`file_size`**.
 
-**Public archive guard (PR3):** **`/archive/`** list/detail/discovery browse exclude **`PHOTO`** via **`archive_browse_queryset_for_user`** / **`exclude_deferred_archive_browse_item_types`** until PR4 display. Staff **`/archive/manage/`** still lists PHOTO items.
+**Public archive guard (PR3, historical):** Before PR4, **`/archive/`** list/detail/discovery browse excluded **`PHOTO`** until display shipped. Staff **`/archive/manage/`** still lists PHOTO items.
+
+**Current state:** PR4+ renderability is enforced by **`filter_browse_renderable_archive_items`** inside **`archive_browse_queryset_for_user`** (uploaded PHOTO + uploaded OCR + other types). The historical **`exclude_deferred_archive_browse_item_types`** helper is **not** in the current codebase.
 
 **Endpoints:** **`POST /api/photo-uploads/create/`**, **`POST /api/photo-uploads/<photo_content_id>/complete/`** (staff only). UI branch: **`/archive/manage/new/?item_type=photo`**.
 
@@ -1383,13 +1391,15 @@ Category/event/tag names on archive detail pages link to these browse pages. Bro
 
 **Browse vs access:** **`archive_item_queryset_for_user`** answers visibility/access only. **`archive_browse_queryset_for_user`** adds PHOTO renderability: linked **`PhotoContent`**, **`upload_status=UPLOADED`**, non-empty **`original_file_key`**. **`PENDING`** / **`FAILED`** PHOTO items return **404** on detail and are omitted from list/discovery browse. Staff **`/archive/manage/`** unchanged (all PHOTO rows regardless of upload status).
 
-**List (V1):** Type label + modest placeholder text; **no** presigned GET per row.
+**List (V1, historical):** Type label + modest placeholder text; **no** presigned GET per row.
 
 **Detail (V1):** After **`get_viewable_archive_item`**, generate presigned GET via existing **`create_presigned_get`** for **`PhotoContent.original_file_key`** when **`UPLOADS_BUCKET_NAME`** is configured; otherwise safe unavailable message. S3 objects remain private.
 
 **Scope (PR4):** Access/browse queryset eligibility, list/detail templates, presigned GET on detail only, focused tests, minimal doc updates. **No** thumbnails, dimensions, edit/delete, S3 cleanup, OCR/**`Document`**, worker.
 
-**Deferred (PR5+):** Edit/delete polish, thumbnail generation — per `docs/ai-context/photo-archive-items.md`.
+**Deferred (PR5+, historical):** Edit/delete polish, thumbnail generation — per `docs/ai-context/photo-archive-items.md`.
+
+**Current state (supersedes PR4 list preview above):** Public browse cards now presign **`PhotoContent.thumbnail_file_key`** when present (never **`original_file_key`**). Missing thumbnail or presign failure uses the CSS **`--photo`** type marker. Detail still presigns the full original. See **“Archive browse card thumbnails — current state”** and `docs/ai-context/photo-archive-items.md` (**Current authoritative state**).
 
 **Docs:** `docs/ai-context/photo-archive-items.md`
 
@@ -1413,7 +1423,7 @@ Category/event/tag names on archive detail pages link to these browse pages. Bro
 
 **Decision:** Improve staff **`/archive/manage/`** clarity for PHOTO upload and public-archive renderability without changing behavior.
 
-**Manage list:** PHOTO rows show Hebrew **`PhotoContent.upload_status`** label and a separate archive-renderability signal. Renderable when **`upload_status=UPLOADED`** and **`original_file_key`** is non-empty (matches **`filter_browse_renderable_photo_items`** upload/key checks; visibility still shown in its own column). Non-PHOTO rows show **—** in those columns.
+**Manage list:** PHOTO rows show Hebrew **`PhotoContent.upload_status`** label and a separate archive-renderability signal. Renderable when **`upload_status=UPLOADED`** and **`original_file_key`** is non-empty (same upload/key checks as **`filter_browse_renderable_archive_items`**; **`filter_browse_renderable_photo_items`** is a backward-compatible alias). Visibility is shown in its own column. Non-PHOTO rows show **—** in those columns.
 
 **Edit/delete copy:** PHOTO edit page states metadata-only / no file replacement / public archive after successful upload. PHOTO delete confirmation states DB-row delete and deferred S3 cleanup.
 
@@ -1436,3 +1446,123 @@ Category/event/tag names on archive detail pages link to these browse pages. Bro
 ### Deferred
 
 - Full explicit **`(language, text_input_type)` → model/prompt** matrix on **`OcrRouteConfig`**; additional per-route env overrides beyond Hebrew printed.
+
+## ArchiveItem — Document shared-metadata mirror column removal (0035)
+
+**Decision:** Remove the six duplicated shared archival columns from **`Document`** now that **`ArchiveItem`** is canonical for reads, writes, filters, and upload/create.
+
+**Migration:** **`0035_remove_document_date_end_and_more`** drops from **`Document`**: **`title`**, **`visibility`**, **`metadata_status`**, **`date_start`**, **`date_end`**, **`date_precision`**.
+
+**Current behavior:**
+
+- **`ArchiveItem`** is the **only** ORM storage for those six fields across all item types.
+- **`Document`** retains OCR/runtime fields (`doc_type`, `language`, `text_input_type`, upload/processing state, file keys, thumbnail fields, catalog/tags side fields, etc.).
+- Display and staff edit paths read/write shared metadata via **`archive_item`** (PR5c–PR5f cutover series).
+- **`sync_document_shared_fields_from_archive_item`** and related mirror-write helpers are **removed** with the columns.
+
+**Historical note:** PR5a–PR5f described temporary compatibility mirrors on **`Document`**. Migration 0035 completes the optional “PR5g” schema cleanup referenced in PR5f.
+
+## Archive browse card thumbnails — current state
+
+**Decision:** Public archive browse cards (`/archive/`, category/event/tag discovery browse) render **stored JPEG thumbnails** when available; otherwise **CSS type-marker fallbacks**. Thumbnail and marker template branches are **mutually exclusive**.
+
+### Visual preview by item type
+
+| Item type | Thumbnail source | Browse presign key | Fallback marker |
+|-----------|------------------|--------------------|-----------------|
+| **PHOTO** | **`PhotoContent.thumbnail_file_key`** | `photos/{photo_content_id}/thumb_400.jpg` | `--photo` |
+| **OCR_DOCUMENT (IMAGE)** | **`Document.thumbnail_file_key`** | `documents/{document_id}/thumb_400.jpg` | `--ocr` |
+| **OCR_DOCUMENT (PDF)** | None (presign skipped) | N/A | `--ocr` |
+| **MANUAL_TEXT** | None | N/A | `--manual` |
+
+### Rules
+
+- Browse cards **never** presign **`PhotoContent.original_file_key`**, **`Document.file_s3_key`**, or source-file keys for list previews.
+- **`apply_photo_thumbnail_urls_to_browse_cards`** and **`apply_document_thumbnail_urls_to_browse_cards`** attach presigned GET URLs to **`ArchiveBrowseCard.thumbnail_url`** in **`_archive_browse_cards_for_items`**.
+- Image OCR presigning requires **`doc_type=IMAGE`**; PDFs always use the marker even if **`thumbnail_file_key`** is set.
+- Text preview (`card.preview_text`) is separate from the visual thumbnail/marker.
+- Template: **`documents/archive/partials/item_list_cards.html`**. No browse-card JavaScript.
+
+**Docs:** `docs/ai-context/photo-archive-items.md` (**Current authoritative state**)
+
+## PHOTO and OCR image browse thumbnails — generation
+
+**Decision:** Generate fixed-edge JPEG browse thumbnails at upload time (best-effort; does not fail the upload). PDF OCR documents are excluded.
+
+### PHOTO
+
+- **When:** After successful **`PhotoContent`** upload finalize (`upload_status=UPLOADED`).
+- **Service:** **`generate_and_persist_photo_thumbnail`** in **`documents/services/photo_thumbnail.py`**.
+- **Input:** Validated **`original_file_key`** from S3.
+- **Output key:** **`photos/{photo_content_id}/thumb_400.jpg`** via **`build_photo_thumbnail_s3_key`**.
+- **Persisted:** **`width`**, **`height`**, **`thumbnail_file_key`**, **`thumbnail_mime_type`**, **`thumbnail_size_bytes`** on **`PhotoContent`**.
+
+### OCR image documents
+
+- **When:** After upload complete/finalize transaction commits (**`schedule_document_thumbnail_after_upload`**).
+- **Service:** **`generate_and_persist_document_thumbnail`** in **`documents/services/document_thumbnail.py`**.
+- **Input:** First source page — **`DocumentSourceFile`** at **`order_index=0`** with non-empty **`file_s3_key`**.
+- **Output key:** **`documents/{document_id}/thumb_400.jpg`** via **`build_document_thumbnail_s3_key`**.
+- **Persisted:** **`first_page_width`**, **`first_page_height`**, **`thumbnail_*`** on **`Document`**.
+- **PDF:** **`should_generate_document_thumbnail`** returns false.
+
+### Shared encoder
+
+- **`documents/services/image_thumbnail.py`** — max edge 400, EXIF-aware transpose, JPEG output.
+- Worker (`run_worker.py`) does **not** generate browse thumbnails.
+
+### Schema
+
+- PHOTO thumbnail columns: migration **`0025_photocontent`**.
+- Document thumbnail columns: migration **`0036_document_thumbnail_fields`** (`thumbnail_*`, **`first_page_width`**, **`first_page_height`**).
+
+## Thumbnail backfill — operational commands
+
+**Decision:** Provide supported, **idempotent** management commands for repair and catch-up thumbnail generation. These are **operational tooling**, not temporary one-off scripts. Completed production backfills do **not** make the commands obsolete.
+
+| Command | Service module | Eligibility summary |
+|---------|----------------|---------------------|
+| **`backfill_photo_thumbnails`** | **`photo_thumbnail_backfill.py`** | `UPLOADED` + non-empty **`original_file_key`** + empty **`thumbnail_file_key`** |
+| **`backfill_document_thumbnails`** | **`document_thumbnail_backfill.py`** | `doc_type=IMAGE` + `UPLOADED` + empty **`thumbnail_file_key`** + valid primary source at `order_index=0` |
+
+**Modes:** Default is **dry-run** (report only). **`--commit`** generates and persists thumbnails (S3 + DB). Both support **`--limit`**, **`--json`**, and single-id filters (`--photo-id`, `--document-id`). Re-runs skip rows that already have thumbnails.
+
+**Delegation:** Both commands call the same **`generate_and_persist_*_thumbnail`** functions used by upload-time generation.
+
+## Document S3 orphan cleanup — `cleanup_document_s3_orphans`
+
+**Decision:** Provide an operational command to audit and optionally delete unreferenced S3 objects under **`documents/`**.
+
+**Protected references (database-backed, not filename exemptions):**
+
+- **`Document.file_s3_key`**
+- **`Document.thumbnail_file_key`**
+- **`DocumentSourceFile.file_s3_key`**
+
+**Behavior:**
+
+- Default is **dry-run**. **`--commit`** deletes listed orphan candidates (with age/limit filters).
+- Referenced thumbnail keys are **never** deleted while the DB row still points at them.
+- Unreferenced thumbnail derivatives under **`documents/`** remain valid orphan candidates.
+- Objects under **`photos/`** are **outside** this command’s scope (no PHOTO orphan cleanup command exists).
+
+**Service:** **`documents/services/document_s3_orphan_cleanup.py`**
+
+## OCR upload UI — gallery-first incremental flow (current)
+
+**Decision:** The first-party admin upload UI (`documents/templates/documents/upload/`) uses a **gallery-first, incremental** image workflow. This supersedes the historical PR6 multi-select batch flow (2–30 files selected once) for the current product UI.
+
+### Current behavior
+
+- **Mobile:** Gallery-first — primary control «הוספת עמוד מהגלריה»; users photograph pages in the device camera app, return to the site, and add images from the gallery. Each image uploads immediately.
+- **Direct in-browser camera capture removed** — the file input has no `capture` attribute (removed because it conflicted with multi-select; incremental gallery flow replaced it).
+- **Image documents:** 1–35 pages per document (`MULTI_IMAGE_MAX_FILES=35` in **`source_files.py`** and upload script). Pages upload **incrementally** via **`POST /api/uploads/create/`** with **`incremental: true`**, then per-part complete endpoints; finalize when ready.
+- **PDF:** Separate single-file path — not mixed with gallery images.
+- **EXIF orientation:** Server-side normalization for supported uploaded images via **`normalize_uploaded_image_exif_in_s3`** (`documents/services/exif_orientation.py`) on upload completion paths.
+
+### Historical note
+
+- **Multi-image upload — admin UI (PR6)** documented 2–30 files selected in one batch with immediate multi-part upload. The current UI uses incremental page-by-page upload with a **35**-page cap.
+- **Multi-image upload — backend API contract (PR3)** batch `files[]` create mode remains in the API for compatibility; the current first-party UI primarily uses the incremental draft flow.
+
+**Docs:** `docs/ai-context/unified-ocr-upload-flow.md` (API history); upload templates under `documents/templates/documents/upload/`.
