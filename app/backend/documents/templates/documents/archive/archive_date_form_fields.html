@@ -16,9 +16,9 @@
       data-date-precision-group="YEAR"
       {% if form_data.date_precision != "YEAR" %}hidden{% endif %}
     >
-      <div class="archive-date-logical-field" data-date-precision-field="YEAR">
+      <div class="archive-date-logical-field">
         <label class="archive-date-group-label" for="date_start_year_desktop_year">תאריך</label>
-        <div class="archive-date-control archive-date-control--year" dir="ltr" lang="en">
+        <div class="archive-date-control" dir="ltr" lang="en">
           <input
             id="date_start_year_desktop_year"
             name="date_start_year"
@@ -40,7 +40,7 @@
       data-date-precision-group="MONTH"
       {% if form_data.date_precision != "MONTH" %}hidden{% endif %}
     >
-      <div class="archive-date-logical-field" data-date-precision-field="MONTH" data-date-logical-control>
+      <div class="archive-date-logical-field">
         <label class="archive-date-group-label" id="archive_date_month_desktop_label" for="date_start_month_desktop_month">תאריך</label>
         <div
           class="archive-date-control"
@@ -89,13 +89,12 @@
       data-date-precision-group="EXACT_DAY"
       {% if form_data.date_precision != "EXACT_DAY" %}hidden{% endif %}
     >
-      <div class="archive-date-logical-field" data-date-precision-field="EXACT_DAY">
+      <div class="archive-date-logical-field">
         <label class="archive-date-group-label" for="date_start_desktop_exact_day">תאריך</label>
         <input
           id="date_start_desktop_exact_day"
           name="date_start"
           type="date"
-          class="archive-date-native-input"
           data-date-native="start-date"
           value="{{ form_data.date_start }}"
           {% if form_data.date_precision != "EXACT_DAY" %}disabled{% endif %}
@@ -108,9 +107,9 @@
       data-date-precision-group="RANGE_YEAR"
       {% if form_data.date_precision != "RANGE_YEAR" %}hidden{% endif %}
     >
-      <div class="archive-date-logical-field" data-date-precision-field="RANGE_YEAR">
+      <div class="archive-date-logical-field">
         <label class="archive-date-group-label" for="date_start_year_desktop_range_year">מתאריך</label>
-        <div class="archive-date-control archive-date-control--year" dir="ltr" lang="en">
+        <div class="archive-date-control" dir="ltr" lang="en">
           <input
             id="date_start_year_desktop_range_year"
             name="date_start_year"
@@ -125,9 +124,9 @@
           />
         </div>
       </div>
-      <div class="archive-date-logical-field" data-date-precision-field="RANGE_YEAR">
+      <div class="archive-date-logical-field">
         <label class="archive-date-group-label" for="date_end_year_desktop_range_year">עד תאריך</label>
-        <div class="archive-date-control archive-date-control--year" dir="ltr" lang="en">
+        <div class="archive-date-control" dir="ltr" lang="en">
           <input
             id="date_end_year_desktop_range_year"
             name="date_end_year"
@@ -149,7 +148,7 @@
       data-date-precision-group="RANGE_MONTH"
       {% if form_data.date_precision != "RANGE_MONTH" %}hidden{% endif %}
     >
-      <div class="archive-date-logical-field" data-date-precision-field="RANGE_MONTH" data-date-logical-control>
+      <div class="archive-date-logical-field">
         <label class="archive-date-group-label" id="archive_date_range_month_start_desktop_label" for="date_start_month_desktop_range_month">מתאריך</label>
         <div
           class="archive-date-control"
@@ -191,7 +190,7 @@
           </span>
         </div>
       </div>
-      <div class="archive-date-logical-field" data-date-precision-field="RANGE_MONTH" data-date-logical-control>
+      <div class="archive-date-logical-field">
         <label class="archive-date-group-label" id="archive_date_range_month_end_desktop_label" for="date_end_month_desktop_range_month">עד תאריך</label>
         <div
           class="archive-date-control"
@@ -240,25 +239,23 @@
       data-date-precision-group="RANGE"
       {% if form_data.date_precision != "RANGE" %}hidden{% endif %}
     >
-      <div class="archive-date-logical-field" data-date-precision-field="RANGE">
+      <div class="archive-date-logical-field">
         <label class="archive-date-group-label" for="date_start_desktop_range">מתאריך</label>
         <input
           id="date_start_desktop_range"
           name="date_start"
           type="date"
-          class="archive-date-native-input"
           data-date-native="start-date"
           value="{{ form_data.date_start }}"
           {% if form_data.date_precision != "RANGE" %}disabled{% endif %}
         />
       </div>
-      <div class="archive-date-logical-field" data-date-precision-field="RANGE">
+      <div class="archive-date-logical-field">
         <label class="archive-date-group-label" for="date_end_desktop_range">עד תאריך</label>
         <input
           id="date_end_desktop_range"
           name="date_end"
           type="date"
-          class="archive-date-native-input"
           data-date-native="end-date"
           value="{{ form_data.date_end }}"
           {% if form_data.date_precision != "RANGE" %}disabled{% endif %}
@@ -273,7 +270,7 @@
       data-date-precision-group="YEAR"
       {% if form_data.date_precision != "YEAR" %}hidden{% endif %}
     >
-      <div class="archive-date-logical-field" data-date-logical-control>
+      <div class="archive-date-logical-field">
         <div class="archive-date-control" dir="ltr" lang="en" role="group" aria-label="תאריך">
           <span class="archive-date-part archive-date-part-year">
             <input
@@ -299,7 +296,7 @@
       data-date-precision-group="MONTH"
       {% if form_data.date_precision != "MONTH" %}hidden{% endif %}
     >
-      <div class="archive-date-logical-field" data-date-logical-control>
+      <div class="archive-date-logical-field">
         <div class="archive-date-control" dir="ltr" lang="en" role="group" aria-label="תאריך">
           <span class="archive-date-part archive-date-part-month">
             <input
@@ -341,7 +338,7 @@
       data-date-precision-group="EXACT_DAY"
       {% if form_data.date_precision != "EXACT_DAY" %}hidden{% endif %}
     >
-      <div class="archive-date-logical-field" data-date-logical-control>
+      <div class="archive-date-logical-field">
         <div class="archive-date-control" dir="ltr" lang="en" role="group" aria-label="תאריך">
           <span class="archive-date-part archive-date-part-day">
             <input
@@ -399,7 +396,7 @@
       data-date-precision-group="RANGE_YEAR"
       {% if form_data.date_precision != "RANGE_YEAR" %}hidden{% endif %}
     >
-      <div class="archive-date-logical-field" data-date-logical-control>
+      <div class="archive-date-logical-field">
         <div class="archive-date-group-label" id="archive_date_range_start_mobile_label">מתאריך</div>
         <div
           class="archive-date-control"
@@ -425,7 +422,7 @@
           </span>
         </div>
       </div>
-      <div class="archive-date-logical-field" data-date-logical-control>
+      <div class="archive-date-logical-field">
         <div class="archive-date-group-label" id="archive_date_range_end_mobile_label">עד תאריך</div>
         <div
           class="archive-date-control"
@@ -458,7 +455,7 @@
       data-date-precision-group="RANGE_MONTH"
       {% if form_data.date_precision != "RANGE_MONTH" %}hidden{% endif %}
     >
-      <div class="archive-date-logical-field" data-date-logical-control>
+      <div class="archive-date-logical-field">
         <div class="archive-date-group-label">מתאריך</div>
         <div class="archive-date-control" dir="ltr" lang="en" role="group" aria-label="מתאריך">
           <span class="archive-date-part archive-date-part-month">
@@ -494,7 +491,7 @@
           </span>
         </div>
       </div>
-      <div class="archive-date-logical-field" data-date-logical-control>
+      <div class="archive-date-logical-field">
         <div class="archive-date-group-label">עד תאריך</div>
         <div class="archive-date-control" dir="ltr" lang="en" role="group" aria-label="עד תאריך">
           <span class="archive-date-part archive-date-part-month">
@@ -537,7 +534,7 @@
       data-date-precision-group="RANGE"
       {% if form_data.date_precision != "RANGE" %}hidden{% endif %}
     >
-      <div class="archive-date-logical-field" data-date-logical-control>
+      <div class="archive-date-logical-field">
         <div class="archive-date-group-label">מתאריך</div>
         <div class="archive-date-control" dir="ltr" lang="en" role="group" aria-label="מתאריך">
           <span class="archive-date-part archive-date-part-day">
@@ -589,7 +586,7 @@
           </span>
         </div>
       </div>
-      <div class="archive-date-logical-field" data-date-logical-control>
+      <div class="archive-date-logical-field">
         <div class="archive-date-group-label">עד תאריך</div>
         <div class="archive-date-control" dir="ltr" lang="en" role="group" aria-label="עד תאריך">
           <span class="archive-date-part archive-date-part-day">

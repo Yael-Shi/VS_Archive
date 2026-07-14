@@ -175,29 +175,6 @@ def _normalize_single_point_end_date(
     return _build_calendar_date(year, month, day, "date_start")
 
 
-def archive_date_entry_flags(date_precision: str) -> dict[str, bool]:
-    """Server-rendered visibility/disabled flags for the shared date-entry partial."""
-    precision = date_precision or ArchiveItem.DatePrecision.UNKNOWN
-    single_group_active = precision in _SINGLE_POINT_PRECISIONS
-    range_group_active = precision in _RANGE_PRECISIONS
-    show_month = precision in (
-        ArchiveItem.DatePrecision.MONTH,
-        ArchiveItem.DatePrecision.EXACT_DAY,
-        ArchiveItem.DatePrecision.RANGE,
-        ArchiveItem.DatePrecision.RANGE_MONTH,
-    )
-    show_day = precision in (
-        ArchiveItem.DatePrecision.EXACT_DAY,
-        ArchiveItem.DatePrecision.RANGE,
-    )
-    return {
-        "date_single_group_active": single_group_active,
-        "date_range_group_active": range_group_active,
-        "date_show_month": show_month,
-        "date_show_day": show_day,
-    }
-
-
 def _normalize_end_date(
     precision: str, year: int, month: int | None, day: int | None
 ) -> date:
@@ -393,7 +370,7 @@ def archive_date_form_data(
     date_start: date | None,
     date_end: date | None,
     date_precision: str,
-) -> dict[str, str | bool]:
+) -> dict[str, str]:
     """Build template form_data date fields (components + legacy ISO keys)."""
     components = date_component_form_data_from_stored(
         date_start=date_start,
@@ -402,7 +379,6 @@ def archive_date_form_data(
     )
     return {
         **components,
-        **archive_date_entry_flags(date_precision),
         "date_start": date_start.isoformat() if date_start else "",
         "date_end": date_end.isoformat() if date_end else "",
         "date_precision": date_precision,
