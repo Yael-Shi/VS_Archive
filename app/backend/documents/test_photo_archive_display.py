@@ -4,7 +4,8 @@ from unittest.mock import patch
 
 from botocore.exceptions import ClientError
 from django.contrib.auth.models import Group, User
-from django.test import TestCase, override_settings
+from django.conf import settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 
 from documents.models import (
@@ -591,3 +592,17 @@ class PhotoArchiveBrowseThumbnailTests(TestCase):
         self.assertNotContains(resp, "archive-browse-card__photo-preview")
         self.assertNotContains(resp, 'alt="Manual browse unchanged"')
         mock_presigned_get.assert_not_called()
+
+
+class PhotoArchiveBrowsePreviewStyleTests(SimpleTestCase):
+    def test_photo_preview_css_fills_preview_area_from_top(self):
+        css_path = settings.BASE_DIR / "public" / "static" / "public" / "app.css"
+        css = css_path.read_text(encoding="utf-8")
+        image_block_start = css.index(".archive-browse-card__photo-preview-image")
+        image_block = css[image_block_start : css.index("}", image_block_start) + 1]
+
+        self.assertIn("object-fit: cover", image_block)
+        self.assertIn("object-position: top center", image_block)
+        self.assertNotIn("object-fit: contain", image_block)
+        self.assertNotIn("border:", image_block)
+        self.assertNotIn("box-shadow:", image_block)
