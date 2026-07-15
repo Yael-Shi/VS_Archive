@@ -107,6 +107,9 @@ from documents.services.exif_orientation import (
 from documents.services.document_thumbnail import (
     schedule_document_thumbnail_after_upload,
 )
+from documents.services.photo_s3_cleanup import (
+    schedule_photo_s3_cleanup_after_commit,
+)
 from documents.services.source_files import (
     MULTI_IMAGE_MAX_FILES,
     all_expected_source_files_uploaded,
@@ -3564,8 +3567,30 @@ def archive_manage_delete_page(request, item_id: int):
         raise Http404() from None
 
     if request.method == "POST":
+        photo_cleanup: tuple[str, str, int | None] | None = None
+        if item.item_type == ArchiveItem.ItemType.PHOTO:
+            photo_content = item.photo_content
+            photo_cleanup = (
+                photo_content.original_file_key,
+                photo_content.thumbnail_file_key,
+                photo_content.pk,
+            )
+
         with transaction.atomic():
             item.delete()
+            if photo_cleanup is not None:
+                (
+                    original_file_key,
+                    thumbnail_file_key,
+                    photo_content_id,
+                ) = photo_cleanup
+                schedule_photo_s3_cleanup_after_commit(
+                    bucket=settings.UPLOADS_BUCKET_NAME,
+                    original_file_key=original_file_key,
+                    thumbnail_file_key=thumbnail_file_key,
+                    photo_content_id=photo_content_id,
+                )
+
         return redirect("archive-manage-list")
 
     if item.item_type == ArchiveItem.ItemType.PHOTO:
