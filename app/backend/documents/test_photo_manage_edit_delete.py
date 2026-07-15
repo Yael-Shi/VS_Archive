@@ -1,6 +1,6 @@
 """PR5: staff PHOTO metadata edit and delete V1."""
 
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from django.contrib.auth.models import Group, User
 from django.test import TestCase, override_settings
@@ -28,6 +28,7 @@ def _create_photo_archive_item(
     visibility=ArchiveItem.Visibility.PUBLIC,
     upload_status=PhotoContent.UploadStatus.UPLOADED,
     original_file_key: str = "photos/55/original.jpg",
+    thumbnail_file_key: str = "",
 ) -> ArchiveItem:
     item = ArchiveItem.objects.create(
         item_type=ArchiveItem.ItemType.PHOTO,
@@ -42,6 +43,7 @@ def _create_photo_archive_item(
         original_size_bytes=1024,
         upload_status=upload_status,
         upload_error="",
+        thumbnail_file_key=thumbnail_file_key,
     )
     return item
 
@@ -416,18 +418,32 @@ class PhotoManageDeleteTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(ArchiveItem.objects.filter(pk=self.photo_item.id).exists())
 
-    @patch("boto3.client")
-    def test_photo_delete_removes_db_rows_and_redirects_without_s3_cleanup(
-        self, mock_boto_client
+    @patch("documents.services.photo_s3_cleanup.delete_s3_object")
+    def test_photo_delete_removes_db_rows_and_s3_objects_after_commit(
+        self, mock_delete_s3_object
     ):
         item_id = self.photo_item.id
+        self.photo_item.photo_content.thumbnail_file_key = "photos/55/thumbnail_400.jpg"
+        self.photo_item.photo_content.save(
+            update_fields=["thumbnail_file_key", "updated_at"]
+        )
+
         self.client.force_login(self.staff)
-        resp = self.client.post(self._delete_url(item_id))
+        with self.captureOnCommitCallbacks(execute=True) as callbacks:
+            resp = self.client.post(self._delete_url(item_id))
+
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp["Location"], reverse("archive-manage-list"))
         self.assertFalse(ArchiveItem.objects.filter(pk=item_id).exists())
         self.assertFalse(PhotoContent.objects.filter(pk=self.photo_content_id).exists())
-        mock_boto_client.assert_not_called()
+        self.assertEqual(len(callbacks), 1)
+        self.assertEqual(
+            mock_delete_s3_object.call_args_list,
+            [
+                call("test-uploads-bucket", "photos/55/original.jpg"),
+                call("test-uploads-bucket", "photos/55/thumbnail_400.jpg"),
+            ],
+        )
 
     def test_manual_text_delete_still_works(self):
         manual_item = create_manual_text_archive_item(
