@@ -19,6 +19,11 @@ TEXT_INPUT_TYPE_UI_CHOICES = (
     (Document.TextInputType.PRINTED, "מודפס"),
 )
 
+HANDWRITING_TYPE_UI_CHOICES = (
+    (Document.HandwritingType.VS, "כתב היד של VS"),
+    (Document.HandwritingType.GENERAL, "כתב יד כללי"),
+)
+
 
 def parse_date_precision(raw_value: str | None) -> str:
     value = (raw_value or ArchiveItem.DatePrecision.UNKNOWN).strip().upper()

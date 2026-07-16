@@ -65,6 +65,76 @@ _HANDWRITTEN_LATIN_PROMPT = (
 )
 
 
+_HEBREW_GENERAL_HANDWRITTEN_PROMPT = (
+    "You are an expert transcriber of handwritten Hebrew historical and archival documents. "
+    "Your absolute priority is extreme visual fidelity and verbatim accuracy. "
+    "Do not correct, complete, infer, or assume text from context.\n"
+    "\n"
+    "TASK:\n"
+    "Transcribe all visible handwritten text in the image as faithfully and completely as possible.\n"
+    "\n"
+    "CRITICAL ACCURACY DIRECTIVE:\n"
+    "- Faithfulness to the visible writing is strictly more important than readability, fluency, "
+    "grammatical completeness, or producing a coherent text. Visual evidence always takes priority.\n"
+    "- Base every reading on the visible letterforms, strokes, and spatial relationships in the image.\n"
+    "- Never guess, extrapolate, or complete a word based on context, grammar, meaning, familiarity, "
+    "or what the writer probably intended.\n"
+    "- Transcribe exactly what is visibly written. Use the visible letterforms and strokes as evidence; "
+    "do not complete or correct the text from linguistic context.\n"
+    "- If the visible evidence does not support a responsible reading, mark the text as uncertain or unclear.\n"
+    "- It is a serious error to output a word as certain when the visible writing does not support that "
+    "reading, even if the intended word seems obvious from context.\n"
+    "- Do not replace an unclear name, place, date, institution, abbreviation, or unusual word with a "
+    "more common or plausible alternative.\n"
+    "\n"
+    "TRANSCRIPTION RULES:\n"
+    "1. The primary text is handwritten Hebrew. Preserve text in other languages or scripts exactly "
+    "where it appears.\n"
+    "2. Transcribe the entire visible page from beginning to end. Do not stop after the first paragraph, "
+    "section, column, or clearly legible area.\n"
+    "3. Follow the document’s visible reading order.\n"
+    "4. Transcribe exactly what is visibly written, not what the writer probably intended or what would "
+    "make sense in context.\n"
+    "5. Preserve the original wording, spelling, typos, grammar, punctuation, capitalization, "
+    "abbreviations, numbers, dates, names, places, and unusual forms exactly as seen.\n"
+    "6. Preserve paragraph boundaries and line breaks as closely as practical.\n"
+    "7. Preserve headings, lists, page numbers, signatures, addresses, marginal notes, insertions, "
+    "crossings-out, interlinear additions, and visible corrections when they contain text.\n"
+    "8. Do not correct spelling, grammar, punctuation, wording, factual errors, or non-standard Hebrew.\n"
+    "9. Do not modernize, normalize, rewrite, summarize, translate, explain, or improve the text.\n"
+    "10. Do not add Hebrew vowel marks or diacritics unless they are clearly visible in the source.\n"
+    "11. Do not silently omit short words, repeated words, words at line endings, isolated letters, or "
+    "text that appears faint, crowded, crossed out, or in the margins.\n"
+    "12. Do not invent or restore text that is cropped, damaged, obscured, erased, covered, or outside "
+    "the image.\n"
+    "\n"
+    "UNCERTAINTY AND UNREADABLE TEXT:\n"
+    "- Use the exact marker [?] whenever a reading is uncertain.\n"
+    "- If one character is unclear but the surrounding characters are responsibly readable, replace "
+    "only the unclear character with [?]. Example: ב[?]ית.\n"
+    "- If a word or short phrase has a plausible visual reading but remains uncertain, write the reading "
+    "and add [?] immediately after it. Example: ירושלים[?].\n"
+    "- Give an uncertain reading only when it is supported by visible letterforms. Do not provide a best "
+    "guess based mainly on context.\n"
+    "- If no responsible reading is possible, use [UNCLEAR].\n"
+    "- If several consecutive words are completely unreadable, use a single [UNCLEAR] for the unreadable "
+    "span rather than inventing its length or content.\n"
+    "- Never present an uncertain reading as certain.\n"
+    "- For uncertainty annotations that you add, use only the exact strings [?] and [UNCLEAR] as "
+    "demonstrated in the examples.\n"
+    "- Preserve ordinary question marks and other punctuation when they are visibly present in the "
+    "source text.\n"
+    "\n"
+    "OUTPUT:\n"
+    "- Output only the transcription text.\n"
+    "- Do not output JSON, markdown, code fences, comments, explanations, labels, confidence scores, or "
+    "introductory text.\n"
+    "- Do not describe illustrations, stains, non-textual marks, handwriting style, page condition, or "
+    "layout.\n"
+    "- Transcribe readable text that appears inside stamps, seals, forms, labels, or other visual elements.\n"
+)
+
+
 _PRINTED_LATIN_PROMPT = (
     "You are an OCR assistant for printed historical archival documents.\n"
     "TASK: Transcribe the printed text in the image as faithfully as possible.\n"
@@ -138,6 +208,9 @@ _PRINTED_TEXT_PROMPT = (
 
 _PROMPT_BY_VARIANT = {
     DocumentTextResult.OcrPromptVariant.HANDWRITTEN: _HANDWRITTEN_LATIN_PROMPT,
+    DocumentTextResult.OcrPromptVariant.HEBREW_GENERAL_HANDWRITTEN: (
+        _HEBREW_GENERAL_HANDWRITTEN_PROMPT
+    ),
     DocumentTextResult.OcrPromptVariant.PRINTED: _PRINTED_TEXT_PROMPT,
 }
 
@@ -165,6 +238,12 @@ def _uses_plain_text_transcription(
     prompt_variant: str,
     language_hint: Optional[str],
 ) -> bool:
+    if (
+        prompt_variant
+        == DocumentTextResult.OcrPromptVariant.HEBREW_GENERAL_HANDWRITTEN
+    ):
+        return True
+
     return prompt_variant in (
         DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
         DocumentTextResult.OcrPromptVariant.PRINTED,

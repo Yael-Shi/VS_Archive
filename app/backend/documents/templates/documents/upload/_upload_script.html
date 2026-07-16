@@ -19,6 +19,10 @@
   const desktopFilePickLabel = document.getElementById("desktopFilePickLabel");
   const galleryMultiSelectOrderHint = document.getElementById("galleryMultiSelectOrderHint");
   const docTypeEl = document.getElementById("doc_type");
+  const languageEl = document.getElementById("language");
+  const textInputTypeEl = document.getElementById("text_input_type");
+  const handwritingTypeFieldEl = document.getElementById("handwritingTypeField");
+  const handwritingTypeEl = document.getElementById("handwriting_type");
   const selectedFilesEl = document.getElementById("selectedFiles");
   const selectedFilesSummaryEl = document.getElementById("selectedFilesSummary");
 
@@ -43,6 +47,22 @@
       .split(",")
       .map(s => s.trim())
       .filter(Boolean);
+  }
+
+  function isHebrewHandwrittenSelection() {
+    if (!handwritingTypeFieldEl) return false;
+
+    return (
+      languageEl.value === handwritingTypeFieldEl.dataset.hebrewLanguage &&
+      textInputTypeEl.value ===
+        handwritingTypeFieldEl.dataset.handwrittenTextInputType
+    );
+  }
+
+  function updateHandwritingTypeField() {
+    const relevant = isHebrewHandwrittenSelection();
+    handwritingTypeFieldEl.hidden = !relevant;
+    handwritingTypeEl.disabled = !relevant;
   }
 
   function getCsrfToken() {
@@ -325,8 +345,8 @@
 
   function buildFormMeta() {
     const title = document.getElementById("title").value.trim();
-    const language = document.getElementById("language").value || "";
-    const text_input_type = document.getElementById("text_input_type").value || "";
+    const language = languageEl.value || "";
+    const text_input_type = textInputTypeEl.value || "";
     const visibility = document.getElementById("visibility").value || "private";
     const author_name = document.getElementById("author_name").value.trim();
     const source_title = document.getElementById("source_title").value.trim();
@@ -356,6 +376,9 @@
       window.vsArchiveDateEntry.collectMeta(meta);
     }
     if (language) meta.language = language;
+    if (isHebrewHandwrittenSelection()) {
+      meta.handwriting_type = handwritingTypeEl.value;
+    }
     if (author_name) meta.author_name = author_name;
     if (source_title) meta.source_title = source_title;
     if (public_note) meta.public_note = public_note;
@@ -378,7 +401,10 @@
   }
 
   applyFileInputMode();
+  updateHandwritingTypeField();
   docTypeEl.addEventListener("change", () => applyFileInputMode());
+  languageEl.addEventListener("change", updateHandwritingTypeField);
+  textInputTypeEl.addEventListener("change", updateHandwritingTypeField);
   updateGalleryPickState();
   updateSubmitButtonState();
 

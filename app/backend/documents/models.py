@@ -229,6 +229,10 @@ class Document(models.Model):
         HANDWRITTEN = "HANDWRITTEN", "Handwritten"
         PRINTED = "PRINTED", "Printed"
 
+    class HandwritingType(models.TextChoices):
+        VS = "VS", "VS handwriting"
+        GENERAL = "GENERAL", "General Hebrew handwriting"
+
     class DatePrecision(models.TextChoices):
         EXACT_DAY = "EXACT_DAY", "Exact day"
         MONTH = "MONTH", "Month"
@@ -248,6 +252,11 @@ class Document(models.Model):
     text_input_type = models.CharField(
         max_length=16,
         choices=TextInputType.choices,
+    )
+    handwriting_type = models.CharField(
+        max_length=16,
+        choices=HandwritingType.choices,
+        default=HandwritingType.VS,
     )
 
     category_event = models.CharField(max_length=255, null=True, blank=True)
@@ -337,6 +346,10 @@ class DocumentTextResult(models.Model):
 
     class OcrPromptVariant(models.TextChoices):
         HANDWRITTEN = "handwritten", "Handwritten"
+        HEBREW_GENERAL_HANDWRITTEN = (
+            "hebrew_general_handwritten",
+            "General Hebrew handwriting",
+        )
         PRINTED = "printed", "Printed"
         HEBREW_TRANSLATION = "hebrew_translation", "Hebrew translation"
 

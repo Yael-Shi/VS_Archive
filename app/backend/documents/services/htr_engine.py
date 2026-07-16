@@ -21,6 +21,7 @@ def transcribe_pages(
     language_hint: Optional[str],
     text_input_type: Optional[str],
     *,
+    handwriting_type: Optional[str] = None,
     route: Optional[OcrRouteConfig] = None,
     source_transkribus_run_id: int | None = None,
     **kwargs,
@@ -32,7 +33,13 @@ def transcribe_pages(
     used for persistence; ``select_ocr_route`` is not called again.
     """
     selected = (
-        route if route is not None else select_ocr_route(language_hint, text_input_type)
+        route
+        if route is not None
+        else select_ocr_route(
+            language_hint,
+            text_input_type,
+            handwriting_type=handwriting_type,
+        )
     )
     adapter = get_htr_adapter(selected.engine_key)
     if source_transkribus_run_id is not None:
