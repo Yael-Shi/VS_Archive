@@ -112,6 +112,23 @@
             </div>
           </div>
 
+          <div
+            id="handwritingTypeField"
+            class="field"
+            data-hebrew-language="{{ hebrew_language_value }}"
+            data-handwritten-text-input-type="{{ handwritten_text_input_value }}"
+            hidden
+          >
+            <label for="handwriting_type">סוג כתב היד</label>
+            <select id="handwriting_type" name="handwriting_type" disabled>
+              {% for v, label in handwriting_type_choices %}
+                <option value="{{ v }}" {% if v == handwriting_type_default %}selected{% endif %}>
+                  {{ label }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+
           <div class="meta-grid">
             <div class="field">
               <label for="visibility">נראות</label>

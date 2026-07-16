@@ -307,7 +307,11 @@ class Command(BaseCommand):
                 effective_mime = (doc.mime_type or s3_mime or "").strip()
                 pages = extract_pages(file_bytes=file_bytes, mime_type=effective_mime)
 
-            route = select_ocr_route(doc.language, doc.text_input_type)
+            route = select_ocr_route(
+                doc.language,
+                doc.text_input_type,
+                handwriting_type=doc.handwriting_type,
+            )
             source_transkribus_run_id: int | None = None
             if (
                 payload.get(OCR_RETRY_MODE_PAYLOAD_KEY)
@@ -326,6 +330,7 @@ class Command(BaseCommand):
                 pages=pages,
                 language_hint=doc.language,
                 text_input_type=doc.text_input_type,
+                handwriting_type=doc.handwriting_type,
                 route=route,
                 worker_env=self._effective_worker_env(payload),
                 document_id=document_id,
@@ -534,7 +539,11 @@ class Command(BaseCommand):
         Success paths use the route selected in Phase 2 and passed into persistence.
         """
         try:
-            route = select_ocr_route(doc.language, doc.text_input_type)
+            route = select_ocr_route(
+                doc.language,
+                doc.text_input_type,
+                handwriting_type=doc.handwriting_type,
+            )
             return route.engine_key, route.prompt_variant
         except ValueError:
             return None

@@ -141,6 +141,7 @@ from documents.services.archive_metadata_suggestions import (
 )
 from documents.services.archive_item_validation import (
     DATE_PRECISION_UI_CHOICES,
+    HANDWRITING_TYPE_UI_CHOICES,
     TEXT_INPUT_TYPE_UI_CHOICES,
     parse_date_precision,
 )
@@ -255,6 +256,7 @@ class _CreateUploadCommon(TypedDict):
     date_precision: str
     language: str | None
     text_input_type: str
+    handwriting_type: str
     visibility: str
     admin_meta: dict
     author_name: str
@@ -311,6 +313,35 @@ def _parse_text_input_type(raw_value: Optional[str]) -> str:
     }
     if value not in valid:
         raise ValueError("text_input_type must be HANDWRITTEN or PRINTED")
+    return value
+
+
+def _parse_handwriting_type(
+    raw_value: Optional[str],
+    *,
+    field_present: bool,
+    language: str | None,
+    text_input_type: str,
+) -> str:
+    is_hebrew_handwritten = (
+        language == Document.Language.HEBREW
+        and text_input_type == Document.TextInputType.HANDWRITTEN
+    )
+
+    if not is_hebrew_handwritten:
+        if field_present:
+            raise ValueError(
+                "handwriting_type is only allowed for Hebrew handwritten documents"
+            )
+        return Document.HandwritingType.VS
+
+    value = (raw_value or "").strip().upper()
+    if not value:
+        return Document.HandwritingType.VS
+
+    valid = {choice.value for choice in Document.HandwritingType}
+    if value not in valid:
+        raise ValueError("handwriting_type is invalid")
     return value
 
 
@@ -575,11 +606,19 @@ def _parse_create_upload_common(
 
     language = (payload.get("language") or "").strip() or None
     text_input_type_raw = payload.get("text_input_type")
+    handwriting_type_present = "handwriting_type" in payload
+    handwriting_type_raw = payload.get("handwriting_type")
     visibility = (payload.get("visibility") or "private").strip()
     admin_meta = payload.get("admin_meta", None)
 
     try:
         text_input_type = _parse_text_input_type(text_input_type_raw)
+        handwriting_type = _parse_handwriting_type(
+            handwriting_type_raw,
+            field_present=handwriting_type_present,
+            language=language,
+            text_input_type=text_input_type,
+        )
         date_precision = parse_date_precision(payload.get("date_precision"))
         ds, de, _, date_errors = parse_archive_date_bounds(
             date_precision=date_precision,
@@ -633,6 +672,7 @@ def _parse_create_upload_common(
         "date_precision": date_precision,
         "language": language,
         "text_input_type": text_input_type,
+        "handwriting_type": handwriting_type,
         "visibility": visibility,
         "admin_meta": admin_meta,
         "author_name": author_name,
@@ -763,6 +803,7 @@ def _create_incremental_multi_image_upload(
         date_precision=common["date_precision"],
         language=common["language"],
         text_input_type=common["text_input_type"],
+        handwriting_type=common["handwriting_type"],
         visibility=common["visibility"],
         author_name=common["author_name"],
         source_title=common["source_title"],
@@ -846,6 +887,7 @@ def _create_multi_image_upload(request, payload: dict, common: _CreateUploadComm
         date_precision=common["date_precision"],
         language=common["language"],
         text_input_type=common["text_input_type"],
+        handwriting_type=common["handwriting_type"],
         visibility=common["visibility"],
         author_name=common["author_name"],
         source_title=common["source_title"],
@@ -913,6 +955,7 @@ def _create_single_file_upload(request, payload: dict, common: _CreateUploadComm
         date_precision=common["date_precision"],
         language=common["language"],
         text_input_type=common["text_input_type"],
+        handwriting_type=common["handwriting_type"],
         visibility=common["visibility"],
         author_name=common["author_name"],
         source_title=common["source_title"],
@@ -2716,13 +2759,17 @@ def document_hebrew_translation_retry(request, doc_id: int):
     return redirect("documents-detail-page", doc_id=doc.id)
 
 
-UPLOAD_UI_REVISION = "2026-07-09.3"
+UPLOAD_UI_REVISION = "2026-07-15.1"
 
 
 def _upload_form_context() -> dict:
     return {
         "doc_type_choices": Document.DocType.choices,
         "text_input_type_choices": TEXT_INPUT_TYPE_UI_CHOICES,
+        "handwriting_type_choices": HANDWRITING_TYPE_UI_CHOICES,
+        "handwriting_type_default": Document.HandwritingType.VS,
+        "hebrew_language_value": Document.Language.HEBREW,
+        "handwritten_text_input_value": Document.TextInputType.HANDWRITTEN,
         "date_precision_choices": DATE_PRECISION_UI_CHOICES,
         "empty_date_form_data": archive_date_form_data(
             date_start=None,

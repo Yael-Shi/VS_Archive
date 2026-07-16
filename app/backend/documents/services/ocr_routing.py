@@ -50,6 +50,11 @@ HEBREW_HANDWRITTEN_TRANSKRIBUS_ROUTE = OcrRouteConfig(
     prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
 )
 
+HEBREW_GENERAL_HANDWRITTEN_GEMINI_ROUTE = OcrRouteConfig(
+    engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+    prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_GENERAL_HANDWRITTEN,
+)
+
 ARABIC_PRINTED_ANTIGRAVITY_ROUTE = OcrRouteConfig(
     engine_key=DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
     prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
@@ -104,7 +109,9 @@ def _env_bool(name: str, *, default: bool = False) -> bool:
 
 
 def select_ocr_route(
-    language: str | None, text_input_type: str | None
+    language: str | None,
+    text_input_type: str | None,
+    handwriting_type: str | None = None,
 ) -> OcrRouteConfig:
     lang = (language or "").strip().lower()
     if lang not in {v for v, _label in Document.Language.choices}:
@@ -127,12 +134,27 @@ def select_ocr_route(
         lang == Document.Language.HEBREW
         and text_type == Document.TextInputType.HANDWRITTEN
     ):
+        normalized_handwriting_type = (
+            handwriting_type or Document.HandwritingType.VS
+        ).strip().upper()
+        valid_handwriting_types = {
+            choice.value for choice in Document.HandwritingType
+        }
+        if normalized_handwriting_type not in valid_handwriting_types:
+            raise ValueError(
+                "Invalid handwriting_type for OCR routing: "
+                f"{handwriting_type!r}"
+            )
+
+        if normalized_handwriting_type == Document.HandwritingType.GENERAL:
+            return HEBREW_GENERAL_HANDWRITTEN_GEMINI_ROUTE
+
         if not _env_bool("ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN", default=False):
             raise ValueError(
-                "Hebrew handwritten documents require Transkribus, but "
+                "Hebrew VS handwritten documents require Transkribus, but "
                 "ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN is not enabled. "
-                "Gemini fallback is not allowed for language='he' and "
-                "text_input_type='HANDWRITTEN'."
+                "Gemini fallback is not allowed for language='he', "
+                "text_input_type='HANDWRITTEN', and handwriting_type='VS'."
             )
         return HEBREW_HANDWRITTEN_TRANSKRIBUS_ROUTE
 

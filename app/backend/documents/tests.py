@@ -108,6 +108,47 @@ class HtrDispatcherTests(SimpleTestCase):
 
     @patch("documents.services.htr_engine.get_htr_adapter")
     @patch("documents.services.htr_engine.select_ocr_route")
+    def test_dispatcher_passes_handwriting_type_to_route_selector(
+        self, mock_select_route, mock_get_adapter
+    ):
+        mock_select_route.return_value = OcrRouteConfig(
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=(
+                DocumentTextResult.OcrPromptVariant.HEBREW_GENERAL_HANDWRITTEN
+            ),
+        )
+        adapter = Mock()
+        adapter.execute.return_value = HtrResult(
+            text="תעתוק",
+            engine_name="gemini",
+        )
+        mock_get_adapter.return_value = adapter
+
+        transcribe_pages(
+            pages=[],
+            language_hint=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            handwriting_type=Document.HandwritingType.GENERAL,
+        )
+
+        mock_select_route.assert_called_once_with(
+            Document.Language.HEBREW,
+            Document.TextInputType.HANDWRITTEN,
+            handwriting_type=Document.HandwritingType.GENERAL,
+        )
+        mock_get_adapter.assert_called_once_with(
+            DocumentTextResult.OcrEngineKey.GEMINI
+        )
+        adapter.execute.assert_called_once_with(
+            pages=[],
+            language_hint=Document.Language.HEBREW,
+            prompt_variant=(
+                DocumentTextResult.OcrPromptVariant.HEBREW_GENERAL_HANDWRITTEN
+            ),
+        )
+
+    @patch("documents.services.htr_engine.get_htr_adapter")
+    @patch("documents.services.htr_engine.select_ocr_route")
     def test_hebrew_printed_with_worker_env_passes_route_model_candidates(
         self, mock_select_route, mock_get_adapter
     ):
@@ -7397,6 +7438,41 @@ class GeminiEnginePromptTests(SimpleTestCase):
         )
         self.assertNotIn("Hebrew words", _HANDWRITTEN_LATIN_PROMPT)
 
+    def test_general_hebrew_handwritten_prompt_uses_plain_text_contract(self):
+        from documents.services.gemini_engine import (
+            _HEBREW_GENERAL_HANDWRITTEN_PROMPT,
+        )
+
+        guardrails = (
+            "extreme visual fidelity and verbatim accuracy",
+            "Visual evidence always takes priority",
+            "Never guess, extrapolate, or complete a word based on context",
+            "Base every reading on the visible letterforms",
+            "Do not invent or restore text that is cropped",
+            "Use the exact marker [?]",
+            "Example: ב[?]ית.",
+            "Example: ירושלים[?].",
+            "If no responsible reading is possible, use [UNCLEAR]",
+            "Preserve ordinary question marks",
+            "Output only the transcription text",
+            "Do not output JSON",
+        )
+        for phrase in guardrails:
+            with self.subTest(phrase=phrase):
+                self.assertIn(
+                    phrase,
+                    _HEBREW_GENERAL_HANDWRITTEN_PROMPT,
+                )
+
+        self.assertNotIn(
+            "OUTPUT FORMAT",
+            _HEBREW_GENERAL_HANDWRITTEN_PROMPT,
+        )
+        self.assertNotIn(
+            '{"text":',
+            _HEBREW_GENERAL_HANDWRITTEN_PROMPT,
+        )
+
     def test_hebrew_translation_prompt_includes_archival_guardrails(self):
         guardrails = (
             "excerpt from a longer document",
@@ -7409,6 +7485,58 @@ class GeminiEnginePromptTests(SimpleTestCase):
         for phrase in guardrails:
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, _HEBREW_TRANSLATION_PROMPT)
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_general_hebrew_handwritten_uses_plain_text_v1beta_without_thinking(
+        self, _mock_get_key, mock_create_client
+    ):
+        transcription = (
+            "זהו תעתוק עברי כללי ארוך מספיק לצורך בדיקת מסלול "
+            "כתב היד העברי הכללי."
+        )
+        mock_client = Mock()
+        mock_client.models.generate_content.return_value = SimpleNamespace(
+            text=transcription,
+            candidates=[SimpleNamespace(finish_reason="STOP")],
+        )
+        mock_create_client.return_value = mock_client
+        pages = [
+            PageImage(
+                page_index=1,
+                image_bytes=b"png",
+                mime_type="image/png",
+            )
+        ]
+
+        result = transcribe_pages_with_gemini(
+            pages,
+            Document.Language.HEBREW,
+            prompt_variant=(
+                DocumentTextResult.OcrPromptVariant.HEBREW_GENERAL_HANDWRITTEN
+            ),
+            temperature=0.11,
+        )
+
+        self.assertEqual(result.text, transcription)
+        mock_create_client.assert_called_once_with(
+            "test-key",
+            api_version="v1beta",
+        )
+
+        call_kwargs = mock_client.models.generate_content.call_args.kwargs
+        config = call_kwargs["config"]
+        self.assertEqual(config.temperature, 0.0)
+        self.assertEqual(config.thinking_config.thinking_budget, 0)
+
+        prompt_part = call_kwargs["contents"][0]
+        prompt_text = getattr(prompt_part, "text", None)
+        if prompt_text is not None:
+            self.assertIn(
+                "Output only the transcription text",
+                prompt_text,
+            )
+            self.assertNotIn("OUTPUT FORMAT", prompt_text)
 
     @patch("documents.services.gemini_engine._create_client")
     @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
@@ -8336,6 +8464,76 @@ class OcrRoutingTranskribusHebrewHandwrittenTests(SimpleTestCase):
         self.assertEqual(
             route.prompt_variant, DocumentTextResult.OcrPromptVariant.HANDWRITTEN
         )
+
+    def test_general_hebrew_handwritten_routes_to_gemini_without_transkribus_flag(
+        self,
+    ):
+        with patch.dict(
+            os.environ,
+            {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "false"},
+            clear=False,
+        ):
+            route = select_ocr_route(
+                Document.Language.HEBREW,
+                Document.TextInputType.HANDWRITTEN,
+                handwriting_type=Document.HandwritingType.GENERAL,
+            )
+
+        self.assertEqual(
+            route.engine_key,
+            DocumentTextResult.OcrEngineKey.GEMINI,
+        )
+        self.assertEqual(
+            route.prompt_variant,
+            DocumentTextResult.OcrPromptVariant.HEBREW_GENERAL_HANDWRITTEN,
+        )
+
+    def test_vs_hebrew_handwritten_routes_to_transkribus_when_enabled(self):
+        with patch.dict(
+            os.environ,
+            {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "true"},
+            clear=False,
+        ):
+            route = select_ocr_route(
+                Document.Language.HEBREW,
+                Document.TextInputType.HANDWRITTEN,
+                handwriting_type=Document.HandwritingType.VS,
+            )
+
+        self.assertEqual(
+            route.engine_key,
+            DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
+        )
+        self.assertEqual(
+            route.prompt_variant,
+            DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+        )
+
+    def test_missing_handwriting_type_keeps_legacy_vs_route(self):
+        with patch.dict(
+            os.environ,
+            {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "true"},
+            clear=False,
+        ):
+            route = select_ocr_route(
+                Document.Language.HEBREW,
+                Document.TextInputType.HANDWRITTEN,
+            )
+
+        self.assertEqual(
+            route.engine_key,
+            DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
+        )
+
+    def test_invalid_hebrew_handwriting_type_is_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            select_ocr_route(
+                Document.Language.HEBREW,
+                Document.TextInputType.HANDWRITTEN,
+                handwriting_type="UNKNOWN",
+            )
+
+        self.assertIn("handwriting_type", str(ctx.exception))
 
     def test_flag_off_he_handwritten_raises_clear_error(self):
         with patch.dict(
@@ -9781,10 +9979,16 @@ class UploadPageTemplateTests(TestCase):
         self.assertContains(resp, "סוג טקסט")
         for label in ("כתב יד", "מודפס"):
             self.assertContains(resp, label)
-        self.assertNotContains(resp, "Handwritten")
-        self.assertNotContains(resp, "Printed")
-        self.assertContains(resp, 'value="HANDWRITTEN"')
-        self.assertContains(resp, 'value="PRINTED"')
+
+        content = resp.content.decode()
+        select_start = content.index('<select id="text_input_type"')
+        select_end = content.index("</select>", select_start) + len("</select>")
+        select_html = content[select_start:select_end]
+
+        self.assertNotIn(">Handwritten<", select_html)
+        self.assertNotIn(">Printed<", select_html)
+        self.assertIn('value="HANDWRITTEN"', select_html)
+        self.assertIn('value="PRINTED"', select_html)
 
     def test_upload_page_js_keeps_single_file_pdf_upload_path(self):
         resp = self._get_page()
