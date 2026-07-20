@@ -2,8 +2,21 @@
 
 from __future__ import annotations
 
-from documents.models import Document, DocumentSourceFile
-from documents.s3 import delete_s3_object
+from datetime import timedelta
+
+from django.db.models import Q
+from django.utils import timezone
+
+from documents.models import (
+    Document,
+    DocumentSourceFile,
+    TranskribusSnapshotPage,
+    TranskribusTranscriptSnapshot,
+)
+from documents.s3 import (
+    build_transkribus_snapshot_page_xml_s3_key,
+    delete_s3_object,
+)
 from documents.services.s3_orphan_cleanup import (
     S3DeleteFailure as S3DeleteFailure,
     S3ListedObject as S3ListedObject,
@@ -17,6 +30,8 @@ from documents.services.s3_orphan_cleanup import (
 )
 
 # Database fields that may legitimately reference S3 objects under documents/.
+# Snapshot PAGE XML keys are collected separately with status + exact-key-identity
+# rules (READY always; recent PENDING_UPLOAD only; FAILED residuals orphan-eligible).
 DOCUMENT_S3_REFERENCE_FIELDS: tuple[tuple[str, str], ...] = (
     ("Document", "file_s3_key"),
     ("Document", "thumbnail_file_key"),
@@ -29,6 +44,11 @@ _DOCUMENT_S3_REFERENCE_MODELS: dict[str, type] = {
 }
 
 _DOCUMENTS_PREFIX_ROOT = "documents/"
+
+# PENDING_UPLOAD snapshot PAGE XML keys are protected only while the snapshot row
+# is younger than this window. Stale PENDING keys become orphan-eligible under the
+# command's existing object-age safeguards. This does not change DB status.
+TRANSKRIBUS_SNAPSHOT_PENDING_ORPHAN_PROTECTION_HOURS = 24
 
 # Preserve the existing public names used by the command and tests.
 DocumentS3OrphanCandidate = S3OrphanCandidate
@@ -43,7 +63,65 @@ def normalize_and_validate_s3_prefix(prefix: str) -> str:
     )
 
 
-def collect_referenced_document_s3_keys() -> set[str]:
+def collect_referenced_transkribus_snapshot_page_xml_s3_keys(
+    *,
+    now=None,
+) -> set[str]:
+    """Return protected snapshot PAGE XML keys under documents/.
+
+    Protection rules:
+
+    * ``READY``: protect when stored key exactly equals the deterministic key built
+      from ``(snapshot.document_id, snapshot_id, page_index)``.
+    * ``PENDING_UPLOAD``: same exact-key rule, but only while
+      ``created_at`` is newer than
+      ``TRANSKRIBUS_SNAPSHOT_PENDING_ORPHAN_PROTECTION_HOURS``.
+    * ``FAILED``: never protected (age-eligible orphan candidates).
+
+    Syntactically valid keys that belong to another document/snapshot/page are
+    not protected. Stale PENDING DB status is left unchanged.
+    """
+    reference_now = now if now is not None else timezone.now()
+    pending_cutoff = reference_now - timedelta(
+        hours=TRANSKRIBUS_SNAPSHOT_PENDING_ORPHAN_PROTECTION_HOURS
+    )
+
+    rows = TranskribusSnapshotPage.objects.filter(
+        Q(
+            snapshot__storage_status=TranskribusTranscriptSnapshot.StorageStatus.READY,
+        )
+        | Q(
+            snapshot__storage_status=(
+                TranskribusTranscriptSnapshot.StorageStatus.PENDING_UPLOAD
+            ),
+            snapshot__created_at__gt=pending_cutoff,
+        )
+    ).values_list(
+        "page_xml_s3_key",
+        "snapshot__document_id",
+        "snapshot_id",
+        "page_index",
+    )
+
+    keys: set[str] = set()
+    for raw_key, document_id, snapshot_id, page_index in rows:
+        normalized = (raw_key or "").strip()
+        if not normalized:
+            continue
+        try:
+            expected = build_transkribus_snapshot_page_xml_s3_key(
+                document_id=int(document_id),
+                snapshot_id=int(snapshot_id),
+                page_index=int(page_index),
+            )
+        except (TypeError, ValueError):
+            continue
+        if normalized == expected:
+            keys.add(normalized)
+    return keys
+
+
+def collect_referenced_document_s3_keys(*, now=None) -> set[str]:
     keys: set[str] = set()
 
     for model_name, field_name in DOCUMENT_S3_REFERENCE_FIELDS:
@@ -54,6 +132,7 @@ def collect_referenced_document_s3_keys() -> set[str]:
             if normalized:
                 keys.add(normalized)
 
+    keys.update(collect_referenced_transkribus_snapshot_page_xml_s3_keys(now=now))
     return keys
 
 
