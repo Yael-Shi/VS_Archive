@@ -136,9 +136,7 @@ class HtrDispatcherTests(SimpleTestCase):
             Document.TextInputType.HANDWRITTEN,
             handwriting_type=Document.HandwritingType.GENERAL,
         )
-        mock_get_adapter.assert_called_once_with(
-            DocumentTextResult.OcrEngineKey.GEMINI
-        )
+        mock_get_adapter.assert_called_once_with(DocumentTextResult.OcrEngineKey.GEMINI)
         adapter.execute.assert_called_once_with(
             pages=[],
             language_hint=Document.Language.HEBREW,
@@ -7492,8 +7490,7 @@ class GeminiEnginePromptTests(SimpleTestCase):
         self, _mock_get_key, mock_create_client
     ):
         transcription = (
-            "זהו תעתוק עברי כללי ארוך מספיק לצורך בדיקת מסלול "
-            "כתב היד העברי הכללי."
+            "זהו תעתוק עברי כללי ארוך מספיק לצורך בדיקת מסלול כתב היד העברי הכללי."
         )
         mock_client = Mock()
         mock_client.models.generate_content.return_value = SimpleNamespace(
@@ -9042,6 +9039,22 @@ class ReviewUiTests(TestCase):
         defaults.update(kwargs)
         return DocumentTextResult.objects.create(document=doc, **defaults)
 
+    def _create_hebrew_mirror_for_pending_edit(self, doc, **kwargs):
+        """Explicit SOURCE_TEXT + HEBREW_TEXT pair for pending Hebrew mirror edits."""
+        text = kwargs.pop("text", "שורת בדיקה")
+        engine = kwargs.pop("engine", "transkribus-pylaia:1")
+        shared = {"text": text, "engine": engine, **kwargs}
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            **shared,
+        )
+        return self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            **shared,
+        )
+
     def test_review_backlog_requires_staff(self):
         self.client.force_login(self.user)
         resp = self.client.get("/api/ui/admin/review/")
@@ -9450,7 +9463,7 @@ class ReviewUiTests(TestCase):
 
     def test_staff_can_edit_pending_unverified_text(self):
         doc = self._create_document()
-        row = self._create_text_result(doc, text="טקסט מקורי")
+        row = self._create_hebrew_mirror_for_pending_edit(doc, text="טקסט מקורי")
         self.client.force_login(self.staff)
         resp = self.client.post(self._text_url(row.id), {"text": "טקסט מתוקן"})
         self.assertEqual(resp.status_code, 302)
@@ -9460,7 +9473,7 @@ class ReviewUiTests(TestCase):
 
     def test_staff_can_edit_pending_rejected_text(self):
         doc = self._create_document()
-        row = self._create_text_result(
+        row = self._create_hebrew_mirror_for_pending_edit(
             doc,
             verification_status=DocumentTextResult.VerificationStatus.REJECTED,
             text="נדחה",
@@ -9475,14 +9488,14 @@ class ReviewUiTests(TestCase):
 
     def test_edit_redirects_to_review_detail(self):
         doc = self._create_document()
-        row = self._create_text_result(doc)
+        row = self._create_hebrew_mirror_for_pending_edit(doc)
         self.client.force_login(self.staff)
         resp = self.client.post(self._text_url(row.id), {"text": "חדש"})
         self.assertEqual(resp["Location"], f"/api/ui/admin/review/{doc.id}/")
 
     def test_edit_preserves_multiline_text(self):
         doc = self._create_document()
-        row = self._create_text_result(doc)
+        row = self._create_hebrew_mirror_for_pending_edit(doc)
         multiline = "שורה א\n\nשורה ב\t עם רווח"
         self.client.force_login(self.staff)
         self.client.post(self._text_url(row.id), {"text": multiline})
@@ -9491,7 +9504,7 @@ class ReviewUiTests(TestCase):
 
     def test_edit_does_not_strip_whole_text_before_saving(self):
         doc = self._create_document()
-        row = self._create_text_result(doc)
+        row = self._create_hebrew_mirror_for_pending_edit(doc)
         leading_trailing = "  שורה עם רווחים  \n"
         self.client.force_login(self.staff)
         self.client.post(self._text_url(row.id), {"text": leading_trailing})
@@ -9500,7 +9513,7 @@ class ReviewUiTests(TestCase):
 
     def test_edit_does_not_change_status_verification_reasons_or_processing(self):
         doc = self._create_document()
-        row = self._create_text_result(
+        row = self._create_hebrew_mirror_for_pending_edit(
             doc,
             review_reasons='["AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW","MIN_TEXT_LENGTH"]',
         )
@@ -9558,6 +9571,11 @@ class ReviewUiTests(TestCase):
             self.client.post(self._text_url(999999), {"text": "x"}).status_code, 404
         )
 
+    def test_edit_missing_result_blank_text_returns_404(self):
+        self.client.force_login(self.staff)
+        resp = self.client.post(self._text_url(999999), {"text": ""})
+        self.assertEqual(resp.status_code, 404)
+
     def test_cannot_edit_failed_transcription_result(self):
         doc = self._create_document()
         row = self._create_text_result(
@@ -9599,7 +9617,7 @@ class ReviewUiTests(TestCase):
         from documents.services.review_backlog import documents_in_review_backlog
 
         doc = self._create_document()
-        row = self._create_text_result(doc)
+        row = self._create_hebrew_mirror_for_pending_edit(doc)
         self.client.force_login(self.staff)
         self.client.post(self._text_url(row.id), {"text": "עודכן"})
         self.assertIn(
@@ -9610,7 +9628,7 @@ class ReviewUiTests(TestCase):
         from documents.services.review_backlog import documents_in_review_backlog
 
         doc = self._create_document()
-        row = self._create_text_result(
+        row = self._create_hebrew_mirror_for_pending_edit(
             doc,
             verification_status=DocumentTextResult.VerificationStatus.REJECTED,
         )
