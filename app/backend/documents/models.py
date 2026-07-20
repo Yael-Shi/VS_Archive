@@ -858,3 +858,399 @@ class DocumentSourceFile(models.Model):
             f"DocumentSourceFile(doc={self.document_id}, "
             f"order_index={self.order_index})"
         )
+
+
+class TranskribusTranscriptSnapshot(models.Model):
+    """
+    Immutable Transkribus PAGE-XML transcript snapshot for a Document.
+
+    Snapshots are history owned by the document. Active geometry association to
+    displayed text is via ``TranskribusTextResultBinding``, not this row alone.
+
+    Cross-document ``transkribus_run`` mismatches are rejected in ``save()``.
+    Do not use ``bulk_create`` for this model (bypasses that check).
+    """
+
+    class SourceKind(models.TextChoices):
+        AUTOMATIC_HTR = "AUTOMATIC_HTR", "Automatic HTR"
+        CORRECTED_CURRENT_SYNC = "CORRECTED_CURRENT_SYNC", "Corrected-current sync"
+
+    class StorageStatus(models.TextChoices):
+        PENDING_UPLOAD = "PENDING_UPLOAD", "Pending upload"
+        READY = "READY", "Ready"
+        FAILED = "FAILED", "Failed"
+
+    class GeometryCapability(models.TextChoices):
+        VERIFIED = "VERIFIED", "Verified"
+        PARTIAL = "PARTIAL", "Partial"
+        NOT_AVAILABLE = "NOT_AVAILABLE", "Not available"
+        INDETERMINATE = "INDETERMINATE", "Indeterminate"
+
+    document = models.ForeignKey(
+        Document,
+        on_delete=models.CASCADE,
+        related_name="transkribus_transcript_snapshots",
+    )
+    transkribus_run = models.ForeignKey(
+        TranskribusRun,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="transcript_snapshots",
+    )
+
+    source_kind = models.CharField(max_length=32, choices=SourceKind.choices)
+    remote_doc_id = models.CharField(max_length=64, blank=True, default="")
+    collection_id = models.CharField(max_length=64, blank=True, default="")
+    model_id = models.CharField(max_length=64, blank=True, default="")
+    recognition_job_id = models.CharField(max_length=128, blank=True, default="")
+
+    parser_version = models.CharField(max_length=64)
+
+    # Fingerprints are nullable while storage_status is PENDING_UPLOAD / FAILED.
+    provider_identity_fingerprint = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        help_text="SHA-256 of ordered page_index:tsId lines. Not unique.",
+    )
+    raw_xml_fingerprint = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        help_text="SHA-256 of ordered per-page PAGE XML SHA-256 digests.",
+    )
+
+    canonical_text = models.TextField(blank=True, default="")
+    canonical_text_sha256 = models.CharField(max_length=64, blank=True, default="")
+
+    geometry_capability = models.CharField(
+        max_length=32,
+        choices=GeometryCapability.choices,
+        default=GeometryCapability.INDETERMINATE,
+    )
+    hover_eligible = models.BooleanField(default=False)
+
+    storage_status = models.CharField(
+        max_length=32,
+        choices=StorageStatus.choices,
+        default=StorageStatus.PENDING_UPLOAD,
+    )
+
+    # Observed provider transcript status metadata only — never verification.
+    remote_status_summary = models.JSONField(null=True, blank=True, default=None)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="transkribus_transcript_snapshots_created",
+    )
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["document", "-created_at"],
+                name="tr_snap_doc_created_idx",
+            ),
+            models.Index(
+                fields=["document", "storage_status"],
+                name="tr_snap_doc_storage_idx",
+            ),
+            models.Index(
+                fields=["raw_xml_fingerprint"],
+                name="tr_snap_raw_xml_fp_idx",
+            ),
+        ]
+        constraints = [
+            # Same raw XML may be reparsed under a future parser_version.
+            # Pending rows may omit fingerprints; only READY+complete fingerprints dedupe.
+            models.UniqueConstraint(
+                fields=["document", "parser_version", "raw_xml_fingerprint"],
+                condition=models.Q(storage_status="READY")
+                & models.Q(raw_xml_fingerprint__isnull=False)
+                & ~models.Q(raw_xml_fingerprint=""),
+                name="uniq_tr_snap_ready_raw_xml",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(storage_status="READY")
+                    | (
+                        models.Q(provider_identity_fingerprint__isnull=False)
+                        & ~models.Q(provider_identity_fingerprint="")
+                        & models.Q(raw_xml_fingerprint__isnull=False)
+                        & ~models.Q(raw_xml_fingerprint="")
+                        & ~models.Q(canonical_text_sha256="")
+                    )
+                ),
+                name="tr_snap_ready_requires_fingerprints",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        self._validate_transkribus_run_document()
+
+    def _validate_transkribus_run_document(self) -> None:
+        if not self.transkribus_run_id or not self.document_id:
+            return
+        run_document_id = self.transkribus_run.document_id
+        if run_document_id != self.document_id:
+            raise ValidationError(
+                {
+                    "transkribus_run": (
+                        "TranskribusTranscriptSnapshot requires transkribus_run "
+                        "to belong to the same document."
+                    )
+                }
+            )
+
+    def save(self, *args, **kwargs):
+        # bulk_create bypasses save(); do not use it for this model.
+        self._validate_transkribus_run_document()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return (
+            f"TranskribusTranscriptSnapshot(id={self.pk}, doc={self.document_id}, "
+            f"status={self.storage_status})"
+        )
+
+
+class TranskribusSnapshotPage(models.Model):
+    """One PAGE XML page within an immutable Transkribus transcript snapshot."""
+
+    class GeometryCapability(models.TextChoices):
+        VERIFIED = "VERIFIED", "Verified"
+        PARTIAL = "PARTIAL", "Partial"
+        NOT_AVAILABLE = "NOT_AVAILABLE", "Not available"
+        INDETERMINATE = "INDETERMINATE", "Indeterminate"
+
+    snapshot = models.ForeignKey(
+        TranskribusTranscriptSnapshot,
+        on_delete=models.CASCADE,
+        related_name="pages",
+    )
+
+    page_index = models.PositiveIntegerField(
+        help_text="1-based local page index (matches PageImage.page_index).",
+    )
+    page_nr = models.PositiveIntegerField(
+        help_text="Transkribus pageNr.",
+    )
+    transcript_ts_id = models.CharField(max_length=64)
+    provider_page_id = models.BigIntegerField(null=True, blank=True)
+
+    image_width = models.PositiveIntegerField(null=True, blank=True)
+    image_height = models.PositiveIntegerField(null=True, blank=True)
+    image_filename = models.CharField(max_length=512, blank=True, default="")
+    page_namespace = models.CharField(max_length=255, blank=True, default="")
+
+    remote_transcript_status = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Observed provider transcript status; not verification.",
+    )
+
+    page_xml_s3_key = models.CharField(
+        max_length=1024,
+        blank=True,
+        default="",
+        help_text="Future S3 key for raw PAGE XML; unused in schema PR.",
+    )
+    page_xml_sha256 = models.CharField(max_length=64, blank=True, default="")
+
+    text_region_count = models.PositiveIntegerField(default=0)
+    text_line_count = models.PositiveIntegerField(default=0)
+    lines_with_non_empty_text = models.PositiveIntegerField(default=0)
+    duplicate_line_ids = models.PositiveIntegerField(default=0)
+    reading_order_present = models.BooleanField(default=False)
+    reading_order_resolved = models.BooleanField(default=False)
+    lines_xml_order_differs_from_reading_order = models.PositiveIntegerField(default=0)
+
+    page_geometry_capability = models.CharField(
+        max_length=32,
+        choices=GeometryCapability.choices,
+        default=GeometryCapability.INDETERMINATE,
+    )
+
+    class Meta:
+        ordering = ["page_index"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["snapshot", "page_index"],
+                name="uniq_tr_snap_page_index",
+            ),
+            models.UniqueConstraint(
+                fields=["snapshot", "page_nr"],
+                name="uniq_tr_snap_page_nr",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(page_index__gte=1),
+                name="tr_snap_page_index_gte_1",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(page_nr__gte=1),
+                name="tr_snap_page_nr_gte_1",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(transcript_ts_id=""),
+                name="tr_snap_page_ts_id_nonempty",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(image_width__isnull=True) | models.Q(image_width__gte=1)
+                ),
+                name="tr_snap_page_image_width_positive",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(image_height__isnull=True) | models.Q(image_height__gte=1)
+                ),
+                name="tr_snap_page_image_height_positive",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return (
+            f"TranskribusSnapshotPage(snapshot={self.snapshot_id}, "
+            f"page_index={self.page_index})"
+        )
+
+
+class TranskribusSnapshotLine(models.Model):
+    """One TextLine within a snapshot page (immutable geometry + text slice)."""
+
+    page = models.ForeignKey(
+        TranskribusSnapshotPage,
+        on_delete=models.CASCADE,
+        related_name="lines",
+    )
+
+    order_index = models.PositiveIntegerField(
+        help_text="Zero-based order among retained lines in XML document order.",
+    )
+    provider_region_id = models.CharField(max_length=128, blank=True, default="")
+    provider_line_id = models.CharField(max_length=128, blank=True, default="")
+
+    text = models.TextField(blank=True, default="")
+    contributes_to_canonical = models.BooleanField(default=True)
+
+    char_start = models.PositiveIntegerField()
+    char_end = models.PositiveIntegerField()
+
+    # Coordinates as JSON arrays of [x, y] pairs (float-compatible numbers).
+    polygon_points = models.JSONField(null=True, blank=True, default=None)
+    baseline_points = models.JSONField(null=True, blank=True, default=None)
+
+    bbox_min_x = models.FloatField(null=True, blank=True)
+    bbox_min_y = models.FloatField(null=True, blank=True)
+    bbox_max_x = models.FloatField(null=True, blank=True)
+    bbox_max_y = models.FloatField(null=True, blank=True)
+
+    coords_valid = models.BooleanField(default=False)
+    baseline_valid = models.BooleanField(default=False)
+    has_meaningful_geometry = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["order_index"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["page", "order_index"],
+                name="uniq_tr_snap_line_order",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(char_end__gte=models.F("char_start")),
+                name="tr_snap_line_char_end_gte_start",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return (
+            f"TranskribusSnapshotLine(page={self.page_id}, "
+            f"order_index={self.order_index})"
+        )
+
+
+class TranskribusTextResultBinding(models.Model):
+    """
+    Explicit active binding from a DocumentTextResult to a transcript snapshot.
+
+    Geometry/hover must follow this binding (and freshness checks in later PRs),
+    not document-level snapshot ownership alone.
+
+    Cross-document mismatches are rejected in ``save()``. Do not use
+    ``bulk_create`` for this model (bypasses that check).
+    """
+
+    class BindingRole(models.TextChoices):
+        SNAPSHOT_SOURCE = "SNAPSHOT_SOURCE", "Snapshot source text"
+        HEBREW_MIRROR = "HEBREW_MIRROR", "Hebrew mirror of snapshot text"
+
+    text_result = models.OneToOneField(
+        DocumentTextResult,
+        on_delete=models.CASCADE,
+        related_name="transkribus_snapshot_binding",
+    )
+    snapshot = models.ForeignKey(
+        TranskribusTranscriptSnapshot,
+        on_delete=models.CASCADE,
+        related_name="text_result_bindings",
+    )
+    binding_role = models.CharField(
+        max_length=32,
+        choices=BindingRole.choices,
+        default=BindingRole.SNAPSHOT_SOURCE,
+    )
+    bound_text_sha256 = models.CharField(max_length=64)
+    bound_source_revision = models.PositiveIntegerField()
+
+    bound_at = models.DateTimeField(auto_now_add=True)
+    bound_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="transkribus_text_result_bindings",
+    )
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["snapshot"],
+                name="tr_bind_snapshot_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        self._validate_same_document()
+
+    def _validate_same_document(self) -> None:
+        if not self.text_result_id or not self.snapshot_id:
+            return
+        text_document_id = self.text_result.document_id
+        snapshot_document_id = self.snapshot.document_id
+        if text_document_id != snapshot_document_id:
+            raise ValidationError(
+                {
+                    "snapshot": (
+                        "TranskribusTextResultBinding requires the snapshot and "
+                        "text result to belong to the same document."
+                    )
+                }
+            )
+
+    def save(self, *args, **kwargs):
+        # bulk_create bypasses save(); do not use it for this model.
+        self._validate_same_document()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return (
+            f"TranskribusTextResultBinding(text_result={self.text_result_id}, "
+            f"snapshot={self.snapshot_id})"
+        )
