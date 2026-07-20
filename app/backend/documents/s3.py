@@ -1,11 +1,22 @@
 from dataclasses import dataclass
+import re
+from typing import Tuple, Optional
 
 import boto3
 from botocore.exceptions import ClientError
 from django.conf import settings
-from typing import Tuple, Optional
 
 _S3_NOT_FOUND_ERROR_CODES = frozenset({"404", "NoSuchKey", "NotFound"})
+
+# Exact PAGE XML object key under a document prefix. Do not treat arbitrary
+# keys under documents/.../transkribus/ as referenced snapshot objects.
+# Require [1-9]\d* so zero-valued document/snapshot/page IDs never match.
+_TRANSKRIBUS_SNAPSHOT_PAGE_XML_KEY_RE = re.compile(
+    r"^documents/(?P<document_id>[1-9]\d*)/transkribus/snapshots/"
+    r"(?P<snapshot_id>[1-9]\d*)/pages/(?P<page_index>[1-9]\d*)\.page\.xml$"
+)
+
+TRANSKRIBUS_SNAPSHOT_PAGE_XML_CONTENT_TYPE = "application/xml"
 
 
 def get_s3_client():
@@ -63,6 +74,32 @@ def build_photo_thumbnail_s3_key(photo_content_id: int) -> str:
 def build_document_thumbnail_s3_key(document_id: int) -> str:
     """Deterministic private S3 key for an OCR document JPEG thumbnail (max edge 400)."""
     return f"documents/{document_id}/thumb_400.jpg"
+
+
+def build_transkribus_snapshot_page_xml_s3_key(
+    document_id: int,
+    snapshot_id: int,
+    page_index: int,
+) -> str:
+    """Deterministic private S3 key for one snapshot PAGE XML object."""
+    if int(document_id) < 1:
+        raise ValueError("document_id must be a positive integer.")
+    if int(snapshot_id) < 1:
+        raise ValueError("snapshot_id must be a positive integer.")
+    if int(page_index) < 1:
+        raise ValueError("page_index must be a 1-based positive integer.")
+    return (
+        f"documents/{int(document_id)}/transkribus/snapshots/"
+        f"{int(snapshot_id)}/pages/{int(page_index)}.page.xml"
+    )
+
+
+def is_transkribus_snapshot_page_xml_s3_key(key: str) -> bool:
+    """Return True only for the exact snapshot PAGE XML key pattern."""
+    normalized = (key or "").strip()
+    if not normalized:
+        return False
+    return _TRANSKRIBUS_SNAPSHOT_PAGE_XML_KEY_RE.fullmatch(normalized) is not None
 
 
 def create_presigned_put(

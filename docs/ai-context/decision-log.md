@@ -1568,13 +1568,19 @@ Category/event/tag names on archive detail pages link to these browse pages. Bro
 - **`Document.file_s3_key`**
 - **`Document.thumbnail_file_key`**
 - **`DocumentSourceFile.file_s3_key`**
+- **`TranskribusSnapshotPage.page_xml_s3_key`** when the stored key exactly equals the deterministic key for that row’s `(document_id, snapshot_id, page_index)`:
+  - **`READY`**: always
+  - **`PENDING_UPLOAD`**: only while snapshot `created_at` is within **`TRANSKRIBUS_SNAPSHOT_PENDING_ORPHAN_PROTECTION_HOURS` (24)**
+  - **`FAILED`**: never
+  (see “Transkribus transcript snapshot storage”)
 
 **Behavior:**
 
 - Default is **dry-run**. **`--commit`** deletes listed orphan candidates (with age/limit filters).
 - Referenced thumbnail keys are **never** deleted while the DB row still points at them.
 - Unreferenced thumbnail derivatives under **`documents/`** remain valid orphan candidates.
-- Objects under **`photos/`** are **outside** this command’s scope (no PHOTO orphan cleanup command exists).
+- Snapshot PAGE XML for **`FAILED`** attempts, **stale `PENDING_UPLOAD`** (>24h), and mismatched keys is intentionally **not** treated as referenced, so residual objects remain age-eligible orphan candidates.
+- Objects under **`photos/`** are **outside** this command’s scope (use **`cleanup_photo_s3_orphans`** for PHOTO objects).
 
 **Service:** **`documents/services/document_s3_orphan_cleanup.py`**
 
@@ -1596,3 +1602,51 @@ Category/event/tag names on archive detail pages link to these browse pages. Bro
 - **Multi-image upload — backend API contract (PR3)** batch `files[]` create mode remains in the API for compatibility; the current first-party UI primarily uses the incremental draft flow.
 
 **Docs:** `docs/ai-context/unified-ocr-upload-flow.md` (API history); upload templates under `documents/templates/documents/upload/`.
+
+## Transkribus transcript snapshot storage (PAGE XML persistence)
+
+**Decision:** Persist already-fetched / already-selected Transkribus PAGE XML as an immutable `TranskribusTranscriptSnapshot` with normalized page/line rows in PostgreSQL and raw PAGE XML objects in S3. This layer does **not** fetch Transkribus metadata, select transcripts, activate bindings, or update `DocumentTextResult`.
+
+**Service:** `documents/services/transkribus_snapshot_storage.py` → `store_transkribus_transcript_snapshot(...)`.
+
+**Parser:** Reuses pure `parse_document_pages_for_snapshot` / `PARSER_VERSION` from `transkribus_snapshot_parser.py`. Storage must not reimplement geometry or text ordering.
+
+**S3 key contract (deterministic, no user filenames):**
+
+`documents/{document_id}/transkribus/snapshots/{snapshot_id}/pages/{page_index}.page.xml`
+
+Content-Type: `application/xml` via `put_object_bytes`.
+
+**Lifecycle (no PostgreSQL↔S3 cross-system atomicity):**
+
+1. Validate inputs; parse all pages and fingerprints before persistent writes.
+2. If a `READY` snapshot already exists for `(document, parser_version, raw_xml_fingerprint)`, return `REUSED_EXISTING` (no upload, no duplicate rows).
+3. Otherwise create `PENDING_UPLOAD` snapshot + page/line rows with final S3 keys in a **short** DB transaction (no network I/O while holding the transaction).
+4. Upload every PAGE XML object outside the DB transaction.
+5. Only after all uploads succeed, transition to `READY`.
+6. On upload failure: never `READY`; best-effort mark `FAILED` (DB update failures are attached as secondary `state_update_errors` and must not replace the primary upload error); best-effort delete objects uploaded in this attempt (caller-owned accumulator retains successful keys even when a later page upload raises); preserve the primary upload error (cleanup failures reported separately).
+7. Concurrent identical finalization: recheck for an existing identical `READY` before finalizing; on race loss, clean up this attempt’s S3 objects, best-effort mark the losing `PENDING_UPLOAD` row `FAILED`, and return `REUSED_CONCURRENT_WINNER`. Do not overwrite either snapshot’s immutable content.
+
+**Idempotency rules:**
+
+- Same provider `tsId` with different PAGE XML → new snapshot (provider identity is observational, not unique).
+- Dedup key is `(document, parser_version, raw_xml_fingerprint)` for `READY` only (`uniq_tr_snap_ready_raw_xml`).
+- Canonical-text hash alone must **not** deduplicate (geometry may change with identical text).
+- A previously stored identical raw snapshot may be reused even if not currently active.
+- `FAILED` attempts do not block later retries.
+
+**Orphan cleanup integration (`cleanup_document_s3_orphans`):**
+
+- Protected references additionally include `TranskribusSnapshotPage.page_xml_s3_key` when the stored key **exactly equals** the deterministic key built from `(snapshot.document_id, snapshot_id, page_index)`:
+  - **`READY`**: always protected under that exact-identity rule.
+  - **`PENDING_UPLOAD`**: protected only while the snapshot `created_at` is newer than **`TRANSKRIBUS_SNAPSHOT_PENDING_ORPHAN_PROTECTION_HOURS` (24)**. Stale PENDING keys are **not** protected and may become orphan candidates under the command’s existing object-age safeguards. Stale PENDING **DB status is not changed** by orphan cleanup.
+  - **`FAILED`**: never protected.
+- A syntactically valid key that belongs to another document/snapshot/page is **not** protected.
+- Classic `DOCUMENT_S3_REFERENCE_FIELDS` (Document source/thumbnail + DocumentSourceFile) are unchanged.
+- Dry-run-by-default and `--commit` behavior preserved. `photos/` remains outside this command’s prefix scope.
+
+**Document deletion:** Follow existing OCR document convention — ORM `CASCADE` removes snapshot/page/line rows; S3 objects are **not** deleted synchronously. After cascade, snapshot PAGE XML keys are no longer referenced and become age-eligible orphan candidates (same pattern as document source/thumbnail objects). Immediate after-commit S3 delete (photo path) is intentionally **not** added for OCR documents in this PR.
+
+**Out of scope (deferred):** corrected-current fetch/selection, snapshot activation / `TranskribusTextResultBinding`, worker integration, search/hover UI, backfill, stale-PENDING status automation.
+
+**Known limitation:** PostgreSQL and S3 are not a single atomic unit. Crash between successful uploads and `READY` transition can leave `PENDING_UPLOAD` rows with objects in S3. Those keys are orphan-protected only for the first **24 hours** after snapshot `created_at`; after that window they may be cleaned as orphans (subject to the command’s object-age threshold) even while the DB row remains `PENDING_UPLOAD`. Ops / retry paths must still account for stuck PENDING rows; this PR does not add a stale-PENDING management command.
