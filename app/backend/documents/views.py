@@ -217,7 +217,9 @@ from documents.services.transcription_suggestion_review import (
     reject_suggestion,
 )
 from documents.services.verified_text_result_edit import (
+    PendingTextResultEditError,
     VerifiedTextResultEditError,
+    edit_pending_text_result,
     edit_verified_text_result,
     is_hebrew_translation_stale,
     is_verified_editable_text_result,
@@ -2135,8 +2137,18 @@ def review_text_result_update_text(request, result_id: int):
     if submitted is None or not submitted.strip():
         return HttpResponseBadRequest("text is required and must be non-empty")
 
-    row.text = submitted
-    row.save(update_fields=["text", "updated_at"])
+    try:
+        row = edit_pending_text_result(
+            result_id=row.id,
+            new_text=submitted,
+            editor=request.user,
+        )
+    except DocumentTextResult.DoesNotExist:
+        raise Http404() from None
+    except PendingTextResultEditError as exc:
+        if str(exc) == "transcription result is not eligible for review action":
+            return _review_text_result_not_eligible_response()
+        return HttpResponseBadRequest(str(exc))
 
     logger.info(
         "review_text_result_update_text user=%s result_id=%s document_id=%s",
