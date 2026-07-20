@@ -25,10 +25,10 @@ from documents.services.transkribus_page_xml_geometry import (
     _find_page_element,
     _local_tag,
     _ns_map,
+    _overlay_polygon_coords_in_bounds,
     _parse_baseline_points,
     _parse_int_attr,
     _parse_polygon_points,
-    _points_outside_page,
     _reading_order_line_ids,
 )
 
@@ -271,7 +271,6 @@ def parse_page_xml_for_snapshot(
     image_filename = _child_attr(page_el, "imageFilename")
     image_width = _parse_int_attr(page_el, "imageWidth")
     image_height = _parse_int_attr(page_el, "imageHeight")
-    bounds_validation_available = image_width is not None and image_height is not None
 
     # Production text order: namespaced TextLine findall on the document root.
     production_lines = _production_text_lines(root, ns)
@@ -338,22 +337,16 @@ def parse_page_xml_for_snapshot(
 
         coords_in_bounds = True
         if coords_structurally_valid and parsed_coords.points:
-            neg, outside = _points_outside_page(
+            in_bounds, neg, outside = _overlay_polygon_coords_in_bounds(
                 parsed_coords.points,
                 width=image_width,
                 height=image_height,
             )
+            coords_in_bounds = in_bounds
             if neg:
                 negative_or_outside_coordinates += 1
-            if bounds_validation_available and outside:
+            if outside:
                 polygons_outside_page_bounds += 1
-            # Negatives are invalid even when page dimensions are unknown.
-            # Width/height overflow can only be judged when dimensions exist.
-            has_negative = any(x < 0 or y < 0 for x, y in parsed_coords.points)
-            if has_negative:
-                coords_in_bounds = False
-            elif bounds_validation_available and outside:
-                coords_in_bounds = False
 
         coords_valid = coords_structurally_valid and coords_in_bounds
         has_meaningful_geometry = coords_valid or baseline_valid

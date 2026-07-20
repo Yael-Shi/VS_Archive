@@ -118,6 +118,38 @@ class TranskribusPageXmlGeometryAnalyzerTests(SimpleTestCase):
         audit = analyze_page_xml_geometry(_page_xml(body), page_index=1, page_nr=1)
         self.assertFalse(audit.bounds_validation_available)
         self.assertEqual(audit.page_capability, "PARTIAL")
+        self.assertEqual(audit.lines_with_text_and_valid_coords, 1)
+
+    def test_negative_polygon_without_page_dimensions_not_verified(self):
+        body = """
+  <Page>
+    <TextLine id="l1">
+      <Coords points="-1,10 10,10 10,20 -1,20"/>
+      <TextEquiv><Unicode>Negative</Unicode></TextEquiv>
+    </TextLine>
+  </Page>
+"""
+        page = analyze_page_xml_geometry(_page_xml(body), page_index=1, page_nr=1)
+        self.assertFalse(page.bounds_validation_available)
+        self.assertGreater(page.negative_or_outside_coordinates, 0)
+        self.assertEqual(page.lines_with_text_and_valid_coords, 0)
+        self.assertNotEqual(page.page_capability, "VERIFIED")
+        self.assertEqual(page.page_capability, "PARTIAL")
+
+        from documents.services.transkribus_page_xml_geometry import (
+            DocumentGeometryAudit,
+        )
+
+        audit = DocumentGeometryAudit(
+            document_id=1,
+            transkribus_run_id=2,
+            remote_doc_id="999",
+            mapping_description="trusted upload-created mapping",
+            page_mapping_reliable=True,
+            pages=(page,),
+        )
+        self.assertFalse(audit.suitable_for_overlay_poc)
+        self.assertNotEqual(audit.line_geometry_capability, "VERIFIED")
 
     def test_malformed_and_degenerate_polygons(self):
         body = """

@@ -276,6 +276,35 @@ def _points_outside_page(
     return negative_or_outside, outside_bounds
 
 
+def _overlay_polygon_coords_in_bounds(
+    points: Sequence[tuple[float, float]],
+    *,
+    width: int | None,
+    height: int | None,
+) -> tuple[bool, bool, bool]:
+    """Return ``(coords_in_bounds, negative_or_outside, outside_declared_bounds)``.
+
+    Negative coordinates invalidate overlay geometry even when page dimensions are
+    unknown. Overflow above declared width/height is evaluated only when both
+    dimensions are present.
+    """
+    if not points:
+        return True, False, False
+    negative_or_outside, outside_declared_bounds = _points_outside_page(
+        points,
+        width=width,
+        height=height,
+    )
+    bounds_validation_available = width is not None and height is not None
+    coords_in_bounds = True
+    if negative_or_outside:
+        coords_in_bounds = False
+    elif bounds_validation_available and outside_declared_bounds:
+        coords_in_bounds = False
+    reported_outside = outside_declared_bounds if bounds_validation_available else False
+    return coords_in_bounds, negative_or_outside, reported_outside
+
+
 def _collect_text_lines(page_el: ET.Element, ns: Mapping[str, str]) -> list[ET.Element]:
     lines = page_el.findall(".//pc:TextLine", ns)
     if lines:
@@ -462,21 +491,18 @@ def analyze_page_xml_geometry(
 
         coords_in_bounds = True
         if coords_structurally_valid and parsed_coords.points:
-            neg, outside = _points_outside_page(
+            in_bounds, neg, outside = _overlay_polygon_coords_in_bounds(
                 parsed_coords.points,
                 width=image_width,
                 height=image_height,
             )
+            coords_in_bounds = in_bounds
             if neg:
                 negative_or_outside_coordinates += 1
-            if bounds_validation_available and outside:
+            if outside:
                 polygons_outside_page_bounds += 1
-            if bounds_validation_available and (neg or outside):
-                coords_in_bounds = False
 
-        coords_valid = coords_structurally_valid and (
-            not bounds_validation_available or coords_in_bounds
-        )
+        coords_valid = coords_structurally_valid and coords_in_bounds
 
         if has_text and coords_valid:
             lines_with_text_and_valid_coords += 1
