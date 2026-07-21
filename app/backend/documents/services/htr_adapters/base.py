@@ -12,6 +12,9 @@ class HtrResult:
     needs_review: bool = False
     engine_name: str = ""
     review_reasons: List[str] = field(default_factory=list)
+    # Transkribus automatic snapshot local-completion (optional; not routing metadata).
+    transkribus_run_id: int | None = None
+    transkribus_snapshot_id: int | None = None
 
 
 class UnsupportedEngineError(RuntimeError):
@@ -26,6 +29,14 @@ class EngineRetryableError(RuntimeError):
 
 class EnginePermanentError(RuntimeError):
     pass
+
+
+class TranskribusLocalPersistenceRetryableError(RuntimeError):
+    """Transient local snapshot/S3 persistence failure after durable recognition.
+
+    Must not be persisted as an OCR failure or mark TranskribusRun FAILED.
+    Worker must leave the SQS message unacknowledged (return False).
+    """
 
 
 class HtrEngineAdapter(Protocol):

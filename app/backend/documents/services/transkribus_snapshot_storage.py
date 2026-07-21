@@ -272,11 +272,15 @@ def _create_pending_snapshot_rows(
     recognition_job_id: str,
     created_by: Any,
     remote_status_summary: dict[str, Any] | None,
+    hover_eligible: bool | None = None,
 ) -> TranskribusTranscriptSnapshot:
     """Create PENDING_UPLOAD snapshot + pages/lines with deterministic S3 keys.
 
     Short transaction only — no network I/O.
     """
+    effective_hover = (
+        parsed.hover_eligible if hover_eligible is None else bool(hover_eligible)
+    )
     with transaction.atomic():
         snapshot = TranskribusTranscriptSnapshot(
             document=document,
@@ -292,7 +296,7 @@ def _create_pending_snapshot_rows(
             canonical_text=parsed.canonical_text,
             canonical_text_sha256=parsed.canonical_text_sha256,
             geometry_capability=parsed.geometry_capability,
-            hover_eligible=parsed.hover_eligible,
+            hover_eligible=effective_hover,
             storage_status=TranskribusTranscriptSnapshot.StorageStatus.PENDING_UPLOAD,
             remote_status_summary=remote_status_summary,
             created_by=created_by,
@@ -697,6 +701,7 @@ def store_transkribus_transcript_snapshot(
     model_id: str = "",
     recognition_job_id: str = "",
     created_by: Any = None,
+    hover_eligible: bool | None = None,
 ) -> SnapshotStorageResult:
     """Parse and persist PAGE XML pages as an immutable Transkribus snapshot.
 
@@ -771,6 +776,7 @@ def store_transkribus_transcript_snapshot(
         recognition_job_id=recognition_job_id,
         created_by=created_by,
         remote_status_summary=remote_status_summary,
+        hover_eligible=hover_eligible,
     )
 
     # Post-create guard: once a PENDING row exists, unexpected failures must still

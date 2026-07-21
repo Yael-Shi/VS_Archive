@@ -1254,3 +1254,97 @@ class TranskribusTextResultBinding(models.Model):
             f"TranskribusTextResultBinding(text_result={self.text_result_id}, "
             f"snapshot={self.snapshot_id})"
         )
+
+
+class TranskribusRunAutomaticSnapshot(models.Model):
+    """
+    Durable association from a TranskribusRun to the READY AUTOMATIC_HTR snapshot
+    used for that run's local completion.
+
+    ``TranskribusTranscriptSnapshot.transkribus_run`` remains origin/provenance of
+    first creation. Storage may reuse an identical READY snapshot across runs;
+    each consuming run records its own association here.
+
+    ``mapping_trusted`` is run-level (upload map vs EXISTING_SERVER traversal) and
+    must not mutate immutable snapshot hover_eligible.
+    """
+
+    run = models.OneToOneField(
+        TranskribusRun,
+        on_delete=models.CASCADE,
+        related_name="automatic_snapshot_association",
+    )
+    snapshot = models.ForeignKey(
+        TranskribusTranscriptSnapshot,
+        on_delete=models.CASCADE,
+        related_name="run_associations",
+    )
+    mapping_trusted = models.BooleanField(
+        default=False,
+        help_text=(
+            "True when page_index↔pageNr came from a trusted upload mapping. "
+            "False for EXISTING_SERVER traversal-only indexes."
+        ),
+    )
+    # Engine outcome review reasons (e.g. EMPTY_TRANSCRIPT_PAGE) for resume.
+    review_reasons = models.JSONField(default=list, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def clean(self) -> None:
+        super().clean()
+        self._validate_same_document()
+        self._validate_ready_automatic()
+
+    def _validate_same_document(self) -> None:
+        if not self.run_id or not self.snapshot_id:
+            return
+        if self.run.document_id != self.snapshot.document_id:
+            raise ValidationError(
+                {
+                    "snapshot": (
+                        "TranskribusRunAutomaticSnapshot requires the run and "
+                        "snapshot to belong to the same document."
+                    )
+                }
+            )
+
+    def _validate_ready_automatic(self) -> None:
+        if not self.snapshot_id:
+            return
+        if (
+            self.snapshot.storage_status
+            != TranskribusTranscriptSnapshot.StorageStatus.READY
+        ):
+            raise ValidationError(
+                {
+                    "snapshot": (
+                        "TranskribusRunAutomaticSnapshot requires a READY snapshot."
+                    )
+                }
+            )
+        if (
+            self.snapshot.source_kind
+            != TranskribusTranscriptSnapshot.SourceKind.AUTOMATIC_HTR
+        ):
+            raise ValidationError(
+                {
+                    "snapshot": (
+                        "TranskribusRunAutomaticSnapshot requires AUTOMATIC_HTR "
+                        "source_kind."
+                    )
+                }
+            )
+
+    def save(self, *args, **kwargs):
+        # bulk_create bypasses save(); do not use it for this model.
+        self._validate_same_document()
+        self._validate_ready_automatic()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return (
+            f"TranskribusRunAutomaticSnapshot(run={self.run_id}, "
+            f"snapshot={self.snapshot_id})"
+        )

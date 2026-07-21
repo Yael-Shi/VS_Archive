@@ -1647,6 +1647,38 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 **Document deletion:** Follow existing OCR document convention — ORM `CASCADE` removes snapshot/page/line rows; S3 objects are **not** deleted synchronously. After cascade, snapshot PAGE XML keys are no longer referenced and become age-eligible orphan candidates (same pattern as document source/thumbnail objects). Immediate after-commit S3 delete (photo path) is intentionally **not** added for OCR documents in this PR.
 
-**Out of scope (deferred):** corrected-current fetch/selection, snapshot activation / `TranskribusTextResultBinding`, worker integration, search/hover UI, backfill, stale-PENDING status automation.
+**Out of scope (deferred at storage PR time; see “Transkribus automatic snapshot integration” below for what shipped later):** corrected-current fetch/selection, search/hover UI, backfill, stale-PENDING status automation.
 
 **Known limitation:** PostgreSQL and S3 are not a single atomic unit. Crash between successful uploads and `READY` transition can leave `PENDING_UPLOAD` rows with objects in S3. Those keys are orphan-protected only for the first **24 hours** after snapshot `created_at`; after that window they may be cleaned as orphans (subject to the command’s object-age threshold) even while the DB row remains `PENDING_UPLOAD`. Ops / retry paths must still account for stuck PENDING rows; this PR does not add a stale-PENDING management command.
+
+## Transkribus automatic snapshot integration (worker binding)
+
+**Decision:** On successful Transkribus recognition, persist an `AUTOMATIC_HTR` READY snapshot from the **exact** PAGE XML selected by production `pick_transcript` / `ordered_transcript_selections` (jobId+modelId, then job-only, then model-only — unchanged), then atomically write `DocumentTextResult` rows + `TranskribusTextResultBinding` and only then `mark_succeeded`.
+
+**Run→snapshot association:** `TranskribusTranscriptSnapshot.transkribus_run` remains **origin/provenance** of first creation. Storage may reuse an identical READY snapshot by `(document, parser_version, raw_xml_fingerprint)`. Every automatic consuming run records durable use via **`TranskribusRunAutomaticSnapshot`** (`OneToOne` run → FK snapshot, plus `mapping_trusted` and `review_reasons`). Multiple runs may share one immutable READY snapshot. Association enforces same-document + READY + `AUTOMATIC_HTR`. The run→snapshot link is **immutable**: create if missing; same-snapshot retry is idempotent (safe `mapping_trusted` upgrade / empty `review_reasons` fill only); reassignment to a different snapshot raises. Resume, local completion, idempotency, and SUCCEEDED checks resolve the snapshot through this association — **not** origin FK alone.
+
+**Lifecycle:**
+
+1. After `recognition_job_id` is durable, keep `TranskribusRun` at `RECOGNITION_STARTED` through snapshot storage and association.
+2. Store snapshot via `store_transkribus_transcript_snapshot` (S3 outside DB transactions). Reuse identical READY snapshots by existing fingerprint idempotency; **do not** mutate READY fields (including `hover_eligible`) on reuse.
+3. Worker calls `complete_transkribus_local_success` with lock order: **Document → TranskribusRun → TranskribusRunAutomaticSnapshot → snapshot → DTR rows**; write/update SOURCE_TEXT (+ Hebrew HEBREW_TEXT mirror); bind `SNAPSHOT_SOURCE` / `HEBREW_MIRROR`; require hash == `canonical_text_sha256`; roll up processing state; `mark_succeeded` — all in one transaction.
+4. Transient snapshot/S3 failure **or** transient re-fetch during resume (durable `recognition_job_id`) → `TranskribusLocalPersistenceRetryableError`: do **not** mark run FAILED, do **not** persist OCR failure DTR, worker returns `False` (no SQS ack).
+5. Binding/DB failure rolls back the local-success transaction; SQS not ack’d; resume from durable recognition / associated READY snapshot without `start_pylaia_recognition`.
+
+**Hover / mapping trust:** Upload associations set `mapping_trusted=True`. EXISTING_SERVER associations set `mapping_trusted=False`. New EXISTING_SERVER snapshots may be created with `hover_eligible=False`; reused READY snapshots keep their original hover eligibility. End-to-end hover eligibility must not be claimed for an untrusted EXISTING_SERVER association (binding-time / association-level check preferred).
+
+**Review reasons:** Engine reasons such as `EMPTY_TRANSCRIPT_PAGE` are stored on `TranskribusRunAutomaticSnapshot.review_reasons` and reconstructed from snapshot page stats when needed. READY-snapshot resume must not drop them.
+
+**Resume (before upload / new recognition):**
+
+- Upload mode: use `find_blocking_upload_run`; resume `RECOGNITION_STARTED` with durable ids, or `SUCCEEDED` when an association exists (idempotent duplicate delivery when bindings are structurally complete, including human-edited-after-bind). Historical `SUCCEEDED` without association is **not** interrupted new-pipeline work.
+- EXISTING_SERVER: resume only `RECOGNITION_STARTED` or **demonstrably incomplete** `SUCCEEDED` (association present, bindings not structurally complete). Fully completed EXISTING_SERVER runs are **not** selected — SQS carries only `document_id` (no attempt id), so duplicate delivery vs a new requested processing cannot be distinguished; treating completed runs as no-ops would make every future EXISTING_SERVER request a no-op. **Limitation:** fully completed EXISTING_SERVER duplicate idempotency is deferred until request identity exists.
+- Associated READY snapshot → reuse canonical text + durable review reasons (no recognition restart). Else re-fetch finished job via `complete_pylaia_transcription_after_job` only.
+
+**Page index convention:** Production `PageImage.page_index` and snapshot `page_index` are **1-based**. Trusted `page_index_to_page_nr` keys must be dense ``0..N-1`` (converted ``+1`` at the snapshot boundary) or dense ``1..N`` (preserved). Gaps, mixed bases, and duplicate keys after integer coercion are rejected. Do not mass-rewrite unrelated fixtures.
+
+**Bindings inspection:** Distinguish never-completed (missing binding, or binding for a different snapshot) from completed-with-later-human-edit (current DTR text/revision drifts from otherwise-valid original binding metadata) from corrupt original metadata (`bound_text_sha256` ≠ snapshot canonical hash, `bound_source_revision < 1`, role mismatch, or Hebrew SOURCE/HEBREW bound revisions disagree). Duplicate delivery must not overwrite human edits. Corrupt binding metadata is never an idempotent completed no-op.
+
+**Revisions (automatic only):** create at `source_revision=1`; byte-identical text does not bump; changed text increments SOURCE and sets Hebrew `based_on_source_revision`; rows stay `NEEDS_REVIEW` / `UNVERIFIED` (no verified-edit services).
+
+**Still out of scope:** corrected/current sync, selector changes, search/hover UI, backfill, stale-PENDING recovery, SQS/DLQ redesign, non-Transkribus engines, request-identity idempotency for EXISTING_SERVER.

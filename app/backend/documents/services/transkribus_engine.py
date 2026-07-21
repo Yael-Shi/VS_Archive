@@ -690,12 +690,40 @@ class TrpUploadOutcome:
 
 
 @dataclass(frozen=True)
+class SelectedTranscriptPage:
+    """One PAGE XML page retained from the production transcript selector.
+
+    ``page_index`` is assigned by the caller (trusted upload map or EXISTING_SERVER
+    traversal order). Selection itself happens once in ``ordered_transcript_selections``.
+    """
+
+    page_nr: int
+    transcript_ts_id: str
+    page_xml: bytes
+    url: str
+    provider_page_id: Optional[int] = None
+    remote_transcript_status: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class OrderedTranscriptSelection:
+    """Transcript already chosen by ``pick_transcript`` for one page (pre-fetch)."""
+
+    page_nr: int
+    url: str
+    transcript_ts_id: str
+    provider_page_id: Optional[int] = None
+    remote_transcript_status: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class PylaiaTranscriptionOutcome:
     """PyLaia recognition + transcript fetch result (engine-only; not ``HtrResult``)."""
 
     text: str
     review_reasons: List[str]
     recognition_job_id: str
+    selected_pages: Tuple[SelectedTranscriptPage, ...] = ()
 
 
 def run_trp_upload_page_images_through_ingest(
@@ -834,18 +862,21 @@ def pick_transcript(
     return None
 
 
-def ordered_transcript_urls(
+def ordered_transcript_selections(
     pages_meta: List[TrpPageMetadata],
     *,
     job_id: str,
     model_id: str,
-) -> List[Tuple[Optional[int], str]]:
+) -> List[OrderedTranscriptSelection]:
+    """Select one transcript per page using production ``pick_transcript`` (once)."""
     sorted_pages = sorted(
         pages_meta,
         key=lambda p: (p.page_nr is None, p.page_nr if p.page_nr is not None else 0),
     )
-    out: List[Tuple[Optional[int], str]] = []
+    out: List[OrderedTranscriptSelection] = []
     for pm in sorted_pages:
+        if pm.page_nr is None:
+            raise _http_permanent("Transkribus page metadata missing pageNr")
         chosen = pick_transcript(pm.transcripts, job_id=job_id, model_id=model_id)
         if chosen is None:
             raise _http_permanent(
@@ -854,8 +885,41 @@ def ordered_transcript_urls(
         url = chosen.get("url")
         if not url or not isinstance(url, str):
             raise _http_permanent(f"Transcript URL missing for page {pm.page_nr}")
-        out.append((pm.page_nr, url))
+        ts_raw = chosen.get("tsId")
+        ts_id = str(ts_raw).strip() if ts_raw is not None else ""
+        if not ts_id:
+            raise _http_permanent(f"Transcript tsId missing for page {pm.page_nr}")
+        status_raw = chosen.get("status")
+        status = (
+            str(status_raw).strip()
+            if status_raw is not None and str(status_raw).strip()
+            else None
+        )
+        out.append(
+            OrderedTranscriptSelection(
+                page_nr=int(pm.page_nr),
+                url=url,
+                transcript_ts_id=ts_id,
+                provider_page_id=pm.page_id,
+                remote_transcript_status=status,
+            )
+        )
     return out
+
+
+def ordered_transcript_urls(
+    pages_meta: List[TrpPageMetadata],
+    *,
+    job_id: str,
+    model_id: str,
+) -> List[Tuple[Optional[int], str]]:
+    """Compatibility wrapper: ``(page_nr, url)`` from ``ordered_transcript_selections``."""
+    return [
+        (sel.page_nr, sel.url)
+        for sel in ordered_transcript_selections(
+            pages_meta, job_id=job_id, model_id=model_id
+        )
+    ]
 
 
 def fetch_transcript_xml(
@@ -921,27 +985,39 @@ def complete_pylaia_transcription_after_job(
     if not pages_meta:
         raise _http_permanent("Transkribus pages metadata returned empty list")
 
-    pairs = ordered_transcript_urls(
+    selections = ordered_transcript_selections(
         pages_meta,
         job_id=job_id,
         model_id=model_id,
     )
     page_texts: List[str] = []
     review_reasons: List[str] = []
-    for _page_nr, t_url in pairs:
+    selected_pages: List[SelectedTranscriptPage] = []
+    for sel in selections:
         xml_bytes = fetch_transcript_xml(
-            t_url, bearer_token=bearer_token, timeout_sec=timeout_sec
+            sel.url, bearer_token=bearer_token, timeout_sec=timeout_sec
         )
         text = parse_page_xml_to_text(xml_bytes)
         if not text.strip():
             review_reasons.append("EMPTY_TRANSCRIPT_PAGE")
         page_texts.append(text)
+        selected_pages.append(
+            SelectedTranscriptPage(
+                page_nr=sel.page_nr,
+                transcript_ts_id=sel.transcript_ts_id,
+                page_xml=xml_bytes,
+                url=sel.url,
+                provider_page_id=sel.provider_page_id,
+                remote_transcript_status=sel.remote_transcript_status,
+            )
+        )
 
     full_text = "\n\n".join(page_texts)
     return PylaiaTranscriptionOutcome(
         text=full_text,
         review_reasons=list(review_reasons),
         recognition_job_id=job_id,
+        selected_pages=tuple(selected_pages),
     )
 
 
