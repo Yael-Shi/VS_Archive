@@ -74,7 +74,9 @@ def format_document_date(obj: Any) -> str:
         if start and end:
             if start.year == end.year and start.month == end.month:
                 return _format_month_year_label(start)
-            return f"{_format_month_year_label(start)} - {_format_month_year_label(end)}"
+            return (
+                f"{_format_month_year_label(start)} - {_format_month_year_label(end)}"
+            )
         if start:
             return _format_month_year_label(start)
         if end:

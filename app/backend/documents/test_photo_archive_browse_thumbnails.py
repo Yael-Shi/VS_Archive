@@ -8,7 +8,9 @@ from django.test import TestCase, override_settings
 from documents.models import ArchiveItem, PhotoContent
 from documents.services.archive_item_presentation import build_archive_browse_card
 from documents.services.archive_items import create_manual_text_archive_item
-from documents.services.photo_archive_urls import apply_photo_thumbnail_urls_to_browse_cards
+from documents.services.photo_archive_urls import (
+    apply_photo_thumbnail_urls_to_browse_cards,
+)
 
 
 def _photo_item(

@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Mapping, Sequence
 
 from documents.services import transkribus_engine as tr
+from documents.services.transkribus_page_xml_types import SnapshotPageInput
 from documents.services.transkribus_page_xml_geometry import (
     BoundingBox,
     LineGeometryCapability,
@@ -99,18 +100,6 @@ class ParsedSnapshotDocument:
     hover_eligible: bool
     pages: tuple[ParsedSnapshotPage, ...]
     warnings: tuple[str, ...] = field(default_factory=tuple)
-
-
-@dataclass(frozen=True)
-class SnapshotPageInput:
-    """One PAGE XML page plus provider metadata for document-level parse."""
-
-    page_index: int
-    page_nr: int
-    transcript_ts_id: str
-    page_xml: bytes
-    provider_page_id: int | None = None
-    remote_transcript_status: str | None = None
 
 
 def compute_sha256_hex(data: bytes | str) -> str:

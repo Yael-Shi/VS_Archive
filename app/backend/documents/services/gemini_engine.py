@@ -238,10 +238,7 @@ def _uses_plain_text_transcription(
     prompt_variant: str,
     language_hint: Optional[str],
 ) -> bool:
-    if (
-        prompt_variant
-        == DocumentTextResult.OcrPromptVariant.HEBREW_GENERAL_HANDWRITTEN
-    ):
+    if prompt_variant == DocumentTextResult.OcrPromptVariant.HEBREW_GENERAL_HANDWRITTEN:
         return True
 
     return prompt_variant in (

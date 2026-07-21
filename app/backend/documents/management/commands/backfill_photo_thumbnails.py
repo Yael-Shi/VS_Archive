@@ -155,7 +155,9 @@ class Command(BaseCommand):
             "generate and persist thumbnails."
         )
         if report.photo_id_filter is not None:
-            self.stdout.write(f"Photo filter: photo_content_id={report.photo_id_filter}")
+            self.stdout.write(
+                f"Photo filter: photo_content_id={report.photo_id_filter}"
+            )
         if report.limit is not None:
             self.stdout.write(f"Limit: {report.limit}")
         self.stdout.write("")
@@ -178,7 +180,9 @@ class Command(BaseCommand):
         self.stdout.write("Mode: commit (S3 read/write and DB metadata updates).")
         self.stdout.write(f"Bucket: {report.bucket}")
         if report.photo_id_filter is not None:
-            self.stdout.write(f"Photo filter: photo_content_id={report.photo_id_filter}")
+            self.stdout.write(
+                f"Photo filter: photo_content_id={report.photo_id_filter}"
+            )
         if report.limit is not None:
             self.stdout.write(f"Limit: {report.limit}")
         self.stdout.write("")
@@ -192,7 +196,9 @@ class Command(BaseCommand):
             self.stdout.write("")
             self.stdout.write("Per-photo results:")
             for row in apply_result.results:
-                line = f"  photo_content_id={row.photo_content_id} outcome={row.outcome}"
+                line = (
+                    f"  photo_content_id={row.photo_content_id} outcome={row.outcome}"
+                )
                 if row.thumbnail_file_key:
                     line += f" thumbnail_file_key={row.thumbnail_file_key!r}"
                 if row.reason:

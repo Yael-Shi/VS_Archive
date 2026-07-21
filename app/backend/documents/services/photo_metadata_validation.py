@@ -49,11 +49,11 @@ def parse_photo_metadata_form(
     return parsed, []
 
 
-def _photo_staff_form_data(parsed_shared: dict[str, Any], photo_metadata: dict[str, str]) -> dict[str, Any]:
+def _photo_staff_form_data(
+    parsed_shared: dict[str, Any], photo_metadata: dict[str, str]
+) -> dict[str, Any]:
     return {
-        key: value
-        for key, value in parsed_shared.items()
-        if not key.endswith("_value")
+        key: value for key, value in parsed_shared.items() if not key.endswith("_value")
     } | photo_metadata
 
 

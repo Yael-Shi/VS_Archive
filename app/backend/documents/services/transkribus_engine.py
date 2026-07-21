@@ -13,6 +13,8 @@ import requests
 
 from documents.services.htr_adapters.base import HtrResult
 from documents.services.page_extraction import PageImage
+from documents.services.transkribus_page_xml_constants import PAGE_XML_NS
+from documents.services.transkribus_page_xml_types import SelectedTranscriptPage
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +24,6 @@ _TRP_SESSION_COOKIE_NAME = "JSESSIONID"
 DEFAULT_HTTP_TIMEOUT_SEC = 60
 POLL_INTERVAL_SEC = 2.0
 POLL_MAX_WAIT_SEC = 900.0
-
-PAGE_XML_NS = "http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15"
 
 
 class TranskribusPermanentError(Exception):
@@ -687,22 +687,6 @@ class TrpUploadOutcome:
     ingest_job_id: str
     pages_query: str
     page_index_to_page_nr: Dict[int, int]
-
-
-@dataclass(frozen=True)
-class SelectedTranscriptPage:
-    """One PAGE XML page retained from the production transcript selector.
-
-    ``page_index`` is assigned by the caller (trusted upload map or EXISTING_SERVER
-    traversal order). Selection itself happens once in ``ordered_transcript_selections``.
-    """
-
-    page_nr: int
-    transcript_ts_id: str
-    page_xml: bytes
-    url: str
-    provider_page_id: Optional[int] = None
-    remote_transcript_status: Optional[str] = None
 
 
 @dataclass(frozen=True)

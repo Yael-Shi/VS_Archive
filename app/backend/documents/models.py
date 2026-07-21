@@ -996,7 +996,17 @@ class TranskribusTranscriptSnapshot(models.Model):
     def _validate_transkribus_run_document(self) -> None:
         if not self.transkribus_run_id or not self.document_id:
             return
-        run_document_id = self.transkribus_run.document_id
+        transkribus_run = self.transkribus_run
+        if transkribus_run is None:
+            raise ValidationError(
+                {
+                    "transkribus_run": (
+                        "TranskribusTranscriptSnapshot requires a valid "
+                        "TranskribusRun when transkribus_run_id is set."
+                    )
+                }
+            )
+        run_document_id = transkribus_run.document_id
         if run_document_id != self.document_id:
             raise ValidationError(
                 {
