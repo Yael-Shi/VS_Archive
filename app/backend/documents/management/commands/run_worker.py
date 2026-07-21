@@ -27,7 +27,10 @@ from documents.services.processing_state import (
     update_document_processing_state_for_engine,
 )
 from documents.services.gemini_models import DEFAULT_GEMINI_MODEL
-from documents.services.htr_adapters.base import UnsupportedEngineError
+from documents.services.htr_adapters.base import (
+    UnsupportedEngineError,
+    TranskribusLocalPersistenceRetryableError,
+)
 from documents.services.hebrew_translation_retry import (
     PROCESS_DOCUMENT_OPERATION_KEY,
     RETRY_HEBREW_TRANSLATION_OPERATION,
@@ -51,6 +54,9 @@ from documents.services.source_files import (
     MultiImageSourceFilesError,
     get_ordered_source_files_for_processing,
     is_multi_image_document,
+)
+from documents.services.transkribus_local_completion import (
+    complete_transkribus_local_success,
 )
 
 logger = logging.getLogger(__name__)
@@ -337,6 +343,18 @@ class Command(BaseCommand):
                 source_transkribus_run_id=source_transkribus_run_id,
             )
 
+        except TranskribusLocalPersistenceRetryableError as e:
+            # Durable recognition may already exist; do not persist OCR failure or ack.
+            self.stderr.write(
+                self.style.ERROR(
+                    f"Transkribus local persistence retryable for doc {document_id}: {e}"
+                )
+            )
+            logger.error(
+                "transkribus local persistence retryable; leaving SQS message",
+                extra={"document_id": document_id},
+            )
+            return False
         except Exception as e:
             processing_exc = e
             error = str(e)
@@ -345,6 +363,28 @@ class Command(BaseCommand):
             )
 
         # Phase 3: Save results
+        if (
+            not error
+            and htr_result is not None
+            and route is not None
+            and htr_result.transkribus_snapshot_id is not None
+            and htr_result.transkribus_run_id is not None
+        ):
+            # Transkribus automatic snapshot: DTR + bindings + mark_succeeded in one
+            # dedicated transaction (no S3/HTTP). Failures propagate → no SQS ack.
+            complete_transkribus_local_success(
+                document_id=document_id,
+                run_id=htr_result.transkribus_run_id,
+                snapshot_id=htr_result.transkribus_snapshot_id,
+                text=htr_result.text,
+                engine=htr_result.engine_name,
+                route=route,
+                needs_review=htr_result.needs_review,
+                review_reasons=getattr(htr_result, "review_reasons", None),
+                min_text_length=self._cfg.min_text_length,
+            )
+            return True
+
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)

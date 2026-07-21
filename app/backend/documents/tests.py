@@ -29,7 +29,6 @@ from documents.models import (
 )
 from documents.services.archive_items import create_ocr_document
 from documents.services.env_validation import validate_required_env
-from documents.services.transkribus_engine import PylaiaTranscriptionOutcome
 from documents.services.gemini_engine import (
     GeminiError,
     GeminiResult,
@@ -40,7 +39,11 @@ from documents.services.gemini_engine import (
     transcribe_pages_with_gemini,
     translate_text_to_hebrew_with_gemini,
 )
-from documents.services.page_extraction import PageImage
+from documents.services.gemini_models import (
+    DEFAULT_GEMINI_MODEL_CANDIDATES,
+    LATIN_HANDWRITTEN_GEMINI_MODEL,
+    LATIN_PRINTED_GEMINI_MODEL,
+)
 from documents.services.htr_adapters.base import (
     EnginePermanentError,
     EngineRetryableError,
@@ -51,17 +54,66 @@ from documents.services.htr_adapters.gemini_adapter import GeminiAdapter
 from documents.services.htr_adapters.registry import get_htr_adapter
 from documents.services.htr_adapters.transkribus_adapter import TranskribusAdapter
 from documents.services.htr_engine import transcribe_pages
-from documents.services.gemini_models import (
-    DEFAULT_GEMINI_MODEL_CANDIDATES,
-    LATIN_HANDWRITTEN_GEMINI_MODEL,
-    LATIN_PRINTED_GEMINI_MODEL,
-)
 from documents.services.ocr_routing import (
     OcrRouteConfig,
     OCR_ROUTES,
     gemini_model_candidates,
     select_ocr_route,
 )
+from documents.services.page_extraction import PageImage
+from documents.services.transkribus_engine import (
+    PylaiaTranscriptionOutcome,
+    SelectedTranscriptPage,
+)
+
+
+def _adapter_selected_pages_stub(text: str = "text") -> tuple:
+    """Minimal selected PAGE XML for adapter tests that predate snapshot integration."""
+    from documents.services.transkribus_engine import PAGE_XML_NS
+
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        f'<PcGts xmlns="{PAGE_XML_NS}">'
+        '<Page imageFilename="p.png" imageWidth="10" imageHeight="10">'
+        '<TextRegion id="r1"><TextLine id="l1">'
+        f"<TextEquiv><Unicode>{text}</Unicode></TextEquiv>"
+        "</TextLine></TextRegion></Page></PcGts>"
+    ).encode("utf-8")
+    return (
+        SelectedTranscriptPage(
+            page_nr=1,
+            transcript_ts_id="1",
+            page_xml=xml,
+            url="http://example.test/page.xml",
+        ),
+    )
+
+
+def _adapter_selected_pages_for_page_nrs(
+    page_texts: list[tuple[int, str]],
+) -> tuple:
+    """Minimal PAGE XML stubs for multi-page trusted upload mapping fixtures."""
+    from documents.services.transkribus_engine import PAGE_XML_NS
+
+    pages: list[SelectedTranscriptPage] = []
+    for page_nr, text in page_texts:
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            f'<PcGts xmlns="{PAGE_XML_NS}">'
+            '<Page imageFilename="p.png" imageWidth="10" imageHeight="10">'
+            '<TextRegion id="r1"><TextLine id="l1">'
+            f"<TextEquiv><Unicode>{text}</Unicode></TextEquiv>"
+            "</TextLine></TextRegion></Page></PcGts>"
+        ).encode("utf-8")
+        pages.append(
+            SelectedTranscriptPage(
+                page_nr=page_nr,
+                transcript_ts_id=str(page_nr),
+                page_xml=xml,
+                url=f"http://example.test/page-{page_nr}.xml",
+            )
+        )
+    return tuple(pages)
 
 
 def _htr_test_page(page_index: int = 1) -> PageImage:
@@ -403,6 +455,19 @@ class HtrRegistryTests(SimpleTestCase):
 
 
 class TranskribusAdapterTests(TestCase):
+    def setUp(self):
+        super().setUp()
+        from unittest.mock import MagicMock, patch
+
+        self._snapshot_store_patcher = patch(
+            "documents.services.htr_adapters.transkribus_adapter.store_automatic_snapshot_from_selected_pages"
+        )
+        self._mock_snapshot_store = self._snapshot_store_patcher.start()
+        self.addCleanup(self._snapshot_store_patcher.stop)
+        snap = MagicMock()
+        snap.pk = 9001
+        self._mock_snapshot_store.return_value = snap
+
     def _create_document(self) -> Document:
         return create_ocr_document(
             title="Transkribus adapter test doc",
@@ -549,21 +614,31 @@ class TranskribusAdapterTests(TestCase):
         mock_upload.assert_not_called()
 
     @patch(
+        "documents.services.htr_adapters.transkribus_adapter.store_automatic_snapshot_from_selected_pages"
+    )
+    @patch(
         "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
     )
     @patch(
         "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
     )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
-    def test_execute_success_maps_htr_result(self, m_login, m_start, m_complete):
+    def test_execute_success_maps_htr_result(
+        self, m_login, m_start, m_complete, m_store
+    ):
         from documents.services.env_validation import WorkerEnvConfig
+        from unittest.mock import MagicMock
 
         m_start.return_value = "job-1"
         m_complete.return_value = PylaiaTranscriptionOutcome(
             text="line one\nline two",
             review_reasons=[],
             recognition_job_id="job-1",
+            selected_pages=_adapter_selected_pages_stub("line one\nline two"),
         )
+        snap = MagicMock()
+        snap.pk = 9
+        m_store.return_value = snap
         adapter = TranskribusAdapter()
         cfg = WorkerEnvConfig(
             gemini_api_key="k",
@@ -613,9 +688,11 @@ class TranskribusAdapterTests(TestCase):
         self.assertEqual(result.text, "line one\nline two")
         self.assertFalse(result.needs_review)
         self.assertEqual(result.engine_name, "transkribus-pylaia:42")
+        self.assertEqual(result.transkribus_snapshot_id, 9)
         m_login.assert_called_once()
         m_start.assert_called_once()
         m_complete.assert_called_once()
+        m_store.assert_called_once()
 
     @patch(
         "documents.services.htr_adapters.transkribus_adapter.tr.start_pylaia_recognition"
@@ -707,6 +784,7 @@ class TranskribusAdapterTests(TestCase):
             text="uploaded",
             review_reasons=[],
             recognition_job_id="recog-1",
+            selected_pages=_adapter_selected_pages_stub("uploaded"),
         )
         adapter = TranskribusAdapter()
         cfg = WorkerEnvConfig(
@@ -857,6 +935,7 @@ class TranskribusAdapterTests(TestCase):
             text="ok",
             review_reasons=[],
             recognition_job_id="r1",
+            selected_pages=_adapter_selected_pages_stub("ok"),
         )
         adapter = TranskribusAdapter()
         cfg = WorkerEnvConfig(
@@ -1580,6 +1659,7 @@ class TranskribusJobPollingTests(SimpleTestCase):
                 None,
                 [
                     {
+                        "tsId": "ts-poll-1",
                         "jobId": "j99",
                         "modelId": "42",
                         "url": "https://example.invalid/transcript",
@@ -1617,6 +1697,7 @@ class TranskribusJobPollingTests(SimpleTestCase):
             text="plain",
             review_reasons=[],
             recognition_job_id="job-1",
+            selected_pages=_adapter_selected_pages_stub("plain"),
         )
         text, reasons = tr.transcribe_existing_server_document(
             username="a",
@@ -1664,6 +1745,7 @@ class TranskribusJobPollingTests(SimpleTestCase):
             text="hello",
             review_reasons=["EMPTY_TRANSCRIPT_PAGE"],
             recognition_job_id="job-1",
+            selected_pages=_adapter_selected_pages_stub("hello"),
         )
         pages = [PageImage(page_index=1, image_bytes=b"x", mime_type="image/png")]
         htr = upload_then_transcribe_page_images_with_pylaia(
@@ -1998,7 +2080,10 @@ class TranskribusWorkdirRetryEngineTests(SimpleTestCase):
                 "/tmp/HTR/PyLaia/trpProd/Decode/pylaiaDecode_job-1"
             ),
             PylaiaTranscriptionOutcome(
-                text="recovered", review_reasons=[], recognition_job_id="job-2"
+                text="recovered",
+                review_reasons=[],
+                recognition_job_id="job-2",
+                selected_pages=_adapter_selected_pages_stub("recovered"),
             ),
         ]
         started: list[str] = []
@@ -5843,6 +5928,9 @@ class TranskribusAdapterPersistenceTests(TestCase):
         )
 
     @patch(
+        "documents.services.htr_adapters.transkribus_adapter.store_automatic_snapshot_from_selected_pages"
+    )
+    @patch(
         "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
     )
     @patch(
@@ -5853,13 +5941,14 @@ class TranskribusAdapterPersistenceTests(TestCase):
     )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_dev_upload_success_persists_succeeded_run(
-        self, m_login, m_upload, m_start, m_complete
+        self, m_login, m_upload, m_start, m_complete, m_store
     ):
         from documents.services.htr_adapters.transkribus_adapter import (
             TranskribusAdapter,
         )
         from documents.services.page_extraction import PageImage
         from documents.services.transkribus_engine import TrpUploadOutcome
+        from unittest.mock import MagicMock
 
         doc = self._create_document()
         m_upload.return_value = TrpUploadOutcome(
@@ -5875,7 +5964,11 @@ class TranskribusAdapterPersistenceTests(TestCase):
             text="text",
             review_reasons=[],
             recognition_job_id="recog-9",
+            selected_pages=_adapter_selected_pages_stub("text"),
         )
+        snap = MagicMock()
+        snap.pk = 101
+        m_store.return_value = snap
         adapter = TranskribusAdapter()
         result = adapter.execute(
             pages=[PageImage(page_index=0, image_bytes=b"x", mime_type="image/png")],
@@ -5887,14 +5980,16 @@ class TranskribusAdapterPersistenceTests(TestCase):
             document_id=doc.id,
         )
         self.assertEqual(result.engine_name, "transkribus-pylaia:42")
+        self.assertEqual(result.transkribus_snapshot_id, 101)
         run = TranskribusRun.objects.get(document=doc)
-        self.assertEqual(run.status, TranskribusRun.Status.SUCCEEDED)
+        # Local completion (mark_succeeded) is deferred to the worker.
+        self.assertEqual(run.status, TranskribusRun.Status.RECOGNITION_STARTED)
         self.assertEqual(run.mode, TranskribusRun.Mode.UPLOAD_CREATED)
         self.assertEqual(run.remote_doc_id, "777")
         self.assertEqual(run.upload_id, 10)
         self.assertEqual(run.ingest_job_id, "ingest-9")
         self.assertEqual(run.recognition_job_id, "recog-9")
-        self.assertEqual(run.engine_runtime, "transkribus-pylaia:42")
+        self.assertIsNone(run.engine_runtime)
 
     @patch(
         "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
@@ -5982,6 +6077,9 @@ class TranskribusAdapterPersistenceTests(TestCase):
         self.assertEqual(run.error_code, "TRANSKRIBUS_RECOGNITION_FAILED")
 
     @patch(
+        "documents.services.htr_adapters.transkribus_adapter.store_automatic_snapshot_from_selected_pages"
+    )
+    @patch(
         "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
     )
     @patch(
@@ -5989,12 +6087,13 @@ class TranskribusAdapterPersistenceTests(TestCase):
     )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_existing_server_success_persists_without_upload_fields(
-        self, m_login, m_start, m_complete
+        self, m_login, m_start, m_complete, m_store
     ):
         from documents.services.htr_adapters.transkribus_adapter import (
             TranskribusAdapter,
         )
         from documents.services.page_extraction import PageImage
+        from unittest.mock import MagicMock
 
         doc = self._create_document()
         m_start.return_value = "recog-es"
@@ -6002,7 +6101,11 @@ class TranskribusAdapterPersistenceTests(TestCase):
             text="es text",
             review_reasons=[],
             recognition_job_id="recog-es",
+            selected_pages=_adapter_selected_pages_stub("es text"),
         )
+        snap = MagicMock()
+        snap.pk = 202
+        m_store.return_value = snap
         adapter = TranskribusAdapter()
         adapter.execute(
             pages=[PageImage(page_index=0, image_bytes=b"x", mime_type="image/png")],
@@ -6016,7 +6119,7 @@ class TranskribusAdapterPersistenceTests(TestCase):
             document_id=doc.id,
         )
         run = TranskribusRun.objects.get(document=doc)
-        self.assertEqual(run.status, TranskribusRun.Status.SUCCEEDED)
+        self.assertEqual(run.status, TranskribusRun.Status.RECOGNITION_STARTED)
         self.assertEqual(run.mode, TranskribusRun.Mode.EXISTING_SERVER)
         self.assertEqual(run.remote_doc_id, "99")
         self.assertEqual(run.pages_query, "1-2")
@@ -6091,6 +6194,9 @@ class TranskribusWorkdirRetryAdapterTests(TestCase):
 
     @patch("documents.services.transkribus_engine.time.sleep")
     @patch(
+        "documents.services.htr_adapters.transkribus_adapter.store_automatic_snapshot_from_selected_pages"
+    )
+    @patch(
         "documents.services.transkribus_engine.complete_pylaia_transcription_after_job"
     )
     @patch("documents.services.transkribus_engine.start_pylaia_recognition")
@@ -6099,12 +6205,13 @@ class TranskribusWorkdirRetryAdapterTests(TestCase):
     )
     @patch("documents.services.htr_adapters.transkribus_adapter.tr.login_trp_server")
     def test_dev_upload_recovers_workdir_failure_without_new_upload(
-        self, m_login, m_upload, m_start, m_complete, m_sleep
+        self, m_login, m_upload, m_start, m_complete, m_store, m_sleep
     ):
         from documents.services.htr_adapters.transkribus_adapter import (
             TranskribusAdapter,
         )
         from documents.services.page_extraction import PageImage
+        from unittest.mock import MagicMock
 
         doc = self._create_document()
         m_upload.return_value = self._upload_outcome()
@@ -6112,9 +6219,22 @@ class TranskribusWorkdirRetryAdapterTests(TestCase):
         m_complete.side_effect = [
             self._workdir_exc(),
             PylaiaTranscriptionOutcome(
-                text="recovered text", review_reasons=[], recognition_job_id="recog-2"
+                text="recovered text",
+                review_reasons=[],
+                recognition_job_id="recog-2",
+                selected_pages=_adapter_selected_pages_for_page_nrs(
+                    [
+                        (1, "recovered text"),
+                        (2, ""),
+                        (3, ""),
+                        (4, ""),
+                    ]
+                ),
             ),
         ]
+        snap = MagicMock()
+        snap.pk = 303
+        m_store.return_value = snap
 
         adapter = TranskribusAdapter()
         result = adapter.execute(
@@ -6139,7 +6259,7 @@ class TranskribusWorkdirRetryAdapterTests(TestCase):
         runs = list(TranskribusRun.objects.filter(document=doc))
         self.assertEqual(len(runs), 1)
         run = runs[0]
-        self.assertEqual(run.status, TranskribusRun.Status.SUCCEEDED)
+        self.assertEqual(run.status, TranskribusRun.Status.RECOGNITION_STARTED)
         self.assertEqual(run.remote_doc_id, "16537736")
         self.assertEqual(run.recognition_job_id, "recog-2")
 
@@ -6221,6 +6341,9 @@ class TranskribusWorkdirRetryWorkerTests(TestCase):
 
     @patch("documents.services.transkribus_engine.time.sleep")
     @patch(
+        "documents.services.htr_adapters.transkribus_adapter.store_automatic_snapshot_from_selected_pages"
+    )
+    @patch(
         "documents.services.transkribus_engine.complete_pylaia_transcription_after_job"
     )
     @patch("documents.services.transkribus_engine.start_pylaia_recognition")
@@ -6238,6 +6361,7 @@ class TranskribusWorkdirRetryWorkerTests(TestCase):
         m_upload,
         m_start,
         m_complete,
+        m_store,
         m_sleep,
     ):
         from documents.services.page_extraction import PageImage
@@ -6268,8 +6392,54 @@ class TranskribusWorkdirRetryWorkerTests(TestCase):
                 text="worker recovered text",
                 review_reasons=[],
                 recognition_job_id="recog-2",
+                selected_pages=_adapter_selected_pages_stub("worker recovered text"),
             ),
         ]
+
+        def _store_side_effect(
+            *, document, run, page_inputs, mapping_trusted, review_reasons=None
+        ):
+            from documents.models import (
+                TranskribusRunAutomaticSnapshot,
+                TranskribusTranscriptSnapshot,
+            )
+            from documents.services.transkribus_snapshot_parser import (
+                PARSER_VERSION,
+                compute_sha256_hex,
+            )
+
+            text_value = "worker recovered text"
+            unique = f"{document.pk}:{run.pk}:worker"
+            snapshot = TranskribusTranscriptSnapshot.objects.create(
+                document=document,
+                transkribus_run=run,
+                source_kind=TranskribusTranscriptSnapshot.SourceKind.AUTOMATIC_HTR,
+                remote_doc_id=str(run.remote_doc_id or ""),
+                collection_id=str(run.collection_id or ""),
+                model_id=str(run.model_id or ""),
+                recognition_job_id=str(run.recognition_job_id or ""),
+                parser_version=PARSER_VERSION,
+                provider_identity_fingerprint=compute_sha256_hex(f"prov:{unique}"),
+                raw_xml_fingerprint=compute_sha256_hex(f"raw:{unique}"),
+                canonical_text=text_value,
+                canonical_text_sha256=compute_sha256_hex(text_value),
+                geometry_capability=(
+                    TranskribusTranscriptSnapshot.GeometryCapability.INDETERMINATE
+                ),
+                hover_eligible=False,
+                storage_status=TranskribusTranscriptSnapshot.StorageStatus.READY,
+            )
+            TranskribusRunAutomaticSnapshot.objects.update_or_create(
+                run=run,
+                defaults={
+                    "snapshot": snapshot,
+                    "mapping_trusted": bool(mapping_trusted),
+                    "review_reasons": list(review_reasons or []),
+                },
+            )
+            return snapshot
+
+        m_store.side_effect = _store_side_effect
 
         cmd = self._make_worker_command()
         he_doc = self._he_doc()
@@ -6565,6 +6735,19 @@ class TranskribusRunPersistenceReusableRunTests(TestCase):
 
 
 class TranskribusUploadDuplicateGuardTests(TestCase):
+    def setUp(self):
+        super().setUp()
+        from unittest.mock import MagicMock, patch
+
+        self._snapshot_store_patcher = patch(
+            "documents.services.htr_adapters.transkribus_adapter.store_automatic_snapshot_from_selected_pages"
+        )
+        self._mock_snapshot_store = self._snapshot_store_patcher.start()
+        self.addCleanup(self._snapshot_store_patcher.stop)
+        snap = MagicMock()
+        snap.pk = 9001
+        self._mock_snapshot_store.return_value = snap
+
     def _create_document(self) -> Document:
         return create_ocr_document(
             title="Duplicate guard doc",
@@ -6634,6 +6817,7 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
         self.assertIn("TRANSKRIBUS_FORCE_REPROCESS", str(ctx.exception))
         m_upload.assert_not_called()
         m_login.assert_not_called()
+        self._mock_snapshot_store.assert_not_called()
         self.assertEqual(
             TranskribusRun.objects.filter(document=doc).count(),
             run_count_before,
@@ -6656,6 +6840,7 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
             self._execute_dev_upload(doc)
         m_upload.assert_not_called()
         m_login.assert_not_called()
+        self._mock_snapshot_store.assert_not_called()
 
     @patch(
         "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
@@ -6691,6 +6876,7 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
             text="ok",
             review_reasons=[],
             recognition_job_id="recog-1",
+            selected_pages=_adapter_selected_pages_stub("ok"),
         )
         self._execute_dev_upload(doc)
         m_upload.assert_called_once()
@@ -6708,6 +6894,7 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
         with self.assertRaises(EnginePermanentError):
             self._execute_dev_upload(doc)
         m_upload.assert_not_called()
+        self._mock_snapshot_store.assert_not_called()
 
     @patch(
         "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
@@ -6725,6 +6912,7 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
         with self.assertRaises(EnginePermanentError):
             self._execute_dev_upload(doc)
         m_upload.assert_not_called()
+        self._mock_snapshot_store.assert_not_called()
 
     @patch(
         "documents.services.htr_adapters.transkribus_adapter.tr.run_trp_upload_page_images_through_ingest"
@@ -6742,6 +6930,7 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
         with self.assertRaises(EnginePermanentError):
             self._execute_dev_upload(doc)
         m_upload.assert_not_called()
+        self._mock_snapshot_store.assert_not_called()
 
     @patch(
         "documents.services.htr_adapters.transkribus_adapter.tr.complete_pylaia_transcription_after_job"
@@ -6778,6 +6967,7 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
             text="ok",
             review_reasons=[],
             recognition_job_id="recog-1",
+            selected_pages=_adapter_selected_pages_stub("ok"),
         )
         self._execute_dev_upload(doc)
         m_upload.assert_called_once()
@@ -6817,6 +7007,7 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
             text="ok",
             review_reasons=[],
             recognition_job_id="recog-1",
+            selected_pages=_adapter_selected_pages_stub("ok"),
         )
         self._execute_dev_upload(doc)
         m_upload.assert_called_once()
@@ -6855,6 +7046,7 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
             text="forced",
             review_reasons=[],
             recognition_job_id="recog-2",
+            selected_pages=_adapter_selected_pages_stub("forced"),
         )
         self._execute_dev_upload(
             doc,
@@ -6889,6 +7081,7 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
             text="es text",
             review_reasons=[],
             recognition_job_id="recog-es",
+            selected_pages=_adapter_selected_pages_stub("es text"),
         )
         adapter = TranskribusAdapter()
         adapter.execute(
@@ -6914,6 +7107,19 @@ class TranskribusUploadDuplicateGuardTests(TestCase):
 
 
 class TranskribusRecognitionOnlyRetryTests(TestCase):
+    def setUp(self):
+        super().setUp()
+        from unittest.mock import MagicMock, patch
+
+        self._snapshot_store_patcher = patch(
+            "documents.services.htr_adapters.transkribus_adapter.store_automatic_snapshot_from_selected_pages"
+        )
+        self._mock_snapshot_store = self._snapshot_store_patcher.start()
+        self.addCleanup(self._snapshot_store_patcher.stop)
+        snap = MagicMock()
+        snap.pk = 9002
+        self._mock_snapshot_store.return_value = snap
+
     def _create_document(self) -> Document:
         return create_ocr_document(
             title="Recognition-only retry doc",
@@ -7014,6 +7220,7 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
             text="from explicit source run",
             review_reasons=[],
             recognition_job_id="recog-explicit",
+            selected_pages=_adapter_selected_pages_stub("from explicit source run"),
         )
 
         result = self._execute_dev_upload(
@@ -7129,6 +7336,7 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
             text="recovered text",
             review_reasons=[],
             recognition_job_id="recog-retry",
+            selected_pages=_adapter_selected_pages_stub("recovered text"),
         )
         run_count_before = TranskribusRun.objects.filter(document=doc).count()
         result = self._execute_dev_upload(
@@ -7149,7 +7357,7 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
             .first()
         )
         self.assertNotEqual(new_run.id, source.id)
-        self.assertEqual(new_run.status, TranskribusRun.Status.SUCCEEDED)
+        self.assertEqual(new_run.status, TranskribusRun.Status.RECOGNITION_STARTED)
         self.assertEqual(new_run.remote_doc_id, "555")
         self.assertEqual(new_run.pages_query, "1")
         self.assertEqual(new_run.upload_id, 10)
@@ -7177,6 +7385,7 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
             text="from uploaded",
             review_reasons=[],
             recognition_job_id="recog-u",
+            selected_pages=_adapter_selected_pages_stub("from uploaded"),
         )
         self._execute_dev_upload(
             doc,
@@ -7205,6 +7414,7 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
             text="from recognition started",
             review_reasons=[],
             recognition_job_id="recog-rs",
+            selected_pages=_adapter_selected_pages_stub("from recognition started"),
         )
         self._execute_dev_upload(
             doc,
@@ -7263,6 +7473,7 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
             text="forced upload",
             review_reasons=[],
             recognition_job_id="recog-force",
+            selected_pages=_adapter_selected_pages_stub("forced upload"),
         )
         self._execute_dev_upload(
             doc,
@@ -7356,6 +7567,7 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
             text="es text",
             review_reasons=[],
             recognition_job_id="recog-es",
+            selected_pages=_adapter_selected_pages_stub("es text"),
         )
         adapter = TranskribusAdapter()
         adapter.execute(

@@ -10,6 +10,7 @@ from documents.services.htr_adapters.base import (
     EnginePermanentError,
     EngineRetryableError,
     HtrResult,
+    TranskribusLocalPersistenceRetryableError,
 )
 from documents.services.htr_adapters.transkribus_error_codes import (
     TRANSKRIBUS_RECOGNITION_FAILED_ERROR_CODE,
@@ -17,6 +18,22 @@ from documents.services.htr_adapters.transkribus_error_codes import (
 )
 from documents.services.page_extraction import PageImage
 from documents.services import transkribus_run_persistence as trp
+from documents.services.transkribus_local_completion import (
+    TranskribusLocalCompletionError,
+    find_existing_server_local_completion_resume_run,
+    find_upload_local_completion_resume_run,
+    plan_local_completion_resume,
+    reconstruct_engine_review_reasons_from_snapshot,
+    store_automatic_snapshot_from_selected_pages,
+)
+from documents.services.transkribus_snapshot_pages import (
+    TranskribusPageMappingError,
+    snapshot_pages_from_existing_server_traversal,
+    snapshot_pages_from_upload_mapping,
+)
+from documents.services.transkribus_snapshot_storage import (
+    TranskribusSnapshotStorageValidationError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +152,19 @@ class TranskribusAdapter:
         pages_query = getattr(worker_env, "transkribus_dev_existing_pages", None) or ""
         engine_runtime = f"transkribus-pylaia:{model_id}"
 
+        resumed = self._try_resume_existing_server(
+            worker_env=worker_env,
+            document_id=document_id,
+            collection_id=collection_id,
+            model_id=model_id,
+            username=username,
+            password=password,
+            bearer=bearer,
+            engine_runtime=engine_runtime,
+        )
+        if resumed is not None:
+            return resumed
+
         run = trp.start_run(
             document_id=document_id,
             mode=TranskribusRun.Mode.EXISTING_SERVER,
@@ -157,10 +187,15 @@ class TranskribusAdapter:
                     pages_query=pages_query,
                     bearer=bearer,
                 )
-                trp.mark_succeeded(run, engine_runtime=engine_runtime)
-                return self._htr_result_from_outcome(
-                    outcome, engine_runtime=engine_runtime
+                return self._store_snapshot_and_build_result(
+                    run=run,
+                    outcome=outcome,
+                    engine_runtime=engine_runtime,
+                    mapping_trusted=False,
+                    page_index_to_page_nr=None,
                 )
+        except TranskribusLocalPersistenceRetryableError:
+            raise
         except tr.TranskribusRetryableError as exc:
             trp.mark_failed(
                 run,
@@ -168,7 +203,12 @@ class TranskribusAdapter:
                 error_details=str(exc),
             )
             raise EngineRetryableError(str(exc)) from exc
-        except tr.TranskribusPermanentError as exc:
+        except (
+            tr.TranskribusPermanentError,
+            TranskribusPageMappingError,
+            TranskribusSnapshotStorageValidationError,
+            TranskribusLocalCompletionError,
+        ) as exc:
             trp.mark_failed(
                 run,
                 error_code=TRANSKRIBUS_RECOGNITION_FAILED_ERROR_CODE,
@@ -197,6 +237,20 @@ class TranskribusAdapter:
         recognition_only_retry = getattr(
             worker_env, "transkribus_recognition_only_retry", False
         )
+
+        if not force_reprocess:
+            resumed = self._try_resume_upload_mode(
+                worker_env=worker_env,
+                document_id=document_id,
+                collection_id=collection_id,
+                model_id=model_id,
+                username=username,
+                password=password,
+                bearer=bearer,
+                engine_runtime=engine_runtime,
+            )
+            if resumed is not None:
+                return resumed
 
         if force_reprocess:
             return self._execute_dev_upload_with_new_trp_document(
@@ -347,10 +401,15 @@ class TranskribusAdapter:
                     pages_query=pages_query,
                     bearer=bearer,
                 )
-                trp.mark_succeeded(run, engine_runtime=engine_runtime)
-                return self._htr_result_from_outcome(
-                    outcome, engine_runtime=engine_runtime
+                return self._store_snapshot_and_build_result(
+                    run=run,
+                    outcome=outcome,
+                    engine_runtime=engine_runtime,
+                    mapping_trusted=True,
+                    page_index_to_page_nr=run.page_index_to_page_nr,
                 )
+        except TranskribusLocalPersistenceRetryableError:
+            raise
         except tr.TranskribusRetryableError as exc:
             trp.mark_failed(
                 run,
@@ -358,7 +417,12 @@ class TranskribusAdapter:
                 error_details=str(exc),
             )
             raise EngineRetryableError(str(exc)) from exc
-        except tr.TranskribusPermanentError as exc:
+        except (
+            tr.TranskribusPermanentError,
+            TranskribusPageMappingError,
+            TranskribusSnapshotStorageValidationError,
+            TranskribusLocalCompletionError,
+        ) as exc:
             trp.mark_failed(
                 run,
                 error_code=TRANSKRIBUS_RECOGNITION_FAILED_ERROR_CODE,
@@ -415,10 +479,15 @@ class TranskribusAdapter:
                     pages_query=upload_out.pages_query,
                     bearer=bearer,
                 )
-                trp.mark_succeeded(run, engine_runtime=engine_runtime)
-                return self._htr_result_from_outcome(
-                    outcome, engine_runtime=engine_runtime
+                return self._store_snapshot_and_build_result(
+                    run=run,
+                    outcome=outcome,
+                    engine_runtime=engine_runtime,
+                    mapping_trusted=True,
+                    page_index_to_page_nr=run.page_index_to_page_nr,
                 )
+        except TranskribusLocalPersistenceRetryableError:
+            raise
         except tr.TranskribusRetryableError as exc:
             error_code = (
                 TRANSKRIBUS_UPLOAD_FAILED_ERROR_CODE
@@ -427,7 +496,12 @@ class TranskribusAdapter:
             )
             trp.mark_failed(run, error_code=error_code, error_details=str(exc))
             raise EngineRetryableError(str(exc)) from exc
-        except tr.TranskribusPermanentError as exc:
+        except (
+            tr.TranskribusPermanentError,
+            TranskribusPageMappingError,
+            TranskribusSnapshotStorageValidationError,
+            TranskribusLocalCompletionError,
+        ) as exc:
             error_code = (
                 TRANSKRIBUS_UPLOAD_FAILED_ERROR_CODE
                 if run.status == TranskribusRun.Status.STARTED
@@ -436,17 +510,281 @@ class TranskribusAdapter:
             trp.mark_failed(run, error_code=error_code, error_details=str(exc))
             raise EnginePermanentError(str(exc)) from exc
 
+    def _try_resume_upload_mode(
+        self,
+        *,
+        worker_env: object,
+        document_id: int,
+        collection_id: str,
+        model_id: str,
+        username: str,
+        password: str,
+        bearer: str,
+        engine_runtime: str,
+    ) -> HtrResult | None:
+        try:
+            document = Document.objects.only("id", "language").get(pk=document_id)
+        except Document.DoesNotExist as exc:
+            raise EnginePermanentError(
+                f"Resume failed: document_id={document_id} does not exist."
+            ) from exc
+        is_hebrew = (document.language or "").strip().lower() in (
+            "he",
+            "heb",
+            "hebrew",
+        )
+        try:
+            run = find_upload_local_completion_resume_run(
+                document_id=document_id,
+                collection_id=collection_id,
+                model_id=model_id,
+                engine_runtime=engine_runtime,
+                is_hebrew=is_hebrew,
+            )
+        except TranskribusLocalCompletionError as exc:
+            raise EnginePermanentError(str(exc)) from exc
+        if run is None:
+            return None
+        return self._resume_run_local_completion(
+            worker_env=worker_env,
+            run=run,
+            username=username,
+            password=password,
+            bearer=bearer,
+            engine_runtime=engine_runtime,
+            mapping_trusted=True,
+            page_index_to_page_nr=run.page_index_to_page_nr,
+        )
+
+    def _try_resume_existing_server(
+        self,
+        *,
+        worker_env: object,
+        document_id: int,
+        collection_id: str,
+        model_id: str,
+        username: str,
+        password: str,
+        bearer: str,
+        engine_runtime: str,
+    ) -> HtrResult | None:
+        try:
+            document = Document.objects.only("id", "language").get(pk=document_id)
+        except Document.DoesNotExist as exc:
+            raise EnginePermanentError(
+                f"Resume failed: document_id={document_id} does not exist."
+            ) from exc
+        is_hebrew = (document.language or "").strip().lower() in (
+            "he",
+            "heb",
+            "hebrew",
+        )
+        try:
+            run = find_existing_server_local_completion_resume_run(
+                document_id=document_id,
+                collection_id=collection_id,
+                model_id=model_id,
+                engine_runtime=engine_runtime,
+                is_hebrew=is_hebrew,
+            )
+        except TranskribusLocalCompletionError as exc:
+            raise EnginePermanentError(str(exc)) from exc
+        if run is None:
+            return None
+        return self._resume_run_local_completion(
+            worker_env=worker_env,
+            run=run,
+            username=username,
+            password=password,
+            bearer=bearer,
+            engine_runtime=engine_runtime,
+            mapping_trusted=False,
+            page_index_to_page_nr=None,
+        )
+
+    @staticmethod
+    def _htr_result_from_associated_snapshot(
+        *,
+        run: TranskribusRun,
+        snapshot,
+        engine_runtime: str,
+        association,
+    ) -> HtrResult:
+        reasons = list(association.review_reasons or []) if association else []
+        if not reasons:
+            reasons = reconstruct_engine_review_reasons_from_snapshot(snapshot)
+        return HtrResult(
+            text=snapshot.canonical_text,
+            needs_review=bool(reasons),
+            engine_name=engine_runtime,
+            review_reasons=reasons,
+            transkribus_run_id=run.pk,
+            transkribus_snapshot_id=snapshot.pk,
+        )
+
+    def _resume_run_local_completion(
+        self,
+        *,
+        worker_env: object,
+        run: TranskribusRun,
+        username: str,
+        password: str,
+        bearer: str,
+        engine_runtime: str,
+        mapping_trusted: bool,
+        page_index_to_page_nr,
+    ) -> HtrResult:
+        try:
+            document = Document.objects.get(pk=run.document_id)
+        except Document.DoesNotExist as exc:
+            raise EnginePermanentError(
+                f"Resume failed: document_id={run.document_id} does not exist."
+            ) from exc
+
+        plan = plan_local_completion_resume(
+            document=document, run=run, engine_runtime=engine_runtime
+        )
+        if plan.already_complete and plan.snapshot is not None:
+            logger.info(
+                "Transkribus local completion already done; idempotent resume "
+                "document_id=%s run_id=%s snapshot_id=%s",
+                document.pk,
+                run.pk,
+                plan.snapshot.pk,
+            )
+            return self._htr_result_from_associated_snapshot(
+                run=run,
+                snapshot=plan.snapshot,
+                engine_runtime=engine_runtime,
+                association=plan.association,
+            )
+
+        if plan.snapshot is not None:
+            logger.info(
+                "Transkribus resume reusing READY snapshot document_id=%s "
+                "run_id=%s snapshot_id=%s (no recognition restart)",
+                document.pk,
+                run.pk,
+                plan.snapshot.pk,
+            )
+            return self._htr_result_from_associated_snapshot(
+                run=run,
+                snapshot=plan.snapshot,
+                engine_runtime=engine_runtime,
+                association=plan.association,
+            )
+
+        if run.status != TranskribusRun.Status.RECOGNITION_STARTED:
+            raise EnginePermanentError(
+                f"Transkribus resume refused for run id={run.pk} status={run.status}: "
+                "SUCCEEDED without READY automatic snapshot association is not "
+                "treated as interrupted local-completion work."
+            )
+
+        logger.info(
+            "Transkribus resume re-fetching finished recognition job "
+            "document_id=%s run_id=%s recognition_job_id=%s (no start_pylaia)",
+            document.pk,
+            run.pk,
+            run.recognition_job_id,
+        )
+        try:
+            with requests.Session() as session:
+                tr.login_trp_server(session, username=username, password=password)
+                outcome = tr.complete_pylaia_transcription_after_job(
+                    session,
+                    recognition_job_id=str(run.recognition_job_id).strip(),
+                    collection_id=str(run.collection_id).strip(),
+                    model_id=str(run.model_id).strip(),
+                    document_id=str(run.remote_doc_id).strip(),
+                    pages_query=str(run.pages_query).strip(),
+                    bearer_token=bearer,
+                )
+                return self._store_snapshot_and_build_result(
+                    run=run,
+                    outcome=outcome,
+                    engine_runtime=engine_runtime,
+                    mapping_trusted=mapping_trusted,
+                    page_index_to_page_nr=page_index_to_page_nr,
+                )
+        except TranskribusLocalPersistenceRetryableError:
+            raise
+        except tr.TranskribusRetryableError as exc:
+            # Durable recognition_job_id: keep run recoverable; do not OCR-fail+ack.
+            raise TranskribusLocalPersistenceRetryableError(str(exc)) from exc
+        except (
+            tr.TranskribusPermanentError,
+            TranskribusPageMappingError,
+            TranskribusSnapshotStorageValidationError,
+            TranskribusLocalCompletionError,
+        ) as exc:
+            raise EnginePermanentError(str(exc)) from exc
+
+    def _store_snapshot_and_build_result(
+        self,
+        *,
+        run: TranskribusRun,
+        outcome: tr.PylaiaTranscriptionOutcome,
+        engine_runtime: str,
+        mapping_trusted: bool,
+        page_index_to_page_nr,
+    ) -> HtrResult:
+        run.refresh_from_db()
+        if run.status != TranskribusRun.Status.RECOGNITION_STARTED:
+            raise EnginePermanentError(
+                f"Expected TranskribusRun id={run.pk} status=RECOGNITION_STARTED "
+                f"before snapshot storage, got {run.status}."
+            )
+        if not outcome.selected_pages:
+            raise EnginePermanentError(
+                "Transkribus outcome missing selected PAGE XML pages for snapshot."
+            )
+
+        try:
+            document = Document.objects.get(pk=run.document_id)
+        except Document.DoesNotExist as exc:
+            raise EnginePermanentError(
+                f"Snapshot storage failed: document_id={run.document_id} missing."
+            ) from exc
+
+        if mapping_trusted:
+            page_inputs = snapshot_pages_from_upload_mapping(
+                outcome.selected_pages, page_index_to_page_nr
+            )
+        else:
+            page_inputs = snapshot_pages_from_existing_server_traversal(
+                outcome.selected_pages
+            )
+
+        snapshot = store_automatic_snapshot_from_selected_pages(
+            document=document,
+            run=run,
+            page_inputs=page_inputs,
+            mapping_trusted=mapping_trusted,
+            review_reasons=list(outcome.review_reasons),
+        )
+        return self._htr_result_from_outcome(
+            outcome,
+            engine_runtime=engine_runtime,
+            transkribus_run_id=run.pk,
+            transkribus_snapshot_id=snapshot.pk,
+        )
+
     @staticmethod
     def _htr_result_from_outcome(
         outcome: tr.PylaiaTranscriptionOutcome,
         *,
         engine_runtime: str,
+        transkribus_run_id: int | None = None,
+        transkribus_snapshot_id: int | None = None,
     ) -> HtrResult:
         return HtrResult(
             text=outcome.text,
             needs_review=bool(outcome.review_reasons),
             engine_name=engine_runtime,
             review_reasons=list(outcome.review_reasons),
+            transkribus_run_id=transkribus_run_id,
+            transkribus_snapshot_id=transkribus_snapshot_id,
         )
 
     @staticmethod
