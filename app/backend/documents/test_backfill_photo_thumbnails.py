@@ -231,9 +231,7 @@ class BackfillPhotoThumbnailsCommandTests(TestCase):
         payload = json.loads(stdout.getvalue())
 
         self.assertEqual(payload["candidate_count"], 2)
-        selected_ids = [
-            row["photo_content_id"] for row in payload["candidates"]
-        ]
+        selected_ids = [row["photo_content_id"] for row in payload["candidates"]]
         self.assertEqual(selected_ids, [first.id, second.id])
         self.assertNotIn(third.id, selected_ids)
 

@@ -135,15 +135,12 @@ def select_ocr_route(
         and text_type == Document.TextInputType.HANDWRITTEN
     ):
         normalized_handwriting_type = (
-            handwriting_type or Document.HandwritingType.VS
-        ).strip().upper()
-        valid_handwriting_types = {
-            choice.value for choice in Document.HandwritingType
-        }
+            (handwriting_type or Document.HandwritingType.VS).strip().upper()
+        )
+        valid_handwriting_types = {choice.value for choice in Document.HandwritingType}
         if normalized_handwriting_type not in valid_handwriting_types:
             raise ValueError(
-                "Invalid handwriting_type for OCR routing: "
-                f"{handwriting_type!r}"
+                f"Invalid handwriting_type for OCR routing: {handwriting_type!r}"
             )
 
         if normalized_handwriting_type == Document.HandwritingType.GENERAL:

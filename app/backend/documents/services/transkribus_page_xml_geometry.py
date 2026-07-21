@@ -3,14 +3,15 @@ from __future__ import annotations
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
 
 import requests
 
 from documents.models import Document, TranskribusRun
-from documents.services import transkribus_engine as tr
+from documents.services.transkribus_page_xml_constants import PAGE_XML_NS
 
-PAGE_XML_NS = tr.PAGE_XML_NS
+if TYPE_CHECKING:
+    from documents.services.transkribus_engine import TrpPageMetadata
 SAMPLE_TEXT_MAX_LEN = 120
 
 LineGeometryCapability = str  # VERIFIED | PARTIAL | NOT_AVAILABLE | INDETERMINATE
@@ -139,7 +140,7 @@ def _ns_map(root: ET.Element) -> dict[str, str]:
     return {"pc": PAGE_XML_NS}
 
 
-def _find_page_element(root: ET.Element, ns: Mapping[str, str]) -> ET.Element | None:
+def _find_page_element(root: ET.Element, ns: dict[str, str]) -> ET.Element | None:
     page = root.find("pc:Page", ns)
     if page is not None:
         return page
@@ -149,7 +150,7 @@ def _find_page_element(root: ET.Element, ns: Mapping[str, str]) -> ET.Element | 
     return None
 
 
-def _text_line_unicode(text_line: ET.Element, ns: Mapping[str, str]) -> str:
+def _text_line_unicode(text_line: ET.Element, ns: dict[str, str]) -> str:
     unicode_el = text_line.find("pc:TextEquiv/pc:Unicode", ns)
     if unicode_el is not None and unicode_el.text:
         return unicode_el.text
@@ -305,14 +306,14 @@ def _overlay_polygon_coords_in_bounds(
     return coords_in_bounds, negative_or_outside, reported_outside
 
 
-def _collect_text_lines(page_el: ET.Element, ns: Mapping[str, str]) -> list[ET.Element]:
+def _collect_text_lines(page_el: ET.Element, ns: dict[str, str]) -> list[ET.Element]:
     lines = page_el.findall(".//pc:TextLine", ns)
     if lines:
         return lines
     return [el for el in page_el.iter() if _local_tag(el.tag) == "TextLine"]
 
 
-def _count_elements(page_el: ET.Element, ns: Mapping[str, str], name: str) -> int:
+def _count_elements(page_el: ET.Element, ns: dict[str, str], name: str) -> int:
     tagged = page_el.findall(f".//pc:{name}", ns)
     if tagged:
         return len(tagged)
@@ -320,7 +321,7 @@ def _count_elements(page_el: ET.Element, ns: Mapping[str, str], name: str) -> in
 
 
 def _reading_order_line_ids(
-    page_el: ET.Element, ns: Mapping[str, str]
+    page_el: ET.Element, ns: dict[str, str]
 ) -> list[str] | None:
     """Resolve explicit TextLine ids referenced by ReadingOrder, when possible.
 
@@ -706,8 +707,10 @@ def resolve_page_indices_to_audit(
 
 
 def _page_metadata_by_nr(
-    pages_meta: Sequence[tr.TrpPageMetadata], page_nr: int
-) -> tr.TrpPageMetadata:
+    pages_meta: Sequence[TrpPageMetadata], page_nr: int
+) -> TrpPageMetadata:
+    from documents.services import transkribus_engine as tr
+
     matches = [pm for pm in pages_meta if pm.page_nr == page_nr]
     if len(matches) == 1:
         return matches[0]
@@ -745,9 +748,11 @@ def fetch_document_geometry_audit(
     bearer_token: str,
     session_factory: Callable[[], requests.Session] | None = None,
     fetch_xml: Callable[..., bytes] | None = None,
-    fetch_pages_metadata: Callable[..., list[tr.TrpPageMetadata]] | None = None,
+    fetch_pages_metadata: Callable[..., list[TrpPageMetadata]] | None = None,
     login: Callable[..., None] | None = None,
 ) -> DocumentGeometryAudit:
+    from documents.services import transkribus_engine as tr
+
     run = resolve_audit_transkribus_run(document_id)
     page_index_map = _normalize_page_index_map(run.page_index_to_page_nr)
     page_indices = resolve_page_indices_to_audit(page_index_map, page_index=page_index)

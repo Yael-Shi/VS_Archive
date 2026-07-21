@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from typing import Mapping, Sequence
 
-from documents.services.transkribus_engine import SelectedTranscriptPage
-from documents.services.transkribus_snapshot_parser import SnapshotPageInput
+from documents.services.transkribus_page_xml_types import (
+    SelectedTranscriptPage,
+    SnapshotPageInput,
+)
 
 
 class TranskribusPageMappingError(ValueError):

@@ -124,10 +124,7 @@ class _StripWhitespace(Func):
     Unicode whitespace code point.
     """
 
-    template = (
-        "REGEXP_REPLACE(%(expressions)s, "
-        "'^[[:space:]]+|[[:space:]]+$', '', 'g')"
-    )
+    template = "REGEXP_REPLACE(%(expressions)s, '^[[:space:]]+|[[:space:]]+$', '', 'g')"
     output_field = CharField()
 
 
@@ -228,7 +225,8 @@ def build_photo_thumbnail_backfill_report(
                 PhotoThumbnailBackfillCandidate(
                     photo_content_id=target.photo_content_id,
                     original_file_key=target.original_file_key or "",
-                    upload_status=target.upload_status or PhotoContent.UploadStatus.UPLOADED,
+                    upload_status=target.upload_status
+                    or PhotoContent.UploadStatus.UPLOADED,
                 )
             )
         return report

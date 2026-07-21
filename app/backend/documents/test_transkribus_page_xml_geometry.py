@@ -816,3 +816,103 @@ class TranskribusPageXmlGeometryJsonTests(SimpleTestCase):
         payload = audit_to_json_dict(audit)
         self.assertEqual(payload["pages"][0]["page_capability"], "VERIFIED")
         self.assertEqual(payload["verdict"]["line_geometry_capability"], "VERIFIED")
+
+
+class TranskribusPageXmlGeometryImportIsolationTests(SimpleTestCase):
+    def test_geometry_module_imports_without_preloaded_transkribus_engine(self):
+        import os
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        backend_dir = Path(__file__).resolve().parents[1]
+        env = os.environ.copy()
+        env.setdefault("DJANGO_SETTINGS_MODULE", "vs_archive.settings")
+        pythonpath = env.get("PYTHONPATH", "")
+        backend_str = str(backend_dir)
+        if backend_str not in pythonpath.split(os.pathsep):
+            env["PYTHONPATH"] = (
+                f"{backend_str}{os.pathsep}{pythonpath}" if pythonpath else backend_str
+            )
+
+        script = """
+import importlib
+import os
+import sys
+
+import django
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "vs_archive.settings")
+django.setup()
+
+constants = importlib.import_module(
+    "documents.services.transkribus_page_xml_constants"
+)
+types_mod = importlib.import_module(
+    "documents.services.transkribus_page_xml_types"
+)
+geometry = importlib.import_module(
+    "documents.services.transkribus_page_xml_geometry"
+)
+snapshot_pages = importlib.import_module(
+    "documents.services.transkribus_snapshot_pages"
+)
+if not callable(getattr(geometry, "analyze_page_xml_geometry", None)):
+    print(
+        "geometry module missing analyze_page_xml_geometry",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+if geometry.PAGE_XML_NS != constants.PAGE_XML_NS:
+    print(
+        "geometry PAGE_XML_NS does not match shared constant",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+if snapshot_pages is None:
+    print("transkribus_snapshot_pages failed to import", file=sys.stderr)
+    raise SystemExit(1)
+
+engine = importlib.import_module("documents.services.transkribus_engine")
+if engine.PAGE_XML_NS != constants.PAGE_XML_NS:
+    print(
+        "transkribus_engine.PAGE_XML_NS does not match shared constant",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+if engine.SelectedTranscriptPage is not types_mod.SelectedTranscriptPage:
+    print(
+        "transkribus_engine.SelectedTranscriptPage is not the shared type",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+snapshot_parser = importlib.import_module(
+    "documents.services.transkribus_snapshot_parser"
+)
+if snapshot_parser.SnapshotPageInput is not types_mod.SnapshotPageInput:
+    print(
+        "transkribus_snapshot_parser.SnapshotPageInput is not the shared type",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+print("OK")
+"""
+
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=backend_dir,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            msg=(
+                "subprocess import isolation failed\n"
+                f"stdout:\n{completed.stdout}\n"
+                f"stderr:\n{completed.stderr}"
+            ),
+        )
+        self.assertIn("OK", completed.stdout)
