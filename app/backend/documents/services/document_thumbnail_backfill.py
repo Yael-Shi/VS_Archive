@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, assert_never
 
 from django.conf import settings
 from django.db.models import CharField, Func, OuterRef, Subquery
@@ -99,7 +99,7 @@ class DocumentThumbnailBackfillReport:
                         reason=target.reason,
                     )
                 ]
-            return []
+            assert_never(target.disposition)
 
         return [
             DocumentThumbnailBackfillDocumentResult(
@@ -186,7 +186,10 @@ class _StripWhitespace(Func):
     """Strip leading/trailing PostgreSQL POSIX ``[[:space:]]`` characters."""
 
     template = "REGEXP_REPLACE(%(expressions)s, '^[[:space:]]+|[[:space:]]+$', '', 'g')"
-    output_field = CharField()
+
+
+def _strip_whitespace(expression: str) -> _StripWhitespace:
+    return _StripWhitespace(expression, output_field=CharField())
 
 
 def _non_empty_stripped(value: str | None) -> str:
@@ -283,7 +286,7 @@ def _eligible_primary_source_key_subquery():
             order_index=0,
             upload_status=DocumentSourceFile.UploadStatus.UPLOADED,
         )
-        .annotate(_key_trimmed=_StripWhitespace("file_s3_key"))
+        .annotate(_key_trimmed=_strip_whitespace("file_s3_key"))
         .exclude(_key_trimmed="")
         .values("_key_trimmed")[:1]
     )
@@ -292,7 +295,7 @@ def _eligible_primary_source_key_subquery():
 def _backfill_candidates_queryset():
     return (
         Document.objects.annotate(
-            _thumbnail_key_trimmed=_StripWhitespace("thumbnail_file_key"),
+            _thumbnail_key_trimmed=_strip_whitespace("thumbnail_file_key"),
             _primary_source_file_key=Subquery(_eligible_primary_source_key_subquery()),
         )
         .filter(

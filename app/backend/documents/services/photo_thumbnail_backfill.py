@@ -125,7 +125,10 @@ class _StripWhitespace(Func):
     """
 
     template = "REGEXP_REPLACE(%(expressions)s, '^[[:space:]]+|[[:space:]]+$', '', 'g')"
-    output_field = CharField()
+
+
+def _strip_whitespace(expression: str) -> _StripWhitespace:
+    return _StripWhitespace(expression, output_field=CharField())
 
 
 def _non_empty_stripped(value: str | None) -> str:
@@ -191,8 +194,8 @@ def _resolve_photo_target(photo_id: int) -> PhotoThumbnailBackfillTarget:
 def _backfill_candidates_queryset():
     return (
         PhotoContent.objects.annotate(
-            _original_key_trimmed=_StripWhitespace("original_file_key"),
-            _thumbnail_key_trimmed=_StripWhitespace("thumbnail_file_key"),
+            _original_key_trimmed=_strip_whitespace("original_file_key"),
+            _thumbnail_key_trimmed=_strip_whitespace("thumbnail_file_key"),
         )
         .filter(
             upload_status=PhotoContent.UploadStatus.UPLOADED,

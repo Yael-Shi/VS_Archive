@@ -31,6 +31,15 @@ class DocumentThumbnailResult:
     thumbnail_size_bytes: int
 
 
+@dataclass(frozen=True)
+class _PreservedDocumentThumbnailFields:
+    first_page_width: int | None
+    first_page_height: int | None
+    thumbnail_file_key: str
+    thumbnail_mime_type: str
+    thumbnail_size_bytes: int | None
+
+
 def should_generate_document_thumbnail(
     document: Document,
     *,
@@ -117,6 +126,15 @@ def generate_and_persist_document_thumbnail(
         "thumbnail_file_key": thumbnail_key,
     }
 
+    # Capture restore state before any S3 upload or in-memory mutation.
+    preserved = _PreservedDocumentThumbnailFields(
+        first_page_width=document.first_page_width,
+        first_page_height=document.first_page_height,
+        thumbnail_file_key=document.thumbnail_file_key,
+        thumbnail_mime_type=document.thumbnail_mime_type,
+        thumbnail_size_bytes=document.thumbnail_size_bytes,
+    )
+
     try:
         image_bytes, _content_type = get_object_bytes(bucket, source_key)
         jpeg_bytes, width, height = generate_image_thumbnail_bytes(image_bytes)
@@ -131,12 +149,6 @@ def generate_and_persist_document_thumbnail(
         return None
 
     try:
-        preserved_first_page_width = document.first_page_width
-        preserved_first_page_height = document.first_page_height
-        preserved_thumbnail_file_key = document.thumbnail_file_key
-        preserved_thumbnail_mime_type = document.thumbnail_mime_type
-        preserved_thumbnail_size_bytes = document.thumbnail_size_bytes
-
         document.first_page_width = width
         document.first_page_height = height
         document.thumbnail_file_key = thumbnail_key
@@ -153,11 +165,11 @@ def generate_and_persist_document_thumbnail(
             ]
         )
     except Exception:
-        document.first_page_width = preserved_first_page_width
-        document.first_page_height = preserved_first_page_height
-        document.thumbnail_file_key = preserved_thumbnail_file_key
-        document.thumbnail_mime_type = preserved_thumbnail_mime_type
-        document.thumbnail_size_bytes = preserved_thumbnail_size_bytes
+        document.first_page_width = preserved.first_page_width
+        document.first_page_height = preserved.first_page_height
+        document.thumbnail_file_key = preserved.thumbnail_file_key
+        document.thumbnail_mime_type = preserved.thumbnail_mime_type
+        document.thumbnail_size_bytes = preserved.thumbnail_size_bytes
         logger.exception(
             "document thumbnail metadata persistence failed",
             extra=log_extra,

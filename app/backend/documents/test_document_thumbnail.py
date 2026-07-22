@@ -239,6 +239,29 @@ class GenerateAndPersistDocumentThumbnailTests(TestCase):
         doc.refresh_from_db()
         self.assertEqual(doc.thumbnail_file_key, "")
 
+    @patch("documents.services.document_thumbnail.put_object_bytes", return_value=7777)
+    @patch(
+        "documents.services.document_thumbnail.get_object_bytes",
+        return_value=(_solid_jpeg_bytes(800, 600), "image/jpeg"),
+    )
+    def test_preserved_field_capture_runs_before_s3_upload(self, _mock_get, mock_put):
+        doc = self._create_image_document_with_sources(
+            source_specs=[(800, 600, (1, 2, 3))]
+        )
+        with patch(
+            "documents.services.document_thumbnail._PreservedDocumentThumbnailFields",
+            side_effect=RuntimeError("capture failed"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "capture failed"):
+                generate_and_persist_document_thumbnail(
+                    doc,
+                    bucket="test-uploads-bucket",
+                )
+
+        mock_put.assert_not_called()
+        self.assertEqual(doc.thumbnail_file_key, "")
+        self.assertIsNone(doc.first_page_width)
+
 
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
 class DocumentUploadThumbnailIntegrationTests(TestCase):
