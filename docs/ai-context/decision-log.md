@@ -1722,4 +1722,23 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 **Activation (future):** Staff activation must reference an **explicit `COMPLETED` attempt id**, verify page **`transcript_ts_id`** values against the attempt’s **`resolved_snapshot`** pages, and must **never** infer “latest” attempt. No URLs, tokens, raw XML, provider user metadata, or generic JSON on these tables.
 
-**Still out of scope:** sync orchestration service, queues, staff UI, hover, cleanup automation.
+**Still out of scope:** staff UI, explicit activation against `DocumentTextResult` / bindings, search/hover UI, queues/commands, backfill.
+
+## Transkribus corrected-current sync orchestration (service)
+
+**Decision:** Staff corrected/current import is orchestrated in `documents/services/transkribus_corrected_current_sync.py` via `run_corrected_current_transkribus_sync(...)`. Transport (Trp login, metadata GET, transcript XML GET) and snapshot S3 uploads run **outside** `transaction.atomic()`; DB writes use short transactions with `select_for_update` on the sync attempt for terminal transitions.
+
+**Flow:**
+
+1. Resolve **`Document`**, trusted **`UPLOAD_CREATED`** run (`resolve_audit_transkribus_run`), and dense **`normalize_page_index_to_page_nr`** mapping.
+2. Create a new **`STARTED`** `TranskribusCorrectedCurrentSyncAttempt` (required **`initiated_by`** at service entry).
+3. Fetch pages metadata once; build **`CorrectedCurrentPageInput`** rows; call **`select_corrected_current_transcripts_for_document`**.
+4. **Refused:** persist REFUSED page rows + terminal **`REFUSED`** (no PAGE XML fetch, no snapshot storage).
+5. **Selected:** persist SELECTED page rows while **`STARTED`**; fetch selected transcript XML; **`snapshot_pages_from_upload_mapping`** → **`store_transkribus_transcript_snapshot`** with **`source_kind=CORRECTED_CURRENT_SYNC`** and **`hover_eligible=None`** (parser-derived geometry eligibility — orchestration does not force hover); verify READY snapshot page_index/page_nr/tsId parity with attempt pages; terminal **`COMPLETED`** with exact **`SnapshotStorageOutcome`** value.
+6. **Failure after attempt creation:** best-effort **`STARTED` → `FAILED`** with fixed public **`failure_code`** / **`failure_message`** (no raw provider URLs, tokens, or external exception text in DB or raised messages). Raw external exception **messages and tracebacks are not logged or chained** into **`CorrectedCurrentSyncError`**; server-side logs record **`failure_code`**, **`attempt_id`**, and external **exception class name** only. Retain SELECTED page rows where applicable; raise **`CorrectedCurrentSyncError`** with safe text (**`raise … from None`**).
+
+**Terminal rules:** Only **`STARTED` → `COMPLETED` | `REFUSED` | `FAILED`**. Idempotent retry when status and payload already match; never overwrite a different terminal outcome (conflicts raise **`CorrectedCurrentSyncTerminalConflictError`**).
+
+**Run resolution:** Occurs before attempt creation; **`RUN_RESOLUTION_FAILED`** uses **`attempt_id=None`** (no persisted failed attempt).
+
+**Explicit non-goals (unchanged):** automatic **`pick_transcript`**, **`TranskribusRunAutomaticSnapshot`**, **`DocumentTextResult`**, bindings, **`processing_state_user`**, activation UI.
