@@ -15,6 +15,9 @@ from documents.services.transkribus_page_xml_geometry import (
     TranskribusPageXmlGeometryError,
 )
 from documents.services.transkribus_transcript_versions import (
+    DocumentTranscriptVersionAudit,
+    PageTranscriptVersionAudit,
+    TranscriptPageXmlSummary,
     TranskribusTranscriptVersionsError,
     _best_parsed_timestamp,
     _collect_provider_version_signals,
@@ -71,6 +74,37 @@ def _mock_upload_run(**overrides) -> SimpleNamespace:
     return SimpleNamespace(**values)
 
 
+def _document_transcript_version_audit(
+    *,
+    document_id: int = 123,
+    transkribus_run_id: int = 10,
+    remote_doc_id: str = "999",
+    mapping_description: str = "trusted upload-created mapping",
+    page_mapping_reliable: bool = True,
+    stored_recognition_job_id: str = "job-1",
+    stored_model_id: str = "42",
+    pages: tuple[PageTranscriptVersionAudit, ...] = (),
+    candidate_selection_rules: tuple[str, ...] = ("rule",),
+    global_ambiguities: tuple[str, ...] = (),
+    warnings: tuple[str, ...] = ("warning",),
+    inspected_transcript: TranscriptPageXmlSummary | None = None,
+) -> DocumentTranscriptVersionAudit:
+    return DocumentTranscriptVersionAudit(
+        document_id=document_id,
+        transkribus_run_id=transkribus_run_id,
+        remote_doc_id=remote_doc_id,
+        mapping_description=mapping_description,
+        page_mapping_reliable=page_mapping_reliable,
+        stored_recognition_job_id=stored_recognition_job_id,
+        stored_model_id=stored_model_id,
+        pages=pages,
+        candidate_selection_rules=candidate_selection_rules,
+        global_ambiguities=global_ambiguities,
+        warnings=warnings,
+        inspected_transcript=inspected_transcript,
+    )
+
+
 class TranskribusTimestampParsingTests(SimpleTestCase):
     def test_parse_numeric_epoch_seconds(self):
         self.assertEqual(_parse_timestamp_epoch(1700000000), 1700000000)
@@ -95,11 +129,13 @@ class TranskribusTimestampParsingTests(SimpleTestCase):
     def test_parse_iso8601_with_z(self):
         parsed = _parse_timestamp_epoch("2024-01-15T12:30:00Z")
         self.assertIsNotNone(parsed)
+        assert parsed is not None
         self.assertGreater(parsed, 0)
 
     def test_parse_iso8601_with_timezone_offset(self):
         parsed = _parse_timestamp_epoch("2024-01-15T12:30:00+02:00")
         self.assertIsNotNone(parsed)
+        assert parsed is not None
         self.assertGreater(parsed, 0)
 
     def test_unparseable_timestamp_returns_none(self):
@@ -115,6 +151,7 @@ class TranskribusTimestampParsingTests(SimpleTestCase):
         iso_epoch = _parse_timestamp_epoch(_EPOCH_2024_ISO)
         assert iso_epoch is not None
         self.assertEqual(best, iso_epoch)
+        assert best is not None
         self.assertGreater(best, _EPOCH_2020)
 
     def test_mixed_seconds_milliseconds_and_iso_compare_correctly(self):
@@ -254,6 +291,24 @@ class TranskribusProviderFlagTests(SimpleTestCase):
         )
         signals = _collect_provider_version_signals(transcripts)
         self.assertTrue(any("explicitly truthy latest flags" in s for s in signals))
+
+    def test_float_version_indicator_value_is_preserved(self):
+        meta = build_transcript_version_metadata(
+            {
+                "tsId": "12",
+                "versionNumber": 1.5,
+                "isCurrent": 1.0,
+            },
+            list_position=1,
+            stored_job_id="job-1",
+            stored_model_id="42",
+        )
+        self.assertEqual(meta.version_indicator_fields.get("versionNumber"), 1.5)
+        self.assertEqual(meta.version_indicator_fields.get("isCurrent"), 1.0)
+        signals = _collect_provider_version_signals((meta,))
+        self.assertTrue(
+            any("explicitly truthy current/primary flags" in s for s in signals)
+        )
 
 
 class TranskribusTranscriptVersionMetadataTests(SimpleTestCase):
@@ -592,20 +647,7 @@ class TranskribusTranscriptVersionRedactionTests(SimpleTestCase):
             stored_job_id="job-1",
             stored_model_id="42",
         )
-        audit = SimpleNamespace(
-            document_id=123,
-            transkribus_run_id=10,
-            remote_doc_id="999",
-            mapping_description="trusted upload-created mapping",
-            page_mapping_reliable=True,
-            stored_recognition_job_id="job-1",
-            stored_model_id="42",
-            pages=(page,),
-            candidate_selection_rules=("rule",),
-            global_ambiguities=(),
-            warnings=("warning",),
-            inspected_transcript=None,
-        )
+        audit = _document_transcript_version_audit(pages=(page,))
         payload = audit_to_json_dict(audit)
         validate_json_payload(payload)
         serialized = json.dumps(payload)
@@ -630,20 +672,7 @@ class TranskribusTranscriptVersionRedactionTests(SimpleTestCase):
             stored_job_id="job-1",
             stored_model_id="42",
         )
-        audit = SimpleNamespace(
-            document_id=123,
-            transkribus_run_id=10,
-            remote_doc_id="999",
-            mapping_description="trusted upload-created mapping",
-            page_mapping_reliable=True,
-            stored_recognition_job_id="job-1",
-            stored_model_id="42",
-            pages=(page,),
-            candidate_selection_rules=("rule",),
-            global_ambiguities=(),
-            warnings=("warning",),
-            inspected_transcript=None,
-        )
+        audit = _document_transcript_version_audit(pages=(page,))
         payload = audit_to_json_dict(audit)
         serialized = json.dumps(payload).lower()
         self.assertNotIn("https://", serialized)
@@ -1111,18 +1140,8 @@ class AuditTranskribusTranscriptVersionsCommandTests(SimpleTestCase):
             stored_job_id="job-1",
             stored_model_id="42",
         )
-        mock_fetch.return_value = SimpleNamespace(
-            document_id=123,
-            transkribus_run_id=10,
-            remote_doc_id="999",
-            mapping_description="trusted upload-created mapping",
-            page_mapping_reliable=True,
-            stored_recognition_job_id="job-1",
-            stored_model_id="42",
+        mock_fetch.return_value = audit = _document_transcript_version_audit(
             pages=(page,),
-            candidate_selection_rules=("rule",),
-            global_ambiguities=(),
-            warnings=("warning",),
             inspected_transcript=inspected,
         )
         stdout = StringIO()
@@ -1134,6 +1153,6 @@ class AuditTranskribusTranscriptVersionsCommandTests(SimpleTestCase):
             stdout=stdout,
         )
         output = stdout.getvalue()
-        validate_audit_payload(audit_to_json_dict(mock_fetch.return_value))
+        validate_audit_payload(audit_to_json_dict(audit))
         self.assertIn("Safe sample only", output)
         self.assertNotIn("https://", output.lower())

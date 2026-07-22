@@ -156,7 +156,7 @@ class TranscriptVersionMetadata:
     status: str | None
     timestamp_fields: dict[str, str | int | float]
     user_editor_fields: dict[str, str | int]
-    version_indicator_fields: dict[str, str | int | bool]
+    version_indicator_fields: dict[str, str | int | float | bool]
     other_safe_fields: dict[str, str | int | float | bool]
     observed_edit_signals: tuple[str, ...]
     matches_stored_htr_job_model: bool
@@ -291,10 +291,8 @@ def _normalize_numeric_epoch_seconds(value: int | float) -> int | None:
         if value != value:
             return None
         numeric = int(value)
-    elif isinstance(value, int):
-        numeric = value
     else:
-        return None
+        numeric = value
 
     if numeric < 0:
         return None
@@ -328,7 +326,7 @@ def _parse_timestamp_epoch(value: str | int | float) -> int | None:
             except ValueError:
                 return None
             if parsed.tzinfo is None:
-                parsed = parsed.replace(tinfo=timezone.utc)
+                parsed = parsed.replace(tzinfo=timezone.utc)
             seconds = int(parsed.timestamp())
             if seconds < _EPOCH_SECONDS_MIN or seconds > _EPOCH_SECONDS_MAX:
                 return None
@@ -383,12 +381,12 @@ def _extract_safe_transcript_fields(
 ) -> tuple[
     dict[str, str | int | float],
     dict[str, str | int],
-    dict[str, str | int | bool],
+    dict[str, str | int | float | bool],
     dict[str, str | int | float | bool],
 ]:
     timestamp_fields: dict[str, str | int | float] = {}
     user_editor_fields: dict[str, str | int] = {}
-    version_indicator_fields: dict[str, str | int | bool] = {}
+    version_indicator_fields: dict[str, str | int | float | bool] = {}
     other_safe_fields: dict[str, str | int | float | bool] = {}
 
     for key, value in raw.items():
