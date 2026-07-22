@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from django.contrib.auth.models import User
+
 from documents.models import (
     DocumentTextResult,
     TranskribusTextResultBinding,
@@ -36,10 +38,14 @@ def bind_text_result_to_snapshot(
     snapshot: TranskribusTranscriptSnapshot,
     binding_role: str,
     bound_source_revision: int,
+    bound_by: User | None = None,
 ) -> TranskribusTextResultBinding:
     """Create or update a binding after READY snapshot + DTR rows exist.
 
-    Caller must hold the local-completion transaction. Does not perform S3/HTTP.
+    Caller must hold the enclosing write transaction. Does not perform S3/HTTP.
+
+    When ``bound_by`` is provided, it is stored on create/update. When omitted
+    (``None``), an existing ``bound_by`` value is left unchanged.
     """
     _require_ready_same_document(snapshot=snapshot, text_result=text_result)
 
@@ -63,13 +69,17 @@ def bind_text_result_to_snapshot(
     if binding_role not in valid_roles:
         raise TranskribusSnapshotBindingError(f"Invalid binding_role={binding_role!r}.")
 
+    defaults: dict[str, object] = {
+        "snapshot": snapshot,
+        "binding_role": binding_role,
+        "bound_text_sha256": text_sha,
+        "bound_source_revision": bound_source_revision,
+    }
+    if bound_by is not None:
+        defaults["bound_by"] = bound_by
+
     binding, _created = TranskribusTextResultBinding.objects.update_or_create(
         text_result=text_result,
-        defaults={
-            "snapshot": snapshot,
-            "binding_role": binding_role,
-            "bound_text_sha256": text_sha,
-            "bound_source_revision": bound_source_revision,
-        },
+        defaults=defaults,
     )
     return binding
