@@ -1681,4 +1681,26 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 **Revisions (automatic only):** create at `source_revision=1`; byte-identical text does not bump; changed text increments SOURCE and sets Hebrew `based_on_source_revision`; rows stay `NEEDS_REVIEW` / `UNVERIFIED` (no verified-edit services).
 
-**Still out of scope:** corrected/current sync, selector changes, search/hover UI, backfill, stale-PENDING recovery, SQS/DLQ redesign, non-Transkribus engines, request-identity idempotency for EXISTING_SERVER.
+**Still out of scope:** corrected/current sync orchestration, staff attempt/activation UI, search/hover UI, backfill, stale-PENDING recovery, SQS/DLQ redesign, non-Transkribus engines, request-identity idempotency for EXISTING_SERVER.
+
+## Transkribus corrected-current transcript selection (v1)
+
+**Decision:** Staff corrected-current sync (future PRs) must select Transkribus PAGE XML using a **separate** pure selector in `documents/services/transkribus_corrected_current_selection.py`. It must **not** call or extend automatic HTR `pick_transcript` / `ordered_transcript_selections`.
+
+**Verified production findings (read-only transcript-version audits, Documents 247, 249, 280):**
+
+- On **every audited page** across Documents **247**, **249**, and **280**, the provider exposed **exactly one** transcript in `tsList`. **No multi-transcript page was observed** in those production audits.
+- All three documents therefore **support the v1 sole-transcript selection rule** in production as audited.
+- Document **249** showed that the **sole** transcript’s metadata did **not** match stored recognition `jobId`/`modelId` (automatic `pick_transcript` / geometry-audit failure class). That proves a **metadata mismatch**, not human editing by itself.
+- Automatic job/model selection remains **insufficient** for corrected-current import when the sole provider transcript lacks or does not match the stored recognition job/model metadata, as observed for Document **249**; v1 corrected-current selection intentionally **does not** use job/model matching.
+- Remote transcript **`IN_PROGRESS`** may appear on otherwise selectable rows; it is a **warning**, not a selection failure.
+
+**Current behavior (v1 selector rule):**
+
+- Per page: select the sole transcript when `len(tsList) == 1` and `tsId` is non-empty.
+- **No** job/model match, **no** `ORIGINAL_HTR` / `NON_MATCHING_VERSION` classification, **no** timestamp / `tsId` / list-order / `isCurrent` / `isLatest` fallbacks.
+- Per page: refuse with precise errors when `len == 0`, `len > 1`, or the single row lacks `tsId`. Refusal when `len > 1` is a **conservative v1 safety rule** (provider shape and unit-test fixtures); it was **not** triggered by the 247/249/280 production audits above.
+- Per document: if **any** page refuses, the whole document selection is refused (orchestration must not partially sync). Empty `pages` input is invalid and raises **`ValueError`** (caller must supply mapped pages).
+- `IN_PROGRESS` (case/space normalized) sets a fixed `in_progress_warning` on the selection; it does not refuse.
+
+**Deferred (not this PR):** HTTP fetch, snapshot storage, sync attempt rows, staff UI, activation, hover, backfill.
