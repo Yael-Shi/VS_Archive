@@ -1742,3 +1742,11 @@ Content-Type: `application/xml` via `put_object_bytes`.
 **Run resolution:** Occurs before attempt creation; **`RUN_RESOLUTION_FAILED`** uses **`attempt_id=None`** (no persisted failed attempt).
 
 **Explicit non-goals (unchanged):** automatic **`pick_transcript`**, **`TranskribusRunAutomaticSnapshot`**, **`DocumentTextResult`**, bindings, **`processing_state_user`**, activation UI.
+
+## Transkribus corrected-current sync execution surface (v1 command)
+
+**Decision:** The v1 manual execution surface for `run_corrected_current_transkribus_sync(...)` is a **worker-environment** Django management command: **`sync_transkribus_corrected_current`** (`--document-id`, `--initiated-by-user-id`). It reads Transkribus session + bearer credentials from the worker env (same pattern as existing Transkribus audit commands), requires an **active staff** initiating user, and prints only safe attempt/status/snapshot/outcome/`failure_code` fields.
+
+**Deferred:** a **dedicated SQS message type** on the **existing** worker/queue until a staff enqueue UI exists. That message must remain **separate from `PROCESS_DOCUMENT`** (not nested as an `operation`). A **separate queue/worker** is **not** justified currently (worker already has Transkribus credentials and hosts longer recognition work).
+
+**Operational follow-ups (not this PR):** duplicate/concurrent manual invocations (each run creates a new attempt by design); stale **`STARTED`** recovery after process kill; staff UI / activation / search / hover.
