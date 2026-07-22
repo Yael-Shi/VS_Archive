@@ -20,15 +20,46 @@ from documents.models import (
 )
 from documents.services.archive_items import create_ocr_document
 from documents.services.text_presentation import resolve_displayable_source_text_result
+from documents.views import _corrected_current_sync_remote_status_label
 
 User = get_user_model()
 
 _TEST_PARSER_VERSION = "test_parser_preview_v1"
+_PREVIEW_BANNER = "זוהי תצוגה מקדימה בלבד. שום דבר עדיין לא השתנה באתר."
+_NO_BASELINE_MSG = (
+    "אין תעתוק מקור שמור שאפשר להשוות אליו. התעתוק מ־Transkribus מוצג ללא השוואה."
+)
+_IN_PROGRESS_WARNING_HE = "ב־Transkribus הגרסה עדיין מסומנת כבתהליך"
 
 
 def _sha256_hex(data: bytes | str) -> str:
     payload = data.encode("utf-8") if isinstance(data, str) else data
     return hashlib.sha256(payload).hexdigest()
+
+
+def _split_primary_and_technical(html: str) -> tuple[str, str]:
+    """Split response HTML into primary content and the technical <details> block."""
+    marker = "<summary>פרטים טכניים</summary>"
+    if marker not in html:
+        return html, ""
+    before, _, after = html.partition(marker)
+    # Include the opening <details ...> that precedes the summary.
+    details_start = before.rfind("<details")
+    if details_start == -1:
+        return before, marker + after
+    primary = before[:details_start]
+    technical = before[details_start:] + marker + after
+    return primary, technical
+
+
+def _assert_technical_details_collapsed(testcase: TestCase, html: str) -> None:
+    primary, technical = _split_primary_and_technical(html)
+    testcase.assertIn("פרטים טכניים", technical)
+    testcase.assertRegex(
+        technical,
+        r"<details\b(?![^>]*\bopen\b)[^>]*>",
+    )
+    testcase.assertNotIn("פרטים טכניים", primary)
 
 
 @override_settings(UPLOADS_BUCKET_NAME="")
@@ -130,6 +161,26 @@ class ResolveDisplayableSourceTextResultTests(TestCase):
         )
 
         self.assertEqual(resolve_displayable_source_text_result(doc), succeeded)
+
+
+class CorrectedCurrentSyncRemoteStatusLabelTests(TestCase):
+    def test_normalizes_case_and_whitespace_before_lookup(self):
+        self.assertEqual(
+            _corrected_current_sync_remote_status_label(" in_progress "),
+            _corrected_current_sync_remote_status_label("IN_PROGRESS"),
+        )
+        self.assertEqual(
+            _corrected_current_sync_remote_status_label("done"),
+            _corrected_current_sync_remote_status_label("DONE"),
+        )
+        self.assertEqual(
+            _corrected_current_sync_remote_status_label(" in_progress "),
+            "בתהליך",
+        )
+        self.assertEqual(
+            _corrected_current_sync_remote_status_label("done"),
+            "הושלם",
+        )
 
 
 @override_settings(UPLOADS_BUCKET_NAME="")
@@ -269,8 +320,54 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(self._list_url(doc.id))
         self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "גרסאות תעתוק מ־Transkribus")
         self.assertContains(resp, "אין עדיין ניסיונות סנכרון")
-        self.assertContains(resp, "אינה משנה את הארכיון הציבורי")
+        self.assertContains(resp, _PREVIEW_BANNER)
+        self.assertNotContains(resp, "activate")
+        self.assertNotContains(resp, "Snapshot")
+        self.assertNotContains(resp, "קוד כשל")
+        self.assertNotContains(resp, "הפעלה")
+
+    def test_staff_list_shows_human_columns_and_israeli_dates(self):
+        doc = self._create_doc()
+        run = self._upload_run(doc)
+        snapshot = self._ready_snapshot(document=doc, run=run)
+        attempt = TranskribusCorrectedCurrentSyncAttempt.objects.create(
+            document=doc,
+            transkribus_run=run,
+            initiated_by=self.staff,
+            status=TranskribusCorrectedCurrentSyncAttempt.Status.COMPLETED,
+            resolved_snapshot=snapshot,
+            storage_outcome=(
+                TranskribusCorrectedCurrentSyncAttempt.StorageOutcome.CREATED
+            ),
+            completed_at=timezone.now(),
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._list_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        for header in (
+            "ניסיון",
+            "מצב",
+            "התחלה",
+            "סיום",
+            "הופעל על ידי",
+            "תוצאה",
+            "צפייה",
+        ):
+            self.assertIn(header, html)
+        self.assertContains(resp, f"#{attempt.id}")
+        self.assertContains(resp, "הושלם")
+        self.assertContains(resp, "נוצר חדש")
+        self.assertContains(resp, self.staff.username)
+        self.assertRegex(html, r"\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}")
+        self.assertNotContains(resp, "COMPLETED")
+        self.assertNotContains(resp, "CREATED")
+        self.assertNotContains(resp, "Snapshot")
+        self.assertNotContains(resp, "failure_code")
+        self.assertNotContains(resp, "קוד כשל")
+        self.assertRegex(html, rf'href="{self._detail_url(doc.id, attempt.id)}"')
 
     def test_staff_can_inspect_private_document(self):
         doc = self._create_doc(visibility=Document.Visibility.PRIVATE)
@@ -354,27 +451,66 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(self._detail_url(doc.id, attempt.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, f"#{source.id}")
-        self.assertContains(resp, "revision 3")
-        self.assertContains(resp, "Hello")
-        self.assertContains(resp, "Hello sync")
-        self.assertContains(resp, 'class="transcription-diff-ins"')
-        self.assertContains(resp, "sync")
-        self.assertNotContains(resp, "שלום")
-        self.assertContains(resp, "CORRECTED_CURRENT_SYNC")
-        self.assertContains(resp, str(snapshot.id))
-        self.assertContains(resp, "297019349")
+        html = resp.content.decode()
+        primary, technical = _split_primary_and_technical(html)
+
+        self.assertIn("תצוגה מקדימה לתעתוק מ־Transkribus", primary)
+        self.assertIn(_PREVIEW_BANNER, primary)
+        self.assertIn("פרטי הסנכרון", primary)
+        self.assertIn("תעתוק המקור השמור כיום", primary)
+        self.assertIn("התעתוק הנוכחי מ־Transkribus", primary)
+        self.assertIn("מה השתנה", primary)
+        self.assertIn("מידע לפי עמוד", primary)
+        self.assertIn("Hello", primary)
+        self.assertIn("Hello sync", primary)
+        self.assertIn('class="transcription-diff-ins"', html)
+        self.assertIn("sync", primary)
+        self.assertNotIn("שלום", html)
+        self.assertNotIn("activate", primary)
+        self.assertNotIn("SOURCE_TEXT", primary)
+        self.assertNotIn("source_kind", primary)
+        self.assertNotIn("storage_status", primary)
+        self.assertNotIn("geometry_capability", primary)
+        self.assertNotIn("hover_eligible", primary)
+        self.assertNotIn("page_index", primary)
+        self.assertNotIn(">page_nr<", primary)
+        self.assertNotIn("tsId", primary)
+        self.assertNotIn("COMPLETED", primary)
+        self.assertNotIn("CORRECTED_CURRENT_SYNC", primary)
+        self.assertNotIn("297019349", primary)
+        self.assertNotIn(f"#{source.id}", primary)
+        self.assertNotIn("revision 3", primary)
+        self.assertNotIn("מזהה snapshot", primary)
+        self.assertNotIn("טקסט קנוני מה־snapshot", primary)
+
+        _assert_technical_details_collapsed(self, html)
+        self.assertIn("CORRECTED_CURRENT_SYNC", technical)
+        self.assertIn(str(snapshot.id), technical)
+        self.assertIn("297019349", technical)
+        self.assertIn(f"#{source.id}", technical)
+        self.assertIn("source_revision", technical)
+        self.assertIn("3", technical)
+        self.assertIn("page_index", technical)
+        self.assertIn("tsId", technical)
+
         self.assertNotContains(resp, snapshot.provider_identity_fingerprint)
         self.assertNotContains(resp, snapshot.raw_xml_fingerprint)
         self.assertNotContains(resp, "page_xml_s3_key")
         self.assertNotContains(resp, "remote_status_summary")
         self.assertNotContains(resp, '{"pages"')
+        self.assertNotIn("activate", html.lower())
+        self.assertNotIn("הפעלה", primary)
+
+        # Backend still resolves SOURCE_TEXT as the comparison baseline.
+        self.assertEqual(resp.context["source_row"], source)
+        self.assertEqual(resp.context["source_text"], "Hello")
+        self.assertIsNotNone(resp.context["diff_html"])
 
     def test_hebrew_document_uses_source_text_baseline(self):
         doc = self._create_doc(title="HE completed")
         run = self._upload_run(doc)
         hebrew_sentinel = "HEBREW_TEXT_SHOULD_NOT_BE_BASELINE"
-        self._create_source_result(doc, text="מקור")
+        source = self._create_source_result(doc, text="מקור")
         self._create_hebrew_result(doc, text=hebrew_sentinel)
         snapshot = self._ready_snapshot(
             document=doc,
@@ -396,9 +532,15 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(self._detail_url(doc.id, attempt.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "מקור")
-        self.assertContains(resp, "מקור מתוקן")
-        self.assertNotContains(resp, hebrew_sentinel)
+        html = resp.content.decode()
+        primary, _technical = _split_primary_and_technical(html)
+        self.assertIn("מקור", primary)
+        self.assertIn("מקור מתוקן", primary)
+        self.assertNotIn(hebrew_sentinel, html)
+        self.assertNotIn("SOURCE_TEXT", primary)
+        self.assertNotIn("HEBREW_TEXT", primary)
+        self.assertEqual(resp.context["source_row"], source)
+        self.assertIsNotNone(resp.context["diff_html"])
 
     def test_completed_without_source_shows_empty_baseline_and_no_diff(self):
         doc = self._create_doc(title="No source baseline")
@@ -424,11 +566,16 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(self._detail_url(doc.id, attempt.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "אין תעתוק מקור (SOURCE_TEXT) ניתן להצגה")
-        self.assertContains(resp, "אין בסיס SOURCE_TEXT להשוואה")
-        self.assertContains(resp, "Snapshot only")
-        self.assertNotContains(resp, 'class="transcription-diff')
-        self.assertNotContains(resp, "רק עברית")
+        html = resp.content.decode()
+        primary, _technical = _split_primary_and_technical(html)
+        self.assertIn(_NO_BASELINE_MSG, primary)
+        self.assertIn("Snapshot only", primary)
+        self.assertNotIn("SOURCE_TEXT", primary)
+        self.assertNotIn("HEBREW_TEXT", primary)
+        self.assertNotIn('class="transcription-diff', primary)
+        self.assertNotIn("רק עברית", html)
+        self.assertIsNone(resp.context["source_row"])
+        self.assertIsNone(resp.context["diff_html"])
 
     def test_refused_shows_page_reasons_without_snapshot_preview(self):
         doc = self._create_doc(title="Refused attempt")
@@ -454,11 +601,18 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(self._detail_url(doc.id, attempt.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "MULTIPLE_TRANSCRIPTS")
-        self.assertContains(resp, "יותר מתעתיק אחד לעמוד")
-        self.assertContains(resp, "סורב בשלב בחירת התעתיקים")
-        self.assertNotContains(resp, "טקסט קנוני מה־snapshot")
-        self.assertNotContains(resp, "הבדלים מודגשים")
+        html = resp.content.decode()
+        primary, technical = _split_primary_and_technical(html)
+        self.assertIn("לא ניתן היה לבחור גרסת תעתוק חד־משמעית", primary)
+        self.assertIn("יותר מתעתיק אחד לעמוד", primary)
+        self.assertIn("סורב בבחירה", primary)
+        self.assertNotIn("תעתוק המקור השמור כיום", primary)
+        self.assertNotIn("התעתוק הנוכחי מ־Transkribus", primary)
+        self.assertNotIn("מה השתנה", primary)
+        self.assertNotIn("MULTIPLE_TRANSCRIPTS", primary)
+        self.assertNotIn("activate", primary)
+        _assert_technical_details_collapsed(self, html)
+        self.assertIn("MULTIPLE_TRANSCRIPTS", technical)
 
     def test_failed_shows_safe_failure_fields(self):
         doc = self._create_doc(title="Failed attempt")
@@ -484,10 +638,15 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(self._detail_url(doc.id, attempt.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "HTTP_TRANSCRIPT_XML_FAILED")
-        self.assertContains(resp, "שליפת XML נכשלה")
-        self.assertContains(resp, "111")
-        self.assertNotContains(resp, "טקסט קנוני מה־snapshot")
+        html = resp.content.decode()
+        primary, technical = _split_primary_and_technical(html)
+        self.assertIn("שליפת XML נכשלה", primary)
+        self.assertNotIn("HTTP_TRANSCRIPT_XML_FAILED", primary)
+        self.assertNotIn("תעתוק המקור השמור כיום", primary)
+        self.assertNotIn("111", primary)
+        _assert_technical_details_collapsed(self, html)
+        self.assertIn("HTTP_TRANSCRIPT_XML_FAILED", technical)
+        self.assertIn("111", technical)
 
     def test_started_shown_as_in_progress_not_stale(self):
         doc = self._create_doc(title="Started attempt")
@@ -511,11 +670,18 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(self._detail_url(doc.id, attempt.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "בתהליך")
-        self.assertContains(resp, "אזהרת IN_PROGRESS מהספק")
-        self.assertNotContains(resp, "stale")
-        self.assertNotContains(resp, "לא עדכני")
-        self.assertNotContains(resp, "ישן")
+        html = resp.content.decode()
+        primary, technical = _split_primary_and_technical(html)
+        self.assertIn("בתהליך", primary)
+        self.assertIn(_IN_PROGRESS_WARNING_HE, primary)
+        self.assertNotIn("אזהרת IN_PROGRESS מהספק", html)
+        self.assertNotIn("IN_PROGRESS", primary)
+        self.assertNotIn("stale", html.lower())
+        self.assertNotIn("לא עדכני", html)
+        self.assertNotIn("ישן", html)
+        _assert_technical_details_collapsed(self, html)
+        self.assertIn("IN_PROGRESS", technical)
+        self.assertIn("222", technical)
 
     def test_script_like_text_is_escaped(self):
         doc = self._create_doc(title="Escape attempt")
@@ -603,4 +769,5 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, self._list_url(doc.id))
-        self.assertContains(resp, "היסטוריית סנכרון Transkribus מתוקן")
+        self.assertContains(resp, "גרסאות תעתוק מ־Transkribus")
+        self.assertNotContains(resp, "היסטוריית סנכרון Transkribus מתוקן")

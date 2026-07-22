@@ -2147,6 +2147,29 @@ pre {
   word-break: break-word;
 }
 
+/* Corrected/current Transkribus sync staff preview — scoped text heights only. */
+.corrected-sync-preview-text {
+  margin: 0;
+  padding: var(--space-4);
+  max-height: min(28vh, 240px);
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--card-input);
+  font-family: var(--font-sans);
+  font-size: var(--font-base);
+  line-height: var(--line-ocr);
+  color: var(--text);
+  unicode-bidi: plaintext;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .corrected-sync-preview-text {
+    max-height: min(40vh, 280px);
+  }
+}
+
 .transcription-diff-del {
   background: var(--danger-soft);
   text-decoration: line-through;
