@@ -32,6 +32,15 @@ class PhotoThumbnailResult:
     thumbnail_size_bytes: int
 
 
+@dataclass(frozen=True)
+class _PreservedPhotoThumbnailFields:
+    width: int | None
+    height: int | None
+    thumbnail_file_key: str
+    thumbnail_mime_type: str
+    thumbnail_size_bytes: int | None
+
+
 def generate_photo_thumbnail_bytes(
     image_bytes: bytes,
     *,
@@ -76,6 +85,15 @@ def generate_and_persist_photo_thumbnail(
         "thumbnail_file_key": thumbnail_key,
     }
 
+    # Capture restore state before any S3 upload or in-memory mutation.
+    preserved = _PreservedPhotoThumbnailFields(
+        width=photo_content.width,
+        height=photo_content.height,
+        thumbnail_file_key=photo_content.thumbnail_file_key,
+        thumbnail_mime_type=photo_content.thumbnail_mime_type,
+        thumbnail_size_bytes=photo_content.thumbnail_size_bytes,
+    )
+
     try:
         image_bytes, _content_type = get_object_bytes(bucket, original_key)
         jpeg_bytes, width, height = generate_photo_thumbnail_bytes(image_bytes)
@@ -90,12 +108,6 @@ def generate_and_persist_photo_thumbnail(
         return None
 
     try:
-        preserved_width = photo_content.width
-        preserved_height = photo_content.height
-        preserved_thumbnail_file_key = photo_content.thumbnail_file_key
-        preserved_thumbnail_mime_type = photo_content.thumbnail_mime_type
-        preserved_thumbnail_size_bytes = photo_content.thumbnail_size_bytes
-
         photo_content.width = width
         photo_content.height = height
         photo_content.thumbnail_file_key = thumbnail_key
@@ -112,11 +124,11 @@ def generate_and_persist_photo_thumbnail(
             ]
         )
     except Exception:
-        photo_content.width = preserved_width
-        photo_content.height = preserved_height
-        photo_content.thumbnail_file_key = preserved_thumbnail_file_key
-        photo_content.thumbnail_mime_type = preserved_thumbnail_mime_type
-        photo_content.thumbnail_size_bytes = preserved_thumbnail_size_bytes
+        photo_content.width = preserved.width
+        photo_content.height = preserved.height
+        photo_content.thumbnail_file_key = preserved.thumbnail_file_key
+        photo_content.thumbnail_mime_type = preserved.thumbnail_mime_type
+        photo_content.thumbnail_size_bytes = preserved.thumbnail_size_bytes
         logger.exception(
             "photo thumbnail metadata persistence failed",
             extra=log_extra,
