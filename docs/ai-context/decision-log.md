@@ -1757,9 +1757,9 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 **Comparison baseline:** Preview diffs snapshot `canonical_text` against the latest **displayable SOURCE_TEXT** only via `resolve_displayable_source_text_result` (SUCCEEDED then NEEDS_REVIEW; **never** falls back to HEBREW_TEXT). Diff uses `render_transcription_diff_html(source_text, snapshot.canonical_text)`. When no displayable SOURCE_TEXT exists, show an explicit empty state and skip the diff.
 
-**Staff UI presentation (read-only polish):** List/detail copy is Hebrew-first for staff without exposing internal model names in primary content. Technical identifiers (`source_kind`, `storage_status`, `geometry_capability`, `hover_eligible`, raw enums, `tsId`, `page_index`/`page_nr`, failure/selection codes, DocumentTextResult ids) live in a collapsed **`פרטים טכניים`** `<details>` block. Comparison remains SOURCE_TEXT-only in the backend even though the UI no longer names `SOURCE_TEXT` / `snapshot` in primary headings. No activation controls.
+**Staff UI presentation (read-only polish):** List/detail copy is Hebrew-first for staff without exposing internal model names in primary content. Technical identifiers (`source_kind`, `storage_status`, `geometry_capability`, `hover_eligible`, raw enums, `tsId`, `page_index`/`page_nr`, failure/selection codes, DocumentTextResult ids) live in a collapsed **`פרטים טכניים`** `<details>` block. Comparison remains SOURCE_TEXT-only in the backend even though the UI no longer names `SOURCE_TEXT` / `snapshot` in primary headings.
 
-**Non-goals (unchanged):** activation / canonical `DocumentTextResult` updates; bindings; translation; search/hover; running sync from the web; POST actions; SQS/worker/command changes; selector/orchestration/storage; models/migrations; stale STARTED detection/recovery; global nav backlog.
+**Non-goals for the preview surface itself:** running sync from the web; bindings; translation; search/hover; SQS/worker/command changes; selector/orchestration/storage; models/migrations; stale STARTED detection/recovery; global nav backlog. Explicit activation is a separate POST surface (see activation UI PR2 below), not part of the read-only list.
 
 ## Transkribus corrected-current activation (service PR1)
 
@@ -1775,4 +1775,20 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 **Transaction:** One short `atomic()`; lock order Document → Attempt → Snapshot → DTR rows (pk order) → bindings; no HTTP/S3/Gemini/SQS. Does **not** update `Document.processing_state_user` in this PR.
 
-**Still out of scope:** staff activation UI/routes; translation enqueue; search/hover; processing-state rollup; selector/sync/storage/automatic-completion/worker changes.
+**Still out of scope for the service PR:** staff activation UI/routes (see PR2); translation enqueue; search/hover; processing-state rollup; selector/sync/storage/automatic-completion/worker changes.
+
+## Transkribus corrected-current activation UI (PR2)
+
+**Decision:** Staff activate a **COMPLETED** corrected/current attempt from the existing attempt **detail** page only, via a dedicated POST route that calls `activate_corrected_current_sync_attempt(...)`. GET detail remains read-only. The attempts **list** has no activation controls. Activation does **not** run Transkribus sync, S3, Gemini, or SQS.
+
+**Route / auth:** `POST /api/ui/admin/documents/<doc_id>/transkribus-corrected-current-sync/<attempt_id>/activate/` (`corrected-current-sync-attempt-activate`). Same staff gate as preview (`login_required` + `_require_admin_page` / `is_document_admin`). CSRF required; non-POST rejected. Document/attempt ownership lookup runs immediately after the admin gate (before confirmation or baseline parsing); nonexistent attempt or document/attempt mismatch → **404** with no queued message and no service call (parity with GET detail). POST/Redirect/GET back to the detail page on success and handled rejection.
+
+**Exact preview baseline:** The form submits the exact SOURCE_TEXT baseline shown in preview: `source_text_result_id`, `expected_source_revision`, `expected_source_sha256` (from `compute_sha256_hex(source_row.text)`). The view does not infer latest attempt/engine/result. Missing confirmation checkbox does **not** call the service. Missing/invalid baseline fields redirect with a safe Hebrew message without calling the service when values cannot be parsed. The service remains authoritative under locks.
+
+**Form availability (GET):** Render the activation form only when the attempt is **COMPLETED**, `resolved_snapshot` is **READY**, and a concrete displayable SOURCE_TEXT baseline exists. If COMPLETED+READY but no baseline, show a short non-technical explanation and no button. Do **not** claim client-side eligibility for VERIFIED/human-edit cases — the service decides at POST time.
+
+**UI copy:** Hebrew-first staff wording. Restrained warning that activation replaces the currently displayed transcription with the Transkribus corrected/current text, does not mark text as human-verified, and blocks verified/protected human-edited text. Explicit confirmation checkbox required. Action label: **`החלפת התעתוק המוצג בגרסת Transkribus`**. Primary UI does not expose enums, hashes, revisions, result IDs, engine names, or error codes (collapsed technical details unchanged).
+
+**Messages:** Map stable `CorrectedCurrentActivationErrorCode` values to concise Hebrew staff messages (stale preview; VERIFIED / human-edited block; unauthorized; attempt/snapshot no longer eligible; binding/internal safe failure). Never display raw exception text, provider details, hashes, IDs, or traceback. Success distinguishes three **APPLIED** shapes — SOURCE text changed; Hebrew mirror updated without SOURCE text change; binding-only repair with no displayed text change — plus **ALREADY_ACTIVE** idempotent no-op. After redirect, detail re-renders the current baseline/diff.
+
+**Still out of scope:** activation service semantics changes; models/migrations; selector/sync/storage/parser; automatic completion; OCR routing/worker/upload; search/hover; public archive pages; navigation; processing-state rollup; translation enqueue.

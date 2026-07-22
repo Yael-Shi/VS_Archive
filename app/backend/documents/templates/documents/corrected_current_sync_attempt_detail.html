@@ -25,6 +25,15 @@
       </div>
     </div>
 
+    {% if messages %}
+      <div class="spacer"></div>
+      {% for message in messages %}
+        <div class="alert{% if message.tags == 'error' %} alert-danger{% elif message.tags == 'success' %} alert-ok{% endif %}">
+          {{ message }}
+        </div>
+      {% endfor %}
+    {% endif %}
+
     <div class="spacer"></div>
 
     <div class="card card--pad-lg">
@@ -96,6 +105,52 @@
         {% else %}
           <div class="alert">
             אין תעתוק מקור שמור שאפשר להשוות אליו. התעתוק מ־Transkribus מוצג ללא השוואה.
+          </div>
+        {% endif %}
+      </div>
+    {% endif %}
+
+    {% if show_activation_section %}
+      <div class="spacer"></div>
+      <div class="card card--pad-lg">
+        <div class="section-title">החלפת התעתוק המוצג</div>
+        <div class="spacer-sm"></div>
+        {% if activation_form_available %}
+          <div class="alert corrected-sync-activation-warning">
+            פעולה זו מחליפה את התעתוק המוצג כיום באתר בגרסת התעתוק מ־Transkribus.
+            ההחלפה אינה מסמנת את התעתוק כמאומת על ידי אדם.
+            אם התעתוק הנוכחי מאומת או מוגן בעריכה ידנית — הפעולה תיחסם.
+          </div>
+          <div class="spacer-sm"></div>
+          <form
+            method="post"
+            action="{% url 'corrected-current-sync-attempt-activate' doc_id=doc.id attempt_id=attempt.id %}"
+            class="corrected-sync-activation-form"
+          >
+            {% csrf_token %}
+            <input type="hidden" name="source_text_result_id" value="{{ activation_source_text_result_id }}">
+            <input type="hidden" name="expected_source_revision" value="{{ activation_expected_source_revision }}">
+            <input type="hidden" name="expected_source_sha256" value="{{ activation_expected_source_sha256 }}">
+            <label class="corrected-sync-activation-confirm">
+              <input
+                type="checkbox"
+                name="confirm_replace"
+                value="1"
+                required
+              >
+              <span>
+                אני מאשר/ת שהבנתי שהתעתוק המוצג יוחלף בגרסת Transkribus,
+                ושהפעולה אינה אימות אנושי של התעתוק.
+              </span>
+            </label>
+            <div class="spacer-sm"></div>
+            <button class="btn btn-primary" type="submit">
+              החלפת התעתוק המוצג בגרסת Transkribus
+            </button>
+          </form>
+        {% else %}
+          <div class="alert">
+            אין תעתוק מקור שמור שאפשר להחליף כרגע.
           </div>
         {% endif %}
       </div>
