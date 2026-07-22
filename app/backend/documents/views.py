@@ -706,7 +706,7 @@ def _apply_upload_discovery_metadata(doc: Document, discovery_metadata: dict) ->
 
 
 def _parse_image_file_entry(
-    entry: dict,
+    entry: object,
     *,
     field_prefix: str,
 ) -> tuple[_ParsedImageFileMeta | None, HttpResponseBadRequest | None]:
