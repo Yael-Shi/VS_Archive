@@ -1750,3 +1750,11 @@ Content-Type: `application/xml` via `put_object_bytes`.
 **Deferred:** a **dedicated SQS message type** on the **existing** worker/queue until a staff enqueue UI exists. That message must remain **separate from `PROCESS_DOCUMENT`** (not nested as an `operation`). A **separate queue/worker** is **not** justified currently (worker already has Transkribus credentials and hosts longer recognition work).
 
 **Operational follow-ups (not this PR):** duplicate/concurrent manual invocations (each run creates a new attempt by design); stale **`STARTED`** recovery after process kill; staff UI / activation / search / hover.
+
+## Transkribus corrected-current sync staff preview (read-only)
+
+**Decision:** Ship a **read-only** staff application surface for corrected/current sync attempt history and text preview (not Django admin; not OCR review mutation actions). URLs are document-scoped under `/api/ui/admin/documents/<id>/transkribus-corrected-current-sync/` (+ `/<attempt_id>/`). Access uses the existing staff-page gate (`login_required` + `_require_admin_page` / `is_document_admin`). Staff may inspect private documents; mismatched document/attempt pairs return **404**.
+
+**Comparison baseline:** Preview diffs snapshot `canonical_text` against the latest **displayable SOURCE_TEXT** only via `resolve_displayable_source_text_result` (SUCCEEDED then NEEDS_REVIEW; **never** falls back to HEBREW_TEXT). Diff uses `render_transcription_diff_html(source_text, snapshot.canonical_text)`. When no displayable SOURCE_TEXT exists, show an explicit empty state and skip the diff.
+
+**Non-goals (unchanged):** activation / canonical `DocumentTextResult` updates; bindings; translation; search/hover; running sync from the web; POST actions; SQS/worker/command changes; selector/orchestration/storage; models/migrations; stale STARTED detection/recovery; global nav backlog.

@@ -45,6 +45,7 @@ from .models import (
     PhotoContent,
     Tag,
     TranscriptionEditSuggestion,
+    TranskribusCorrectedCurrentSyncAttempt,
 )
 from documents.services.archive_catalog_metadata_validation import (
     parse_ocr_catalog_metadata_form,
@@ -194,6 +195,7 @@ from documents.services.text_presentation import (
     document_detail_has_source_viewer,
     get_displayed_transcription_text,
     get_text_presentation_for_document,
+    resolve_displayable_source_text_result,
     text_presentation_results_prefetch,
 )
 from documents.services.transcription_edit_suggestions import (
@@ -2068,6 +2070,181 @@ def review_detail_page(request, doc_id: int):
         len(transkribus_runs),
     )
     return render(request, "documents/review_detail.html", context)
+
+
+_CORRECTED_CURRENT_SYNC_STATUS_LABELS: dict[str, str] = {
+    TranskribusCorrectedCurrentSyncAttempt.Status.STARTED.value: "בתהליך",
+    TranskribusCorrectedCurrentSyncAttempt.Status.COMPLETED.value: "הושלם",
+    TranskribusCorrectedCurrentSyncAttempt.Status.REFUSED.value: "סורב בבחירה",
+    TranskribusCorrectedCurrentSyncAttempt.Status.FAILED.value: "נכשל",
+}
+
+_CORRECTED_CURRENT_SYNC_STORAGE_OUTCOME_LABELS: dict[str, str] = {
+    TranskribusCorrectedCurrentSyncAttempt.StorageOutcome.CREATED.value: "נוצר חדש",
+    TranskribusCorrectedCurrentSyncAttempt.StorageOutcome.REUSED_EXISTING.value: (
+        "נעשה שימוש חוזר בקיים"
+    ),
+    TranskribusCorrectedCurrentSyncAttempt.StorageOutcome.REUSED_CONCURRENT_WINNER.value: (
+        "נעשה שימוש חוזר במנצח מקבילי"
+    ),
+}
+
+_CORRECTED_CURRENT_SYNC_PAGE_OUTCOME_LABELS: dict[str, str] = {
+    "SELECTED": "נבחר",
+    "REFUSED": "סורב",
+}
+
+
+def _corrected_current_sync_status_label(status: str) -> str:
+    return _CORRECTED_CURRENT_SYNC_STATUS_LABELS.get(status, status)
+
+
+def _corrected_current_sync_storage_outcome_label(outcome: str | None) -> str:
+    if not outcome:
+        return "—"
+    return _CORRECTED_CURRENT_SYNC_STORAGE_OUTCOME_LABELS.get(outcome, outcome)
+
+
+def _corrected_current_sync_attempts_queryset(*, with_pages: bool = False):
+    qs = TranskribusCorrectedCurrentSyncAttempt.objects.select_related(
+        "initiated_by",
+        "resolved_snapshot",
+    )
+    if with_pages:
+        qs = qs.prefetch_related("pages")
+    return qs
+
+
+@login_required
+def corrected_current_sync_attempts_page(request, doc_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    doc = get_object_or_404(
+        Document.objects.select_related("archive_item"),
+        id=doc_id,
+    )
+    attempts = list(
+        _corrected_current_sync_attempts_queryset()
+        .filter(document_id=doc.id)
+        .order_by("-created_at")
+    )
+    attempt_rows = [
+        {
+            "attempt": attempt,
+            "status_label": _corrected_current_sync_status_label(attempt.status),
+            "storage_outcome_label": _corrected_current_sync_storage_outcome_label(
+                attempt.storage_outcome
+            ),
+            "initiated_by_username": (
+                attempt.initiated_by.username if attempt.initiated_by_id else "—"
+            ),
+        }
+        for attempt in attempts
+    ]
+
+    logger.info(
+        "corrected_current_sync_attempts_page user=%s doc_id=%s attempts=%s",
+        getattr(request.user, "username", None),
+        doc.id,
+        len(attempt_rows),
+    )
+    return render(
+        request,
+        "documents/corrected_current_sync_attempts.html",
+        {
+            "doc": doc,
+            "attempt_rows": attempt_rows,
+        },
+    )
+
+
+@login_required
+def corrected_current_sync_attempt_detail_page(request, doc_id: int, attempt_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    doc = get_object_or_404(
+        Document.objects.select_related("archive_item").prefetch_related(
+            text_presentation_results_prefetch()
+        ),
+        id=doc_id,
+    )
+    attempt = get_object_or_404(
+        _corrected_current_sync_attempts_queryset(with_pages=True),
+        id=attempt_id,
+        document_id=doc.id,
+    )
+
+    page_rows = [
+        {
+            "page": page,
+            "outcome_label": _CORRECTED_CURRENT_SYNC_PAGE_OUTCOME_LABELS.get(
+                page.outcome, page.outcome
+            ),
+        }
+        for page in attempt.pages.all()
+    ]
+
+    source_row = resolve_displayable_source_text_result(doc)
+    source_text = (source_row.text or "") if source_row is not None else ""
+    snapshot = attempt.resolved_snapshot
+    show_snapshot_preview = (
+        attempt.status == TranskribusCorrectedCurrentSyncAttempt.Status.COMPLETED
+        and snapshot is not None
+    )
+    snapshot_text = snapshot.canonical_text if show_snapshot_preview else ""
+    diff_html = None
+    if show_snapshot_preview and source_row is not None:
+        diff_html = render_transcription_diff_html(source_text, snapshot_text)
+
+    logger.info(
+        "corrected_current_sync_attempt_detail_page user=%s doc_id=%s attempt_id=%s "
+        "status=%s pages=%s has_source_baseline=%s",
+        getattr(request.user, "username", None),
+        doc.id,
+        attempt.id,
+        attempt.status,
+        len(page_rows),
+        source_row is not None,
+    )
+    return render(
+        request,
+        "documents/corrected_current_sync_attempt_detail.html",
+        {
+            "doc": doc,
+            "attempt": attempt,
+            "status_label": _corrected_current_sync_status_label(attempt.status),
+            "storage_outcome_label": _corrected_current_sync_storage_outcome_label(
+                attempt.storage_outcome
+            ),
+            "initiated_by_username": (
+                attempt.initiated_by.username if attempt.initiated_by_id else "—"
+            ),
+            "page_rows": page_rows,
+            "source_row": source_row,
+            "source_text": source_text,
+            "show_snapshot_preview": show_snapshot_preview,
+            "snapshot": snapshot if show_snapshot_preview else None,
+            "snapshot_text": snapshot_text,
+            "diff_html": diff_html,
+            "is_started": (
+                attempt.status == TranskribusCorrectedCurrentSyncAttempt.Status.STARTED
+            ),
+            "is_refused": (
+                attempt.status == TranskribusCorrectedCurrentSyncAttempt.Status.REFUSED
+            ),
+            "is_failed": (
+                attempt.status == TranskribusCorrectedCurrentSyncAttempt.Status.FAILED
+            ),
+            "is_completed": (
+                attempt.status
+                == TranskribusCorrectedCurrentSyncAttempt.Status.COMPLETED
+            ),
+        },
+    )
 
 
 def _review_text_result_not_eligible_response() -> HttpResponseBadRequest:

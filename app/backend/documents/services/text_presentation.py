@@ -417,6 +417,18 @@ def get_text_presentation_for_document(doc: Document) -> TextPresentation:
     )
 
 
+def resolve_displayable_source_text_result(
+    doc: Document,
+) -> Optional[DocumentTextResult]:
+    """
+    Latest displayable SOURCE_TEXT row only.
+
+    Never falls back to HEBREW_TEXT. Uses the same SUCCEEDED-then-NEEDS_REVIEW
+    rules and prefetch-aware path as ``_latest_displayable``.
+    """
+    return _latest_displayable(doc, "SOURCE_TEXT")
+
+
 def resolve_displayed_transcription_result(
     doc: Document,
 ) -> Optional[DocumentTextResult]:
@@ -430,9 +442,9 @@ def resolve_displayed_transcription_result(
         hebrew_obj = _latest_displayable(doc, "HEBREW_TEXT")
         if hebrew_obj:
             return hebrew_obj
-        return _latest_displayable(doc, "SOURCE_TEXT")
+        return resolve_displayable_source_text_result(doc)
 
-    source_obj = _latest_displayable(doc, "SOURCE_TEXT")
+    source_obj = resolve_displayable_source_text_result(doc)
     if source_obj:
         return source_obj
     return _latest_displayable(doc, "HEBREW_TEXT")
