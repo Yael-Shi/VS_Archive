@@ -46,6 +46,7 @@ from .models import (
     Tag,
     TranscriptionEditSuggestion,
     TranskribusCorrectedCurrentSyncAttempt,
+    TranskribusTranscriptSnapshot,
 )
 from documents.services.archive_catalog_metadata_validation import (
     parse_ocr_catalog_metadata_form,
@@ -198,6 +199,13 @@ from documents.services.text_presentation import (
     resolve_displayable_source_text_result,
     text_presentation_results_prefetch,
 )
+from documents.services.transkribus_corrected_current_activation import (
+    CorrectedCurrentActivationError,
+    CorrectedCurrentActivationErrorCode,
+    CorrectedCurrentActivationResult,
+    activate_corrected_current_sync_attempt,
+)
+from documents.services.transkribus_snapshot_parser import compute_sha256_hex
 from documents.services.transcription_edit_suggestions import (
     IDENTICAL_TEXT_ERROR,
     NAME_REQUIRED_ERROR,
@@ -2132,6 +2140,129 @@ def _corrected_current_sync_attempts_queryset(*, with_pages: bool = False):
     return qs
 
 
+_CORRECTED_CURRENT_ACTIVATION_CONFIRM_FIELD = "confirm_replace"
+_CORRECTED_CURRENT_ACTIVATION_CONFIRM_VALUE = "1"
+
+_CORRECTED_CURRENT_ACTIVATION_MSG_MISSING_CONFIRM = (
+    "יש לאשר במפורש את החלפת התעתוק לפני ביצוע הפעולה."
+)
+_CORRECTED_CURRENT_ACTIVATION_MSG_INVALID_BASELINE = (
+    "לא ניתן לבצע את ההחלפה. רעננו את הדף ונסו שוב."
+)
+_CORRECTED_CURRENT_ACTIVATION_MSG_GENERIC = (
+    "לא ניתן להשלים את ההחלפה כעת. רעננו את הדף ונסו שוב מאוחר יותר."
+)
+_CORRECTED_CURRENT_ACTIVATION_MSG_STALE = (
+    "התעתוק המוצג השתנה מאז התצוגה המקדימה. רעננו את הדף ובדקו שוב לפני ההחלפה."
+)
+_CORRECTED_CURRENT_ACTIVATION_MSG_VERIFIED = "לא ניתן להחליף תעתוק שאומת על ידי אדם."
+_CORRECTED_CURRENT_ACTIVATION_MSG_HUMAN_EDITED = (
+    "לא ניתן להחליף תעתוק שנערך ידנית ומוגן."
+)
+_CORRECTED_CURRENT_ACTIVATION_MSG_UNAUTHORIZED = "אין הרשאה לבצע החלפה זו."
+_CORRECTED_CURRENT_ACTIVATION_MSG_NOT_ELIGIBLE = (
+    "גרסת ה־Transkribus הזו כבר אינה זמינה להחלפה."
+)
+_CORRECTED_CURRENT_ACTIVATION_MSG_APPLIED_SOURCE = (
+    "התעתוק המוצג הוחלף בגרסת Transkribus."
+)
+_CORRECTED_CURRENT_ACTIVATION_MSG_APPLIED_HEBREW_MIRROR = (
+    "התעתוק בעברית עודכן בהתאם לגרסת Transkribus. תעתוק המקור לא השתנה."
+)
+_CORRECTED_CURRENT_ACTIVATION_MSG_APPLIED_BINDING_ONLY = (
+    "הקישור לגרסת Transkribus עודכן. התעתוק המוצג לא השתנה."
+)
+_CORRECTED_CURRENT_ACTIVATION_MSG_ALREADY_ACTIVE = (
+    "גרסת Transkribus הזו כבר פעילה. לא בוצע שינוי."
+)
+
+_CORRECTED_CURRENT_ACTIVATION_ERROR_MESSAGES_HE: dict[str, str] = {
+    CorrectedCurrentActivationErrorCode.STALE_PREVIEW: (
+        _CORRECTED_CURRENT_ACTIVATION_MSG_STALE
+    ),
+    CorrectedCurrentActivationErrorCode.VERIFIED_BLOCKED: (
+        _CORRECTED_CURRENT_ACTIVATION_MSG_VERIFIED
+    ),
+    CorrectedCurrentActivationErrorCode.HUMAN_EDITED_BLOCKED: (
+        _CORRECTED_CURRENT_ACTIVATION_MSG_HUMAN_EDITED
+    ),
+    CorrectedCurrentActivationErrorCode.ACTOR_UNAUTHORIZED: (
+        _CORRECTED_CURRENT_ACTIVATION_MSG_UNAUTHORIZED
+    ),
+    CorrectedCurrentActivationErrorCode.DOCUMENT_NOT_FOUND: (
+        _CORRECTED_CURRENT_ACTIVATION_MSG_NOT_ELIGIBLE
+    ),
+    CorrectedCurrentActivationErrorCode.ATTEMPT_NOT_FOUND: (
+        _CORRECTED_CURRENT_ACTIVATION_MSG_NOT_ELIGIBLE
+    ),
+    CorrectedCurrentActivationErrorCode.ATTEMPT_DOCUMENT_MISMATCH: (
+        _CORRECTED_CURRENT_ACTIVATION_MSG_NOT_ELIGIBLE
+    ),
+    CorrectedCurrentActivationErrorCode.ATTEMPT_NOT_COMPLETED: (
+        _CORRECTED_CURRENT_ACTIVATION_MSG_NOT_ELIGIBLE
+    ),
+    CorrectedCurrentActivationErrorCode.SNAPSHOT_MISSING: (
+        _CORRECTED_CURRENT_ACTIVATION_MSG_NOT_ELIGIBLE
+    ),
+    CorrectedCurrentActivationErrorCode.SNAPSHOT_DOCUMENT_MISMATCH: (
+        _CORRECTED_CURRENT_ACTIVATION_MSG_NOT_ELIGIBLE
+    ),
+    CorrectedCurrentActivationErrorCode.SNAPSHOT_NOT_READY: (
+        _CORRECTED_CURRENT_ACTIVATION_MSG_NOT_ELIGIBLE
+    ),
+    CorrectedCurrentActivationErrorCode.SNAPSHOT_PAGE_MISMATCH: (
+        _CORRECTED_CURRENT_ACTIVATION_MSG_NOT_ELIGIBLE
+    ),
+    CorrectedCurrentActivationErrorCode.TARGET_NOT_FOUND: (
+        _CORRECTED_CURRENT_ACTIVATION_MSG_NOT_ELIGIBLE
+    ),
+    CorrectedCurrentActivationErrorCode.TARGET_DOCUMENT_MISMATCH: (
+        _CORRECTED_CURRENT_ACTIVATION_MSG_NOT_ELIGIBLE
+    ),
+    CorrectedCurrentActivationErrorCode.TARGET_NOT_SOURCE_TEXT: (
+        _CORRECTED_CURRENT_ACTIVATION_MSG_NOT_ELIGIBLE
+    ),
+    CorrectedCurrentActivationErrorCode.CANONICAL_TEXT_EMPTY: (
+        _CORRECTED_CURRENT_ACTIVATION_MSG_GENERIC
+    ),
+    CorrectedCurrentActivationErrorCode.CANONICAL_HASH_MISMATCH: (
+        _CORRECTED_CURRENT_ACTIVATION_MSG_GENERIC
+    ),
+    CorrectedCurrentActivationErrorCode.HEBREW_MIRROR_MISSING: (
+        _CORRECTED_CURRENT_ACTIVATION_MSG_GENERIC
+    ),
+    CorrectedCurrentActivationErrorCode.BINDING_FAILED: (
+        _CORRECTED_CURRENT_ACTIVATION_MSG_GENERIC
+    ),
+}
+
+
+def _corrected_current_activation_error_message(code: str) -> str:
+    return _CORRECTED_CURRENT_ACTIVATION_ERROR_MESSAGES_HE.get(
+        code,
+        _CORRECTED_CURRENT_ACTIVATION_MSG_GENERIC,
+    )
+
+
+def _corrected_current_activation_success_message(
+    result: CorrectedCurrentActivationResult,
+) -> str:
+    if result.outcome == "ALREADY_ACTIVE":
+        return _CORRECTED_CURRENT_ACTIVATION_MSG_ALREADY_ACTIVE
+    if result.source_text_changed:
+        return _CORRECTED_CURRENT_ACTIVATION_MSG_APPLIED_SOURCE
+    if result.hebrew_mirror_updated:
+        return _CORRECTED_CURRENT_ACTIVATION_MSG_APPLIED_HEBREW_MIRROR
+    return _CORRECTED_CURRENT_ACTIVATION_MSG_APPLIED_BINDING_ONLY
+
+
+def _corrected_current_activation_detail_url(*, doc_id: int, attempt_id: int) -> str:
+    return reverse(
+        "corrected-current-sync-attempt-detail",
+        kwargs={"doc_id": doc_id, "attempt_id": attempt_id},
+    )
+
+
 @login_required
 def corrected_current_sync_attempts_page(request, doc_id: int):
     deny = _require_admin_page(request)
@@ -2211,10 +2342,27 @@ def corrected_current_sync_attempt_detail_page(request, doc_id: int, attempt_id:
     source_row = resolve_displayable_source_text_result(doc)
     source_text = (source_row.text or "") if source_row is not None else ""
     snapshot = attempt.resolved_snapshot
+    snapshot_ready = (
+        snapshot is not None
+        and snapshot.storage_status == TranskribusTranscriptSnapshot.StorageStatus.READY
+    )
     show_snapshot_preview = (
         attempt.status == TranskribusCorrectedCurrentSyncAttempt.Status.COMPLETED
         and snapshot is not None
     )
+    show_activation_section = (
+        attempt.status == TranskribusCorrectedCurrentSyncAttempt.Status.COMPLETED
+        and snapshot_ready
+    )
+    activation_form_available = False
+    activation_source_text_result_id: int | None = None
+    activation_expected_source_revision: int | None = None
+    activation_expected_source_sha256: str | None = None
+    if show_activation_section and source_row is not None:
+        activation_form_available = True
+        activation_source_text_result_id = source_row.id
+        activation_expected_source_revision = source_row.source_revision
+        activation_expected_source_sha256 = compute_sha256_hex(source_row.text or "")
     snapshot_text = snapshot.canonical_text if show_snapshot_preview else ""
     diff_html = None
     if show_snapshot_preview and source_row is not None:
@@ -2222,13 +2370,14 @@ def corrected_current_sync_attempt_detail_page(request, doc_id: int, attempt_id:
 
     logger.info(
         "corrected_current_sync_attempt_detail_page user=%s doc_id=%s attempt_id=%s "
-        "status=%s pages=%s has_source_baseline=%s",
+        "status=%s pages=%s has_source_baseline=%s activation_form=%s",
         getattr(request.user, "username", None),
         doc.id,
         attempt.id,
         attempt.status,
         len(page_rows),
         source_row is not None,
+        activation_form_available,
     )
     return render(
         request,
@@ -2250,6 +2399,11 @@ def corrected_current_sync_attempt_detail_page(request, doc_id: int, attempt_id:
             "snapshot": snapshot if show_snapshot_preview else None,
             "snapshot_text": snapshot_text,
             "diff_html": diff_html,
+            "show_activation_section": show_activation_section,
+            "activation_form_available": activation_form_available,
+            "activation_source_text_result_id": activation_source_text_result_id,
+            "activation_expected_source_revision": activation_expected_source_revision,
+            "activation_expected_source_sha256": activation_expected_source_sha256,
             "is_started": (
                 attempt.status == TranskribusCorrectedCurrentSyncAttempt.Status.STARTED
             ),
@@ -2265,6 +2419,87 @@ def corrected_current_sync_attempt_detail_page(request, doc_id: int, attempt_id:
             ),
         },
     )
+
+
+@login_required
+@require_POST
+def corrected_current_sync_attempt_activate(request, doc_id: int, attempt_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    # URL ownership/existence parity with GET detail (404, no messages).
+    get_object_or_404(
+        TranskribusCorrectedCurrentSyncAttempt.objects.only("id"),
+        id=attempt_id,
+        document_id=doc_id,
+    )
+
+    detail_url = _corrected_current_activation_detail_url(
+        doc_id=doc_id,
+        attempt_id=attempt_id,
+    )
+
+    confirm = (
+        request.POST.get(_CORRECTED_CURRENT_ACTIVATION_CONFIRM_FIELD) or ""
+    ).strip()
+    if confirm != _CORRECTED_CURRENT_ACTIVATION_CONFIRM_VALUE:
+        messages.error(request, _CORRECTED_CURRENT_ACTIVATION_MSG_MISSING_CONFIRM)
+        return redirect(detail_url)
+
+    raw_source_id = request.POST.get("source_text_result_id")
+    raw_revision = request.POST.get("expected_source_revision")
+    expected_source_sha256 = (request.POST.get("expected_source_sha256") or "").strip()
+    try:
+        source_text_result_id = int(raw_source_id)
+        expected_source_revision = int(raw_revision)
+    except (TypeError, ValueError):
+        messages.error(request, _CORRECTED_CURRENT_ACTIVATION_MSG_INVALID_BASELINE)
+        return redirect(detail_url)
+
+    if not expected_source_sha256:
+        messages.error(request, _CORRECTED_CURRENT_ACTIVATION_MSG_INVALID_BASELINE)
+        return redirect(detail_url)
+
+    try:
+        result = activate_corrected_current_sync_attempt(
+            document_id=doc_id,
+            attempt_id=attempt_id,
+            source_text_result_id=source_text_result_id,
+            activated_by=request.user,
+            expected_source_revision=expected_source_revision,
+            expected_source_sha256=expected_source_sha256,
+        )
+    except CorrectedCurrentActivationError as exc:
+        messages.error(
+            request,
+            _corrected_current_activation_error_message(exc.code),
+        )
+        logger.info(
+            "corrected_current_sync_attempt_activate rejected user=%s doc_id=%s "
+            "attempt_id=%s code=%s",
+            getattr(request.user, "username", None),
+            doc_id,
+            attempt_id,
+            exc.code,
+        )
+        return redirect(detail_url)
+
+    messages.success(
+        request,
+        _corrected_current_activation_success_message(result),
+    )
+    logger.info(
+        "corrected_current_sync_attempt_activate ok user=%s doc_id=%s attempt_id=%s "
+        "outcome=%s source_text_changed=%s hebrew_mirror_updated=%s",
+        getattr(request.user, "username", None),
+        doc_id,
+        attempt_id,
+        result.outcome,
+        result.source_text_changed,
+        result.hebrew_mirror_updated,
+    )
+    return redirect(detail_url)
 
 
 def _review_text_result_not_eligible_response() -> HttpResponseBadRequest:

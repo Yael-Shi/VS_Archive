@@ -303,6 +303,12 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
             kwargs={"doc_id": doc_id, "attempt_id": attempt_id},
         )
 
+    def _activate_url(self, doc_id: int, attempt_id: int) -> str:
+        return reverse(
+            "corrected-current-sync-attempt-activate",
+            kwargs={"doc_id": doc_id, "attempt_id": attempt_id},
+        )
+
     def test_anonymous_redirects_to_login(self):
         doc = self._create_doc()
         resp = self.client.get(self._list_url(doc.id))
@@ -323,7 +329,9 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
         self.assertContains(resp, "גרסאות תעתוק מ־Transkribus")
         self.assertContains(resp, "אין עדיין ניסיונות סנכרון")
         self.assertContains(resp, _PREVIEW_BANNER)
-        self.assertNotContains(resp, "activate")
+        self.assertNotContains(resp, "corrected-sync-activation-form")
+        self.assertNotContains(resp, "החלפת התעתוק המוצג בגרסת Transkribus")
+        self.assertNotContains(resp, "/activate/")
         self.assertNotContains(resp, "Snapshot")
         self.assertNotContains(resp, "קוד כשל")
         self.assertNotContains(resp, "הפעלה")
@@ -466,7 +474,14 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
         self.assertIn('class="transcription-diff-ins"', html)
         self.assertIn("sync", primary)
         self.assertNotIn("שלום", html)
-        self.assertNotIn("activate", primary)
+        self.assertIn("החלפת התעתוק המוצג בגרסת Transkribus", primary)
+        self.assertIn("corrected-sync-activation-form", primary)
+        self.assertIn('name="confirm_replace"', primary)
+        self.assertIn('name="csrfmiddlewaretoken"', primary)
+        self.assertIn(
+            self._activate_url(doc.id, attempt.id),
+            primary,
+        )
         self.assertNotIn("SOURCE_TEXT", primary)
         self.assertNotIn("source_kind", primary)
         self.assertNotIn("storage_status", primary)
@@ -482,6 +497,8 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
         self.assertNotIn("revision 3", primary)
         self.assertNotIn("מזהה snapshot", primary)
         self.assertNotIn("טקסט קנוני מה־snapshot", primary)
+        self.assertNotIn("STALE_PREVIEW", primary)
+        self.assertNotIn("APPLIED", primary)
 
         _assert_technical_details_collapsed(self, html)
         self.assertIn("CORRECTED_CURRENT_SYNC", technical)
@@ -498,13 +515,14 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
         self.assertNotContains(resp, "page_xml_s3_key")
         self.assertNotContains(resp, "remote_status_summary")
         self.assertNotContains(resp, '{"pages"')
-        self.assertNotIn("activate", html.lower())
-        self.assertNotIn("הפעלה", primary)
 
         # Backend still resolves SOURCE_TEXT as the comparison baseline.
         self.assertEqual(resp.context["source_row"], source)
         self.assertEqual(resp.context["source_text"], "Hello")
         self.assertIsNotNone(resp.context["diff_html"])
+        self.assertTrue(resp.context["activation_form_available"])
+        self.assertEqual(resp.context["activation_source_text_result_id"], source.id)
+        self.assertEqual(resp.context["activation_expected_source_revision"], 3)
 
     def test_hebrew_document_uses_source_text_baseline(self):
         doc = self._create_doc(title="HE completed")
@@ -570,12 +588,17 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
         primary, _technical = _split_primary_and_technical(html)
         self.assertIn(_NO_BASELINE_MSG, primary)
         self.assertIn("Snapshot only", primary)
+        self.assertIn("אין תעתוק מקור שמור שאפשר להחליף כרגע.", primary)
+        self.assertNotIn("corrected-sync-activation-form", primary)
+        self.assertNotIn("החלפת התעתוק המוצג בגרסת Transkribus", primary)
         self.assertNotIn("SOURCE_TEXT", primary)
         self.assertNotIn("HEBREW_TEXT", primary)
         self.assertNotIn('class="transcription-diff', primary)
         self.assertNotIn("רק עברית", html)
         self.assertIsNone(resp.context["source_row"])
         self.assertIsNone(resp.context["diff_html"])
+        self.assertTrue(resp.context["show_activation_section"])
+        self.assertFalse(resp.context["activation_form_available"])
 
     def test_refused_shows_page_reasons_without_snapshot_preview(self):
         doc = self._create_doc(title="Refused attempt")
@@ -610,7 +633,9 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
         self.assertNotIn("התעתוק הנוכחי מ־Transkribus", primary)
         self.assertNotIn("מה השתנה", primary)
         self.assertNotIn("MULTIPLE_TRANSCRIPTS", primary)
-        self.assertNotIn("activate", primary)
+        self.assertNotIn("corrected-sync-activation-form", primary)
+        self.assertNotIn("החלפת התעתוק המוצג בגרסת Transkribus", primary)
+        self.assertFalse(resp.context["show_activation_section"])
         _assert_technical_details_collapsed(self, html)
         self.assertIn("MULTIPLE_TRANSCRIPTS", technical)
 

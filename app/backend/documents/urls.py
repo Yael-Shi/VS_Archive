@@ -131,4 +131,9 @@ urlpatterns = [
         views.corrected_current_sync_attempt_detail_page,
         name="corrected-current-sync-attempt-detail",
     ),
+    path(
+        "ui/admin/documents/<int:doc_id>/transkribus-corrected-current-sync/<int:attempt_id>/activate/",
+        views.corrected_current_sync_attempt_activate,
+        name="corrected-current-sync-attempt-activate",
+    ),
 ]
