@@ -1358,3 +1358,339 @@ class TranskribusRunAutomaticSnapshot(models.Model):
             f"TranskribusRunAutomaticSnapshot(run={self.run_id}, "
             f"snapshot={self.snapshot_id})"
         )
+
+
+class TranskribusCorrectedCurrentSyncAttempt(models.Model):
+    """
+    Staff-initiated corrected/current Transkribus sync provenance for a Document.
+
+    Records whether a sync completed, was refused at selection, or failed before
+    a READY snapshot link. Future activation must reference an explicit COMPLETED
+    attempt id (never infer latest). Does not perform HTTP, storage, or activation.
+    """
+
+    class Status(models.TextChoices):
+        STARTED = "STARTED", "Started"
+        COMPLETED = "COMPLETED", "Completed"
+        REFUSED = "REFUSED", "Refused"
+        FAILED = "FAILED", "Failed"
+
+    class StorageOutcome(models.TextChoices):
+        CREATED = "CREATED", "Created"
+        REUSED_EXISTING = "REUSED_EXISTING", "Reused existing"
+        REUSED_CONCURRENT_WINNER = (
+            "REUSED_CONCURRENT_WINNER",
+            "Reused concurrent winner",
+        )
+
+    document = models.ForeignKey(
+        Document,
+        on_delete=models.CASCADE,
+        related_name="transkribus_corrected_current_sync_attempts",
+    )
+    transkribus_run = models.ForeignKey(
+        TranskribusRun,
+        on_delete=models.RESTRICT,
+        related_name="corrected_current_sync_attempts",
+    )
+    initiated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="transkribus_corrected_current_sync_attempts",
+    )
+
+    status = models.CharField(max_length=16, choices=Status.choices)
+
+    resolved_snapshot = models.ForeignKey(
+        TranskribusTranscriptSnapshot,
+        on_delete=models.RESTRICT,
+        null=True,
+        blank=True,
+        related_name="corrected_current_sync_attempts",
+    )
+    storage_outcome = models.CharField(
+        max_length=32,
+        choices=StorageOutcome.choices,
+        null=True,
+        blank=True,
+    )
+
+    failure_code = models.CharField(max_length=64, null=True, blank=True)
+    failure_message = models.CharField(max_length=512, null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["document", "-created_at"],
+                name="tr_cc_sync_doc_created_idx",
+            ),
+            models.Index(
+                fields=["document", "status"],
+                name="tr_cc_sync_doc_status_idx",
+            ),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(
+                    status__in=[
+                        "STARTED",
+                        "COMPLETED",
+                        "REFUSED",
+                        "FAILED",
+                    ]
+                ),
+                name="tr_cc_sync_status_valid",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(storage_outcome__isnull=True)
+                | models.Q(
+                    storage_outcome__in=[
+                        "CREATED",
+                        "REUSED_EXISTING",
+                        "REUSED_CONCURRENT_WINNER",
+                    ]
+                ),
+                name="tr_cc_sync_storage_outcome_valid",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="STARTED")
+                    | (
+                        models.Q(completed_at__isnull=True)
+                        & models.Q(resolved_snapshot__isnull=True)
+                        & models.Q(storage_outcome__isnull=True)
+                        & models.Q(failure_code__isnull=True)
+                        & models.Q(failure_message__isnull=True)
+                    )
+                ),
+                name="tr_cc_sync_started_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="COMPLETED")
+                    | (
+                        models.Q(completed_at__isnull=False)
+                        & models.Q(resolved_snapshot__isnull=False)
+                        & models.Q(storage_outcome__isnull=False)
+                        & models.Q(failure_code__isnull=True)
+                        & models.Q(failure_message__isnull=True)
+                    )
+                ),
+                name="tr_cc_sync_completed_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="REFUSED")
+                    | (
+                        models.Q(completed_at__isnull=False)
+                        & models.Q(resolved_snapshot__isnull=True)
+                        & models.Q(storage_outcome__isnull=True)
+                        & models.Q(failure_code__isnull=True)
+                        & models.Q(failure_message__isnull=True)
+                    )
+                ),
+                name="tr_cc_sync_refused_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="FAILED")
+                    | (
+                        models.Q(completed_at__isnull=False)
+                        & models.Q(failure_code__isnull=False)
+                        & ~models.Q(failure_code="")
+                        & models.Q(resolved_snapshot__isnull=True)
+                        & models.Q(storage_outcome__isnull=True)
+                    )
+                ),
+                name="tr_cc_sync_failed_shape",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        self._validate_transkribus_run()
+        self._validate_resolved_snapshot()
+
+    def _validate_transkribus_run(self) -> None:
+        if not self.transkribus_run_id or not self.document_id:
+            return
+        run = self.transkribus_run
+        if run.document_id != self.document_id:
+            raise ValidationError(
+                {
+                    "transkribus_run": (
+                        "TranskribusCorrectedCurrentSyncAttempt requires "
+                        "transkribus_run to belong to the same document."
+                    )
+                }
+            )
+        if run.mode != TranskribusRun.Mode.UPLOAD_CREATED:
+            raise ValidationError(
+                {
+                    "transkribus_run": (
+                        "Corrected-current sync requires an UPLOAD_CREATED "
+                        "TranskribusRun with trusted page_index_to_page_nr."
+                    )
+                }
+            )
+        mapping = run.page_index_to_page_nr
+        if not isinstance(mapping, dict) or not mapping:
+            raise ValidationError(
+                {
+                    "transkribus_run": (
+                        "Corrected-current sync requires a non-empty "
+                        "page_index_to_page_nr mapping on the TranskribusRun."
+                    )
+                }
+            )
+
+    def _validate_resolved_snapshot(self) -> None:
+        if not self.resolved_snapshot_id:
+            return
+        snapshot = self.resolved_snapshot
+        if snapshot is None:
+            return
+        if snapshot.document_id != self.document_id:
+            raise ValidationError(
+                {
+                    "resolved_snapshot": (
+                        "Resolved snapshot must belong to the same document "
+                        "as the sync attempt."
+                    )
+                }
+            )
+        if snapshot.storage_status != TranskribusTranscriptSnapshot.StorageStatus.READY:
+            raise ValidationError(
+                {
+                    "resolved_snapshot": (
+                        "Resolved snapshot must have storage_status=READY."
+                    )
+                }
+            )
+
+    def save(self, *args, **kwargs):
+        self._validate_transkribus_run()
+        self._validate_resolved_snapshot()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return (
+            f"TranskribusCorrectedCurrentSyncAttempt(id={self.pk}, "
+            f"doc={self.document_id}, status={self.status})"
+        )
+
+
+class TranskribusCorrectedCurrentSyncPage(models.Model):
+    """Per-page corrected/current selection or refusal for one sync attempt."""
+
+    class Outcome(models.TextChoices):
+        SELECTED = "SELECTED", "Selected"
+        REFUSED = "REFUSED", "Refused"
+
+    class SelectionErrorCode(models.TextChoices):
+        ZERO_TRANSCRIPTS = "ZERO_TRANSCRIPTS", "Zero transcripts"
+        MULTIPLE_TRANSCRIPTS = "MULTIPLE_TRANSCRIPTS", "Multiple transcripts"
+        MISSING_TS_ID = "MISSING_TS_ID", "Missing tsId"
+
+    attempt = models.ForeignKey(
+        TranskribusCorrectedCurrentSyncAttempt,
+        on_delete=models.CASCADE,
+        related_name="pages",
+    )
+
+    page_index = models.PositiveIntegerField(
+        help_text="1-based local page index (matches PageImage.page_index).",
+    )
+    page_nr = models.PositiveIntegerField(
+        help_text="Transkribus pageNr.",
+    )
+
+    outcome = models.CharField(max_length=16, choices=Outcome.choices)
+
+    transcript_ts_id = models.CharField(max_length=64, blank=True, default="")
+    remote_transcript_status = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Observed provider transcript status; not verification.",
+    )
+    in_progress_warning = models.BooleanField(default=False)
+
+    selection_error_code = models.CharField(
+        max_length=32,
+        choices=SelectionErrorCode.choices,
+        blank=True,
+        default="",
+    )
+    selection_error_message = models.CharField(max_length=512, blank=True, default="")
+
+    class Meta:
+        ordering = ["page_index"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(outcome__in=["SELECTED", "REFUSED"]),
+                name="tr_cc_sync_page_outcome_valid",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(selection_error_code="")
+                | models.Q(
+                    selection_error_code__in=[
+                        "ZERO_TRANSCRIPTS",
+                        "MULTIPLE_TRANSCRIPTS",
+                        "MISSING_TS_ID",
+                    ]
+                ),
+                name="tr_cc_sync_selection_error_code_valid",
+            ),
+            models.UniqueConstraint(
+                fields=["attempt", "page_index"],
+                name="uniq_tr_cc_sync_page_index",
+            ),
+            models.UniqueConstraint(
+                fields=["attempt", "page_nr"],
+                name="uniq_tr_cc_sync_page_nr",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(page_index__gte=1),
+                name="tr_cc_sync_page_index_gte_1",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(page_nr__gte=1),
+                name="tr_cc_sync_page_nr_gte_1",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(outcome="SELECTED")
+                    | (
+                        ~models.Q(transcript_ts_id="")
+                        & models.Q(selection_error_code="")
+                        & models.Q(selection_error_message="")
+                    )
+                ),
+                name="tr_cc_sync_page_selected_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(outcome="REFUSED")
+                    | (
+                        models.Q(transcript_ts_id="")
+                        & ~models.Q(selection_error_code="")
+                        & ~models.Q(selection_error_message="")
+                    )
+                ),
+                name="tr_cc_sync_page_refused_shape",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return (
+            f"TranskribusCorrectedCurrentSyncPage(attempt={self.attempt_id}, "
+            f"page_index={self.page_index}, outcome={self.outcome})"
+        )

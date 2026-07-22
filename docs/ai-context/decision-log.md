@@ -1703,4 +1703,23 @@ Content-Type: `application/xml` via `put_object_bytes`.
 - Per document: if **any** page refuses, the whole document selection is refused (orchestration must not partially sync). Empty `pages` input is invalid and raises **`ValueError`** (caller must supply mapped pages).
 - `IN_PROGRESS` (case/space normalized) sets a fixed `in_progress_warning` on the selection; it does not refuse.
 
-**Deferred (not this PR):** HTTP fetch, snapshot storage, sync attempt rows, staff UI, activation, hover, backfill.
+**Deferred (not this PR):** HTTP fetch, snapshot storage, staff UI, activation, hover, backfill.
+
+## Transkribus corrected-current sync provenance (schema)
+
+**Decision:** Persist staff corrected/current sync as **`TranskribusCorrectedCurrentSyncAttempt`** plus per-page **`TranskribusCorrectedCurrentSyncPage`** rows (migration **0041**). Schema only — no orchestration, HTTP/S3, activation, or UI in this PR.
+
+**Attempt contract:**
+
+- Required **`document`**, trusted **`UPLOAD_CREATED`** **`transkribus_run`** (same document, non-empty **`page_index_to_page_nr`**), and **`status`** (`STARTED` | `COMPLETED` | `REFUSED` | `FAILED`). Multiple attempts per document are allowed. **`initiated_by`** is nullable with **`SET_NULL`** (required when the future creation service starts an attempt; historical rows survive user deletion), aligned with snapshot audit actor fields.
+- **`COMPLETED`** links a **`resolved_snapshot`** that must be **`READY`** on the same document and records **`storage_outcome`** (`CREATED` | `REUSED_EXISTING` | `REUSED_CONCURRENT_WINNER`) aligned with snapshot storage semantics (including reuse of an existing **`AUTOMATIC_HTR`** READY row without mutating **`source_kind`**). DB check constraints enforce declared **`status`** / non-null **`storage_outcome`** values only.
+- **`REFUSED`** / **`FAILED`** terminal shapes are enforced with DB check constraints; **`FAILED`** requires non-null, non-empty **`failure_code`**. Cross-row lifecycle transitions and terminal immutability belong in a future service (not model save hooks beyond run/snapshot integrity checks).
+- **`transkribus_run`** and **`resolved_snapshot`** use **`RESTRICT`** so provenance blocks deleting runs or snapshots still referenced independently; **`document`** CASCADE removes attempts (and pages), and existing **`TranskribusRun`** / **`TranskribusTranscriptSnapshot`** CASCADE from **`Document`** removes runs and snapshots when the document is deleted.
+
+**Page contract:**
+
+- Per attempt: 1-based **`page_index`** / **`page_nr`**, outcome **`SELECTED`** (requires **`transcript_ts_id`**; optional remote status + **`in_progress_warning`**) or **`REFUSED`** (requires bounded selection error fields). **`selection_error_code`** on REFUSED rows must be one of **`ZERO_TRANSCRIPTS`**, **`MULTIPLE_TRANSCRIPTS`**, or **`MISSING_TS_ID`** (same vocabulary as **`transkribus_corrected_current_selection`**). DB constraints enforce declared **`outcome`** and non-empty **`selection_error_code`** values. Mutual exclusion enforced in the DB.
+
+**Activation (future):** Staff activation must reference an **explicit `COMPLETED` attempt id**, verify page **`transcript_ts_id`** values against the attempt’s **`resolved_snapshot`** pages, and must **never** infer “latest” attempt. No URLs, tokens, raw XML, provider user metadata, or generic JSON on these tables.
+
+**Still out of scope:** sync orchestration service, queues, staff UI, hover, cleanup automation.
