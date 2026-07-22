@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from django.db.models import Q
+from django.db.models import Manager, Q
 from django.utils import timezone
 
 from documents.models import (
@@ -38,9 +38,14 @@ DOCUMENT_S3_REFERENCE_FIELDS: tuple[tuple[str, str], ...] = (
     ("DocumentSourceFile", "file_s3_key"),
 )
 
-_DOCUMENT_S3_REFERENCE_MODELS: dict[str, type] = {
-    "Document": Document,
-    "DocumentSourceFile": DocumentSourceFile,
+# django-stubs removes Model.objects from type[Model] and only attaches managers to
+# concrete model classes. Store the default managers directly so values_list typing
+# resolves without treating model classes as type[Model].
+_DOCUMENT_S3_REFERENCE_MANAGERS: dict[
+    str, Manager[Document] | Manager[DocumentSourceFile]
+] = {
+    "Document": Document.objects,
+    "DocumentSourceFile": DocumentSourceFile.objects,
 }
 
 _DOCUMENTS_PREFIX_ROOT = "documents/"
@@ -125,9 +130,9 @@ def collect_referenced_document_s3_keys(*, now=None) -> set[str]:
     keys: set[str] = set()
 
     for model_name, field_name in DOCUMENT_S3_REFERENCE_FIELDS:
-        model = _DOCUMENT_S3_REFERENCE_MODELS[model_name]
+        manager = _DOCUMENT_S3_REFERENCE_MANAGERS[model_name]
 
-        for key in model.objects.values_list(field_name, flat=True):
+        for key in manager.values_list(field_name, flat=True):
             normalized = (key or "").strip()
             if normalized:
                 keys.add(normalized)

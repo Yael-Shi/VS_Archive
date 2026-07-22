@@ -628,7 +628,7 @@ class TranskribusSnapshotStorageTests(TestCase):
 
         self.assertEqual(err, "failed_state_update category=DatabaseError")
 
-    def test_string_and_bool_page_indexes_rejected_before_upload(self):
+    def test_string_and_bool_page_indexes_rejected_before_upload(self) -> None:
         put_mock, delete_mock = self._mock_s3()
         xml = _page_xml(FULL_GEOMETRY_BODY)
         with put_mock, delete_mock:
@@ -664,7 +664,7 @@ class TranskribusSnapshotStorageTests(TestCase):
                     source_kind=TranskribusTranscriptSnapshot.SourceKind.AUTOMATIC_HTR,
                     pages=[
                         SnapshotPageInput(
-                            page_index=True,  # type: ignore[arg-type]
+                            page_index=True,
                             page_nr=1,
                             transcript_ts_id="7",
                             page_xml=xml,
@@ -678,7 +678,7 @@ class TranskribusSnapshotStorageTests(TestCase):
                     pages=[
                         SnapshotPageInput(
                             page_index=1,
-                            page_nr=True,  # type: ignore[arg-type]
+                            page_nr=True,
                             transcript_ts_id="7",
                             page_xml=xml,
                         )

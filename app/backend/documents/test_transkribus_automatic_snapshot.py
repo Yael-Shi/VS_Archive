@@ -228,6 +228,7 @@ class PickTranscriptSelectorTests(TestCase):
             job_id="10",
             model_id="20",
         )
+        assert chosen is not None
         self.assertEqual(chosen["url"], "http://b")
 
     def test_job_only_fallback(self):
@@ -239,6 +240,7 @@ class PickTranscriptSelectorTests(TestCase):
             job_id="10",
             model_id="20",
         )
+        assert chosen is not None
         self.assertEqual(chosen["url"], "http://job")
 
     def test_model_only_fallback(self):
@@ -250,6 +252,7 @@ class PickTranscriptSelectorTests(TestCase):
             job_id="10",
             model_id="20",
         )
+        assert chosen is not None
         self.assertEqual(chosen["url"], "http://model")
 
 

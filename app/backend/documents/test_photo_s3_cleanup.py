@@ -97,8 +97,8 @@ class PhotoS3CleanupTests(TestCase):
 
     @patch("documents.services.photo_s3_cleanup.delete_photo_s3_objects_best_effort")
     def test_rollback_discards_scheduled_cleanup(self, mock_cleanup):
-        try:
-            with self.captureOnCommitCallbacks(execute=True) as callbacks:
+        with self.captureOnCommitCallbacks(execute=True) as callbacks:
+            try:
                 with transaction.atomic():
                     schedule_photo_s3_cleanup_after_commit(
                         bucket="bucket",
@@ -107,8 +107,8 @@ class PhotoS3CleanupTests(TestCase):
                         photo_content_id=1,
                     )
                     raise RuntimeError("force rollback")
-        except RuntimeError:
-            pass
+            except RuntimeError:
+                pass
 
         self.assertEqual(callbacks, [])
         mock_cleanup.assert_not_called()
