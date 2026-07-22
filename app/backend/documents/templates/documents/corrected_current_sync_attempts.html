@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}VSArchive - היסטוריית סנכרון Transkribus מתוקן · {{ doc.archive_item.title }}{% endblock %}
+{% block title %}VSArchive - גרסאות תעתוק מ־Transkribus · {{ doc.archive_item.title }}{% endblock %}
 
 {% block content %}
-  <div class="card card--pad-lg">
+  <div class="card card--pad-lg corrected-sync-preview">
     <div class="page-toolbar">
       <a class="btn" href="{% url 'documents-detail-page' doc_id=doc.id %}">תצוגת מסמך</a>
       <a class="btn" href="{% url 'review-detail-page' doc_id=doc.id %}">בקרת תעתוק</a>
@@ -10,7 +10,7 @@
 
     <div class="spacer"></div>
 
-    <h1 class="page-title">היסטוריית סנכרון Transkribus מתוקן/נוכחי</h1>
+    <h1 class="page-title">גרסאות תעתוק מ־Transkribus</h1>
     <div class="page-lead">
       <a href="{% url 'documents-detail-page' doc_id=doc.id %}">{{ doc.archive_item.title }}</a>
       · מסמך #{{ doc.id }}
@@ -18,14 +18,13 @@
 
     <div class="spacer-sm"></div>
     <div class="alert">
-      זו רשימת היסטוריה ותצוגה מקדימה בלבד. היא אינה משנה את הארכיון הציבורי,
-      ואינה מפעילה (activate) תוצאה. הפעלה עתידית תידרש כפעולה מפורשת ונפרדת.
+      זוהי תצוגה מקדימה בלבד. שום דבר עדיין לא השתנה באתר.
     </div>
   </div>
 
   <div class="spacer"></div>
 
-  <div class="card card--pad-lg">
+  <div class="card card--pad-lg corrected-sync-preview">
     <div class="section-title">ניסיונות סנכרון</div>
     <div class="spacer-sm"></div>
 
@@ -34,29 +33,24 @@
         <table class="table">
           <thead>
             <tr>
-              <th>מזהה</th>
-              <th>סטטוס</th>
-              <th>נוצר</th>
-              <th>הושלם</th>
-              <th>יזם/ה</th>
-              <th>תוצאת אחסון</th>
-              <th>Snapshot</th>
-              <th>קוד כשל</th>
-              <th></th>
+              <th>ניסיון</th>
+              <th>מצב</th>
+              <th>התחלה</th>
+              <th>סיום</th>
+              <th>הופעל על ידי</th>
+              <th>תוצאה</th>
+              <th>צפייה</th>
             </tr>
           </thead>
           <tbody>
             {% for row in attempt_rows %}
               <tr>
                 <td>#{{ row.attempt.id }}</td>
-                <td>
-                  <span class="badge">{{ row.status_label }}</span>
-                  <div class="muted text-sm">{{ row.attempt.status }}</div>
-                </td>
-                <td>{{ row.attempt.created_at|date:"Y-m-d H:i" }}</td>
+                <td><span class="badge">{{ row.status_label }}</span></td>
+                <td>{{ row.attempt.created_at|date:"d.m.Y H:i" }}</td>
                 <td>
                   {% if row.attempt.completed_at %}
-                    {{ row.attempt.completed_at|date:"Y-m-d H:i" }}
+                    {{ row.attempt.completed_at|date:"d.m.Y H:i" }}
                   {% else %}
                     —
                   {% endif %}
@@ -64,24 +58,10 @@
                 <td>{{ row.initiated_by_username }}</td>
                 <td>{{ row.storage_outcome_label }}</td>
                 <td>
-                  {% if row.attempt.resolved_snapshot_id %}
-                    #{{ row.attempt.resolved_snapshot_id }}
-                  {% else %}
-                    —
-                  {% endif %}
-                </td>
-                <td>
-                  {% if row.attempt.failure_code %}
-                    <code>{{ row.attempt.failure_code }}</code>
-                  {% else %}
-                    —
-                  {% endif %}
-                </td>
-                <td>
                   <a
                     class="btn"
                     href="{% url 'corrected-current-sync-attempt-detail' doc_id=doc.id attempt_id=row.attempt.id %}"
-                  >פירוט</a>
+                  >צפייה</a>
                 </td>
               </tr>
             {% endfor %}

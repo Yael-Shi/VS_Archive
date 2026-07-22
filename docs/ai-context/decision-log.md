@@ -1757,4 +1757,6 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 **Comparison baseline:** Preview diffs snapshot `canonical_text` against the latest **displayable SOURCE_TEXT** only via `resolve_displayable_source_text_result` (SUCCEEDED then NEEDS_REVIEW; **never** falls back to HEBREW_TEXT). Diff uses `render_transcription_diff_html(source_text, snapshot.canonical_text)`. When no displayable SOURCE_TEXT exists, show an explicit empty state and skip the diff.
 
+**Staff UI presentation (read-only polish):** List/detail copy is Hebrew-first for staff without exposing internal model names in primary content. Technical identifiers (`source_kind`, `storage_status`, `geometry_capability`, `hover_eligible`, raw enums, `tsId`, `page_index`/`page_nr`, failure/selection codes, DocumentTextResult ids) live in a collapsed **`פרטים טכניים`** `<details>` block. Comparison remains SOURCE_TEXT-only in the backend even though the UI no longer names `SOURCE_TEXT` / `snapshot` in primary headings. No activation controls.
+
 **Non-goals (unchanged):** activation / canonical `DocumentTextResult` updates; bindings; translation; search/hover; running sync from the web; POST actions; SQS/worker/command changes; selector/orchestration/storage; models/migrations; stale STARTED detection/recovery; global nav backlog.

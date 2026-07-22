@@ -2094,6 +2094,14 @@ _CORRECTED_CURRENT_SYNC_PAGE_OUTCOME_LABELS: dict[str, str] = {
     "REFUSED": "סורב",
 }
 
+_CORRECTED_CURRENT_SYNC_REMOTE_STATUS_LABELS: dict[str, str] = {
+    "IN_PROGRESS": "בתהליך",
+    "DONE": "הושלם",
+    "FINAL": "סופי",
+    "GT": "אמת מידה",
+    "NEW": "חדש",
+}
+
 
 def _corrected_current_sync_status_label(status: str) -> str:
     return _CORRECTED_CURRENT_SYNC_STATUS_LABELS.get(status, status)
@@ -2103,6 +2111,15 @@ def _corrected_current_sync_storage_outcome_label(outcome: str | None) -> str:
     if not outcome:
         return "—"
     return _CORRECTED_CURRENT_SYNC_STORAGE_OUTCOME_LABELS.get(outcome, outcome)
+
+
+def _corrected_current_sync_remote_status_label(status: str | None) -> str:
+    if not status:
+        return "—"
+    normalized = str(status).strip()
+    if not normalized:
+        return "—"
+    return _CORRECTED_CURRENT_SYNC_REMOTE_STATUS_LABELS.get(normalized.upper(), "אחר")
 
 
 def _corrected_current_sync_attempts_queryset(*, with_pages: bool = False):
@@ -2183,6 +2200,9 @@ def corrected_current_sync_attempt_detail_page(request, doc_id: int, attempt_id:
             "page": page,
             "outcome_label": _CORRECTED_CURRENT_SYNC_PAGE_OUTCOME_LABELS.get(
                 page.outcome, page.outcome
+            ),
+            "remote_status_label": _corrected_current_sync_remote_status_label(
+                page.remote_transcript_status
             ),
         }
         for page in attempt.pages.all()

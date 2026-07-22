@@ -51,7 +51,7 @@
                 <a class="btn btn-primary" href="{% url 'archive-manage-edit' item_id=doc.archive_item_id %}">עריכת מטא־דאטה</a>
               {% endif %}
               <a class="btn btn-primary" href="{% url 'review-detail-page' doc_id=doc.id %}">בקרת תעתוק למסמך זה</a>
-              <a class="btn btn-primary" href="{% url 'corrected-current-sync-attempts' doc_id=doc.id %}">היסטוריית סנכרון Transkribus מתוקן</a>
+              <a class="btn btn-primary" href="{% url 'corrected-current-sync-attempts' doc_id=doc.id %}">גרסאות תעתוק מ־Transkribus</a>
 
               {% if show_ocr_reprocess_action or show_hebrew_translation_retry_action %}
                 <details class="review-details review-details--secondary document-detail-staff-actions">
