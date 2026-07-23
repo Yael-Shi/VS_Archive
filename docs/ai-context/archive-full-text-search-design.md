@@ -1,0 +1,305 @@
+# Archive full-text search — design
+
+**Status:** Architecture decision (documentation only). No application code, migrations, tests, settings, or dependencies ship with this document.
+
+**Companion decision-log entry:** `docs/ai-context/decision-log.md` — “Archive full-text search — architecture (docs-only)”.
+
+This document is the detailed contract for the implementation PR sequence. It records verified current behavior, target decisions, risks, and per-PR scope. It does not describe unimplemented features as live.
+
+---
+
+## 1. Current behavior (verified)
+
+### Public `/archive/?q=` pipeline
+
+Entry: `archive_list_page` (`documents/views.py`) via `documents/archive_urls.py` (`archive-list`).
+
+Order of operations:
+
+1. `normalize_archive_public_list_type_filter(item_type)`
+2. `normalize_archive_list_search_query(q)` (strip; empty/whitespace → no search filter)
+3. Base queryset: `archive_browse_queryset_for_user(request.user)` then select-related and `.order_by("-created_at")`
+4. `filter_archive_items_by_public_list_type`
+5. `filter_archive_items_by_search_query`
+6. `count()` → page / `per_page` → slice → browse cards
+
+Helpers live in `documents/services/archive_item_presentation.py`. Access helpers live in `documents/services/archive_item_access.py`.
+
+**Note:** Discovery PR5 decision-log text refers to `archive_item_queryset_for_user`. The live list path uses **`archive_browse_queryset_for_user`** (visibility **and** renderability). Full-text implementation must keep the browse queryset as the auth/renderability choke point.
+
+### Fields searched today
+
+`filter_archive_items_by_search_query` uses case-insensitive `icontains` OR over:
+
+- `ArchiveItem.title`
+- `ArchiveItem.author_name`
+- `ArchiveItem.source_title`
+- `categories__name`
+- `events__name`
+- `tags__name`
+
+Ends with `.distinct()` (one `ArchiveItem` per result despite M2M joins).
+
+### Not searched today
+
+- `ManualTextContent.body`
+- Displayed (or any) `DocumentTextResult.text`
+- `ArchiveItem.public_note`
+- Detailed `PhotoContent` fields (`description`, `location`, `context`, `people_present`, `notes`)
+- Dates (`date_start` / `date_end` / `date_precision`)
+- `DocumentMetadata` and legacy OCR discovery fields on `Document`
+
+List help copy currently suggests date/place search; that is **misleading relative to the filter** and must be corrected only in the UI/snippet PR (PR4), not sooner.
+
+### Database / FTS posture today
+
+- App DB engine: PostgreSQL (`vs_archive.settings.DATABASES`).
+- Deployed image in infra: `postgres:16-alpine`.
+- Repo has **no** FTS usage (`SearchQuery` / `SearchVector` / `SearchRank` / `SearchHeadline`), **no** `GinIndex`, **no** `pg_trgm` / `unaccent` / other search extension migrations, and **`django.contrib.postgres` is not** in `INSTALLED_APPS`.
+- Ranking today is chronological (`-created_at`), not relevance.
+
+### Displayed OCR text (reuse contract)
+
+Canonical displayed transcription selection is already implemented in `documents/services/text_presentation.py`:
+
+- `_latest_displayable` — non-empty text; prefer latest `SUCCEEDED`, else latest `NEEDS_REVIEW`; excludes `FAILED` / empty
+- `resolve_displayed_transcription_result` / `get_displayed_transcription_text` — Hebrew docs: HEBREW then SOURCE; non-Hebrew: SOURCE then HEBREW
+
+Browse OCR preview already calls `get_displayed_transcription_text` (`_ocr_document_preview` in `archive_item_presentation.py`).
+
+**Search body for OCR items must follow these helpers**, not index every `DocumentTextResult` row (multi-engine uniqueness is `(document, result_type, engine)`).
+
+`verification_status=REJECTED` is **not** filtered out of display selection today. If a REJECTED row remains displayable under those rules, it is shown. Search will follow that same rule until a separate display-policy decision changes it.
+
+### Manual text
+
+`ManualTextContent` (`OneToOne` → `ArchiveItem`, field `body`) is the typed body for `MANUAL_TEXT` items. It is displayed on detail/browse preview today and is **in scope** for future search indexing.
+
+### Authorization (verified)
+
+| Viewer | ArchiveItem visibility |
+|--------|-------------------------|
+| Staff / document admin | All |
+| `archive_family` group | `public` + `private` |
+| Anonymous / other authenticated | `public` only |
+
+Browse renderability: PHOTO requires uploaded key; OCR_DOCUMENT requires `Document.upload_status=UPLOADED`; MANUAL_TEXT unchanged.
+
+Hard rule for all discovery/search work (also in `archive-discovery-catalog-design.md`): no unauthorized leak of private **existence**, **counts**, titles, ranks, or snippets.
+
+### Search independence from Transkribus geometry
+
+Public and family search must work with **no** Transkribus transcript snapshot, binding, PAGE XML, or hover geometry. Hover/highlight is a later enhancement (`text-image-hover-design.md`) and is **not** a search dependency.
+
+---
+
+## 2. Target decisions
+
+1. **Denormalized index:** one search-index row per `ArchiveItem` (1:1). Working name in this doc: `ArchiveItemSearchIndex` (final model name may vary in PR1).
+2. **Indexed content:** title, author_name, source_title, category/event/tag **names**, `public_note`, `ManualTextContent.body`, and the OCR transcription returned by existing display helpers.
+3. **Never indexed:** `DocumentMetadata`, technical/provider identifiers, Transkribus snapshots / PAGE XML / bindings / geometry, engine keys, review-internal fields, or other private implementation metadata.
+4. **Initial non-goals for content:** detailed `PhotoContent` descriptive fields; date overlap/search. Help-text correction for date/place claims lands in PR4 only.
+5. **REJECTED:** follow current display behavior — displayable ⇒ searchable. Changing that is a separate decision.
+6. **Result model:** one `ArchiveItem` per hit; keep existing public type filters (`documents_and_texts` / `photo` / all), pagination (`page` / `per_page`), and visibility/family/private behavior.
+7. **FTS:** PostgreSQL full-text search with text-search configuration **`simple`** for language-independent body tokenization and ranking. Do **not** treat `simple` FTS as sufficient Hebrew substring/prefix handling.
+8. **Short-field substrings:** preserve substring behavior for short discovery fields (title/author/source_title and discovery names as needed). Evaluate `pg_trgm` **or** a measured Hebrew-normalization strategy **before** applying trigrams to full OCR bodies.
+9. **No locator fields yet:** do not add search-result → line/page/hover payloads in PR1–PR4. Mapping is deferred until hover integration.
+10. **Visibility is query-time only:** never store “who can see this” in the search index. Always filter with `archive_browse_queryset_for_user` (or equivalent visibility + renderability) **before** matching, ranking, counts, and snippets.
+
+---
+
+## 3. Recommended index shape
+
+Logical fields (exact Django field names left to PR1):
+
+| Logical field | Role |
+|---------------|------|
+| `archive_item` | OneToOne PK/FK |
+| `metadata_text` | Concatenated short discovery strings used for indexing/debug |
+| `body_text` | Manual body or displayed OCR transcription (plain text) |
+| `search_vector` | Weighted PostgreSQL `tsvector` (`simple`): title/metadata high weight, body lower — **materialized on the row by persistence**, not by the pure builder |
+| Optional match flags | Booleans or small enum bits for later PR4 match-source UI (title / tags / body) — only if cheap in PR1; otherwise derive at query time in PR3/PR4 |
+| `updated_at` | Sync/backfill freshness |
+
+### Pure builder vs persistence
+
+- **Pure builder:** Deterministically selects and normalizes source-of-truth text/segments (discovery fields, `public_note`, ManualText body, displayed OCR transcription via existing helpers) and returns a **plain value object**. It performs **no** database writes and does **not** update `search_vector`.
+- **Persistence layer:** Materializes/updates `ArchiveItemSearchIndex` from that value object, including writing plain text columns and computing/storing the weighted PostgreSQL `search_vector`.
+
+Backfill (PR1) and write-path sync (PR2) both: build value object → persist row. Do not describe the pure builder as directly performing database vector updates.
+
+**Weighting intent:** title and short discovery fields outrank long body hits; tie-break with existing `-created_at` when ranks are equal or when `q` is empty (empty `q` continues to mean “no search filter,” chronological browse).
+
+**Auth:** index rows may exist for private items; queries must still start from the browse queryset so unauthorized users never match, count, rank, or snippet those rows.
+
+---
+
+## 4. Hebrew and short-field matching
+
+### Limitation (known)
+
+Under plain `simple` FTS, tokens are split on whitespace/punctuation without Hebrew morphology or clitic stripping.
+
+Example: searching `מרזוק` may **not** match indexed `ומרזוק` (leading vav) or other prefixed forms. This is an accepted limitation of `simple` FTS, not a bug to “fix” by silently indexing every substring of OCR bodies.
+
+### Strategy
+
+- **Body (long text):** `simple` FTS + ranking; optional prefix operator on the last query token where appropriate; document Hebrew clitic/prefix gaps in UI only if product asks (not required in PR3).
+- **Short discovery fields:** keep substring semantics comparable to today’s `icontains` (implementation choice in PR3: retain `icontains` arms, and/or `pg_trgm` similarity/GIN on short columns after evaluation).
+- **Do not** default to trigram GIN on full OCR `body_text` without measurement (index size, write amplification, query plans).
+
+---
+
+## 5. Authorization, leakage, and snippets
+
+### Query pipeline (target)
+
+1. `archive_browse_queryset_for_user(user)`
+2. Type filter
+3. Search against the denormalized index **joined/filtered to that queryset only**
+4. Rank + stable tie-break
+5. `count` / paginate
+6. (PR4) Build snippets **only** for the authorized page slice
+
+### Leakage tests (required by cutover)
+
+- Anonymous: unique private title/body must not appear in results, HTML, or counts.
+- Family: can find authorized private items.
+- Staff: can find private items.
+- Snippets must not include text from non-visible items.
+- `DocumentMetadata` terms must not match on the public archive path.
+
+### HTML escaping (PR4)
+
+OCR/manual text may contain `<`, `&`, quotes, or accidental markup. Highlighting must **escape plain text first**, then wrap match spans in trusted markup (e.g. `<mark>`). Never interpolate raw body text into HTML.
+
+---
+
+## 6. Sync, drift, and deployment
+
+### Drift risk
+
+The index is a derived cache. It can drift if:
+
+- ManualText or displayed OCR text changes without rebuild
+- Discovery metadata (title/tags/etc.) changes without rebuild
+- Display selection would pick a different `DocumentTextResult` after OCR write/activation/edit, but the index still holds the old body
+
+**Requirement:** idempotent rebuild/backfill command that can recompute any item from source of truth (ArchiveItem + ManualTextContent / display helpers) and be re-run safely. A PR1-era backfill is **not** assumed to remain fully current across the gap until PR2 sync is deployed.
+
+### Write-path sync (PR2, not PR1)
+
+PR1 ships pure builder + persistence helper + backfill only (no broad hooks). Between PR1 backfill and PR2 sync going live, source writes can drift the index. PR2 adds explicit synchronization from all relevant writers (at minimum: ManualText create/update; ArchiveItem discovery-field edits; OCR text persistence paths that change displayed text, including staff edits / suggestion approval / corrected-current activation when they change displayed rows). Each hook must be covered by drift and transaction tests.
+
+After PR2 sync is **deployed and active**, operators **must** run the **full idempotent backfill again** (while sync is live), then perform **drift verification**, before any PR3 cutover. Do not treat the original PR1 backfill as sufficient for cutover.
+
+### Deployment order (hard rule)
+
+1. PR1: migrate schema + GIN → full idempotent backfill.
+2. PR2: deploy write-path synchronization and confirm it is active.
+3. While sync is active: run the **full idempotent backfill again**.
+4. Run/perform **drift verification**.
+5. Only then cut over public search behavior (PR3).
+6. Then ship snippet UI (PR4).
+
+Required order (short form): **PR1 migrate/backfill → PR2 deploy sync → full backfill again while sync is active → drift verification → PR3 cutover.**
+
+**Do not** switch `/archive/?q=` to the index while any required backfill is partial, while sync is missing, or before post-PR2 drift verification passes. A feature flag around PR3 cutover is allowed if it makes rollback safer.
+
+### Rollback
+
+- PR3: revert to `icontains` filter (index table can remain).
+- PR4: hide snippet fields; keep backend FTS.
+- PR1/PR2: dropping the index table is possible but disruptive; prefer leaving the table unused over rushed public cutover.
+
+---
+
+## 7. Implementation PR sequence
+
+### PR1 — Search index foundation (no public behavior change)
+
+| | |
+|--|--|
+| **Scope** | Model 1:1 with `ArchiveItem`; **pure builder** that selects/normalizes source text into a plain value object (no DB writes); **persistence** that materializes/updates `ArchiveItemSearchIndex` including weighted `search_vector`; migration + GIN; enable `django.contrib.postgres` if required by the implementation; idempotent management command backfill (builder → persist); **no** change to `filter_archive_items_by_search_query`; **no** broad write-path hooks |
+| **Likely files** | `documents/models.py`; new `documents/services/archive_search_index.py` (or similar); management command under `documents/management/commands/`; migration(s); `vs_archive/settings.py` only if adding `django.contrib.postgres`; focused tests; decision-log touch if needed |
+| **Migrations** | Create search-index table; GIN on `search_vector`; no public-search behavior migration |
+| **Tests** | Pure builder value object: OCR body equals `get_displayed_transcription_text`; ManualText uses `body`; FAILED/empty excluded; multi-engine picks displayable row; REJECTED still selected when displayable; metadata segments include decided fields and exclude `DocumentMetadata`; persistence writes row + `search_vector` from the value object; backfill idempotent |
+| **Rollout** | Migrate → full backfill to completion on each environment. Public search remains `icontains`. This backfill alone is **not** the final pre-cutover rebuild (see PR2). |
+| **Rollback** | Stop using the command; table can remain empty/unused. |
+| **Non-goals** | Public FTS cutover; write-path sync hooks; snippets; `pg_trgm` on OCR bodies; locator/hover fields; photo descriptive fields; date search |
+
+### PR2 — Explicit index synchronization
+
+| | |
+|--|--|
+| **Scope** | From every relevant write path, call pure builder → persistence to upsert/clear `ArchiveItemSearchIndex`; keep rebuild/backfill command for repair; drift detection tests |
+| **Likely files** | ManualText / ArchiveItem edit services; OCR text persistence / edit / suggestion-approve / activation paths that change displayed text; `archive_search_index` service; tests |
+| **Migrations** | None expected (unless a tiny sync-metadata column was deferred from PR1) |
+| **Tests** | Each hooked writer persists (or clears) the index from the builder value object in the same transaction as the source write; concurrent update safety as appropriate; full rebuild repairs intentional drift; no sync from snapshot/geometry-only paths |
+| **Rollout** | Deploy sync after PR1 migrate/backfill and confirm sync is **active**. Then run the **full idempotent backfill again while sync is live**, then **drift verification**. Still **no** public FTS cutover. Do not assume the PR1-era backfill is still fully current. |
+| **Rollback** | Remove hooks; rely on periodic rebuild until fixed. Do not cut over PR3 while sync is rolled back. |
+| **Non-goals** | Changing `/archive/?q=` behavior; snippet UI; hover locators |
+
+### PR3 — Backend search cutover (no snippet UI)
+
+| | |
+|--|--|
+| **Scope** | Replace/extend `filter_archive_items_by_search_query` to query the index under `archive_browse_queryset_for_user`; weighted ranking + `-created_at` tie-break; preserve type filters, pagination, one-row-per-item; short-field substring strategy as decided (`icontains` and/or evaluated `pg_trgm`); Hebrew/`simple` limitation covered by tests; performance/query-plan verification notes or tests as practical |
+| **Likely files** | `archive_item_presentation.py`; light `views.py` wiring if needed; `test_archive_item.py` / new `test_archive_full_text_search.py` |
+| **Migrations** | Only if PR3 adopts `pg_trgm` extension + short-field indexes after evaluation |
+| **Tests** | Auth leak suite (existence/count/rank); OCR + ManualText body hits; metadata/`public_note` hits; exclusions (`DocumentMetadata`, snapshots not required); distinct; empty `q`; type filter; Hebrew prefix/clitic case documenting `simple` limitation; optional `EXPLAIN` assertion or documented staging check |
+| **Rollout** | Only after: PR2 sync active → **full backfill again** → **drift verification** passed. Optional feature flag. |
+| **Rollback** | Flag off or revert filter to pre-cutover `icontains`; index remains. |
+| **Non-goals** | Snippet/highlight UI; match-source chips; help-text rewrite (PR4); locator fields; photo field search; date search; staff `_base_queryset` FTS |
+
+### PR4 — Snippets, match sources, help text
+
+| | |
+|--|--|
+| **Scope** | Safe Hebrew-oriented snippets for the authorized page slice; escape-then-highlight; optional match-source presentation (title / tags / content); correct misleading date/place search help text on the archive list |
+| **Likely files** | `documents/archive/list.html`, card partials, `ArchiveBrowseCard` / presentation helpers, CSS, tests |
+| **Migrations** | None expected |
+| **Tests** | Snippet appears for body hits; HTML escaped; no private snippet leakage; pagination still preserves `q`; help text no longer claims unimplemented date search |
+| **Rollout** | After PR3 stable. |
+| **Rollback** | Hide snippet UI; keep FTS backend. |
+| **Non-goals** | Hover overlay; line/page geometry; Transkribus binding requirements |
+
+### Later — Search ↔ hover mapping (optional)
+
+When hover/highlight is implemented, optionally attach search-result → page/line mapping. Requires a separate design aligned with `text-image-hover-design.md`. **Out of scope** for PR1–PR4. Must remain optional: search continues to work with no snapshot/binding/geometry.
+
+---
+
+## 8. Explicit cross-cutting non-goals
+
+- Treating Transkribus snapshots, bindings, or PAGE XML as required for search
+- Indexing `DocumentMetadata` for the public archive path
+- Denormalizing visibility into the search index
+- Changing `REJECTED` / display-selection policy inside search PRs
+- Date search and detailed photo-content field search in the initial sequence
+- Staff document-list / review-backlog FTS cutover in the same PRs
+- SQS/retry/DLQ redesign
+- Fake or approximate hover highlighting
+
+---
+
+## 9. Self-check against audit
+
+| Audit fact | This design |
+|------------|-------------|
+| Browse QS then type then `icontains` metadata | §1 current behavior |
+| No ManualText/OCR body search today | §1; target adds them in index + PR3 |
+| Postgres 16; no FTS/GIN/trgm migrations | §1 |
+| Use display helpers, not all DTR rows | §1 + §2 |
+| No snapshot/binding dependency | §1 + §8 |
+| Auth before match/rank/count/snippet | §2 #10, §5 |
+| Denormalized 1:1 index | §2 #1, §3 |
+| `public_note` in; photo details/dates out initially | §2 #2–4 |
+| REJECTED follows display | §2 #5 |
+| `simple` FTS + Hebrew substring caveat | §2 #7–8, §4 |
+| No locators in initial PRs | §2 #9, Later |
+| Pure builder → value object; persistence materializes `search_vector` | §3 |
+| PR1 migrate/backfill → PR2 sync → full backfill again → drift check → PR3 → PR4 | §6–§7 |
+| No cutover before post-PR2 backfill + drift verification | §6 |
+
+No contradiction found with the verified audit used for this architecture PR.

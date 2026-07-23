@@ -1792,3 +1792,41 @@ Content-Type: `application/xml` via `put_object_bytes`.
 **Messages:** Map stable `CorrectedCurrentActivationErrorCode` values to concise Hebrew staff messages (stale preview; VERIFIED / human-edited block; unauthorized; attempt/snapshot no longer eligible; binding/internal safe failure). Never display raw exception text, provider details, hashes, IDs, or traceback. Success distinguishes three **APPLIED** shapes — SOURCE text changed; Hebrew mirror updated without SOURCE text change; binding-only repair with no displayed text change — plus **ALREADY_ACTIVE** idempotent no-op. After redirect, detail re-renders the current baseline/diff.
 
 **Still out of scope:** activation service semantics changes; models/migrations; selector/sync/storage/parser; automatic completion; OCR routing/worker/upload; search/hover; public archive pages; navigation; processing-state rollup; translation enqueue.
+
+## Archive full-text search — architecture (docs-only)
+
+**Decision:** Future public `/archive/?q=` full-text search will use a **denormalized one-to-one search-index row per `ArchiveItem`**, queried only after the existing browse authorization/renderability filter. Detailed design: **`docs/ai-context/archive-full-text-search-design.md`**. This entry is **docs-only**; no application code, migrations, tests, settings, or dependencies change here.
+
+**Current behavior (verified, unchanged by this entry):**
+
+- Public search applies **`archive_browse_queryset_for_user`**, then type filtering, then **`icontains`** over **`title`**, **`author_name`**, **`source_title`**, and linked **`categories`**, **`events`**, and **`tags`** names (`filter_archive_items_by_search_query`).
+- It does **not** search **`ManualTextContent.body`** or displayed **`DocumentTextResult`** text.
+- Database is **PostgreSQL 16**; the repo has **no** FTS, GIN, **`pg_trgm`**, **`SearchVector`**, or PostgreSQL extension migrations for search.
+- Existing discovery PR5 (`icontains` metadata search) remains the live behavior until the implementation sequence below cuts over.
+
+**Target searchable content:** title, author, source title, categories, events, tags, **`public_note`**, **`ManualTextContent.body`**, and the OCR transcription selected by existing display helpers (`get_displayed_transcription_text` / `resolve_displayed_transcription_result` — not every `DocumentTextResult` row).
+
+**Explicit exclusions:** **`DocumentMetadata`**, technical/provider data, Transkribus snapshots, PAGE XML, bindings/geometry, and other private implementation metadata. Initial scope also excludes detailed **`PhotoContent`** descriptive fields and **date** search. Misleading date/place help text is corrected only in the UI/snippet PR.
+
+**Policy decisions:**
+
+1. Denormalized **1:1 search-index row per `ArchiveItem`**.
+2. OCR body text follows **current display selection**; **`REJECTED`** remains searchable when it is still displayable. Changing display/REJECTED policy is a separate decision.
+3. Preserve **one result per `ArchiveItem`**, existing type filters, pagination, and public/family/private visibility.
+4. PostgreSQL FTS with config **`simple`** for language-independent body tokenization/ranking; **not** sufficient alone for Hebrew substring/prefix (e.g. `מרזוק` vs `ומרזוק`). Preserve substring behavior on short discovery fields; evaluate **`pg_trgm`** or measured Hebrew normalization **before** trigram-indexing full OCR bodies.
+5. **No** locator / hover payload fields yet. Search-to-line/page mapping waits for hover integration.
+6. **Visibility stays query-time** and is **never** denormalized into the search index. Auth/renderability run **before** matching, ranking, counts, and snippets. Search must work **without** Transkribus snapshots, bindings, or geometry.
+
+**Implementation sequence (future code PRs):**
+
+| PR | Focus |
+|----|--------|
+| **PR1** | Search-index model; pure builder (value object only) + persistence (materializes row/`search_vector`); migration; GIN; idempotent backfill — **no** public search behavior change, **no** broad write-path hooks |
+| **PR2** | Explicit index synchronization from all relevant write paths + drift/transaction tests; then **full backfill again while sync is active** + drift verification before cutover |
+| **PR3** | Backend search cutover (auth, ranking, Hebrew behavior, query-plan tests) — **no** snippet UI |
+| **PR4** | Safe Hebrew snippets, match-source presentation, help-text correction |
+| **Later** | Optional search-result → line/page mapping when hover is implemented |
+
+**Hard rollout rule:** **PR1 migrate/backfill → PR2 deploy sync → full backfill again while sync is active → drift verification → PR3 cutover.** Do **not** assume the PR1-era backfill remains fully current across the sync deployment gap. Do **not** switch public search to the index before post-PR2 backfill and drift verification complete.
+
+**Docs:** `docs/ai-context/archive-full-text-search-design.md`
