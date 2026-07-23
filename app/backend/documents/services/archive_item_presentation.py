@@ -12,10 +12,10 @@ from urllib.parse import urlencode
 from django.db.models import Prefetch, Q, QuerySet
 from django.urls import reverse
 
-from documents.models import ArchiveItem, DocumentTextResult
+from documents.models import ArchiveItem
 from documents.services.document_date import format_document_date
 from documents.services.text_presentation import (
-    PREFETCHED_DISPLAYABLE_TEXT_RESULTS_ATTR,
+    archive_item_displayable_text_results_prefetch,
     get_displayed_transcription_text,
 )
 
@@ -662,21 +662,7 @@ def _related_links_for_item(archive_item: ArchiveItem) -> tuple[ArchiveBrowseLin
 
 def archive_browse_displayable_text_results_prefetch() -> Prefetch:
     """Prefetch displayable OCR text rows for archive browse cards (avoids N+1)."""
-    return Prefetch(
-        "ocr_document__text_results",
-        queryset=(
-            DocumentTextResult.objects.filter(
-                status__in=(
-                    DocumentTextResult.Status.SUCCEEDED,
-                    DocumentTextResult.Status.NEEDS_REVIEW,
-                ),
-            )
-            .exclude(text__isnull=True)
-            .exclude(text__exact="")
-            .order_by("-created_at")
-        ),
-        to_attr=PREFETCHED_DISPLAYABLE_TEXT_RESULTS_ATTR,
-    )
+    return archive_item_displayable_text_results_prefetch()
 
 
 def build_archive_browse_card(archive_item: ArchiveItem) -> ArchiveBrowseCard:

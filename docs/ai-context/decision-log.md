@@ -1830,3 +1830,18 @@ Content-Type: `application/xml` via `put_object_bytes`.
 **Hard rollout rule:** **PR1 migrate/backfill → PR2 deploy sync → full backfill again while sync is active → drift verification → PR3 cutover.** Do **not** assume the PR1-era backfill remains fully current across the sync deployment gap. Do **not** switch public search to the index before post-PR2 backfill and drift verification complete.
 
 **Docs:** `docs/ai-context/archive-full-text-search-design.md`
+
+## Archive full-text search — PR1 search-index foundation (implemented)
+
+**Decision / implemented:** PR1 foundation from `docs/ai-context/archive-full-text-search-design.md` is in code.
+
+**Introduced:**
+
+- Model **`ArchiveItemSearchIndex`** (`documents.models`): OneToOne → **`ArchiveItem`** (`related_name="search_index"`, **`CASCADE`**); plain fields **`title_text`** (weight A), **`metadata_text`** (weight B: author, source_title, categories/events/tags names, public_note), **`body_text`** (weight C); **`SearchVectorField`** **`search_vector`** (nullable until persistence); GIN index **`archive_item_search_vector_gin`**; migration **`0042_archive_item_search_index`**.
+- **`django.contrib.postgres`** added to **`INSTALLED_APPS`** (required for **`SearchVectorField`** / **`GinIndex`**).
+- Pure builder + persistence in **`documents/services/archive_search_index.py`**: **`ArchiveItemSearchContent`** value object; **`build_archive_item_search_content`** (no DB writes / no vector); **`persist_archive_item_search_content`** upserts row and materializes weighted **`simple`** **`search_vector`**; queryset helper **`archive_items_for_search_index_build`** documents prefetch expectations. OCR body uses **`get_displayed_transcription_text`**.
+- Management command **`backfill_archive_search_index`** (`--archive-item-id`, `--batch-size`): idempotent rebuild of the search-index table only.
+
+**Unchanged (intentional):** public **`/archive/?q=`** still uses **`filter_archive_items_by_search_query`** (`icontains` metadata only). **No** write-path sync hooks. **No** snippets, ranking cutover, `pg_trgm`, locators, photo-detail/date search, or Transkribus geometry dependency.
+
+**Tests:** `documents/test_archive_search_index.py`.
