@@ -3,6 +3,8 @@ from __future__ import annotations
 import uuid
 
 from django.conf import settings
+from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.search import SearchVectorField
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 
@@ -131,6 +133,35 @@ class ManualTextContent(models.Model):
 
     def __str__(self) -> str:
         return f"ManualTextContent(archive_item_id={self.archive_item_id})"
+
+
+class ArchiveItemSearchIndex(models.Model):
+    """Denormalized full-text search document for one ArchiveItem (PR1 foundation)."""
+
+    archive_item = models.OneToOneField(
+        ArchiveItem,
+        on_delete=models.CASCADE,
+        related_name="search_index",
+    )
+    # Weight A — title alone (not duplicated into metadata_text).
+    title_text = models.TextField(blank=True, default="")
+    # Weight B — author, source_title, categories, events, tags, public_note.
+    metadata_text = models.TextField(blank=True, default="")
+    # Weight C — ManualText body or displayed OCR transcription.
+    body_text = models.TextField(blank=True, default="")
+    search_vector = SearchVectorField(null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            GinIndex(
+                fields=["search_vector"],
+                name="archive_item_search_vector_gin",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"ArchiveItemSearchIndex(archive_item_id={self.archive_item_id})"
 
 
 class PhotoContent(models.Model):

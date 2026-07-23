@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Optional, Literal
 
-from django.db.models import Prefetch
+from django.db.models import Prefetch, QuerySet
 
 from documents.models import Document, DocumentTextResult
 from documents.services.expected_outputs import expected_result_types_for_document
@@ -261,6 +261,35 @@ def text_presentation_results_prefetch() -> Prefetch:
         "text_results",
         queryset=DocumentTextResult.objects.order_by("-created_at"),
         to_attr=PREFETCHED_TEXT_PRESENTATION_RESULTS_ATTR,
+    )
+
+
+def displayable_document_text_results_queryset() -> QuerySet[DocumentTextResult]:
+    """
+    Canonical queryset of displayable ``DocumentTextResult`` rows.
+
+    SUCCEEDED / NEEDS_REVIEW, non-empty text, newest first — shared by browse
+    cards and search-index build so selection rules cannot drift.
+    """
+    return (
+        DocumentTextResult.objects.filter(
+            status__in=(
+                DocumentTextResult.Status.SUCCEEDED,
+                DocumentTextResult.Status.NEEDS_REVIEW,
+            ),
+        )
+        .exclude(text__isnull=True)
+        .exclude(text__exact="")
+        .order_by("-created_at")
+    )
+
+
+def archive_item_displayable_text_results_prefetch() -> Prefetch:
+    """Prefetch displayable OCR rows onto ``ArchiveItem.ocr_document`` (N+1 safe)."""
+    return Prefetch(
+        "ocr_document__text_results",
+        queryset=displayable_document_text_results_queryset(),
+        to_attr=PREFETCHED_DISPLAYABLE_TEXT_RESULTS_ATTR,
     )
 
 
