@@ -131,6 +131,10 @@ class WorkerOcrSearchIndexSyncTests(TestCase):
         displayed = get_displayed_transcription_text(doc)
         self.assertEqual(displayed, "recognized source for index")
         self.assertEqual(_index_for(doc.archive_item_id).body_text, displayed)
+        self.assertEqual(
+            _index_for(doc.archive_item_id).hebrew_translation_text,
+            "translated hebrew text long enough",
+        )
         self.assertNotEqual(
             _index_for(doc.archive_item_id).body_text,
             "translated hebrew text long enough",
@@ -171,6 +175,7 @@ class WorkerOcrSearchIndexSyncTests(TestCase):
         displayed = get_displayed_transcription_text(doc)
         self.assertEqual(displayed, hebrew.text)
         self.assertEqual(_index_for(doc.archive_item_id).body_text, displayed)
+        self.assertEqual(_index_for(doc.archive_item_id).hebrew_translation_text, "")
 
     @patch("documents.management.commands.run_worker.get_object_bytes")
     @patch("documents.management.commands.run_worker.extract_pages")
@@ -448,6 +453,10 @@ class HebrewTranslationRetrySearchIndexSyncTests(TestCase):
         displayed = get_displayed_transcription_text(doc)
         self.assertEqual(displayed, source.text)
         self.assertEqual(_index_for(doc.archive_item_id).body_text, displayed)
+        self.assertEqual(
+            _index_for(doc.archive_item_id).hebrew_translation_text,
+            "translated hebrew text long enough",
+        )
 
     @patch(
         "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"

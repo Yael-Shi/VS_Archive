@@ -139,6 +139,69 @@ class PendingAndVerifiedEditSearchIndexSyncTests(TestCase):
             get_displayed_transcription_text(doc),
         )
 
+    def test_non_hebrew_hebrew_text_edit_updates_indexed_translation(self):
+        doc = self._english_doc()
+        source = _create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="English source",
+            source_revision=1,
+        )
+        hebrew = _create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="תרגום לפני",
+            engine=source.engine,
+            based_on_source_revision=source.source_revision,
+        )
+        rebuild_archive_item_search_index(doc.archive_item)
+        self.assertEqual(
+            _index_for(doc.archive_item_id).hebrew_translation_text,
+            "תרגום לפני",
+        )
+
+        edit_pending_text_result(
+            result_id=hebrew.id,
+            new_text="תרגום אחרי עריכה",
+            editor=self.staff,
+        )
+
+        index = _index_for(doc.archive_item_id)
+        self.assertEqual(index.body_text, "English source")
+        self.assertEqual(index.hebrew_translation_text, "תרגום אחרי עריכה")
+
+    def test_non_hebrew_source_edit_keeps_displayed_stale_translation_indexed(self):
+        doc = self._english_doc()
+        source = _create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="Source before",
+            source_revision=1,
+        )
+        _create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="תרגום שיהפוך למיושן",
+            engine=source.engine,
+            based_on_source_revision=source.source_revision,
+        )
+        rebuild_archive_item_search_index(doc.archive_item)
+        self.assertEqual(
+            _index_for(doc.archive_item_id).hebrew_translation_text,
+            "תרגום שיהפוך למיושן",
+        )
+
+        edit_pending_text_result(
+            result_id=source.id,
+            new_text="Source after revision bump",
+            editor=self.staff,
+        )
+
+        index = _index_for(doc.archive_item_id)
+        self.assertEqual(index.body_text, "Source after revision bump")
+        # Public detail still shows the stale translation; index must follow.
+        self.assertEqual(index.hebrew_translation_text, "תרגום שיהפוך למיושן")
+
     def test_verified_edit_updates_indexed_displayed_body(self):
         doc = self._english_doc()
         source = _create_text_result(

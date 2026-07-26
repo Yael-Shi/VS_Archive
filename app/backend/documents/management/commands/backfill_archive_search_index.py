@@ -259,6 +259,7 @@ class Command(BaseCommand):
                 index.title_text != expected.title_text
                 or index.metadata_text != expected.metadata_text
                 or index.body_text != expected.body_text
+                or index.hebrew_translation_text != expected.hebrew_translation_text
             ):
                 stats.content_mismatch_ids.append(archive_item_id)
                 continue

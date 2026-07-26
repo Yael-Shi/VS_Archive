@@ -21,6 +21,7 @@ from documents.models import (
     ArchiveItemSearchIndex,
     ArchiveMetadataSuggestion,
     Document,
+    DocumentTextResult,
     Tag,
 )
 from documents.services.archive_discovery_metadata_backfill import (
@@ -481,6 +482,66 @@ class DriftCheckOnlyCommandTests(TestCase):
         self.assertIn("content_mismatch", err_text)
         self.assertNotIn("drifted-title", err_text)
         self.assertNotIn("Match me", err_text)
+
+    def test_check_only_detects_hebrew_translation_drift(self):
+        from documents.test_archive_item import create_viewable_ocr_document
+
+        doc = create_viewable_ocr_document(
+            title="Translation drift",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        source = DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="engine-a",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="source body",
+            source_revision=1,
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="engine-he",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="canonical translation text",
+            based_on_source_revision=source.source_revision,
+        )
+        rebuild_archive_item_search_index(
+            archive_items_for_search_index_build(
+                archive_item_ids=[doc.archive_item_id]
+            ).get()
+        )
+        ArchiveItemSearchIndex.objects.filter(
+            archive_item_id=doc.archive_item_id
+        ).update(hebrew_translation_text="drifted-translation-only")
+        before = _index_for(doc.archive_item_id)
+        before_updated_at = before.updated_at
+        err = StringIO()
+        with self.assertRaises(CommandError):
+            call_command(
+                "backfill_archive_search_index",
+                check_only=True,
+                archive_item_id=doc.archive_item_id,
+                stdout=StringIO(),
+                stderr=err,
+            )
+        err_text = err.getvalue()
+        self.assertIn("content_mismatch", err_text)
+        self.assertIn(str(doc.archive_item_id), err_text)
+        self.assertNotIn("drifted-translation-only", err_text)
+        self.assertNotIn("canonical translation text", err_text)
+        after = _index_for(doc.archive_item_id)
+        self.assertEqual(after.updated_at, before_updated_at)
+        self.assertEqual(after.hebrew_translation_text, "drifted-translation-only")
 
     def test_check_only_detects_null_vector(self):
         item = create_manual_text_archive_item(title="Null vector", body="Body")
