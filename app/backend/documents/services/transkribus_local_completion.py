@@ -796,6 +796,15 @@ def complete_transkribus_local_success(
 
         trp.mark_succeeded(run, engine_runtime=engine)
 
+        # Sync after final DTR/bindings/run success. Skip the early no-overwrite
+        # path above. Lock order: Document → Run → Assoc → Snapshot → DTRs →
+        # ArchiveItem (inside sync).
+        from documents.services.archive_search_index import (
+            sync_archive_item_search_index,
+        )
+
+        sync_archive_item_search_index(doc.archive_item_id)
+
         return HtrResult(
             text=text,
             needs_review=needs_review,

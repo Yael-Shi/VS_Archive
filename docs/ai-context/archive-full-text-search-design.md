@@ -1,10 +1,10 @@
 # Archive full-text search — design
 
-**Status:** Architecture contract. **PR1**, **PR2a**, and **PR2b-1** are implemented in application code; **PR2b-2+** remain future work unless marked implemented in the decision log.
+**Status:** Architecture contract. **PR1**, **PR2a**, **PR2b-1**, and **PR2b-2** are implemented in application code; **PR3+** remain future work unless marked implemented in the decision log.
 
-**Companion decision-log entries:** `docs/ai-context/decision-log.md` — “Archive full-text search — architecture (docs-only)”, “PR1 search-index foundation (implemented)”, “PR2a discovery/manual/taxonomy sync (implemented)”, “PR2b-1 human-controlled displayed-text sync (implemented)”.
+**Companion decision-log entries:** `docs/ai-context/decision-log.md` — “Archive full-text search — architecture (docs-only)”, “PR1 search-index foundation (implemented)”, “PR2a discovery/manual/taxonomy sync (implemented)”, “PR2b-1 human-controlled displayed-text sync (implemented)”, “PR2b-2 automated displayed-text sync (implemented)”.
 
-This document is the detailed contract for the implementation PR sequence. It records verified current behavior, target decisions, risks, and per-PR scope. Do not treat unimplemented PR2b-2/PR3/PR4 behavior as live.
+This document is the detailed contract for the implementation PR sequence. It records verified current behavior, target decisions, risks, and per-PR scope. Do not treat unimplemented PR3/PR4 behavior as live.
 
 ---
 
@@ -264,13 +264,13 @@ Required order (short form): **PR1 migrate/backfill → PR2a sync → PR2b-1 syn
 
 | | |
 |--|--|
-| **Scope** | Explicit sync from automated `DocumentTextResult` writers that can change displayed transcription body (worker OCR/HTR success/failure persistence, Transkribus local completion, translation persist/retry, and related automated demotion paths) |
-| **Likely files** | Worker / local completion / translation modules; `archive_search_index` call sites; tests |
+| **Scope** | Explicit sync at parent automated write boundaries that can change displayed transcription body: worker Phase 3 OCR/HTR success/failure (+ nested non-Hebrew translation), Transkribus local completion write path, Hebrew translation-retry persist TX |
+| **Likely files** | `run_worker.py` Phase 3; `transkribus_local_completion.py`; `hebrew_translation_retry.py`; tests; design/decision-log |
 | **Migrations** | None expected |
-| **Tests** | Each hooked automated writer updates `body_text` when display changes; same-TX semantics; no opportunistic non-Hebrew `PARTIAL` “fixes”; public search unchanged |
+| **Tests** | Worker success (EN SOURCE / HE Hebrew selector); OCR failure demotion rebuild; local completion write vs early no-overwrite skip; translation retry single sync / duplicate no-resync; same-TX rollback; public `icontains` unchanged; PR2a/PR2b-1 intact |
 | **Rollout** | Deploy after PR2b-1. Then **full backfill again while PR2a+PR2b-1+PR2b-2 sync are active**, then **drift verification**. Still **no** public FTS cutover. |
 | **Rollback** | Remove PR2b-2 hooks; do not cut over PR3 while any required sync slice is rolled back. |
-| **Non-goals** | Changing `/archive/?q=` behavior; snippet UI; hover locators; redoing PR2b-1 human hooks |
+| **Non-goals** | Changing `/archive/?q=` behavior; snippet UI; hover locators; redoing PR2b-1 human hooks; hooking shared `persist_hebrew_translation_result` (would double-sync on worker path) |
 
 ### PR3 — Backend search cutover (no snippet UI)
 

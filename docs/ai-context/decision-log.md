@@ -1868,7 +1868,7 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 ## Archive full-text search — PR2b-1 human-controlled displayed-text sync (implemented)
 
-**Decision / implemented:** PR2b is split. **PR2b-1** covers human-controlled displayed-text mutation sync only. **PR2b-2** (automated worker/translation mutations) remains deferred.
+**Decision / implemented:** PR2b is split. **PR2b-1** covers human-controlled displayed-text mutation sync only. **PR2b-2** covers automated worker/translation mutations (see following entry).
 
 **Introduced:**
 
@@ -1880,10 +1880,33 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 **Explicitly not hooked in PR2b-1:** verification-only verify/reject; transcription suggestion rejection; activation **`ALREADY_ACTIVE`** and binding-only repair; preview/history GET; snapshot fetch/storage; geometry/binding-only helpers; worker OCR/HTR, translation persist/retry, Transkribus local completion (PR2b-2); public **`/archive/?q=`**.
 
-**Deferred to PR2b-2:** worker OCR/HTR persistence, Transkribus local completion, translation persist/retry, and other automated **`DocumentTextResult`** writers that can change displayed **`body_text`**.
-
 **Unchanged (intentional):** public **`/archive/?q=`** remains **`icontains`**. Hebrew/non-Hebrew displayed body continues to follow **`get_displayed_transcription_text`**. PR2a discovery/manual/taxonomy sync remains intact.
 
 **Hard rollout rule (updated):** public FTS cutover (PR3) remains blocked until **PR2a, PR2b-1, and PR2b-2** are deployed, a **full backfill is rerun while all sync hooks are active**, and **`--check-only` drift verification passes**.
 
 **Tests:** `documents/test_archive_search_index_sync_ocr_body.py` (plus existing PR1/PR2a suites).
+
+## Archive full-text search — PR2b-2 automated displayed-text sync (implemented)
+
+**Decision / implemented:** **PR2b-2** covers automated displayed-text mutation sync. Hooks are at **parent transaction boundaries** only (one sync per logical automated operation). Shared **`persist_hebrew_translation_result`** is intentionally **not** hooked (worker Phase 3 already syncs after nested translation).
+
+**Introduced:**
+
+- Same-transaction id-based **`sync_archive_item_search_index(archive_item_id)`** after final automated display state:
+  - Worker Phase 3 atomic in **`run_worker._process_message`** — after `_save_htr_results` / `_save_ocr_failure` and processing-state save (covers Gemini OCR success, nested non-Hebrew translation persist, and OCR failure demotion). Transkribus automatic snapshot path is **not** double-synced here (it returns via local completion).
+  - **`complete_transkribus_local_success`** write path only — after DTR/bindings/run success; **skips** early no-overwrite exit when bindings are structurally complete and run is already SUCCEEDED.
+  - **`run_hebrew_translation_retry`** persist atomic only — after HEBREW persist + processing-state save; claim TX / abort / duplicate terminal no-op paths do not sync.
+- Index failure propagates and rolls back the surrounding source transaction. Worker Phase 3 / local-completion failures continue to prevent SQS ack via existing exception/`False` behavior; translation-retry persist failures remain **`return False`** (no ack) after rollback. **No signals. No `on_commit`. No schema migration.**
+
+**Lock order (documented):**
+- Phase 3: **Document** → **ArchiveItem** (inside sync)
+- Local completion: **Document → TranskribusRun → RunAutomaticSnapshot → Snapshot → DTRs** → **ArchiveItem** (inside sync)
+- Translation retry persist: **Document** → **ArchiveItem** (inside sync)
+
+**Explicitly not hooked in PR2b-2:** `persist_hebrew_translation_result` helper; claim-only / abort translation-retry paths; local-completion early no-overwrite; multi-image validation FAILED without DTR; snapshot PAGE XML storage; bindings/geometry-only helpers; verification-only verify/reject; PR2b-1 human paths (already hooked); public **`/archive/?q=`**.
+
+**Unchanged (intentional):** public **`/archive/?q=`** remains **`icontains`**. Non-Hebrew missing/failed translation still yields intentional **`PARTIAL`**. Worker retry/ack policy unchanged except index failure cannot leave text and index inconsistent.
+
+**Hard rollout rule (unchanged):** public FTS cutover (PR3) remains blocked until **PR2a, PR2b-1, and PR2b-2** are deployed, a **full backfill is rerun while all sync hooks are active**, and **`--check-only` drift verification passes**.
+
+**Tests:** `documents/test_archive_search_index_sync_automated.py` (plus existing PR1/PR2a/PR2b-1 suites).

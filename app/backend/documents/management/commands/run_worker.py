@@ -407,6 +407,13 @@ class Command(BaseCommand):
 
                 self._update_processing_state(doc, final_engine)
                 doc.save(update_fields=["processing_state_user"])
+                # One sync after final OCR/translation/failure display state.
+                # Lock order: Document (held) → ArchiveItem (inside sync).
+                from documents.services.archive_search_index import (
+                    sync_archive_item_search_index,
+                )
+
+                sync_archive_item_search_index(doc.archive_item_id)
         except Document.DoesNotExist:
             pass
 
