@@ -1747,7 +1747,7 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 **Decision:** The v1 manual execution surface for `run_corrected_current_transkribus_sync(...)` is a **worker-environment** Django management command: **`sync_transkribus_corrected_current`** (`--document-id`, `--initiated-by-user-id`). It reads Transkribus session + bearer credentials from the worker env (same pattern as existing Transkribus audit commands), requires an **active staff** initiating user, and prints only safe attempt/status/snapshot/outcome/`failure_code` fields.
 
-**Deferred:** a **dedicated SQS message type** on the **existing** worker/queue until a staff enqueue UI exists. That message must remain **separate from `PROCESS_DOCUMENT`** (not nested as an `operation`). A **separate queue/worker** is **not** justified currently (worker already has Transkribus credentials and hosts longer recognition work).
+**Deferred:** a **dedicated SQS message type** on the **existing** worker/queue until a staff enqueue UI exists. That message must remain **separate from `PROCESS_DOCUMENT`** (not nested as an `operation`). A **separate queue/worker** is **not** justified currently (worker already has Transkribus credentials and hosts longer recognition work). **PR1 (schema only)** adds the **`TranskribusCorrectedCurrentSyncRequest`** model and constant **`SYNC_TRANSKRIBUS_CORRECTED_CURRENT`**; sender/worker/UI remain deferred — see **“Transkribus corrected/current sync queue foundation (PR1)”** below.
 
 **Operational follow-ups (not this PR):** duplicate/concurrent manual invocations (each run creates a new attempt by design); stale **`STARTED`** recovery after process kill; staff UI / activation / search / hover.
 
@@ -1792,6 +1792,24 @@ Content-Type: `application/xml` via `put_object_bytes`.
 **Messages:** Map stable `CorrectedCurrentActivationErrorCode` values to concise Hebrew staff messages (stale preview; VERIFIED / human-edited block; unauthorized; attempt/snapshot no longer eligible; binding/internal safe failure). Never display raw exception text, provider details, hashes, IDs, or traceback. Success distinguishes three **APPLIED** shapes — SOURCE text changed; Hebrew mirror updated without SOURCE text change; binding-only repair with no displayed text change — plus **ALREADY_ACTIVE** idempotent no-op. After redirect, detail re-renders the current baseline/diff.
 
 **Still out of scope:** activation service semantics changes; models/migrations; selector/sync/storage/parser; automatic completion; OCR routing/worker/upload; search/hover; public archive pages; navigation; processing-state rollup; translation enqueue.
+
+## Transkribus corrected/current sync queue foundation (PR1 — schema/contract only)
+
+**Decision:** Staff-triggered corrected/current sync from the website will use **Design B**: a durable **`TranskribusCorrectedCurrentSyncRequest`** row plus a top-level SQS message on the **existing** worker queue (not a `PROCESS_DOCUMENT` **`operation`**). PR1 ships **schema, migration, model tests, message-type constant, and docs only** — no enqueue sender, worker branch, web UI, service correlation parameters, visibility changes, or recovery commands.
+
+**Delivery guarantee (planned):** **At-most-once provider orchestration per Request**, not exactly-once. SQS is at-least-once; lease-token fencing plus atomic Request↔Attempt correlation before provider I/O prevent duplicate Transkribus/S3 work for the same Request. Terminal Request statuses are **immutable** (no automatic rewrite from `RECOVERY_REQUIRED` to `FAILED` and back).
+
+**Request model (migration 0044):** FK **`document`** (CASCADE), **`initiated_by`** (`SET_NULL`), **`status`** (`QUEUED` | `RUNNING` | `RECOVERY_REQUIRED` | `COMPLETED` | `REFUSED` | `FAILED` | `ENQUEUE_FAILED`), nullable unique **`attempt`** OneToOne (`RESTRICT` — preserves provenance; delete the request or document before deleting a referenced attempt), **`lease_token`** / **`lease_expires_at`**, safe **`failure_code`** / **`failure_message`**, timestamps including **`last_enqueued_at`**. DB partial unique: **at most one active Request per document** for `QUEUED`, `RUNNING`, `RECOVERY_REQUIRED`, and `ENQUEUE_FAILED`. Lifecycle check constraints enforce queue shapes, terminal rows without active lease fields, and **`FAILED`** requiring non-empty **`failure_code`**.
+
+**`RECOVERY_REQUIRED` (non-terminal):** entered when **`RUNNING`** has a linked **`STARTED`** Attempt whose execution exceeded the recovery threshold. Retains **`lease_token`** as fencing identity for a potentially late original worker, but **`lease_expires_at` must be null** (no active lease expiry). Never re-enters provider orchestration. A later terminal linked Attempt may move the Request to **`COMPLETED`** / **`REFUSED`** / **`FAILED`**. Otherwise a future explicit staff POST may abandon/retry (later PR). **`RECOVERY_REQUIRED`** counts toward the one-active-request rule.
+
+**SQS message type constant (PR1 only):** **`SYNC_TRANSKRIBUS_CORRECTED_CURRENT`** in `documents/services/sqs.py`. Future payload carries **`request_id`** only (no credentials). Not nested under **`PROCESS_DOCUMENT`**.
+
+**Unchanged in PR1:** `run_corrected_current_transkribus_sync(...)` and **`sync_transkribus_corrected_current`** management command (no `SyncRequest` parameter yet). Activation remains manual and separate. Web enqueue remains **disabled**; nothing is operationally enabled by PR1.
+
+**Planned later PRs (not PR1):** worker claim/fencing + service correlation + visibility extension; enqueue service; staff UI POST + feature gate; ops reconcile/requeue command.
+
+**Planned v1 timing constants (docs only until worker PR):** execution lease **45 minutes**, one-shot SQS visibility extension **45 minutes**, linked **`STARTED`** recovery threshold **60 minutes** — conservative for up to ~30-page documents; tune after production measurements.
 
 ## Archive full-text search — architecture (docs-only)
 
