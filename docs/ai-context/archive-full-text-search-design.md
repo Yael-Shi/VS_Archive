@@ -1,8 +1,8 @@
 # Archive full-text search — design
 
-**Status:** Architecture contract. **PR1**, **PR2a**, **PR2b-1**, **PR2b-2**, **PR3**, and **PR4** are implemented in application code; later hover/page-line mapping remains deferred.
+**Status:** Architecture contract. **PR1**, **PR2a**, **PR2b-1**, **PR2b-2**, **PR3**, and **PR4** are implemented in application code; **post-PR4 translation search coverage** is implemented (`hebrew_translation_text`). Later hover/page-line mapping remains deferred.
 
-**Companion decision-log entries:** `docs/ai-context/decision-log.md` — “Archive full-text search — architecture (docs-only)”, “PR1 search-index foundation (implemented)”, “PR2a discovery/manual/taxonomy sync (implemented)”, “PR2b-1 human-controlled displayed-text sync (implemented)”, “PR2b-2 automated displayed-text sync (implemented)”, “PR3 backend search cutover (implemented)”, “PR4 snippets/match-source/help text (implemented)”.
+**Companion decision-log entries:** `docs/ai-context/decision-log.md` — “Archive full-text search — architecture (docs-only)”, “PR1 search-index foundation (implemented)”, “PR2a discovery/manual/taxonomy sync (implemented)”, “PR2b-1 human-controlled displayed-text sync (implemented)”, “PR2b-2 automated displayed-text sync (implemented)”, “PR3 backend search cutover (implemented)”, “PR4 snippets/match-source/help text (implemented)”, “Post-PR4 Hebrew translation search coverage (implemented)”.
 
 This document is the detailed contract for the implementation PR sequence. It records verified current behavior, target decisions, risks, and per-PR scope. Do not treat unimplemented later hover-mapping behavior as live.
 
@@ -28,15 +28,16 @@ Helpers live in `documents/services/archive_item_presentation.py` and `documents
 
 **Note:** Discovery PR5 decision-log text refers to `archive_item_queryset_for_user`. The live list path uses **`archive_browse_queryset_for_user`** (visibility **and** renderability). Auth/renderability remains the choke point **before** matching, ranking, counts, and pagination.
 
-### Fields searched (PR3)
+### Fields searched (PR3 + post-PR4 translation coverage)
 
-Via denormalized `ArchiveItemSearchIndex` (content from the PR1 builder contract):
+Via denormalized `ArchiveItemSearchIndex` (content from the PR1 builder contract, extended for translation):
 
 | Index field | Weight / match |
 |-------------|----------------|
 | `title_text` | A — FTS and short-field `icontains` |
 | `metadata_text` | B — author, source_title, categories/events/tags names, `public_note` — FTS and short-field `icontains` |
-| `body_text` | C — ManualText body or displayed OCR transcription — **FTS only** (no body substring) |
+| `body_text` | C — ManualText body or displayed OCR transcription (source/original) — **FTS only** (no body substring) |
+| `hebrew_translation_text` | C — displayed Hebrew translation for **non-Hebrew OCR only** — **FTS only**; never concatenated into `body_text` |
 
 ### Still not searched
 
@@ -60,12 +61,17 @@ Canonical displayed transcription selection is already implemented in `documents
 
 - `_latest_displayable` — non-empty text; prefer latest `SUCCEEDED`, else latest `NEEDS_REVIEW`; excludes `FAILED` / empty
 - `resolve_displayed_transcription_result` / `get_displayed_transcription_text` — Hebrew docs: HEBREW then SOURCE; non-Hebrew: SOURCE then HEBREW
+- `resolve_displayed_hebrew_translation_result` / `get_displayed_hebrew_translation_text` — non-Hebrew only: displayable HEBREW_TEXT when a displayable SOURCE also exists (same `_latest_displayable` multi-engine rules as detail presentation). Empty for Hebrew-language documents (mirrored HEBREW is transcription, not a separate translation field). **Revision-stale translations are included** — the public detail page still displays them; `is_hebrew_translation_stale` is a staff review-detail signal only, not a public-presentation filter.
 
 Browse OCR preview already calls `get_displayed_transcription_text` (`_ocr_document_preview` in `archive_item_presentation.py`).
 
-**Search body for OCR items must follow these helpers**, not index every `DocumentTextResult` row (multi-engine uniqueness is `(document, result_type, engine)`).
+**Search `body_text` for OCR items must follow `get_displayed_transcription_text`**, not index every `DocumentTextResult` row (multi-engine uniqueness is `(document, result_type, engine)`).
+
+**Search `hebrew_translation_text` must follow `get_displayed_hebrew_translation_text`**, not index every `HEBREW_TEXT` row. Failed, missing, empty, or non-displayable translations are not indexed. When SOURCE is not displayable, HEBREW lives only in `body_text` (transcription fallback) so the same text is not duplicated into both fields. Hebrew-language documents leave `hebrew_translation_text` empty.
 
 `verification_status=REJECTED` is **not** filtered out of display selection today. If a REJECTED row remains displayable under those rules, it is shown. Search will follow that same rule until a separate display-policy decision changes it.
+
+**Known product note (stale translations):** public document detail shows revision-stale Hebrew translations; staff review detail may badge them via `is_hebrew_translation_stale`. Search follows the **public** presentation (indexes stale text when displayable). Changing public detail to suppress stale text would be a separate presentation-policy decision, after which search should reuse the same canonical selector.
 
 ### Manual text
 
@@ -113,14 +119,15 @@ Logical fields (exact Django field names left to PR1):
 | `archive_item` | OneToOne PK/FK |
 | `metadata_text` | Concatenated short discovery strings used for indexing/debug |
 | `body_text` | Manual body or displayed OCR transcription (plain text) |
-| `search_vector` | Weighted PostgreSQL `tsvector` (`simple`): title/metadata high weight, body lower — **materialized on the row by persistence**, not by the pure builder |
+| `hebrew_translation_text` | Displayed Hebrew translation for non-Hebrew OCR only (plain text; empty otherwise) |
+| `search_vector` | Weighted PostgreSQL `tsvector` (`simple`): title A, metadata B, body + translation C — **materialized on the row by persistence**, not by the pure builder |
 | Optional match flags | Booleans or small enum bits for later PR4 match-source UI (title / tags / body) — only if cheap in PR1; otherwise derive at query time in PR3/PR4 |
 | `updated_at` | Sync/backfill freshness |
 
 ### Pure builder vs persistence
 
-- **Pure builder:** Deterministically selects and normalizes source-of-truth text/segments (discovery fields, `public_note`, ManualText body, displayed OCR transcription via existing helpers) and returns a **plain value object**. It performs **no** database writes and does **not** update `search_vector`.
-- **Persistence layer:** Materializes/updates `ArchiveItemSearchIndex` from that value object, including writing plain text columns and computing/storing the weighted PostgreSQL `search_vector`.
+- **Pure builder:** Deterministically selects and normalizes source-of-truth text/segments (discovery fields, `public_note`, ManualText body, displayed OCR transcription via existing helpers, and displayed non-Hebrew Hebrew translation via `get_displayed_hebrew_translation_text`) and returns a **plain value object**. It performs **no** database writes and does **not** update `search_vector`.
+- **Persistence layer:** Materializes/updates `ArchiveItemSearchIndex` from that value object, including writing plain text columns and computing/storing the weighted PostgreSQL `search_vector` (title A + metadata B + `body_text` C + `hebrew_translation_text` C).
 
 Backfill (PR1) and write-path sync (PR2) both: build value object → persist row. Do not describe the pure builder as directly performing database vector updates.
 
@@ -288,8 +295,8 @@ Required order (short form): **PR1 migrate/backfill → PR2a sync → PR2b-1 syn
    - `no_matches`: overlong, or nonblank punctuation-only (e.g. `... !!!`) → empty result set (not full archive).
    - `search`: collapse whitespace; split on ordinary punctuation **and underscore** (`[\W_]+`); drop empty terms; `config="simple"` at query time.
 3. **Max length:** `ARCHIVE_LIST_SEARCH_QUERY_MAX_LENGTH = 200` on the trimmed display string. Overlong → `no_matches`; display string unchanged.
-4. **Multi-term:** AND. Every term must match; terms may hit different sources/fields; order/adjacency do not matter. No OR fallback; no phrase/minus/paren syntax.
-5. **Per-term match (decomposed for GIN):** authorized PK candidates are `FTS ∪ title_text icontains ∪ metadata_text icontains` via Django `QuerySet.union`, then AND’d across terms with successive `pk__in`. A single `@@ OR ILIKE OR ILIKE` WHERE can force a seq scan and prevent meaningful `archive_item_search_vector_gin` participation; UNION keeps the FTS `@@` SELECT independently indexable. No `body_text` substring/prefix arm.
+4. **Multi-term:** AND. Every term must match; terms may hit different sources/fields (including `body_text` and `hebrew_translation_text`); order/adjacency do not matter. No OR fallback; no phrase/minus/paren syntax.
+5. **Per-term match (decomposed for GIN):** authorized PK candidates are `FTS ∪ title_text icontains ∪ metadata_text icontains` via Django `QuerySet.union`, then AND’d across terms with successive `pk__in`. A single `@@ OR ILIKE OR ILIKE` WHERE can force a seq scan and prevent meaningful `archive_item_search_vector_gin` participation; UNION keeps the FTS `@@` SELECT independently indexable. No `body_text` / `hebrew_translation_text` substring/prefix arm.
 6. **Ranking:** `SearchRank(search_vector, AND of terms)` + title substring boost `1.0` (weight A) + metadata substring boost `0.4` (weight B); each short-field boost applies once if any term hits that field (not summed per term); order `-relevance`, `-created_at`, `pk`.
 7. **Missing index:** no match, no crash, no GET-time rebuild.
 8. **Hebrew/`simple`:** body clitic/prefix gaps remain accepted limitations; short-field substring covers partials only on title/metadata.
@@ -311,11 +318,21 @@ Required order (short form): **PR1 migrate/backfill → PR2a sync → PR2b-1 syn
 
 1. **No effective `q`:** cards keep ordinary beginning-of-text `preview_text` with no match-source row.
 2. **One snippet max** per card when body whole-tokens match query terms. Target ~190 chars (band 160–220); CSS line-clamp still 3. Window maximizes distinct query terms within max length; tie-break earliest match. Whole-word edges where practical; leading/trailing `…` only when omitted. No page/line locators.
-3. **Body vs other sources:** useful body match → replace preview with snippet; labels **`נמצא בתעתוק`** (OCR) / **`נמצא בטקסט`** (ManualText). Prefer body snippet even when title/metadata also match (ranking unchanged).
+3. **Body vs other sources:** useful body or translation match → replace preview with snippet; labels **`נמצא בתעתוק`** (OCR source/transcription), **`נמצא בתרגום`** (OCR Hebrew translation field), **`נמצא בטקסט`** (ManualText). When source and translation both contain query terms, choose the field whose best window covers the most distinct query terms; ties keep the existing source/body preference; label the field actually used. Prefer a long-text snippet even when title/metadata also match (ranking unchanged). Never label translation text as transcription.
 4. **Title-only:** no unrelated body excerpt; title remains the visible explanation (no match-source chip required).
-5. **Metadata/public_note/discovery-only:** keep ordinary preview; show a specific Hebrew label when exactly one metadata source matches, else **`נמצא בפרטי הפריט`**. Never claim a field unless it contains a normalized query term (`icontains`-aligned for short fields; whole-token for body).
+5. **Metadata/public_note/discovery-only:** keep ordinary preview; show a specific Hebrew label when exactly one metadata source matches, else **`נמצא בפרטי הפריט`**. Never claim a field unless it contains a normalized query term (`icontains`-aligned for short fields; whole-token for body/translation).
 6. **Highlighting:** Unicode-aware case-insensitive whole-token marks inside the selected snippet only; does not change match membership. No Hebrew morphology / fuzzy / body substring.
-7. **Performance/auth:** snippets after auth + pagination; one `ArchiveItemSearchIndex` load for the page ids; no per-result queries; never load all matching bodies before pagination.
+7. **Performance/auth:** snippets after auth + pagination; one `ArchiveItemSearchIndex` load for the page ids (includes `hebrew_translation_text`); no per-result queries; never load all matching bodies before pagination.
+
+### Post-PR4 — Hebrew translation search coverage — **implemented**
+
+| | |
+|--|--|
+| **Scope** | Add separate `hebrew_translation_text` on `ArchiveItemSearchIndex` + builder VO; include at weight C in `search_vector`; index only the canonical displayed non-Hebrew translation; snippet label **`נמצא בתרגום`**; backfill/`--check-only` compare the new field; no new sync hooks (parent-boundary rebuild already covers translation writers) |
+| **Files** | `models.py`; migration `0043_…`; `text_presentation.py` helpers; `archive_search_index.py`; `archive_search_snippets.py`; backfill command; tests; design + decision-log |
+| **Migrations** | Add nullable-default `hebrew_translation_text` TextField only (no data migration; full backfill rematerializes) |
+| **Rollout** | 1) deploy/migrate; 2) run full `backfill_archive_search_index` while all PR2 sync hooks remain active; 3) run full `--check-only` drift verification |
+| **Non-goals** | Concatenating translation into `body_text`; Hebrew-doc mirror duplication; photo/ManualText expansion; `pg_trgm`/fuzzy/morphology; hover/page-line mapping; ranking/auth/UNION/GIN strategy changes; new signals/`on_commit` |
 
 ### Later — Search ↔ hover mapping (optional)
 

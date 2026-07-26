@@ -1918,8 +1918,8 @@ Content-Type: `application/xml` via `put_object_bytes`.
 **Query semantics:**
 
 - Display/URL `q`: trim only. Normalization outcome via **`resolve_archive_list_search_terms`**: blank/whitespace → **`no_search`** (browse); overlong or nonblank punctuation-only → **`no_matches`** (empty results, not full archive); otherwise **`search`** terms after collapsing whitespace and splitting on ordinary punctuation **and underscore** (`[\W_]+`). PostgreSQL/`SearchQuery` `config="simple"` + `search_type="plain"`.
-- Multi-term **AND** (cross-source allowed: terms may hit different of title/metadata/body). No OR fallback; no phrase/minus/paren/web syntax.
-- Per-term match is **decomposed**: authorized PK `UNION` of FTS (`search_vector @@`) ∪ `title_text` `icontains` ∪ `metadata_text` `icontains`, then AND across terms via `pk__in`. This keeps the FTS arm independently usable with **`archive_item_search_vector_gin`** (a combined `@@ OR ILIKE OR ILIKE` WHERE can force seq scan). **No** `body_text` substring.
+- Multi-term **AND** (cross-source allowed: terms may hit different of title/metadata/body/**hebrew_translation_text**). No OR fallback; no phrase/minus/paren/web syntax.
+- Per-term match is **decomposed**: authorized PK `UNION` of FTS (`search_vector @@`) ∪ `title_text` `icontains` ∪ `metadata_text` `icontains`, then AND across terms via `pk__in`. This keeps the FTS arm independently usable with **`archive_item_search_vector_gin`** (a combined `@@ OR ILIKE OR ILIKE` WHERE can force seq scan). **No** `body_text` / `hebrew_translation_text` substring.
 - Ranking: `SearchRank` on A/B/C vector + title substring boost `1.0` + metadata substring boost `0.4` (each boost once if any term hits that short field); tie-break `-created_at`, then `pk`. Empty `q`: unchanged chronological `-created_at`.
 - Safety: trimmed `q` longer than **200** chars → empty results (display string preserved). Missing index row → no match, no crash, no GET rebuild.
 - Auth/filters/pagination/UI unchanged aside from backend matching/ranking. One `ArchiveItem` per hit. `REJECTED` displayable OCR remains searchable per display helpers.
@@ -1947,6 +1947,35 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 **Files:** `documents/services/archive_search_snippets.py`; `ArchiveBrowseCard` search fields; `archive_list_page` wiring; archive list/card templates; CSS; tests in `documents/test_archive_full_text_search.py`.
 
-**Explicitly deferred:** hover/page/line mapping; jump-to-match; `pg_trgm`/morphology/fuzzy; search backend/ranking changes; write-path/index sync/schema.
+**Explicitly deferred:** hover/page/line mapping; jump-to-match; `pg_trgm`/morphology/fuzzy; search backend/ranking changes beyond translation-field coverage.
 
 **Docs:** `docs/ai-context/archive-full-text-search-design.md` (PR4 marked implemented).
+
+## Archive full-text search — post-PR4 Hebrew translation coverage (implemented)
+
+**Decision / implemented:** After PR1–PR4, non-Hebrew documents were findable by displayed source transcription but **not** by text that appears only in the displayed Hebrew translation, because `ArchiveItemSearchIndex` stored a single `body_text`. This correction adds a separate indexed field and keeps source/translation contracts distinct.
+
+**Introduced:**
+
+- Model field **`ArchiveItemSearchIndex.hebrew_translation_text`** (weight **C** with `body_text`); migration **`0043_archiveitemsearchindex_hebrew_translation_text`** (schema only; no data migration).
+- Value object field on **`ArchiveItemSearchContent`**; builder uses **`get_displayed_hebrew_translation_text`** / **`resolve_displayed_hebrew_translation_result`** in **`text_presentation.py`**.
+- Selection contract for the translation field:
+  - non-Hebrew OCR only;
+  - displayable HEBREW_TEXT via the same `_latest_displayable` rules as `get_text_presentation_for_document`;
+  - requires a displayable SOURCE (so HEBREW used as transcription fallback is not duplicated into both fields);
+  - **includes** revision-stale translations (public detail still shows them; `is_hebrew_translation_stale` is review-detail only);
+  - Hebrew-language documents leave the field empty (no mirror duplication);
+  - ManualText / photos leave the field empty.
+- Persistence rematerializes `search_vector` as title A + metadata B + `body_text` C + `hebrew_translation_text` C. Existing GIN index unchanged; no `pg_trgm`.
+- Snippets: translation-only matches use label **`נמצא בתרגום`**; source keeps **`נמצא בתעתוק`**; ManualText keeps **`נמצא בטקסט`**. When both long-text fields match, pick the window with more distinct query terms; ties prefer source/body.
+- Backfill `--check-only` compares `hebrew_translation_text` (counts/IDs only; no source/translation text in logs).
+
+**Sync/write-path audit:** No new hooks. Existing parent-boundary `sync_archive_item_search_index` calls already rebuild the full value object after worker OCR + nested translation, translation retry, human pending/verified HEBREW_TEXT edits, suggestion approval, and corrected-current activation when source/hebrew text flags change. Source edits that leave HEBREW revision-stale still rebuild the index with the translation text the public detail continues to show. **`persist_hebrew_translation_result`** remains unhooked (would double-sync on the worker path).
+
+**Unchanged (intentional):** ranking weights A/B/C and boosts; auth; UNION/GIN strategy; max query length; punctuation normalization; filters; pagination; no-query ordering; photo content; translation generation / OCR routing / processing-state semantics.
+
+**Rollout:** 1) deploy + migrate `0043`; 2) full `backfill_archive_search_index` while all PR2 sync hooks are active; 3) full `--check-only` drift verification.
+
+**Tests:** extended `test_archive_search_index.py`, `test_archive_full_text_search.py`, `test_archive_search_index_sync.py`, `test_archive_search_index_sync_ocr_body.py`, `test_archive_search_index_sync_automated.py`.
+
+**Still deferred:** hover/page/line mapping; `pg_trgm`/fuzzy/morphology/Hebrew prefix expansion.

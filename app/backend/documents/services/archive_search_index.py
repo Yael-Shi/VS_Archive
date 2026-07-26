@@ -20,6 +20,7 @@ from django.db.models.expressions import CombinedExpression
 from documents.models import ArchiveItem, ArchiveItemSearchIndex
 from documents.services.text_presentation import (
     archive_item_displayable_text_results_prefetch,
+    get_displayed_hebrew_translation_text,
     get_displayed_transcription_text,
 )
 
@@ -37,6 +38,7 @@ class ArchiveItemSearchContent:
     title_text: str
     metadata_text: str
     body_text: str
+    hebrew_translation_text: str
 
 
 def archive_items_for_search_index_build(
@@ -102,6 +104,16 @@ def _body_text_for_archive_item(archive_item: ArchiveItem) -> str:
     return ""
 
 
+def _hebrew_translation_text_for_archive_item(archive_item: ArchiveItem) -> str:
+    """Displayed Hebrew translation only; empty for Hebrew docs / non-OCR."""
+    if archive_item.item_type != ArchiveItem.ItemType.OCR_DOCUMENT:
+        return ""
+    document = getattr(archive_item, "ocr_document", None)
+    if document is None:
+        return ""
+    return _normalize_body(get_displayed_hebrew_translation_text(document))
+
+
 def build_archive_item_search_content(
     archive_item: ArchiveItem,
 ) -> ArchiveItemSearchContent:
@@ -110,6 +122,12 @@ def build_archive_item_search_content(
 
     Does not write to the database or materialize ``search_vector``.
     Expects relations from ``archive_items_for_search_index_build`` (or equivalent).
+
+    ``body_text`` is ManualText body or displayed OCR transcription (source /
+    original contract via ``get_displayed_transcription_text``).
+    ``hebrew_translation_text`` is the current displayed Hebrew translation for
+    non-Hebrew OCR only (never concatenated into ``body_text``; empty for
+    Hebrew-language documents so mirrored HEBREW/SOURCE is not duplicated).
     """
     if archive_item.pk is None:
         raise ValueError("archive_item must be saved before building search content")
@@ -126,12 +144,14 @@ def build_archive_item_search_content(
         ]
     )
     body_text = _body_text_for_archive_item(archive_item)
+    hebrew_translation_text = _hebrew_translation_text_for_archive_item(archive_item)
 
     return ArchiveItemSearchContent(
         archive_item_id=archive_item.pk,
         title_text=title_text,
         metadata_text=metadata_text,
         body_text=body_text,
+        hebrew_translation_text=hebrew_translation_text,
     )
 
 
@@ -140,6 +160,9 @@ def _weighted_search_vector() -> CombinedExpression:
         SearchVector("title_text", weight="A", config=SEARCH_VECTOR_CONFIG)
         + SearchVector("metadata_text", weight="B", config=SEARCH_VECTOR_CONFIG)
         + SearchVector("body_text", weight="C", config=SEARCH_VECTOR_CONFIG)
+        + SearchVector(
+            "hebrew_translation_text", weight="C", config=SEARCH_VECTOR_CONFIG
+        )
     )
 
 
@@ -158,6 +181,7 @@ def persist_archive_item_search_content(
                 "title_text": content.title_text,
                 "metadata_text": content.metadata_text,
                 "body_text": content.body_text,
+                "hebrew_translation_text": content.hebrew_translation_text,
             },
         )
         ArchiveItemSearchIndex.objects.filter(pk=index.pk).update(

@@ -23,6 +23,7 @@ ARCHIVE_SEARCH_SNIPPET_TARGET_LEN = 190
 ARCHIVE_SEARCH_SNIPPET_MAX_LEN = 220
 
 MATCH_SOURCE_OCR_BODY = "נמצא בתעתוק"
+MATCH_SOURCE_OCR_TRANSLATION = "נמצא בתרגום"
 MATCH_SOURCE_MANUAL_BODY = "נמצא בטקסט"
 MATCH_SOURCE_ITEM_DETAILS = "נמצא בפרטי הפריט"
 MATCH_SOURCE_AUTHOR = "נמצא במחבר/ת"
@@ -300,6 +301,53 @@ def _body_match_source_label(archive_item: ArchiveItem) -> str | None:
     return None
 
 
+def _distinct_query_terms_in_window(
+    text: str,
+    terms: Sequence[str],
+    window: tuple[int, int],
+) -> int:
+    """Count distinct query terms present as whole tokens inside ``window``."""
+    normalized = _normalize_snippet_source(text)
+    if not normalized:
+        return 0
+    start, end = window
+    excerpt = normalized[start:end]
+    term_set = {term.casefold() for term in terms if term}
+    found = {
+        token.casefold()
+        for _, _, token in iter_token_spans(excerpt)
+        if token.casefold() in term_set
+    }
+    return len(found)
+
+
+def _snippet_candidate_for_field(
+    *,
+    field_text: str,
+    terms: Sequence[str],
+    label: str,
+    tie_break_preference: int,
+) -> tuple[int, int, str, tuple[ArchiveSearchSnippetSegment, ...]] | None:
+    """
+    Build one snippet candidate for a long-text field.
+
+    Sort key: maximize distinct query terms in the chosen window, then prefer
+    lower ``tie_break_preference`` (source/body = 0 before translation = 1).
+    """
+    if not body_contains_any_term(field_text, terms):
+        return None
+    window = select_snippet_window(field_text, terms)
+    segments = build_highlighted_snippet_segments(field_text, terms, window=window)
+    if not segments:
+        return None
+    distinct = (
+        _distinct_query_terms_in_window(field_text, terms, window)
+        if window is not None
+        else 0
+    )
+    return (-distinct, tie_break_preference, label, segments)
+
+
 def build_archive_search_match_presentation(
     *,
     archive_item: ArchiveItem,
@@ -309,29 +357,55 @@ def build_archive_search_match_presentation(
     """
     Build match-source / snippet presentation for one authorized result.
 
-    Prefers a body contextual snippet when body tokens match. Title-only hits
-    add no extras (title is already visible). Metadata-only hits add a label
+    Prefers a contextual snippet from ``body_text`` or
+    ``hebrew_translation_text`` when those tokens match. When both fields
+    match, chooses the field whose best window covers the most distinct query
+    terms; ties keep the existing source/body preference. Title-only hits add
+    no extras (title is already visible). Metadata-only hits add a label
     without fabricating a body excerpt.
     """
     if not terms:
         return None
 
     body_text = ""
+    translation_text = ""
     title_text = archive_item.title or ""
     if search_index is not None:
         body_text = search_index.body_text or ""
+        translation_text = search_index.hebrew_translation_text or ""
         title_text = search_index.title_text or title_text
 
-    if body_contains_any_term(body_text, terms):
-        window = select_snippet_window(body_text, terms)
-        segments = build_highlighted_snippet_segments(body_text, terms, window=window)
-        label = _body_match_source_label(archive_item)
-        if segments and label:
-            return ArchiveSearchMatchPresentation(
-                match_source_label=label,
-                snippet_segments=segments,
-                replaces_preview=True,
-            )
+    candidates: list[tuple[int, int, str, tuple[ArchiveSearchSnippetSegment, ...]]] = []
+
+    body_label = _body_match_source_label(archive_item)
+    if body_label:
+        body_candidate = _snippet_candidate_for_field(
+            field_text=body_text,
+            terms=terms,
+            label=body_label,
+            tie_break_preference=0,
+        )
+        if body_candidate is not None:
+            candidates.append(body_candidate)
+
+    if archive_item.item_type == ArchiveItem.ItemType.OCR_DOCUMENT:
+        translation_candidate = _snippet_candidate_for_field(
+            field_text=translation_text,
+            terms=terms,
+            label=MATCH_SOURCE_OCR_TRANSLATION,
+            tie_break_preference=1,
+        )
+        if translation_candidate is not None:
+            candidates.append(translation_candidate)
+
+    if candidates:
+        candidates.sort()
+        _neg_distinct, _pref, label, segments = candidates[0]
+        return ArchiveSearchMatchPresentation(
+            match_source_label=label,
+            snippet_segments=segments,
+            replaces_preview=True,
+        )
 
     metadata_label = resolve_metadata_match_source_label(archive_item, terms)
     if metadata_label:
@@ -359,7 +433,13 @@ def load_archive_search_indexes_for_item_ids(
         row.archive_item_id: row
         for row in ArchiveItemSearchIndex.objects.filter(
             archive_item_id__in=list(item_ids)
-        ).only("archive_item_id", "title_text", "metadata_text", "body_text")
+        ).only(
+            "archive_item_id",
+            "title_text",
+            "metadata_text",
+            "body_text",
+            "hebrew_translation_text",
+        )
     }
 
 

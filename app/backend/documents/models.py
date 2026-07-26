@@ -147,8 +147,11 @@ class ArchiveItemSearchIndex(models.Model):
     title_text = models.TextField(blank=True, default="")
     # Weight B — author, source_title, categories, events, tags, public_note.
     metadata_text = models.TextField(blank=True, default="")
-    # Weight C — ManualText body or displayed OCR transcription.
+    # Weight C — ManualText body or displayed OCR transcription (source/original).
     body_text = models.TextField(blank=True, default="")
+    # Weight C — displayed Hebrew translation for non-Hebrew OCR only (never
+    # concatenated into body_text; empty for Hebrew docs / ManualText / photos).
+    hebrew_translation_text = models.TextField(blank=True, default="")
     search_vector = SearchVectorField(null=True)
     updated_at = models.DateTimeField(auto_now=True)
 

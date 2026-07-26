@@ -33,7 +33,10 @@ from documents.services.archive_search_index import (
     persist_archive_item_search_content,
     rebuild_archive_item_search_index,
 )
-from documents.services.text_presentation import get_displayed_transcription_text
+from documents.services.text_presentation import (
+    get_displayed_hebrew_translation_text,
+    get_displayed_transcription_text,
+)
 from documents.test_archive_item import create_viewable_ocr_document
 
 
@@ -53,6 +56,8 @@ def _create_text_result(
     engine_key: str = DocumentTextResult.OcrEngineKey.GEMINI,
     prompt_variant: str = DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
     verification_status: str = DocumentTextResult.VerificationStatus.UNVERIFIED,
+    source_revision: int = 1,
+    based_on_source_revision: int | None = None,
 ) -> DocumentTextResult:
     return DocumentTextResult.objects.create(
         document=doc,
@@ -63,6 +68,8 @@ def _create_text_result(
         status=status,
         verification_status=verification_status,
         text=text,
+        source_revision=source_revision,
+        based_on_source_revision=based_on_source_revision,
     )
 
 
@@ -105,6 +112,17 @@ class ArchiveItemSearchIndexModelTests(TestCase):
         self.assertEqual(indexes[0].name, "archive_item_search_vector_gin")
         self.assertEqual(list(indexes[0].fields), ["search_vector"])
 
+    def test_translation_field_migration_adds_hebrew_translation_text(self):
+        import importlib
+
+        migration_module = importlib.import_module(
+            "documents.migrations.0043_archiveitemsearchindex_hebrew_translation_text"
+        )
+        Migration = migration_module.Migration
+        add_op = Migration.operations[0]
+        self.assertEqual(add_op.name, "hebrew_translation_text")
+        self.assertEqual(add_op.model_name, "archiveitemsearchindex")
+
 
 class ArchiveItemSearchIndexBuilderTests(TestCase):
     def test_includes_title_author_source_public_note_and_sorted_m2m_names(self):
@@ -145,6 +163,7 @@ class ArchiveItemSearchIndexBuilderTests(TestCase):
             ),
         )
         self.assertEqual(content.body_text, "Body text")
+        self.assertEqual(content.hebrew_translation_text, "")
 
     def test_builder_is_deterministic_across_calls(self):
         item = create_manual_text_archive_item(
@@ -208,7 +227,12 @@ class ArchiveItemSearchIndexBuilderTests(TestCase):
         ocr_content = build_archive_item_search_content(_load_item(item.pk))
         photo_content = build_archive_item_search_content(_load_item(photo_item.pk))
 
-        blob = f"{ocr_content.title_text}\n{ocr_content.metadata_text}\n{ocr_content.body_text}"
+        blob = (
+            f"{ocr_content.title_text}\n"
+            f"{ocr_content.metadata_text}\n"
+            f"{ocr_content.body_text}\n"
+            f"{ocr_content.hebrew_translation_text}"
+        )
         self.assertIn("Allowed note", blob)
         self.assertIn("Displayed OCR body", blob)
         for forbidden in (
@@ -225,7 +249,8 @@ class ArchiveItemSearchIndexBuilderTests(TestCase):
         photo_blob = (
             f"{photo_content.title_text}\n"
             f"{photo_content.metadata_text}\n"
-            f"{photo_content.body_text}"
+            f"{photo_content.body_text}\n"
+            f"{photo_content.hebrew_translation_text}"
         )
         for forbidden in (
             "photo-description-secret",
@@ -236,6 +261,7 @@ class ArchiveItemSearchIndexBuilderTests(TestCase):
         ):
             self.assertNotIn(forbidden, photo_blob)
         self.assertEqual(photo_content.body_text, "")
+        self.assertEqual(photo_content.hebrew_translation_text, "")
 
     def test_manual_text_body_selection(self):
         item = create_manual_text_archive_item(
@@ -244,6 +270,7 @@ class ArchiveItemSearchIndexBuilderTests(TestCase):
         )
         content = build_archive_item_search_content(_load_item(item.pk))
         self.assertEqual(content.body_text, "Manual body content")
+        self.assertEqual(content.hebrew_translation_text, "")
 
     def test_ocr_body_matches_displayed_transcription_helper(self):
         doc = create_viewable_ocr_document(
@@ -274,6 +301,348 @@ class ArchiveItemSearchIndexBuilderTests(TestCase):
             get_displayed_transcription_text(loaded.ocr_document),
         )
         self.assertEqual(content.body_text, "Hebrew preferred text")
+        self.assertEqual(content.hebrew_translation_text, "")
+        self.assertEqual(
+            get_displayed_hebrew_translation_text(loaded.ocr_document),
+            "",
+        )
+
+    def test_non_hebrew_indexes_source_body_and_current_translation_separately(self):
+        doc = create_viewable_ocr_document(
+            title="EN with translation",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        source = _create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="English source transcription",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            source_revision=2,
+        )
+        _create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="תרגום עברי ייחודי לאינדקס",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            engine="engine-he",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+            based_on_source_revision=source.source_revision,
+        )
+        loaded = _load_item(doc.archive_item_id)
+        content = build_archive_item_search_content(loaded)
+        self.assertEqual(content.body_text, "English source transcription")
+        self.assertEqual(
+            content.hebrew_translation_text,
+            get_displayed_hebrew_translation_text(loaded.ocr_document),
+        )
+        self.assertEqual(
+            content.hebrew_translation_text,
+            "תרגום עברי ייחודי לאינדקס",
+        )
+        self.assertNotIn(content.hebrew_translation_text, content.body_text)
+
+    def test_non_hebrew_excludes_failed_missing_and_non_displayable_translation(
+        self,
+    ):
+        doc = create_viewable_ocr_document(
+            title="EN translation exclusions",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        source = _create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="Keep source searchable",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            source_revision=3,
+        )
+        content_missing = build_archive_item_search_content(
+            _load_item(doc.archive_item_id)
+        )
+        self.assertEqual(content_missing.body_text, "Keep source searchable")
+        self.assertEqual(content_missing.hebrew_translation_text, "")
+
+        failed = _create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="failed translation should not index",
+            status=DocumentTextResult.Status.FAILED,
+            engine="engine-he-failed",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+            based_on_source_revision=source.source_revision,
+        )
+        content_failed = build_archive_item_search_content(
+            _load_item(doc.archive_item_id)
+        )
+        self.assertEqual(content_failed.hebrew_translation_text, "")
+        failed.delete()
+
+        empty = _create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            engine="engine-he-empty",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+            based_on_source_revision=source.source_revision,
+        )
+        content_empty = build_archive_item_search_content(
+            _load_item(doc.archive_item_id)
+        )
+        self.assertEqual(content_empty.hebrew_translation_text, "")
+        empty.delete()
+
+    def test_indexed_translation_agrees_with_public_presentation(self):
+        from documents.services.text_presentation import (
+            get_text_presentation_for_document,
+        )
+
+        # Current non-Hebrew translation (revision-linked).
+        current_doc = create_viewable_ocr_document(
+            title="Presentation agree current",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        current_source = _create_text_result(
+            current_doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="Current source",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            source_revision=2,
+        )
+        _create_text_result(
+            current_doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="תרגום נוכחי מוצג",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            engine="engine-he",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+            based_on_source_revision=current_source.source_revision,
+        )
+        current_presentation = get_text_presentation_for_document(current_doc)
+        current_content = build_archive_item_search_content(
+            _load_item(current_doc.archive_item_id)
+        )
+        self.assertIsNotNone(current_presentation.hebrew)
+        assert current_presentation.hebrew is not None
+        self.assertEqual(current_presentation.hebrew.text, "תרגום נוכחי מוצג")
+        self.assertEqual(
+            current_content.hebrew_translation_text,
+            current_presentation.hebrew.text,
+        )
+        self.assertEqual(
+            current_content.hebrew_translation_text,
+            get_displayed_hebrew_translation_text(current_doc),
+        )
+
+        # Stale translation: public detail still shows it; index must agree.
+        stale_doc = create_viewable_ocr_document(
+            title="Presentation agree stale",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        _create_text_result(
+            stale_doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="Fresh source after edit",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            source_revision=5,
+        )
+        _create_text_result(
+            stale_doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="תרגום מיושן שעדיין מוצג",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            engine="engine-he",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+            based_on_source_revision=1,
+        )
+        stale_presentation = get_text_presentation_for_document(stale_doc)
+        stale_content = build_archive_item_search_content(
+            _load_item(stale_doc.archive_item_id)
+        )
+        self.assertIsNotNone(stale_presentation.hebrew)
+        assert stale_presentation.hebrew is not None
+        self.assertEqual(
+            stale_presentation.hebrew.text,
+            "תרגום מיושן שעדיין מוצג",
+        )
+        self.assertEqual(
+            stale_content.hebrew_translation_text,
+            stale_presentation.hebrew.text,
+        )
+
+        # Multi-engine HEBREW_TEXT: same SUCCEEDED-then-latest selection.
+        multi_doc = create_viewable_ocr_document(
+            title="Presentation agree multi engine",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        multi_source = _create_text_result(
+            multi_doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="Multi source",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            source_revision=1,
+        )
+        older = _create_text_result(
+            multi_doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="Older needs-review translation",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            engine="engine-he-old",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+            based_on_source_revision=multi_source.source_revision,
+        )
+        newer = _create_text_result(
+            multi_doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="Newer succeeded translation",
+            status=DocumentTextResult.Status.SUCCEEDED,
+            engine="engine-he-new",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+            based_on_source_revision=multi_source.source_revision,
+        )
+        self.assertGreater(newer.created_at, older.created_at)
+        multi_presentation = get_text_presentation_for_document(multi_doc)
+        multi_content = build_archive_item_search_content(
+            _load_item(multi_doc.archive_item_id)
+        )
+        self.assertIsNotNone(multi_presentation.hebrew)
+        assert multi_presentation.hebrew is not None
+        self.assertEqual(
+            multi_presentation.hebrew.text,
+            "Newer succeeded translation",
+        )
+        self.assertEqual(
+            multi_content.hebrew_translation_text,
+            multi_presentation.hebrew.text,
+        )
+
+        # Missing displayable SOURCE: HEBREW is transcription fallback in body only.
+        fallback_doc = create_viewable_ocr_document(
+            title="Presentation agree hebrew fallback",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        _create_text_result(
+            fallback_doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="failed source",
+            status=DocumentTextResult.Status.FAILED,
+        )
+        _create_text_result(
+            fallback_doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="עברית כfallback לתעתוק",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            engine="engine-he",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+        )
+        fallback_presentation = get_text_presentation_for_document(fallback_doc)
+        fallback_content = build_archive_item_search_content(
+            _load_item(fallback_doc.archive_item_id)
+        )
+        self.assertIsNotNone(fallback_presentation.hebrew)
+        assert fallback_presentation.hebrew is not None
+        self.assertEqual(
+            fallback_presentation.hebrew.text,
+            "עברית כfallback לתעתוק",
+        )
+        self.assertEqual(fallback_content.body_text, "עברית כfallback לתעתוק")
+        self.assertEqual(fallback_content.hebrew_translation_text, "")
+        self.assertEqual(
+            fallback_content.body_text,
+            get_displayed_transcription_text(fallback_doc),
+        )
+
+        # Hebrew-language document: HEBREW is transcription; translation field empty.
+        he_doc = create_viewable_ocr_document(
+            title="Presentation agree hebrew language",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            language=Document.Language.HEBREW,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        _create_text_result(
+            he_doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="מקור",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+        )
+        _create_text_result(
+            he_doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="טקסט עברי מוצג",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            engine="engine-he",
+        )
+        he_presentation = get_text_presentation_for_document(he_doc)
+        he_content = build_archive_item_search_content(
+            _load_item(he_doc.archive_item_id)
+        )
+        self.assertTrue(he_presentation.show_hebrew)
+        self.assertFalse(he_presentation.show_source)
+        self.assertEqual(he_content.body_text, "טקסט עברי מוצג")
+        self.assertEqual(he_content.hebrew_translation_text, "")
+        self.assertEqual(
+            he_content.body_text,
+            get_displayed_transcription_text(he_doc),
+        )
+
+    def test_non_hebrew_translation_follows_canonical_displayable_selection(self):
+        doc = create_viewable_ocr_document(
+            title="EN multi translation engines",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        source = _create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="Source body",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            source_revision=1,
+        )
+        older = _create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="Older needs-review translation",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            engine="engine-he-old",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+            based_on_source_revision=source.source_revision,
+        )
+        newer = _create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="Newer succeeded translation",
+            status=DocumentTextResult.Status.SUCCEEDED,
+            engine="engine-he-new",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+            based_on_source_revision=source.source_revision,
+        )
+        self.assertGreater(newer.created_at, older.created_at)
+        content = build_archive_item_search_content(_load_item(doc.archive_item_id))
+        self.assertEqual(content.body_text, "Source body")
+        self.assertEqual(
+            content.hebrew_translation_text,
+            "Newer succeeded translation",
+        )
 
     def test_failed_and_empty_text_excluded_via_display_rules(self):
         doc = create_viewable_ocr_document(
@@ -299,6 +668,7 @@ class ArchiveItemSearchIndexBuilderTests(TestCase):
         )
         content = build_archive_item_search_content(_load_item(doc.archive_item_id))
         self.assertEqual(content.body_text, "")
+        self.assertEqual(content.hebrew_translation_text, "")
 
     def test_multi_engine_prefers_displayable_selection(self):
         doc = create_viewable_ocr_document(
@@ -373,6 +743,7 @@ class ArchiveItemSearchIndexPersistenceTests(TestCase):
         first = persist_archive_item_search_content(content)
         self.assertEqual(first.title_text, title_token)
         self.assertEqual(first.body_text, body_token)
+        self.assertEqual(first.hebrew_translation_text, "")
         self.assertIn(meta_token, first.metadata_text)
 
         vector_text = self._search_vector_text(first)
@@ -389,6 +760,10 @@ class ArchiveItemSearchIndexPersistenceTests(TestCase):
         self.assertEqual(second.title_text, first.title_text)
         self.assertEqual(second.metadata_text, first.metadata_text)
         self.assertEqual(second.body_text, first.body_text)
+        self.assertEqual(
+            second.hebrew_translation_text,
+            first.hebrew_translation_text,
+        )
         self.assertEqual(self._search_vector_text(second), vector_text)
 
         updated_title = "uniqtitleaweightupdated"
@@ -403,6 +778,38 @@ class ArchiveItemSearchIndexPersistenceTests(TestCase):
         self.assertRegex(updated_vector, rf"'{meta_token}':\d+B")
         self.assertRegex(updated_vector, rf"'{body_token}':\d+C")
         self.assertNotRegex(updated_vector, rf"'{title_token}':\d+A")
+
+    def test_persistence_writes_hebrew_translation_into_vector_at_weight_c(self):
+        doc = create_viewable_ocr_document(
+            title="persist translation vector",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        source = _create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="uniqsourcebodycweight",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            source_revision=1,
+        )
+        _create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="uniqtranslationcweight",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            engine="engine-he",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+            based_on_source_revision=source.source_revision,
+        )
+        content = build_archive_item_search_content(_load_item(doc.archive_item_id))
+        index = persist_archive_item_search_content(content)
+        self.assertEqual(index.body_text, "uniqsourcebodycweight")
+        self.assertEqual(index.hebrew_translation_text, "uniqtranslationcweight")
+        vector_text = self._search_vector_text(index)
+        self.assertRegex(vector_text, r"'uniqsourcebodycweight':\d+C")
+        self.assertRegex(vector_text, r"'uniqtranslationcweight':\d+C")
 
 
 class ArchiveItemSearchIndexBackfillCommandTests(TestCase):
@@ -440,6 +847,42 @@ class ArchiveItemSearchIndexBackfillCommandTests(TestCase):
             ArchiveItemSearchIndex.objects.get().archive_item_id,
             target.pk,
         )
+
+    def test_backfill_populates_hebrew_translation_text(self):
+        doc = create_viewable_ocr_document(
+            title="Backfill translation",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        source = _create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="source for backfill",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            source_revision=1,
+        )
+        _create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="תרגום למילוי חוזר",
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            engine="engine-he",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+            based_on_source_revision=source.source_revision,
+        )
+        ArchiveItemSearchIndex.objects.filter(
+            archive_item_id=doc.archive_item_id
+        ).delete()
+        call_command(
+            "backfill_archive_search_index",
+            archive_item_id=doc.archive_item_id,
+            stdout=StringIO(),
+        )
+        index = ArchiveItemSearchIndex.objects.get(archive_item_id=doc.archive_item_id)
+        self.assertEqual(index.body_text, "source for backfill")
+        self.assertEqual(index.hebrew_translation_text, "תרגום למילוי חוזר")
 
     def test_partial_failure_is_recoverable(self):
         from django.db import DatabaseError

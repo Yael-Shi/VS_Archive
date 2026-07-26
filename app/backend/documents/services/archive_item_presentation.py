@@ -340,10 +340,11 @@ def filter_archive_items_by_search_query(
 
     Multi-term queries are AND across sources: each term must match via the
     per-term UNION of weighted ``search_vector`` FTS and/or short-field
-    ``title_text`` / ``metadata_text`` substring arms. ``body_text`` is FTS-only
-    (no substring). Items without an index row never match and do not crash the
-    page. Blank ``q`` leaves the queryset (and its ordering) unchanged;
-    punctuation-only nonblank ``q`` returns no rows.
+    ``title_text`` / ``metadata_text`` substring arms. ``body_text`` and
+    ``hebrew_translation_text`` are FTS-only (no substring). Items without an
+    index row never match and do not crash the page. Blank ``q`` leaves the
+    queryset (and its ordering) unchanged; punctuation-only nonblank ``q``
+    returns no rows.
     """
     resolved = resolve_archive_list_search_terms(search_query)
     if resolved.outcome == ARCHIVE_LIST_SEARCH_NO_SEARCH:

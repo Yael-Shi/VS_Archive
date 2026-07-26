@@ -51,8 +51,10 @@ from documents.services.archive_search_snippets import (
     MATCH_SOURCE_ITEM_DETAILS,
     MATCH_SOURCE_MANUAL_BODY,
     MATCH_SOURCE_OCR_BODY,
+    MATCH_SOURCE_OCR_TRANSLATION,
     MATCH_SOURCE_PUBLIC_NOTE,
     apply_archive_search_match_presentation_to_cards,
+    build_archive_search_match_presentation,
     build_highlighted_snippet_segments,
     load_archive_search_indexes_for_item_ids,
     select_snippet_window,
@@ -77,16 +79,22 @@ def _create_text_result(
     status: str = DocumentTextResult.Status.NEEDS_REVIEW,
     verification_status: str = DocumentTextResult.VerificationStatus.UNVERIFIED,
     result_type: str = DocumentTextResult.ResultType.SOURCE_TEXT,
+    engine: str = "engine-a",
+    prompt_variant: str = DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+    source_revision: int = 1,
+    based_on_source_revision: int | None = None,
 ) -> DocumentTextResult:
     return DocumentTextResult.objects.create(
         document=doc,
         result_type=result_type,
-        engine="engine-a",
+        engine=engine,
         engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
-        prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+        prompt_variant=prompt_variant,
         status=status,
         verification_status=verification_status,
         text=text,
+        source_revision=source_revision,
+        based_on_source_revision=based_on_source_revision,
     )
 
 
@@ -1186,3 +1194,294 @@ class ArchiveSearchSnippetPresentationTests(TestCase):
         )
         self.assertNotContains(resp, "שם, מקום, נושא, תאריך")
         self.assertNotContains(resp, "תאריך או מילת מפתח")
+
+
+class ArchiveHebrewTranslationSearchCoverageTests(TestCase):
+    """Post-PR4: searchable displayed Hebrew translation for non-Hebrew OCR."""
+
+    def _en_doc_with_translation(
+        self,
+        *,
+        title: str,
+        source_text: str,
+        translation_text: str,
+        visibility: str = Document.Visibility.PUBLIC,
+        based_on: int | None = None,
+        source_revision: int = 1,
+    ) -> Document:
+        doc = create_viewable_ocr_document(
+            title=title,
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            visibility=visibility,
+        )
+        source = _create_text_result(
+            doc,
+            text=source_text,
+            source_revision=source_revision,
+        )
+        _create_text_result(
+            doc,
+            text=translation_text,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="engine-he",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+            based_on_source_revision=(
+                source.source_revision if based_on is None else based_on
+            ),
+        )
+        _rebuild(doc.archive_item_id)
+        return doc
+
+    def test_translation_only_query_finds_non_hebrew_document(self):
+        doc = self._en_doc_with_translation(
+            title="Translation only searchable",
+            source_text="english source only words",
+            translation_text="מילתתרגוםייחודית לחיפוש",
+        )
+        qs = archive_browse_queryset_for_user(None)
+        self.assertEqual(
+            _ids(filter_archive_items_by_search_query(qs, "מילתתרגוםייחודית")),
+            [doc.archive_item_id],
+        )
+        self.assertEqual(
+            _ids(filter_archive_items_by_search_query(qs, "english")),
+            [doc.archive_item_id],
+        )
+
+    def test_cross_source_and_across_body_and_translation(self):
+        doc = self._en_doc_with_translation(
+            title="Cross source translation and",
+            source_text="alphaonlysource term here",
+            translation_text="betaonlytranslation term here",
+        )
+        other = self._en_doc_with_translation(
+            title="Partial translation and",
+            source_text="alphaonlysource alone",
+            translation_text="other hebrew words",
+        )
+        qs = archive_browse_queryset_for_user(None)
+        ids = _ids(
+            filter_archive_items_by_search_query(
+                qs,
+                "alphaonlysource betaonlytranslation",
+            )
+        )
+        self.assertEqual(ids, [doc.archive_item_id])
+        self.assertNotIn(other.archive_item_id, ids)
+
+    def test_translation_only_result_shows_translation_label_and_snippet(self):
+        doc = self._en_doc_with_translation(
+            title="Snippet translation label",
+            source_text="unrelated english transcription",
+            translation_text="הקשר תרגום מילתתרגוםלתווית נמצא כאן",
+        )
+        resp = self.client.get(reverse("archive-list"), {"q": "מילתתרגוםלתווית"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, MATCH_SOURCE_OCR_TRANSLATION)
+        self.assertNotContains(resp, MATCH_SOURCE_OCR_BODY)
+        card = _card_by_item_id(resp.context["browse_cards"], doc.archive_item_id)
+        self.assertTrue(card.show_search_snippet)
+        self.assertEqual(card.search_match_source_label, MATCH_SOURCE_OCR_TRANSLATION)
+        plain = _snippet_plain_text(card)
+        self.assertIn("מילתתרגוםלתווית", plain)
+        matched = [seg.text for seg in card.search_snippet_segments if seg.is_match]
+        self.assertIn("מילתתרגוםלתווית", matched)
+
+    def test_source_result_not_mislabeled_as_translation(self):
+        doc = self._en_doc_with_translation(
+            title="Source label not translation",
+            source_text="מילתמקורלתווית in the source transcription",
+            translation_text="תרגום אחר לגמרי בלי המילה",
+        )
+        resp = self.client.get(reverse("archive-list"), {"q": "מילתמקורלתווית"})
+        self.assertContains(resp, MATCH_SOURCE_OCR_BODY)
+        self.assertNotContains(resp, MATCH_SOURCE_OCR_TRANSLATION)
+        card = _card_by_item_id(resp.context["browse_cards"], doc.archive_item_id)
+        self.assertEqual(card.search_match_source_label, MATCH_SOURCE_OCR_BODY)
+
+    def test_deterministic_source_vs_translation_snippet_choice_and_tie(self):
+        doc = create_viewable_ocr_document(
+            title="Snippet field choice",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        source = _create_text_result(
+            doc,
+            text="alpha beta source only filler words here",
+            source_revision=1,
+        )
+        _create_text_result(
+            doc,
+            text="alpha beta gamma translation has three terms",
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="engine-he",
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+            based_on_source_revision=source.source_revision,
+        )
+        index = _rebuild(doc.archive_item_id)
+
+        # Translation window covers more distinct terms → translation wins.
+        presentation = build_archive_search_match_presentation(
+            archive_item=doc.archive_item,
+            search_index=index,
+            terms=("alpha", "beta", "gamma"),
+        )
+        self.assertIsNotNone(presentation)
+        assert presentation is not None
+        self.assertEqual(
+            presentation.match_source_label,
+            MATCH_SOURCE_OCR_TRANSLATION,
+        )
+
+        # Tie on distinct count → prefer source/body (existing preference).
+        tied = build_archive_search_match_presentation(
+            archive_item=doc.archive_item,
+            search_index=index,
+            terms=("alpha", "beta"),
+        )
+        self.assertIsNotNone(tied)
+        assert tied is not None
+        self.assertEqual(tied.match_source_label, MATCH_SOURCE_OCR_BODY)
+
+    def test_split_and_shows_one_field_snippet_not_combined(self):
+        doc = self._en_doc_with_translation(
+            title="Split AND snippet",
+            source_text="sourceonlytoken appears in transcription",
+            translation_text="translationonlytoken appears in hebrew",
+        )
+        resp = self.client.get(
+            reverse("archive-list"),
+            {"q": "sourceonlytoken translationonlytoken"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        card = _card_by_item_id(resp.context["browse_cards"], doc.archive_item_id)
+        self.assertTrue(card.show_search_snippet)
+        # Tie → source preference; one snippet only.
+        self.assertEqual(card.search_match_source_label, MATCH_SOURCE_OCR_BODY)
+        plain = _snippet_plain_text(card)
+        self.assertIn("sourceonlytoken", plain)
+        self.assertNotIn("translationonlytoken", plain)
+
+    def test_hebrew_document_does_not_duplicate_mirror_into_translation_field(self):
+        doc = create_viewable_ocr_document(
+            title="Hebrew no translation field",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            language=Document.Language.HEBREW,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        _create_text_result(doc, text="מקור עברי")
+        _create_text_result(
+            doc,
+            text="טקסט עברי מוצג",
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="engine-he",
+        )
+        index = _rebuild(doc.archive_item_id)
+        self.assertEqual(index.body_text, "טקסט עברי מוצג")
+        self.assertEqual(index.hebrew_translation_text, "")
+        qs = archive_browse_queryset_for_user(None)
+        self.assertEqual(
+            _ids(filter_archive_items_by_search_query(qs, "מוצג")),
+            [doc.archive_item_id],
+        )
+
+    def test_stale_translation_remains_searchable_like_public_detail(self):
+        doc = self._en_doc_with_translation(
+            title="Stale translation still shown",
+            source_text="fresh source body",
+            translation_text="מילתתרגוםמיושן",
+            based_on=1,
+            source_revision=5,
+        )
+        index = ArchiveItemSearchIndex.objects.get(archive_item_id=doc.archive_item_id)
+        self.assertEqual(index.hebrew_translation_text, "מילתתרגוםמיושן")
+        qs = archive_browse_queryset_for_user(None)
+        self.assertEqual(
+            _ids(filter_archive_items_by_search_query(qs, "מילתתרגוםמיושן")),
+            [doc.archive_item_id],
+        )
+        self.assertEqual(
+            _ids(filter_archive_items_by_search_query(qs, "fresh")),
+            [doc.archive_item_id],
+        )
+
+    def test_manual_text_unchanged_no_translation_label(self):
+        item = create_manual_text_archive_item(
+            title="Manual unchanged",
+            body="מילתטקסטידני לחיפוש",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        _rebuild(item.pk)
+        resp = self.client.get(reverse("archive-list"), {"q": "מילתטקסטידני"})
+        self.assertContains(resp, MATCH_SOURCE_MANUAL_BODY)
+        self.assertNotContains(resp, MATCH_SOURCE_OCR_TRANSLATION)
+        index = ArchiveItemSearchIndex.objects.get(archive_item_id=item.pk)
+        self.assertEqual(index.hebrew_translation_text, "")
+
+    def test_unauthorized_private_translation_never_leaks(self):
+        private_query = "privatetranslationquerytoken"
+        private_sentinel = "privateonlytranslationbodyuniquezzz"
+        private_title = "Private translation title uniquezzz"
+        public = self._en_doc_with_translation(
+            title="Public translation sibling",
+            source_text="public source",
+            translation_text="public hebrew translation without private tokens",
+        )
+        private = self._en_doc_with_translation(
+            title=private_title,
+            source_text="private source",
+            translation_text=f"{private_query} {private_sentinel} secret hebrew",
+            visibility=Document.Visibility.PRIVATE,
+        )
+        resp = self.client.get(reverse("archive-list"), {"q": private_query})
+        self.assertEqual(resp.status_code, 200)
+        # Submitted q may be reflected in the search form; private content must not.
+        self.assertEqual(resp.context["total_count"], 0)
+        self.assertEqual(list(resp.context["items"]), [])
+        self.assertEqual(list(resp.context["browse_cards"]), [])
+        page_ids = [item.pk for item in resp.context["items"]]
+        self.assertNotIn(private.archive_item_id, page_ids)
+        self.assertNotIn(public.archive_item_id, page_ids)
+        self.assertNotContains(
+            resp,
+            reverse("archive-detail", kwargs={"item_id": private.archive_item_id}),
+        )
+        self.assertNotContains(resp, private_title)
+        self.assertNotContains(resp, private_sentinel)
+        self.assertNotContains(resp, MATCH_SOURCE_OCR_TRANSLATION)
+        qs = archive_browse_queryset_for_user(None)
+        self.assertEqual(
+            _ids(filter_archive_items_by_search_query(qs, private_query)),
+            [],
+        )
+        ranked = filter_archive_items_by_search_query(
+            archive_browse_queryset_for_user(None),
+            private_query,
+        )
+        self.assertEqual(_ids(ranked), [])
+        self.assertEqual(
+            private.archive_item.visibility,
+            ArchiveItem.Visibility.PRIVATE,
+        )
+
+    def test_xss_escaping_safe_for_malicious_translated_text(self):
+        payload = '<script>alert("x")</script>'
+        doc = self._en_doc_with_translation(
+            title="XSS translation",
+            source_text="benign source",
+            translation_text=f"prefix {payload} xssmarktoken suffix",
+        )
+        resp = self.client.get(reverse("archive-list"), {"q": "xssmarktoken"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, MATCH_SOURCE_OCR_TRANSLATION)
+        content = resp.content.decode("utf-8")
+        self.assertNotIn('<script>alert("x")</script>', content)
+        self.assertIn(escape('<script>alert("x")</script>'), content)
+        card = _card_by_item_id(resp.context["browse_cards"], doc.archive_item_id)
+        plain = _snippet_plain_text(card)
+        self.assertIn(payload, plain)

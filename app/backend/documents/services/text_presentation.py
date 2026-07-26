@@ -490,3 +490,50 @@ def get_displayed_transcription_text(doc: Document) -> str:
     if row is None:
         return ""
     return row.text or ""
+
+
+def resolve_displayed_hebrew_translation_result(
+    doc: Document,
+) -> Optional[DocumentTextResult]:
+    """
+    DocumentTextResult backing the public Hebrew *translation* panel text for
+    search indexing (separate from ``body_text``).
+
+    Aligns with ``get_text_presentation_for_document`` HEBREW_TEXT selection
+    (``_latest_displayable``: SUCCEEDED then NEEDS_REVIEW; multi-engine picks
+    the latest displayable row). Includes revision-stale translations: the
+    public detail page shows them (stale is a staff review signal only).
+
+    Returns None when:
+    - the document is Hebrew-language (HEBREW_TEXT is transcription, not a
+      separate translation field — never duplicate into both index fields);
+    - there is no displayable SOURCE_TEXT (HEBREW would be the transcription
+      fallback already covered by ``get_displayed_transcription_text``);
+    - HEBREW_TEXT is missing, failed, or empty/non-displayable.
+    """
+    if is_hebrew_language(doc):
+        return None
+
+    source_obj = resolve_displayable_source_text_result(doc)
+    if source_obj is None:
+        return None
+
+    return _latest_displayable(doc, "HEBREW_TEXT")
+
+
+def get_displayed_hebrew_translation_text(doc: Document) -> str:
+    """
+    Plain Hebrew translation text indexed separately from source transcription.
+
+    Matches the HEBREW_TEXT block ``get_text_presentation_for_document`` would
+    expose for a non-Hebrew document when a displayable SOURCE also exists
+    (including revision-stale rows the public detail page still shows).
+
+    Empty for Hebrew-language documents and when translation is missing,
+    failed, empty, or non-displayable — and when SOURCE is not displayable
+    (HEBREW then lives only in ``body_text`` via transcription fallback).
+    """
+    row = resolve_displayed_hebrew_translation_result(doc)
+    if row is None:
+        return ""
+    return row.text or ""
