@@ -548,8 +548,8 @@ class DriftCheckOnlyCommandTests(TestCase):
             )
 
 
-class PublicSearchUnchangedWithSyncTests(TestCase):
-    def test_public_archive_q_still_ignores_manual_body(self):
+class PublicSearchCutoverWithSyncTests(TestCase):
+    def test_public_archive_q_finds_synced_manual_body(self):
         item = create_manual_text_archive_item(
             title="Visible title sync",
             body="unique-sync-body-token-zzz",
@@ -559,14 +559,14 @@ class PublicSearchUnchangedWithSyncTests(TestCase):
             ArchiveItemSearchIndex.objects.filter(archive_item_id=item.pk).exists()
         )
         qs = ArchiveItem.objects.all()
-        self.assertFalse(
-            filter_archive_items_by_search_query(
-                qs, "unique-sync-body-token-zzz"
-            ).exists()
+        self.assertTrue(
+            filter_archive_items_by_search_query(qs, "unique-sync-body-token-zzz")
+            .filter(pk=item.pk)
+            .exists()
         )
         resp = self.client.get(
             reverse("archive-list"),
             {"q": "unique-sync-body-token-zzz"},
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, "Visible title sync")
+        self.assertContains(resp, "Visible title sync")

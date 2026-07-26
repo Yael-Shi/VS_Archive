@@ -3936,29 +3936,53 @@ class ArchiveItemListSearchTests(TestCase):
         self.assertContains(resp, item.title)
 
     def test_anonymous_search_finds_public_item_by_category_name(self):
+        from documents.services.archive_search_index import (
+            archive_items_for_search_index_build,
+            rebuild_archive_item_search_index,
+        )
+
         item = self._create_public_item(title="Category search item")
         category = ArchiveCategory.objects.create(
             name="Unique category search term",
             slug="unique-category-search-term",
         )
         item.categories.add(category)
+        rebuild_archive_item_search_index(
+            archive_items_for_search_index_build(archive_item_ids=[item.pk]).get()
+        )
         resp = self.client.get(reverse("archive-list"), {"q": "category search term"})
         self.assertContains(resp, item.title)
 
     def test_anonymous_search_finds_public_item_by_event_name(self):
+        from documents.services.archive_search_index import (
+            archive_items_for_search_index_build,
+            rebuild_archive_item_search_index,
+        )
+
         item = self._create_public_item(title="Event search item")
         event = ArchiveEvent.objects.create(
             name="Unique event search term",
             slug="unique-event-search-term",
         )
         item.events.add(event)
+        rebuild_archive_item_search_index(
+            archive_items_for_search_index_build(archive_item_ids=[item.pk]).get()
+        )
         resp = self.client.get(reverse("archive-list"), {"q": "event search term"})
         self.assertContains(resp, item.title)
 
     def test_anonymous_search_finds_public_item_by_tag_name(self):
+        from documents.services.archive_search_index import (
+            archive_items_for_search_index_build,
+            rebuild_archive_item_search_index,
+        )
+
         item = self._create_public_item(title="Tag search item")
         tag = Tag.objects.create(name="unique-tag-search-term")
         item.tags.add(tag)
+        rebuild_archive_item_search_index(
+            archive_items_for_search_index_build(archive_item_ids=[item.pk]).get()
+        )
         resp = self.client.get(reverse("archive-list"), {"q": "tag-search-term"})
         self.assertContains(resp, item.title)
 
@@ -4011,6 +4035,11 @@ class ArchiveItemListSearchTests(TestCase):
         self.assertNotContains(resp, "Whitespace search private hidden")
 
     def test_search_duplicate_m2m_matches_do_not_duplicate_rows(self):
+        from documents.services.archive_search_index import (
+            archive_items_for_search_index_build,
+            rebuild_archive_item_search_index,
+        )
+
         item = self._create_public_item(title="Duplicate m2m search item")
         category_one = ArchiveCategory.objects.create(
             name="Shared duplicate search alpha",
@@ -4021,6 +4050,9 @@ class ArchiveItemListSearchTests(TestCase):
             slug="shared-duplicate-search-beta",
         )
         item.categories.add(category_one, category_two)
+        rebuild_archive_item_search_index(
+            archive_items_for_search_index_build(archive_item_ids=[item.pk]).get()
+        )
         resp = self.client.get(reverse("archive-list"), {"q": "duplicate search"})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(

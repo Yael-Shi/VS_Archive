@@ -573,7 +573,7 @@ class CorrectedCurrentActivationSearchIndexSyncTests(TestCase):
 
 @override_settings(UPLOADS_BUCKET_NAME="")
 class PublicSearchAndPr2aRegressionTests(TestCase):
-    def test_public_archive_q_still_ignores_ocr_body(self):
+    def test_public_archive_q_finds_synced_ocr_body(self):
         from documents.models import ArchiveItem
 
         doc = create_ocr_document(
@@ -607,17 +607,17 @@ class PublicSearchAndPr2aRegressionTests(TestCase):
             "unique-ocr-body-token-pr2b1-aaa",
         )
         qs = ArchiveItem.objects.all()
-        self.assertFalse(
-            filter_archive_items_by_search_query(
-                qs, "unique-ocr-body-token-pr2b1-aaa"
-            ).exists()
+        self.assertTrue(
+            filter_archive_items_by_search_query(qs, "unique-ocr-body-token-pr2b1-aaa")
+            .filter(pk=doc.archive_item_id)
+            .exists()
         )
         resp = self.client.get(
             reverse("archive-list"),
             {"q": "unique-ocr-body-token-pr2b1-aaa"},
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, "Visible OCR title body sync")
+        self.assertContains(resp, "Visible OCR title body sync")
 
     def test_pr2a_ocr_create_still_syncs_empty_body_without_dtr(self):
         doc = create_ocr_document(

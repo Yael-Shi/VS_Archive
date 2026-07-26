@@ -485,8 +485,10 @@ class ArchiveItemSearchIndexBackfillCommandTests(TestCase):
         )
 
 
-class ArchiveItemSearchIndexPublicSearchUnchangedTests(TestCase):
-    def test_filter_still_does_not_match_manual_or_ocr_body(self):
+class ArchiveItemSearchIndexPublicSearchCutoverTests(TestCase):
+    """PR3: public ``/archive/?q=`` searches indexed body text (replaces metadata-only)."""
+
+    def test_filter_matches_manual_and_ocr_body(self):
         manual = create_manual_text_archive_item(
             title="Visible title only",
             body="unique-manual-body-token-xyz",
@@ -509,15 +511,15 @@ class ArchiveItemSearchIndexPublicSearchUnchangedTests(TestCase):
         rebuild_archive_item_search_index(_load_item(doc.archive_item_id))
 
         qs = ArchiveItem.objects.all()
-        self.assertFalse(
-            filter_archive_items_by_search_query(
-                qs, "unique-manual-body-token-xyz"
-            ).exists()
+        self.assertTrue(
+            filter_archive_items_by_search_query(qs, "unique-manual-body-token-xyz")
+            .filter(pk=manual.pk)
+            .exists()
         )
-        self.assertFalse(
-            filter_archive_items_by_search_query(
-                qs, "unique-ocr-body-token-xyz"
-            ).exists()
+        self.assertTrue(
+            filter_archive_items_by_search_query(qs, "unique-ocr-body-token-xyz")
+            .filter(pk=doc.archive_item_id)
+            .exists()
         )
         self.assertTrue(
             filter_archive_items_by_search_query(qs, "Visible title only")
@@ -525,7 +527,7 @@ class ArchiveItemSearchIndexPublicSearchUnchangedTests(TestCase):
             .exists()
         )
 
-    def test_archive_list_body_query_still_empty(self):
+    def test_archive_list_body_query_finds_item(self):
         create_manual_text_archive_item(
             title="List title",
             body="unique-list-body-token-abc",
@@ -539,5 +541,4 @@ class ArchiveItemSearchIndexPublicSearchUnchangedTests(TestCase):
             {"q": "unique-list-body-token-abc"},
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, "List title")
-        self.assertContains(resp, "לא נמצאו פריטים התואמים את החיפוש")
+        self.assertContains(resp, "List title")

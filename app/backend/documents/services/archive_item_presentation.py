@@ -5,14 +5,27 @@ Stored enum/database values are unchanged; templates and forms map values here.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from urllib.parse import urlencode
 
-from django.db.models import Prefetch, Q, QuerySet
+from django.contrib.postgres.search import SearchQuery, SearchRank
+from django.db.models import (
+    Case,
+    F,
+    FloatField,
+    Prefetch,
+    Q,
+    QuerySet,
+    Value,
+    When,
+)
+from django.db.models.functions import Coalesce
 from django.urls import reverse
 
 from documents.models import ArchiveItem
+from documents.services.archive_search_index import SEARCH_VECTOR_CONFIG
 from documents.services.document_date import format_document_date
 from documents.services.text_presentation import (
     archive_item_displayable_text_results_prefetch,
@@ -216,27 +229,178 @@ def normalize_archive_list_item_type_filter(raw: str | None) -> str:
     return ""
 
 
+# Safety cap for public ``/archive/?q=`` (display string length after trim).
+# Overlong queries return no matches; the trimmed original remains in form/URL.
+ARCHIVE_LIST_SEARCH_QUERY_MAX_LENGTH = 200
+
+# Letters/digits stay in terms; ordinary punctuation and underscore are separators.
+# ``\W`` is ``[^\w]``; underscore is included explicitly because ``\w`` matches it.
+_ARCHIVE_LIST_SEARCH_TERM_SEPARATOR_RE = re.compile(r"[\W_]+", flags=re.UNICODE)
+
+# Substring boosts align with PostgreSQL A/B weights (title > metadata > body).
+# Body matches rely on SearchRank against weight C only (no body substring arm).
+# Multi-term: each boost is applied once if any term hits that short field (not
+# summed per term), so single-term title > metadata > body stays deterministic.
+_ARCHIVE_SEARCH_TITLE_SUBSTRING_BOOST = 1.0
+_ARCHIVE_SEARCH_METADATA_SUBSTRING_BOOST = 0.4
+
+ARCHIVE_LIST_SEARCH_NO_SEARCH = "no_search"
+ARCHIVE_LIST_SEARCH_NO_MATCHES = "no_matches"
+ARCHIVE_LIST_SEARCH_SEARCH = "search"
+
+
+@dataclass(frozen=True)
+class ArchiveListSearchTerms:
+    """
+    Explicit normalization outcome for public archive ``q``.
+
+    - ``no_search``: blank/whitespace-only → browse (no search filter).
+    - ``no_matches``: overlong, or nonblank punctuation-only → empty result set.
+    - ``search``: one or more terms → index search.
+    """
+
+    terms: tuple[str, ...]
+    outcome: str
+
+
 def normalize_archive_list_search_query(raw: str | None) -> str:
-    """Trim archive list ``q``; empty/whitespace means no search filter."""
+    """Trim archive list ``q`` for display/URL; empty/whitespace means no search."""
     return (raw or "").strip()
+
+
+def resolve_archive_list_search_terms(search_query: str) -> ArchiveListSearchTerms:
+    """Normalize ``q`` into an explicit browse / empty / search outcome."""
+    display_q = normalize_archive_list_search_query(search_query)
+    if not display_q:
+        return ArchiveListSearchTerms(terms=(), outcome=ARCHIVE_LIST_SEARCH_NO_SEARCH)
+    if len(display_q) > ARCHIVE_LIST_SEARCH_QUERY_MAX_LENGTH:
+        return ArchiveListSearchTerms(terms=(), outcome=ARCHIVE_LIST_SEARCH_NO_MATCHES)
+    collapsed = " ".join(display_q.split())
+    terms = tuple(
+        term for term in _ARCHIVE_LIST_SEARCH_TERM_SEPARATOR_RE.split(collapsed) if term
+    )
+    if not terms:
+        # Nonblank q that tokenizes to nothing (e.g. "... !!!").
+        return ArchiveListSearchTerms(terms=(), outcome=ARCHIVE_LIST_SEARCH_NO_MATCHES)
+    return ArchiveListSearchTerms(terms=terms, outcome=ARCHIVE_LIST_SEARCH_SEARCH)
+
+
+def _archive_list_plain_search_query(term: str) -> SearchQuery:
+    return SearchQuery(
+        term,
+        config=SEARCH_VECTOR_CONFIG,
+        search_type="plain",
+    )
+
+
+def _archive_list_term_candidate_pks(
+    authorized: QuerySet[ArchiveItem],
+    term: str,
+) -> QuerySet:
+    """
+    Authorized PK candidates for one term: FTS ∪ title substring ∪ metadata substring.
+
+    Branches are UNION'd so the FTS ``search_vector @@`` arm remains a separate
+    SELECT that PostgreSQL can satisfy via ``archive_item_search_vector_gin``.
+    A single WHERE with ``@@ OR ILIKE OR ILIKE`` can force a seq scan and prevent
+    meaningful GIN participation.
+    """
+    scope = authorized.order_by().values("pk")
+    fts_branch = (
+        ArchiveItem.objects.order_by()
+        .filter(
+            pk__in=scope,
+            search_index__search_vector=_archive_list_plain_search_query(term),
+        )
+        .values("pk")
+    )
+    title_branch = (
+        ArchiveItem.objects.order_by()
+        .filter(pk__in=scope, search_index__title_text__icontains=term)
+        .values("pk")
+    )
+    metadata_branch = (
+        ArchiveItem.objects.order_by()
+        .filter(pk__in=scope, search_index__metadata_text__icontains=term)
+        .values("pk")
+    )
+    return fts_branch.union(title_branch, metadata_branch)
 
 
 def filter_archive_items_by_search_query(
     queryset: QuerySet[ArchiveItem],
     search_query: str,
 ) -> QuerySet[ArchiveItem]:
-    """Case-insensitive search over ArchiveItem public discovery metadata fields."""
-    q = normalize_archive_list_search_query(search_query)
-    if not q:
+    """
+    Public archive search against ``ArchiveItemSearchIndex`` (PR3 cutover).
+
+    Callers must pass an already-authorized browse queryset
+    (``archive_browse_queryset_for_user`` or equivalent). Matching, ranking,
+    counts, and pagination must not run on unauthorized rows.
+
+    Multi-term queries are AND across sources: each term must match via the
+    per-term UNION of weighted ``search_vector`` FTS and/or short-field
+    ``title_text`` / ``metadata_text`` substring arms. ``body_text`` is FTS-only
+    (no substring). Items without an index row never match and do not crash the
+    page. Blank ``q`` leaves the queryset (and its ordering) unchanged;
+    punctuation-only nonblank ``q`` returns no rows.
+    """
+    resolved = resolve_archive_list_search_terms(search_query)
+    if resolved.outcome == ARCHIVE_LIST_SEARCH_NO_SEARCH:
         return queryset
-    return queryset.filter(
-        Q(title__icontains=q)
-        | Q(author_name__icontains=q)
-        | Q(source_title__icontains=q)
-        | Q(categories__name__icontains=q)
-        | Q(events__name__icontains=q)
-        | Q(tags__name__icontains=q)
-    ).distinct()
+    if resolved.outcome == ARCHIVE_LIST_SEARCH_NO_MATCHES:
+        return queryset.none()
+
+    terms = resolved.terms
+    matched = queryset
+    for term in terms:
+        matched = matched.filter(
+            pk__in=_archive_list_term_candidate_pks(queryset, term)
+        )
+
+    rank_query = _archive_list_plain_search_query(terms[0])
+    for term in terms[1:]:
+        rank_query &= _archive_list_plain_search_query(term)
+
+    title_substring_q = Q(search_index__title_text__icontains=terms[0])
+    metadata_substring_q = Q(search_index__metadata_text__icontains=terms[0])
+    for term in terms[1:]:
+        title_substring_q |= Q(search_index__title_text__icontains=term)
+        metadata_substring_q |= Q(search_index__metadata_text__icontains=term)
+
+    return (
+        matched.annotate(
+            archive_search_rank=Coalesce(
+                SearchRank(F("search_index__search_vector"), rank_query),
+                Value(0.0),
+                output_field=FloatField(),
+            ),
+            archive_search_title_boost=Case(
+                When(
+                    condition=title_substring_q,
+                    then=Value(_ARCHIVE_SEARCH_TITLE_SUBSTRING_BOOST),
+                ),
+                default=Value(0.0),
+                output_field=FloatField(),
+            ),
+            archive_search_metadata_boost=Case(
+                When(
+                    condition=metadata_substring_q,
+                    then=Value(_ARCHIVE_SEARCH_METADATA_SUBSTRING_BOOST),
+                ),
+                default=Value(0.0),
+                output_field=FloatField(),
+            ),
+        )
+        .annotate(
+            archive_search_relevance=(
+                F("archive_search_rank")
+                + F("archive_search_title_boost")
+                + F("archive_search_metadata_boost")
+            ),
+        )
+        .order_by("-archive_search_relevance", "-created_at", "pk")
+    )
 
 
 ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE = 48
