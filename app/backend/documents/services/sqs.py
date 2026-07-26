@@ -4,6 +4,9 @@ from typing import Any, Dict
 
 import boto3
 
+# Top-level SQS message type for staff corrected/current sync dispatch (PR1 constant only).
+SYNC_TRANSKRIBUS_CORRECTED_CURRENT = "SYNC_TRANSKRIBUS_CORRECTED_CURRENT"
+
 
 def _required_env(name: str) -> str:
     v = os.getenv(name)

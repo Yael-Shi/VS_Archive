@@ -29,6 +29,8 @@ VS-Archive is a Django backend project for managing historical family documents.
 
 **Not implemented:** Gemini→Transkribus fallback, Transkribus→Gemini fallback, hybrid OCR routing, broader Transkribus routing beyond Hebrew handwritten, product/admin reprocess workflow, cleanup automation, general re-OCR on successful Trp runs, or remote Trp deletion.
 
+**Corrected/current staff sync queue (PR1 — schema only):** durable **`TranskribusCorrectedCurrentSyncRequest`** per document enqueue intent; top-level SQS type **`SYNC_TRANSKRIBUS_CORRECTED_CURRENT`** (constant only). At-most-once provider orchestration per Request with lease fencing and atomic Request↔Attempt correlation are **planned** in later PRs. **`RECOVERY_REQUIRED`** is a non-terminal state for linked stale **`STARTED`** attempts; it keeps **`lease_token`** but clears **`lease_expires_at`**. Web enqueue, worker handling, and UI remain **disabled** until those PRs ship. Management command **`sync_transkribus_corrected_current`** unchanged.
+
 **Recognition-only retry V1 (dev/staging):** when `TRANSKRIBUS_RECOGNITION_ONLY_RETRY=true`, dev upload mode may re-run PyLaia on an existing Trp `remote_doc_id` without a new upload — **recovery only** (failed/incomplete upload-created attempts). Excludes `SUCCEEDED` source runs; blocks if any `DocumentTextResult` is `VERIFIED`. `TRANSKRIBUS_FORCE_REPROCESS=true` still means a new upload/new Trp document. See `decision-log.md`.
 
 **TranskribusRun persistence:** Transkribus adapter paths persist one row per attempt (remote ids, job ids, attempt status). Worker passes generic `document_id` only.

@@ -1621,6 +1621,202 @@ class TranskribusCorrectedCurrentSyncAttempt(models.Model):
         )
 
 
+class TranskribusCorrectedCurrentSyncRequest(models.Model):
+    """
+    Durable staff corrected/current sync queue request for one Document.
+
+    Records enqueue/execution lifecycle and lease fencing for worker dispatch.
+    Does not perform HTTP, snapshot storage, activation, or SQS I/O in PR1.
+    """
+
+    class Status(models.TextChoices):
+        QUEUED = "QUEUED", "Queued"
+        RUNNING = "RUNNING", "Running"
+        RECOVERY_REQUIRED = "RECOVERY_REQUIRED", "Recovery required"
+        COMPLETED = "COMPLETED", "Completed"
+        REFUSED = "REFUSED", "Refused"
+        FAILED = "FAILED", "Failed"
+        ENQUEUE_FAILED = "ENQUEUE_FAILED", "Enqueue failed"
+
+    document = models.ForeignKey(
+        Document,
+        on_delete=models.CASCADE,
+        related_name="transkribus_corrected_current_sync_requests",
+    )
+    initiated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="transkribus_corrected_current_sync_requests",
+    )
+    status = models.CharField(max_length=32, choices=Status.choices)
+    attempt = models.OneToOneField(
+        TranskribusCorrectedCurrentSyncAttempt,
+        on_delete=models.RESTRICT,
+        null=True,
+        blank=True,
+        related_name="corrected_current_sync_request",
+        help_text=(
+            "Linked sync attempt once worker correlation succeeds. RESTRICT "
+            "preserves request provenance; delete the request (or its document) "
+            "before deleting a referenced attempt."
+        ),
+    )
+    lease_token = models.UUIDField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    failure_code = models.CharField(max_length=64, blank=True, default="")
+    failure_message = models.CharField(max_length=512, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    last_enqueued_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["document", "-created_at"],
+                name="tr_cc_sync_req_doc_created_idx",
+            ),
+            models.Index(
+                fields=["document", "status"],
+                name="tr_cc_sync_req_doc_status_idx",
+            ),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(
+                    status__in=[
+                        "QUEUED",
+                        "RUNNING",
+                        "RECOVERY_REQUIRED",
+                        "COMPLETED",
+                        "REFUSED",
+                        "FAILED",
+                        "ENQUEUE_FAILED",
+                    ]
+                ),
+                name="tr_cc_sync_req_status_valid",
+            ),
+            models.UniqueConstraint(
+                fields=["document"],
+                condition=models.Q(
+                    status__in=[
+                        "QUEUED",
+                        "RUNNING",
+                        "RECOVERY_REQUIRED",
+                        "ENQUEUE_FAILED",
+                    ]
+                ),
+                name="uniq_tr_cc_sync_req_active_doc",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status__in=["QUEUED", "ENQUEUE_FAILED"])
+                    | (
+                        models.Q(lease_token__isnull=True)
+                        & models.Q(lease_expires_at__isnull=True)
+                        & models.Q(started_at__isnull=True)
+                        & models.Q(completed_at__isnull=True)
+                        & models.Q(attempt__isnull=True)
+                    )
+                ),
+                name="tr_cc_sync_req_queued_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="RUNNING")
+                    | (
+                        models.Q(lease_token__isnull=False)
+                        & models.Q(lease_expires_at__isnull=False)
+                        & models.Q(started_at__isnull=False)
+                        & models.Q(completed_at__isnull=True)
+                    )
+                ),
+                name="tr_cc_sync_req_running_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="RECOVERY_REQUIRED")
+                    | (
+                        models.Q(attempt__isnull=False)
+                        & models.Q(lease_token__isnull=False)
+                        & models.Q(lease_expires_at__isnull=True)
+                        & models.Q(started_at__isnull=False)
+                        & models.Q(completed_at__isnull=True)
+                    )
+                ),
+                name="tr_cc_sync_req_recovery_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status__in=["COMPLETED", "REFUSED"])
+                    | (
+                        models.Q(attempt__isnull=False)
+                        & models.Q(completed_at__isnull=False)
+                    )
+                ),
+                name="tr_cc_sync_req_success_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="FAILED")
+                    | (
+                        models.Q(completed_at__isnull=False)
+                        & ~models.Q(failure_code="")
+                    )
+                ),
+                name="tr_cc_sync_req_failed_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status__in=["COMPLETED", "REFUSED", "FAILED"])
+                    | (
+                        models.Q(lease_token__isnull=True)
+                        & models.Q(lease_expires_at__isnull=True)
+                    )
+                ),
+                name="tr_cc_sync_req_terminal_no_lease",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        self._validate_attempt_document()
+
+    def _validate_attempt_document(self) -> None:
+        if not self.attempt_id or not self.document_id:
+            return
+        attempt = self.attempt
+        if attempt is None:
+            return
+        if attempt.document_id != self.document_id:
+            raise ValidationError(
+                {
+                    "attempt": (
+                        "TranskribusCorrectedCurrentSyncRequest requires "
+                        "attempt to belong to the same document."
+                    )
+                }
+            )
+
+    def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+        if update_fields is None or (
+            {"attempt", "document", "attempt_id", "document_id"} & set(update_fields)
+        ):
+            self._validate_attempt_document()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return (
+            f"TranskribusCorrectedCurrentSyncRequest(id={self.pk}, "
+            f"doc={self.document_id}, status={self.status})"
+        )
+
+
 class TranskribusCorrectedCurrentSyncPage(models.Model):
     """Per-page corrected/current selection or refusal for one sync attempt."""
 
