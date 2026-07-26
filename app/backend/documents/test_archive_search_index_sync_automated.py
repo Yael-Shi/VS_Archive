@@ -515,7 +515,7 @@ class HebrewTranslationRetrySearchIndexSyncTests(TestCase):
 
 @override_settings(UPLOADS_BUCKET_NAME="")
 class Pr2aPr2b1AndPublicSearchRegressionTests(TestCase):
-    def test_public_archive_q_still_ignores_worker_ocr_body(self):
+    def test_public_archive_q_finds_worker_synced_ocr_body(self):
         command = _worker_command()
         doc = create_ocr_document(
             title="Visible automated OCR title",
@@ -568,17 +568,19 @@ class Pr2aPr2b1AndPublicSearchRegressionTests(TestCase):
             "unique-automated-ocr-body-token-pr2b2",
         )
         qs = ArchiveItem.objects.all()
-        self.assertFalse(
+        self.assertTrue(
             filter_archive_items_by_search_query(
                 qs, "unique-automated-ocr-body-token-pr2b2"
-            ).exists()
+            )
+            .filter(pk=doc.archive_item_id)
+            .exists()
         )
         resp = self.client.get(
             reverse("archive-list"),
             {"q": "unique-automated-ocr-body-token-pr2b2"},
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, "Visible automated OCR title")
+        self.assertContains(resp, "Visible automated OCR title")
 
     def test_pr2b1_pending_edit_sync_still_works(self):
         doc = create_ocr_document(

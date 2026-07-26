@@ -1797,12 +1797,12 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 **Decision:** Future public `/archive/?q=` full-text search will use a **denormalized one-to-one search-index row per `ArchiveItem`**, queried only after the existing browse authorization/renderability filter. Detailed design: **`docs/ai-context/archive-full-text-search-design.md`**. This entry is **docs-only**; no application code, migrations, tests, settings, or dependencies change here.
 
-**Current behavior (verified, unchanged by this entry):**
+**Current behavior at architecture-docs time (historical; superseded by PR1–PR3 implementation entries):**
 
-- Public search applies **`archive_browse_queryset_for_user`**, then type filtering, then **`icontains`** over **`title`**, **`author_name`**, **`source_title`**, and linked **`categories`**, **`events`**, and **`tags`** names (`filter_archive_items_by_search_query`).
-- It does **not** search **`ManualTextContent.body`** or displayed **`DocumentTextResult`** text.
-- Database is **PostgreSQL 16**; the repo has **no** FTS, GIN, **`pg_trgm`**, **`SearchVector`**, or PostgreSQL extension migrations for search.
-- Existing discovery PR5 (`icontains` metadata search) remains the live behavior until the implementation sequence below cuts over.
+- Public search applied **`archive_browse_queryset_for_user`**, then type filtering, then **`icontains`** over **`title`**, **`author_name`**, **`source_title`**, and linked **`categories`**, **`events`**, and **`tags`** names.
+- It did **not** search **`ManualTextContent.body`** or displayed **`DocumentTextResult`** text.
+- Database was **PostgreSQL 16** without search-index FTS yet.
+- **Live behavior now:** see PR1–PR3 implementation entries (`ArchiveItemSearchIndex` + PR3 `/archive/?q=` cutover).
 
 **Target searchable content:** title, author, source title, categories, events, tags, **`public_note`**, **`ManualTextContent.body`**, and the OCR transcription selected by existing display helpers (`get_displayed_transcription_text` / `resolve_displayed_transcription_result` — not every `DocumentTextResult` row).
 
@@ -1825,11 +1825,11 @@ Content-Type: `application/xml` via `put_object_bytes`.
 | **PR2a** | Explicit sync for discovery/manual/taxonomy writers + `--check-only` drift verification |
 | **PR2b-1** | Explicit sync for human-controlled displayed OCR/`DocumentTextResult` mutation paths |
 | **PR2b-2** | Explicit sync for automated worker/translation displayed OCR/`DocumentTextResult` mutation paths |
-| **PR3** | Backend search cutover (auth, ranking, Hebrew behavior, query-plan tests) — **no** snippet UI |
-| **PR4** | Safe Hebrew snippets, match-source presentation, help-text correction |
-| **Later** | Optional search-result → line/page mapping when hover is implemented |
+| **PR3** | Backend search cutover (auth, ranking, Hebrew behavior, query-plan tests) — **no** snippet UI — **implemented** (see PR3 entry) |
+| **PR4** | Safe Hebrew snippets, match-source presentation, help-text correction — **deferred** |
+| **Later** | Optional search-result → line/page mapping when hover is implemented — **deferred** |
 
-**Hard rollout rule:** **PR1 migrate/backfill → PR2a sync → PR2b-1 sync → PR2b-2 sync → full backfill again while all sync hooks are active → drift verification → PR3 cutover.** Do **not** assume the PR1-era backfill remains fully current across the sync deployment gap. Do **not** switch public search to the index before PR2a, PR2b-1, and PR2b-2 are live and post-sync backfill + drift verification complete.
+**Hard rollout rule:** **PR1 migrate/backfill → PR2a sync → PR2b-1 sync → PR2b-2 sync → full backfill again while all sync hooks are active → drift verification → PR3 cutover.** Satisfied before PR3 implementation.
 
 **Docs:** `docs/ai-context/archive-full-text-search-design.md`
 
@@ -1907,6 +1907,25 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 **Unchanged (intentional):** public **`/archive/?q=`** remains **`icontains`**. Non-Hebrew missing/failed translation still yields intentional **`PARTIAL`**. Worker retry/ack policy unchanged except index failure cannot leave text and index inconsistent.
 
-**Hard rollout rule (unchanged):** public FTS cutover (PR3) remains blocked until **PR2a, PR2b-1, and PR2b-2** are deployed, a **full backfill is rerun while all sync hooks are active**, and **`--check-only` drift verification passes**.
+**Hard rollout rule (historical for this entry):** public FTS cutover (PR3) remained blocked until **PR2a, PR2b-1, and PR2b-2** were deployed, a **full backfill was rerun while all sync hooks are active**, and **`--check-only` drift verification** passed. **PR3 is now implemented** — see the following entry.
 
 **Tests:** `documents/test_archive_search_index_sync_automated.py` (plus existing PR1/PR2a/PR2b-1 suites).
+
+## Archive full-text search — PR3 backend search cutover (implemented)
+
+**Decision / implemented:** Public `/archive/?q=` now searches **`ArchiveItemSearchIndex`** after **`archive_browse_queryset_for_user`**. Production gate satisfied before cutover: PR1–PR2b-2 deployed; final backfill 216/216; `--check-only` drift verification clean.
+
+**Query semantics:**
+
+- Display/URL `q`: trim only. Normalization outcome via **`resolve_archive_list_search_terms`**: blank/whitespace → **`no_search`** (browse); overlong or nonblank punctuation-only → **`no_matches`** (empty results, not full archive); otherwise **`search`** terms after collapsing whitespace and splitting on ordinary punctuation **and underscore** (`[\W_]+`). PostgreSQL/`SearchQuery` `config="simple"` + `search_type="plain"`.
+- Multi-term **AND** (cross-source allowed: terms may hit different of title/metadata/body). No OR fallback; no phrase/minus/paren/web syntax.
+- Per-term match is **decomposed**: authorized PK `UNION` of FTS (`search_vector @@`) ∪ `title_text` `icontains` ∪ `metadata_text` `icontains`, then AND across terms via `pk__in`. This keeps the FTS arm independently usable with **`archive_item_search_vector_gin`** (a combined `@@ OR ILIKE OR ILIKE` WHERE can force seq scan). **No** `body_text` substring.
+- Ranking: `SearchRank` on A/B/C vector + title substring boost `1.0` + metadata substring boost `0.4` (each boost once if any term hits that short field); tie-break `-created_at`, then `pk`. Empty `q`: unchanged chronological `-created_at`.
+- Safety: trimmed `q` longer than **200** chars → empty results (display string preserved). Missing index row → no match, no crash, no GET rebuild.
+- Auth/filters/pagination/UI unchanged aside from backend matching/ranking. One `ArchiveItem` per hit. `REJECTED` displayable OCR remains searchable per display helpers.
+
+**Explicitly deferred:** PR4 snippets/highlights/match-source chips/help-text correction; hover/page/line locators; `pg_trgm`; write-path/sync/schema changes; staff document-list FTS.
+
+**Tests:** `documents/test_archive_full_text_search.py` (plus updated PR1/PR2 public-search regressions and archive list search tests).
+
+**Docs:** `docs/ai-context/archive-full-text-search-design.md` (PR3 marked implemented).

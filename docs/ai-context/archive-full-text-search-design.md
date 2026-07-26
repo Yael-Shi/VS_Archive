@@ -1,62 +1,57 @@
 # Archive full-text search — design
 
-**Status:** Architecture contract. **PR1**, **PR2a**, **PR2b-1**, and **PR2b-2** are implemented in application code; **PR3+** remain future work unless marked implemented in the decision log.
+**Status:** Architecture contract. **PR1**, **PR2a**, **PR2b-1**, **PR2b-2**, and **PR3** are implemented in application code; **PR4** (snippets/help text) and later hover mapping remain deferred.
 
-**Companion decision-log entries:** `docs/ai-context/decision-log.md` — “Archive full-text search — architecture (docs-only)”, “PR1 search-index foundation (implemented)”, “PR2a discovery/manual/taxonomy sync (implemented)”, “PR2b-1 human-controlled displayed-text sync (implemented)”, “PR2b-2 automated displayed-text sync (implemented)”.
+**Companion decision-log entries:** `docs/ai-context/decision-log.md` — “Archive full-text search — architecture (docs-only)”, “PR1 search-index foundation (implemented)”, “PR2a discovery/manual/taxonomy sync (implemented)”, “PR2b-1 human-controlled displayed-text sync (implemented)”, “PR2b-2 automated displayed-text sync (implemented)”, “PR3 backend search cutover (implemented)”.
 
-This document is the detailed contract for the implementation PR sequence. It records verified current behavior, target decisions, risks, and per-PR scope. Do not treat unimplemented PR3/PR4 behavior as live.
+This document is the detailed contract for the implementation PR sequence. It records verified current behavior, target decisions, risks, and per-PR scope. Do not treat unimplemented PR4/later behavior as live.
 
 ---
 
 ## 1. Current behavior (verified)
 
-### Public `/archive/?q=` pipeline
+### Public `/archive/?q=` pipeline (PR3 live)
 
 Entry: `archive_list_page` (`documents/views.py`) via `documents/archive_urls.py` (`archive-list`).
 
 Order of operations:
 
 1. `normalize_archive_public_list_type_filter(item_type)`
-2. `normalize_archive_list_search_query(q)` (strip; empty/whitespace → no search filter)
+2. `normalize_archive_list_search_query(q)` (trim for form/URL display)
 3. Base queryset: `archive_browse_queryset_for_user(request.user)` then select-related and `.order_by("-created_at")`
 4. `filter_archive_items_by_public_list_type`
-5. `filter_archive_items_by_search_query`
+5. `filter_archive_items_by_search_query` — `resolve_archive_list_search_terms` then queries **`ArchiveItemSearchIndex`** via per-term FTS/substring **UNION** candidates (GIN-usable FTS arm) AND’d across terms; blank `q` leaves chronological browse; punctuation-only/overlong → empty; search reorders by relevance then `-created_at` then `pk`
 6. `count()` → page / `per_page` → slice → browse cards
 
-Helpers live in `documents/services/archive_item_presentation.py`. Access helpers live in `documents/services/archive_item_access.py`.
+Helpers live in `documents/services/archive_item_presentation.py`. Index builder/persistence live in `documents/services/archive_search_index.py`. Access helpers live in `documents/services/archive_item_access.py`.
 
-**Note:** Discovery PR5 decision-log text refers to `archive_item_queryset_for_user`. The live list path uses **`archive_browse_queryset_for_user`** (visibility **and** renderability). Full-text implementation must keep the browse queryset as the auth/renderability choke point.
+**Note:** Discovery PR5 decision-log text refers to `archive_item_queryset_for_user`. The live list path uses **`archive_browse_queryset_for_user`** (visibility **and** renderability). Auth/renderability remains the choke point **before** matching, ranking, counts, and pagination.
 
-### Fields searched today
+### Fields searched (PR3)
 
-`filter_archive_items_by_search_query` uses case-insensitive `icontains` OR over:
+Via denormalized `ArchiveItemSearchIndex` (content from the PR1 builder contract):
 
-- `ArchiveItem.title`
-- `ArchiveItem.author_name`
-- `ArchiveItem.source_title`
-- `categories__name`
-- `events__name`
-- `tags__name`
+| Index field | Weight / match |
+|-------------|----------------|
+| `title_text` | A — FTS and short-field `icontains` |
+| `metadata_text` | B — author, source_title, categories/events/tags names, `public_note` — FTS and short-field `icontains` |
+| `body_text` | C — ManualText body or displayed OCR transcription — **FTS only** (no body substring) |
 
-Ends with `.distinct()` (one `ArchiveItem` per result despite M2M joins).
+### Still not searched
 
-### Not searched today
-
-- `ManualTextContent.body`
-- Displayed (or any) `DocumentTextResult.text`
-- `ArchiveItem.public_note`
 - Detailed `PhotoContent` fields (`description`, `location`, `context`, `people_present`, `notes`)
 - Dates (`date_start` / `date_end` / `date_precision`)
 - `DocumentMetadata` and legacy OCR discovery fields on `Document`
+- Non-displayed `DocumentTextResult` rows (only display-helper text is indexed)
 
-List help copy currently suggests date/place search; that is **misleading relative to the filter** and must be corrected only in the UI/snippet PR (PR4), not sooner.
+List help copy still suggests date/place search; that remains **misleading** and is corrected only in PR4.
 
-### Database / FTS posture today
+### Database / FTS posture (PR3)
 
-- App DB engine: PostgreSQL (`vs_archive.settings.DATABASES`).
-- Deployed image in infra: `postgres:16-alpine`.
-- Repo has **no** FTS usage (`SearchQuery` / `SearchVector` / `SearchRank` / `SearchHeadline`), **no** `GinIndex`, **no** `pg_trgm` / `unaccent` / other search extension migrations, and **`django.contrib.postgres` is not** in `INSTALLED_APPS`.
-- Ranking today is chronological (`-created_at`), not relevance.
+- App DB engine: PostgreSQL (`vs_archive.settings.DATABASES`); infra image `postgres:16-alpine`.
+- `django.contrib.postgres` enabled; model GIN index `archive_item_search_vector_gin` on `ArchiveItemSearchIndex.search_vector`.
+- Public search uses Django `SearchQuery` / `SearchRank` (`config="simple"`, `search_type="plain"`) — no handcrafted tsquery interpolation.
+- **`pg_trgm` not adopted** for PR3; short-field substring uses `icontains` on stored `title_text` / `metadata_text`.
 
 ### Displayed OCR text (reuse contract)
 
@@ -145,19 +140,19 @@ Example: searching `מרזוק` may **not** match indexed `ומרזוק` (leadin
 ### Strategy
 
 - **Body (long text):** `simple` FTS + ranking; optional prefix operator on the last query token where appropriate; document Hebrew clitic/prefix gaps in UI only if product asks (not required in PR3).
-- **Short discovery fields:** keep substring semantics comparable to today’s `icontains` (implementation choice in PR3: retain `icontains` arms, and/or `pg_trgm` similarity/GIN on short columns after evaluation).
+- **Short discovery fields (PR3 choice):** substring via `icontains` on stored index `title_text` / `metadata_text` (comparable to pre-cutover short-field behavior). **`pg_trgm` not adopted** in PR3.
 - **Do not** default to trigram GIN on full OCR `body_text` without measurement (index size, write amplification, query plans).
 
 ---
 
 ## 5. Authorization, leakage, and snippets
 
-### Query pipeline (target)
+### Query pipeline (PR3 live; PR4 snippets deferred)
 
 1. `archive_browse_queryset_for_user(user)`
 2. Type filter
 3. Search against the denormalized index **joined/filtered to that queryset only**
-4. Rank + stable tie-break
+4. Rank + stable tie-break (`-created_at`, `pk`)
 5. `count` / paginate
 6. (PR4) Build snippets **only** for the authorized page slice
 
@@ -272,17 +267,32 @@ Required order (short form): **PR1 migrate/backfill → PR2a sync → PR2b-1 syn
 | **Rollback** | Remove PR2b-2 hooks; do not cut over PR3 while any required sync slice is rolled back. |
 | **Non-goals** | Changing `/archive/?q=` behavior; snippet UI; hover locators; redoing PR2b-1 human hooks; hooking shared `persist_hebrew_translation_result` (would double-sync on worker path) |
 
-### PR3 — Backend search cutover (no snippet UI)
+### PR3 — Backend search cutover (no snippet UI) — **implemented**
 
 | | |
 |--|--|
-| **Scope** | Replace/extend `filter_archive_items_by_search_query` to query the index under `archive_browse_queryset_for_user`; weighted ranking + `-created_at` tie-break; preserve type filters, pagination, one-row-per-item; short-field substring strategy as decided (`icontains` and/or evaluated `pg_trgm`); Hebrew/`simple` limitation covered by tests; performance/query-plan verification notes or tests as practical |
-| **Likely files** | `archive_item_presentation.py`; light `views.py` wiring if needed; `test_archive_item.py` / new `test_archive_full_text_search.py` |
-| **Migrations** | Only if PR3 adopts `pg_trgm` extension + short-field indexes after evaluation |
-| **Tests** | Auth leak suite (existence/count/rank); OCR + ManualText body hits; metadata/`public_note` hits; exclusions (`DocumentMetadata`, snapshots not required); distinct; empty `q`; type filter; Hebrew prefix/clitic case documenting `simple` limitation; optional `EXPLAIN` assertion or documented staging check |
-| **Rollout** | Only after: PR2a + PR2b-1 + PR2b-2 sync active → **full backfill again** → **drift verification** passed. Optional feature flag. |
-| **Rollback** | Flag off or revert filter to pre-cutover `icontains`; index remains. |
+| **Scope** | Replace `filter_archive_items_by_search_query` to query `ArchiveItemSearchIndex` under the browse-authorized queryset; cross-source AND multi-term semantics; weighted ranking + short-field substring boosts + `-created_at`/`pk` tie-break; preserve type filters, pagination, one-row-per-item; short-field substring via `icontains` on `title_text`/`metadata_text` (no `pg_trgm`); missing-index rows never match; safety max length on `q` |
+| **Files** | `archive_item_presentation.py`; `test_archive_full_text_search.py`; PR1/PR2 “public search unchanged” regressions updated; design + decision-log |
+| **Migrations** | None (`pg_trgm` not adopted) |
+| **Tests** | Auth leak (existence/count/rank/pagination); title/metadata/`public_note`/ManualText/OCR body; REJECTED displayable OCR; title > metadata > body ranking; tie-break; AND + cross-source AND; normalization outcomes (blank vs punctuation-only vs underscore); short-field substring vs no body substring; empty `q`; type filter; one row per item; missing index; public-search EXPLAIN proves UNION + GIN on FTS arm (`enable_seqscan=off` for tiny fixtures) |
+| **Rollout** | After PR2a + PR2b-1 + PR2b-2 sync, full backfill, and `--check-only` drift verification (production gate passed for this cutover). |
+| **Rollback** | Revert `filter_archive_items_by_search_query` to pre-cutover `icontains`; index table remains. |
 | **Non-goals** | Snippet/highlight UI; match-source chips; help-text rewrite (PR4); locator fields; photo field search; date search; staff `_base_queryset` FTS |
+
+#### PR3 final query semantics
+
+1. **Display `q`:** trim only (`normalize_archive_list_search_query`); preserved in form/URL.
+2. **Internal terms (`resolve_archive_list_search_terms` → `ArchiveListSearchTerms`):**
+   - `no_search`: blank/whitespace-only → no search filter (browse).
+   - `no_matches`: overlong, or nonblank punctuation-only (e.g. `... !!!`) → empty result set (not full archive).
+   - `search`: collapse whitespace; split on ordinary punctuation **and underscore** (`[\W_]+`); drop empty terms; `config="simple"` at query time.
+3. **Max length:** `ARCHIVE_LIST_SEARCH_QUERY_MAX_LENGTH = 200` on the trimmed display string. Overlong → `no_matches`; display string unchanged.
+4. **Multi-term:** AND. Every term must match; terms may hit different sources/fields; order/adjacency do not matter. No OR fallback; no phrase/minus/paren syntax.
+5. **Per-term match (decomposed for GIN):** authorized PK candidates are `FTS ∪ title_text icontains ∪ metadata_text icontains` via Django `QuerySet.union`, then AND’d across terms with successive `pk__in`. A single `@@ OR ILIKE OR ILIKE` WHERE can force a seq scan and prevent meaningful `archive_item_search_vector_gin` participation; UNION keeps the FTS `@@` SELECT independently indexable. No `body_text` substring/prefix arm.
+6. **Ranking:** `SearchRank(search_vector, AND of terms)` + title substring boost `1.0` (weight A) + metadata substring boost `0.4` (weight B); each short-field boost applies once if any term hits that field (not summed per term); order `-relevance`, `-created_at`, `pk`.
+7. **Missing index:** no match, no crash, no GET-time rebuild.
+8. **Hebrew/`simple`:** body clitic/prefix gaps remain accepted limitations; short-field substring covers partials only on title/metadata.
+9. **Remaining tradeoff:** short-field `icontains` branches are still unindexed scans of the denormalized short text columns; they run as separate UNION arms rather than poisoning the FTS index path.
 
 ### PR4 — Snippets, match sources, help text
 
@@ -319,9 +329,9 @@ When hover/highlight is implemented, optionally attach search-result → page/li
 
 | Audit fact | This design |
 |------------|-------------|
-| Browse QS then type then `icontains` metadata | §1 current behavior |
-| No ManualText/OCR body search today | §1; target adds them in index + PR3 |
-| Postgres 16; no FTS/GIN/trgm migrations | §1 |
+| Browse QS then type then index search (was `icontains` metadata) | §1 current behavior (PR3) |
+| ManualText/OCR body searchable via index | §1 PR3; builder/display helpers |
+| Postgres 16; GIN on `search_vector`; no `pg_trgm` in PR3 | §1 |
 | Use display helpers, not all DTR rows | §1 + §2 |
 | No snapshot/binding dependency | §1 + §8 |
 | Auth before match/rank/count/snippet | §2 #10, §5 |
@@ -332,6 +342,6 @@ When hover/highlight is implemented, optionally attach search-result → page/li
 | No locators in initial PRs | §2 #9, Later |
 | Pure builder → value object; persistence materializes `search_vector` | §3 |
 | PR1 migrate/backfill → PR2a → PR2b-1 → PR2b-2 → full backfill again → drift check → PR3 → PR4 | §6–§7 |
-| No cutover before post-PR2a+PR2b-1+PR2b-2 backfill + drift verification | §6 |
+| Cutover only after post-PR2a+PR2b-1+PR2b-2 backfill + drift verification | §6 |
 
-No contradiction found with the verified audit used for this architecture PR.
+PR3 cutover matches the verified audit and the final product decisions recorded in the PR3 decision-log entry.
