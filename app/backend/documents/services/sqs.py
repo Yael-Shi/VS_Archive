@@ -4,7 +4,8 @@ from typing import Any, Dict
 
 import boto3
 
-# Top-level SQS message type for staff corrected/current sync dispatch (PR1 constant only).
+# Top-level SQS message type for staff corrected/current sync dispatch.
+# Payload: {"type": SYNC_TRANSKRIBUS_CORRECTED_CURRENT, "request_id": <int>}.
 SYNC_TRANSKRIBUS_CORRECTED_CURRENT = "SYNC_TRANSKRIBUS_CORRECTED_CURRENT"
 
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import uuid
+from datetime import timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -15,6 +17,7 @@ from documents.models import (
     Document,
     TranskribusCorrectedCurrentSyncAttempt,
     TranskribusCorrectedCurrentSyncPage,
+    TranskribusCorrectedCurrentSyncRequest,
     TranskribusRun,
     TranskribusTranscriptSnapshot,
 )
@@ -23,6 +26,7 @@ from documents.services.archive_items import create_ocr_document
 from documents.services.transkribus_corrected_current_sync import (
     CorrectedCurrentSyncError,
     CorrectedCurrentSyncFailureCode,
+    CorrectedCurrentSyncFencedOutError,
     CorrectedCurrentSyncTerminalConflictError,
     _transition_attempt_terminal,
     run_corrected_current_transkribus_sync,
@@ -739,3 +743,146 @@ class CorrectedCurrentSyncTransactionBoundaryTests(TransactionTestCase):
             fetch_transcript_xml=fetch_xml,
             store_snapshot=store,
         )
+
+
+class CorrectedCurrentSyncRequestFencingTests(TestCase):
+    def setUp(self) -> None:
+        self.doc = _create_he_doc()
+        self.transkribus_run = _upload_run(self.doc)
+        self.user = _staff_user()
+        self.lease_token = uuid.uuid4()
+        now = timezone.now()
+        self.sync_request = TranskribusCorrectedCurrentSyncRequest.objects.create(
+            document=self.doc,
+            initiated_by=self.user,
+            status=TranskribusCorrectedCurrentSyncRequest.Status.RUNNING,
+            lease_token=self.lease_token,
+            lease_expires_at=now + timedelta(minutes=45),
+            started_at=now,
+        )
+
+    def _run_request_backed(self, **kwargs):
+        defaults = dict(
+            document_id=self.doc.pk,
+            initiated_by=self.user,
+            username="u",
+            password="p",
+            bearer_token="token",
+            sync_request_id=self.sync_request.pk,
+            lease_token=self.lease_token,
+            login=lambda *a, **k: None,
+            session_factory=MagicMock,
+            fetch_pages_metadata=lambda *a, **k: [_trp_meta(1), _trp_meta(2)],
+            fetch_transcript_xml=lambda url, *, bearer_token: _page_xml(
+                _SIMPLE_PAGE_BODY
+            ),
+        )
+        defaults.update(kwargs)
+        return run_corrected_current_transkribus_sync(**defaults)
+
+    def test_request_backed_links_attempt_before_provider_io(self):
+        login_calls: list[int] = []
+
+        def login(*args, **kwargs):
+            login_calls.append(1)
+            self.sync_request.refresh_from_db()
+            self.assertIsNotNone(self.sync_request.attempt_id)
+            attempt = self.sync_request.attempt
+            assert attempt is not None
+            self.assertEqual(
+                attempt.status,
+                TranskribusCorrectedCurrentSyncAttempt.Status.STARTED,
+            )
+
+        with patch(
+            "documents.services.transkribus_snapshot_storage.put_object_bytes",
+            return_value=None,
+        ):
+            with override_settings(UPLOADS_BUCKET_NAME="test-bucket"):
+                result = self._run_request_backed(login=login)
+
+        self.assertEqual(len(login_calls), 1)
+        self.sync_request.refresh_from_db()
+        self.assertEqual(self.sync_request.attempt_id, result.attempt.pk)
+        self.assertEqual(
+            result.attempt.status,
+            TranskribusCorrectedCurrentSyncAttempt.Status.COMPLETED,
+        )
+
+    def test_stale_lease_token_fenced_before_provider_io(self):
+        login = MagicMock()
+        fetch_pages = MagicMock(return_value=[_trp_meta(1)])
+        fetch_xml = MagicMock(return_value=_page_xml(_SIMPLE_PAGE_BODY))
+        store = MagicMock()
+
+        with self.assertRaises(CorrectedCurrentSyncFencedOutError):
+            self._run_request_backed(
+                lease_token=uuid.uuid4(),
+                login=login,
+                fetch_pages_metadata=fetch_pages,
+                fetch_transcript_xml=fetch_xml,
+                store_snapshot=store,
+            )
+
+        login.assert_not_called()
+        fetch_pages.assert_not_called()
+        fetch_xml.assert_not_called()
+        store.assert_not_called()
+        self.sync_request.refresh_from_db()
+        self.assertIsNone(self.sync_request.attempt_id)
+        self.assertEqual(
+            self.sync_request.status,
+            TranskribusCorrectedCurrentSyncRequest.Status.RUNNING,
+        )
+        self.assertEqual(
+            TranskribusCorrectedCurrentSyncAttempt.objects.filter(
+                document=self.doc
+            ).count(),
+            0,
+        )
+
+    def test_partial_correlation_args_rejected_without_io(self):
+        login = MagicMock()
+        with self.assertRaises(CorrectedCurrentSyncError) as ctx:
+            run_corrected_current_transkribus_sync(
+                document_id=self.doc.pk,
+                initiated_by=self.user,
+                username="u",
+                password="p",
+                bearer_token="t",
+                sync_request_id=self.sync_request.pk,
+                login=login,
+            )
+        self.assertEqual(
+            ctx.exception.failure_code,
+            CorrectedCurrentSyncFailureCode.UNEXPECTED,
+        )
+        login.assert_not_called()
+        self.sync_request.refresh_from_db()
+        self.assertIsNone(self.sync_request.attempt_id)
+
+    def test_management_path_without_request_still_creates_attempt(self):
+        with patch(
+            "documents.services.transkribus_snapshot_storage.put_object_bytes",
+            return_value=None,
+        ):
+            with override_settings(UPLOADS_BUCKET_NAME="test-bucket"):
+                result = run_corrected_current_transkribus_sync(
+                    document_id=self.doc.pk,
+                    initiated_by=self.user,
+                    username="u",
+                    password="p",
+                    bearer_token="token",
+                    login=lambda *a, **k: None,
+                    session_factory=MagicMock,
+                    fetch_pages_metadata=lambda *a, **k: [
+                        _trp_meta(1),
+                        _trp_meta(2),
+                    ],
+                    fetch_transcript_xml=lambda url, *, bearer_token: _page_xml(
+                        _SIMPLE_PAGE_BODY
+                    ),
+                )
+        self.assertIsNotNone(result.attempt.pk)
+        self.sync_request.refresh_from_db()
+        self.assertIsNone(self.sync_request.attempt_id)

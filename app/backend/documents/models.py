@@ -1626,7 +1626,8 @@ class TranskribusCorrectedCurrentSyncRequest(models.Model):
     Durable staff corrected/current sync queue request for one Document.
 
     Records enqueue/execution lifecycle and lease fencing for worker dispatch.
-    Does not perform HTTP, snapshot storage, activation, or SQS I/O in PR1.
+    Provider HTTP/S3 orchestration is performed by the worker via
+    ``run_corrected_current_transkribus_sync`` under lease fencing — not here.
     """
 
     class Status(models.TextChoices):
