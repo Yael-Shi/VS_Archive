@@ -267,6 +267,11 @@ def edit_verified_text_result(
             editor=editor,
             force_verified=True,
         )
+        from documents.services.archive_search_index import (
+            sync_archive_item_search_index,
+        )
+
+        sync_archive_item_search_index(doc.archive_item_id)
 
     return target
 
@@ -304,5 +309,11 @@ def edit_pending_text_result(
             )
         except VerifiedTextResultEditError as exc:
             raise PendingTextResultEditError(str(exc)) from exc
+
+        from documents.services.archive_search_index import (
+            sync_archive_item_search_index,
+        )
+
+        sync_archive_item_search_index(doc.archive_item_id)
 
     return target

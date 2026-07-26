@@ -650,6 +650,13 @@ def activate_corrected_current_sync_attempt(
             activated_by=actor,
         )
 
+        if source_text_changed or hebrew_mirror_updated:
+            from documents.services.archive_search_index import (
+                sync_archive_item_search_index,
+            )
+
+            sync_archive_item_search_index(doc.archive_item_id)
+
         return CorrectedCurrentActivationResult(
             attempt_id=attempt.pk,
             snapshot_id=snapshot.pk,

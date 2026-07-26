@@ -146,6 +146,11 @@ def approve_suggestion(
                 "reviewed_by",
             ]
         )
+        from documents.services.archive_search_index import (
+            sync_archive_item_search_index,
+        )
+
+        sync_archive_item_search_index(doc.archive_item_id)
 
     return suggestion
 

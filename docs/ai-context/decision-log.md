@@ -1823,12 +1823,13 @@ Content-Type: `application/xml` via `put_object_bytes`.
 |----|--------|
 | **PR1** | Search-index model; pure builder (value object only) + persistence (materializes row/`search_vector`); migration; GIN; idempotent backfill — **no** public search behavior change, **no** broad write-path hooks |
 | **PR2a** | Explicit sync for discovery/manual/taxonomy writers + `--check-only` drift verification |
-| **PR2b** | Explicit sync for displayed OCR/`DocumentTextResult` mutation paths |
+| **PR2b-1** | Explicit sync for human-controlled displayed OCR/`DocumentTextResult` mutation paths |
+| **PR2b-2** | Explicit sync for automated worker/translation displayed OCR/`DocumentTextResult` mutation paths |
 | **PR3** | Backend search cutover (auth, ranking, Hebrew behavior, query-plan tests) — **no** snippet UI |
 | **PR4** | Safe Hebrew snippets, match-source presentation, help-text correction |
 | **Later** | Optional search-result → line/page mapping when hover is implemented |
 
-**Hard rollout rule:** **PR1 migrate/backfill → PR2a sync → PR2b sync → full backfill again while all sync hooks are active → drift verification → PR3 cutover.** Do **not** assume the PR1-era backfill remains fully current across the sync deployment gap. Do **not** switch public search to the index before both PR2 slices are live and post-sync backfill + drift verification complete.
+**Hard rollout rule:** **PR1 migrate/backfill → PR2a sync → PR2b-1 sync → PR2b-2 sync → full backfill again while all sync hooks are active → drift verification → PR3 cutover.** Do **not** assume the PR1-era backfill remains fully current across the sync deployment gap. Do **not** switch public search to the index before PR2a, PR2b-1, and PR2b-2 are live and post-sync backfill + drift verification complete.
 
 **Docs:** `docs/ai-context/archive-full-text-search-design.md`
 
@@ -1849,7 +1850,7 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 ## Archive full-text search — PR2a discovery/manual/taxonomy sync (implemented)
 
-**Decision / implemented:** PR2 write-path synchronization is split. **PR2a** covers ArchiveItem discovery/manual/taxonomy index sync and drift verification only. **PR2b** (displayed OCR text mutation hooks) remains deferred.
+**Decision / implemented:** PR2 write-path synchronization is split. **PR2a** covers ArchiveItem discovery/manual/taxonomy index sync and drift verification only. Displayed OCR mutation sync is further split into **PR2b-1** (human-controlled) and **PR2b-2** (automated).
 
 **Introduced:**
 
@@ -1857,10 +1858,32 @@ Content-Type: `application/xml` via `put_object_bytes`.
 - Explicit hooks (same transaction as source writes): **`create_ocr_document`**, **`create_manual_text_archive_item`**, **`update_manual_text_archive_item`**, **`update_photo_archive_item_metadata`**, **`update_ocr_document_metadata`**, **`update_archive_item_discovery_metadata`** (also covers photo create empty/non-empty discovery), **`archive_metadata_suggestion_review.approve_suggestion`**, **`apply_archive_discovery_metadata_backfill`** when links are added, and Tag/ArchiveCategory/ArchiveEvent admin **`save_model`** name-rename fan-out.
 - **`backfill_archive_search_index --check-only`**: read-only coverage/content/null-vector/extra-row drift verification; prints counts and archive item ids only; exits non-zero on drift; no writes.
 
-**Deferred to PR2b:** worker OCR/HTR persistence, Transkribus local completion, translation persist/retry, staff pending/verified text edits, transcription suggestion approval, corrected-current activation, and other **`DocumentTextResult`** writers that can change displayed **`body_text`**.
+**Deferred (superseded by PR2b-1 / PR2b-2 split):** displayed OCR/`DocumentTextResult` mutation hooks were deferred from PR2a; see the PR2b-1 and PR2b-2 entries below.
 
 **Unchanged (intentional):** public **`/archive/?q=`** remains **`icontains`**. No schema migration. No snippets/ranking/`pg_trgm`. Deletes continue to rely on **`ArchiveItemSearchIndex` CASCADE**.
 
-**Hard rollout rule (updated):** public FTS cutover (PR3) remains blocked until **PR2a and PR2b** are deployed, a **full backfill is rerun while all sync hooks are active**, and **`--check-only` drift verification passes**.
+**Hard rollout rule (updated):** public FTS cutover (PR3) remains blocked until **PR2a, PR2b-1, and PR2b-2** are deployed, a **full backfill is rerun while all sync hooks are active**, and **`--check-only` drift verification passes**.
 
 **Tests:** `documents/test_archive_search_index_sync.py` (plus existing PR1 suite).
+
+## Archive full-text search — PR2b-1 human-controlled displayed-text sync (implemented)
+
+**Decision / implemented:** PR2b is split. **PR2b-1** covers human-controlled displayed-text mutation sync only. **PR2b-2** (automated worker/translation mutations) remains deferred.
+
+**Introduced:**
+
+- Same-transaction id-based **`sync_archive_item_search_index(archive_item_id)`** hooks after successful human-controlled displayed-text mutations:
+  - **`edit_pending_text_result`** / **`edit_verified_text_result`** (after canonical edit/mirror/revision logic; pending no-op early return does not sync)
+  - transcription **`approve_suggestion`** (after displayed text + Hebrew mirror / revision updates and suggestion status save)
+  - **`activate_corrected_current_sync_attempt`** only when **`source_text_changed`** or **`hebrew_mirror_updated`** is true (after final displayed text + bindings)
+- Index failure propagates and rolls back the surrounding source transaction (text edits, suggestion approval, activation text/bindings). **No signals. No `on_commit`. No schema migration.**
+
+**Explicitly not hooked in PR2b-1:** verification-only verify/reject; transcription suggestion rejection; activation **`ALREADY_ACTIVE`** and binding-only repair; preview/history GET; snapshot fetch/storage; geometry/binding-only helpers; worker OCR/HTR, translation persist/retry, Transkribus local completion (PR2b-2); public **`/archive/?q=`**.
+
+**Deferred to PR2b-2:** worker OCR/HTR persistence, Transkribus local completion, translation persist/retry, and other automated **`DocumentTextResult`** writers that can change displayed **`body_text`**.
+
+**Unchanged (intentional):** public **`/archive/?q=`** remains **`icontains`**. Hebrew/non-Hebrew displayed body continues to follow **`get_displayed_transcription_text`**. PR2a discovery/manual/taxonomy sync remains intact.
+
+**Hard rollout rule (updated):** public FTS cutover (PR3) remains blocked until **PR2a, PR2b-1, and PR2b-2** are deployed, a **full backfill is rerun while all sync hooks are active**, and **`--check-only` drift verification passes**.
+
+**Tests:** `documents/test_archive_search_index_sync_ocr_body.py` (plus existing PR1/PR2a suites).
