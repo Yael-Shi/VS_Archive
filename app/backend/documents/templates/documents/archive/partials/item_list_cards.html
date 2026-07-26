@@ -53,7 +53,15 @@
               </div>
             </header>
 
-            <p class="archive-browse-card__preview">{{ card.preview_text }}</p>
+            {% if card.show_search_snippet and card.search_snippet_segments %}
+              <p class="archive-browse-card__preview archive-browse-card__preview--search-snippet">{% for segment in card.search_snippet_segments %}{% if segment.is_match %}<mark class="archive-browse-card__mark">{{ segment.text }}</mark>{% else %}{{ segment.text }}{% endif %}{% endfor %}</p>
+            {% else %}
+              <p class="archive-browse-card__preview">{{ card.preview_text }}</p>
+            {% endif %}
+
+            {% if card.search_match_source_label %}
+              <p class="archive-browse-card__match-source">{{ card.search_match_source_label }}</p>
+            {% endif %}
 
             {% if card.category_links or card.related_links %}
               <div class="archive-browse-card__discovery">

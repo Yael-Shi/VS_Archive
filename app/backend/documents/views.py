@@ -179,6 +179,9 @@ from documents.services.archive_item_presentation import (
     normalize_archive_public_list_type_filter,
     normalize_archive_list_search_query,
 )
+from documents.services.archive_search_snippets import (
+    apply_archive_search_match_presentation_to_cards,
+)
 from documents.services.env_validation import EnvConfigError, validate_required_env
 from documents.services.ocr_reprocess import (
     OcrReprocessError,
@@ -3574,12 +3577,18 @@ def archive_list_page(request):
     )
     offset = (page - 1) * per_page
     page_items = list(items[offset : offset + per_page])
+    browse_cards = _archive_browse_cards_for_items(page_items)
+    # PR4: snippets/match-source only for the authorized page slice (no N+1).
+    browse_cards = apply_archive_search_match_presentation_to_cards(
+        browse_cards,
+        search_query=search_query,
+    )
     return render(
         request,
         "documents/archive/list.html",
         context={
             "items": page_items,
-            "browse_cards": _archive_browse_cards_for_items(page_items),
+            "browse_cards": browse_cards,
             "is_admin": _is_admin(request.user),
             "item_type_filter": item_type_filter,
             "q": search_query,

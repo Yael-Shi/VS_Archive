@@ -2663,6 +2663,24 @@ pre {
   overflow: hidden;
 }
 
+.archive-browse-card__preview--search-snippet {
+  color: var(--text);
+}
+
+.archive-browse-card__mark {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: inherit;
+  padding: 0 0.1em;
+  border-radius: 0.15em;
+}
+
+.archive-browse-card__match-source {
+  margin: var(--space-1) 0 0;
+  font-size: var(--font-xs);
+  line-height: var(--line-relaxed);
+  color: var(--muted);
+}
+
 .archive-browse-card__discovery {
   margin-top: var(--space-3);
   display: flex;
