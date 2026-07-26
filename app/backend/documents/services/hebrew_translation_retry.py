@@ -340,6 +340,13 @@ def run_hebrew_translation_retry(
 
             update_document_processing_state_for_engine(doc, engine)
             doc.save(update_fields=["processing_state_user", "updated_at"])
+            # Sync once at persist boundary (not in shared persist helper, and
+            # not in the claim TX). Lock order: Document (held) → ArchiveItem.
+            from documents.services.archive_search_index import (
+                sync_archive_item_search_index,
+            )
+
+            sync_archive_item_search_index(doc.archive_item_id)
     except HebrewTranslationRetryError as exc:
         _restore_processing_state_after_retry_abort(document_id, engine)
         logger.warning(
