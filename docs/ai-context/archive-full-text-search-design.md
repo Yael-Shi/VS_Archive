@@ -1,10 +1,10 @@
 # Archive full-text search — design
 
-**Status:** Architecture contract. **PR1** and **PR2a** are implemented in application code; **PR2b+** remain future work unless marked implemented in the decision log.
+**Status:** Architecture contract. **PR1**, **PR2a**, and **PR2b-1** are implemented in application code; **PR2b-2+** remain future work unless marked implemented in the decision log.
 
-**Companion decision-log entries:** `docs/ai-context/decision-log.md` — “Archive full-text search — architecture (docs-only)”, “PR1 search-index foundation (implemented)”, “PR2a discovery/manual/taxonomy sync (implemented)”.
+**Companion decision-log entries:** `docs/ai-context/decision-log.md` — “Archive full-text search — architecture (docs-only)”, “PR1 search-index foundation (implemented)”, “PR2a discovery/manual/taxonomy sync (implemented)”, “PR2b-1 human-controlled displayed-text sync (implemented)”.
 
-This document is the detailed contract for the implementation PR sequence. It records verified current behavior, target decisions, risks, and per-PR scope. Do not treat unimplemented PR2b/PR3/PR4 behavior as live.
+This document is the detailed contract for the implementation PR sequence. It records verified current behavior, target decisions, risks, and per-PR scope. Do not treat unimplemented PR2b-2/PR3/PR4 behavior as live.
 
 ---
 
@@ -187,30 +187,32 @@ The index is a derived cache. It can drift if:
 
 **Requirement:** idempotent rebuild/backfill command that can recompute any item from source of truth (ArchiveItem + ManualTextContent / display helpers) and be re-run safely. A PR1-era backfill is **not** assumed to remain fully current across the gap until PR2 sync is deployed.
 
-### Write-path sync (PR2a + PR2b, not PR1)
+### Write-path sync (PR2a + PR2b-1 + PR2b-2, not PR1)
 
 PR1 ships pure builder + persistence helper + backfill only (no broad hooks). Between PR1 backfill and full PR2 sync going live, source writes can drift the index.
 
 PR2 is intentionally split:
 
 - **PR2a** — explicit sync for ArchiveItem discovery scalars/M2M, ManualText body, photo/OCR shared metadata, taxonomy name renames, plus read-only **`--check-only`** drift verification on `backfill_archive_search_index`.
-- **PR2b** — explicit sync for displayed OCR/HTR mutation paths (`DocumentTextResult` writers: worker persistence, translation, staff edits, transcription suggestion approval, corrected-current activation, failure demotion).
+- **PR2b-1** — explicit sync for **human-controlled** displayed OCR/HTR mutation paths: staff pending/verified text edits, transcription suggestion approval, corrected-current activation when `source_text_changed` or `hebrew_mirror_updated`.
+- **PR2b-2** — explicit sync for **automated** displayed OCR/HTR mutation paths: worker OCR/HTR persistence, Transkribus local completion, translation persist/retry, and other automated `DocumentTextResult` writers that can change displayed `body_text`.
 
-After **both PR2a and PR2b** sync are **deployed and active**, operators **must** run the **full idempotent backfill again** (while sync is live), then perform **drift verification**, before any PR3 cutover. Do not treat the original PR1 backfill as sufficient for cutover. Do not cut over while only PR2a is live.
+After **PR2a, PR2b-1, and PR2b-2** sync are **deployed and active**, operators **must** run the **full idempotent backfill again** (while sync is live), then perform **drift verification**, before any PR3 cutover. Do not treat the original PR1 backfill as sufficient for cutover. Do not cut over while only PR2a and/or PR2b-1 are live.
 
 ### Deployment order (hard rule)
 
 1. PR1: migrate schema + GIN → full idempotent backfill.
 2. PR2a: deploy discovery/manual/taxonomy sync + drift verification command mode; confirm active.
-3. PR2b: deploy displayed-OCR sync hooks; confirm active.
-4. While **all** sync hooks are active: run the **full idempotent backfill again**.
-5. Run/perform **drift verification** (`--check-only`).
-6. Only then cut over public search behavior (PR3).
-7. Then ship snippet UI (PR4).
+3. PR2b-1: deploy human-controlled displayed-OCR sync hooks; confirm active.
+4. PR2b-2: deploy automated worker/translation displayed-OCR sync hooks; confirm active.
+5. While **all** sync hooks are active: run the **full idempotent backfill again**.
+6. Run/perform **drift verification** (`--check-only`).
+7. Only then cut over public search behavior (PR3).
+8. Then ship snippet UI (PR4).
 
-Required order (short form): **PR1 migrate/backfill → PR2a sync → PR2b sync → full backfill again while all sync is active → drift verification → PR3 cutover.**
+Required order (short form): **PR1 migrate/backfill → PR2a sync → PR2b-1 sync → PR2b-2 sync → full backfill again while all sync is active → drift verification → PR3 cutover.**
 
-**Do not** switch `/archive/?q=` to the index while any required backfill is partial, while PR2a or PR2b sync is missing, or before post-PR2 drift verification passes. A feature flag around PR3 cutover is allowed if it makes rollback safer.
+**Do not** switch `/archive/?q=` to the index while any required backfill is partial, while PR2a / PR2b-1 / PR2b-2 sync is missing, or before post-PR2 drift verification passes. A feature flag around PR3 cutover is allowed if it makes rollback safer.
 
 ### Rollback
 
@@ -242,21 +244,33 @@ Required order (short form): **PR1 migrate/backfill → PR2a sync → PR2b sync 
 | **Likely files** | `archive_search_index.py`; `archive_items.py`; photo upload (via discovery hook); metadata suggestion review; discovery backfill; taxonomy admins; backfill command; tests; decision-log |
 | **Migrations** | None expected |
 | **Tests** | Fresh-reload vs stale prefetch; same-TX rollback on sync failure; each PR2a hooked writer; taxonomy fan-out; CASCADE delete; check-only pass/fail/no-write; public `icontains` unchanged |
-| **Rollout** | Deploy after PR1. Still **no** public FTS cutover. PR3 remains blocked until PR2b is also active and post-sync full backfill + drift verification pass. |
+| **Rollout** | Deploy after PR1. Still **no** public FTS cutover. PR3 remains blocked until PR2b-1 and PR2b-2 are also active and post-sync full backfill + drift verification pass. |
 | **Rollback** | Remove PR2a hooks; rely on periodic rebuild until fixed. |
-| **Non-goals** | Displayed OCR mutation hooks (PR2b); changing `/archive/?q=`; snippets; hover locators |
+| **Non-goals** | Displayed OCR mutation hooks (PR2b-1/PR2b-2); changing `/archive/?q=`; snippets; hover locators |
 
-### PR2b — Displayed OCR text mutation sync
+### PR2b-1 — Human-controlled displayed OCR text mutation sync
 
 | | |
 |--|--|
-| **Scope** | Explicit sync from every `DocumentTextResult` writer that can change displayed transcription body (worker success/failure, Transkribus local completion, translation persist/retry, staff pending/verified edits, transcription suggestion approval, corrected-current activation when text changes) |
-| **Likely files** | Worker / local completion / translation / verified edit / transcription suggestion / corrected-current activation; `archive_search_index` call sites; tests |
+| **Scope** | Explicit sync after human-controlled writers that change displayed transcription body: `edit_pending_text_result`, `edit_verified_text_result`, transcription `approve_suggestion`, corrected-current activation when `source_text_changed` or `hebrew_mirror_updated` |
+| **Likely files** | `verified_text_result_edit.py`; `transcription_suggestion_review.py`; `transkribus_corrected_current_activation.py`; `archive_search_index` call sites; tests; design/decision-log |
 | **Migrations** | None expected |
-| **Tests** | Each hooked OCR writer updates `body_text`; skip verify/reject and snapshot-only paths; same-TX semantics; no geometry/binding-only sync |
-| **Rollout** | Deploy after PR2a. Then **full backfill again while PR2a+PR2b sync are active**, then **drift verification**. Still **no** public FTS cutover. |
-| **Rollback** | Remove PR2b hooks; do not cut over PR3 while either sync slice is rolled back. |
-| **Non-goals** | Changing `/archive/?q=` behavior; snippet UI; hover locators |
+| **Tests** | Pending/verified edits update `body_text`; Hebrew mirror follows display selector; suggestion approve updates body; reject skips sync; activation syncs only on source/hebrew text flags; binding-only and `ALREADY_ACTIVE` skip; same-TX rollback; public `icontains` unchanged; PR2a intact |
+| **Rollout** | Deploy after PR2a. Still **no** public FTS cutover. PR3 remains blocked until PR2b-2 is also active and post-sync full backfill + drift verification pass. |
+| **Rollback** | Remove PR2b-1 hooks; do not cut over PR3 while any required sync slice is rolled back. |
+| **Non-goals** | Worker/translation/local-completion hooks (PR2b-2); changing `/archive/?q=`; snippet UI; hover locators; verify/reject-only paths; snapshot/preview/geometry/binding-only paths |
+
+### PR2b-2 — Automated worker/translation displayed OCR text mutation sync
+
+| | |
+|--|--|
+| **Scope** | Explicit sync from automated `DocumentTextResult` writers that can change displayed transcription body (worker OCR/HTR success/failure persistence, Transkribus local completion, translation persist/retry, and related automated demotion paths) |
+| **Likely files** | Worker / local completion / translation modules; `archive_search_index` call sites; tests |
+| **Migrations** | None expected |
+| **Tests** | Each hooked automated writer updates `body_text` when display changes; same-TX semantics; no opportunistic non-Hebrew `PARTIAL` “fixes”; public search unchanged |
+| **Rollout** | Deploy after PR2b-1. Then **full backfill again while PR2a+PR2b-1+PR2b-2 sync are active**, then **drift verification**. Still **no** public FTS cutover. |
+| **Rollback** | Remove PR2b-2 hooks; do not cut over PR3 while any required sync slice is rolled back. |
+| **Non-goals** | Changing `/archive/?q=` behavior; snippet UI; hover locators; redoing PR2b-1 human hooks |
 
 ### PR3 — Backend search cutover (no snippet UI)
 
@@ -266,7 +280,7 @@ Required order (short form): **PR1 migrate/backfill → PR2a sync → PR2b sync 
 | **Likely files** | `archive_item_presentation.py`; light `views.py` wiring if needed; `test_archive_item.py` / new `test_archive_full_text_search.py` |
 | **Migrations** | Only if PR3 adopts `pg_trgm` extension + short-field indexes after evaluation |
 | **Tests** | Auth leak suite (existence/count/rank); OCR + ManualText body hits; metadata/`public_note` hits; exclusions (`DocumentMetadata`, snapshots not required); distinct; empty `q`; type filter; Hebrew prefix/clitic case documenting `simple` limitation; optional `EXPLAIN` assertion or documented staging check |
-| **Rollout** | Only after: PR2 sync active → **full backfill again** → **drift verification** passed. Optional feature flag. |
+| **Rollout** | Only after: PR2a + PR2b-1 + PR2b-2 sync active → **full backfill again** → **drift verification** passed. Optional feature flag. |
 | **Rollback** | Flag off or revert filter to pre-cutover `icontains`; index remains. |
 | **Non-goals** | Snippet/highlight UI; match-source chips; help-text rewrite (PR4); locator fields; photo field search; date search; staff `_base_queryset` FTS |
 
@@ -317,7 +331,7 @@ When hover/highlight is implemented, optionally attach search-result → page/li
 | `simple` FTS + Hebrew substring caveat | §2 #7–8, §4 |
 | No locators in initial PRs | §2 #9, Later |
 | Pure builder → value object; persistence materializes `search_vector` | §3 |
-| PR1 migrate/backfill → PR2a → PR2b → full backfill again → drift check → PR3 → PR4 | §6–§7 |
-| No cutover before post-PR2a+PR2b backfill + drift verification | §6 |
+| PR1 migrate/backfill → PR2a → PR2b-1 → PR2b-2 → full backfill again → drift check → PR3 → PR4 | §6–§7 |
+| No cutover before post-PR2a+PR2b-1+PR2b-2 backfill + drift verification | §6 |
 
 No contradiction found with the verified audit used for this architecture PR.
