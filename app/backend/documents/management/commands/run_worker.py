@@ -55,6 +55,10 @@ from documents.services.source_files import (
     get_ordered_source_files_for_processing,
     is_multi_image_document,
 )
+from documents.services.sqs import SYNC_TRANSKRIBUS_CORRECTED_CURRENT
+from documents.services.transkribus_corrected_current_sync_worker import (
+    handle_sync_transkribus_corrected_current,
+)
 from documents.services.transkribus_local_completion import (
     complete_transkribus_local_success,
 )
@@ -124,7 +128,7 @@ class Command(BaseCommand):
                 time.sleep(options["sleep_seconds"])
                 continue
 
-            ok = self._process_message(msg)
+            ok = self._process_message(msg, sqs=sqs, queue_url=queue_url)
 
             if ok:
                 self._delete_message(sqs, queue_url, msg)
@@ -193,13 +197,41 @@ class Command(BaseCommand):
 
     # ------------------------------------------------------------------ Core Logic
 
-    def _process_message(self, msg: Dict[str, Any]) -> bool:
+    def _process_message(
+        self,
+        msg: Dict[str, Any],
+        *,
+        sqs=None,
+        queue_url: Optional[str] = None,
+    ) -> bool:
         try:
             payload = json.loads(msg.get("Body", "{}"))
         except Exception:
             return True
 
-        if payload.get("type") != "PROCESS_DOCUMENT":
+        msg_type = payload.get("type")
+        if msg_type == SYNC_TRANSKRIBUS_CORRECTED_CURRENT:
+            receipt_handle = msg.get("ReceiptHandle")
+            if (
+                sqs is None
+                or not queue_url
+                or not isinstance(receipt_handle, str)
+                or not receipt_handle
+            ):
+                logger.error(
+                    "SYNC_TRANSKRIBUS_CORRECTED_CURRENT missing SQS context; "
+                    "cannot claim/defer safely"
+                )
+                return False
+            return handle_sync_transkribus_corrected_current(
+                payload,
+                sqs=sqs,
+                queue_url=queue_url,
+                receipt_handle=receipt_handle,
+                worker_env=self._cfg,
+            )
+
+        if msg_type != "PROCESS_DOCUMENT":
             return True
 
         document_id = payload.get("document_id")

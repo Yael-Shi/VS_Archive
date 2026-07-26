@@ -1807,9 +1807,34 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 **Unchanged in PR1:** `run_corrected_current_transkribus_sync(...)` and **`sync_transkribus_corrected_current`** management command (no `SyncRequest` parameter yet). Activation remains manual and separate. Web enqueue remains **disabled**; nothing is operationally enabled by PR1.
 
-**Planned later PRs (not PR1):** worker claim/fencing + service correlation + visibility extension; enqueue service; staff UI POST + feature gate; ops reconcile/requeue command.
+**Planned later PRs (not PR1):** ~~worker claim/fencing + service correlation + visibility extension~~ → **PR2 implemented** (see following entry); enqueue service; staff UI POST + feature gate; ops reconcile/requeue command.
 
 **Planned v1 timing constants (docs only until worker PR):** execution lease **45 minutes**, one-shot SQS visibility extension **45 minutes**, linked **`STARTED`** recovery threshold **60 minutes** — conservative for up to ~30-page documents; tune after production measurements.
+
+## Transkribus corrected/current sync worker (PR2 — claim/fencing/correlation)
+
+**Decision / implemented:** Worker execution for **`SYNC_TRANSKRIBUS_CORRECTED_CURRENT`** with lease fencing and atomic Request↔Attempt correlation. Delivery guarantee: **at-most-once provider orchestration per Request**, with **idempotent terminal Request reconciliation** (not exactly-once SQS delivery).
+
+**Service correlation:** `run_corrected_current_transkribus_sync(..., sync_request_id=None, lease_token=None)`. Management-command path omits both (unchanged). Worker path passes both. Before any Transkribus HTTP or S3 I/O, one short transaction locks the Request, requires **`RUNNING`** + matching **`lease_token`** + no linked Attempt, creates **`STARTED`** Attempt, and links it. Stale/fenced workers raise **`CorrectedCurrentSyncFencedOutError`** with no Attempt, no provider I/O, and no Request mutation.
+
+**Worker handler:** `handle_sync_transkribus_corrected_current` in `documents/services/transkribus_corrected_current_sync_worker.py`, dispatched from `run_worker._process_message` **before** **`PROCESS_DOCUMENT`**. Payload validates **`request_id`** (int); unknown top-level types still ack-discard as before.
+
+**Claim / reclaim / defer:**
+
+| Observation | Action |
+|-------------|--------|
+| Terminal Request | No-op ack |
+| Linked terminal Attempt | Reconcile Request to matching terminal status; ack; no provider I/O |
+| Linked **`STARTED`**, age &lt; 60m | Never rerun; defer (no ack); visibility **2 minutes** |
+| Linked **`STARTED`**, age ≥ 60m | Request → **`RECOVERY_REQUIRED`** (keep **`lease_token`**, clear **`lease_expires_at`**); ack; no provider rerun |
+| `attempt_id` null, **`RUNNING`**, lease fresh | Defer (no ack); visibility **2 minutes** |
+| `QUEUED` / `ENQUEUE_FAILED`, or stale **`RUNNING`** with null Attempt | Claim/reclaim: rotate **`lease_token`**, lease **45 minutes**; one-shot SQS visibility **45 minutes**; run service once |
+
+**Late legitimate worker:** After **`RECOVERY_REQUIRED`**, the original worker that still holds the fencing token may terminalize the Request from its terminal Attempt (Attempt remains source of truth on any observe).
+
+**Timing constants (implemented):** execution lease **45m**; SQS visibility after claim **45m**; competing/in-progress defer **2m**; linked **`STARTED`** recovery threshold **60m**.
+
+**Unchanged / still out of scope for PR2:** enqueue sender; IAM/CDK; web view/route/button; feature gate; automatic activation; search; transcript selection/storage; DTR/bindings/processing-state; ops reconcile command; management command behavior when correlation args omitted.
 
 ## Archive full-text search — architecture (docs-only)
 

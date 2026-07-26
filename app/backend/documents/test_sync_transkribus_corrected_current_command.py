@@ -191,6 +191,9 @@ class SyncTranskribusCorrectedCurrentCommandTests(TestCase):
         self.assertEqual(kwargs["username"], _CREDS["TRANSKRIBUS_USERNAME"])
         self.assertEqual(kwargs["password"], _CREDS["TRANSKRIBUS_PASSWORD"])
         self.assertEqual(kwargs["bearer_token"], _CREDS["TRANSKRIBUS_API_TOKEN"])
+        # Management-command path must not supply request/lease correlation.
+        self.assertNotIn("sync_request_id", kwargs)
+        self.assertNotIn("lease_token", kwargs)
 
     @patch.dict("os.environ", _CREDS, clear=False)
     @patch(_SERVICE)

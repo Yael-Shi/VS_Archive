@@ -11,6 +11,7 @@ Does not activate geometry, mutate automatic HTR associations, or update
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Mapping, NoReturn, Sequence
@@ -23,6 +24,7 @@ from documents.models import (
     Document,
     TranskribusCorrectedCurrentSyncAttempt,
     TranskribusCorrectedCurrentSyncPage,
+    TranskribusCorrectedCurrentSyncRequest,
     TranskribusRun,
     TranskribusSnapshotPage,
     TranskribusTranscriptSnapshot,
@@ -129,6 +131,14 @@ class CorrectedCurrentSyncTerminalConflictError(CorrectedCurrentSyncError):
     """Terminal attempt transition rejected (wrong state or conflicting payload)."""
 
 
+class CorrectedCurrentSyncFencedOutError(Exception):
+    """Request-backed sync lost its lease before Attempt correlation.
+
+    Raised before Attempt creation and before any Transkribus HTTP or S3 I/O.
+    Does not mutate the Request.
+    """
+
+
 class CorrectedCurrentSyncPageMetadataError(Exception):
     """Pages metadata lookup failed for a mapped pageNr."""
 
@@ -224,6 +234,60 @@ def _create_started_attempt(
     )
     attempt.save()
     return attempt
+
+
+def _create_started_attempt_for_request(
+    *,
+    sync_request_id: int,
+    lease_token: uuid.UUID,
+    document: Document,
+    run: TranskribusRun,
+    initiated_by: Any,
+) -> TranskribusCorrectedCurrentSyncAttempt:
+    """Atomically fence the Request and create+link a STARTED Attempt.
+
+    Must run before any Transkribus HTTP or S3 I/O. A stale/fenced worker
+    raises ``CorrectedCurrentSyncFencedOutError`` with no Attempt and no
+    Request mutation.
+    """
+    if initiated_by is None:
+        raise CorrectedCurrentSyncError(
+            _public_message(CorrectedCurrentSyncFailureCode.UNEXPECTED),
+            failure_code=CorrectedCurrentSyncFailureCode.UNEXPECTED,
+            attempt_id=None,
+        )
+    with transaction.atomic():
+        try:
+            sync_request = (
+                TranskribusCorrectedCurrentSyncRequest.objects.select_for_update().get(
+                    pk=sync_request_id
+                )
+            )
+        except TranskribusCorrectedCurrentSyncRequest.DoesNotExist as exc:
+            raise CorrectedCurrentSyncFencedOutError(
+                f"Sync request id={sync_request_id} not found for fencing."
+            ) from exc
+
+        if (
+            sync_request.status != TranskribusCorrectedCurrentSyncRequest.Status.RUNNING
+            or sync_request.attempt_id is not None
+            or sync_request.lease_token != lease_token
+            or sync_request.document_id != document.pk
+        ):
+            raise CorrectedCurrentSyncFencedOutError(
+                f"Sync request id={sync_request_id} fenced out before Attempt link."
+            )
+
+        attempt = TranskribusCorrectedCurrentSyncAttempt(
+            document=document,
+            transkribus_run=run,
+            initiated_by=initiated_by,
+            status=TranskribusCorrectedCurrentSyncAttempt.Status.STARTED,
+        )
+        attempt.save()
+        sync_request.attempt = attempt
+        sync_request.save(update_fields=["attempt", "updated_at"])
+        return attempt
 
 
 def _build_selector_inputs(
@@ -611,6 +675,8 @@ def run_corrected_current_transkribus_sync(
     username: str,
     password: str,
     bearer_token: str,
+    sync_request_id: int | None = None,
+    lease_token: uuid.UUID | None = None,
     session_factory: Callable[[], requests.Session] | None = None,
     login: Callable[..., None] | None = None,
     fetch_pages_metadata: Callable[..., list[tr.TrpPageMetadata]] | None = None,
@@ -619,13 +685,42 @@ def run_corrected_current_transkribus_sync(
         ..., SnapshotStorageResult
     ] = store_transkribus_transcript_snapshot,
 ) -> CorrectedCurrentSyncResult:
-    """Run one corrected/current sync for ``document_id`` (new attempt each call)."""
+    """Run one corrected/current sync for ``document_id``.
+
+    Management-command path: omit ``sync_request_id`` and ``lease_token`` —
+    creates a new Attempt with no Request correlation (unchanged).
+
+    Worker/request-backed path: pass both. Before any Transkribus HTTP or S3
+    I/O, atomically locks the Request, verifies RUNNING + matching lease + no
+    linked Attempt, creates STARTED Attempt, and links it. Stale/fenced workers
+    raise ``CorrectedCurrentSyncFencedOutError`` with no Attempt and no I/O.
+    """
+    if (sync_request_id is None) != (lease_token is None):
+        raise CorrectedCurrentSyncError(
+            _public_message(CorrectedCurrentSyncFailureCode.UNEXPECTED),
+            failure_code=CorrectedCurrentSyncFailureCode.UNEXPECTED,
+            attempt_id=None,
+        )
+
+    # DB-only resolution (no provider HTTP / S3). On request-backed runs, resolve
+    # failure raises before fencing/Attempt link; the worker then fails the Request.
     document, run, page_index_map = _resolve_document_run_and_mapping(document_id)
-    attempt = _create_started_attempt(
-        document=document,
-        run=run,
-        initiated_by=initiated_by,
-    )
+
+    if sync_request_id is not None:
+        assert lease_token is not None
+        attempt = _create_started_attempt_for_request(
+            sync_request_id=sync_request_id,
+            lease_token=lease_token,
+            document=document,
+            run=run,
+            initiated_by=initiated_by,
+        )
+    else:
+        attempt = _create_started_attempt(
+            document=document,
+            run=run,
+            initiated_by=initiated_by,
+        )
     attempt_id = attempt.pk
     phase = _SyncPhase.HTTP_LOGIN_METADATA
 
@@ -713,6 +808,8 @@ def run_corrected_current_transkribus_sync(
             storage_outcome=storage_result.outcome,
         )
 
+    except CorrectedCurrentSyncFencedOutError:
+        raise
     except CorrectedCurrentSyncTerminalConflictError:
         raise
     except _SnapshotPageMismatchError as exc:
@@ -728,6 +825,7 @@ def run_corrected_current_transkribus_sync(
 __all__ = [
     "CorrectedCurrentSyncError",
     "CorrectedCurrentSyncFailureCode",
+    "CorrectedCurrentSyncFencedOutError",
     "CorrectedCurrentSyncResult",
     "CorrectedCurrentSyncTerminalConflictError",
     "run_corrected_current_transkribus_sync",
