@@ -1826,7 +1826,7 @@ Content-Type: `application/xml` via `put_object_bytes`.
 | **PR2b-1** | Explicit sync for human-controlled displayed OCR/`DocumentTextResult` mutation paths |
 | **PR2b-2** | Explicit sync for automated worker/translation displayed OCR/`DocumentTextResult` mutation paths |
 | **PR3** | Backend search cutover (auth, ranking, Hebrew behavior, query-plan tests) — **no** snippet UI — **implemented** (see PR3 entry) |
-| **PR4** | Safe Hebrew snippets, match-source presentation, help-text correction — **deferred** |
+| **PR4** | Safe Hebrew snippets, match-source presentation, help-text correction — **implemented** (see PR4 entry) |
 | **Later** | Optional search-result → line/page mapping when hover is implemented — **deferred** |
 
 **Hard rollout rule:** **PR1 migrate/backfill → PR2a sync → PR2b-1 sync → PR2b-2 sync → full backfill again while all sync hooks are active → drift verification → PR3 cutover.** Satisfied before PR3 implementation.
@@ -1924,8 +1924,29 @@ Content-Type: `application/xml` via `put_object_bytes`.
 - Safety: trimmed `q` longer than **200** chars → empty results (display string preserved). Missing index row → no match, no crash, no GET rebuild.
 - Auth/filters/pagination/UI unchanged aside from backend matching/ranking. One `ArchiveItem` per hit. `REJECTED` displayable OCR remains searchable per display helpers.
 
-**Explicitly deferred:** PR4 snippets/highlights/match-source chips/help-text correction; hover/page/line locators; `pg_trgm`; write-path/sync/schema changes; staff document-list FTS.
+**Explicitly deferred (at PR3 time; PR4 now implemented):** PR4 snippets/highlights/match-source/help-text — see following entry. Still deferred: hover/page/line locators; `pg_trgm`; write-path/sync/schema changes; staff document-list FTS.
 
 **Tests:** `documents/test_archive_full_text_search.py` (plus updated PR1/PR2 public-search regressions and archive list search tests).
 
 **Docs:** `docs/ai-context/archive-full-text-search-design.md` (PR3 marked implemented).
+
+## Archive full-text search — PR4 snippets, match-source, help text (implemented)
+
+**Decision / implemented:** Public `/archive/?q=` search results show safe contextual snippets and accurate Hebrew match-source labels for the authorized page slice only. PR3 matching/ranking/normalization/auth/filters/pagination are unchanged.
+
+**Presentation:**
+
+- No effective `q`: ordinary beginning-of-text card preview unchanged.
+- With `q`: at most one contextual body snippet per card (~160–220 chars, word-aware window maximizing distinct query terms, earliest tie-break, ellipses only when omitted). Body whole-token match → replace preview; OCR label **`נמצא בתעתוק`**, ManualText **`נמצא בטקסט`**. Prefer body snippet when body and title/metadata both match.
+- Title-only: no fabricated body excerpt (title already visible).
+- Metadata/public_note/discovery-only: keep ordinary preview; specific label when one source is reliable, else **`נמצא בפרטי הפריט`**. Never claim a field without a normalized term hit.
+- Highlighting: autoescaped `ArchiveSearchSnippetSegment` text + template `<mark>` only (no `mark_safe` / raw HTML). Unicode-aware case-insensitive whole-token highlights inside the selected snippet.
+- Help text + placeholder corrected to live fields (no date/place claims).
+
+**Performance / auth:** Snippets built only after browse auth and pagination; one bounded `ArchiveItemSearchIndex` load for page ids; no N+1; unauthorized private content never appears in snippets, labels, counts, or HTML.
+
+**Files:** `documents/services/archive_search_snippets.py`; `ArchiveBrowseCard` search fields; `archive_list_page` wiring; archive list/card templates; CSS; tests in `documents/test_archive_full_text_search.py`.
+
+**Explicitly deferred:** hover/page/line mapping; jump-to-match; `pg_trgm`/morphology/fuzzy; search backend/ranking changes; write-path/index sync/schema.
+
+**Docs:** `docs/ai-context/archive-full-text-search-design.md` (PR4 marked implemented).

@@ -1,12 +1,15 @@
-"""PR3 public archive FTS cutover: matching, ranking, auth, and query-plan coverage."""
+"""PR3/PR4 public archive FTS: matching, ranking, snippets, auth, and query plans."""
 
 from __future__ import annotations
 
 from datetime import timedelta
+from html import escape
+from unittest.mock import patch
 
 from django.contrib.auth.models import Group, User
 from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
@@ -28,15 +31,31 @@ from documents.services.archive_item_presentation import (
     ARCHIVE_LIST_SEARCH_NO_SEARCH,
     ARCHIVE_LIST_SEARCH_QUERY_MAX_LENGTH,
     ARCHIVE_LIST_SEARCH_SEARCH,
+    build_archive_browse_cards,
     filter_archive_items_by_public_list_type,
     filter_archive_items_by_search_query,
     normalize_archive_list_search_query,
     resolve_archive_list_search_terms,
 )
-from documents.services.archive_items import create_manual_text_archive_item
+from documents.services.archive_items import (
+    create_manual_text_archive_item,
+    update_archive_item_discovery_metadata,
+)
 from documents.services.archive_search_index import (
     archive_items_for_search_index_build,
     rebuild_archive_item_search_index,
+)
+from documents.services.archive_search_snippets import (
+    MATCH_SOURCE_AUTHOR,
+    MATCH_SOURCE_CATEGORIES,
+    MATCH_SOURCE_ITEM_DETAILS,
+    MATCH_SOURCE_MANUAL_BODY,
+    MATCH_SOURCE_OCR_BODY,
+    MATCH_SOURCE_PUBLIC_NOTE,
+    apply_archive_search_match_presentation_to_cards,
+    build_highlighted_snippet_segments,
+    load_archive_search_indexes_for_item_ids,
+    select_snippet_window,
 )
 from documents.test_archive_item import create_viewable_ocr_document
 
@@ -665,3 +684,505 @@ class ArchiveFullTextSearchQueryPlanTests(TestCase):
 
         self.assertIn("archive_item_search_vector_gin", plan)
         self.assertRegex(plan, r"(Index Scan|Bitmap Index Scan|Bitmap Heap Scan)")
+
+
+def _card_by_item_id(cards, item_id: int):
+    for card in cards:
+        if card.item.pk == item_id:
+            return card
+    raise AssertionError(f"card for item {item_id} not found")
+
+
+def _snippet_plain_text(card) -> str:
+    return "".join(segment.text for segment in card.search_snippet_segments)
+
+
+class ArchiveSearchSnippetPresentationTests(TestCase):
+    def test_ocr_body_match_shows_transcription_label_and_contextual_snippet(self):
+        prefix = "מילה " * 40
+        doc = create_viewable_ocr_document(
+            title="OCR snippet title",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            language=Document.Language.HEBREW,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        _create_text_result(
+            doc,
+            text=f"{prefix}יוסף מרזוק המשך הטקסט אחרי ההתאמה",
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+        )
+        _rebuild(doc.archive_item_id)
+
+        resp = self.client.get(reverse("archive-list"), {"q": "יוסף מרזוק"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, MATCH_SOURCE_OCR_BODY)
+        self.assertContains(resp, "<mark")
+        self.assertContains(resp, "יוסף")
+        self.assertContains(resp, "מרזוק")
+        card = _card_by_item_id(resp.context["browse_cards"], doc.archive_item_id)
+        self.assertTrue(card.show_search_snippet)
+        self.assertEqual(card.search_match_source_label, MATCH_SOURCE_OCR_BODY)
+        plain = _snippet_plain_text(card)
+        self.assertIn("יוסף", plain)
+        self.assertIn("מרזוק", plain)
+        self.assertTrue(plain.startswith("…"))
+        self.assertNotEqual(card.preview_text, plain)
+
+    def test_manual_body_match_shows_text_label(self):
+        item = create_manual_text_archive_item(
+            title="Manual snippet title",
+            body=("רקע " * 30) + "מילתחיפוש ייחודית להמחשה בהמשך",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        _rebuild(item.pk)
+
+        resp = self.client.get(reverse("archive-list"), {"q": "מילתחיפוש"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, MATCH_SOURCE_MANUAL_BODY)
+        card = _card_by_item_id(resp.context["browse_cards"], item.pk)
+        self.assertTrue(card.show_search_snippet)
+        self.assertEqual(card.search_match_source_label, MATCH_SOURCE_MANUAL_BODY)
+        self.assertIn("מילתחיפוש", _snippet_plain_text(card))
+
+    def test_no_query_keeps_ordinary_beginning_preview(self):
+        body = "Opening preview sentence for browse without search."
+        item = create_manual_text_archive_item(
+            title="No query preview",
+            body=body,
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        _rebuild(item.pk)
+
+        resp = self.client.get(reverse("archive-list"))
+        card = _card_by_item_id(resp.context["browse_cards"], item.pk)
+        self.assertFalse(card.show_search_snippet)
+        self.assertEqual(card.search_match_source_label, "")
+        self.assertEqual(card.search_snippet_segments, ())
+        self.assertIn("Opening preview sentence", card.preview_text)
+        self.assertNotContains(resp, MATCH_SOURCE_MANUAL_BODY)
+        self.assertNotContains(resp, 'class="archive-browse-card__mark"')
+
+    def test_title_only_match_does_not_show_unrelated_body_excerpt(self):
+        item = create_manual_text_archive_item(
+            title="uniqtitleonlytoken",
+            body=(
+                "This body never contains the title token. "
+                "It starts with ordinary preview words for the card."
+            ),
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        _rebuild(item.pk)
+
+        resp = self.client.get(reverse("archive-list"), {"q": "uniqtitleonlytoken"})
+        card = _card_by_item_id(resp.context["browse_cards"], item.pk)
+        self.assertFalse(card.show_search_snippet)
+        self.assertEqual(card.search_snippet_segments, ())
+        self.assertEqual(card.search_match_source_label, "")
+        self.assertIn("This body never contains", card.preview_text)
+        self.assertNotContains(resp, MATCH_SOURCE_MANUAL_BODY)
+        self.assertNotContains(resp, MATCH_SOURCE_OCR_BODY)
+
+    def test_metadata_and_discovery_match_source_labels(self):
+        author_item = create_manual_text_archive_item(
+            title="Author carrier",
+            body="unrelated body for author match",
+            author_name="uniqauthorsnippettoken",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        note_item = create_manual_text_archive_item(
+            title="Note carrier",
+            body="unrelated body for note match",
+            public_note="uniqpublicnotesnippettoken",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        discovery_item = create_manual_text_archive_item(
+            title="Discovery carrier",
+            body="unrelated body for discovery match",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        update_archive_item_discovery_metadata(
+            discovery_item,
+            category_names=["uniqcategorysnippettoken"],
+            event_names=[],
+            tag_names=[],
+        )
+        multi_item = create_manual_text_archive_item(
+            title="Multi meta carrier",
+            body="unrelated body for multi metadata",
+            author_name="uniqmultiauthortoken",
+            public_note="uniqmultinotetoken",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        for item_id in (
+            author_item.pk,
+            note_item.pk,
+            discovery_item.pk,
+            multi_item.pk,
+        ):
+            _rebuild(item_id)
+
+        author_resp = self.client.get(
+            reverse("archive-list"), {"q": "uniqauthorsnippettoken"}
+        )
+        author_card = _card_by_item_id(
+            author_resp.context["browse_cards"], author_item.pk
+        )
+        self.assertEqual(author_card.search_match_source_label, MATCH_SOURCE_AUTHOR)
+        self.assertFalse(author_card.show_search_snippet)
+
+        note_resp = self.client.get(
+            reverse("archive-list"), {"q": "uniqpublicnotesnippettoken"}
+        )
+        note_card = _card_by_item_id(note_resp.context["browse_cards"], note_item.pk)
+        self.assertEqual(note_card.search_match_source_label, MATCH_SOURCE_PUBLIC_NOTE)
+
+        discovery_resp = self.client.get(
+            reverse("archive-list"), {"q": "uniqcategorysnippettoken"}
+        )
+        discovery_card = _card_by_item_id(
+            discovery_resp.context["browse_cards"], discovery_item.pk
+        )
+        self.assertEqual(
+            discovery_card.search_match_source_label, MATCH_SOURCE_CATEGORIES
+        )
+
+        multi_resp = self.client.get(
+            reverse("archive-list"),
+            {"q": "uniqmultiauthortoken uniqmultinotetoken"},
+        )
+        multi_card = _card_by_item_id(multi_resp.context["browse_cards"], multi_item.pk)
+        self.assertEqual(
+            multi_card.search_match_source_label, MATCH_SOURCE_ITEM_DETAILS
+        )
+
+    def test_multi_term_nearby_and_far_apart_single_snippet(self):
+        nearby = create_manual_text_archive_item(
+            title="Nearby terms",
+            body="הקדמה קצרה יוסף מרזוק סיום קצר",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        far = create_manual_text_archive_item(
+            title="Far terms",
+            body=("alpha " + ("padword " * 80) + "beta " + ("tailword " * 20)),
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        _rebuild(nearby.pk)
+        _rebuild(far.pk)
+
+        nearby_resp = self.client.get(reverse("archive-list"), {"q": "יוסף מרזוק"})
+        nearby_card = _card_by_item_id(nearby_resp.context["browse_cards"], nearby.pk)
+        nearby_plain = _snippet_plain_text(nearby_card)
+        self.assertIn("יוסף", nearby_plain)
+        self.assertIn("מרזוק", nearby_plain)
+        matched = [
+            seg.text for seg in nearby_card.search_snippet_segments if seg.is_match
+        ]
+        self.assertEqual(matched, ["יוסף", "מרזוק"])
+
+        far_resp = self.client.get(reverse("archive-list"), {"q": "alpha beta"})
+        far_card = _card_by_item_id(far_resp.context["browse_cards"], far.pk)
+        far_plain = _snippet_plain_text(far_card)
+        # One deterministic excerpt: earliest suitable region (alpha), not two snippets.
+        self.assertIn("alpha", far_plain)
+        self.assertNotIn("beta", far_plain)
+        self.assertEqual(far_plain.count("…"), 1)
+        self.assertTrue(far_card.show_search_snippet)
+
+    def test_punctuation_underscore_terms_align_with_pr3_and_highlight(self):
+        item = create_manual_text_archive_item(
+            title="Punctuation snippet",
+            body="hello alpha beta world",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        _rebuild(item.pk)
+
+        resp = self.client.get(reverse("archive-list"), {"q": "alpha_beta"})
+        self.assertEqual(resp.context["total_count"], 1)
+        card = _card_by_item_id(resp.context["browse_cards"], item.pk)
+        matched = [seg.text for seg in card.search_snippet_segments if seg.is_match]
+        self.assertEqual(matched, ["alpha", "beta"])
+
+    def test_snippet_ellipses_and_deterministic_window_selection(self):
+        filler = "מילה "
+        body = f"{filler * 50}מוקדם {filler * 50}מאוחר"
+        item = create_manual_text_archive_item(
+            title="Window selection",
+            body=body,
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        index = _rebuild(item.pk)
+        terms = ("מוקדם", "מאוחר")
+        window = select_snippet_window(index.body_text, terms)
+        self.assertIsNotNone(window)
+        assert window is not None
+        start, end = window
+        excerpt = " ".join(index.body_text.split())[start:end]
+        self.assertIn("מוקדם", excerpt)
+        self.assertNotIn("מאוחר", excerpt)
+
+        segments = build_highlighted_snippet_segments(index.body_text, ("מוקדם",))
+        self.assertEqual(segments[0].text, "…")
+        self.assertEqual(segments[-1].text, "…")
+        self.assertTrue(any(seg.is_match and seg.text == "מוקדם" for seg in segments))
+
+    def test_malicious_html_is_escaped_only_mark_is_markup(self):
+        malicious = (
+            'prefix <script>alert("xss")</script> יוסף '
+            "<img src=x onerror=alert(1)> & more"
+        )
+        item = create_manual_text_archive_item(
+            title="XSS snippet item",
+            body=malicious,
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        _rebuild(item.pk)
+
+        resp = self.client.get(reverse("archive-list"), {"q": "יוסף"})
+        content = resp.content.decode("utf-8")
+        self.assertIn("<mark", content)
+        self.assertIn("יוסף", content)
+        self.assertIn(escape("<script>"), content)
+        self.assertNotIn("<script>alert", content)
+        self.assertNotIn("<img src=x", content)
+        self.assertIn(escape("<img src=x onerror=alert(1)>"), content)
+
+        card = _card_by_item_id(resp.context["browse_cards"], item.pk)
+        plain = _snippet_plain_text(card)
+        self.assertIn("<script>", plain)
+        self.assertIn("<img", plain)
+
+    def test_snippet_mark_keeps_adjacent_punctuation_without_template_spaces(self):
+        item = create_manual_text_archive_item(
+            title="Punctuation adjacency snippet",
+            body="prefix(term),suffix",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        _rebuild(item.pk)
+
+        resp = self.client.get(reverse("archive-list"), {"q": "term"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(
+            resp,
+            'prefix(<mark class="archive-browse-card__mark">term</mark>),suffix',
+            html=False,
+        )
+
+    def test_unauthorized_private_never_appears_in_snippet_or_source(self):
+        private_token = "privateuniquesnippetleakoken"
+        private_sentinel = "privateonlysnippetbodyuniquezzz"
+        public = create_manual_text_archive_item(
+            title="Public sibling",
+            body="public body without private token",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        private = create_manual_text_archive_item(
+            title="Private snippet title",
+            body=f"secret {private_token} {private_sentinel} content",
+            visibility=ArchiveItem.Visibility.PRIVATE,
+        )
+        _rebuild(public.pk)
+        _rebuild(private.pk)
+
+        resp = self.client.get(reverse("archive-list"), {"q": private_token})
+        self.assertEqual(resp.context["total_count"], 0)
+        self.assertEqual(list(resp.context["items"]), [])
+        self.assertEqual(list(resp.context["browse_cards"]), [])
+        page_ids = [item.pk for item in resp.context["items"]]
+        self.assertNotIn(private.pk, page_ids)
+        self.assertNotContains(
+            resp,
+            reverse("archive-detail", kwargs={"item_id": private.pk}),
+        )
+        self.assertNotContains(resp, MATCH_SOURCE_MANUAL_BODY)
+        # Private-only body text (not the submitted q) must never render.
+        self.assertNotContains(resp, private_sentinel)
+
+    def test_snippets_only_for_current_page_slice(self):
+        token = "pageonlysnippettoken"
+        per_page = 24
+        # Enough matches for two pages at the supported minimum page size.
+        item_count = per_page + 1
+        shared_body = f"{token} contextual body " + ("pad " * 20)
+        items = [
+            create_manual_text_archive_item(
+                title=f"Page slice {index}",
+                body=shared_body,
+                visibility=ArchiveItem.Visibility.PUBLIC,
+            )
+            for index in range(item_count)
+        ]
+        now = timezone.now()
+        for offset, item in enumerate(items):
+            ArchiveItem.objects.filter(pk=item.pk).update(
+                created_at=now - timedelta(days=offset)
+            )
+            _rebuild(item.pk)
+
+        # Identical body rank → newest first: items[0]..items[23] on page 1;
+        # items[24] is a known page-2 id that must not be loaded for snippets.
+        expected_page1_ids = [item.pk for item in items[:per_page]]
+        known_page2_id = items[per_page].pk
+
+        with patch(
+            "documents.services.archive_search_snippets."
+            "load_archive_search_indexes_for_item_ids",
+            wraps=load_archive_search_indexes_for_item_ids,
+        ) as mock_load:
+            resp = self.client.get(
+                reverse("archive-list"),
+                {"q": token, "per_page": str(per_page), "page": "1"},
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertGreater(resp.context["total_count"], per_page)
+        self.assertEqual(resp.context["total_count"], item_count)
+        page_ids = [item.pk for item in resp.context["items"]]
+        self.assertEqual(page_ids, expected_page1_ids)
+        self.assertNotIn(known_page2_id, page_ids)
+
+        mock_load.assert_called_once()
+        loaded_ids = list(mock_load.call_args.args[0])
+        self.assertEqual(loaded_ids, expected_page1_ids)
+        self.assertNotIn(known_page2_id, loaded_ids)
+
+        for card in resp.context["browse_cards"]:
+            self.assertIn(card.item.pk, set(expected_page1_ids))
+            self.assertTrue(card.show_search_snippet)
+
+    def test_snippet_generation_does_not_create_n_plus_one_queries(self):
+        token = "nplusonesnippettoken"
+
+        def build_cards(count: int):
+            ArchiveItem.objects.all().delete()
+            created = [
+                create_manual_text_archive_item(
+                    title=f"N+1 item {index}",
+                    body=f"{token} contextual body {index} " + ("word " * 25),
+                    visibility=ArchiveItem.Visibility.PUBLIC,
+                )
+                for index in range(count)
+            ]
+            for item in created:
+                _rebuild(item.pk)
+            cards = build_archive_browse_cards(
+                [_load_item(item.pk) for item in created]
+            )
+            with CaptureQueriesContext(connection) as context:
+                apply_archive_search_match_presentation_to_cards(
+                    cards,
+                    search_query=token,
+                )
+            return len(context)
+
+        self.assertEqual(build_cards(2), build_cards(5))
+        self.assertEqual(build_cards(2), 1)
+
+    def test_type_filter_and_pagination_intact_with_snippets(self):
+        token = "filterpagesnippettoken"
+        manual = create_manual_text_archive_item(
+            title="Filter manual",
+            body=f"{token} manual body",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        doc = create_viewable_ocr_document(
+            title="Filter OCR",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        _create_text_result(doc, text=f"{token} ocr body")
+        photo = ArchiveItem.objects.create(
+            item_type=ArchiveItem.ItemType.PHOTO,
+            title=f"{token} photo",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        PhotoContent.objects.create(
+            archive_item=photo,
+            original_file_key="photos/snippet/original.jpg",
+            original_filename="photo.jpg",
+            original_mime_type="image/jpeg",
+            original_size_bytes=100,
+            upload_status=PhotoContent.UploadStatus.UPLOADED,
+        )
+        for item_id in (manual.pk, doc.archive_item_id, photo.pk):
+            _rebuild(item_id)
+
+        resp = self.client.get(
+            reverse("archive-list"),
+            {
+                "q": token,
+                "item_type": "documents_and_texts",
+                "per_page": "24",
+                "page": "1",
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["total_count"], 2)
+        page_ids = [item.pk for item in resp.context["items"]]
+        self.assertCountEqual(page_ids, [manual.pk, doc.archive_item_id])
+        self.assertNotIn(photo.pk, page_ids)
+        labels = {
+            card.item.pk: card.search_match_source_label
+            for card in resp.context["browse_cards"]
+        }
+        self.assertEqual(labels[manual.pk], MATCH_SOURCE_MANUAL_BODY)
+        self.assertEqual(labels[doc.archive_item_id], MATCH_SOURCE_OCR_BODY)
+
+    def test_pr3_ranking_order_unchanged_when_snippets_attached(self):
+        token = "rankunchangedtoken"
+        body_hit = create_manual_text_archive_item(
+            title="Body rank",
+            body=token,
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        meta_hit = create_manual_text_archive_item(
+            title="Meta rank",
+            body="no token in body",
+            author_name=token,
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        title_hit = create_manual_text_archive_item(
+            title=token,
+            body="no token in body either",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        now = timezone.now()
+        ArchiveItem.objects.filter(pk=body_hit.pk).update(
+            created_at=now - timedelta(days=3)
+        )
+        ArchiveItem.objects.filter(pk=meta_hit.pk).update(
+            created_at=now - timedelta(days=2)
+        )
+        ArchiveItem.objects.filter(pk=title_hit.pk).update(
+            created_at=now - timedelta(days=1)
+        )
+        for item_id in (body_hit.pk, meta_hit.pk, title_hit.pk):
+            _rebuild(item_id)
+
+        expected = _ids(
+            filter_archive_items_by_search_query(
+                archive_browse_queryset_for_user(None),
+                token,
+            )
+        )
+        self.assertEqual(expected, [title_hit.pk, meta_hit.pk, body_hit.pk])
+
+        resp = self.client.get(reverse("archive-list"), {"q": token})
+        page_ids = [item.pk for item in resp.context["items"]]
+        self.assertEqual(page_ids, expected)
+
+    def test_help_text_and_placeholder_no_longer_claim_date_or_place(self):
+        resp = self.client.get(reverse("archive-list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(
+            resp,
+            "אפשר לחפש לפי כותרת, מחבר/ת, קטגוריות, אירועים, תגיות או מילים מתוך הטקסט.",
+        )
+        self.assertContains(
+            resp,
+            'placeholder="כותרת, מחבר/ת, קטגוריות, אירועים, תגיות או מילים מהטקסט..."',
+        )
+        self.assertNotContains(resp, "שם, מקום, נושא, תאריך")
+        self.assertNotContains(resp, "תאריך או מילת מפתח")

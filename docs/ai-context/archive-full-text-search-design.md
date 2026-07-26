@@ -1,16 +1,16 @@
 # Archive full-text search — design
 
-**Status:** Architecture contract. **PR1**, **PR2a**, **PR2b-1**, **PR2b-2**, and **PR3** are implemented in application code; **PR4** (snippets/help text) and later hover mapping remain deferred.
+**Status:** Architecture contract. **PR1**, **PR2a**, **PR2b-1**, **PR2b-2**, **PR3**, and **PR4** are implemented in application code; later hover/page-line mapping remains deferred.
 
-**Companion decision-log entries:** `docs/ai-context/decision-log.md` — “Archive full-text search — architecture (docs-only)”, “PR1 search-index foundation (implemented)”, “PR2a discovery/manual/taxonomy sync (implemented)”, “PR2b-1 human-controlled displayed-text sync (implemented)”, “PR2b-2 automated displayed-text sync (implemented)”, “PR3 backend search cutover (implemented)”.
+**Companion decision-log entries:** `docs/ai-context/decision-log.md` — “Archive full-text search — architecture (docs-only)”, “PR1 search-index foundation (implemented)”, “PR2a discovery/manual/taxonomy sync (implemented)”, “PR2b-1 human-controlled displayed-text sync (implemented)”, “PR2b-2 automated displayed-text sync (implemented)”, “PR3 backend search cutover (implemented)”, “PR4 snippets/match-source/help text (implemented)”.
 
-This document is the detailed contract for the implementation PR sequence. It records verified current behavior, target decisions, risks, and per-PR scope. Do not treat unimplemented PR4/later behavior as live.
+This document is the detailed contract for the implementation PR sequence. It records verified current behavior, target decisions, risks, and per-PR scope. Do not treat unimplemented later hover-mapping behavior as live.
 
 ---
 
 ## 1. Current behavior (verified)
 
-### Public `/archive/?q=` pipeline (PR3 live)
+### Public `/archive/?q=` pipeline (PR3 + PR4 live)
 
 Entry: `archive_list_page` (`documents/views.py`) via `documents/archive_urls.py` (`archive-list`).
 
@@ -22,8 +22,9 @@ Order of operations:
 4. `filter_archive_items_by_public_list_type`
 5. `filter_archive_items_by_search_query` — `resolve_archive_list_search_terms` then queries **`ArchiveItemSearchIndex`** via per-term FTS/substring **UNION** candidates (GIN-usable FTS arm) AND’d across terms; blank `q` leaves chronological browse; punctuation-only/overlong → empty; search reorders by relevance then `-created_at` then `pk`
 6. `count()` → page / `per_page` → slice → browse cards
+7. With effective `q`, PR4 attaches at most one safe contextual snippet + match-source label per card for that authorized page slice only (`apply_archive_search_match_presentation_to_cards`)
 
-Helpers live in `documents/services/archive_item_presentation.py`. Index builder/persistence live in `documents/services/archive_search_index.py`. Access helpers live in `documents/services/archive_item_access.py`.
+Helpers live in `documents/services/archive_item_presentation.py` and `documents/services/archive_search_snippets.py`. Index builder/persistence live in `documents/services/archive_search_index.py`. Access helpers live in `documents/services/archive_item_access.py`.
 
 **Note:** Discovery PR5 decision-log text refers to `archive_item_queryset_for_user`. The live list path uses **`archive_browse_queryset_for_user`** (visibility **and** renderability). Auth/renderability remains the choke point **before** matching, ranking, counts, and pagination.
 
@@ -44,7 +45,7 @@ Via denormalized `ArchiveItemSearchIndex` (content from the PR1 builder contract
 - `DocumentMetadata` and legacy OCR discovery fields on `Document`
 - Non-displayed `DocumentTextResult` rows (only display-helper text is indexed)
 
-List help copy still suggests date/place search; that remains **misleading** and is corrected only in PR4.
+List help copy and placeholder (PR4) describe live searchable fields only (title, author, categories, events, tags, text words) — not date/place.
 
 ### Database / FTS posture (PR3)
 
@@ -147,14 +148,14 @@ Example: searching `מרזוק` may **not** match indexed `ומרזוק` (leadin
 
 ## 5. Authorization, leakage, and snippets
 
-### Query pipeline (PR3 live; PR4 snippets deferred)
+### Query pipeline (PR3 + PR4 live)
 
 1. `archive_browse_queryset_for_user(user)`
 2. Type filter
 3. Search against the denormalized index **joined/filtered to that queryset only**
 4. Rank + stable tie-break (`-created_at`, `pk`)
 5. `count` / paginate
-6. (PR4) Build snippets **only** for the authorized page slice
+6. Build snippets / match-source labels **only** for the authorized page slice (one bounded index load; no N+1; no unauthorized rows)
 
 ### Leakage tests (required by cutover)
 
@@ -164,9 +165,9 @@ Example: searching `מרזוק` may **not** match indexed `ומרזוק` (leadin
 - Snippets must not include text from non-visible items.
 - `DocumentMetadata` terms must not match on the public archive path.
 
-### HTML escaping (PR4)
+### HTML escaping (PR4 live)
 
-OCR/manual text may contain `<`, `&`, quotes, or accidental markup. Highlighting must **escape plain text first**, then wrap match spans in trusted markup (e.g. `<mark>`). Never interpolate raw body text into HTML.
+OCR/manual text may contain `<`, `&`, quotes, or accidental markup. Snippet rendering uses plain `ArchiveSearchSnippetSegment` values in an autoescaped template: segment text is escaped by Django; only template-authored `<mark>` wrappers are markup. Do not use `mark_safe`, `|safe`, or raw body interpolation.
 
 ---
 
@@ -203,7 +204,7 @@ After **PR2a, PR2b-1, and PR2b-2** sync are **deployed and active**, operators *
 5. While **all** sync hooks are active: run the **full idempotent backfill again**.
 6. Run/perform **drift verification** (`--check-only`).
 7. Only then cut over public search behavior (PR3).
-8. Then ship snippet UI (PR4).
+8. Ship snippet UI (PR4) — **implemented**.
 
 Required order (short form): **PR1 migrate/backfill → PR2a sync → PR2b-1 sync → PR2b-2 sync → full backfill again while all sync is active → drift verification → PR3 cutover.**
 
@@ -294,17 +295,27 @@ Required order (short form): **PR1 migrate/backfill → PR2a sync → PR2b-1 syn
 8. **Hebrew/`simple`:** body clitic/prefix gaps remain accepted limitations; short-field substring covers partials only on title/metadata.
 9. **Remaining tradeoff:** short-field `icontains` branches are still unindexed scans of the denormalized short text columns; they run as separate UNION arms rather than poisoning the FTS index path.
 
-### PR4 — Snippets, match sources, help text
+### PR4 — Snippets, match sources, help text — **implemented**
 
 | | |
 |--|--|
-| **Scope** | Safe Hebrew-oriented snippets for the authorized page slice; escape-then-highlight; optional match-source presentation (title / tags / content); correct misleading date/place search help text on the archive list |
-| **Likely files** | `documents/archive/list.html`, card partials, `ArchiveBrowseCard` / presentation helpers, CSS, tests |
-| **Migrations** | None expected |
-| **Tests** | Snippet appears for body hits; HTML escaped; no private snippet leakage; pagination still preserves `q`; help text no longer claims unimplemented date search |
+| **Scope** | Safe contextual snippets for the authorized page slice; autoescaped segment + `<mark>` highlighting; match-source Hebrew labels; correct misleading date/place search help text / placeholder |
+| **Files** | `archive_search_snippets.py`; `ArchiveBrowseCard` fields; `archive_list_page` wiring; `list.html` / `item_list_cards.html`; CSS; `test_archive_full_text_search.py`; design + decision-log |
+| **Migrations** | None |
+| **Tests** | OCR/Manual body labels + contextual snippet; no-q preview unchanged; title-only no fabricated body excerpt; metadata/discovery labels; multi-term nearby/far; ellipses/deterministic window; XSS escape; private leakage; page-slice only; no N+1; type filter/pagination; PR3 order unchanged; help text |
 | **Rollout** | After PR3 stable. |
-| **Rollback** | Hide snippet UI; keep FTS backend. |
-| **Non-goals** | Hover overlay; line/page geometry; Transkribus binding requirements |
+| **Rollback** | Hide snippet UI fields; keep FTS backend. |
+| **Non-goals** | Hover overlay; line/page geometry; Transkribus binding requirements; search backend/ranking changes |
+
+#### PR4 presentation semantics
+
+1. **No effective `q`:** cards keep ordinary beginning-of-text `preview_text` with no match-source row.
+2. **One snippet max** per card when body whole-tokens match query terms. Target ~190 chars (band 160–220); CSS line-clamp still 3. Window maximizes distinct query terms within max length; tie-break earliest match. Whole-word edges where practical; leading/trailing `…` only when omitted. No page/line locators.
+3. **Body vs other sources:** useful body match → replace preview with snippet; labels **`נמצא בתעתוק`** (OCR) / **`נמצא בטקסט`** (ManualText). Prefer body snippet even when title/metadata also match (ranking unchanged).
+4. **Title-only:** no unrelated body excerpt; title remains the visible explanation (no match-source chip required).
+5. **Metadata/public_note/discovery-only:** keep ordinary preview; show a specific Hebrew label when exactly one metadata source matches, else **`נמצא בפרטי הפריט`**. Never claim a field unless it contains a normalized query term (`icontains`-aligned for short fields; whole-token for body).
+6. **Highlighting:** Unicode-aware case-insensitive whole-token marks inside the selected snippet only; does not change match membership. No Hebrew morphology / fuzzy / body substring.
+7. **Performance/auth:** snippets after auth + pagination; one `ArchiveItemSearchIndex` load for the page ids; no per-result queries; never load all matching bodies before pagination.
 
 ### Later — Search ↔ hover mapping (optional)
 
@@ -344,4 +355,4 @@ When hover/highlight is implemented, optionally attach search-result → page/li
 | PR1 migrate/backfill → PR2a → PR2b-1 → PR2b-2 → full backfill again → drift check → PR3 → PR4 | §6–§7 |
 | Cutover only after post-PR2a+PR2b-1+PR2b-2 backfill + drift verification | §6 |
 
-PR3 cutover matches the verified audit and the final product decisions recorded in the PR3 decision-log entry.
+PR3 cutover and PR4 snippet/help-text presentation match the verified audit and the product decisions recorded in the PR3/PR4 decision-log entries. Hover/page-line mapping remains deferred.

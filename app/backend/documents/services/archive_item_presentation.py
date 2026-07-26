@@ -682,6 +682,14 @@ class ArchiveBrowseLink:
 
 
 @dataclass(frozen=True)
+class ArchiveSearchSnippetSegment:
+    """Plain-text snippet segment for autoescaped template rendering (PR4)."""
+
+    text: str
+    is_match: bool = False
+
+
+@dataclass(frozen=True)
 class ArchiveBrowseCard:
     item: ArchiveItem
     title: str
@@ -694,6 +702,10 @@ class ArchiveBrowseCard:
     category_links: tuple[ArchiveBrowseLink, ...]
     related_links: tuple[ArchiveBrowseLink, ...]
     thumbnail_url: str | None = None
+    # PR4 search presentation (empty / false when not searching or N/A).
+    search_match_source_label: str = ""
+    search_snippet_segments: tuple[ArchiveSearchSnippetSegment, ...] = ()
+    show_search_snippet: bool = False
 
 
 def _normalize_preview_source(text: str | None) -> str:
