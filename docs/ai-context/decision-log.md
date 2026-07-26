@@ -1807,7 +1807,7 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 **Unchanged in PR1:** `run_corrected_current_transkribus_sync(...)` and **`sync_transkribus_corrected_current`** management command (no `SyncRequest` parameter yet). Activation remains manual and separate. Web enqueue remains **disabled**; nothing is operationally enabled by PR1.
 
-**Planned later PRs (not PR1):** ~~worker claim/fencing + service correlation + visibility extension~~ → **PR2 implemented** (see following entry); enqueue service; staff UI POST + feature gate; ops reconcile/requeue command.
+**Planned later PRs (not PR1):** ~~worker claim/fencing + service correlation + visibility extension~~ → **PR2 implemented**; ~~enqueue service~~ → **PR3 implemented** (see enqueue entry below); staff UI POST + feature gate; ops reconcile/requeue command.
 
 **Planned v1 timing constants (docs only until worker PR):** execution lease **45 minutes**, one-shot SQS visibility extension **45 minutes**, linked **`STARTED`** recovery threshold **60 minutes** — conservative for up to ~30-page documents; tune after production measurements.
 
@@ -1834,7 +1834,27 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 **Timing constants (implemented):** execution lease **45m**; SQS visibility after claim **45m**; competing/in-progress defer **2m**; linked **`STARTED`** recovery threshold **60m**.
 
-**Unchanged / still out of scope for PR2:** enqueue sender; IAM/CDK; web view/route/button; feature gate; automatic activation; search; transcript selection/storage; DTR/bindings/processing-state; ops reconcile command; management command behavior when correlation args omitted.
+**Unchanged / still out of scope for PR2:** ~~enqueue sender~~ → **PR3**; IAM/CDK; web view/route/button; feature gate; automatic activation; search; transcript selection/storage; DTR/bindings/processing-state; ops reconcile command; management command behavior when correlation args omitted.
+
+## Transkribus corrected/current sync enqueue (PR3 — service only)
+
+**Decision / implemented:** `enqueue_transkribus_corrected_current_sync(*, document_id, initiated_by)` in `documents/services/transkribus_corrected_current_sync_enqueue.py`, plus `send_sync_transkribus_corrected_current_message(request_id)` in `documents/services/sqs.py`. Staff UI, feature gate, IAM/CDK, recovery/requeue command, and worker changes are **out of scope**.
+
+**Document-lock send-right:** Under a short `Document` `select_for_update` transaction, only (1) the caller that **creates** a new **`QUEUED`** Request, or (2) the caller that atomically transitions **`ENQUEUE_FAILED → QUEUED`**, receives local send right. Existing **`QUEUED`**, **`RUNNING`**, and **`RECOVERY_REQUIRED`** never resend. `SendMessage` runs **after commit**, never inside a DB atomic block, and **not** via `transaction.on_commit` as an outbox.
+
+**Post-send CAS finalization** (never regresses worker-owned / terminal state; never writes lease or `attempt`):
+
+- Success: `UPDATE last_enqueued_at` only where `status=QUEUED` ∧ `lease_token IS NULL` ∧ `attempt_id IS NULL`.
+- Failure / unknown: `UPDATE status=ENQUEUE_FAILED` (+ safe `failure_code` / `failure_message`) under the same predicate.
+- If PR2 already claimed or terminalized the Request, finalization updates **0** rows; the service reloads and returns the **observed** status (`ALREADY_RUNNING`, `ALREADY_TERMINAL`, etc.) with `message_sent` reflecting the send attempt (`True` on accepted send, `False` / `None` on definite / ambiguous failure). Observed terminal must never be mapped to `ALREADY_QUEUED`.
+
+**Failure classification:** Catch only expected botocore / SQS configuration send failures (`ClientError`, `BotoCoreError`, `SqsConfigurationError` from `documents/services/sqs.py`; `SqsConfigurationError` subclasses `RuntimeError` for `_required_env` backward compatibility, but enqueue catches the dedicated subclass only). Ordinary `RuntimeError` and other programming exceptions must propagate — do not convert them into `ENQUEUE_FAILED`. `ENQUEUE_SEND_FAILED` only for definite reject codes / missing config. Timeouts / connection / unclear errors → `ENQUEUE_OUTCOME_UNKNOWN` (ambiguous). Delivered-but-marked-`ENQUEUE_FAILED` remains claimable by PR2.
+
+**Known limitation:** crash after DB commit but before `SendMessage` can leave a stranded **`QUEUED`** Request; peers will not resend. Repair is deferred to a later recovery/requeue command.
+
+**Validation boundary:** service requires Document existence + persisted `initiated_by`. Authz / CSRF / admin gate / feature flag remain at the future staff POST.
+
+**Still deferred:** staff UI POST + feature gate; IAM `grant_send_messages` (repo CDK still grants consume only); ops recovery/requeue for stranded `QUEUED`; automatic activation; search / DTR / bindings / processing-state changes.
 
 ## Archive full-text search — architecture (docs-only)
 
