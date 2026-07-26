@@ -243,6 +243,11 @@ def apply_archive_discovery_metadata_backfill(
                     document_updated = True
 
             if document_updated:
+                from documents.services.archive_search_index import (
+                    sync_archive_item_search_index,
+                )
+
+                sync_archive_item_search_index(archive_item.pk)
                 result.documents_updated += 1
 
     return result

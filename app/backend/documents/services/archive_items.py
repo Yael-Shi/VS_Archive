@@ -83,10 +83,14 @@ def create_ocr_document(**document_kwargs: Any):
         source_title=source_metadata_kwargs["source_title"],
         public_note=source_metadata_kwargs["public_note"],
     )
-    return Document.objects.create(
+    document = Document.objects.create(
         archive_item=archive_item,
         **runtime_kwargs,
     )
+    from documents.services.archive_search_index import sync_archive_item_search_index
+
+    sync_archive_item_search_index(archive_item.pk)
+    return document
 
 
 @transaction.atomic
@@ -123,6 +127,9 @@ def create_manual_text_archive_item(
         public_note=public_note,
     )
     ManualTextContent.objects.create(archive_item=archive_item, body=body)
+    from documents.services.archive_search_index import sync_archive_item_search_index
+
+    sync_archive_item_search_index(archive_item.pk)
     return archive_item
 
 
@@ -165,6 +172,9 @@ def update_manual_text_archive_item(
     content = archive_item.manual_text_content
     content.body = body
     content.save(update_fields=["body", "updated_at"])
+    from documents.services.archive_search_index import sync_archive_item_search_index
+
+    sync_archive_item_search_index(archive_item.pk)
     return archive_item
 
 
@@ -227,6 +237,9 @@ def update_photo_archive_item_metadata(
             "updated_at",
         ]
     )
+    from documents.services.archive_search_index import sync_archive_item_search_index
+
+    sync_archive_item_search_index(archive_item.pk)
     return archive_item
 
 
@@ -274,6 +287,9 @@ def update_ocr_document_metadata(
             "updated_at",
         ]
     )
+    from documents.services.archive_search_index import sync_archive_item_search_index
+
+    sync_archive_item_search_index(archive_item.pk)
     return document
 
 
@@ -440,4 +456,7 @@ def update_archive_item_discovery_metadata(
     archive_item.categories.set(category_objs)
     archive_item.events.set(event_objs)
     archive_item.tags.set(tag_objs)
+    from documents.services.archive_search_index import sync_archive_item_search_index
+
+    sync_archive_item_search_index(archive_item.pk)
     return archive_item

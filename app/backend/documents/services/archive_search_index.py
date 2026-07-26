@@ -1,8 +1,10 @@
-"""ArchiveItem search-index builder and persistence (PR1 foundation).
+"""ArchiveItem search-index builder, persistence, and explicit write-path sync.
 
 Pure builder returns a value object only. Persistence materializes
 ``ArchiveItemSearchIndex`` including the weighted PostgreSQL ``search_vector``.
-No write-path hooks live here yet (PR2).
+
+PR2a adds id-based synchronization for discovery/manual/taxonomy writers.
+Displayed OCR mutation hooks are deferred to PR2b.
 """
 
 from __future__ import annotations
@@ -168,6 +170,59 @@ def persist_archive_item_search_content(
 def rebuild_archive_item_search_index(
     archive_item: ArchiveItem,
 ) -> ArchiveItemSearchIndex:
-    """Build from ``archive_item`` then persist (backfill / future sync helper)."""
+    """Build from ``archive_item`` then persist (backfill / sync helper)."""
     content = build_archive_item_search_content(archive_item)
     return persist_archive_item_search_content(content)
+
+
+def sync_archive_item_search_index(
+    archive_item_id: int,
+) -> ArchiveItemSearchIndex | None:
+    """
+    Explicit write-path sync: reload by id, rebuild, persist.
+
+    Accepts only ``archive_item_id`` so callers never pass a stale prefetched
+    ``ArchiveItem``. Reloads through ``archive_items_for_search_index_build``.
+
+    Missing-item behavior: if the ArchiveItem row is gone (delete race), return
+    ``None`` without writing. All other errors propagate so a surrounding source
+    transaction rolls back when sync fails inside it.
+
+    Locks only the ``ArchiveItem`` row (no ``select_for_update`` on nullable
+    ``select_related`` joins). Idempotent when source-derived content is unchanged.
+    """
+    with transaction.atomic():
+        locked = (
+            ArchiveItem.objects.select_for_update().filter(pk=archive_item_id).first()
+        )
+        if locked is None:
+            return None
+
+        item = archive_items_for_search_index_build(
+            archive_item_ids=[archive_item_id]
+        ).get()
+        return rebuild_archive_item_search_index(item)
+
+
+def sync_archive_item_search_indexes(
+    archive_item_ids: Iterable[int],
+) -> list[ArchiveItemSearchIndex]:
+    """
+    Fan-out sync for taxonomy renames and similar multi-item updates.
+
+    Materializes and deduplicates ids, then syncs in deterministic ascending
+    primary-key order inside one ``transaction.atomic()`` (all-or-nothing even
+    without a caller outer transaction). Each id still uses
+    ``sync_archive_item_search_index`` (nested atomic/savepoint). Missing items
+    are skipped (delete races). Other errors propagate and roll back every
+    index update from this fan-out.
+    """
+    ordered_ids = sorted(set(archive_item_ids))
+
+    synced: list[ArchiveItemSearchIndex] = []
+    with transaction.atomic():
+        for archive_item_id in ordered_ids:
+            index = sync_archive_item_search_index(archive_item_id)
+            if index is not None:
+                synced.append(index)
+    return synced

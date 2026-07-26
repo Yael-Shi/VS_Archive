@@ -1,10 +1,10 @@
 # Archive full-text search — design
 
-**Status:** Architecture decision (documentation only). No application code, migrations, tests, settings, or dependencies ship with this document.
+**Status:** Architecture contract. **PR1** and **PR2a** are implemented in application code; **PR2b+** remain future work unless marked implemented in the decision log.
 
-**Companion decision-log entry:** `docs/ai-context/decision-log.md` — “Archive full-text search — architecture (docs-only)”.
+**Companion decision-log entries:** `docs/ai-context/decision-log.md` — “Archive full-text search — architecture (docs-only)”, “PR1 search-index foundation (implemented)”, “PR2a discovery/manual/taxonomy sync (implemented)”.
 
-This document is the detailed contract for the implementation PR sequence. It records verified current behavior, target decisions, risks, and per-PR scope. It does not describe unimplemented features as live.
+This document is the detailed contract for the implementation PR sequence. It records verified current behavior, target decisions, risks, and per-PR scope. Do not treat unimplemented PR2b/PR3/PR4 behavior as live.
 
 ---
 
@@ -187,24 +187,30 @@ The index is a derived cache. It can drift if:
 
 **Requirement:** idempotent rebuild/backfill command that can recompute any item from source of truth (ArchiveItem + ManualTextContent / display helpers) and be re-run safely. A PR1-era backfill is **not** assumed to remain fully current across the gap until PR2 sync is deployed.
 
-### Write-path sync (PR2, not PR1)
+### Write-path sync (PR2a + PR2b, not PR1)
 
-PR1 ships pure builder + persistence helper + backfill only (no broad hooks). Between PR1 backfill and PR2 sync going live, source writes can drift the index. PR2 adds explicit synchronization from all relevant writers (at minimum: ManualText create/update; ArchiveItem discovery-field edits; OCR text persistence paths that change displayed text, including staff edits / suggestion approval / corrected-current activation when they change displayed rows). Each hook must be covered by drift and transaction tests.
+PR1 ships pure builder + persistence helper + backfill only (no broad hooks). Between PR1 backfill and full PR2 sync going live, source writes can drift the index.
 
-After PR2 sync is **deployed and active**, operators **must** run the **full idempotent backfill again** (while sync is live), then perform **drift verification**, before any PR3 cutover. Do not treat the original PR1 backfill as sufficient for cutover.
+PR2 is intentionally split:
+
+- **PR2a** — explicit sync for ArchiveItem discovery scalars/M2M, ManualText body, photo/OCR shared metadata, taxonomy name renames, plus read-only **`--check-only`** drift verification on `backfill_archive_search_index`.
+- **PR2b** — explicit sync for displayed OCR/HTR mutation paths (`DocumentTextResult` writers: worker persistence, translation, staff edits, transcription suggestion approval, corrected-current activation, failure demotion).
+
+After **both PR2a and PR2b** sync are **deployed and active**, operators **must** run the **full idempotent backfill again** (while sync is live), then perform **drift verification**, before any PR3 cutover. Do not treat the original PR1 backfill as sufficient for cutover. Do not cut over while only PR2a is live.
 
 ### Deployment order (hard rule)
 
 1. PR1: migrate schema + GIN → full idempotent backfill.
-2. PR2: deploy write-path synchronization and confirm it is active.
-3. While sync is active: run the **full idempotent backfill again**.
-4. Run/perform **drift verification**.
-5. Only then cut over public search behavior (PR3).
-6. Then ship snippet UI (PR4).
+2. PR2a: deploy discovery/manual/taxonomy sync + drift verification command mode; confirm active.
+3. PR2b: deploy displayed-OCR sync hooks; confirm active.
+4. While **all** sync hooks are active: run the **full idempotent backfill again**.
+5. Run/perform **drift verification** (`--check-only`).
+6. Only then cut over public search behavior (PR3).
+7. Then ship snippet UI (PR4).
 
-Required order (short form): **PR1 migrate/backfill → PR2 deploy sync → full backfill again while sync is active → drift verification → PR3 cutover.**
+Required order (short form): **PR1 migrate/backfill → PR2a sync → PR2b sync → full backfill again while all sync is active → drift verification → PR3 cutover.**
 
-**Do not** switch `/archive/?q=` to the index while any required backfill is partial, while sync is missing, or before post-PR2 drift verification passes. A feature flag around PR3 cutover is allowed if it makes rollback safer.
+**Do not** switch `/archive/?q=` to the index while any required backfill is partial, while PR2a or PR2b sync is missing, or before post-PR2 drift verification passes. A feature flag around PR3 cutover is allowed if it makes rollback safer.
 
 ### Rollback
 
@@ -228,16 +234,28 @@ Required order (short form): **PR1 migrate/backfill → PR2 deploy sync → full
 | **Rollback** | Stop using the command; table can remain empty/unused. |
 | **Non-goals** | Public FTS cutover; write-path sync hooks; snippets; `pg_trgm` on OCR bodies; locator/hover fields; photo descriptive fields; date search |
 
-### PR2 — Explicit index synchronization
+### PR2a — Discovery / ManualText / taxonomy sync + drift verification
 
 | | |
 |--|--|
-| **Scope** | From every relevant write path, call pure builder → persistence to upsert/clear `ArchiveItemSearchIndex`; keep rebuild/backfill command for repair; drift detection tests |
-| **Likely files** | ManualText / ArchiveItem edit services; OCR text persistence / edit / suggestion-approve / activation paths that change displayed text; `archive_search_index` service; tests |
-| **Migrations** | None expected (unless a tiny sync-metadata column was deferred from PR1) |
-| **Tests** | Each hooked writer persists (or clears) the index from the builder value object in the same transaction as the source write; concurrent update safety as appropriate; full rebuild repairs intentional drift; no sync from snapshot/geometry-only paths |
-| **Rollout** | Deploy sync after PR1 migrate/backfill and confirm sync is **active**. Then run the **full idempotent backfill again while sync is live**, then **drift verification**. Still **no** public FTS cutover. Do not assume the PR1-era backfill is still fully current. |
-| **Rollback** | Remove hooks; rely on periodic rebuild until fixed. Do not cut over PR3 while sync is rolled back. |
+| **Scope** | Id-based `sync_archive_item_search_index` API; hooks on ArchiveItem discovery scalars/M2M, ManualText, photo/OCR shared metadata, metadata-suggestion approve, discovery backfill additive links, taxonomy admin renames; `backfill_archive_search_index --check-only` |
+| **Likely files** | `archive_search_index.py`; `archive_items.py`; photo upload (via discovery hook); metadata suggestion review; discovery backfill; taxonomy admins; backfill command; tests; decision-log |
+| **Migrations** | None expected |
+| **Tests** | Fresh-reload vs stale prefetch; same-TX rollback on sync failure; each PR2a hooked writer; taxonomy fan-out; CASCADE delete; check-only pass/fail/no-write; public `icontains` unchanged |
+| **Rollout** | Deploy after PR1. Still **no** public FTS cutover. PR3 remains blocked until PR2b is also active and post-sync full backfill + drift verification pass. |
+| **Rollback** | Remove PR2a hooks; rely on periodic rebuild until fixed. |
+| **Non-goals** | Displayed OCR mutation hooks (PR2b); changing `/archive/?q=`; snippets; hover locators |
+
+### PR2b — Displayed OCR text mutation sync
+
+| | |
+|--|--|
+| **Scope** | Explicit sync from every `DocumentTextResult` writer that can change displayed transcription body (worker success/failure, Transkribus local completion, translation persist/retry, staff pending/verified edits, transcription suggestion approval, corrected-current activation when text changes) |
+| **Likely files** | Worker / local completion / translation / verified edit / transcription suggestion / corrected-current activation; `archive_search_index` call sites; tests |
+| **Migrations** | None expected |
+| **Tests** | Each hooked OCR writer updates `body_text`; skip verify/reject and snapshot-only paths; same-TX semantics; no geometry/binding-only sync |
+| **Rollout** | Deploy after PR2a. Then **full backfill again while PR2a+PR2b sync are active**, then **drift verification**. Still **no** public FTS cutover. |
+| **Rollback** | Remove PR2b hooks; do not cut over PR3 while either sync slice is rolled back. |
 | **Non-goals** | Changing `/archive/?q=` behavior; snippet UI; hover locators |
 
 ### PR3 — Backend search cutover (no snippet UI)
@@ -299,7 +317,7 @@ When hover/highlight is implemented, optionally attach search-result → page/li
 | `simple` FTS + Hebrew substring caveat | §2 #7–8, §4 |
 | No locators in initial PRs | §2 #9, Later |
 | Pure builder → value object; persistence materializes `search_vector` | §3 |
-| PR1 migrate/backfill → PR2 sync → full backfill again → drift check → PR3 → PR4 | §6–§7 |
-| No cutover before post-PR2 backfill + drift verification | §6 |
+| PR1 migrate/backfill → PR2a → PR2b → full backfill again → drift check → PR3 → PR4 | §6–§7 |
+| No cutover before post-PR2a+PR2b backfill + drift verification | §6 |
 
 No contradiction found with the verified audit used for this architecture PR.

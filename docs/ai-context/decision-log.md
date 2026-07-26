@@ -1822,12 +1822,13 @@ Content-Type: `application/xml` via `put_object_bytes`.
 | PR | Focus |
 |----|--------|
 | **PR1** | Search-index model; pure builder (value object only) + persistence (materializes row/`search_vector`); migration; GIN; idempotent backfill — **no** public search behavior change, **no** broad write-path hooks |
-| **PR2** | Explicit index synchronization from all relevant write paths + drift/transaction tests; then **full backfill again while sync is active** + drift verification before cutover |
+| **PR2a** | Explicit sync for discovery/manual/taxonomy writers + `--check-only` drift verification |
+| **PR2b** | Explicit sync for displayed OCR/`DocumentTextResult` mutation paths |
 | **PR3** | Backend search cutover (auth, ranking, Hebrew behavior, query-plan tests) — **no** snippet UI |
 | **PR4** | Safe Hebrew snippets, match-source presentation, help-text correction |
 | **Later** | Optional search-result → line/page mapping when hover is implemented |
 
-**Hard rollout rule:** **PR1 migrate/backfill → PR2 deploy sync → full backfill again while sync is active → drift verification → PR3 cutover.** Do **not** assume the PR1-era backfill remains fully current across the sync deployment gap. Do **not** switch public search to the index before post-PR2 backfill and drift verification complete.
+**Hard rollout rule:** **PR1 migrate/backfill → PR2a sync → PR2b sync → full backfill again while all sync hooks are active → drift verification → PR3 cutover.** Do **not** assume the PR1-era backfill remains fully current across the sync deployment gap. Do **not** switch public search to the index before both PR2 slices are live and post-sync backfill + drift verification complete.
 
 **Docs:** `docs/ai-context/archive-full-text-search-design.md`
 
@@ -1842,6 +1843,24 @@ Content-Type: `application/xml` via `put_object_bytes`.
 - Pure builder + persistence in **`documents/services/archive_search_index.py`**: **`ArchiveItemSearchContent`** value object; **`build_archive_item_search_content`** (no DB writes / no vector); **`persist_archive_item_search_content`** upserts row and materializes weighted **`simple`** **`search_vector`**; queryset helper **`archive_items_for_search_index_build`** documents prefetch expectations. OCR body uses **`get_displayed_transcription_text`**.
 - Management command **`backfill_archive_search_index`** (`--archive-item-id`, `--batch-size`): idempotent rebuild of the search-index table only.
 
-**Unchanged (intentional):** public **`/archive/?q=`** still uses **`filter_archive_items_by_search_query`** (`icontains` metadata only). **No** write-path sync hooks. **No** snippets, ranking cutover, `pg_trgm`, locators, photo-detail/date search, or Transkribus geometry dependency.
+**Unchanged (intentional):** public **`/archive/?q=`** still uses **`filter_archive_items_by_search_query`** (`icontains` metadata only). **No** write-path sync hooks in PR1. **No** snippets, ranking cutover, `pg_trgm`, locators, photo-detail/date search, or Transkribus geometry dependency.
 
 **Tests:** `documents/test_archive_search_index.py`.
+
+## Archive full-text search — PR2a discovery/manual/taxonomy sync (implemented)
+
+**Decision / implemented:** PR2 write-path synchronization is split. **PR2a** covers ArchiveItem discovery/manual/taxonomy index sync and drift verification only. **PR2b** (displayed OCR text mutation hooks) remains deferred.
+
+**Introduced:**
+
+- Id-based sync API in **`documents/services/archive_search_index.py`**: **`sync_archive_item_search_index(archive_item_id)`** reloads via **`archive_items_for_search_index_build`**, locks only the **`ArchiveItem`** row, then rebuilds/persists. Returns **`None`** only when the ArchiveItem is missing (delete race); other errors propagate so surrounding source transactions roll back. **`sync_archive_item_search_indexes`** fans out for taxonomy renames. **No signals.**
+- Explicit hooks (same transaction as source writes): **`create_ocr_document`**, **`create_manual_text_archive_item`**, **`update_manual_text_archive_item`**, **`update_photo_archive_item_metadata`**, **`update_ocr_document_metadata`**, **`update_archive_item_discovery_metadata`** (also covers photo create empty/non-empty discovery), **`archive_metadata_suggestion_review.approve_suggestion`**, **`apply_archive_discovery_metadata_backfill`** when links are added, and Tag/ArchiveCategory/ArchiveEvent admin **`save_model`** name-rename fan-out.
+- **`backfill_archive_search_index --check-only`**: read-only coverage/content/null-vector/extra-row drift verification; prints counts and archive item ids only; exits non-zero on drift; no writes.
+
+**Deferred to PR2b:** worker OCR/HTR persistence, Transkribus local completion, translation persist/retry, staff pending/verified text edits, transcription suggestion approval, corrected-current activation, and other **`DocumentTextResult`** writers that can change displayed **`body_text`**.
+
+**Unchanged (intentional):** public **`/archive/?q=`** remains **`icontains`**. No schema migration. No snippets/ranking/`pg_trgm`. Deletes continue to rely on **`ArchiveItemSearchIndex` CASCADE**.
+
+**Hard rollout rule (updated):** public FTS cutover (PR3) remains blocked until **PR2a and PR2b** are deployed, a **full backfill is rerun while all sync hooks are active**, and **`--check-only` drift verification passes**.
+
+**Tests:** `documents/test_archive_search_index_sync.py` (plus existing PR1 suite).
