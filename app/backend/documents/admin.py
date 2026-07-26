@@ -14,22 +14,44 @@ from .models import (
 )
 
 
+class _DiscoveryTaxonomyNameSyncAdmin(admin.ModelAdmin):
+    """Fan-out ArchiveItemSearchIndex sync when a discovery taxonomy name changes."""
+
+    def save_model(self, request, obj, form, change):
+        previous_name = None
+        if change and obj.pk is not None:
+            previous_name = (
+                type(obj)
+                .objects.filter(pk=obj.pk)
+                .values_list("name", flat=True)
+                .first()
+            )
+        super().save_model(request, obj, form, change)
+        if change and previous_name is not None and previous_name != obj.name:
+            from documents.services.archive_search_index import (
+                sync_archive_item_search_indexes,
+            )
+
+            archive_item_ids = obj.archive_items.values_list("pk", flat=True)
+            sync_archive_item_search_indexes(archive_item_ids)
+
+
 @admin.register(Tag)
-class TagAdmin(admin.ModelAdmin):
+class TagAdmin(_DiscoveryTaxonomyNameSyncAdmin):
     list_display = ("id", "name", "created_at", "updated_at")
     search_fields = ("name",)
     ordering = ("name",)
 
 
 @admin.register(ArchiveCategory)
-class ArchiveCategoryAdmin(admin.ModelAdmin):
+class ArchiveCategoryAdmin(_DiscoveryTaxonomyNameSyncAdmin):
     list_display = ("id", "name", "slug", "created_at", "updated_at")
     search_fields = ("name", "slug")
     ordering = ("name",)
 
 
 @admin.register(ArchiveEvent)
-class ArchiveEventAdmin(admin.ModelAdmin):
+class ArchiveEventAdmin(_DiscoveryTaxonomyNameSyncAdmin):
     list_display = ("id", "name", "slug", "date_precision", "created_at", "updated_at")
     search_fields = ("name", "slug")
     list_filter = ("date_precision",)

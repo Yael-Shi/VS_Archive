@@ -409,6 +409,8 @@ class ArchiveItemSearchIndexBackfillCommandTests(TestCase):
     def test_full_run_and_repeat_are_idempotent(self):
         a = create_manual_text_archive_item(title="A", body="Body A")
         b = create_manual_text_archive_item(title="B", body="Body B")
+        # PR2a create hooks already persist rows; clear to exercise write backfill.
+        ArchiveItemSearchIndex.objects.all().delete()
         out = StringIO()
         call_command("backfill_archive_search_index", stdout=out, batch_size=1)
         self.assertEqual(ArchiveItemSearchIndex.objects.count(), 2)
@@ -427,6 +429,7 @@ class ArchiveItemSearchIndexBackfillCommandTests(TestCase):
     def test_single_item_run(self):
         target = create_manual_text_archive_item(title="Target", body="Only me")
         create_manual_text_archive_item(title="Other", body="Skip")
+        ArchiveItemSearchIndex.objects.all().delete()
         call_command(
             "backfill_archive_search_index",
             archive_item_id=target.pk,
@@ -443,6 +446,7 @@ class ArchiveItemSearchIndexBackfillCommandTests(TestCase):
 
         ok = create_manual_text_archive_item(title="OK", body="ok-body")
         bad = create_manual_text_archive_item(title="Bad", body="bad-body")
+        ArchiveItemSearchIndex.objects.all().delete()
         original = rebuild_archive_item_search_index
 
         def flaky(item: ArchiveItem):

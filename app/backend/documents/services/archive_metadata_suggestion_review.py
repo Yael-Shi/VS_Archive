@@ -75,6 +75,13 @@ def approve_suggestion(
             tags = [_get_or_create_tag_by_name(name)[0] for name in tag_names]
             archive_item.tags.add(*tags)
 
+        if category_names or event_names or tag_names:
+            from documents.services.archive_search_index import (
+                sync_archive_item_search_index,
+            )
+
+            sync_archive_item_search_index(archive_item.pk)
+
         reviewed_at = timezone.now()
         suggestion.status = ArchiveMetadataSuggestion.Status.APPROVED
         suggestion.reviewed_at = reviewed_at
