@@ -547,7 +547,7 @@ label {
   }
 }
 
-.upload-file-input-hidden {
+input[type="file"].upload-file-input-hidden {
   position: absolute;
   width: 1px;
   height: 1px;
