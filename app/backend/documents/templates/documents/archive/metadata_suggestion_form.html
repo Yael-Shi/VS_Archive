@@ -17,21 +17,20 @@
     <div class="spacer"></div>
 
     <p class="page-lead">
-      אפשר להציע קטגוריות, אירועים, תגיות, או לשלוח הערה כללית למנהלי הארכיון.
+      אפשר להציע קטגוריות, אירועים, תגיות, או להוסיף מידע נוסף על הפריט.
     </p>
 
     {% if form_errors %}
-      <div class="spacer-sm"></div>
-      <div class="alert alert-danger">
+      <div class="alert alert-danger metadata-suggestion-form-errors">
         <ul>
           {% for error in form_errors %}
             <li>{{ error }}</li>
           {% endfor %}
         </ul>
       </div>
+    {% else %}
+      <div class="spacer"></div>
     {% endif %}
-
-    <div class="spacer"></div>
 
     <div class="two-col document-detail-layout">
       <div class="card card--pad-lg">
@@ -71,8 +70,30 @@
       </div>
 
       <div class="card card--pad-lg">
-        <form method="post" action="">
+        <form class="metadata-suggestion-form" method="post" action="">
           {% csrf_token %}
+
+          <div class="field">
+            <label for="metadata-suggestion-submitter-name">שם <span class="required-marker" aria-hidden="true">*</span></label>
+            <input
+              id="metadata-suggestion-submitter-name"
+              type="text"
+              name="submitter_name"
+              value="{{ field_values.submitter_name }}"
+              maxlength="255"
+              required
+            />
+          </div>
+
+          <div class="field">
+            <label for="metadata-suggestion-submitter-email">אימייל</label>
+            <input
+              id="metadata-suggestion-submitter-email"
+              type="email"
+              name="submitter_email"
+              value="{{ field_values.submitter_email }}"
+            />
+          </div>
 
           <div class="field">
             <label for="metadata-suggestion-categories">קטגוריות מוצעות</label>
@@ -101,37 +122,14 @@
             >{{ field_values.suggested_tags }}</textarea>
           </div>
 
-          <div class="spacer"></div>
-
           <div class="field">
-            <label for="metadata-suggestion-submitter-name">שם</label>
-            <input
-              id="metadata-suggestion-submitter-name"
-              type="text"
-              name="submitter_name"
-              value="{{ field_values.submitter_name }}"
-              maxlength="255"
-              required
-            />
-          </div>
-
-          <div class="field">
-            <label for="metadata-suggestion-submitter-email">אימייל</label>
-            <input
-              id="metadata-suggestion-submitter-email"
-              type="email"
-              name="submitter_email"
-              value="{{ field_values.submitter_email }}"
-            />
-          </div>
-
-          <div class="field">
-            <label for="metadata-suggestion-submitter-note">הערה למנהלי הארכיון</label>
+            <label for="metadata-suggestion-submitter-note">מידע נוסף על הפריט</label>
             <textarea
               id="metadata-suggestion-submitter-note"
               name="submitter_note"
               rows="4"
             >{{ field_values.submitter_note }}</textarea>
+            <div class="field-hint">מידע שאינו מתאים לקטגוריות, אירועים או תגיות.</div>
           </div>
 
           <div class="registration-honeypot" aria-hidden="true">

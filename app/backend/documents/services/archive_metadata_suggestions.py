@@ -5,7 +5,7 @@ from __future__ import annotations
 from public.services.registration import HONEYPOT_FIELD_NAME
 
 NAME_REQUIRED_ERROR = "יש למלא שם."
-SUGGESTION_CONTENT_REQUIRED_ERROR = "יש להזין מידע, קטגוריה, אירוע או תגית מוצעים."
+SUGGESTION_CONTENT_REQUIRED_ERROR = "יש להזין מידע, קטגוריה, אירוע ו/או תגית."
 
 SUGGESTION_STATUS_LABELS = {
     "PENDING": "ממתין לבדיקה",
