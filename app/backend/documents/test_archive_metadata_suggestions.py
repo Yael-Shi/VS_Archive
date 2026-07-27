@@ -77,9 +77,49 @@ class ArchiveMetadataSuggestionPublicFlowTests(TestCase):
         self.assertContains(resp, "הוספת מידע על הפריט")
         self.assertContains(
             resp,
-            "אפשר להציע קטגוריות, אירועים, תגיות, או לשלוח הערה כללית למנהלי הארכיון.",
+            "אפשר להציע קטגוריות, אירועים, תגיות, או להוסיף מידע נוסף על הפריט.",
         )
         self.assertContains(resp, "ההצעה תיבדק לפני שינוי באתר")
+        self.assertContains(resp, 'class="required-marker"', count=1)
+        self.assertContains(resp, 'class="metadata-suggestion-form"', count=1)
+        self.assertNotContains(resp, "יש למלא לפחות אחד משדות המידע הבאים.")
+        self.assertContains(resp, "מידע נוסף על הפריט")
+        self.assertContains(
+            resp,
+            "מידע שאינו מתאים לקטגוריות, אירועים או תגיות.",
+        )
+        self.assertContains(
+            resp,
+            'for="metadata-suggestion-submitter-email">אימייל</label>',
+        )
+
+        html = resp.content.decode()
+        name_pos = html.index('for="metadata-suggestion-submitter-name"')
+        email_pos = html.index('for="metadata-suggestion-submitter-email"')
+        categories_pos = html.index('for="metadata-suggestion-categories"')
+        events_pos = html.index('for="metadata-suggestion-events"')
+        tags_pos = html.index('for="metadata-suggestion-tags"')
+        note_pos = html.index('for="metadata-suggestion-submitter-note"')
+        self.assertLess(
+            name_pos,
+            email_pos,
+        )
+        self.assertLess(
+            email_pos,
+            categories_pos,
+        )
+        self.assertLess(
+            categories_pos,
+            events_pos,
+        )
+        self.assertLess(
+            events_pos,
+            tags_pos,
+        )
+        self.assertLess(
+            tags_pos,
+            note_pos,
+        )
 
     def test_anonymous_cannot_access_private_item(self):
         item = self._create_public_manual_text_item()
@@ -144,6 +184,10 @@ class ArchiveMetadataSuggestionPublicFlowTests(TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "יש למלא שם.")
+        self.assertContains(
+            resp,
+            'class="alert alert-danger metadata-suggestion-form-errors"',
+        )
         self.assertEqual(ArchiveMetadataSuggestion.objects.count(), 0)
 
     def test_at_least_one_suggestion_field_required(self):
@@ -158,7 +202,7 @@ class ArchiveMetadataSuggestionPublicFlowTests(TestCase):
             ),
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "יש להזין מידע, קטגוריה, אירוע או תגית מוצעים.")
+        self.assertContains(resp, "יש להזין מידע, קטגוריה, אירוע ו/או תגית.")
         self.assertEqual(ArchiveMetadataSuggestion.objects.count(), 0)
 
     def test_post_accepts_note_only_suggestion(self):

@@ -437,6 +437,11 @@ label {
   color: var(--text-soft);
 }
 
+.required-marker {
+  color: var(--danger);
+  font-weight: 700;
+}
+
 .field-hint {
   font-size: var(--font-sm);
   color: var(--muted);
@@ -791,6 +796,19 @@ textarea {
 
 .alert-danger .alert-title {
   color: var(--danger);
+}
+
+.metadata-suggestion-form-errors {
+  padding: var(--space-2) var(--space-3);
+}
+
+.metadata-suggestion-form-errors ul {
+  margin: 0;
+  padding-inline-start: 1.25rem;
+}
+
+.metadata-suggestion-form .field + .field {
+  margin-top: var(--space-3);
 }
 
 .alert-ok {
