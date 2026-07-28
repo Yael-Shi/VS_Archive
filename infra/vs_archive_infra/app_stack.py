@@ -280,7 +280,7 @@ class VsArchiveAppStack(Stack):
             self,
             f"{cfg.prefix}-worker-td",
             cpu=256,
-            memory_limit_mib=512,
+            memory_limit_mib=2048,
             task_role=cast(iam.IRole, task_role),
             execution_role=cast(iam.IRole, exec_role),
         )
@@ -299,6 +299,7 @@ class VsArchiveAppStack(Stack):
                 "DB_USER": "vsarchive",
                 # Preserve current live worker OCR/runtime tuning to avoid drift on CDK deploy.
                 "ENABLE_HYBRID_HTR": "false",
+                "ENABLE_ANTIGRAVITY_ARABIC_PRINTED": "true",
                 "ENABLE_DAILY_REPORT": "false",
                 "GEMINI_DOUBLE_PASS": "true",
                 "GEMINI_TEMPERATURE": "0.0",
