@@ -261,6 +261,11 @@ class OcrReprocessUiTests(TestCase):
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.FAILED)
 
+    @patch.dict(
+        "os.environ",
+        {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "true"},
+        clear=False,
+    )
     @patch("documents.views.validate_required_env")
     @patch("documents.services.ocr_reprocess.send_process_document_message")
     def test_post_enqueue_failure_redirects_with_error_and_keeps_failed_state(
