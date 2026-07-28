@@ -47,6 +47,10 @@ from documents.services.process_document_outcome import (
     ProcessDocumentDisposition,
     ProcessDocumentOutcome,
 )
+from documents.services.process_document_request_worker import (
+    PROCESS_DOCUMENT_REQUEST_ID_PAYLOAD_KEY,
+    handle_process_document_request,
+)
 from documents.services.review_reasons import (
     AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW,
     HAS_UNCLEAR,
@@ -259,6 +263,29 @@ class Command(BaseCommand):
         if msg_type != "PROCESS_DOCUMENT":
             return True
 
+        if PROCESS_DOCUMENT_REQUEST_ID_PAYLOAD_KEY in payload:
+            receipt_handle = msg.get("ReceiptHandle")
+            if (
+                sqs is None
+                or not queue_url
+                or not isinstance(receipt_handle, str)
+                or not receipt_handle
+            ):
+                logger.error(
+                    "Request-aware PROCESS_DOCUMENT missing SQS context; "
+                    "cannot claim/defer safely"
+                )
+                return False
+
+            return handle_process_document_request(
+                payload,
+                sqs=sqs,
+                queue_url=queue_url,
+                receipt_handle=receipt_handle,
+                execute_payload=self._execute_process_document_payload,
+            )
+
+        # Backward compatibility for messages created before durable Requests.
         return self._execute_process_document_payload(payload).should_ack
 
     def _execute_process_document_payload(
