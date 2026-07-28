@@ -1629,6 +1629,7 @@ class ProcessDocumentRequest(models.Model):
         RUNNING = "RUNNING", "Running"
         RECOVERY_REQUIRED = "RECOVERY_REQUIRED", "Recovery required"
         COMPLETED = "COMPLETED", "Completed"
+        PARTIAL = "PARTIAL", "Partial"
         FAILED = "FAILED", "Failed"
         ENQUEUE_FAILED = "ENQUEUE_FAILED", "Enqueue failed"
 
@@ -1712,6 +1713,7 @@ class ProcessDocumentRequest(models.Model):
                         "RUNNING",
                         "RECOVERY_REQUIRED",
                         "COMPLETED",
+                        "PARTIAL",
                         "FAILED",
                         "ENQUEUE_FAILED",
                     ]
@@ -1768,7 +1770,7 @@ class ProcessDocumentRequest(models.Model):
             ),
             models.CheckConstraint(
                 condition=(
-                    ~models.Q(status__in=["COMPLETED", "FAILED"])
+                    ~models.Q(status__in=["COMPLETED", "PARTIAL", "FAILED"])
                     | (
                         models.Q(lease_token__isnull=True)
                         & models.Q(lease_expires_at__isnull=True)

@@ -34,7 +34,7 @@ from documents.services.htr_adapters.base import (
 from documents.services.hebrew_translation_retry import (
     PROCESS_DOCUMENT_OPERATION_KEY,
     RETRY_HEBREW_TRANSLATION_OPERATION,
-    run_hebrew_translation_retry,
+    execute_hebrew_translation_retry,
 )
 from documents.services.htr_engine import transcribe_pages
 from documents.services.ocr_reprocess import (
@@ -43,6 +43,10 @@ from documents.services.ocr_reprocess import (
     SOURCE_TRANSKRIBUS_RUN_ID_PAYLOAD_KEY,
 )
 from documents.services.ocr_routing import OcrRouteConfig, select_ocr_route
+from documents.services.process_document_outcome import (
+    ProcessDocumentDisposition,
+    ProcessDocumentOutcome,
+)
 from documents.services.review_reasons import (
     AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW,
     HAS_UNCLEAR,
@@ -88,6 +92,27 @@ def _env(name: str) -> str:
 def _is_hebrew_language(language: Optional[str]) -> bool:
     lang = (language or "").strip().lower()
     return lang in ("he", "heb", "hebrew")
+
+
+def _outcome_for_final_processing_state(
+    processing_state: str,
+) -> ProcessDocumentOutcome:
+    """Map final Document state without conflating PARTIAL with FAILED."""
+
+    if processing_state == Document.ProcessingState.READY:
+        return ProcessDocumentOutcome(ProcessDocumentDisposition.COMPLETED)
+    if processing_state == Document.ProcessingState.PARTIAL:
+        return ProcessDocumentOutcome(
+            ProcessDocumentDisposition.PARTIAL,
+            failure_code="PROCESS_DOCUMENT_PARTIAL",
+        )
+    return ProcessDocumentOutcome(
+        ProcessDocumentDisposition.FAILED,
+        failure_code="PROCESS_DOCUMENT_INCOMPLETE",
+        failure_message=(
+            f"Unexpected final processing_state_user={processing_state!r}."
+        ),
+    )
 
 
 class Command(BaseCommand):
@@ -234,13 +259,22 @@ class Command(BaseCommand):
         if msg_type != "PROCESS_DOCUMENT":
             return True
 
+        return self._execute_process_document_payload(payload).should_ack
+
+    def _execute_process_document_payload(
+        self,
+        payload: Dict[str, Any],
+    ) -> ProcessDocumentOutcome:
         document_id = payload.get("document_id")
         if not isinstance(document_id, int):
-            return True
+            return ProcessDocumentOutcome(ProcessDocumentDisposition.NOOP)
 
         operation = payload.get(PROCESS_DOCUMENT_OPERATION_KEY)
         if operation == RETRY_HEBREW_TRANSLATION_OPERATION:
-            return run_hebrew_translation_retry(document_id, worker_env=self._cfg)
+            return execute_hebrew_translation_retry(
+                document_id,
+                worker_env=self._cfg,
+            )
         if operation is not None:
             self.stderr.write(
                 self.style.ERROR(
@@ -251,7 +285,11 @@ class Command(BaseCommand):
                 "invalid operation in PROCESS_DOCUMENT payload",
                 extra={"document_id": document_id, "operation": operation},
             )
-            return True
+            return ProcessDocumentOutcome(
+                ProcessDocumentDisposition.NOOP,
+                failure_code="INVALID_PROCESS_DOCUMENT_OPERATION",
+                failure_message=repr(operation),
+            )
 
         if self._is_invalid_ocr_retry_mode(payload):
             retry_mode = payload.get(OCR_RETRY_MODE_PAYLOAD_KEY)
@@ -264,7 +302,11 @@ class Command(BaseCommand):
                 "invalid ocr_retry_mode in PROCESS_DOCUMENT payload",
                 extra={"document_id": document_id, "ocr_retry_mode": retry_mode},
             )
-            return True
+            return ProcessDocumentOutcome(
+                ProcessDocumentDisposition.NOOP,
+                failure_code="INVALID_OCR_RETRY_MODE",
+                failure_message=repr(retry_mode),
+            )
 
         recognition_only_error = self._recognition_only_payload_error(payload)
         if recognition_only_error is not None:
@@ -285,18 +327,22 @@ class Command(BaseCommand):
                     "error": recognition_only_error,
                 },
             )
-            return True
+            return ProcessDocumentOutcome(
+                ProcessDocumentDisposition.NOOP,
+                failure_code="INVALID_RECOGNITION_ONLY_PAYLOAD",
+                failure_message=recognition_only_error,
+            )
 
         # Phase 1: Mark PROCESSING
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
                 if doc.upload_status != Document.UploadStatus.UPLOADED:
-                    return True
+                    return ProcessDocumentOutcome(ProcessDocumentDisposition.NOOP)
                 doc.processing_state_user = Document.ProcessingState.PROCESSING
                 doc.save(update_fields=["processing_state_user", "updated_at"])
         except Document.DoesNotExist:
-            return True
+            return ProcessDocumentOutcome(ProcessDocumentDisposition.NOOP)
 
         # Pre-flight: multi-image source-file validation.
         # Input-integrity failures here are distinct from OCR/HTR failures: mark the document
@@ -324,7 +370,11 @@ class Command(BaseCommand):
                         doc.save(update_fields=["processing_state_user"])
                 except Document.DoesNotExist:
                     pass
-                return True
+                return ProcessDocumentOutcome(
+                    ProcessDocumentDisposition.FAILED,
+                    failure_code="MULTI_IMAGE_SOURCE_INVALID",
+                    failure_message=str(e),
+                )
 
         # Phase 2: Heavy work
         error: Optional[str] = None
@@ -386,7 +436,11 @@ class Command(BaseCommand):
                 "transkribus local persistence retryable; leaving SQS message",
                 extra={"document_id": document_id},
             )
-            return False
+            return ProcessDocumentOutcome(
+                ProcessDocumentDisposition.RETRYABLE,
+                failure_code="TRANSKRIBUS_LOCAL_PERSISTENCE_RETRYABLE",
+                failure_message=str(e),
+            )
         except Exception as e:
             processing_exc = e
             error = str(e)
@@ -415,7 +469,8 @@ class Command(BaseCommand):
                 review_reasons=getattr(htr_result, "review_reasons", None),
                 min_text_length=self._cfg.min_text_length,
             )
-            return True
+            doc.refresh_from_db(fields=["processing_state_user"])
+            return _outcome_for_final_processing_state(doc.processing_state_user)
 
         try:
             with transaction.atomic():
@@ -447,9 +502,16 @@ class Command(BaseCommand):
 
                 sync_archive_item_search_index(doc.archive_item_id)
         except Document.DoesNotExist:
-            pass
+            return ProcessDocumentOutcome(ProcessDocumentDisposition.NOOP)
 
-        return True
+        if error:
+            return ProcessDocumentOutcome(
+                ProcessDocumentDisposition.FAILED,
+                failure_code="OCR_PROCESSING_FAILED",
+                failure_message=error,
+            )
+
+        return _outcome_for_final_processing_state(doc.processing_state_user)
 
     def _build_pages_from_source_files(self, bucket, ordered_sources):
         """

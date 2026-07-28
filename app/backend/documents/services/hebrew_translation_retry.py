@@ -18,6 +18,10 @@ from documents.services.non_hebrew_hebrew_translation import (
 from documents.services.processing_state import (
     update_document_processing_state_for_engine,
 )
+from documents.services.process_document_outcome import (
+    ProcessDocumentDisposition,
+    ProcessDocumentOutcome,
+)
 from documents.services.sqs import send_process_document_message
 from documents.services.text_presentation import resolve_displayed_transcription_result
 
@@ -275,24 +279,24 @@ def enqueue_hebrew_translation_retry(document_id: int) -> None:
     )
 
 
-def run_hebrew_translation_retry(
+def execute_hebrew_translation_retry(
     document_id: int,
     *,
     worker_env: WorkerEnvConfig,
-) -> bool:
-    """Worker entrypoint for translation-only retry. Returns True when the SQS message may be acked."""
+) -> ProcessDocumentOutcome:
+    """Execute translation-only retry and return its semantic worker outcome."""
     now = timezone.now()
     try:
         with transaction.atomic():
             doc = Document.objects.select_for_update().get(pk=document_id)
             claim = _claim_translation_retry(doc, document_id=document_id, now=now)
             if claim is False:
-                return False
+                return ProcessDocumentOutcome(ProcessDocumentDisposition.DEFERRED)
             if claim is True:
-                return True
+                return ProcessDocumentOutcome(ProcessDocumentDisposition.NOOP)
             engine, source_text = claim
     except Document.DoesNotExist:
-        return True
+        return ProcessDocumentOutcome(ProcessDocumentDisposition.NOOP)
 
     try:
         translation = translate_text_to_hebrew_with_gemini(
@@ -354,13 +358,40 @@ def run_hebrew_translation_retry(
             document_id,
             exc,
         )
-        return True
-    except Exception:
+        return ProcessDocumentOutcome(
+            ProcessDocumentDisposition.NOOP,
+            failure_code="HEBREW_TRANSLATION_RETRY_REJECTED",
+            failure_message=str(exc),
+        )
+    except Exception as exc:
         _restore_processing_state_after_retry_abort(document_id, engine)
         logger.exception(
             "Hebrew translation retry persistence failed document_id=%s",
             document_id,
         )
-        return False
+        return ProcessDocumentOutcome(
+            ProcessDocumentDisposition.RETRYABLE,
+            failure_code="HEBREW_TRANSLATION_PERSISTENCE_RETRYABLE",
+            failure_message=str(exc),
+        )
 
-    return True
+    if translation_error is not None:
+        return ProcessDocumentOutcome(
+            ProcessDocumentDisposition.FAILED,
+            failure_code="HEBREW_TRANSLATION_FAILED",
+            failure_message=str(translation_error),
+        )
+
+    return ProcessDocumentOutcome(ProcessDocumentDisposition.COMPLETED)
+
+
+def run_hebrew_translation_retry(
+    document_id: int,
+    *,
+    worker_env: WorkerEnvConfig,
+) -> bool:
+    """Legacy bool wrapper: return whether the SQS message may be acknowledged."""
+    return execute_hebrew_translation_retry(
+        document_id,
+        worker_env=worker_env,
+    ).should_ack

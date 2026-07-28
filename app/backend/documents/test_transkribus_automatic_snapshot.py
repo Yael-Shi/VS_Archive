@@ -64,6 +64,7 @@ from documents.services.transkribus_snapshot_storage import (
     SnapshotStorageOutcome,
     SnapshotStorageResult,
 )
+from documents.services.process_document_outcome import ProcessDocumentDisposition
 
 
 def _page_xml(line: str = "Hello") -> bytes:
@@ -1404,6 +1405,80 @@ class WorkerAckAndIdempotencyTests(TestCase):
             ).count(),
             2,
         )
+        run.refresh_from_db()
+        self.assertEqual(run.status, TranskribusRun.Status.SUCCEEDED)
+
+    def test_worker_local_completion_partial_outcome_acks(self):
+        doc = _create_he_doc()
+        run = TranskribusRun.objects.create(
+            document=doc,
+            status=TranskribusRun.Status.RECOGNITION_STARTED,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id="col",
+            model_id="42",
+            remote_doc_id="777",
+            pages_query="1",
+            recognition_job_id="job-1",
+            page_index_to_page_nr={1: 1},
+        )
+        snap = _ready_snapshot(document=doc, run=run, text="")
+        cmd = self._cmd()
+        htr = HtrResult(
+            text="",
+            needs_review=True,
+            engine_name="transkribus-pylaia:42",
+            review_reasons=[],
+            transkribus_run_id=run.id,
+            transkribus_snapshot_id=snap.id,
+        )
+
+        with (
+            patch(
+                "documents.management.commands.run_worker.get_object_bytes",
+                return_value=(b"%PDF", "application/pdf"),
+            ),
+            patch(
+                "documents.management.commands.run_worker.extract_pages",
+                return_value=[
+                    PageImage(
+                        page_index=1,
+                        image_bytes=b"x",
+                        mime_type="image/png",
+                    )
+                ],
+            ),
+            patch(
+                "documents.management.commands.run_worker.select_ocr_route",
+                return_value=_route(),
+            ),
+            patch(
+                "documents.management.commands.run_worker.transcribe_pages",
+                return_value=htr,
+            ),
+        ):
+            outcome = cmd._execute_process_document_payload(
+                {
+                    "type": "PROCESS_DOCUMENT",
+                    "document_id": doc.id,
+                }
+            )
+
+        self.assertEqual(
+            outcome.disposition,
+            ProcessDocumentDisposition.PARTIAL,
+        )
+        self.assertEqual(
+            outcome.failure_code,
+            "PROCESS_DOCUMENT_PARTIAL",
+        )
+        self.assertTrue(outcome.should_ack)
+
+        doc.refresh_from_db()
+        self.assertEqual(
+            doc.processing_state_user,
+            Document.ProcessingState.PARTIAL,
+        )
+
         run.refresh_from_db()
         self.assertEqual(run.status, TranskribusRun.Status.SUCCEEDED)
 
