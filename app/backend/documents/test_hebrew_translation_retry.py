@@ -21,7 +21,11 @@ from documents.services.hebrew_translation_retry import (
     STALE_TRANSLATION_RETRY_PROCESSING_THRESHOLD,
     HebrewTranslationRetryError,
     enqueue_hebrew_translation_retry,
+    execute_hebrew_translation_retry,
     run_hebrew_translation_retry,
+)
+from documents.services.process_document_outcome import (
+    ProcessDocumentDisposition,
 )
 
 ENGINE = "gemini-2.0-flash"
@@ -141,8 +145,16 @@ class HebrewTranslationRetryWorkerTests(TestCase):
             engine_name=ENGINE,
         )
 
-        run_hebrew_translation_retry(doc.id, worker_env=self.worker_env)
+        outcome = execute_hebrew_translation_retry(
+            doc.id,
+            worker_env=self.worker_env,
+        )
 
+        self.assertEqual(
+            outcome.disposition,
+            ProcessDocumentDisposition.COMPLETED,
+        )
+        self.assertTrue(outcome.should_ack)
         source.refresh_from_db()
         self.assertEqual(source.text, "keep this source exactly")
         hebrew = DocumentTextResult.objects.get(
@@ -182,8 +194,17 @@ class HebrewTranslationRetryWorkerTests(TestCase):
         _failed_hebrew(doc)
         mock_translate.side_effect = GeminiError("Gemini API Error: timeout")
 
-        run_hebrew_translation_retry(doc.id, worker_env=self.worker_env)
+        outcome = execute_hebrew_translation_retry(
+            doc.id,
+            worker_env=self.worker_env,
+        )
 
+        self.assertEqual(
+            outcome.disposition,
+            ProcessDocumentDisposition.FAILED,
+        )
+        self.assertEqual(outcome.failure_code, "HEBREW_TRANSLATION_FAILED")
+        self.assertTrue(outcome.should_ack)
         source.refresh_from_db()
         self.assertEqual(source.text, "recognized source text")
         hebrew = DocumentTextResult.objects.get(
@@ -231,8 +252,16 @@ class HebrewTranslationRetryWorkerTests(TestCase):
     def test_missing_source_is_rejected_safely(self):
         doc = _non_hebrew_doc()
 
-        run_hebrew_translation_retry(doc.id, worker_env=self.worker_env)
+        outcome = execute_hebrew_translation_retry(
+            doc.id,
+            worker_env=self.worker_env,
+        )
 
+        self.assertEqual(
+            outcome.disposition,
+            ProcessDocumentDisposition.NOOP,
+        )
+        self.assertTrue(outcome.should_ack)
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.PARTIAL)
 
@@ -285,9 +314,16 @@ class HebrewTranslationRetryWorkerTests(TestCase):
         _failed_hebrew(doc)
         _set_processing_updated_at(doc, age=timedelta(minutes=1))
 
-        ack = run_hebrew_translation_retry(doc.id, worker_env=self.worker_env)
+        outcome = execute_hebrew_translation_retry(
+            doc.id,
+            worker_env=self.worker_env,
+        )
 
-        self.assertFalse(ack)
+        self.assertEqual(
+            outcome.disposition,
+            ProcessDocumentDisposition.DEFERRED,
+        )
+        self.assertFalse(outcome.should_ack)
         mock_translate.assert_not_called()
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.PROCESSING)
@@ -578,9 +614,20 @@ class HebrewTranslationRetryWorkerTests(TestCase):
         )
         mock_persist.side_effect = RuntimeError("db write failed for test")
 
-        ack = run_hebrew_translation_retry(doc.id, worker_env=self.worker_env)
+        outcome = execute_hebrew_translation_retry(
+            doc.id,
+            worker_env=self.worker_env,
+        )
 
-        self.assertFalse(ack)
+        self.assertEqual(
+            outcome.disposition,
+            ProcessDocumentDisposition.RETRYABLE,
+        )
+        self.assertEqual(
+            outcome.failure_code,
+            "HEBREW_TRANSLATION_PERSISTENCE_RETRYABLE",
+        )
+        self.assertFalse(outcome.should_ack)
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.PARTIAL)
 

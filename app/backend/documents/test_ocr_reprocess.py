@@ -22,6 +22,7 @@ from documents.services.ocr_reprocess import (
     apply_ocr_reprocess,
     assess_ocr_reprocess,
 )
+from documents.services.process_document_outcome import ProcessDocumentDisposition
 
 COLLECTION_ID = "col"
 MODEL_ID = "42"
@@ -833,6 +834,72 @@ class RunWorkerOcrRetryModeTests(TestCase):
         self.assertFalse(call_kw["worker_env"].transkribus_recognition_only_retry)
         self.assertFalse(call_kw["worker_env"].transkribus_force_reprocess)
         self.assertIsNone(call_kw.get("source_transkribus_run_id"))
+
+    @patch(
+        "documents.management.commands.run_worker.translate_text_to_hebrew_with_gemini",
+        side_effect=RuntimeError("translation failed for test"),
+    )
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    def test_successful_source_with_translation_failure_returns_partial_outcome(
+        self,
+        mock_transcribe,
+        mock_extract_pages,
+        mock_get_object_bytes,
+        mock_translate,
+    ):
+        mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
+        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_transcribe.return_value = HtrResult(
+            text="recognized source text",
+            needs_review=False,
+            engine_name="gemini-2.0-flash",
+            review_reasons=[],
+        )
+
+        payload = json.loads(self._message()["Body"])
+        outcome = self.command._execute_process_document_payload(payload)
+
+        self.assertEqual(
+            outcome.disposition,
+            ProcessDocumentDisposition.PARTIAL,
+        )
+        self.assertEqual(
+            outcome.failure_code,
+            "PROCESS_DOCUMENT_PARTIAL",
+        )
+        self.assertTrue(outcome.should_ack)
+        mock_translate.assert_called_once()
+
+        self.doc.refresh_from_db()
+        self.assertEqual(
+            self.doc.processing_state_user,
+            Document.ProcessingState.PARTIAL,
+        )
+
+        source = DocumentTextResult.objects.get(
+            document=self.doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+        )
+        self.assertEqual(
+            source.status,
+            DocumentTextResult.Status.NEEDS_REVIEW,
+        )
+        self.assertEqual(source.text, "recognized source text")
+
+        hebrew = DocumentTextResult.objects.get(
+            document=self.doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+        )
+        self.assertEqual(
+            hebrew.status,
+            DocumentTextResult.Status.FAILED,
+        )
+        self.assertEqual(
+            hebrew.error_code,
+            "HEBREW_TRANSLATION_FAILED",
+        )
 
     @patch.dict(
         "os.environ",

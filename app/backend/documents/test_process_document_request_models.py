@@ -153,6 +153,50 @@ class ProcessDocumentRequestModelTests(TestCase):
 
         self.assertEqual(request.status, ProcessDocumentRequest.Status.COMPLETED)
 
+    def test_partial_is_terminal_and_allows_optional_metadata(self):
+        self._assert_integrity_error(
+            **self._ocr_kwargs(
+                status=ProcessDocumentRequest.Status.PARTIAL,
+            )
+        )
+
+        request = ProcessDocumentRequest.objects.create(
+            **self._ocr_kwargs(
+                status=ProcessDocumentRequest.Status.PARTIAL,
+                completed_at=timezone.now(),
+            )
+        )
+
+        self.assertEqual(
+            request.status,
+            ProcessDocumentRequest.Status.PARTIAL,
+        )
+        self.assertEqual(request.failure_code, "")
+        self.assertEqual(request.failure_message, "")
+
+        with_metadata = ProcessDocumentRequest.objects.create(
+            **self._ocr_kwargs(
+                status=ProcessDocumentRequest.Status.PARTIAL,
+                completed_at=timezone.now(),
+                failure_code="PROCESS_DOCUMENT_PARTIAL",
+                failure_message="Expected output is incomplete.",
+            )
+        )
+        self.assertEqual(
+            with_metadata.failure_code,
+            "PROCESS_DOCUMENT_PARTIAL",
+        )
+        self.assertEqual(
+            with_metadata.failure_message,
+            "Expected output is incomplete.",
+        )
+
+        active = ProcessDocumentRequest.objects.create(**self._ocr_kwargs())
+        self.assertEqual(
+            active.status,
+            ProcessDocumentRequest.Status.QUEUED,
+        )
+
     def test_failed_requires_terminal_timestamp_and_failure_code(self):
         self._assert_integrity_error(
             **self._ocr_kwargs(
