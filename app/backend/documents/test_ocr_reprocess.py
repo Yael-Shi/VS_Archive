@@ -14,6 +14,7 @@ from documents.management.commands.run_worker import Command as RunWorkerCommand
 from documents.models import Document, DocumentTextResult, TranskribusRun
 from documents.services.archive_items import create_ocr_document
 from documents.services.env_validation import WorkerEnvConfig
+from documents.services.gemini_engine import GeminiResult
 from documents.services.htr_adapters.base import HtrResult
 from documents.services.ocr_reprocess import (
     OcrReprocessError,
@@ -84,6 +85,16 @@ def _seed_transkribus_run(
 
 
 class OcrReprocessServiceTests(TestCase):
+    def setUp(self):
+        super().setUp()
+        flag_patcher = patch.dict(
+            "os.environ",
+            {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "true"},
+            clear=False,
+        )
+        flag_patcher.start()
+        self.addCleanup(flag_patcher.stop)
+
     def test_dry_run_upload_failure_classifies_normal_reenqueue(self):
         doc = _failed_ocr_document()
         _seed_transkribus_run(
@@ -273,6 +284,72 @@ class OcrReprocessServiceTests(TestCase):
             source_transkribus_run_id=source.id,
         )
 
+    @patch.dict(
+        "os.environ",
+        {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "false"},
+        clear=False,
+    )
+    def test_general_hebrew_handwriting_does_not_require_transkribus_config(self):
+        doc = _failed_ocr_document(
+            handwriting_type=Document.HandwritingType.GENERAL,
+        )
+
+        assessment = assess_ocr_reprocess(
+            doc.id,
+            collection_id="",
+            model_id="",
+        )
+
+        self.assertEqual(assessment.retry_mode, OcrRetryMode.NORMAL_REENQUEUE)
+        self.assertIsNone(assessment.source_transkribus_run_id)
+
+    @patch.dict(
+        "os.environ",
+        {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "false"},
+        clear=False,
+    )
+    def test_general_hebrew_handwriting_ignores_reusable_transkribus_run(self):
+        doc = _failed_ocr_document(
+            handwriting_type=Document.HandwritingType.GENERAL,
+        )
+        _seed_transkribus_run(
+            doc,
+            status=TranskribusRun.Status.FAILED,
+            remote_doc_id="555",
+            pages_query="1",
+            error_code="TRANSKRIBUS_RECOGNITION_FAILED",
+        )
+
+        assessment = assess_ocr_reprocess(
+            doc.id,
+            collection_id=COLLECTION_ID,
+            model_id=MODEL_ID,
+        )
+
+        self.assertEqual(assessment.retry_mode, OcrRetryMode.NORMAL_REENQUEUE)
+        self.assertIsNone(assessment.source_transkribus_run_id)
+
+    @patch.dict(
+        "os.environ",
+        {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "false"},
+        clear=False,
+    )
+    @patch("documents.services.ocr_reprocess.send_process_document_message")
+    def test_vs_handwriting_with_disabled_route_does_not_enqueue(self, mock_enqueue):
+        doc = _failed_ocr_document()
+
+        with self.assertRaises(OcrReprocessError) as ctx:
+            apply_ocr_reprocess(
+                doc.id,
+                collection_id=COLLECTION_ID,
+                model_id=MODEL_ID,
+            )
+
+        self.assertIn("valid OCR route", str(ctx.exception))
+        mock_enqueue.assert_not_called()
+        doc.refresh_from_db()
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.FAILED)
+
     def test_verified_text_blocks_reprocess(self):
         doc = _failed_ocr_document()
         DocumentTextResult.objects.create(
@@ -376,6 +453,34 @@ class GeminiPartialOcrReprocessTests(TestCase):
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.PROCESSING)
         mock_enqueue.assert_called_once_with(doc.id)
 
+    @patch.dict(
+        "os.environ",
+        {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "false"},
+        clear=False,
+    )
+    def test_general_hebrew_partial_failed_source_ocr_is_eligible(self):
+        doc = _gemini_partial_failed_source_document(
+            language=Document.Language.HEBREW,
+            handwriting_type=Document.HandwritingType.GENERAL,
+        )
+        DocumentTextResult.objects.filter(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+        ).update(
+            prompt_variant=(
+                DocumentTextResult.OcrPromptVariant.HEBREW_GENERAL_HANDWRITTEN
+            )
+        )
+
+        assessment = assess_ocr_reprocess(
+            doc.id,
+            collection_id="",
+            model_id="",
+        )
+
+        self.assertEqual(assessment.retry_mode, OcrRetryMode.NORMAL_REENQUEUE)
+        self.assertIsNone(assessment.source_transkribus_run_id)
+
     def test_translation_only_partial_is_ineligible(self):
         doc = _gemini_partial_failed_source_document()
         DocumentTextResult.objects.filter(document=doc).delete()
@@ -466,6 +571,11 @@ class GeminiPartialOcrReprocessTests(TestCase):
                 model_id=MODEL_ID,
             )
 
+    @patch.dict(
+        "os.environ",
+        {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "true"},
+        clear=False,
+    )
     def test_failed_ocr_retry_behavior_unchanged(self):
         doc = _failed_ocr_document()
 
@@ -577,6 +687,11 @@ class SendProcessDocumentMessageTests(SimpleTestCase):
 
 
 class OcrReprocessCommandTests(TestCase):
+    @patch.dict(
+        "os.environ",
+        {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "true"},
+        clear=False,
+    )
     @patch(
         "documents.management.commands.reprocess_failed_ocr_document.validate_required_env"
     )
@@ -684,6 +799,13 @@ class RunWorkerOcrRetryModeTests(TestCase):
             payload["source_transkribus_run_id"] = source_transkribus_run_id
         return {"Body": json.dumps(payload)}
 
+    @patch(
+        "documents.management.commands.run_worker.translate_text_to_hebrew_with_gemini",
+        return_value=GeminiResult(
+            text="תרגום",
+            engine_name="gemini-2.0-flash",
+        ),
+    )
     @patch("documents.management.commands.run_worker.get_object_bytes")
     @patch("documents.management.commands.run_worker.extract_pages")
     @patch("documents.management.commands.run_worker.transcribe_pages")
@@ -692,6 +814,7 @@ class RunWorkerOcrRetryModeTests(TestCase):
         mock_transcribe,
         mock_extract_pages,
         mock_get_object_bytes,
+        mock_translate,
     ):
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
         mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
@@ -704,6 +827,7 @@ class RunWorkerOcrRetryModeTests(TestCase):
 
         self.assertTrue(self.command._process_message(self._message()))
 
+        mock_translate.assert_called_once()
         call_kw = mock_transcribe.call_args.kwargs
         self.assertIs(call_kw["worker_env"], self.base_cfg)
         self.assertFalse(call_kw["worker_env"].transkribus_recognition_only_retry)

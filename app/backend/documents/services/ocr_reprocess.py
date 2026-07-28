@@ -9,7 +9,7 @@ from django.db import transaction
 
 from documents.models import ArchiveItem, Document, DocumentTextResult, TranskribusRun
 from documents.services import transkribus_run_persistence as trp
-from documents.services.ocr_routing import select_ocr_route
+from documents.services.ocr_routing import OcrRouteConfig, select_ocr_route
 from documents.services.sqs import send_process_document_message
 
 
@@ -40,12 +40,24 @@ def _get_document(document_id: int) -> Document:
         raise OcrReprocessError(f"Document id={document_id} does not exist.") from exc
 
 
-def _document_routes_to_gemini(doc: Document) -> bool:
+def _select_document_ocr_route(doc: Document) -> OcrRouteConfig:
     try:
-        route = select_ocr_route(doc.language, doc.text_input_type)
-    except ValueError:
-        return False
-    return route.engine_key == DocumentTextResult.OcrEngineKey.GEMINI
+        return select_ocr_route(
+            doc.language,
+            doc.text_input_type,
+            handwriting_type=doc.handwriting_type,
+        )
+    except ValueError as exc:
+        raise OcrReprocessError(
+            f"Document id={doc.id} has no valid OCR route for reprocess."
+        ) from exc
+
+
+def _document_routes_to_gemini(doc: Document) -> bool:
+    return (
+        _select_document_ocr_route(doc).engine_key
+        == DocumentTextResult.OcrEngineKey.GEMINI
+    )
 
 
 def _source_text_row_is_usable(row: DocumentTextResult) -> bool:
@@ -144,13 +156,6 @@ def is_ocr_reprocess_ui_eligible(doc: Document) -> bool:
     return True
 
 
-def _is_hebrew_handwritten(doc: Document) -> bool:
-    return (
-        doc.language == Document.Language.HEBREW
-        and doc.text_input_type == Document.TextInputType.HANDWRITTEN
-    )
-
-
 def _transkribus_reprocess_config_present(collection_id: str, model_id: str) -> bool:
     return bool(str(collection_id).strip()) and bool(str(model_id).strip())
 
@@ -158,10 +163,11 @@ def _transkribus_reprocess_config_present(collection_id: str, model_id: str) -> 
 def _validate_transkribus_reprocess_config(
     doc: Document,
     *,
+    route: OcrRouteConfig,
     collection_id: str,
     model_id: str,
 ) -> None:
-    if not _is_hebrew_handwritten(doc):
+    if route.engine_key != DocumentTextResult.OcrEngineKey.TRANSKRIBUS:
         return
     if _transkribus_reprocess_config_present(collection_id, model_id):
         return
@@ -169,7 +175,7 @@ def _validate_transkribus_reprocess_config(
         f"Document id={doc.id} is Hebrew handwritten and requires "
         "TRANSKRIBUS_COLLECTION_ID and TRANSKRIBUS_MODEL_ID for OCR reprocess "
         "assessment, but one or both are missing in this environment. "
-        "Cannot safely classify retry mode without them."
+        "Cannot safely classify the Transkribus retry mode without them."
     )
 
 
@@ -195,7 +201,15 @@ def classify_ocr_retry_mode(
     document_id: int,
     collection_id: str,
     model_id: str,
+    route: OcrRouteConfig,
 ) -> OcrReprocessAssessment:
+    if route.engine_key != DocumentTextResult.OcrEngineKey.TRANSKRIBUS:
+        return OcrReprocessAssessment(
+            document_id=document_id,
+            retry_mode=OcrRetryMode.NORMAL_REENQUEUE,
+            source_transkribus_run_id=None,
+        )
+
     reusable = trp.find_reusable_upload_run(
         document_id=document_id,
         collection_id=collection_id,
@@ -226,8 +240,10 @@ def assess_ocr_reprocess(
 ) -> OcrReprocessAssessment:
     doc = _get_document(document_id)
     validate_document_for_ocr_reprocess(doc)
+    route = _select_document_ocr_route(doc)
     _validate_transkribus_reprocess_config(
         doc,
+        route=route,
         collection_id=collection_id,
         model_id=model_id,
     )
@@ -235,6 +251,7 @@ def assess_ocr_reprocess(
         document_id=document_id,
         collection_id=collection_id,
         model_id=model_id,
+        route=route,
     )
 
 
