@@ -63,11 +63,22 @@ class VsArchiveDataStack(Stack):
             ),
         )
 
+        self.jobs_dead_letter_queue = sqs.Queue(
+            self,
+            f"{cfg.prefix}-jobs-dlq",
+            retention_period=Duration.days(14),
+            removal_policy=RemovalPolicy.RETAIN,
+        )
+
         self.jobs_queue = sqs.Queue(
             self,
             f"{cfg.prefix}-jobs",
             visibility_timeout=Duration.minutes(10),
             retention_period=Duration.days(4),
+            dead_letter_queue=sqs.DeadLetterQueue(
+                max_receive_count=5,
+                queue=self.jobs_dead_letter_queue,
+            ),
         )
 
         self.db_secret = cast(
