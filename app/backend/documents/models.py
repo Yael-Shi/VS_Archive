@@ -1621,6 +1621,266 @@ class TranskribusCorrectedCurrentSyncAttempt(models.Model):
         )
 
 
+class ProcessDocumentRequest(models.Model):
+    """Durable lifecycle and payload contract for PROCESS_DOCUMENT."""
+
+    class Status(models.TextChoices):
+        QUEUED = "QUEUED", "Queued"
+        RUNNING = "RUNNING", "Running"
+        RECOVERY_REQUIRED = "RECOVERY_REQUIRED", "Recovery required"
+        COMPLETED = "COMPLETED", "Completed"
+        FAILED = "FAILED", "Failed"
+        ENQUEUE_FAILED = "ENQUEUE_FAILED", "Enqueue failed"
+
+    class Operation(models.TextChoices):
+        OCR = "OCR", "OCR"
+        HEBREW_TRANSLATION = "HEBREW_TRANSLATION", "Hebrew translation"
+
+    class Origin(models.TextChoices):
+        UPLOAD_FINALIZE = "UPLOAD_FINALIZE", "Upload finalize"
+        OCR_REPROCESS = "OCR_REPROCESS", "OCR reprocess"
+        HEBREW_TRANSLATION_RETRY = (
+            "HEBREW_TRANSLATION_RETRY",
+            "Hebrew translation retry",
+        )
+
+    class OcrRetryMode(models.TextChoices):
+        NORMAL_REENQUEUE = "normal_reenqueue", "Normal re-enqueue"
+        TRANSKRIBUS_RECOGNITION_ONLY = (
+            "transkribus_recognition_only",
+            "Transkribus recognition only",
+        )
+
+    document = models.ForeignKey(
+        Document,
+        on_delete=models.CASCADE,
+        related_name="process_document_requests",
+    )
+    initiated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="initiated_process_document_requests",
+    )
+    source_transkribus_run = models.ForeignKey(
+        TranskribusRun,
+        on_delete=models.RESTRICT,
+        null=True,
+        blank=True,
+        related_name="process_document_requests",
+    )
+
+    status = models.CharField(max_length=32, choices=Status.choices)
+    operation = models.CharField(max_length=32, choices=Operation.choices)
+    origin = models.CharField(max_length=32, choices=Origin.choices)
+    ocr_retry_mode = models.CharField(
+        max_length=48,
+        choices=OcrRetryMode.choices,
+        blank=True,
+        default="",
+    )
+
+    lease_token = models.UUIDField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    failure_code = models.CharField(max_length=64, blank=True, default="")
+    failure_message = models.CharField(max_length=512, blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    last_enqueued_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["document", "-created_at"],
+                name="proc_req_doc_created_idx",
+            ),
+            models.Index(
+                fields=["document", "status"],
+                name="proc_req_doc_status_idx",
+            ),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(
+                    status__in=[
+                        "QUEUED",
+                        "RUNNING",
+                        "RECOVERY_REQUIRED",
+                        "COMPLETED",
+                        "FAILED",
+                        "ENQUEUE_FAILED",
+                    ]
+                ),
+                name="proc_req_status_valid",
+            ),
+            models.UniqueConstraint(
+                fields=["document"],
+                condition=models.Q(
+                    status__in=[
+                        "QUEUED",
+                        "RUNNING",
+                        "RECOVERY_REQUIRED",
+                        "ENQUEUE_FAILED",
+                    ]
+                ),
+                name="uniq_process_req_active_doc",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status__in=["QUEUED", "ENQUEUE_FAILED"])
+                    | (
+                        models.Q(lease_token__isnull=True)
+                        & models.Q(lease_expires_at__isnull=True)
+                        & models.Q(started_at__isnull=True)
+                        & models.Q(completed_at__isnull=True)
+                    )
+                ),
+                name="proc_req_queued_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="RUNNING")
+                    | (
+                        models.Q(lease_token__isnull=False)
+                        & models.Q(lease_expires_at__isnull=False)
+                        & models.Q(started_at__isnull=False)
+                        & models.Q(completed_at__isnull=True)
+                    )
+                ),
+                name="proc_req_running_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="RECOVERY_REQUIRED")
+                    | (
+                        models.Q(lease_token__isnull=False)
+                        & models.Q(lease_expires_at__isnull=True)
+                        & models.Q(started_at__isnull=False)
+                        & models.Q(completed_at__isnull=True)
+                    )
+                ),
+                name="proc_req_recovery_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status__in=["COMPLETED", "FAILED"])
+                    | (
+                        models.Q(lease_token__isnull=True)
+                        & models.Q(lease_expires_at__isnull=True)
+                        & models.Q(completed_at__isnull=False)
+                    )
+                ),
+                name="proc_req_terminal_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="COMPLETED")
+                    | (models.Q(failure_code="") & models.Q(failure_message=""))
+                ),
+                name="proc_req_completed_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status__in=["FAILED", "ENQUEUE_FAILED"])
+                    | ~models.Q(failure_code="")
+                ),
+                name="proc_req_failure_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        operation="OCR",
+                        ocr_retry_mode__in=[
+                            "normal_reenqueue",
+                            "transkribus_recognition_only",
+                        ],
+                    )
+                    | models.Q(
+                        operation="HEBREW_TRANSLATION",
+                        ocr_retry_mode="",
+                        source_transkribus_run__isnull=True,
+                    )
+                ),
+                name="proc_req_operation_payload",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    (
+                        models.Q(
+                            ocr_retry_mode="transkribus_recognition_only",
+                            source_transkribus_run__isnull=False,
+                        )
+                    )
+                    | (
+                        ~models.Q(ocr_retry_mode="transkribus_recognition_only")
+                        & models.Q(source_transkribus_run__isnull=True)
+                    )
+                ),
+                name="proc_req_source_run_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        origin="UPLOAD_FINALIZE",
+                        operation="OCR",
+                        ocr_retry_mode="normal_reenqueue",
+                    )
+                    | models.Q(
+                        origin="OCR_REPROCESS",
+                        operation="OCR",
+                    )
+                    | models.Q(
+                        origin="HEBREW_TRANSLATION_RETRY",
+                        operation="HEBREW_TRANSLATION",
+                    )
+                ),
+                name="proc_req_origin_operation",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        source_transkribus_run = self.source_transkribus_run
+        if (
+            source_transkribus_run is not None
+            and self.document_id
+            and source_transkribus_run.document_id != self.document_id
+        ):
+            raise ValidationError(
+                {
+                    "source_transkribus_run": (
+                        "ProcessDocumentRequest requires source_transkribus_run "
+                        "to belong to the same document."
+                    )
+                }
+            )
+
+    def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+        if update_fields is None or (
+            {
+                "document",
+                "document_id",
+                "source_transkribus_run",
+                "source_transkribus_run_id",
+            }
+            & set(update_fields)
+        ):
+            self.clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return (
+            f"ProcessDocumentRequest(id={self.pk}, "
+            f"doc={self.document_id}, status={self.status})"
+        )
+
+
 class TranskribusCorrectedCurrentSyncRequest(models.Model):
     """
     Durable staff corrected/current sync queue request for one Document.
