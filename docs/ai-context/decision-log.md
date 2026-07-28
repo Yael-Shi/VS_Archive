@@ -2042,3 +2042,21 @@ Content-Type: `application/xml` via `put_object_bytes`.
 **Tests:** extended `test_archive_search_index.py`, `test_archive_full_text_search.py`, `test_archive_search_index_sync.py`, `test_archive_search_index_sync_ocr_body.py`, `test_archive_search_index_sync_automated.py`.
 
 **Still deferred:** hover/page/line mapping; `pg_trgm`/fuzzy/morphology/Hebrew prefix expansion.
+
+## PROCESS_DOCUMENT durable Request enqueue foundation (service only)
+
+**Decision / implemented:** `enqueue_process_document_request(...)` in `documents/services/process_document_request_enqueue.py` creates, coalesces, and enqueues durable `ProcessDocumentRequest` rows. `send_process_document_request_message(request_id)` sends the request-aware payload `{"type": "PROCESS_DOCUMENT", "request_id": <positive int>}`. This PR is service-only: existing upload-finalize, OCR-reprocess, and Hebrew-translation-retry callers continue using their legacy enqueue paths and are wired in later, separately reviewed PRs.
+
+**Transaction boundary:** The public enqueue service must be called outside every database atomic block. It rejects an outer transaction before validation or database writes. Under one short transaction it locks the `Document`, validates the canonical operation/origin/retry/source-run shape, and determines send right. SQS `SendMessage` always runs after that transaction commits.
+
+**Document-lock send right and coalescing:** Only the caller that creates a new `QUEUED` Request, or atomically changes a matching `ENQUEUE_FAILED` Request back to `QUEUED`, may send. A matching `QUEUED`, `RUNNING`, or `RECOVERY_REQUIRED` Request is returned without resending. A differing active payload returns `ACTIVE_REQUEST_CONFLICT`; the existing Request is never repurposed. Terminal history does not block a new Request.
+
+**Payload and provenance:** OCR supports `UPLOAD_FINALIZE` and `OCR_REPROCESS`; Hebrew translation supports `HEBREW_TRANSLATION_RETRY`. `transkribus_recognition_only` requires a positive source `TranskribusRun` id belonging to the same Document. System-initiated work may use `initiated_by=None`; any supplied actor must be a persisted `User`. Retrying with no actor preserves existing actor provenance.
+
+**Post-send fencing:** Success and failure finalization use compare-and-set updates restricted to an unclaimed `QUEUED` Request with no lease token. They never overwrite worker-owned `RUNNING`, `RECOVERY_REQUIRED`, or terminal state. If the worker claims or terminalizes during `SendMessage`, the service reloads and reports the observed state; `PARTIAL` remains an acknowledged terminal outcome.
+
+**Send failures:** Only expected botocore or SQS configuration failures are classified. Definite rejection or missing configuration records `ENQUEUE_FAILED` / `ENQUEUE_SEND_FAILED` with a safe message and `message_sent=False`. Ambiguous transport outcomes record `ENQUEUE_FAILED` / `ENQUEUE_OUTCOME_UNKNOWN` with `message_sent=None`. Programming exceptions propagate instead of being misclassified.
+
+**Known limitation:** A process crash after the Request transaction commits but before `SendMessage`, or an unexpected programming exception at send time, can leave a stranded `QUEUED` Request. Matching peers deliberately do not resend it. Explicit recovery/requeue tooling remains a later task.
+
+**Still deferred:** wiring upload finalize, OCR reprocess, and Hebrew translation retry to this service; removing the legacy document-id payload producers; stranded-`QUEUED` reconciliation/requeue tooling; and any caller-specific UI or operational behavior changes.

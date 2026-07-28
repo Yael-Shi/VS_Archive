@@ -4,6 +4,10 @@ from typing import Any, Dict
 
 import boto3
 
+# Top-level SQS message type for durable PROCESS_DOCUMENT dispatch.
+# Request-aware payload: {"type": PROCESS_DOCUMENT_MESSAGE_TYPE, "request_id": <int>}.
+PROCESS_DOCUMENT_MESSAGE_TYPE = "PROCESS_DOCUMENT"
+
 # Top-level SQS message type for staff corrected/current sync dispatch.
 # Payload: {"type": SYNC_TRANSKRIBUS_CORRECTED_CURRENT, "request_id": <int>}.
 SYNC_TRANSKRIBUS_CORRECTED_CURRENT = "SYNC_TRANSKRIBUS_CORRECTED_CURRENT"
@@ -40,6 +44,24 @@ def send_process_document_message(
         payload["ocr_retry_mode"] = ocr_retry_mode
     if source_transkribus_run_id is not None:
         payload["source_transkribus_run_id"] = source_transkribus_run_id
+    sqs.send_message(QueueUrl=queue_url, MessageBody=json.dumps(payload))
+
+
+def send_process_document_request_message(request_id: int) -> None:
+    """Enqueue a durable PROCESS_DOCUMENT Request by id only."""
+    if type(request_id) is not int or request_id < 1:
+        raise ValueError("request_id must be a positive int")
+
+    queue_url = _required_env("SQS_QUEUE_URL")
+    region = (
+        os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "eu-central-1"
+    )
+
+    sqs = boto3.client("sqs", region_name=region)
+    payload: Dict[str, Any] = {
+        "type": PROCESS_DOCUMENT_MESSAGE_TYPE,
+        "request_id": request_id,
+    }
     sqs.send_message(QueueUrl=queue_url, MessageBody=json.dumps(payload))
 
 
