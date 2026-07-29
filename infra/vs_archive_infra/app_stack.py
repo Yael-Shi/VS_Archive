@@ -18,6 +18,7 @@ from aws_cdk import aws_certificatemanager as acm
 from typing import cast
 from .config import EnvConfig
 from .image_tags import resolve_image_tags
+from .worker_scaling import resolve_worker_desired_count
 
 
 class VsArchiveAppStack(Stack):
@@ -361,6 +362,7 @@ class VsArchiveAppStack(Stack):
             f"{cfg.prefix}-worker-svc",
             cluster=cluster,
             task_definition=worker_task,
+            desired_count=resolve_worker_desired_count(self),
             assign_public_ip=True,
             vpc_subnets=public_subnets,
             security_groups=[sg_web],
