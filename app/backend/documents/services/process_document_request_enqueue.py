@@ -4,8 +4,9 @@ Only the caller that creates a QUEUED Request, or safely retries a matching
 ENQUEUE_FAILED Request, receives send right. SQS I/O always occurs after the
 short Document-lock transaction commits.
 
-Known limitation: a process crash after commit but before SendMessage can leave
-a stranded QUEUED Request. Recovery tooling remains a later task.
+A process crash after commit but before SendMessage can leave a stranded
+QUEUED Request. ``recover_process_document_requests`` repairs eligible rows
+after an explicit cooldown and lock-time reassessment.
 """
 
 from __future__ import annotations
@@ -436,6 +437,92 @@ def _outcome_from_observed(
     return "ALREADY_QUEUED"
 
 
+def send_reserved_process_document_request(
+    *,
+    request_id: int,
+    created: bool,
+) -> EnqueueResult:
+    """
+    Send a Request for which the caller already acquired durable send right.
+
+    The reservation transaction must have committed before this function is
+    called. Success and failure finalization remain fenced against a worker
+    that claims or terminalizes the Request during SendMessage.
+    """
+    if connection.in_atomic_block:
+        raise RuntimeError(
+            "PROCESS_DOCUMENT Request SendMessage must run outside "
+            "database transactions."
+        )
+    if type(request_id) is not int or request_id < 1:
+        raise _invalid_payload("request_id must be a positive int.")
+    if type(created) is not bool:
+        raise _invalid_payload("created must be a bool.")
+
+    try:
+        send_process_document_request_message(request_id)
+    except _EXPECTED_SEND_EXCEPTIONS as exc:
+        kind = classify_process_document_sqs_send_failure(exc)
+        if kind == "definite":
+            failure_code = _FAILURE_CODE_SEND_FAILED
+            failure_message = _SAFE_SEND_FAILED_MESSAGE
+            message_sent: bool | None = False
+            cas_outcome: EnqueueOutcome = "ENQUEUE_FAILED"
+        else:
+            failure_code = _FAILURE_CODE_OUTCOME_UNKNOWN
+            failure_message = _SAFE_OUTCOME_UNKNOWN_MESSAGE
+            message_sent = None
+            cas_outcome = "ENQUEUE_OUTCOME_UNKNOWN"
+
+        updated = _finalize_failure(
+            request_id=request_id,
+            failure_code=failure_code,
+            failure_message=failure_message,
+        )
+        request = _reload_request(request_id)
+        if (
+            updated == 1
+            and request.status == ProcessDocumentRequest.Status.ENQUEUE_FAILED
+        ):
+            outcome = cas_outcome
+        else:
+            outcome = _outcome_from_observed(
+                created=created,
+                send_accepted=False,
+                observed_status=request.status,
+            )
+            if request.status == ProcessDocumentRequest.Status.ENQUEUE_FAILED:
+                outcome = (
+                    "ENQUEUE_FAILED"
+                    if request.failure_code == _FAILURE_CODE_SEND_FAILED
+                    else "ENQUEUE_OUTCOME_UNKNOWN"
+                )
+
+        return EnqueueResult(
+            outcome=outcome,
+            request=request,
+            created=created,
+            message_sent=message_sent,
+            observed_status=request.status,
+            send_attempted=True,
+        )
+
+    _finalize_success(request_id=request_id)
+    request = _reload_request(request_id)
+    return EnqueueResult(
+        outcome=_outcome_from_observed(
+            created=created,
+            send_accepted=True,
+            observed_status=request.status,
+        ),
+        request=request,
+        created=created,
+        message_sent=True,
+        observed_status=request.status,
+        send_attempted=True,
+    )
+
+
 def enqueue_process_document_request(
     *,
     document_id: int,
@@ -492,72 +579,7 @@ def enqueue_process_document_request(
             send_attempted=False,
         )
 
-    if connection.in_atomic_block:
-        raise RuntimeError(
-            "BUG: PROCESS_DOCUMENT Request enqueue attempted SendMessage "
-            "inside a database atomic block."
-        )
-
-    created = resolved.created
-    try:
-        send_process_document_request_message(request.pk)
-    except _EXPECTED_SEND_EXCEPTIONS as exc:
-        kind = classify_process_document_sqs_send_failure(exc)
-        if kind == "definite":
-            failure_code = _FAILURE_CODE_SEND_FAILED
-            failure_message = _SAFE_SEND_FAILED_MESSAGE
-            message_sent: bool | None = False
-            cas_outcome: EnqueueOutcome = "ENQUEUE_FAILED"
-        else:
-            failure_code = _FAILURE_CODE_OUTCOME_UNKNOWN
-            failure_message = _SAFE_OUTCOME_UNKNOWN_MESSAGE
-            message_sent = None
-            cas_outcome = "ENQUEUE_OUTCOME_UNKNOWN"
-
-        updated = _finalize_failure(
-            request_id=request.pk,
-            failure_code=failure_code,
-            failure_message=failure_message,
-        )
-        request = _reload_request(request.pk)
-        if (
-            updated == 1
-            and request.status == ProcessDocumentRequest.Status.ENQUEUE_FAILED
-        ):
-            outcome = cas_outcome
-        else:
-            outcome = _outcome_from_observed(
-                created=created,
-                send_accepted=False,
-                observed_status=request.status,
-            )
-            if request.status == ProcessDocumentRequest.Status.ENQUEUE_FAILED:
-                outcome = (
-                    "ENQUEUE_FAILED"
-                    if request.failure_code == _FAILURE_CODE_SEND_FAILED
-                    else "ENQUEUE_OUTCOME_UNKNOWN"
-                )
-
-        return EnqueueResult(
-            outcome=outcome,
-            request=request,
-            created=created,
-            message_sent=message_sent,
-            observed_status=request.status,
-            send_attempted=True,
-        )
-
-    _finalize_success(request_id=request.pk)
-    request = _reload_request(request.pk)
-    return EnqueueResult(
-        outcome=_outcome_from_observed(
-            created=created,
-            send_accepted=True,
-            observed_status=request.status,
-        ),
-        request=request,
-        created=created,
-        message_sent=True,
-        observed_status=request.status,
-        send_attempted=True,
+    return send_reserved_process_document_request(
+        request_id=request.pk,
+        created=resolved.created,
     )

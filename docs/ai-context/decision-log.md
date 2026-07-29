@@ -2131,3 +2131,63 @@ mixed-version deployment safety. Remove them only after the durable chain is
 deployed and verified end to end. Stranded pre-send `QUEUED` recovery/requeue,
 async Transkribus resume, Gemini page persistence, and deployment remain
 separate work.
+
+## PROCESS_DOCUMENT stranded enqueue recovery/requeue
+
+**Decision / implemented:** Add the dry-run-by-default management command
+`recover_process_document_requests` and the fenced recovery service in
+`process_document_request_recovery.py`. The command repairs delivery of an
+already-approved durable Request; it does not create new processing intent or
+repurpose its payload. Before reserving a send it revalidates the current
+caller-specific safety contract. Operator usage is documented in
+`docs/ai-context/process-document-request-recovery.md`.
+
+**Eligibility:** A Request is recoverable only when it is older than the
+operator-selected cooldown (default **15 minutes**) and is either:
+
+- `QUEUED` with `last_enqueued_at IS NULL` (no successful send finalization);
+- `ENQUEUE_FAILED`, including `ENQUEUE_OUTCOME_UNKNOWN`.
+
+`QUEUED` rows with a recorded successful enqueue, `RUNNING`,
+`RECOVERY_REQUIRED`, and every terminal status are excluded. Duplicate
+request-id messages remain execution-safe because the worker locks the Request
+and grants only one current lease.
+
+**Current-intent reassessment:** Recovery must not bypass safety changes that
+occurred after the original enqueue attempt. `OCR_REPROCESS` reruns the
+route-aware assessment and requires the selected retry mode/source run to match
+the stored Request exactly. `HEBREW_TRANSLATION_RETRY` reruns source,
+processing-state, and overwrite protection. `UPLOAD_FINALIZE` requires an
+uploaded OCR Document with no verified text and no usable existing
+`SOURCE_TEXT`. Failed reassessment or payload drift is reported as an
+ineligible skip, without reservation or SQS.
+
+**Operator safety:** Unscoped execution is report-only. `--apply` requires
+repeated `--request-id`, repeated `--document-id`, or explicit
+`--all-eligible`. `--limit` defaults to 100 and is capped at 1000.
+`--older-than-minutes` is explicit, may override the 15-minute default, and
+must remain at least one minute so the reservation has a real exclusion
+window.
+Missing explicit Request ids and invalid limits/ages fail before mutation.
+
+**Reservation and SQS boundary:** Recovery reassesses under
+`select_for_update`. An eligible `ENQUEUE_FAILED` row returns to canonical
+`QUEUED` shape; every eligible row receives a new `updated_at` cooldown
+reservation. The transaction then commits before `SendMessage`. A crash in the
+new pre-send window leaves the row recoverable again after the cooldown. The
+shared `send_reserved_process_document_request` path owns the existing
+definite/ambiguous failure classification and post-send compare-and-set
+fencing, so recovery cannot overwrite worker-owned running or terminal state.
+Unexpected programming exceptions still propagate.
+
+**Document state:** Successful queued OCR recovery marks the Document
+`PROCESSING` and clears `upload_error` only while the same Request remains
+`QUEUED`. A persisted queue failure marks a safe OCR failure only while that
+Request remains `ENQUEUE_FAILED`. Hebrew-translation recovery does not mutate
+Document state; its worker remains the owner of claim and completion.
+
+**Scope / deferrals:** No model, migration, worker execution, SQS payload, IAM,
+or infrastructure changes. `RECOVERY_REQUIRED` execution recovery is
+deliberately not replayed by this command. Legacy document-id compatibility,
+deployment/E2E, async Transkribus resume, and Gemini page persistence remain
+separate work.

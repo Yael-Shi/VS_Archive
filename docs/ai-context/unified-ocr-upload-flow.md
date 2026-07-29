@@ -224,6 +224,15 @@ mode, and no source Transkribus run. Enqueue leaves Document processing state
 unchanged; the translation worker owns claim and completion. Expected queue,
 conflict, and recovery failures use safe typed feedback.
 
+Operational delivery recovery uses the dry-run-by-default
+`recover_process_document_requests` command. It may resend only old,
+never-finalized `QUEUED` Requests or `ENQUEUE_FAILED` Requests after a
+lock-time reassessment and cooldown reservation. That reassessment reruns the
+origin-specific upload, OCR-reprocess, or Hebrew-translation safety contract
+and rejects changed request payloads. Apply mode requires an explicit
+Request/Document scope or `--all-eligible`; running, terminal, and
+`RECOVERY_REQUIRED` work is never replayed.
+
 ---
 
 ## 3. Implementation history (PR1–PR3)
