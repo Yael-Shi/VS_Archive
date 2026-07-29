@@ -4,6 +4,7 @@ import inspect
 import json
 import os
 import tempfile
+import traceback
 from dataclasses import replace
 from datetime import timedelta
 from io import BytesIO, StringIO
@@ -30,6 +31,7 @@ from documents.models import (
 from documents.services.archive_items import create_ocr_document
 from documents.services.env_validation import validate_required_env
 from documents.services.gemini_engine import (
+    GeminiApiError,
     GeminiError,
     GeminiResult,
     _HANDWRITTEN_LATIN_PROMPT,
@@ -7993,7 +7995,7 @@ class GeminiEnginePromptTests(SimpleTestCase):
         self.assertIn("output_length=21", log_output)
         self.assertIn("trailing_whitespace_chars=5", log_output)
         self.assertIn("finish_reason=STOP", log_output)
-        self.assertIn("finish_message='Natural stop'", log_output)
+        self.assertNotIn("Natural stop", log_output)
         self.assertIn("prompt_token_count=321", log_output)
         self.assertIn("candidates_token_count=45", log_output)
         self.assertIn("thoughts_token_count=0", log_output)
@@ -8086,10 +8088,7 @@ class GeminiEnginePromptTests(SimpleTestCase):
         self.assertIn("raw_output_length=35", message)
         self.assertIn("output_length=30", message)
         self.assertIn("trailing_whitespace_chars=5", message)
-        self.assertIn(
-            "finish_message='Maximum output tokens reached'",
-            message,
-        )
+        self.assertNotIn("Maximum output tokens reached", message)
         self.assertIn("prompt_token_count=730", message)
         self.assertIn("candidates_token_count=8192", message)
         self.assertIn("thoughts_token_count=0", message)
@@ -8463,6 +8462,72 @@ class GeminiHebrewTranslationTests(SimpleTestCase):
 
         self.assertEqual(result.text, hebrew_text)
         mock_client.models.generate_content.assert_called_once()
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_translation_keeps_response_text_extraction_behavior(
+        self, _mock_get_key, mock_create_client
+    ):
+        source_text = self._short_source_text(80)
+        hebrew_text = "זהו תרגום עברי קצר וסביר למסמך קצר."
+        response = self._translation_response(hebrew_text)
+        response.candidates[0].content = SimpleNamespace(
+            parts=[SimpleNamespace(text="different candidate-part text")]
+        )
+        mock_client = Mock()
+        mock_client.models.generate_content.return_value = response
+        mock_create_client.return_value = mock_client
+
+        result = translate_text_to_hebrew_with_gemini(source_text, "en")
+
+        self.assertEqual(result.text, hebrew_text)
+        mock_client.models.generate_content.assert_called_once()
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_translation_redacts_finish_message_content(
+        self, _mock_get_key, mock_create_client
+    ):
+        sensitive_marker = "SENSITIVE_TRANSLATION_FINISH_MESSAGE"
+        source_text = self._short_source_text(80)
+        hebrew_text = "זהו תרגום עברי קצר וסביר למסמך קצר."
+        mock_client = Mock()
+        mock_client.models.generate_content.return_value = self._translation_response(
+            hebrew_text,
+            finish_message=sensitive_marker,
+        )
+        mock_create_client.return_value = mock_client
+
+        with self.assertLogs(
+            "documents.services.gemini_engine",
+            level="INFO",
+        ) as captured:
+            result = translate_text_to_hebrew_with_gemini(source_text, "en")
+
+        self.assertEqual(result.text, hebrew_text)
+        self.assertIn("finish_message_present=True", "\n".join(captured.output))
+        self.assertNotIn(sensitive_marker, "\n".join(captured.output))
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_translation_redacts_provider_exception_content(
+        self, _mock_get_key, mock_create_client
+    ):
+        sensitive_marker = "SENSITIVE_TRANSLATION_PROVIDER_DETAIL"
+        mock_client = Mock()
+        mock_client.models.generate_content.side_effect = RuntimeError(sensitive_marker)
+        mock_create_client.return_value = mock_client
+
+        with self.assertRaises(GeminiApiError) as ctx:
+            translate_text_to_hebrew_with_gemini(
+                self._short_source_text(80),
+                "en",
+            )
+
+        self.assertIn("exception_class=RuntimeError", str(ctx.exception))
+        self.assertNotIn(sensitive_marker, str(ctx.exception))
+        formatted_traceback = "".join(traceback.format_exception(ctx.exception))
+        self.assertNotIn(sensitive_marker, formatted_traceback)
 
     @patch("documents.services.gemini_engine._create_client")
     @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
