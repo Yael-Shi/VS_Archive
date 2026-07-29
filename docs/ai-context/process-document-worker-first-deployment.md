@@ -16,6 +16,30 @@ Existing commands that provide only `image_tag` remain backward compatible.
 Production deployment must always provide explicit dated tags; never rely on
 the `dev` fallback.
 
+## Migration bootstrap
+
+If the new image contains unapplied migrations required by the worker, stop the
+worker through the stack before creating the migration task:
+
+```bash
+poetry run cdk deploy vs-archive-dev-app-v2 \
+  --profile default \
+  -c image_tag=LIVE_TAG \
+  -c web_image_tag=LIVE_TAG \
+  -c worker_image_tag=NEW_TAG \
+  -c worker_desired_count=0
+```
+
+The `worker_desired_count` context accepts only `0` or `1` and defaults to `1`.
+With the service at zero, run a one-off ECS task from the new worker task
+definition with `python manage.py migrate --noinput`. Require exit code zero
+and verify the expected migrations in `django_migrations` before starting the
+worker service.
+
+Do not register a task definition manually. The migration task must reuse the
+CDK-created worker task definition so its roles, networking, environment, and
+secrets remain identical to the service.
+
 ## Phase 1: worker first
 
 Keep the web service on the verified live tag and move only the worker:
@@ -25,13 +49,15 @@ poetry run cdk diff vs-archive-dev-app-v2 \
   --profile default \
   -c image_tag=LIVE_TAG \
   -c web_image_tag=LIVE_TAG \
-  -c worker_image_tag=NEW_TAG
+  -c worker_image_tag=NEW_TAG \
+  -c worker_desired_count=1
 
 poetry run cdk deploy vs-archive-dev-app-v2 \
   --profile default \
   -c image_tag=LIVE_TAG \
   -c web_image_tag=LIVE_TAG \
-  -c worker_image_tag=NEW_TAG
+  -c worker_image_tag=NEW_TAG \
+  -c worker_desired_count=1
 ```
 
 Before phase 2, require a completed worker rollout, the expected new worker
@@ -47,13 +73,15 @@ poetry run cdk diff vs-archive-dev-app-v2 \
   --profile default \
   -c image_tag=NEW_TAG \
   -c web_image_tag=NEW_TAG \
-  -c worker_image_tag=NEW_TAG
+  -c worker_image_tag=NEW_TAG \
+  -c worker_desired_count=1
 
 poetry run cdk deploy vs-archive-dev-app-v2 \
   --profile default \
   -c image_tag=NEW_TAG \
   -c web_image_tag=NEW_TAG \
-  -c worker_image_tag=NEW_TAG
+  -c worker_image_tag=NEW_TAG \
+  -c worker_desired_count=1
 ```
 
 Require `UPDATE_COMPLETE`, completed ECS rollouts, healthy ALB targets, site
