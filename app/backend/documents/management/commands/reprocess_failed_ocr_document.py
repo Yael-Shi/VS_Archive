@@ -5,8 +5,10 @@ from django.core.management.base import BaseCommand, CommandError
 from documents.services.env_validation import EnvConfigError, validate_required_env
 from documents.services.ocr_reprocess import (
     OcrReprocessError,
-    apply_ocr_reprocess,
     assess_ocr_reprocess,
+)
+from documents.services.process_document_ocr_reprocess_enqueue import (
+    apply_ocr_reprocess,
 )
 
 
@@ -21,7 +23,10 @@ class Command(BaseCommand):
         parser.add_argument(
             "--apply",
             action="store_true",
-            help="Set PROCESSING, clear upload_error when set, and enqueue PROCESS_DOCUMENT.",
+            help=(
+                "Create, retry, or coalesce a durable PROCESS_DOCUMENT request "
+                "and reflect its current state."
+            ),
         )
 
     def handle(self, *args, **options):
@@ -38,13 +43,16 @@ class Command(BaseCommand):
 
         try:
             if apply_mode:
-                assessment = apply_ocr_reprocess(
+                apply_result = apply_ocr_reprocess(
                     document_id,
                     collection_id=collection_id,
                     model_id=model_id,
+                    initiated_by=None,
                 )
+                assessment = apply_result.assessment
                 mode_label = "apply"
             else:
+                apply_result = None
                 assessment = assess_ocr_reprocess(
                     document_id,
                     collection_id=collection_id,
@@ -66,6 +74,11 @@ class Command(BaseCommand):
                 f"source_transkribus_run_id={assessment.source_transkribus_run_id}"
             )
         if apply_mode:
-            self.stdout.write(self.style.SUCCESS("enqueued PROCESS_DOCUMENT"))
+            assert apply_result is not None
+            self.stdout.write(
+                f"request_id={apply_result.enqueue_result.request.pk} "
+                f"enqueue_outcome={apply_result.enqueue_result.outcome}"
+            )
+            self.stdout.write(self.style.SUCCESS("PROCESS_DOCUMENT request handled"))
         else:
             self.stdout.write("no changes made (dry-run)")

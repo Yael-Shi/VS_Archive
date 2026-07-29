@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TypedDict
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.contrib.messages import get_messages
-from django.test import TestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from documents.models import Document, DocumentTextResult
@@ -15,6 +16,10 @@ from documents.services.ocr_reprocess import (
     OcrReprocessAssessment,
     OcrReprocessError,
     OcrRetryMode,
+)
+from documents.services.process_document_ocr_reprocess_enqueue import (
+    OcrReprocessEnqueueError,
+    OcrReprocessEnqueueErrorCode,
 )
 
 COLLECTION_ID = "col"
@@ -226,9 +231,15 @@ class OcrReprocessUiTests(TestCase):
     ):
         doc = _failed_ocr_document()
         mock_validate_env.return_value = _worker_env_config()
-        mock_apply.return_value = OcrReprocessAssessment(
-            document_id=doc.id,
-            retry_mode=OcrRetryMode.NORMAL_REENQUEUE,
+        mock_apply.return_value = SimpleNamespace(
+            assessment=OcrReprocessAssessment(
+                document_id=doc.id,
+                retry_mode=OcrRetryMode.NORMAL_REENQUEUE,
+            ),
+            enqueue_result=SimpleNamespace(
+                outcome="CREATED_AND_ENQUEUED",
+                request=SimpleNamespace(pk=42),
+            ),
         )
 
         self.client.force_login(self.staff)
@@ -240,16 +251,30 @@ class OcrReprocessUiTests(TestCase):
             doc.id,
             collection_id=COLLECTION_ID,
             model_id=MODEL_ID,
+            initiated_by=self.staff,
         )
         messages = [str(m) for m in get_messages(resp.wsgi_request)]
         self.assertEqual(len(messages), 1)
-        self.assertIn("normal_reenqueue", messages[0])
+        self.assertIn("תוזמן", messages[0])
 
     def test_post_blocked_for_non_staff(self):
         doc = _failed_ocr_document()
         self.client.force_login(self.user)
         resp = self.client.post(self._reprocess_url(doc.id))
         self.assertEqual(resp.status_code, 403)
+
+    @patch("documents.views.apply_ocr_reprocess")
+    def test_post_requires_csrf(self, mock_apply):
+        doc = _failed_ocr_document()
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.staff)
+
+        resp = csrf_client.post(self._reprocess_url(doc.id))
+
+        self.assertEqual(resp.status_code, 403)
+        mock_apply.assert_not_called()
+        doc.refresh_from_db()
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.FAILED)
 
     @patch("documents.views.apply_ocr_reprocess")
     def test_anonymous_post_redirects_to_login_without_mutation(self, mock_apply):
@@ -261,19 +286,19 @@ class OcrReprocessUiTests(TestCase):
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.FAILED)
 
-    @patch.dict(
-        "os.environ",
-        {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "true"},
-        clear=False,
-    )
     @patch("documents.views.validate_required_env")
-    @patch("documents.services.ocr_reprocess.send_process_document_message")
-    def test_post_enqueue_failure_redirects_with_error_and_keeps_failed_state(
-        self, mock_enqueue, mock_validate_env
+    @patch("documents.views.apply_ocr_reprocess")
+    def test_post_enqueue_failure_redirects_with_safe_error(
+        self, mock_apply, mock_validate_env
     ):
         doc = _failed_ocr_document()
         mock_validate_env.return_value = _worker_env_config()
-        mock_enqueue.side_effect = RuntimeError("sqs down for test")
+        mock_apply.side_effect = OcrReprocessEnqueueError(
+            code=OcrReprocessEnqueueErrorCode.QUEUE_UNAVAILABLE,
+            public_message="לא ניתן היה לתזמן את העיבוד מחדש. אפשר לנסות שוב.",
+            http_status=500,
+            outcome="ENQUEUE_FAILED",
+        )
 
         self.client.force_login(self.staff)
         resp = self.client.post(self._reprocess_url(doc.id), follow=True)
@@ -282,9 +307,8 @@ class OcrReprocessUiTests(TestCase):
         self.assertEqual(resp.request["PATH_INFO"], self._detail_url(doc.id))
         messages = [str(m) for m in get_messages(resp.wsgi_request)]
         self.assertEqual(len(messages), 1)
-        self.assertIn("sqs down for test", messages[0])
-        doc.refresh_from_db()
-        self.assertEqual(doc.processing_state_user, Document.ProcessingState.FAILED)
+        self.assertIn("לא ניתן היה לתזמן", messages[0])
+        self.assertNotIn("sqs", messages[0].lower())
 
     @patch("documents.views.validate_required_env")
     @patch("documents.views.apply_ocr_reprocess")

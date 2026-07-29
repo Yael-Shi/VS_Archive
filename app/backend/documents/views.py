@@ -185,8 +185,10 @@ from documents.services.archive_search_snippets import (
 from documents.services.env_validation import EnvConfigError, validate_required_env
 from documents.services.ocr_reprocess import (
     OcrReprocessError,
-    apply_ocr_reprocess,
     is_ocr_reprocess_ui_eligible,
+)
+from documents.services.process_document_ocr_reprocess_enqueue import (
+    apply_ocr_reprocess,
 )
 from documents.services.hebrew_translation_retry import (
     HebrewTranslationRetryError,
@@ -3186,24 +3188,37 @@ def document_ocr_reprocess(request, doc_id: int):
     model_id = worker_env.transkribus_model_id or ""
 
     try:
-        assessment = apply_ocr_reprocess(
+        apply_result = apply_ocr_reprocess(
             doc.id,
             collection_id=collection_id,
             model_id=model_id,
+            initiated_by=request.user,
         )
     except OcrReprocessError as exc:
         messages.error(request, str(exc))
         return redirect("documents-detail-page", doc_id=doc.id)
 
-    messages.success(
-        request,
-        f"בוצע תזמון עיבוד מחדש. מצב: {assessment.retry_mode.value}.",
-    )
+    outcome = apply_result.enqueue_result.outcome
+    if outcome in {"CREATED_AND_ENQUEUED", "REENQUEUED"}:
+        success_message = "העיבוד מחדש תוזמן."
+    elif outcome == "ALREADY_QUEUED":
+        success_message = "העיבוד מחדש כבר ממתין בתור."
+    elif outcome == "ALREADY_RUNNING":
+        success_message = "העיבוד מחדש כבר מתבצע."
+    elif outcome == "ALREADY_TERMINAL":
+        success_message = "העיבוד מחדש כבר הסתיים."
+    else:
+        raise AssertionError(f"Unhandled OCR reprocess success outcome: {outcome}")
+
+    messages.success(request, success_message)
     logger.info(
-        "document_ocr_reprocess user=%s doc_id=%s retry_mode=%s",
+        "document_ocr_reprocess user=%s doc_id=%s request_id=%s "
+        "retry_mode=%s enqueue_outcome=%s",
         getattr(request.user, "username", None),
         doc.id,
-        assessment.retry_mode.value,
+        apply_result.enqueue_result.request.pk,
+        apply_result.assessment.retry_mode.value,
+        outcome,
     )
     return redirect("documents-detail-page", doc_id=doc.id)
 

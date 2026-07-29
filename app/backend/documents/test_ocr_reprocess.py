@@ -8,10 +8,15 @@ from typing import TypedDict
 from unittest.mock import patch
 
 from django.core.management import call_command
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, TransactionTestCase
 
 from documents.management.commands.run_worker import Command as RunWorkerCommand
-from documents.models import Document, DocumentTextResult, TranskribusRun
+from documents.models import (
+    Document,
+    DocumentTextResult,
+    ProcessDocumentRequest,
+    TranskribusRun,
+)
 from documents.services.archive_items import create_ocr_document
 from documents.services.env_validation import WorkerEnvConfig
 from documents.services.gemini_engine import GeminiResult
@@ -19,8 +24,10 @@ from documents.services.htr_adapters.base import HtrResult
 from documents.services.ocr_reprocess import (
     OcrReprocessError,
     OcrRetryMode,
-    apply_ocr_reprocess,
     assess_ocr_reprocess,
+)
+from documents.services.process_document_ocr_reprocess_enqueue import (
+    apply_ocr_reprocess,
 )
 from documents.services.process_document_outcome import ProcessDocumentDisposition
 
@@ -85,7 +92,7 @@ def _seed_transkribus_run(
     )
 
 
-class OcrReprocessServiceTests(TestCase):
+class OcrReprocessServiceTests(TransactionTestCase):
     def setUp(self):
         super().setUp()
         flag_patcher = patch.dict(
@@ -116,8 +123,11 @@ class OcrReprocessServiceTests(TestCase):
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.FAILED)
 
-    @patch("documents.services.ocr_reprocess.send_process_document_message")
-    def test_apply_enqueue_failure_rolls_back_processing_state(self, mock_enqueue):
+    @patch(
+        "documents.services.process_document_request_enqueue."
+        "send_process_document_request_message"
+    )
+    def test_apply_programming_error_preserves_document_state(self, mock_enqueue):
         doc = _failed_ocr_document()
         _seed_transkribus_run(
             doc,
@@ -127,18 +137,22 @@ class OcrReprocessServiceTests(TestCase):
         )
         mock_enqueue.side_effect = RuntimeError("sqs down for test")
 
-        with self.assertRaises(OcrReprocessError) as ctx:
+        with self.assertRaisesMessage(RuntimeError, "sqs down for test"):
             apply_ocr_reprocess(
                 doc.id,
                 collection_id=COLLECTION_ID,
                 model_id=MODEL_ID,
             )
 
-        self.assertIn("sqs down for test", str(ctx.exception))
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.FAILED)
+        request = ProcessDocumentRequest.objects.get(document=doc)
+        self.assertEqual(request.status, ProcessDocumentRequest.Status.QUEUED)
 
-    @patch("documents.services.ocr_reprocess.send_process_document_message")
+    @patch(
+        "documents.services.process_document_request_enqueue."
+        "send_process_document_request_message"
+    )
     def test_apply_normal_sets_processing_and_enqueues_default_payload(
         self, mock_enqueue
     ):
@@ -150,17 +164,25 @@ class OcrReprocessServiceTests(TestCase):
             error_code="TRANSKRIBUS_UPLOAD_FAILED",
         )
 
-        assessment = apply_ocr_reprocess(
+        apply_result = apply_ocr_reprocess(
             doc.id,
             collection_id=COLLECTION_ID,
             model_id=MODEL_ID,
         )
 
-        self.assertEqual(assessment.retry_mode, OcrRetryMode.NORMAL_REENQUEUE)
+        self.assertEqual(
+            apply_result.assessment.retry_mode,
+            OcrRetryMode.NORMAL_REENQUEUE,
+        )
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.PROCESSING)
         self.assertIsNone(doc.upload_error)
-        mock_enqueue.assert_called_once_with(doc.id)
+        request = ProcessDocumentRequest.objects.get(document=doc)
+        self.assertEqual(
+            request.origin,
+            ProcessDocumentRequest.Origin.OCR_REPROCESS,
+        )
+        mock_enqueue.assert_called_once_with(request.pk)
 
     def test_missing_transkribus_config_blocks_misclassification_as_normal_reenqueue(
         self,
@@ -189,7 +211,10 @@ class OcrReprocessServiceTests(TestCase):
         self.assertIn("TRANSKRIBUS_MODEL_ID", str(ctx.exception))
         self.assertNotIn("normal_reenqueue", str(ctx.exception))
 
-    @patch("documents.services.ocr_reprocess.send_process_document_message")
+    @patch(
+        "documents.services.process_document_request_enqueue."
+        "send_process_document_request_message"
+    )
     def test_apply_missing_transkribus_config_does_not_enqueue(self, mock_enqueue):
         doc = _failed_ocr_document()
         _seed_transkribus_run(
@@ -262,7 +287,10 @@ class OcrReprocessServiceTests(TestCase):
         )
         self.assertEqual(assessment.source_transkribus_run_id, source.id)
 
-    @patch("documents.services.ocr_reprocess.send_process_document_message")
+    @patch(
+        "documents.services.process_document_request_enqueue."
+        "send_process_document_request_message"
+    )
     def test_apply_recognition_only_enqueues_explicit_retry_mode(self, mock_enqueue):
         doc = _failed_ocr_document()
         source = _seed_transkribus_run(
@@ -273,17 +301,19 @@ class OcrReprocessServiceTests(TestCase):
             error_code="TRANSKRIBUS_RECOGNITION_FAILED",
         )
 
-        apply_ocr_reprocess(
+        apply_result = apply_ocr_reprocess(
             doc.id,
             collection_id=COLLECTION_ID,
             model_id=MODEL_ID,
         )
 
-        mock_enqueue.assert_called_once_with(
-            doc.id,
-            ocr_retry_mode=OcrRetryMode.TRANSKRIBUS_RECOGNITION_ONLY.value,
-            source_transkribus_run_id=source.id,
+        request = apply_result.enqueue_result.request
+        self.assertEqual(
+            request.ocr_retry_mode,
+            ProcessDocumentRequest.OcrRetryMode.TRANSKRIBUS_RECOGNITION_ONLY,
         )
+        self.assertEqual(request.source_transkribus_run_id, source.id)
+        mock_enqueue.assert_called_once_with(request.pk)
 
     @patch.dict(
         "os.environ",
@@ -335,7 +365,10 @@ class OcrReprocessServiceTests(TestCase):
         {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "false"},
         clear=False,
     )
-    @patch("documents.services.ocr_reprocess.send_process_document_message")
+    @patch(
+        "documents.services.process_document_request_enqueue."
+        "send_process_document_request_message"
+    )
     def test_vs_handwriting_with_disabled_route_does_not_enqueue(self, mock_enqueue):
         doc = _failed_ocr_document()
 
@@ -424,7 +457,7 @@ def _gemini_partial_failed_source_document(**kwargs) -> Document:
     return doc
 
 
-class GeminiPartialOcrReprocessTests(TestCase):
+class GeminiPartialOcrReprocessTests(TransactionTestCase):
     def test_partial_failed_source_ocr_is_eligible(self):
         doc = _gemini_partial_failed_source_document()
 
@@ -437,22 +470,29 @@ class GeminiPartialOcrReprocessTests(TestCase):
         self.assertEqual(assessment.retry_mode, OcrRetryMode.NORMAL_REENQUEUE)
         self.assertIsNone(assessment.source_transkribus_run_id)
 
-    @patch("documents.services.ocr_reprocess.send_process_document_message")
+    @patch(
+        "documents.services.process_document_request_enqueue."
+        "send_process_document_request_message"
+    )
     def test_partial_failed_source_ocr_apply_enqueues_normal_gemini_flow(
         self, mock_enqueue
     ):
         doc = _gemini_partial_failed_source_document()
 
-        assessment = apply_ocr_reprocess(
+        apply_result = apply_ocr_reprocess(
             doc.id,
             collection_id=COLLECTION_ID,
             model_id=MODEL_ID,
         )
 
-        self.assertEqual(assessment.retry_mode, OcrRetryMode.NORMAL_REENQUEUE)
+        self.assertEqual(
+            apply_result.assessment.retry_mode,
+            OcrRetryMode.NORMAL_REENQUEUE,
+        )
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.PROCESSING)
-        mock_enqueue.assert_called_once_with(doc.id)
+        request = ProcessDocumentRequest.objects.get(document=doc)
+        mock_enqueue.assert_called_once_with(request.pk)
 
     @patch.dict(
         "os.environ",
@@ -631,9 +671,11 @@ class GeminiPartialOcrReprocessTests(TestCase):
         self.assertIn("retry_mode=normal_reenqueue", output)
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.PARTIAL)
+        self.assertFalse(ProcessDocumentRequest.objects.filter(document=doc).exists())
 
         with patch(
-            "documents.services.ocr_reprocess.send_process_document_message"
+            "documents.services.process_document_request_enqueue."
+            "send_process_document_request_message"
         ) as mock_enqueue:
             stdout = StringIO()
             call_command(
@@ -642,11 +684,18 @@ class GeminiPartialOcrReprocessTests(TestCase):
                 "--apply",
                 stdout=stdout,
             )
-            mock_enqueue.assert_called_once_with(doc.id)
+            request = ProcessDocumentRequest.objects.get(document=doc)
+            mock_enqueue.assert_called_once_with(request.pk)
+            self.assertIsNone(request.initiated_by_id)
+            self.assertEqual(
+                request.origin,
+                ProcessDocumentRequest.Origin.OCR_REPROCESS,
+            )
 
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.PROCESSING)
-        self.assertIn("enqueued PROCESS_DOCUMENT", stdout.getvalue())
+        self.assertIn("PROCESS_DOCUMENT request handled", stdout.getvalue())
+        self.assertIn("enqueue_outcome=CREATED_AND_ENQUEUED", stdout.getvalue())
 
 
 class SendProcessDocumentMessageTests(SimpleTestCase):

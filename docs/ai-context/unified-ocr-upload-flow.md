@@ -210,6 +210,13 @@ On successful **single** `upload_complete` or **multi** `upload_finalize`:
 - Repeated completion still consults the durable Request. Active work coalesces; matching terminal upload history is an idempotent no-op; worker-owned state is not overwritten.
 - Expected enqueue failures return safe typed API errors without raw queue details.
 
+Intentional OCR reprocess is a separate durable caller path. It preserves the
+existing route-aware eligibility assessment, creates or coalesces a
+`ProcessDocumentRequest` with `origin=OCR_REPROCESS`, and stores a source
+Transkribus run only for recognition-only resume. Its Document-state updates
+are fenced by the current Request status so they cannot overwrite worker-owned
+running or terminal state.
+
 ---
 
 ## 3. Implementation history (PR1–PR3)
