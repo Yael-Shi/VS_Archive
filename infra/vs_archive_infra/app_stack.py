@@ -166,6 +166,7 @@ class VsArchiveAppStack(Stack):
         task_role = iam.Role(self, f"{cfg.prefix}-task-role", assumed_by=assumed_by)
         bucket.grant_read_write(task_role)
         queue.grant_consume_messages(task_role)
+        queue.grant_send_messages(task_role)
         db_secret.grant_read(task_role)
         gemini_secret.grant_read(task_role)
 

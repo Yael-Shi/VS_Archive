@@ -4031,7 +4031,7 @@ class UploadCompleteSourceFileTests(TestCase):
             content_type="application/json",
         )
 
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_successful_upload_complete_creates_primary_source_file(self, mock_enqueue):
         doc = self._create_uploading_document()
 
@@ -4051,7 +4051,12 @@ class UploadCompleteSourceFileTests(TestCase):
             body["processing_state_user"],
             Document.ProcessingState.PROCESSING,
         )
-        mock_enqueue.assert_called_once_with(document_id=doc.id)
+        mock_enqueue.assert_called_once()
+        self.assertEqual(mock_enqueue.call_args.kwargs["document_id"], doc.id)
+        self.assertEqual(
+            mock_enqueue.call_args.kwargs["initiated_by"].pk,
+            self.staff.pk,
+        )
 
         doc.refresh_from_db()
         self.assertEqual(doc.size_bytes, 2048)
@@ -4066,7 +4071,7 @@ class UploadCompleteSourceFileTests(TestCase):
         self.assertEqual(source.mime_type, doc.mime_type)
         self.assertEqual(source.size_bytes, doc.size_bytes)
 
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_repeated_upload_complete_does_not_duplicate_source_file(
         self, mock_enqueue
     ):
@@ -4085,7 +4090,13 @@ class UploadCompleteSourceFileTests(TestCase):
             },
         )
         self.assertEqual(second.status_code, 200)
-        mock_enqueue.assert_called_once()
+        self.assertEqual(mock_enqueue.call_count, 2)
+        for enqueue_call in mock_enqueue.call_args_list:
+            self.assertEqual(enqueue_call.kwargs["document_id"], doc.id)
+            self.assertEqual(
+                enqueue_call.kwargs["initiated_by"].pk,
+                self.staff.pk,
+            )
 
         doc.refresh_from_db()
         self.assertEqual(doc.size_bytes, 4096)
@@ -4097,7 +4108,7 @@ class UploadCompleteSourceFileTests(TestCase):
         self.assertEqual(sources[0].size_bytes, 4096)
         self.assertEqual(sources[0].mime_type, "image/jpeg")
 
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_failed_upload_complete_does_not_create_source_file(self, mock_enqueue):
         doc = self._create_uploading_document()
 
@@ -4113,7 +4124,7 @@ class UploadCompleteSourceFileTests(TestCase):
         mock_enqueue.assert_not_called()
         self.assertEqual(DocumentSourceFile.objects.filter(document=doc).count(), 0)
 
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_legacy_complete_rejects_incremental_image_draft_and_no_source_file(
         self, mock_enqueue
     ):
@@ -4136,8 +4147,8 @@ class UploadCompleteSourceFileTests(TestCase):
         mock_enqueue.assert_not_called()
         self.assertEqual(DocumentSourceFile.objects.filter(document=doc).count(), 0)
 
-    @patch("documents.views.send_process_document_message")
-    def test_already_uploaded_retry_does_not_re_enqueue(self, mock_enqueue):
+    @patch("documents.views.enqueue_uploaded_document_processing")
+    def test_already_uploaded_retry_checks_durable_request(self, mock_enqueue):
         doc = self._create_uploading_document(
             upload_status=Document.UploadStatus.UPLOADED,
             processing_state_user=Document.ProcessingState.PROCESSING,
@@ -4146,11 +4157,19 @@ class UploadCompleteSourceFileTests(TestCase):
         resp = self._post_complete(doc.id, {"success": True})
 
         self.assertEqual(resp.status_code, 200)
-        mock_enqueue.assert_not_called()
-        self.assertEqual(DocumentSourceFile.objects.filter(document=doc).count(), 1)
+        mock_enqueue.assert_called_once()
+        self.assertEqual(
+            mock_enqueue.call_args.kwargs["document_id"],
+            doc.id,
+        )
+        self.assertTrue(mock_enqueue.call_args.kwargs["initiated_by"].is_staff)
+        self.assertEqual(
+            DocumentSourceFile.objects.filter(document=doc).count(),
+            1,
+        )
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_upload_complete_missing_s3_object_returns_400_and_does_not_enqueue(
         self, mock_enqueue
     ):
@@ -4171,7 +4190,7 @@ class UploadCompleteSourceFileTests(TestCase):
         self.assertEqual(DocumentSourceFile.objects.filter(document=doc).count(), 0)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_upload_complete_succeeds_when_s3_content_type_matches(self, mock_enqueue):
         doc = self._create_uploading_document()
 
@@ -4182,12 +4201,17 @@ class UploadCompleteSourceFileTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.mock_s3_head.assert_called_once_with("test-bucket", doc.file_s3_key)
-        mock_enqueue.assert_called_once_with(document_id=doc.id)
+        mock_enqueue.assert_called_once()
+        self.assertEqual(mock_enqueue.call_args.kwargs["document_id"], doc.id)
+        self.assertEqual(
+            mock_enqueue.call_args.kwargs["initiated_by"].pk,
+            self.staff.pk,
+        )
         doc.refresh_from_db()
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADED)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_upload_complete_rejects_s3_content_type_mismatch(self, mock_enqueue):
         from documents.s3 import S3HeadObjectResult
 
@@ -4209,7 +4233,7 @@ class UploadCompleteSourceFileTests(TestCase):
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADING)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_upload_complete_rejects_missing_s3_content_type(self, mock_enqueue):
         from documents.s3 import S3HeadObjectResult
 
@@ -4225,7 +4249,7 @@ class UploadCompleteSourceFileTests(TestCase):
         mock_enqueue.assert_not_called()
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_upload_complete_uses_document_mime_when_file_mime_omitted(
         self, mock_enqueue
     ):
@@ -4239,10 +4263,15 @@ class UploadCompleteSourceFileTests(TestCase):
         resp = self._post_complete(doc.id, {"success": True})
 
         self.assertEqual(resp.status_code, 200)
-        mock_enqueue.assert_called_once_with(document_id=doc.id)
+        mock_enqueue.assert_called_once()
+        self.assertEqual(mock_enqueue.call_args.kwargs["document_id"], doc.id)
+        self.assertEqual(
+            mock_enqueue.call_args.kwargs["initiated_by"].pk,
+            self.staff.pk,
+        )
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_upload_complete_accepts_s3_content_type_with_charset_suffix(
         self, mock_enqueue
     ):
@@ -4262,7 +4291,7 @@ class UploadCompleteSourceFileTests(TestCase):
         mock_enqueue.assert_called_once()
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_upload_complete_accepts_s3_jpg_alias_as_jpeg(self, mock_enqueue):
         from documents.s3 import S3HeadObjectResult
 
@@ -4285,7 +4314,7 @@ class UploadCompleteSourceFileTests(TestCase):
                 mock_enqueue.assert_called_once()
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_upload_complete_s3_verification_failure_returns_502(self, mock_enqueue):
         from botocore.exceptions import ClientError
 
@@ -4765,7 +4794,7 @@ class UploadApiTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_single_file_complete_still_enqueues_and_dual_writes(
         self, mock_enqueue, _mock_put
     ):
@@ -4777,7 +4806,12 @@ class UploadApiTests(TestCase):
             {"success": True, "file_size": 2048, "file_mime": "image/jpeg"},
         )
         self.assertEqual(complete_resp.status_code, 200)
-        mock_enqueue.assert_called_once_with(document_id=doc_id)
+        mock_enqueue.assert_called_once()
+        self.assertEqual(mock_enqueue.call_args.kwargs["document_id"], doc_id)
+        self.assertEqual(
+            mock_enqueue.call_args.kwargs["initiated_by"].pk,
+            self.staff.pk,
+        )
 
         doc = Document.objects.get(id=doc_id)
         sources = list(DocumentSourceFile.objects.filter(document=doc))
@@ -4790,8 +4824,8 @@ class UploadApiTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
-    def test_single_file_complete_retry_does_not_re_enqueue(
+    @patch("documents.views.enqueue_uploaded_document_processing")
+    def test_single_file_complete_retry_consults_durable_adapter(
         self, mock_enqueue, _mock_put
     ):
         create_resp = self._post_create(self._base_create_payload())
@@ -4799,13 +4833,16 @@ class UploadApiTests(TestCase):
 
         self._post_complete(doc_id, {"success": True})
         self._post_complete(doc_id, {"success": True})
-        mock_enqueue.assert_called_once()
+        self.assertEqual(mock_enqueue.call_count, 2)
+        for call in mock_enqueue.call_args_list:
+            self.assertEqual(call.kwargs["document_id"], doc_id)
+            self.assertTrue(call.kwargs["initiated_by"].is_staff)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_single_file_complete_valid_image_succeeds_when_s3_exists(
         self, mock_enqueue, _mock_put
     ):
@@ -4820,7 +4857,12 @@ class UploadApiTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.mock_s3_head.assert_called_once_with("test-bucket", doc.file_s3_key)
-        mock_enqueue.assert_called_once_with(document_id=doc_id)
+        mock_enqueue.assert_called_once()
+        self.assertEqual(mock_enqueue.call_args.kwargs["document_id"], doc_id)
+        self.assertEqual(
+            mock_enqueue.call_args.kwargs["initiated_by"].pk,
+            self.staff.pk,
+        )
         doc.refresh_from_db()
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADED)
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.PROCESSING)
@@ -4828,7 +4870,7 @@ class UploadApiTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_single_file_complete_rejects_unsupported_file_mime(
         self, mock_enqueue, _mock_put
     ):
@@ -4850,7 +4892,7 @@ class UploadApiTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_single_file_complete_rejects_mime_extension_mismatch(
         self, mock_enqueue, _mock_put
     ):
@@ -4877,7 +4919,7 @@ class UploadApiTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_single_file_complete_pdf_rejects_non_pdf_mime(
         self, mock_enqueue, _mock_put
     ):
@@ -4905,7 +4947,7 @@ class UploadApiTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_single_file_complete_mime_validation_failure_does_not_enqueue(
         self, mock_enqueue, _mock_put
     ):
@@ -5144,7 +5186,7 @@ class UploadApiTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_part_complete_success_does_not_enqueue(self, mock_enqueue, _mock_put):
         create_resp = self._post_create(self._multi_files_payload(count=2))
         doc_id = create_resp.json()["document_id"]
@@ -5169,7 +5211,7 @@ class UploadApiTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_part_complete_succeeds_when_s3_content_type_matches(
         self, mock_enqueue, _mock_put
     ):
@@ -5193,7 +5235,7 @@ class UploadApiTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_part_complete_rejects_s3_content_type_mismatch(
         self, mock_enqueue, _mock_put
     ):
@@ -5226,7 +5268,7 @@ class UploadApiTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_part_complete_missing_s3_object_leaves_part_pending(
         self, mock_enqueue, _mock_put
     ):
@@ -5257,7 +5299,7 @@ class UploadApiTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_part_complete_rejects_non_image_file_mime(self, mock_enqueue, _mock_put):
         create_resp = self._post_create(self._multi_files_payload(count=2))
         doc_id = create_resp.json()["document_id"]
@@ -5280,7 +5322,7 @@ class UploadApiTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_part_complete_accepts_mime_matching_stored_extension(
         self, mock_enqueue, _mock_put
     ):
@@ -5334,7 +5376,7 @@ class UploadApiTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_part_complete_failure_marks_document_failed(self, mock_enqueue, _mock_put):
         create_resp = self._post_create(self._multi_files_payload(count=2))
         doc_id = create_resp.json()["document_id"]
@@ -5357,7 +5399,7 @@ class UploadApiTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_part_complete_retry_after_document_failed_is_rejected(
         self, mock_enqueue, _mock_put
     ):
@@ -5396,7 +5438,7 @@ class UploadApiTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_finalize_after_document_failed_is_rejected(self, mock_enqueue, _mock_put):
         create_resp = self._post_create(self._multi_files_payload(count=2))
         doc_id = create_resp.json()["document_id"]
@@ -5427,7 +5469,7 @@ class UploadApiTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_finalize_fails_when_parts_pending(self, mock_enqueue, _mock_put):
         create_resp = self._post_create(self._multi_files_payload(count=2))
         doc_id = create_resp.json()["document_id"]
@@ -5441,7 +5483,7 @@ class UploadApiTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_finalize_fails_when_part_failed(self, mock_enqueue, _mock_put):
         create_resp = self._post_create(self._multi_files_payload(count=2))
         doc_id = create_resp.json()["document_id"]
@@ -5456,7 +5498,7 @@ class UploadApiTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_finalize_success_mirrors_primary_sets_processing_and_enqueues(
         self, mock_enqueue, _mock_put
     ):
@@ -5468,7 +5510,12 @@ class UploadApiTests(TestCase):
 
         resp = self._post_finalize(doc_id)
         self.assertEqual(resp.status_code, 200)
-        mock_enqueue.assert_called_once_with(document_id=doc_id)
+        mock_enqueue.assert_called_once()
+        self.assertEqual(mock_enqueue.call_args.kwargs["document_id"], doc_id)
+        self.assertEqual(
+            mock_enqueue.call_args.kwargs["initiated_by"].pk,
+            self.staff.pk,
+        )
 
         body = resp.json()
         self.assertEqual(body["upload_status"], Document.UploadStatus.UPLOADED)
@@ -5487,11 +5534,33 @@ class UploadApiTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_finalize_enqueue_failure_marks_document_failed(
         self, mock_enqueue, _mock_put
     ):
-        mock_enqueue.side_effect = RuntimeError("sqs down")
+        from documents.services.process_document_upload_enqueue import (
+            UploadProcessEnqueueError,
+            UploadProcessEnqueueErrorCode,
+        )
+
+        def fail_enqueue(*, document_id: int, initiated_by):
+            self.assertTrue(initiated_by.is_staff)
+            Document.objects.filter(pk=document_id).update(
+                processing_state_user=Document.ProcessingState.FAILED,
+                upload_error=(
+                    "Document processing could not be queued. Please try again."
+                ),
+            )
+            raise UploadProcessEnqueueError(
+                code=UploadProcessEnqueueErrorCode.QUEUE_UNAVAILABLE,
+                public_message=(
+                    "Document processing could not be queued. Please try again."
+                ),
+                http_status=500,
+                outcome="ENQUEUE_FAILED",
+            )
+
+        mock_enqueue.side_effect = fail_enqueue
         create_resp = self._post_create(self._multi_files_payload(count=2))
         doc_id = create_resp.json()["document_id"]
 
@@ -5500,20 +5569,32 @@ class UploadApiTests(TestCase):
 
         resp = self._post_finalize(doc_id)
         self.assertEqual(resp.status_code, 500)
+        body = resp.json()
+        self.assertEqual(body["code"], "QUEUE_UNAVAILABLE")
+        self.assertEqual(
+            body["error"],
+            "Document processing could not be queued. Please try again.",
+        )
+        self.assertNotIn("details", body)
 
         doc = Document.objects.get(id=doc_id)
-        # Matches legacy upload_complete enqueue-failure behavior: the files are
-        # uploaded/finalized, so upload_status stays UPLOADED; only the worker enqueue
-        # failed, so processing_state_user becomes FAILED and upload_error records it.
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADED)
-        self.assertEqual(doc.processing_state_user, Document.ProcessingState.FAILED)
-        self.assertIn("enqueue failed", doc.upload_error or "")
+        self.assertEqual(
+            doc.processing_state_user,
+            Document.ProcessingState.FAILED,
+        )
+        self.assertEqual(
+            doc.upload_error,
+            "Document processing could not be queued. Please try again.",
+        )
 
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
-    def test_finalize_idempotent_retry_enqueues_once(self, mock_enqueue, _mock_put):
+    @patch("documents.views.enqueue_uploaded_document_processing")
+    def test_finalize_idempotent_retry_consults_durable_adapter(
+        self, mock_enqueue, _mock_put
+    ):
         create_resp = self._post_create(self._multi_files_payload(count=2))
         doc_id = create_resp.json()["document_id"]
 
@@ -5524,7 +5605,10 @@ class UploadApiTests(TestCase):
         second = self._post_finalize(doc_id)
         self.assertEqual(first.status_code, 200)
         self.assertEqual(second.status_code, 200)
-        mock_enqueue.assert_called_once_with(document_id=doc_id)
+        self.assertEqual(mock_enqueue.call_count, 2)
+        for call in mock_enqueue.call_args_list:
+            self.assertEqual(call.kwargs["document_id"], doc_id)
+            self.assertTrue(call.kwargs["initiated_by"].is_staff)
 
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
@@ -5641,7 +5725,7 @@ class UploadApiCsrfTests(TestCase):
         )
         self.assertEqual(resp.status_code, 403)
 
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_complete_without_csrf_is_rejected(self, _mock_enqueue):
         doc = create_ocr_document(
             title="CSRF complete test",
@@ -5659,7 +5743,7 @@ class UploadApiCsrfTests(TestCase):
         self.assertEqual(resp.status_code, 403)
         _mock_enqueue.assert_not_called()
 
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_complete_with_csrf_succeeds(self, _mock_enqueue):
         doc = create_ocr_document(
             title="CSRF complete test",
@@ -5677,7 +5761,12 @@ class UploadApiCsrfTests(TestCase):
             user=self.staff,
         )
         self.assertEqual(resp.status_code, 200)
-        _mock_enqueue.assert_called_once_with(document_id=doc.id)
+        _mock_enqueue.assert_called_once()
+        self.assertEqual(_mock_enqueue.call_args.kwargs["document_id"], doc.id)
+        self.assertEqual(
+            _mock_enqueue.call_args.kwargs["initiated_by"].pk,
+            self.staff.pk,
+        )
 
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
@@ -5717,7 +5806,7 @@ class UploadApiCsrfTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_part_complete_and_finalize_with_csrf_succeed(
         self, _mock_enqueue, _mock_put
     ):
@@ -5768,7 +5857,12 @@ class UploadApiCsrfTests(TestCase):
         self.assertEqual(part0.status_code, 200)
         self.assertEqual(part1.status_code, 200)
         self.assertEqual(finalize.status_code, 200)
-        _mock_enqueue.assert_called_once_with(document_id=doc_id)
+        _mock_enqueue.assert_called_once()
+        self.assertEqual(_mock_enqueue.call_args.kwargs["document_id"], doc_id)
+        self.assertEqual(
+            _mock_enqueue.call_args.kwargs["initiated_by"].pk,
+            self.staff.pk,
+        )
 
 
 class TranskribusRunPersistenceServiceTests(TestCase):

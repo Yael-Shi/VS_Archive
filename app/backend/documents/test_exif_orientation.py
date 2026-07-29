@@ -323,7 +323,9 @@ class ExifOrientationUploadFlowTests(TestCase):
         raw = make_oriented_jpeg(180, 100, 6)
         doc = self._seed_document_image(key=key, image_bytes=raw)
 
-        with patch("documents.views.send_process_document_message") as mock_enqueue:
+        with patch(
+            "documents.views.enqueue_uploaded_document_processing"
+        ) as mock_enqueue:
             resp = self.client.post(
                 f"/api/uploads/{doc.id}/complete/",
                 data=json.dumps(
@@ -337,7 +339,12 @@ class ExifOrientationUploadFlowTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 200)
-        mock_enqueue.assert_called_once_with(document_id=doc.id)
+        mock_enqueue.assert_called_once()
+        self.assertEqual(mock_enqueue.call_args.kwargs["document_id"], doc.id)
+        self.assertEqual(
+            mock_enqueue.call_args.kwargs["initiated_by"].pk,
+            self.staff.pk,
+        )
 
         stored_bytes, stored_type = self.s3_store.objects[(self.bucket, key)]
         self.assertEqual(stored_type, "image/jpeg")
@@ -409,7 +416,9 @@ class ExifOrientationUploadFlowTests(TestCase):
             size_bytes=len(pdf_bytes),
         )
 
-        with patch("documents.views.send_process_document_message") as mock_enqueue:
+        with patch(
+            "documents.views.enqueue_uploaded_document_processing"
+        ) as mock_enqueue:
             resp = self.client.post(
                 f"/api/uploads/{doc.id}/complete/",
                 data=json.dumps(
@@ -423,7 +432,12 @@ class ExifOrientationUploadFlowTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 200)
-        mock_enqueue.assert_called_once_with(document_id=doc.id)
+        mock_enqueue.assert_called_once()
+        self.assertEqual(mock_enqueue.call_args.kwargs["document_id"], doc.id)
+        self.assertEqual(
+            mock_enqueue.call_args.kwargs["initiated_by"].pk,
+            self.staff.pk,
+        )
         stored_bytes, stored_type = self.s3_store.objects[(self.bucket, key)]
         self.assertEqual(stored_bytes, pdf_bytes)
         self.assertEqual(stored_type, "application/pdf")
@@ -440,7 +454,9 @@ class ExifOrientationUploadFlowTests(TestCase):
                 "documents.views.normalize_uploaded_image_exif_in_s3",
                 side_effect=ExifNormalizationError("transform failed"),
             ),
-            patch("documents.views.send_process_document_message") as mock_enqueue,
+            patch(
+                "documents.views.enqueue_uploaded_document_processing"
+            ) as mock_enqueue,
         ):
             resp = self.client.post(
                 f"/api/uploads/{doc.id}/complete/",
@@ -545,7 +561,9 @@ class ExifOrientationUploadFlowTests(TestCase):
             content_type="application/json",
         )
 
-        with patch("documents.views.send_process_document_message") as mock_enqueue:
+        with patch(
+            "documents.views.enqueue_uploaded_document_processing"
+        ) as mock_enqueue:
             finalize_resp = self.client.post(
                 f"/api/uploads/{doc_id}/finalize/",
                 data=json.dumps({"success": True}),
@@ -553,11 +571,17 @@ class ExifOrientationUploadFlowTests(TestCase):
             )
 
         self.assertEqual(finalize_resp.status_code, 200)
-        mock_enqueue.assert_called_once_with(document_id=doc_id)
+        mock_enqueue.assert_called_once()
+        self.assertEqual(mock_enqueue.call_args.kwargs["document_id"], doc_id)
+        self.assertEqual(
+            mock_enqueue.call_args.kwargs["initiated_by"].pk,
+            self.staff.pk,
+        )
         doc = Document.objects.get(id=doc_id)
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADED)
 
-    def test_content_type_alias_is_preserved_on_rewrite(self):
+    @patch("documents.views.enqueue_uploaded_document_processing")
+    def test_content_type_alias_is_preserved_on_rewrite(self, _mock_enqueue):
         key = "documents/14/original.jpeg"
         raw = make_oriented_jpeg(110, 70, 6)
         self.s3_store.seed(self.bucket, key, raw, "image/jpg")

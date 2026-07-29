@@ -193,7 +193,10 @@ from documents.services.hebrew_translation_retry import (
     enqueue_hebrew_translation_retry,
     is_hebrew_translation_retry_ui_eligible,
 )
-from documents.services.sqs import send_process_document_message
+from documents.services.process_document_upload_enqueue import (
+    UploadProcessEnqueueError,
+    enqueue_uploaded_document_processing,
+)
 from documents.services.text_presentation import (
     build_document_detail_jump_nav,
     document_detail_has_source_viewer,
@@ -1029,6 +1032,56 @@ def create_upload(request):
     return _create_single_file_upload(request, payload, common)
 
 
+def _enqueue_uploaded_document_processing_or_error(
+    request,
+    doc: Document,
+) -> JsonResponse | None:
+    """
+    Enqueue upload-finalize processing outside the upload transaction.
+
+    Expected durable enqueue failures are returned through a safe API boundary.
+    Unexpected programming failures continue to propagate.
+    """
+    try:
+        enqueue_uploaded_document_processing(
+            document_id=doc.pk,
+            initiated_by=request.user,
+        )
+    except UploadProcessEnqueueError as exc:
+        logger.warning(
+            "upload PROCESS_DOCUMENT enqueue did not complete",
+            extra={
+                "document_id": doc.pk,
+                "enqueue_error_code": exc.code,
+                "enqueue_outcome": exc.outcome,
+            },
+        )
+        doc.refresh_from_db(
+            fields=[
+                "upload_status",
+                "processing_state_user",
+                "upload_error",
+            ]
+        )
+        return JsonResponse(
+            {
+                "error": exc.public_message,
+                "code": exc.code,
+                "document_id": doc.pk,
+            },
+            status=exc.http_status,
+        )
+
+    doc.refresh_from_db(
+        fields=[
+            "upload_status",
+            "processing_state_user",
+            "upload_error",
+        ]
+    )
+    return None
+
+
 @login_required
 def upload_complete(request, doc_id: int):
     deny = _require_admin(request)
@@ -1132,7 +1185,8 @@ def upload_complete(request, doc_id: int):
             if file_mime:
                 doc.mime_type = file_mime
 
-            doc.processing_state_user = Document.ProcessingState.PROCESSING
+            if not already_uploaded:
+                doc.processing_state_user = Document.ProcessingState.PROCESSING
             doc.save(
                 update_fields=[
                     "upload_status",
@@ -1150,21 +1204,12 @@ def upload_complete(request, doc_id: int):
                 already_uploaded=already_uploaded,
             )
 
-        if not already_uploaded:
-            try:
-                send_process_document_message(document_id=doc.id)
-            except Exception as e:
-                logger.exception(
-                    "enqueue failed in upload_complete",
-                    extra={"document_id": doc.id},
-                )
-                doc.processing_state_user = Document.ProcessingState.FAILED
-                doc.upload_error = f"enqueue failed: {e}"
-                doc.save(update_fields=["processing_state_user", "upload_error"])
-                return JsonResponse(
-                    {"error": "enqueue failed", "details": str(e)},
-                    status=500,
-                )
+        enqueue_error = _enqueue_uploaded_document_processing_or_error(
+            request,
+            doc,
+        )
+        if enqueue_error is not None:
+            return enqueue_error
 
     else:
         raw_err = payload.get("error") or "upload failed"
@@ -1553,21 +1598,12 @@ def upload_finalize(request, doc_id: int):
             already_uploaded=already_uploaded,
         )
 
-    if not already_uploaded:
-        try:
-            send_process_document_message(document_id=doc.id)
-        except Exception as e:
-            logger.exception(
-                "enqueue failed in upload_finalize",
-                extra={"document_id": doc.id},
-            )
-            doc.processing_state_user = Document.ProcessingState.FAILED
-            doc.upload_error = f"enqueue failed: {e}"
-            doc.save(update_fields=["processing_state_user", "upload_error"])
-            return JsonResponse(
-                {"error": "enqueue failed", "details": str(e)},
-                status=500,
-            )
+    enqueue_error = _enqueue_uploaded_document_processing_or_error(
+        request,
+        doc,
+    )
+    if enqueue_error is not None:
+        return enqueue_error
 
     return _finalize_response(doc)
 

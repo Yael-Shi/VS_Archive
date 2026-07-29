@@ -336,7 +336,7 @@ class DocumentUploadThumbnailIntegrationTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     @patch("documents.services.document_thumbnail.put_object_bytes", return_value=5555)
     @patch("documents.services.document_thumbnail.get_object_bytes")
     def test_finalize_persists_thumbnail_metadata(
@@ -367,7 +367,7 @@ class DocumentUploadThumbnailIntegrationTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     @patch(
         "documents.services.document_thumbnail.generate_and_persist_document_thumbnail"
     )
@@ -390,7 +390,7 @@ class DocumentUploadThumbnailIntegrationTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     @patch(
         "documents.services.document_thumbnail.generate_and_persist_document_thumbnail"
     )
@@ -427,7 +427,7 @@ class DocumentUploadThumbnailIntegrationTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     @patch(
         "documents.services.document_thumbnail.get_object_bytes",
         side_effect=ClientError(
@@ -454,7 +454,7 @@ class DocumentUploadThumbnailIntegrationTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     @patch("documents.services.document_thumbnail.put_object_bytes", return_value=4444)
     @patch("documents.services.document_thumbnail.get_object_bytes")
     def test_metadata_save_failure_leaves_finalize_successful(
