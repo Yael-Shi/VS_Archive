@@ -17,6 +17,7 @@ from aws_cdk import aws_route53_targets as route53_targets
 from aws_cdk import aws_certificatemanager as acm
 from typing import cast
 from .config import EnvConfig
+from .image_tags import resolve_image_tags
 
 
 class VsArchiveAppStack(Stack):
@@ -208,10 +209,10 @@ class VsArchiveAppStack(Stack):
             self, f"{cfg.prefix}-web-repo", "vs-archive-web"
         )
 
-        image_tag = self.node.try_get_context("image_tag") or "dev"
+        web_image_tag, worker_image_tag = resolve_image_tags(self)
         web_task.add_container(
             f"{cfg.prefix}-web",
-            image=ecs.ContainerImage.from_ecr_repository(web_repo, tag=image_tag),
+            image=ecs.ContainerImage.from_ecr_repository(web_repo, tag=web_image_tag),
             logging=get_log_driver("web"),
             environment={
                 "UPLOADS_BUCKET_NAME": bucket.bucket_name,
@@ -286,10 +287,11 @@ class VsArchiveAppStack(Stack):
             execution_role=cast(iam.IRole, exec_role),
         )
 
-        image_tag = self.node.try_get_context("image_tag") or "dev"
         worker_task.add_container(
             f"{cfg.prefix}-worker",
-            image=ecs.ContainerImage.from_ecr_repository(web_repo, tag=image_tag),
+            image=ecs.ContainerImage.from_ecr_repository(
+                web_repo, tag=worker_image_tag
+            ),
             command=["bash", "-lc", "python manage.py run_worker"],
             logging=get_log_driver("worker"),
             environment={
