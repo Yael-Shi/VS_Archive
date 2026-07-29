@@ -217,6 +217,13 @@ Transkribus run only for recognition-only resume. Its Document-state updates
 are fenced by the current Request status so they cannot overwrite worker-owned
 running or terminal state.
 
+Intentional Hebrew-translation retry is also a durable caller path. It creates
+or coalesces a `ProcessDocumentRequest` with
+`operation=HEBREW_TRANSLATION`, `origin=HEBREW_TRANSLATION_RETRY`, no OCR retry
+mode, and no source Transkribus run. Enqueue leaves Document processing state
+unchanged; the translation worker owns claim and completion. Expected queue,
+conflict, and recovery failures use safe typed feedback.
+
 ---
 
 ## 3. Implementation history (PR1–PR3)

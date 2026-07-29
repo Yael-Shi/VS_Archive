@@ -192,8 +192,11 @@ from documents.services.process_document_ocr_reprocess_enqueue import (
 )
 from documents.services.hebrew_translation_retry import (
     HebrewTranslationRetryError,
-    enqueue_hebrew_translation_retry,
     is_hebrew_translation_retry_ui_eligible,
+)
+from documents.services.process_document_hebrew_translation_retry_enqueue import (
+    HebrewTranslationRetryEnqueueError,
+    enqueue_hebrew_translation_retry,
 )
 from documents.services.process_document_upload_enqueue import (
     UploadProcessEnqueueError,
@@ -3235,24 +3238,47 @@ def document_hebrew_translation_retry(request, doc_id: int):
         id=doc_id,
     )
     try:
-        enqueue_hebrew_translation_retry(doc.id)
+        enqueue_result = enqueue_hebrew_translation_retry(
+            doc.id,
+            initiated_by=request.user,
+        )
+    except HebrewTranslationRetryEnqueueError as exc:
+        logger.warning(
+            "document_hebrew_translation_retry enqueue rejected "
+            "user=%s doc_id=%s code=%s outcome=%s",
+            getattr(request.user, "username", None),
+            doc.id,
+            exc.code,
+            exc.outcome,
+        )
+        messages.error(request, exc.public_message)
+        return redirect("documents-detail-page", doc_id=doc.id)
     except HebrewTranslationRetryError:
         messages.error(request, "לא ניתן לשלוח תרגום לעברית לעיבוד כעת.")
         return redirect("documents-detail-page", doc_id=doc.id)
-    except Exception:
-        logger.exception(
-            "document_hebrew_translation_retry enqueue failed user=%s doc_id=%s",
-            getattr(request.user, "username", None),
-            doc.id,
-        )
-        messages.error(request, "שליחת התרגום לעיבוד נכשלה. נסו שוב מאוחר יותר.")
-        return redirect("documents-detail-page", doc_id=doc.id)
 
-    messages.success(request, "תרגום לעברית נשלח לעיבוד.")
+    outcome = enqueue_result.outcome
+    if outcome in {"CREATED_AND_ENQUEUED", "REENQUEUED"}:
+        success_message = "תרגום לעברית נשלח לעיבוד."
+    elif outcome == "ALREADY_QUEUED":
+        success_message = "תרגום לעברית כבר ממתין בתור."
+    elif outcome == "ALREADY_RUNNING":
+        success_message = "תרגום לעברית כבר מתבצע."
+    elif outcome == "ALREADY_TERMINAL":
+        success_message = "עיבוד התרגום לעברית כבר הסתיים."
+    else:
+        raise AssertionError(
+            f"Unhandled Hebrew translation retry success outcome: {outcome}"
+        )
+
+    messages.success(request, success_message)
     logger.info(
-        "document_hebrew_translation_retry user=%s doc_id=%s",
+        "document_hebrew_translation_retry user=%s doc_id=%s "
+        "request_id=%s enqueue_outcome=%s",
         getattr(request.user, "username", None),
         doc.id,
+        enqueue_result.request.pk,
+        outcome,
     )
     return redirect("documents-detail-page", doc_id=doc.id)
 

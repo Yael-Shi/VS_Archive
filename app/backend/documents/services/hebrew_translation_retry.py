@@ -22,7 +22,6 @@ from documents.services.process_document_outcome import (
     ProcessDocumentDisposition,
     ProcessDocumentOutcome,
 )
-from documents.services.sqs import send_process_document_message
 from documents.services.text_presentation import resolve_displayed_transcription_result
 
 logger = logging.getLogger(__name__)
@@ -267,16 +266,6 @@ def is_hebrew_translation_retry_ui_eligible(doc: Document) -> bool:
     except HebrewTranslationRetryError:
         return False
     return True
-
-
-def enqueue_hebrew_translation_retry(document_id: int) -> None:
-    """Validate enqueue eligibility and send a translation-only worker message."""
-    doc = Document.objects.select_related("archive_item").get(pk=document_id)
-    validate_document_for_hebrew_translation_retry(doc)
-    send_process_document_message(
-        document_id,
-        operation=RETRY_HEBREW_TRANSLATION_OPERATION,
-    )
 
 
 def execute_hebrew_translation_retry(
