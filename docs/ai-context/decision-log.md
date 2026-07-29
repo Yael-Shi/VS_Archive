@@ -2102,3 +2102,32 @@ intentional retry.
 unchanged. The legacy document-id sender remains temporarily for Hebrew
 translation retry. Stranded-`QUEUED` recovery/requeue, async Transkribus resume,
 Gemini page persistence, and deployment remain separate work.
+
+## PROCESS_DOCUMENT Hebrew-translation-retry caller cutover
+
+**Decision / implemented:** Staff-triggered retry of a failed or missing Hebrew
+translation now creates or coalesces a durable `ProcessDocumentRequest` with
+`operation=HEBREW_TRANSLATION`, `origin=HEBREW_TRANSLATION_RETRY`, no OCR retry
+mode, and no source Transkribus run. The authenticated staff user is stored as
+`initiated_by`; SQS receives only the Request-aware `request_id` payload.
+
+**Eligibility and idempotence:** Existing translation-only eligibility and
+overwrite protection remain authoritative before a new Request or an
+`ENQUEUE_FAILED` resend. Matching `QUEUED` or worker-owned `RUNNING` work
+coalesces without a second send. Matching `RECOVERY_REQUIRED` and differing
+active work are safe typed conflicts. Terminal translation-retry history does
+not block a later intentional retry.
+
+**State and error boundary:** Enqueue does not mutate
+`Document.processing_state_user` or `upload_error`; the translation worker owns
+the transition to `PROCESSING` and its terminal state. Definite and ambiguous
+queue failures are persisted on the Request and exposed through safe typed
+messages without raw SQS details. Unexpected programming exceptions propagate.
+
+**Compatibility and deferrals:** No worker execution, model, migration, queue,
+or infrastructure contract changes in this cutover. The legacy document-id
+sender and worker payload reader remain temporarily for in-flight messages and
+mixed-version deployment safety. Remove them only after the durable chain is
+deployed and verified end to end. Stranded pre-send `QUEUED` recovery/requeue,
+async Transkribus resume, Gemini page persistence, and deployment remain
+separate work.

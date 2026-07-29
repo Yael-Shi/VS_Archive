@@ -6,12 +6,12 @@ from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.contrib.messages import get_messages
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from documents.management.commands.run_worker import Command
-from documents.models import Document, DocumentTextResult
+from documents.models import Document, DocumentTextResult, ProcessDocumentRequest
 from documents.services.archive_items import create_ocr_document
 from documents.services.env_validation import WorkerEnvConfig
 from documents.services.gemini_engine import GeminiError, GeminiResult
@@ -20,13 +20,16 @@ from documents.services.hebrew_translation_retry import (
     RETRY_HEBREW_TRANSLATION_OPERATION,
     STALE_TRANSLATION_RETRY_PROCESSING_THRESHOLD,
     HebrewTranslationRetryError,
-    enqueue_hebrew_translation_retry,
     execute_hebrew_translation_retry,
     run_hebrew_translation_retry,
+)
+from documents.services.process_document_hebrew_translation_retry_enqueue import (
+    enqueue_hebrew_translation_retry,
 )
 from documents.services.process_document_outcome import (
     ProcessDocumentDisposition,
 )
+from documents.services.sqs import SqsConfigurationError
 
 ENGINE = "gemini-2.0-flash"
 OTHER_ENGINE = "gemini-1.5-pro"
@@ -424,8 +427,9 @@ class HebrewTranslationRetryWorkerTests(TestCase):
             text="hebrew from other engine",
         )
 
+        user = User.objects.create_user(username="translation-enqueue-staff")
         with self.assertRaises(HebrewTranslationRetryError):
-            enqueue_hebrew_translation_retry(doc.id)
+            enqueue_hebrew_translation_retry(doc.id, initiated_by=user)
 
     @patch(
         "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
@@ -678,11 +682,18 @@ class HebrewTranslationRetryWorkerMessageTests(TestCase):
         _usable_source(self.doc)
         _failed_hebrew(self.doc)
 
+    @patch(
+        "documents.management.commands.run_worker.translate_text_to_hebrew_with_gemini"
+    )
     @patch("documents.management.commands.run_worker.transcribe_pages")
     @patch("documents.management.commands.run_worker.extract_pages")
     @patch("documents.management.commands.run_worker.get_object_bytes")
     def test_ordinary_sqs_message_still_runs_normal_ocr_path(
-        self, mock_get_object_bytes, mock_extract_pages, mock_transcribe
+        self,
+        mock_get_object_bytes,
+        mock_extract_pages,
+        mock_transcribe,
+        mock_translate,
     ):
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
         mock_extract_pages.return_value = [object()]
@@ -691,6 +702,10 @@ class HebrewTranslationRetryWorkerMessageTests(TestCase):
             needs_review=False,
             engine_name=ENGINE,
             review_reasons=[],
+        )
+        mock_translate.return_value = GeminiResult(
+            text="translated text",
+            engine_name=ENGINE,
         )
 
         ok = self.command._process_message(
@@ -701,12 +716,20 @@ class HebrewTranslationRetryWorkerMessageTests(TestCase):
         mock_get_object_bytes.assert_called_once()
         mock_extract_pages.assert_called_once()
         mock_transcribe.assert_called_once()
+        mock_translate.assert_called_once()
 
+    @patch(
+        "documents.management.commands.run_worker.translate_text_to_hebrew_with_gemini"
+    )
     @patch("documents.management.commands.run_worker.transcribe_pages")
     @patch("documents.management.commands.run_worker.extract_pages")
     @patch("documents.management.commands.run_worker.get_object_bytes")
     def test_ocr_phase_one_claim_refreshes_updated_at(
-        self, mock_get_object_bytes, mock_extract_pages, mock_transcribe
+        self,
+        mock_get_object_bytes,
+        mock_extract_pages,
+        mock_transcribe,
+        mock_translate,
     ):
         doc = _non_hebrew_doc()
         old_updated_at = timezone.now() - timedelta(days=7)
@@ -730,6 +753,10 @@ class HebrewTranslationRetryWorkerMessageTests(TestCase):
             engine_name=ENGINE,
             review_reasons=[],
         )
+        mock_translate.return_value = GeminiResult(
+            text="translated text",
+            engine_name=ENGINE,
+        )
 
         ok = self.command._process_message(
             _worker_message({"type": "PROCESS_DOCUMENT", "document_id": doc.id})
@@ -739,6 +766,7 @@ class HebrewTranslationRetryWorkerMessageTests(TestCase):
         mock_get_object_bytes.assert_called_once()
         mock_extract_pages.assert_called_once()
         mock_transcribe.assert_called_once()
+        mock_translate.assert_called_once()
         doc.refresh_from_db()
         self.assertGreaterEqual(doc.updated_at, phase_one_updated_at["value"])
 
@@ -772,7 +800,7 @@ class HebrewTranslationRetryWorkerMessageTests(TestCase):
 
 
 @override_settings(UPLOADS_BUCKET_NAME="")
-class HebrewTranslationRetryUiTests(TestCase):
+class HebrewTranslationRetryUiTests(TransactionTestCase):
     def setUp(self):
         self.staff = User.objects.create_user(
             username="hebrew_translation_retry_staff",
@@ -800,7 +828,10 @@ class HebrewTranslationRetryUiTests(TestCase):
     @patch(
         "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
     )
-    @patch("documents.services.hebrew_translation_retry.send_process_document_message")
+    @patch(
+        "documents.services.process_document_request_enqueue."
+        "send_process_document_request_message"
+    )
     def test_staff_post_enqueues_translation_only_operation_without_gemini(
         self, mock_send, mock_translate
     ):
@@ -809,16 +840,28 @@ class HebrewTranslationRetryUiTests(TestCase):
         resp = self.client.post(self._retry_url(doc.id), follow=True)
 
         self.assertEqual(resp.status_code, 200)
-        mock_send.assert_called_once_with(
-            doc.id,
-            operation=RETRY_HEBREW_TRANSLATION_OPERATION,
+        request = ProcessDocumentRequest.objects.get(document=doc)
+        mock_send.assert_called_once_with(request.pk)
+        self.assertEqual(
+            request.operation,
+            ProcessDocumentRequest.Operation.HEBREW_TRANSLATION,
         )
+        self.assertEqual(
+            request.origin,
+            ProcessDocumentRequest.Origin.HEBREW_TRANSLATION_RETRY,
+        )
+        self.assertEqual(request.ocr_retry_mode, "")
+        self.assertIsNone(request.source_transkribus_run_id)
+        self.assertEqual(request.initiated_by, self.staff)
         mock_translate.assert_not_called()
         messages = [str(m) for m in get_messages(resp.wsgi_request)]
         self.assertEqual(len(messages), 1)
         self.assertIn("נשלח לעיבוד", messages[0])
 
-    @patch("documents.services.hebrew_translation_retry.send_process_document_message")
+    @patch(
+        "documents.services.process_document_request_enqueue."
+        "send_process_document_request_message"
+    )
     def test_unauthorized_users_cannot_enqueue(self, mock_send):
         doc = self._eligible_doc()
         self.client.force_login(self.user)
@@ -826,25 +869,36 @@ class HebrewTranslationRetryUiTests(TestCase):
         self.assertEqual(resp.status_code, 403)
         mock_send.assert_not_called()
 
-    @patch("documents.services.hebrew_translation_retry.send_process_document_message")
+    @patch(
+        "documents.services.process_document_request_enqueue."
+        "send_process_document_request_message"
+    )
     def test_enqueue_failure_leaves_state_unchanged_and_shows_safe_feedback(
         self, mock_send
     ):
         doc = self._eligible_doc()
         original_state = doc.processing_state_user
-        mock_send.side_effect = RuntimeError("sqs down for test")
+        mock_send.side_effect = SqsConfigurationError("sqs down for test")
 
         self.client.force_login(self.staff)
         resp = self.client.post(self._retry_url(doc.id), follow=True)
 
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, original_state)
+        process_request = ProcessDocumentRequest.objects.get(document=doc)
+        self.assertEqual(
+            process_request.status,
+            ProcessDocumentRequest.Status.ENQUEUE_FAILED,
+        )
         messages = [str(m) for m in get_messages(resp.wsgi_request)]
         self.assertEqual(len(messages), 1)
-        self.assertIn("שליחת התרגום לעיבוד נכשלה", messages[0])
+        self.assertIn("לא ניתן היה לתזמן את התרגום לעברית", messages[0])
         self.assertNotIn("sqs down for test", messages[0])
 
-    @patch("documents.services.hebrew_translation_retry.send_process_document_message")
+    @patch(
+        "documents.services.process_document_request_enqueue."
+        "send_process_document_request_message"
+    )
     def test_ineligible_post_shows_safe_feedback_without_enqueue(self, mock_send):
         doc = _non_hebrew_doc(visibility=Document.Visibility.PUBLIC)
         self.client.force_login(self.staff)
@@ -854,3 +908,25 @@ class HebrewTranslationRetryUiTests(TestCase):
         messages = [str(m) for m in get_messages(resp.wsgi_request)]
         self.assertEqual(len(messages), 1)
         self.assertIn("לא ניתן לשלוח תרגום לעברית לעיבוד", messages[0])
+
+    @patch(
+        "documents.services.process_document_request_enqueue."
+        "send_process_document_request_message"
+    )
+    def test_repeated_post_coalesces_without_second_send(self, mock_send):
+        doc = self._eligible_doc()
+        self.client.force_login(self.staff)
+
+        first = self.client.post(self._retry_url(doc.id), follow=True)
+        second = self.client.post(self._retry_url(doc.id), follow=True)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(mock_send.call_count, 1)
+        self.assertEqual(
+            ProcessDocumentRequest.objects.filter(document=doc).count(),
+            1,
+        )
+        second_messages = [str(m) for m in get_messages(second.wsgi_request)]
+        self.assertEqual(len(second_messages), 1)
+        self.assertIn("כבר ממתין בתור", second_messages[0])
