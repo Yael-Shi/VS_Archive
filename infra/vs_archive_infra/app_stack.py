@@ -39,7 +39,12 @@ class VsArchiveAppStack(Stack):
     ):
         super().__init__(scope, construct_id, **kwargs)
 
-        cluster = ecs.Cluster(self, f"{cfg.prefix}-cluster", vpc=vpc)
+        cluster = ecs.Cluster(
+            self,
+            f"{cfg.prefix}-cluster",
+            vpc=vpc,
+            enable_fargate_capacity_providers=True,
+        )
 
         namespace = servicediscovery.PrivateDnsNamespace(
             self, f"{cfg.prefix}-ns", name=f"{cfg.prefix}.local", vpc=vpc
