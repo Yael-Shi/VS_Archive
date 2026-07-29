@@ -491,7 +491,7 @@ class ArchiveItemUploadIntegrationTests(TestCase):
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_single_file_complete_still_enqueues_processing(
         self, mock_enqueue, _mock_put
     ):
@@ -509,7 +509,12 @@ class ArchiveItemUploadIntegrationTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(complete_resp.status_code, 200)
-        mock_enqueue.assert_called_once_with(document_id=doc_id)
+        mock_enqueue.assert_called_once()
+        self.assertEqual(mock_enqueue.call_args.kwargs["document_id"], doc_id)
+        self.assertEqual(
+            mock_enqueue.call_args.kwargs["initiated_by"].pk,
+            self.staff.pk,
+        )
 
 
 class ManualTextArchiveItemTests(TestCase):

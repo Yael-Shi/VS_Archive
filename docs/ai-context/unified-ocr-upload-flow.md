@@ -203,9 +203,12 @@ Discovery metadata on the upload form uses the same shared partial as manual tex
 
 On successful **single** `upload_complete` or **multi** `upload_finalize`:
 
-- Document upload status → `UPLOADED`
-- Processing state → `PROCESSING`
-- `send_process_document_message(document_id=...)` enqueues worker processing (unchanged OCR/HTR path)
+- Document upload status → `UPLOADED`.
+- Initial completion sets processing state to `PROCESSING`.
+- After the upload transaction, `enqueue_uploaded_document_processing(...)` creates, retries, or coalesces a durable `ProcessDocumentRequest` with `operation=OCR`, `origin=UPLOAD_FINALIZE`, and `ocr_retry_mode=normal_reenqueue`.
+- SQS receives the Request-aware `request_id` payload rather than the legacy upload `document_id` payload.
+- Repeated completion still consults the durable Request. Active work coalesces; matching terminal upload history is an idempotent no-op; worker-owned state is not overwritten.
+- Expected enqueue failures return safe typed API errors without raw queue details.
 
 ---
 

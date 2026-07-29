@@ -221,6 +221,28 @@ def _payload_matches(
     )
 
 
+def _lock_matching_terminal_upload_request(
+    document_id: int,
+    spec: _RequestSpec,
+) -> ProcessDocumentRequest | None:
+    if spec.origin != ProcessDocumentRequest.Origin.UPLOAD_FINALIZE:
+        return None
+
+    return (
+        ProcessDocumentRequest.objects.select_for_update()
+        .filter(
+            document_id=document_id,
+            status__in=_TERMINAL_STATUSES,
+            operation=spec.operation,
+            origin=spec.origin,
+            ocr_retry_mode=spec.ocr_retry_mode,
+            source_transkribus_run_id=spec.source_transkribus_run_id,
+        )
+        .order_by("-pk")
+        .first()
+    )
+
+
 def _coalesce_outcome_for_status(status: str) -> EnqueueOutcome:
     if status == ProcessDocumentRequest.Status.QUEUED:
         return "ALREADY_QUEUED"
@@ -257,6 +279,18 @@ def _resolve_under_document_lock(
 ) -> _ResolveResult:
     active = _lock_active_request(document.pk)
     if active is None:
+        terminal_upload = _lock_matching_terminal_upload_request(
+            document.pk,
+            spec,
+        )
+        if terminal_upload is not None:
+            return _ResolveResult(
+                request=terminal_upload,
+                created=False,
+                send_right=False,
+                coalesce_outcome="ALREADY_TERMINAL",
+            )
+
         try:
             with transaction.atomic():
                 created_request = ProcessDocumentRequest.objects.create(

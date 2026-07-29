@@ -290,7 +290,7 @@ class PhotoUploadFlowTests(TestCase):
             content_type="application/json",
         )
 
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_successful_finalize_creates_photo_archive_item(self, mock_enqueue):
         created = self._create_pending_upload()
         photo_content_id = created["photo_content_id"]
@@ -329,7 +329,7 @@ class PhotoUploadFlowTests(TestCase):
         self.assertFalse(Document.objects.exists())
         mock_enqueue.assert_not_called()
 
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_persisted_size_comes_from_s3_head_object(self, mock_enqueue):
         created = self._create_pending_upload()
         photo_content_id = created["photo_content_id"]
@@ -343,7 +343,7 @@ class PhotoUploadFlowTests(TestCase):
         photo = PhotoContent.objects.get(id=photo_content_id)
         self.assertEqual(photo.original_size_bytes, self.S3_CONTENT_LENGTH)
 
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_repeated_complete_is_idempotent_for_uploaded_photo(self, mock_enqueue):
         created = self._create_pending_upload()
         photo_content_id = created["photo_content_id"]
@@ -377,7 +377,7 @@ class PhotoUploadFlowTests(TestCase):
         self.assertEqual(photo.original_size_bytes, self.S3_CONTENT_LENGTH)
         self.assertEqual(photo.original_mime_type, "image/jpeg")
 
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_discovery_metadata_saved_on_create(self, mock_enqueue):
         created = self._create_pending_upload()
         item = ArchiveItem.objects.get(id=created["archive_item_id"])
@@ -394,7 +394,7 @@ class PhotoUploadFlowTests(TestCase):
             {"1950", "family"},
         )
 
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_discovery_metadata_saved_from_selected_ids_and_new_names(
         self, mock_enqueue
     ):
@@ -433,7 +433,7 @@ class PhotoUploadFlowTests(TestCase):
         )
         mock_enqueue.assert_not_called()
 
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_photo_metadata_saved_on_create(self, mock_enqueue):
         resp = self.client.post(
             self.CREATE_URL,
@@ -457,7 +457,7 @@ class PhotoUploadFlowTests(TestCase):
         self.assertEqual(photo.notes, "Color scan")
         mock_enqueue.assert_not_called()
 
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_s3_content_type_mismatch_marks_failed(self, mock_enqueue):
         created = self._create_pending_upload()
         photo_content_id = created["photo_content_id"]
@@ -483,7 +483,7 @@ class PhotoUploadFlowTests(TestCase):
         self.assertEqual(photo.original_size_bytes, 0)
         mock_enqueue.assert_not_called()
 
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_client_upload_failure_marks_failed(self, mock_enqueue):
         created = self._create_pending_upload()
         photo_content_id = created["photo_content_id"]
@@ -499,7 +499,7 @@ class PhotoUploadFlowTests(TestCase):
         self.assertEqual(body["upload_error"], "S3 PUT failed")
         self.mock_s3_head.assert_not_called()
 
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_s3_verification_failure_leaves_pending_retryable(self, mock_enqueue):
         from botocore.exceptions import BotoCoreError
 
@@ -521,7 +521,7 @@ class PhotoUploadFlowTests(TestCase):
         photo = PhotoContent.objects.get(id=photo_content_id)
         self.assertEqual(photo.upload_status, PhotoContent.UploadStatus.PENDING)
 
-    @patch("documents.views.send_process_document_message")
+    @patch("documents.views.enqueue_uploaded_document_processing")
     def test_create_sets_upload_status_pending(self, mock_enqueue):
         created = self._create_pending_upload()
         photo = PhotoContent.objects.get(id=created["photo_content_id"])

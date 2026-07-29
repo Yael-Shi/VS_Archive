@@ -6,6 +6,7 @@ import json
 import threading
 import uuid
 from datetime import timedelta
+from typing import cast
 from unittest.mock import patch
 
 from botocore.exceptions import ClientError, EndpointConnectionError
@@ -108,7 +109,7 @@ class SendProcessDocumentRequestMessageTests(SimpleTestCase):
         for request_id in (0, -1, True, 1.0, "1", None):
             with self.subTest(request_id=request_id):
                 with self.assertRaises(ValueError):
-                    send_process_document_request_message(request_id)
+                    send_process_document_request_message(cast(int, request_id))
 
 
 class ProcessDocumentSqsFailureClassificationTests(SimpleTestCase):
@@ -546,7 +547,7 @@ class ProcessDocumentEnqueueAdditionalCoverageTests(TransactionTestCase):
         "documents.services.process_document_request_enqueue."
         "send_process_document_request_message"
     )
-    def test_terminal_history_allows_new_request(self, mock_send):
+    def test_terminal_upload_history_is_idempotent(self, mock_send):
         terminal = ProcessDocumentRequest.objects.create(
             document=self.document,
             initiated_by=self.user,
@@ -559,8 +560,44 @@ class ProcessDocumentEnqueueAdditionalCoverageTests(TransactionTestCase):
 
         result = self._upload_enqueue()
 
+        mock_send.assert_not_called()
+        self.assertEqual(result.outcome, "ALREADY_TERMINAL")
+        self.assertEqual(result.request.pk, terminal.pk)
+        self.assertFalse(result.created)
+        self.assertFalse(result.send_attempted)
+        self.assertFalse(result.message_sent)
+        self.assertEqual(
+            ProcessDocumentRequest.objects.filter(document=self.document).count(),
+            1,
+        )
+
+    @patch(
+        "documents.services.process_document_request_enqueue."
+        "send_process_document_request_message"
+    )
+    def test_terminal_ocr_reprocess_history_allows_new_request(
+        self,
+        mock_send,
+    ):
+        terminal = ProcessDocumentRequest.objects.create(
+            document=self.document,
+            initiated_by=self.user,
+            status=ProcessDocumentRequest.Status.COMPLETED,
+            operation=ProcessDocumentRequest.Operation.OCR,
+            origin=ProcessDocumentRequest.Origin.OCR_REPROCESS,
+            ocr_retry_mode=(ProcessDocumentRequest.OcrRetryMode.NORMAL_REENQUEUE),
+            completed_at=timezone.now(),
+        )
+
+        result = self._upload_enqueue(
+            origin=ProcessDocumentRequest.Origin.OCR_REPROCESS,
+        )
+
         self.assertEqual(result.outcome, "CREATED_AND_ENQUEUED")
         self.assertNotEqual(result.request.pk, terminal.pk)
+        self.assertTrue(result.created)
+        self.assertTrue(result.send_attempted)
+        self.assertTrue(result.message_sent)
         self.assertEqual(
             ProcessDocumentRequest.objects.filter(document=self.document).count(),
             2,

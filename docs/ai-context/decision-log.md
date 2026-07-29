@@ -2060,3 +2060,17 @@ Content-Type: `application/xml` via `put_object_bytes`.
 **Known limitation:** A process crash after the Request transaction commits but before `SendMessage`, or an unexpected programming exception at send time, can leave a stranded `QUEUED` Request. Matching peers deliberately do not resend it. Explicit recovery/requeue tooling remains a later task.
 
 **Still deferred:** wiring upload finalize, OCR reprocess, and Hebrew translation retry to this service; removing the legacy document-id payload producers; stranded-`QUEUED` reconciliation/requeue tooling; and any caller-specific UI or operational behavior changes.
+
+## PROCESS_DOCUMENT upload-finalize caller cutover
+
+**Decision / implemented:** Successful single-file `upload_complete` and multi-image `upload_finalize` now call `enqueue_uploaded_document_processing(...)` after the upload database transaction. The adapter submits `operation=OCR`, `origin=UPLOAD_FINALIZE`, `ocr_retry_mode=normal_reenqueue`, `source_transkribus_run_id=None`, with the authenticated staff user as `initiated_by`. The views no longer send the legacy document-id payload directly.
+
+**Idempotence:** Upload completion retries still consult the durable adapter. A matching active Request coalesces without another send. A matching terminal `UPLOAD_FINALIZE` Request returns `ALREADY_TERMINAL` and does not create new OCR work; later intentional OCR retry must use `origin=OCR_REPROCESS`.
+
+**Document-state fencing:** New, retried, or already-queued work sets `Document.processing_state_user=PROCESSING` and clears `upload_error` only while the associated Request is still `QUEUED`. Queue failure sets the safe `FAILED` state only while the Request is still `ENQUEUE_FAILED`. Worker-owned running or terminal state is never overwritten.
+
+**HTTP boundary:** Expected queue, validation, conflict, and recovery outcomes use typed `UploadProcessEnqueueError` values and safe response text. Raw SQS exception details are not returned. Unexpected programming exceptions propagate.
+
+**Infrastructure:** The shared ECS task role receives `queue.grant_send_messages(...)` in addition to consume permissions. Any deployment must preserve the explicit live/new image tag and pass a narrowly reviewed CDK diff.
+
+**Still deferred:** OCR reprocess and Hebrew translation retry remain on the legacy document-id payload pending separate caller cutovers. Recovery/requeue tooling for stranded pre-send `QUEUED` Requests also remains deferred.

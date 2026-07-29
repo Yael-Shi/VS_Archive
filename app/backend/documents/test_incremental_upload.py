@@ -143,11 +143,18 @@ class IncrementalUploadApiTests(TestCase):
             doc_id, 1, {"success": True, "file_size": 200, "file_mime": "image/jpeg"}
         )
 
-        with patch("documents.views.send_process_document_message") as mock_enqueue:
+        with patch(
+            "documents.views.enqueue_uploaded_document_processing"
+        ) as mock_enqueue:
             finalize_resp = self._post_finalize(doc_id)
 
         self.assertEqual(finalize_resp.status_code, 200)
-        mock_enqueue.assert_called_once_with(document_id=doc_id)
+        mock_enqueue.assert_called_once()
+        self.assertEqual(mock_enqueue.call_args.kwargs["document_id"], doc_id)
+        self.assertEqual(
+            mock_enqueue.call_args.kwargs["initiated_by"].pk,
+            self.staff.pk,
+        )
 
         doc = Document.objects.get(id=doc_id)
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADED)
@@ -166,11 +173,18 @@ class IncrementalUploadApiTests(TestCase):
             doc_id, 0, {"success": True, "file_size": 100, "file_mime": "image/jpeg"}
         )
 
-        with patch("documents.views.send_process_document_message") as mock_enqueue:
+        with patch(
+            "documents.views.enqueue_uploaded_document_processing"
+        ) as mock_enqueue:
             finalize_resp = self._post_finalize(doc_id)
 
         self.assertEqual(finalize_resp.status_code, 200)
-        mock_enqueue.assert_called_once_with(document_id=doc_id)
+        mock_enqueue.assert_called_once()
+        self.assertEqual(mock_enqueue.call_args.kwargs["document_id"], doc_id)
+        self.assertEqual(
+            mock_enqueue.call_args.kwargs["initiated_by"].pk,
+            self.staff.pk,
+        )
 
         doc = Document.objects.get(id=doc_id)
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADED)
@@ -184,7 +198,9 @@ class IncrementalUploadApiTests(TestCase):
         create_resp = self._post_create_incremental()
         doc_id = create_resp.json()["document_id"]
 
-        with patch("documents.views.send_process_document_message") as mock_enqueue:
+        with patch(
+            "documents.views.enqueue_uploaded_document_processing"
+        ) as mock_enqueue:
             resp = self._post_finalize(doc_id)
 
         self.assertEqual(resp.status_code, 400)
