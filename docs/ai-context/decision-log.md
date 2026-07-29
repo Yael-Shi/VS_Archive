@@ -2074,3 +2074,31 @@ Content-Type: `application/xml` via `put_object_bytes`.
 **Infrastructure:** The shared ECS task role receives `queue.grant_send_messages(...)` in addition to consume permissions. Any deployment must preserve the explicit live/new image tag and pass a narrowly reviewed CDK diff.
 
 **Still deferred:** OCR reprocess and Hebrew translation retry remain on the legacy document-id payload pending separate caller cutovers. Recovery/requeue tooling for stranded pre-send `QUEUED` Requests also remains deferred.
+
+## PROCESS_DOCUMENT OCR-reprocess caller cutover
+
+**Decision / implemented:** Intentional staff or command-driven OCR reprocess now
+uses a durable `ProcessDocumentRequest` with `operation=OCR`,
+`origin=OCR_REPROCESS`, the retry mode selected by the existing route-aware
+assessment, and `source_transkribus_run_id` only for
+`transkribus_recognition_only`. The staff actor is stored as `initiated_by`;
+management-command execution remains system initiated.
+
+**Transaction and state boundary:** Assessment remains read-only. The generic
+enqueue service owns the short Document-lock transaction and sends the
+request-id message only after commit. The OCR-reprocess adapter marks the
+Document `PROCESSING` and clears `upload_error` only while the associated
+Request is still `QUEUED`; it marks a safe queue failure only while the Request
+is still `ENQUEUE_FAILED`. Worker-owned `RUNNING` and terminal state always
+wins.
+
+**Outcomes and errors:** Matching active Requests coalesce; a conflicting active
+payload and `RECOVERY_REQUIRED` are explicit safe conflicts. Definite and
+ambiguous queue failures expose no SQS details. Unexpected programming
+exceptions propagate. Terminal OCR-reprocess history does not block a later
+intentional retry.
+
+**Compatibility and deferrals:** The request-aware worker execution contract is
+unchanged. The legacy document-id sender remains temporarily for Hebrew
+translation retry. Stranded-`QUEUED` recovery/requeue, async Transkribus resume,
+Gemini page persistence, and deployment remain separate work.

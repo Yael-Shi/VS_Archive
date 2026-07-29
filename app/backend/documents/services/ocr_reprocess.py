@@ -1,16 +1,13 @@
-"""Staff/admin OCR reprocess planning and enqueue for failed OCR-backed documents."""
+"""Staff/admin OCR reprocess planning for failed OCR-backed documents."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
 
-from django.db import transaction
-
 from documents.models import ArchiveItem, Document, DocumentTextResult, TranskribusRun
 from documents.services import transkribus_run_persistence as trp
 from documents.services.ocr_routing import OcrRouteConfig, select_ocr_route
-from documents.services.sqs import send_process_document_message
 
 
 class OcrReprocessError(RuntimeError):
@@ -253,46 +250,3 @@ def assess_ocr_reprocess(
         model_id=model_id,
         route=route,
     )
-
-
-def apply_ocr_reprocess(
-    document_id: int,
-    *,
-    collection_id: str,
-    model_id: str,
-) -> OcrReprocessAssessment:
-    assessment = assess_ocr_reprocess(
-        document_id,
-        collection_id=collection_id,
-        model_id=model_id,
-    )
-
-    with transaction.atomic():
-        doc = Document.objects.select_for_update().get(pk=document_id)
-        validate_document_for_ocr_reprocess(doc)
-        doc.processing_state_user = Document.ProcessingState.PROCESSING
-        if doc.upload_error:
-            doc.upload_error = None
-        doc.save(update_fields=["processing_state_user", "upload_error", "updated_at"])
-
-        try:
-            if assessment.retry_mode == OcrRetryMode.TRANSKRIBUS_RECOGNITION_ONLY:
-                if assessment.source_transkribus_run_id is None:
-                    raise OcrReprocessError(
-                        f"Document id={document_id} recognition-only reprocess requires "
-                        "source_transkribus_run_id but none was classified."
-                    )
-                send_process_document_message(
-                    document_id,
-                    ocr_retry_mode=OcrRetryMode.TRANSKRIBUS_RECOGNITION_ONLY.value,
-                    source_transkribus_run_id=assessment.source_transkribus_run_id,
-                )
-            else:
-                send_process_document_message(document_id)
-        except OcrReprocessError:
-            raise
-        except Exception as exc:
-            raise OcrReprocessError(
-                f"Failed to enqueue document id={document_id} for OCR reprocess: {exc}"
-            ) from exc
-    return assessment
