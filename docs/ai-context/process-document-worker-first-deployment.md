@@ -16,6 +16,14 @@ Existing commands that provide only `image_tag` remain backward compatible.
 Production deployment must always provide explicit dated tags; never rely on
 the `dev` fallback.
 
+## Cluster capacity providers
+
+The ECS cluster must explicitly enable the built-in `FARGATE` and
+`FARGATE_SPOT` capacity providers. The worker service uses a `FARGATE_SPOT`
+capacity-provider strategy, and ECS rejects service or one-off task placement
+when that provider is not associated with the cluster. Keep
+`enable_fargate_capacity_providers=True` on the cluster construct.
+
 ## Migration bootstrap
 
 If the new image contains unapplied migrations required by the worker, stop the
