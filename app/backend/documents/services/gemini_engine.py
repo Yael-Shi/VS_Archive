@@ -7,6 +7,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
+from enum import Enum
 from typing import Any, Dict, List, Optional, cast
 
 from google import genai
@@ -28,6 +29,78 @@ class GeminiError(RuntimeError):
     pass
 
 
+class GeminiResponseFailureCode(str, Enum):
+    EMPTY_RESPONSE = "EMPTY_RESPONSE"
+    MAX_TOKENS = "MAX_TOKENS"
+    SAFETY = "SAFETY"
+    RECITATION = "RECITATION"
+    LANGUAGE = "LANGUAGE"
+    SPII = "SPII"
+    BLOCKED = "BLOCKED"
+    NO_CANDIDATES = "NO_CANDIDATES"
+    JSON_PARSE = "JSON_PARSE"
+    JSON_SCHEMA = "JSON_SCHEMA"
+    OTHER = "OTHER"
+    API_ERROR = "API_ERROR"
+
+
+@dataclass(frozen=True)
+class GeminiResponseMetadata:
+    model: str
+    page_index: int
+    attempt: int
+    max_output_tokens: Optional[int]
+    candidate_count: int
+    finish_reason: Optional[str]
+    block_reason: Optional[str]
+    raw_output_length: int
+    output_length: int
+    trailing_whitespace_chars: int
+    prompt_token_count: Optional[int]
+    candidates_token_count: Optional[int]
+    thoughts_token_count: Optional[int]
+    total_token_count: Optional[int]
+
+    def safe_details(self) -> str:
+        return (
+            f"page_index={self.page_index}, "
+            f"attempt={self.attempt}, "
+            f"finish_reason={self.finish_reason}, "
+            f"block_reason={self.block_reason}, "
+            f"candidate_count={self.candidate_count}, "
+            f"raw_output_length={self.raw_output_length}, "
+            f"output_length={self.output_length}, "
+            f"trailing_whitespace_chars={self.trailing_whitespace_chars}, "
+            f"prompt_token_count={self.prompt_token_count}, "
+            f"candidates_token_count={self.candidates_token_count}, "
+            f"thoughts_token_count={self.thoughts_token_count}, "
+            f"total_token_count={self.total_token_count}, "
+            f"max_output_tokens={self.max_output_tokens}, "
+            f"model={self.model}"
+        )
+
+
+class GeminiResponseError(GeminiError):
+    def __init__(
+        self,
+        failure_code: GeminiResponseFailureCode,
+        metadata: GeminiResponseMetadata,
+    ) -> None:
+        self.failure_code = failure_code
+        self.metadata = metadata
+        super().__init__(f"{failure_code.value}: {metadata.safe_details()}")
+
+
+class GeminiApiError(GeminiError):
+    failure_code = GeminiResponseFailureCode.API_ERROR
+
+    def __init__(self, exception_class: str) -> None:
+        self.exception_class = exception_class
+        super().__init__(
+            f"{self.failure_code.value}: exception_class={exception_class}"
+        )
+
+
 @dataclass(frozen=True)
 class GeminiResult:
     text: str
@@ -41,7 +114,7 @@ class _HebrewTranslationChunkAttemptResult:
     text: str
     data: Dict[str, Any]
     finish_reason: Optional[str]
-    finish_message: Optional[str]
+    finish_message_present: bool
     usage: Dict[str, Optional[int]]
 
 
@@ -282,6 +355,13 @@ def _similarity_ratio(a: str, b: str) -> float:
 
 
 def _is_retryable_gemini_response_error(exc: Exception) -> bool:
+    if isinstance(exc, GeminiResponseError):
+        return exc.failure_code in {
+            GeminiResponseFailureCode.EMPTY_RESPONSE,
+            GeminiResponseFailureCode.JSON_PARSE,
+            GeminiResponseFailureCode.MAX_TOKENS,
+        }
+
     message = str(exc).upper()
     return any(
         token in message
@@ -393,12 +473,21 @@ def _first_response_candidate(resp: Any) -> Any:
     return candidates[0]
 
 
+def _normalize_provider_enum(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+
+    raw_value = getattr(value, "value", value)
+    normalized = str(raw_value).strip()
+    if not normalized:
+        return None
+    return normalized.rsplit(".", 1)[-1].upper()
+
+
 def _extract_finish_reason(resp: Any) -> Optional[str]:
     candidate = _first_response_candidate(resp)
     finish_reason = getattr(candidate, "finish_reason", None)
-    if finish_reason is None:
-        return None
-    return str(finish_reason)
+    return _normalize_provider_enum(finish_reason)
 
 
 def _is_max_tokens_finish_reason(finish_reason: Optional[str]) -> bool:
@@ -409,18 +498,6 @@ def _is_max_tokens_finish_reason(finish_reason: Optional[str]) -> bool:
 
 def _escalated_max_output_tokens(current: Optional[int]) -> int:
     return max(_TRUNCATION_RETRY_MIN_OUTPUT_TOKENS, current or 0)
-
-
-def _extract_finish_message(resp: Any) -> Optional[str]:
-    candidate = _first_response_candidate(resp)
-    finish_message = getattr(candidate, "finish_message", None)
-    if finish_message is None:
-        return None
-
-    normalized = re.sub(r"\s+", " ", str(finish_message)).strip()
-    if not normalized:
-        return None
-    return normalized[:500]
 
 
 def _extract_response_usage(resp: Any) -> Dict[str, Optional[int]]:
@@ -435,6 +512,127 @@ def _extract_response_usage(resp: Any) -> Dict[str, Optional[int]]:
         "thoughts_token_count": getattr(usage, "thoughts_token_count", None),
         "total_token_count": getattr(usage, "total_token_count", None),
     }
+
+
+def _extract_block_reason(resp: Any) -> Optional[str]:
+    prompt_feedback = getattr(resp, "prompt_feedback", None)
+    block_reason = _normalize_provider_enum(
+        getattr(prompt_feedback, "block_reason", None)
+    )
+    if block_reason in {
+        "UNSPECIFIED",
+        "BLOCK_REASON_UNSPECIFIED",
+        "BLOCKED_REASON_UNSPECIFIED",
+    }:
+        return None
+    return block_reason
+
+
+def _has_finish_message(resp: Any) -> bool:
+    candidate = _first_response_candidate(resp)
+    return bool(getattr(candidate, "finish_message", None))
+
+
+def _extract_response_text(resp: Any) -> str:
+    candidates = getattr(resp, "candidates", None)
+    candidate = _first_response_candidate(resp)
+    if candidate is None and candidates is not None:
+        return ""
+
+    if candidate is not None:
+        content = getattr(candidate, "content", None)
+        parts = getattr(content, "parts", None)
+        if parts is not None:
+            text_parts = [
+                str(text)
+                for part in parts
+                if (text := getattr(part, "text", None)) is not None
+            ]
+            if text_parts:
+                return "".join(text_parts)
+
+    try:
+        return getattr(resp, "text", None) or ""
+    except (AttributeError, TypeError, ValueError):
+        return ""
+
+
+def _response_metadata(
+    resp: Any,
+    *,
+    model_name: str,
+    page_index: int,
+    attempt: int,
+    max_output_tokens: Optional[int],
+) -> tuple[GeminiResponseMetadata, str]:
+    candidates = getattr(resp, "candidates", None)
+    raw_output_text = _extract_response_text(resp)
+    output_text = raw_output_text.strip()
+    usage = _extract_response_usage(resp)
+    metadata = GeminiResponseMetadata(
+        model=model_name,
+        page_index=page_index,
+        attempt=attempt,
+        max_output_tokens=max_output_tokens,
+        candidate_count=(
+            len(candidates) if candidates is not None else int(bool(raw_output_text))
+        ),
+        finish_reason=_extract_finish_reason(resp),
+        block_reason=_extract_block_reason(resp),
+        raw_output_length=len(raw_output_text),
+        output_length=len(output_text),
+        trailing_whitespace_chars=(
+            len(raw_output_text) - len(raw_output_text.rstrip())
+        ),
+        prompt_token_count=usage["prompt_token_count"],
+        candidates_token_count=usage["candidates_token_count"],
+        thoughts_token_count=usage["thoughts_token_count"],
+        total_token_count=usage["total_token_count"],
+    )
+    return metadata, output_text
+
+
+_PERMANENT_FINISH_REASON_CODES = {
+    "SAFETY": GeminiResponseFailureCode.SAFETY,
+    "RECITATION": GeminiResponseFailureCode.RECITATION,
+    "LANGUAGE": GeminiResponseFailureCode.LANGUAGE,
+    "SPII": GeminiResponseFailureCode.SPII,
+    "BLOCKLIST": GeminiResponseFailureCode.BLOCKED,
+    "PROHIBITED_CONTENT": GeminiResponseFailureCode.BLOCKED,
+    "IMAGE_SAFETY": GeminiResponseFailureCode.SAFETY,
+}
+
+
+def _classify_response_failure(
+    metadata: GeminiResponseMetadata,
+) -> Optional[GeminiResponseFailureCode]:
+    if metadata.block_reason:
+        if metadata.block_reason == "SAFETY":
+            return GeminiResponseFailureCode.SAFETY
+        return GeminiResponseFailureCode.BLOCKED
+
+    if metadata.finish_reason == "MAX_TOKENS":
+        return GeminiResponseFailureCode.MAX_TOKENS
+
+    if metadata.finish_reason in _PERMANENT_FINISH_REASON_CODES:
+        return _PERMANENT_FINISH_REASON_CODES[metadata.finish_reason]
+
+    if metadata.finish_reason not in (None, "STOP"):
+        return GeminiResponseFailureCode.OTHER
+
+    if metadata.candidate_count == 0:
+        return GeminiResponseFailureCode.NO_CANDIDATES
+
+    if metadata.output_length == 0:
+        return GeminiResponseFailureCode.EMPTY_RESPONSE
+
+    return None
+
+
+def _raise_for_response_failure(metadata: GeminiResponseMetadata) -> None:
+    failure_code = _classify_response_failure(metadata)
+    if failure_code is not None:
+        raise GeminiResponseError(failure_code, metadata)
 
 
 def _translation_min_expected_length(
@@ -538,7 +736,7 @@ def _generate_hebrew_translation_chunk(
     success = False
     attempts = 0
     finish_reason: Optional[str] = None
-    finish_message: Optional[str] = None
+    finish_message_present = False
     usage: Dict[str, Optional[int]] = {}
     data: Dict[str, Any] = {}
 
@@ -557,7 +755,7 @@ def _generate_hebrew_translation_chunk(
                 ),
             )
             finish_reason = _extract_finish_reason(resp)
-            finish_message = _extract_finish_message(resp)
+            finish_message_present = _has_finish_message(resp)
             usage = _extract_response_usage(resp)
             data = _plain_text_response_to_page_data(
                 resp.text or "",
@@ -587,7 +785,7 @@ def _generate_hebrew_translation_chunk(
                 attempts += 1
                 continue
 
-            raise GeminiError(f"Gemini API Error: {e}")
+            raise GeminiApiError(e.__class__.__name__) from None
 
     if not success:
         raise GeminiError(f"QUOTA_EXHAUSTED: {model_name} after retries")
@@ -596,14 +794,24 @@ def _generate_hebrew_translation_chunk(
         text=_strip_outer_source_excerpt_wrapper(data["text"]),
         data=data,
         finish_reason=finish_reason,
-        finish_message=finish_message,
+        finish_message_present=finish_message_present,
         usage=usage,
     )
 
 
-def _parse_page_json_strict(raw: str, *, page_index: int) -> Dict[str, Any]:
+def _parse_page_json_strict(
+    raw: str,
+    *,
+    page_index: int,
+    response_metadata: Optional[GeminiResponseMetadata] = None,
+) -> Dict[str, Any]:
     raw = (raw or "").strip()
     if not raw:
+        if response_metadata is not None:
+            raise GeminiResponseError(
+                GeminiResponseFailureCode.EMPTY_RESPONSE,
+                response_metadata,
+            )
         raise GeminiError(f"Gemini returned empty response on page {page_index}")
 
     if "```" in raw:
@@ -615,24 +823,34 @@ def _parse_page_json_strict(raw: str, *, page_index: int) -> Dict[str, Any]:
 
     try:
         data = json.loads(raw, strict=False)
-    except Exception as e:
-        logger.error(
-            "JSON Parse Error on page %s: %s. Raw: %s...",
-            page_index,
-            e,
-            raw[:2000],
+    except json.JSONDecodeError as exc:
+        if response_metadata is None:
+            raise GeminiError(f"JSON Parse Error on page {page_index}") from exc
+        error = GeminiResponseError(
+            GeminiResponseFailureCode.JSON_PARSE,
+            response_metadata,
         )
-        raise GeminiError(f"JSON Parse Error on page {page_index}: {e}")
+        logger.error("Gemini response JSON parse failed: %s", error)
+        raise error from exc
 
-    # Validation and defaults
-    for key in _REQUIRED_KEYS:
-        if key not in data:
-            if key == "text":
-                data[key] = ""
-            elif key == "has_unclear":
-                data[key] = False
-            else:
-                data[key] = 0
+    valid_schema = (
+        isinstance(data, dict)
+        and all(key in data for key in _REQUIRED_KEYS)
+        and isinstance(data.get("text"), str)
+        and bool(data["text"].strip())
+        and type(data.get("has_unclear")) is bool
+        and type(data.get("unclear_count")) is int
+        and data["unclear_count"] >= 0
+    )
+    if not valid_schema:
+        if response_metadata is None:
+            raise GeminiError(f"JSON Schema Error on page {page_index}")
+        error = GeminiResponseError(
+            GeminiResponseFailureCode.JSON_SCHEMA,
+            response_metadata,
+        )
+        logger.error("Gemini response JSON schema validation failed: %s", error)
+        raise error
 
     return data
 
@@ -721,39 +939,41 @@ def transcribe_pages_with_gemini(
                     config=types.GenerateContentConfig(**attempt_config_kwargs),
                 )
 
-                finish_reason = _extract_finish_reason(resp)
-                finish_message = _extract_finish_message(resp)
-                usage = _extract_response_usage(resp)
-
-                raw_output_text = resp.text or ""
-                output_text = raw_output_text.strip()
-                trailing_whitespace_chars = len(raw_output_text) - len(
-                    raw_output_text.rstrip()
+                response_metadata, output_text = _response_metadata(
+                    resp,
+                    model_name=model_name,
+                    page_index=page.page_index,
+                    attempt=attempts + 1,
+                    max_output_tokens=attempt_max_output_tokens,
                 )
+                trailing_whitespace_chars = response_metadata.trailing_whitespace_chars
 
                 logger.info(
-                    "Gemini transcription page completed: "
+                    "Gemini transcription response received: "
                     "page=%s raw_output_length=%s output_length=%s "
                     "trailing_whitespace_chars=%s finish_reason=%s "
-                    "finish_message=%r prompt_token_count=%s "
+                    "block_reason=%s candidate_count=%s attempt=%s "
+                    "prompt_token_count=%s "
                     "candidates_token_count=%s thoughts_token_count=%s "
                     "total_token_count=%s max_output_tokens=%s model=%s",
                     page.page_index,
-                    len(raw_output_text),
-                    len(output_text),
+                    response_metadata.raw_output_length,
+                    response_metadata.output_length,
                     trailing_whitespace_chars,
-                    finish_reason,
-                    finish_message,
-                    usage["prompt_token_count"],
-                    usage["candidates_token_count"],
-                    usage["thoughts_token_count"],
-                    usage["total_token_count"],
+                    response_metadata.finish_reason,
+                    response_metadata.block_reason,
+                    response_metadata.candidate_count,
+                    response_metadata.attempt,
+                    response_metadata.prompt_token_count,
+                    response_metadata.candidates_token_count,
+                    response_metadata.thoughts_token_count,
+                    response_metadata.total_token_count,
                     attempt_max_output_tokens,
                     model_name,
                 )
 
                 if uses_plain_text_transcription and _is_max_tokens_finish_reason(
-                    finish_reason
+                    response_metadata.finish_reason
                 ):
                     attempts += 1
                     if attempts < 2:
@@ -766,40 +986,30 @@ def transcribe_pages_with_gemini(
                             "max_output_tokens=%s -> %s "
                             "raw_output_length=%s output_length=%s "
                             "trailing_whitespace_chars=%s "
-                            "finish_message=%r prompt_token_count=%s "
+                            "prompt_token_count=%s "
                             "candidates_token_count=%s "
                             "thoughts_token_count=%s total_token_count=%s",
                             page.page_index,
                             model_name,
                             attempt_max_output_tokens,
                             retry_max_output_tokens,
-                            len(raw_output_text),
-                            len(output_text),
+                            response_metadata.raw_output_length,
+                            response_metadata.output_length,
                             trailing_whitespace_chars,
-                            finish_message,
-                            usage["prompt_token_count"],
-                            usage["candidates_token_count"],
-                            usage["thoughts_token_count"],
-                            usage["total_token_count"],
+                            response_metadata.prompt_token_count,
+                            response_metadata.candidates_token_count,
+                            response_metadata.thoughts_token_count,
+                            response_metadata.total_token_count,
                         )
                         attempt_max_output_tokens = retry_max_output_tokens
                         continue
 
-                    raise GeminiError(
-                        "Gemini transcription page reached MAX_TOKENS after retry: "
-                        f"page_index={page.page_index}, "
-                        f"raw_output_length={len(raw_output_text)}, "
-                        f"output_length={len(output_text)}, "
-                        f"trailing_whitespace_chars={trailing_whitespace_chars}, "
-                        f"finish_reason={finish_reason}, "
-                        f"finish_message={finish_message!r}, "
-                        f"prompt_token_count={usage['prompt_token_count']}, "
-                        f"candidates_token_count={usage['candidates_token_count']}, "
-                        f"thoughts_token_count={usage['thoughts_token_count']}, "
-                        f"total_token_count={usage['total_token_count']}, "
-                        f"max_output_tokens={attempt_max_output_tokens}, "
-                        f"model={model_name}"
+                    raise GeminiResponseError(
+                        GeminiResponseFailureCode.MAX_TOKENS,
+                        response_metadata,
                     )
+
+                _raise_for_response_failure(response_metadata)
 
                 if uses_plain_text_transcription:
                     data = _plain_text_response_to_page_data(
@@ -810,6 +1020,7 @@ def transcribe_pages_with_gemini(
                     data = _parse_page_json_strict(
                         output_text,
                         page_index=page.page_index,
+                        response_metadata=response_metadata,
                     )
 
                 success = True
@@ -837,7 +1048,7 @@ def transcribe_pages_with_gemini(
                     attempts += 1
                     continue
 
-                raise GeminiError(f"Gemini API Error: {exc}")
+                raise GeminiApiError(exc.__class__.__name__) from None
 
         if not success:
             raise GeminiError(f"QUOTA_EXHAUSTED: {model_name} after retries")
@@ -922,7 +1133,7 @@ def translate_text_to_hebrew_with_gemini(
 
             logger.info(
                 "Gemini Hebrew translation chunk %s/%s: source_length=%s output_length=%s "
-                "finish_reason=%s finish_message=%r max_output_tokens=%s "
+                "finish_reason=%s finish_message_present=%s max_output_tokens=%s "
                 "truncation_retry=%s prompt_token_count=%s candidates_token_count=%s "
                 "thoughts_token_count=%s total_token_count=%s model=%s "
                 "split_retry_used=%s",
@@ -931,7 +1142,7 @@ def translate_text_to_hebrew_with_gemini(
                 chunk_source_len,
                 len(translated_text),
                 attempt_result.finish_reason,
-                attempt_result.finish_message,
+                attempt_result.finish_message_present,
                 chunk_max_output_tokens,
                 is_truncation_retry,
                 attempt_result.usage.get("prompt_token_count"),
@@ -950,14 +1161,14 @@ def translate_text_to_hebrew_with_gemini(
                     logger.warning(
                         "Retrying truncated Gemini Hebrew translation chunk %s/%s "
                         "with model %s: max_output_tokens=%s finish_reason=%s "
-                        "finish_message=%r source_length=%s output_length=%s "
+                        "finish_message_present=%s source_length=%s output_length=%s "
                         "truncation_retry=%s split_retry_used=%s",
                         index,
                         len(chunks),
                         model_name,
                         chunk_max_output_tokens,
                         attempt_result.finish_reason,
-                        attempt_result.finish_message,
+                        attempt_result.finish_message_present,
                         chunk_source_len,
                         len(translated_text),
                         True,
@@ -970,7 +1181,7 @@ def translate_text_to_hebrew_with_gemini(
                     logger.warning(
                         "Splitting truncated Gemini Hebrew translation chunk %s/%s "
                         "after MAX_TOKENS with model %s: source_length=%s "
-                        "output_length=%s finish_reason=%s finish_message=%r "
+                        "output_length=%s finish_reason=%s finish_message_present=%s "
                         "split_chunk_count=%s max_output_tokens=%s",
                         index,
                         len(chunks),
@@ -978,7 +1189,7 @@ def translate_text_to_hebrew_with_gemini(
                         chunk_source_len,
                         len(translated_text),
                         attempt_result.finish_reason,
-                        attempt_result.finish_message,
+                        attempt_result.finish_message_present,
                         len(split_chunks),
                         chunk_max_output_tokens,
                     )
@@ -1011,7 +1222,7 @@ def translate_text_to_hebrew_with_gemini(
                         logger.info(
                             "Gemini Hebrew translation split retry chunk %s/%s.%s/%s: "
                             "source_length=%s output_length=%s finish_reason=%s "
-                            "finish_message=%r max_output_tokens=%s "
+                            "finish_message_present=%s max_output_tokens=%s "
                             "prompt_token_count=%s candidates_token_count=%s "
                             "thoughts_token_count=%s total_token_count=%s model=%s "
                             "split_retry_used=%s",
@@ -1022,7 +1233,7 @@ def translate_text_to_hebrew_with_gemini(
                             len(split_chunk),
                             len(split_text),
                             split_result.finish_reason,
-                            split_result.finish_message,
+                            split_result.finish_message_present,
                             chunk_max_output_tokens,
                             split_result.usage.get("prompt_token_count"),
                             split_result.usage.get("candidates_token_count"),
@@ -1040,7 +1251,7 @@ def translate_text_to_hebrew_with_gemini(
                                 f"source_length={len(split_chunk)}, "
                                 f"translation_length={len(split_text)}, "
                                 f"finish_reason={split_result.finish_reason}, "
-                                f"finish_message={split_result.finish_message!r}, "
+                                f"finish_message_present={split_result.finish_message_present}, "
                                 f"max_output_tokens={chunk_max_output_tokens}, "
                                 f"split_retry_used=True, "
                                 f"prompt_token_count={split_result.usage.get('prompt_token_count')}, "
@@ -1071,7 +1282,7 @@ def translate_text_to_hebrew_with_gemini(
                             f"source_length={chunk_source_len}, "
                             f"translation_length={len(translated_text)}, "
                             f"finish_reason={attempt_result.finish_reason}, "
-                            f"finish_message={attempt_result.finish_message!r}, "
+                            f"finish_message_present={attempt_result.finish_message_present}, "
                             f"max_output_tokens={chunk_max_output_tokens}, "
                             f"split_retry_used=True, "
                             f"model={model_name}"
@@ -1084,7 +1295,7 @@ def translate_text_to_hebrew_with_gemini(
                     f"source_length={chunk_source_len}, "
                     f"translation_length={len(translated_text)}, "
                     f"finish_reason={attempt_result.finish_reason}, "
-                    f"finish_message={attempt_result.finish_message!r}, "
+                    f"finish_message_present={attempt_result.finish_message_present}, "
                     f"max_output_tokens={chunk_max_output_tokens}, "
                     f"truncation_retry={is_truncation_retry}, "
                     f"split_retry_used=False, "

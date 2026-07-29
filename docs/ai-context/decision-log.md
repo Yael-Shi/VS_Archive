@@ -2191,3 +2191,32 @@ or infrastructure changes. `RECOVERY_REQUIRED` execution recovery is
 deliberately not replayed by this command. Legacy document-id compatibility,
 deployment/E2E, async Transkribus resume, and Gemini page persistence remain
 separate work.
+
+## Gemini OCR response safety and failure taxonomy
+
+**Decision / implemented:** Gemini OCR response handling classifies provider
+metadata before parsing or accepting text. Response failures use stable codes
+for empty output, `MAX_TOKENS`, safety, recitation, language, SPII, other
+blocking reasons, missing candidates, JSON parse/schema failures, and provider
+API errors.
+
+**Privacy boundary:** Logs, exception messages, and persisted worker failure
+details may include only operational metadata: model, page, attempt,
+finish/block reason, candidate count, output lengths, token counts, configured
+output cap, and exception class. They must not include the OCR response,
+prompt, provider finish-message text, or other document content. This
+finish-message and provider-exception redaction also applies to the shared
+Gemini Hebrew translation logging path.
+
+**Temporary JSON contract:** Until Hebrew printed OCR moves to plain text, the
+JSON parser requires a non-empty string `text`, a real boolean `has_unclear`,
+and a non-negative integer `unclear_count`. Missing keys, empty text, and
+wrongly typed values fail explicitly instead of becoming a successful empty or
+partial transcription.
+
+**Unchanged / deferred:** No routing, model selection, persistence schema,
+attempt count, backoff, output-token cap, Transkribus, Antigravity, translation
+generation, response-text extraction, retry behavior, or processing-state
+semantics change. Page-level checkpoint/resume, Hebrew printed plain-text
+output, bounded per-page recovery, and mixed printed/handwritten routing
+remain separate PRs.
