@@ -261,6 +261,9 @@ class HtrDispatcherTests(SimpleTestCase):
             prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
             worker_env=worker_env,
             model_candidates=["gemini-3.1-flash-lite"],
+            text_input_type=Document.TextInputType.PRINTED,
+            handwriting_type=None,
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
         )
 
     @patch("documents.services.htr_engine.get_htr_adapter")
@@ -327,6 +330,9 @@ class HtrDispatcherTests(SimpleTestCase):
             prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
             worker_env=worker_env,
             model_candidates=explicit_candidates,
+            text_input_type=Document.TextInputType.PRINTED,
+            handwriting_type=None,
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
         )
 
     @patch("documents.services.htr_engine.get_htr_adapter")
@@ -389,6 +395,9 @@ class HtrDispatcherTests(SimpleTestCase):
             prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
             worker_env=worker_env,
             model_candidates=[LATIN_PRINTED_GEMINI_MODEL],
+            text_input_type=Document.TextInputType.PRINTED,
+            handwriting_type=None,
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
         )
 
     @patch("documents.services.htr_engine.get_htr_adapter")
@@ -2173,7 +2182,7 @@ class TranskribusWorkdirRetryEngineTests(SimpleTestCase):
         m_sleep.assert_not_called()
 
 
-class GeminiAdapterTests(SimpleTestCase):
+class GeminiAdapterTests(TestCase):
     @patch(
         "documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini"
     )
@@ -2237,13 +2246,35 @@ class GeminiAdapterTests(SimpleTestCase):
             text="text",
             engine_name="gemini-2.0-flash",
         )
+        document = create_ocr_document(
+            title="Gemini checkpoint adapter document",
+            doc_type=Document.DocType.IMAGE,
+            language=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.PRINTED,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.PROCESSING,
+            file_s3_key="gemini-checkpoint.png",
+            mime_type="image/png",
+        )
         adapter = GeminiAdapter()
 
         adapter.execute(
-            pages=[],
+            pages=[
+                PageImage(
+                    page_index=1,
+                    image_bytes=b"page",
+                    mime_type="image/png",
+                    source_identity="gemini-checkpoint.png",
+                    source_content_fingerprint="a" * 64,
+                )
+            ],
             language_hint="he",
             prompt_variant="printed",
-            document_id=42,
+            document_id=document.id,
+            text_input_type=Document.TextInputType.PRINTED,
+            handwriting_type=document.handwriting_type,
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            model_candidates=["gemini-2.0-flash"],
         )
 
         kwargs = mock_gemini_transcribe.call_args.kwargs
@@ -2371,7 +2402,9 @@ class RunWorkerBehaviorTests(TestCase):
         mock_get_object_bytes,
     ):
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         mock_transcribe.return_value = HtrResult(
             text="recognized text",
             needs_review=False,
@@ -2474,7 +2507,9 @@ class RunWorkerBehaviorTests(TestCase):
         mock_get_object_bytes,
     ):
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         mock_transcribe.return_value = HtrResult(
             text="recognized text",
             needs_review=False,
@@ -2522,7 +2557,9 @@ class RunWorkerBehaviorTests(TestCase):
         mock_get_object_bytes,
     ):
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         mock_transcribe.return_value = HtrResult(
             text="recognized text long enough for min length",
             needs_review=True,
@@ -2554,7 +2591,9 @@ class RunWorkerBehaviorTests(TestCase):
         mock_get_object_bytes,
     ):
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         mock_transcribe.return_value = HtrResult(
             text="hi",
             needs_review=False,
@@ -2584,7 +2623,9 @@ class RunWorkerBehaviorTests(TestCase):
         mock_get_object_bytes,
     ):
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         mock_transcribe.return_value = HtrResult(
             text="plain text long enough then [UNCLEAR] end",
             needs_review=False,
@@ -2623,7 +2664,9 @@ class RunWorkerBehaviorTests(TestCase):
             mime_type="application/pdf",
         )
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         mock_transcribe.return_value = HtrResult(
             text="Hebrew transcript body long enough",
             needs_review=False,
@@ -2663,7 +2706,9 @@ class RunWorkerBehaviorTests(TestCase):
         mock_get_object_bytes,
     ):
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         mock_transcribe.side_effect = UnsupportedEngineError("NOT_A_REGISTERED_ENGINE")
 
         self.assertTrue(self.command._process_message(self._message()))
@@ -2690,7 +2735,9 @@ class RunWorkerBehaviorTests(TestCase):
         mock_select_route,
     ):
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         mock_select_route.return_value = OcrRouteConfig(
             engine_key=DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
             prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
@@ -2727,7 +2774,9 @@ class RunWorkerBehaviorTests(TestCase):
         mock_get_object_bytes,
     ):
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         mock_transcribe.side_effect = ValueError(
             "Invalid or missing language for OCR routing"
         )
@@ -2768,7 +2817,9 @@ class RunWorkerBehaviorTests(TestCase):
             mime_type="application/pdf",
         )
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         cmd = Command()
         cmd._cfg = SimpleNamespace(
             min_text_length=5,
@@ -2803,7 +2854,9 @@ class RunWorkerBehaviorTests(TestCase):
         Real select_ocr_route + worker persistence; Transkribus engine mocked (no HTTP).
         """
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         engine_runtime = "transkribus-pylaia:999"
         mock_transcribe.return_value = HtrResult(
             text="mock trp text",
@@ -2897,7 +2950,9 @@ class RunWorkerBehaviorTests(TestCase):
             mime_type="application/pdf",
         )
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
 
         msg = {
             "Body": json.dumps({"type": "PROCESS_DOCUMENT", "document_id": he_doc.id})
@@ -2951,7 +3006,9 @@ class RunWorkerBehaviorTests(TestCase):
             mime_type="application/pdf",
         )
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         mock_transcribe.side_effect = EnginePermanentError(
             "Transkribus upload failed in test"
         )

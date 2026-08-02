@@ -685,8 +685,13 @@ class ArchiveFullTextSearchQueryPlanTests(TestCase):
         self.assertIn("UNION", sql.upper())
 
         with connection.cursor() as cursor:
-            # Tiny fixtures often prefer seq scans; force index consideration.
+            # Tiny fixtures often prefer seq scans. Selective one-to-one joins
+            # can also prefer a regular B-tree index scan and apply ``@@`` as a
+            # filter, even though the UNION FTS arm is independently GIN
+            # indexable. Force the plan check onto bitmap-capable index paths;
+            # bitmap scans remain enabled and can demonstrate the GIN path.
             cursor.execute("SET LOCAL enable_seqscan = off")
+            cursor.execute("SET LOCAL enable_indexscan = off")
             cursor.execute(f"EXPLAIN {sql}", params)
             plan = "\n".join(row[0] for row in cursor.fetchall())
 

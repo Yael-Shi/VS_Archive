@@ -1,9 +1,10 @@
+import hashlib
 import json
+import logging
 import os
 import time
-import logging
 from dataclasses import replace
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, List, Optional
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -28,6 +29,9 @@ from documents.services.processing_state import (
 )
 from documents.services.gemini_models import DEFAULT_GEMINI_MODEL
 from documents.services.htr_adapters.base import (
+    EnginePageCheckpointBusyError,
+    EnginePageCheckpointPersistenceRetryableError,
+    EnginePageIncompleteError,
     UnsupportedEngineError,
     TranskribusLocalPersistenceRetryableError,
 )
@@ -421,6 +425,15 @@ class Command(BaseCommand):
                 )
                 effective_mime = (doc.mime_type or s3_mime or "").strip()
                 pages = extract_pages(file_bytes=file_bytes, mime_type=effective_mime)
+                source_content_fingerprint = hashlib.sha256(file_bytes).hexdigest()
+                pages = [
+                    replace(
+                        page,
+                        source_identity=doc.file_s3_key,
+                        source_content_fingerprint=source_content_fingerprint,
+                    )
+                    for page in pages
+                ]
 
             route = select_ocr_route(
                 doc.language,
@@ -452,6 +465,43 @@ class Command(BaseCommand):
                 source_transkribus_run_id=source_transkribus_run_id,
             )
 
+        except EnginePageCheckpointBusyError as e:
+            logger.info(
+                "page checkpoint is held by another worker",
+                extra={"document_id": document_id},
+            )
+            return ProcessDocumentOutcome(
+                ProcessDocumentDisposition.RETRYABLE,
+                failure_code=e.failure_code,
+                failure_message=e.safe_message,
+            )
+        except EnginePageCheckpointPersistenceRetryableError as e:
+            logger.error(
+                "page checkpoint persistence failed; leaving SQS message",
+                extra={
+                    "document_id": document_id,
+                    "checkpoint_stage": e.stage,
+                    "page_index": e.page_index,
+                },
+            )
+            return ProcessDocumentOutcome(
+                ProcessDocumentDisposition.RETRYABLE,
+                failure_code=e.failure_code,
+                failure_message=e.safe_message,
+            )
+        except EnginePageIncompleteError as e:
+            try:
+                with transaction.atomic():
+                    doc = Document.objects.select_for_update().get(id=document_id)
+                    doc.processing_state_user = Document.ProcessingState.PARTIAL
+                    doc.save(update_fields=["processing_state_user", "updated_at"])
+            except Document.DoesNotExist:
+                return ProcessDocumentOutcome(ProcessDocumentDisposition.NOOP)
+            return ProcessDocumentOutcome(
+                ProcessDocumentDisposition.PARTIAL,
+                failure_code=e.failure_code,
+                failure_message=e.safe_message,
+            )
         except TranskribusLocalPersistenceRetryableError as e:
             # Durable recognition may already exist; do not persist OCR failure or ack.
             self.stderr.write(
@@ -553,11 +603,14 @@ class Command(BaseCommand):
             file_bytes, _s3_mime = get_object_bytes(
                 bucket=bucket, key=source.file_s3_key
             )
+            source_content_fingerprint = hashlib.sha256(file_bytes).hexdigest()
             pages.append(
                 source_file_bytes_to_page(
                     order_index=source.order_index,
                     file_bytes=file_bytes,
                     mime_type=source.mime_type,
+                    source_identity=f"{source.id}:{source.file_s3_key}",
+                    source_content_fingerprint=source_content_fingerprint,
                 )
             )
         return pages

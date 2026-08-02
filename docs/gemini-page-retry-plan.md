@@ -1,24 +1,34 @@
-# Gemini OCR per-page retry — planning note
+# Gemini OCR bounded per-page retry — PR D planning note
 
-> **Planning only.** No implementation in this doc. For current Gemini behavior and layer boundaries, see `.cursor/rules/architecture.mdc` and `docs/ai-context/decision-log.md`.
+> **Planning only.** This note describes PR D retry policy, not PR B
+> persistence. Durable checkpoint/resume is implemented separately and
+> documented in `docs/ai-context/gemini-page-checkpoint-design.md`. For current
+> Gemini behavior and layer boundaries, see `.cursor/rules/architecture.mdc`
+> and `docs/ai-context/decision-log.md`.
 
 ## Problem
 
-Gemini OCR can fail a multi-page document when **one page** returns an empty or otherwise transient response (e.g. empty body, parse/format failure, rate-limit blip). Today that page failure can abort the whole document even though other pages already succeeded.
+Gemini OCR can fail a page when it returns an empty or otherwise transient
+response (e.g. empty body, parse/format failure, rate-limit blip). PR B
+preserves already-successful pages durably and a later intentional request
+processes only failed/missing pages. It deliberately retains the current
+within-delivery attempt policy.
 
-We want a **bounded per-page retry** so a single transient page failure does not immediately fail the entire document.
+PR D will define a **bounded per-page retry** so a transient page failure may
+recover during the same delivery without an operator-triggered request.
 
 ## Constraints
 
 - Do **not** silently accept empty Gemini output.
-- Do **not** restart already successful pages.
+- Do **not** restart already successful durable checkpoints.
 - Preserve **page order** in the combined transcript.
 - Avoid **overlapping retry loops** across engine, adapter, and worker layers — one boundary only.
 - Preserve existing behavior for:
   - model routing and fallback (within Gemini only)
   - prompt variant selection
   - generation config (temperature, top_k, top_p, max_output_tokens)
-  - persistence (`DocumentTextResult`, review reasons, routing metadata)
+  - PR B attempt/page persistence and final `DocumentTextResult`
+  - review reasons and routing metadata
   - logging shape and error classification (`GeminiError`, quota markers, etc.)
 
 ## Proposed investigation
@@ -45,14 +55,16 @@ We want a **bounded per-page retry** so a single transient page failure does not
   - `attempt` / `max_attempts`
   - error message or classification
 - On exhaustion: raise the same class of error the layer uses today so worker persistence and classification stay unchanged.
-- Successful pages: retain in-memory results; only the failing page re-enters the retry loop.
+- Successful pages: retain durable checkpoints; only the failing page re-enters
+  the retry loop.
 
 ## Test plan
 
 Add or extend tests in the Gemini engine/adapter test modules (exact file TBD during investigation):
 
 1. First attempt fails transiently (empty response or retryable parse error); second attempt succeeds — document completes with all pages in order.
-2. All attempts fail — final `GeminiError` is raised; no partial silent success.
+2. All attempts fail — persist the page failure and return an explicit
+   `GEMINI_PAGES_INCOMPLETE` partial outcome; no partial silent success.
 3. Permanent error (e.g. quota exhausted) — **not** retried beyond current policy.
 4. Page 1 succeeds, page 2 fails then retries — page 1 is **not** reprocessed (mock/call-count assertion).
 5. Logs or raised errors include **page index** and **attempt count** on retry and final failure.
@@ -65,3 +77,4 @@ Add or extend tests in the Gemini engine/adapter test modules (exact file TBD du
 - No CI, env, or dependency changes.
 - No worker-level or cross-provider retry redesign.
 - No change to Transkribus or non-Gemini routes.
+- No checkpoint schema or attempt-identity redesign.

@@ -13,6 +13,8 @@ class PageImage:
     page_index: int  # 1-based
     image_bytes: bytes
     mime_type: str  # e.g. "image/png"
+    source_identity: str = ""
+    source_content_fingerprint: str = ""
 
 
 def _normalize_image_to_png(image_bytes: bytes) -> Tuple[bytes, str]:
@@ -62,6 +64,9 @@ def source_file_bytes_to_page(
     order_index: int,
     file_bytes: bytes,
     mime_type: Optional[str],
+    *,
+    source_identity: str = "",
+    source_content_fingerprint: str = "",
 ) -> PageImage:
     """
     Build one ``PageImage`` for a multi-image ``DocumentSourceFile``.
@@ -82,4 +87,6 @@ def source_file_bytes_to_page(
         page_index=order_index + 1,
         image_bytes=png_bytes,
         mime_type=out_mt,
+        source_identity=source_identity,
+        source_content_fingerprint=source_content_fingerprint,
     )

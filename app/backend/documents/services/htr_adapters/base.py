@@ -31,6 +31,48 @@ class EnginePermanentError(RuntimeError):
     pass
 
 
+class EnginePageIncompleteError(RuntimeError):
+    """Provider-neutral page-checkpoint outcome with explicit missing pages."""
+
+    def __init__(
+        self,
+        missing_page_indices: list[int],
+        *,
+        failure_code: str = "OCR_PAGES_INCOMPLETE",
+    ) -> None:
+        self.missing_page_indices = tuple(sorted(set(missing_page_indices)))
+        self.failure_code = failure_code
+        joined = ",".join(str(page) for page in self.missing_page_indices)
+        self.safe_message = f"missing_pages={joined}"[:512]
+        super().__init__(self.safe_message)
+
+
+class EnginePageCheckpointBusyError(RuntimeError):
+    """A current fenced page claim prevents duplicate provider execution."""
+
+    failure_code = "OCR_PAGE_CHECKPOINT_BUSY"
+
+    def __init__(self, page_index: int) -> None:
+        self.page_index = page_index
+        self.safe_message = f"page_index={page_index}"
+        super().__init__(self.safe_message)
+
+
+class EnginePageCheckpointPersistenceRetryableError(RuntimeError):
+    """Local checkpoint persistence failed and the SQS message must remain."""
+
+    failure_code = "OCR_PAGE_CHECKPOINT_PERSISTENCE_RETRYABLE"
+
+    def __init__(self, *, stage: str, page_index: int | None = None) -> None:
+        self.stage = stage
+        self.page_index = page_index
+        parts = [f"stage={stage}"]
+        if page_index is not None:
+            parts.append(f"page_index={page_index}")
+        self.safe_message = " ".join(parts)[:512]
+        super().__init__(self.safe_message)
+
+
 class TranskribusLocalPersistenceRetryableError(RuntimeError):
     """Transient local snapshot/S3 persistence failure after durable recognition.
 

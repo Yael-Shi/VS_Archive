@@ -13,6 +13,8 @@ VS-Archive has several independent status layers. They answer different question
 | Text row output | `DocumentTextResult.status` | Was this text row produced, failed, or produced but requiring review? |
 | Human verification | `DocumentTextResult.verification_status` | Did a human approve/reject this text as ground truth? |
 | Review explanation | `DocumentTextResult.review_reasons` | Why does this automatic text need review? |
+| Gemini OCR identity | `GeminiOcrAttempt.status` | Is this exact source/route/prompt/config page set complete? |
+| Gemini OCR page | `GeminiOcrPageCheckpoint.status` | Was this exact page claimed, produced, or failed? |
 | External Transkribus attempt | `TranskribusRun.status` | What happened in the external Transkribus attempt lifecycle? |
 
 These layers must not be treated as aliases.
@@ -52,6 +54,12 @@ Meaning: text exists and can be displayed/worked with, but it still needs human 
 
 `PARTIAL` must not mean merely “waiting for human review”.
 
+For Gemini page checkpointing, `PARTIAL` also has a precise structural meaning:
+the matching `GeminiOcrAttempt.missing_page_indices` contains one or more
+failed, unattempted, or otherwise non-succeeded 1-based page indices. The
+request failure metadata may repeat only those indices as
+`missing_pages=...`; it must not include OCR text.
+
 ## `DocumentTextResult.status`
 
 Row-level OCR/HTR output state.
@@ -87,6 +95,32 @@ Known policy/content reasons include:
 - engine-provided review reasons
 
 Do not store Transkribus remote ids, job ids, page mappings, upload ids, or docIds in `review_reasons`.
+
+## Gemini OCR page checkpoint states
+
+`GeminiOcrAttempt` is independent of `ProcessDocumentRequest` and identifies
+one exact source/route/model-candidate/prompt/configuration contract.
+
+- `IN_PROGRESS`: at least one page may be claimed or processing.
+- `PARTIAL`: one or more expected pages are not `SUCCEEDED`; exact indices are
+  stored in `missing_page_indices`.
+- `COMPLETED`: every expected page is `SUCCEEDED`,
+  `missing_page_indices=[]`, and deterministic assembly is available.
+
+`GeminiOcrPageCheckpoint`:
+
+- `RUNNING`: a token/lease currently owns provider execution.
+- `SUCCEEDED`: durable page text and actual runtime model are stored.
+- `FAILED`: safe failure classification is stored; a later intentional OCR
+  execution may reclaim this page.
+
+A `SUCCEEDED` checkpoint is not human verification and is not itself a
+displayable `DocumentTextResult`. Human review status remains on the assembled
+document-level result.
+
+An expired page lease may be reclaimed with a new token, but this does not
+change request-level recovery: `ProcessDocumentRequest.RECOVERY_REQUIRED`
+remains fenced and is not automatically replayed.
 
 ## Expected outputs
 

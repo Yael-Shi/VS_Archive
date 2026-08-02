@@ -23,6 +23,7 @@ from documents.services.hebrew_translation_retry import (
     execute_hebrew_translation_retry,
     run_hebrew_translation_retry,
 )
+from documents.services.page_extraction import PageImage
 from documents.services.process_document_hebrew_translation_retry_enqueue import (
     enqueue_hebrew_translation_retry,
 )
@@ -696,7 +697,9 @@ class HebrewTranslationRetryWorkerMessageTests(TestCase):
         mock_translate,
     ):
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [object()]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         mock_transcribe.return_value = HtrResult(
             text="recognized text",
             needs_review=False,
@@ -746,7 +749,9 @@ class HebrewTranslationRetryWorkerMessageTests(TestCase):
             return (b"%PDF-1.4", "application/pdf")
 
         mock_get_object_bytes.side_effect = _assert_phase_one_claim
-        mock_extract_pages.return_value = [object()]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         mock_transcribe.return_value = HtrResult(
             text="recognized text",
             needs_review=False,

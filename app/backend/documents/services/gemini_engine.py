@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -23,6 +24,8 @@ from documents.services.gemini_models import DEFAULT_GEMINI_MODEL
 from documents.services.page_extraction import PageImage
 
 logger = logging.getLogger(__name__)
+
+GEMINI_OCR_PROMPT_CONTRACT_VERSION = "gemini-ocr-prompt-v1"
 
 
 class GeminiError(RuntimeError):
@@ -107,6 +110,15 @@ class GeminiResult:
     needs_review: bool = False
     engine_name: str = DEFAULT_GEMINI_MODEL
     review_reasons: List[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class GeminiTranscriptionContract:
+    prompt_fingerprint: str
+    prompt_contract_version: str
+    output_mode: str
+    api_version: str
+    effective_temperature: float
 
 
 @dataclass(frozen=True)
@@ -326,6 +338,52 @@ def _prompt_base_for_variant(prompt_variant: str) -> str | None:
     except ValueError:
         return None
     return _PROMPT_BY_VARIANT.get(variant_key)
+
+
+def _effective_transcription_prompt(
+    prompt_variant: str,
+    language_hint: Optional[str],
+) -> tuple[str, bool]:
+    uses_plain_text_transcription = _uses_plain_text_transcription(
+        prompt_variant,
+        language_hint,
+    )
+    if (
+        prompt_variant == DocumentTextResult.OcrPromptVariant.PRINTED
+        and _is_latin_language_hint(language_hint)
+    ):
+        prompt_base: str | None = _PRINTED_LATIN_PROMPT
+    else:
+        prompt_base = _prompt_base_for_variant(prompt_variant)
+    if prompt_base is None:
+        raise GeminiError(f"Unsupported Gemini prompt_variant: {prompt_variant!r}")
+
+    prompt = prompt_base
+    if language_hint:
+        prompt += f"\nLanguage hint: {language_hint}."
+    return prompt, uses_plain_text_transcription
+
+
+def gemini_transcription_contract(
+    *,
+    prompt_variant: str,
+    language_hint: Optional[str],
+    temperature: float,
+) -> GeminiTranscriptionContract:
+    """Resolve safe identity metadata from the exact effective OCR prompt."""
+
+    prompt, uses_plain_text_transcription = _effective_transcription_prompt(
+        prompt_variant,
+        language_hint,
+    )
+
+    return GeminiTranscriptionContract(
+        prompt_fingerprint=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+        prompt_contract_version=GEMINI_OCR_PROMPT_CONTRACT_VERSION,
+        output_mode="plain_text" if uses_plain_text_transcription else "json",
+        api_version="v1beta" if uses_plain_text_transcription else "v1",
+        effective_temperature=0.0 if uses_plain_text_transcription else temperature,
+    )
 
 
 def _get_api_key() -> str:
@@ -872,32 +930,21 @@ def transcribe_pages_with_gemini(
     top_p: float = DEFAULT_GEMINI_TOP_P,
     max_output_tokens: Optional[int] = 8192,
 ) -> GeminiResult:
-    uses_plain_text_transcription = _uses_plain_text_transcription(
-        prompt_variant,
-        language_hint,
+    contract = gemini_transcription_contract(
+        prompt_variant=prompt_variant,
+        language_hint=language_hint,
+        temperature=temperature,
     )
-
-    if (
-        prompt_variant == DocumentTextResult.OcrPromptVariant.PRINTED
-        and _is_latin_language_hint(language_hint)
-    ):
-        prompt_base: str | None = _PRINTED_LATIN_PROMPT
-    else:
-        prompt_base = _prompt_base_for_variant(prompt_variant)
-
-    if prompt_base is None:
-        raise GeminiError(f"Unsupported Gemini prompt_variant: {prompt_variant!r}")
+    uses_plain_text_transcription = contract.output_mode == "plain_text"
 
     api_key = _get_api_key()
     client = _create_client(
         api_key,
-        api_version="v1beta" if uses_plain_text_transcription else "v1",
+        api_version=contract.api_version,
     )
 
-    effective_temperature = 0.0 if uses_plain_text_transcription else temperature
-
     config_kwargs: Dict[str, Any] = {
-        "temperature": effective_temperature,
+        "temperature": contract.effective_temperature,
         "top_k": top_k,
         "top_p": top_p,
         "max_output_tokens": max_output_tokens,
@@ -912,9 +959,10 @@ def transcribe_pages_with_gemini(
     engine_reasons: List[str] = []
 
     for page in pages:
-        prompt = prompt_base
-        if language_hint:
-            prompt += f"\nLanguage hint: {language_hint}."
+        prompt, _ = _effective_transcription_prompt(
+            prompt_variant,
+            language_hint,
+        )
 
         success = False
         attempts = 0
