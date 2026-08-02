@@ -133,6 +133,8 @@ class GeminiResponsePrivacyTests(SimpleTestCase):
         _mock_get_key,
         mock_create_client,
     ):
+        # Arabic printed is the remaining Gemini JSON-contract route now that
+        # Hebrew printed uses the plain-text contract (PR C).
         sensitive_marker = "SENSITIVE_ARCHIVE_TEXT"
         invalid_response = _response(
             text=f'{{"text": "{sensitive_marker}',
@@ -152,7 +154,7 @@ class GeminiResponsePrivacyTests(SimpleTestCase):
             with self.assertRaises(GeminiResponseError) as ctx:
                 transcribe_pages_with_gemini(
                     self.pages,
-                    "he",
+                    "ar",
                     prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
                     model_name="test-model",
                 )
@@ -226,7 +228,7 @@ class GeminiResponsePrivacyTests(SimpleTestCase):
             with self.assertRaises(GeminiResponseError) as ctx:
                 transcribe_pages_with_gemini(
                     self.pages,
-                    "he",
+                    "ar",
                     prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
                     model_name="test-model",
                 )
@@ -257,7 +259,7 @@ class GeminiResponsePrivacyTests(SimpleTestCase):
             with self.assertRaises(GeminiResponseError) as ctx:
                 transcribe_pages_with_gemini(
                     self.pages,
-                    "he",
+                    "ar",
                     prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
                 )
 
