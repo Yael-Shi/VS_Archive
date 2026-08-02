@@ -11,9 +11,11 @@ from documents.services.gemini_defaults import (
     DEFAULT_GEMINI_FREE_DAILY_IMAGE_LIMIT,
     DEFAULT_GEMINI_FREE_DAILY_REQUEST_LIMIT,
     DEFAULT_GEMINI_MAX_OUTPUT_TOKENS,
+    DEFAULT_GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP,
     DEFAULT_GEMINI_TEMPERATURE,
     DEFAULT_GEMINI_TOP_K,
     DEFAULT_GEMINI_TOP_P,
+    MAX_GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP,
 )
 from documents.services.gemini_models import DEFAULT_HEBREW_PRINTED_GEMINI_MODEL
 from documents.services.antigravity_defaults import DEFAULT_ANTIGRAVITY_AGENT_ID
@@ -221,6 +223,12 @@ class WorkerEnvConfig:
     gemini_double_pass: bool
     gemini_consistency_min_ratio: float
 
+    # PR D bounded OCR recovery hard cap (defaulted for compatibility with
+    # existing manual constructors; validate_required_env passes it explicitly)
+    gemini_max_output_tokens_hard_cap: int = field(
+        default=DEFAULT_GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP
+    )
+
     # Transkribus PR #2 (optional; validated in TranskribusAdapter when gate is on)
     transkribus_use_existing_server_document: bool = field(default=False)
     transkribus_dev_upload_mode: bool = field(default=False)
@@ -291,6 +299,18 @@ def validate_required_env() -> WorkerEnvConfig:
     gemini_max_output_tokens = _get_int(
         "GEMINI_MAX_OUTPUT_TOKENS", default=DEFAULT_GEMINI_MAX_OUTPUT_TOKENS
     )
+    gemini_max_output_tokens_hard_cap = _get_int(
+        "GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP",
+        default=DEFAULT_GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP,
+        min_value=1,
+        max_value=MAX_GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP,
+    )
+    if gemini_max_output_tokens_hard_cap < gemini_max_output_tokens:
+        raise EnvConfigError(
+            "Env var GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP must be >= "
+            f"GEMINI_MAX_OUTPUT_TOKENS ({gemini_max_output_tokens}). Got: "
+            f"{gemini_max_output_tokens_hard_cap}"
+        )
 
     # For handwriting, False as the default to avoid disqualifications for minor inconsistencies
     gemini_double_pass = _get_bool("GEMINI_DOUBLE_PASS", default=False)
@@ -381,6 +401,7 @@ def validate_required_env() -> WorkerEnvConfig:
         gemini_top_k=gemini_top_k,
         gemini_top_p=gemini_top_p,
         gemini_max_output_tokens=gemini_max_output_tokens,
+        gemini_max_output_tokens_hard_cap=gemini_max_output_tokens_hard_cap,
         gemini_double_pass=gemini_double_pass,
         gemini_consistency_min_ratio=gemini_consistency_min_ratio,
         transkribus_use_existing_server_document=transkribus_use_existing_server_document,

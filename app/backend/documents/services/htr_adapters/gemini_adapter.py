@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, List, Optional
 from django.db import DatabaseError
 
 from documents.services.gemini_defaults import (
+    DEFAULT_GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP,
     DEFAULT_GEMINI_TEMPERATURE,
     DEFAULT_GEMINI_TOP_K,
     DEFAULT_GEMINI_TOP_P,
@@ -80,6 +81,10 @@ class GeminiAdapter:
             kwargs.setdefault(
                 "max_output_tokens", max_tok if max_tok is not None else 8192
             )
+            kwargs.setdefault(
+                "max_output_tokens_hard_cap",
+                worker_env.gemini_max_output_tokens_hard_cap,
+            )
 
         if document_id is None:
             return self._execute_without_checkpoints(
@@ -112,6 +117,10 @@ class GeminiAdapter:
             top_k=kwargs.get("top_k", DEFAULT_GEMINI_TOP_K),
             top_p=kwargs.get("top_p", DEFAULT_GEMINI_TOP_P),
             max_output_tokens=kwargs.get("max_output_tokens", 8192),
+            max_output_tokens_hard_cap=kwargs.get(
+                "max_output_tokens_hard_cap",
+                DEFAULT_GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP,
+            ),
         )
         try:
             attempt = get_or_create_gemini_attempt(

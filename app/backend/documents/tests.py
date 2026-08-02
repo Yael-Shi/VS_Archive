@@ -29,7 +29,7 @@ from documents.models import (
     TranskribusRun,
 )
 from documents.services.archive_items import create_ocr_document
-from documents.services.env_validation import validate_required_env
+from documents.services.env_validation import EnvConfigError, validate_required_env
 from documents.services.gemini_engine import (
     GeminiApiError,
     GeminiError,
@@ -3362,6 +3362,45 @@ class WorkerEnvConfigTests(SimpleTestCase):
             cfg = validate_required_env()
 
         self.assertEqual(cfg.gemini_hebrew_printed_model, "custom-hebrew-printed-model")
+
+    def test_validate_required_env_defaults_gemini_hard_cap_to_32768(self):
+        with patch.dict(
+            os.environ,
+            {"GEMINI_API_KEY": "test-gemini-key"},
+            clear=True,
+        ):
+            cfg = validate_required_env()
+
+        self.assertEqual(cfg.gemini_max_output_tokens_hard_cap, 32768)
+
+    def test_validate_required_env_accepts_valid_gemini_hard_cap_override(self):
+        with patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": "test-gemini-key",
+                "GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP": "65536",
+            },
+            clear=True,
+        ):
+            cfg = validate_required_env()
+
+        self.assertEqual(cfg.gemini_max_output_tokens_hard_cap, 65536)
+
+    def test_validate_required_env_rejects_invalid_gemini_hard_cap(self):
+        # Booleans, non-positive, above 65536, and below GEMINI_MAX_OUTPUT_TOKENS.
+        cases = ("true", "0", "-1", "12.5", "70000", "1024")
+        for raw in cases:
+            with self.subTest(raw=raw):
+                with patch.dict(
+                    os.environ,
+                    {
+                        "GEMINI_API_KEY": "test-gemini-key",
+                        "GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP": raw,
+                    },
+                    clear=True,
+                ):
+                    with self.assertRaises(EnvConfigError):
+                        validate_required_env()
 
 
 def _worker_env_for_dev_transkribus_upload_command(**overrides):
@@ -8114,6 +8153,10 @@ class GeminiEnginePromptTests(SimpleTestCase):
             ),
             SimpleNamespace(
                 text="partial printed second attempt   \n\n",
+                candidates=[SimpleNamespace(finish_reason="MAX_TOKENS")],
+            ),
+            SimpleNamespace(
+                text="partial printed third attempt   \n\n",
                 candidates=[
                     SimpleNamespace(
                         finish_reason="MAX_TOKENS",
@@ -8122,9 +8165,9 @@ class GeminiEnginePromptTests(SimpleTestCase):
                 ],
                 usage_metadata=SimpleNamespace(
                     prompt_token_count=730,
-                    candidates_token_count=8192,
+                    candidates_token_count=16384,
                     thoughts_token_count=0,
-                    total_token_count=8922,
+                    total_token_count=17114,
                 ),
             ),
         ]
@@ -8143,26 +8186,25 @@ class GeminiEnginePromptTests(SimpleTestCase):
         message = str(ctx.exception)
         self.assertIn("page_index=4", message)
         self.assertIn("MAX_TOKENS", message)
-        self.assertIn("raw_output_length=35", message)
-        self.assertIn("output_length=30", message)
+        self.assertIn("raw_output_length=34", message)
+        self.assertIn("output_length=29", message)
         self.assertIn("trailing_whitespace_chars=5", message)
         self.assertNotIn("Maximum output tokens reached", message)
         self.assertIn("prompt_token_count=730", message)
-        self.assertIn("candidates_token_count=8192", message)
+        self.assertIn("candidates_token_count=16384", message)
         self.assertIn("thoughts_token_count=0", message)
-        self.assertIn("total_token_count=8922", message)
-        self.assertIn("max_output_tokens=8192", message)
+        self.assertIn("total_token_count=17114", message)
+        self.assertIn("max_output_tokens=16384", message)
         self.assertIn("model=test-model", message)
-        self.assertEqual(mock_client.models.generate_content.call_count, 2)
+        self.assertEqual(mock_client.models.generate_content.call_count, 3)
 
-        first_config = mock_client.models.generate_content.call_args_list[0].kwargs[
-            "config"
+        configs = [
+            call.kwargs["config"]
+            for call in mock_client.models.generate_content.call_args_list
         ]
-        retry_config = mock_client.models.generate_content.call_args_list[1].kwargs[
-            "config"
-        ]
-        self.assertEqual(first_config.max_output_tokens, 2048)
-        self.assertEqual(retry_config.max_output_tokens, 8192)
+        self.assertEqual(
+            [cfg.max_output_tokens for cfg in configs], [2048, 8192, 16384]
+        )
 
     @patch("documents.services.gemini_engine._create_client")
     @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
@@ -8217,6 +8259,10 @@ class GeminiEnginePromptTests(SimpleTestCase):
                 text="partial second attempt",
                 candidates=[SimpleNamespace(finish_reason="MAX_TOKENS")],
             ),
+            SimpleNamespace(
+                text="partial third attempt",
+                candidates=[SimpleNamespace(finish_reason="MAX_TOKENS")],
+            ),
         ]
         mock_create_client.return_value = mock_client
         pages = [PageImage(page_index=1, image_bytes=b"png", mime_type="image/png")]
@@ -8233,9 +8279,9 @@ class GeminiEnginePromptTests(SimpleTestCase):
         message = str(ctx.exception)
         self.assertIn("page_index=1", message)
         self.assertIn("MAX_TOKENS", message)
-        self.assertIn("max_output_tokens=8192", message)
+        self.assertIn("max_output_tokens=16384", message)
         self.assertIn("model=test-model", message)
-        self.assertEqual(mock_client.models.generate_content.call_count, 2)
+        self.assertEqual(mock_client.models.generate_content.call_count, 3)
 
 
 class GeminiHebrewTranslationTests(SimpleTestCase):

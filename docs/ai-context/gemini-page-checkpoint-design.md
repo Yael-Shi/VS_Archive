@@ -6,15 +6,16 @@ Approved and implemented by PR B in the Gemini OCR root-cause sequence:
 
 1. PR A — safe response diagnostics and failure taxonomy.
 2. **PR B — durable page checkpoint/resume (this document).**
-3. PR C — Hebrew printed plain-text response contract (implemented on an
-   uncommitted PR branch; focused/static and full regression validated, not
-   yet merged; Hebrew printed uses the route-specific
-   `gemini-hebrew-printed-prompt-v2` marker, so its JSON-era attempt
-   identities are not reused, while all other routes retain
-   `gemini-ocr-prompt-v1` and their existing identities — see the
-   decision-log entry “Gemini Hebrew printed plain-text OCR response
-   contract (PR C)”).
-4. PR D — bounded per-page retry, backoff, and output-token escalation.
+3. PR C — Hebrew printed plain-text response contract (merged; Hebrew printed uses
+   the route-specific `gemini-hebrew-printed-prompt-v2` marker, so its JSON-era
+   attempt identities are not reused, while all other routes retain
+   `gemini-ocr-prompt-v1` — see decision-log entries for PR C and PR D).
+4. **PR D — bounded per-page retry, backoff, and output-token escalation
+   (implemented and validated on branch `feat/gemini-bounded-page-recovery-pr-d`;
+   not yet merged). PR D hashes the retry policy and hard cap into the
+   configuration fingerprint, so it changes attempt identity for every Gemini
+   OCR route — including PR C Hebrew printed, which keeps its v2
+   prompt-contract version.**
 5. PR E — explicit mixed printed/handwritten routing and prompt contract.
 
 This design changes persistence and resume behavior only. It does not authorize a
@@ -157,7 +158,8 @@ output-affecting input:
 - provider API/output mode;
 - configured and effective temperature;
 - top-k and top-p;
-- maximum output tokens;
+- maximum output tokens and the configured hard cap;
+- bounded retry policy version and max provider calls per page;
 - minimum text length;
 - double-pass and consistency settings.
 
@@ -187,12 +189,23 @@ Gemini remains provider-specific inside `GeminiAdapter`/`gemini_engine`.
 `run_worker.py` receives only provider-neutral page-incomplete or page-busy
 errors.
 
-The existing per-page provider behavior is retained:
+The existing per-page provider behavior inside `gemini_engine` (PR D) is:
 
-- the current response-format/quota attempts inside `gemini_engine` are
-  unchanged;
-- Gemini model fallback remains quota-only;
-- processing stops at the first page that remains unsuccessful.
+- at most **three provider calls per page per model candidate**;
+- classify finish/block/candidate/empty failures **before** parsing;
+- retry `EMPTY_RESPONSE` with deterministic **1s then 2s** backoff;
+- retry `JSON_PARSE` within the same three-call budget without token escalation
+  or JSON repair;
+- retry `MAX_TOKENS` immediately with a deterministic token-cap ladder
+  (`None`/below 8192 → 8192, else double, clamped to
+  `GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP`, default 32768, max 65536);
+- do **not** retry permanent PR A classifications (`SAFETY`, `RECITATION`,
+  `LANGUAGE`, `SPII`, blocked/prohibited content, `JSON_SCHEMA`, etc.);
+- quota/rate-limit retries count toward the same three-call budget; ordered
+  **model-candidate fallback remains quota-only** and may start a fresh bounded
+  budget on the next candidate;
+- processing stops at the first page that remains unsuccessful after the bounded
+  attempts for the active candidate chain.
 
 Stopping at the first final failure preserves existing behavior and keeps PR B
 separate from PR D. Earlier successes remain durable. Pages after the failure

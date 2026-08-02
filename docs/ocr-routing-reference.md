@@ -74,7 +74,7 @@ failed page checkpoint and produces an explicit partial outcome. Legacy direct
 adapter calls without document identity retain the prior
 `EngineRetryableError` behavior.
 
-Other Gemini execution knobs (from `worker_env`, not routing): `GEMINI_TEMPERATURE`, `GEMINI_TOP_K`, `GEMINI_TOP_P`, `GEMINI_MAX_OUTPUT_TOKENS`, `GEMINI_DOUBLE_PASS`, `GEMINI_CONSISTENCY_MIN_RATIO`, `MIN_TEXT_LENGTH`.
+Other Gemini execution knobs (from `worker_env`, not routing): `GEMINI_TEMPERATURE`, `GEMINI_TOP_K`, `GEMINI_TOP_P`, `GEMINI_MAX_OUTPUT_TOKENS`, `GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP` (PR D bounded OCR recovery hard cap; default 32768, max 65536, must be ≥ `GEMINI_MAX_OUTPUT_TOKENS`), `GEMINI_DOUBLE_PASS`, `GEMINI_CONSISTENCY_MIN_RATIO`, `MIN_TEXT_LENGTH`.
 
 ### Page checkpoint model provenance
 
