@@ -7981,9 +7981,10 @@ class GeminiEnginePromptTests(SimpleTestCase):
         )
         mock_create_client.return_value = mock_client
         pages = [PageImage(page_index=1, image_bytes=b"png", mime_type="image/png")]
+        # Hebrew printed moved to the plain-text contract in PR C, so it is no
+        # longer part of the JSON cases below.
         cases = (
             ("he", DocumentTextResult.OcrPromptVariant.HANDWRITTEN),
-            ("he", DocumentTextResult.OcrPromptVariant.PRINTED),
             ("ar", DocumentTextResult.OcrPromptVariant.PRINTED),
             (None, DocumentTextResult.OcrPromptVariant.HANDWRITTEN),
         )

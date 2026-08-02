@@ -27,6 +27,13 @@ logger = logging.getLogger(__name__)
 
 GEMINI_OCR_PROMPT_CONTRACT_VERSION = "gemini-ocr-prompt-v1"
 
+# Route-specific v2 marker for Hebrew printed only (PR C): that route moved
+# from the JSON response contract to plain text. Together with the changed
+# effective prompt fingerprint, this prevents reuse of Hebrew printed
+# checkpoints created under the v1 JSON-era contract. All other routes keep
+# GEMINI_OCR_PROMPT_CONTRACT_VERSION and their existing checkpoint identities.
+GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION = "gemini-hebrew-printed-prompt-v2"
+
 
 class GeminiError(RuntimeError):
     pass
@@ -268,6 +275,36 @@ _HEBREW_TRANSLATION_PROMPT = (
     "{{source_text}}\n"
 )
 
+# Plain-text contract for canonical Hebrew (`he`) printed OCR. Keeps the
+# archival guardrails of the JSON-era Hebrew printed prompt but requires
+# transcription text only; uncertainty uses the established [?] / [UNCLEAR]
+# markers so review metadata can be derived from the text itself.
+_HEBREW_PRINTED_PROMPT = (
+    "You are an OCR assistant for printed historical archival documents.\n"
+    "TASK: Transcribe the meaningful printed text from the image as faithfully as possible.\n"
+    "RULES:\n"
+    "- Preserve line breaks and original structure as much as practical.\n"
+    "- Preserve the original reading order of the document text.\n"
+    "- Keep punctuation, spelling, wording, dates, names, URLs, email headers, quoted messages, footer text, and readable navigation text exactly as seen.\n"
+    "- Preserve typos, non-standard spelling, unusual Hebrew forms, and apparent mistakes exactly as seen. Do not correct them.\n"
+    "- Do NOT summarize, rewrite, modernize, normalize, correct grammar, correct punctuation, or improve the wording.\n"
+    "- Do NOT add Hebrew vowel marks or diacritics unless they are clearly visible in the source.\n"
+    "- Do NOT silently omit visible words, including unclear words, short words, or words at line endings.\n"
+    "- Do NOT omit readable URLs, dates, email/listserv headers, or footer lines.\n"
+    "- Pay special attention to short Hebrew words, Hebrew words at the end of lines, names, addresses, and personal details.\n"
+    "- Do not replace an unclear name or personal detail with a more common word. If a word is visible but uncertain, write your best reading and add the exact marker [?] immediately after it. Example: ירושלים[?].\n"
+    "- If text is completely unreadable, output the exact token [UNCLEAR].\n"
+    "- For mixed Hebrew/English documents, preserve Hebrew and English document text in the order it appears. Do not reorder or clean up email/listserv formatting.\n"
+    "- Ignore purely decorative UI icons, toolbar buttons, browser controls, and repeated icon placeholders unless they contain meaningful printed text.\n"
+    "- Stop immediately after the last visible meaningful text on the page.\n"
+    "- Do not repeat text, continue with blank lines, or generate padding after the page content.\n"
+    "- Output only the transcription text.\n"
+    "- Do not output JSON, markdown, code fences, comments, explanations, labels, or introductory text.\n"
+)
+
+# Remaining JSON response contract for printed pages whose language hint is
+# neither Latin nor canonical Hebrew (currently Arabic printed on the Gemini
+# route). Hebrew printed no longer uses this prompt.
 _PRINTED_TEXT_PROMPT = (
     "You are an OCR assistant for printed historical archival documents.\n"
     "TASK: Transcribe the meaningful printed text from the image as faithfully as possible.\n"
@@ -309,6 +346,10 @@ _LATIN_LANGUAGE_HINTS = frozenset(
     {"en", "eng", "english", "fr", "fra", "fre", "french"}
 )
 
+# Only the canonical routing value counts as Hebrew for the printed plain-text
+# contract. Other non-Latin hints and missing hints keep the JSON contract.
+_HEBREW_CANONICAL_LANGUAGE_HINT = "he"
+
 
 # ------------------------------------------------------------------ helpers
 
@@ -319,11 +360,34 @@ def _is_latin_language_hint(language_hint: Optional[str]) -> bool:
     return language_hint.strip().lower() in _LATIN_LANGUAGE_HINTS
 
 
+def _is_hebrew_language_hint(language_hint: Optional[str]) -> bool:
+    if not language_hint:
+        return False
+    return language_hint.strip().lower() == _HEBREW_CANONICAL_LANGUAGE_HINT
+
+
+def _is_hebrew_printed_plain_text_contract(
+    prompt_variant: str,
+    language_hint: Optional[str],
+) -> bool:
+    """Single predicate for the PR C Hebrew printed plain-text contract.
+
+    Prompt selection, output-mode selection, and prompt-contract-version
+    selection all use this predicate so they cannot drift apart.
+    """
+    return prompt_variant == DocumentTextResult.OcrPromptVariant.PRINTED and (
+        _is_hebrew_language_hint(language_hint)
+    )
+
+
 def _uses_plain_text_transcription(
     prompt_variant: str,
     language_hint: Optional[str],
 ) -> bool:
     if prompt_variant == DocumentTextResult.OcrPromptVariant.HEBREW_GENERAL_HANDWRITTEN:
+        return True
+
+    if _is_hebrew_printed_plain_text_contract(prompt_variant, language_hint):
         return True
 
     return prompt_variant in (
@@ -353,6 +417,8 @@ def _effective_transcription_prompt(
         and _is_latin_language_hint(language_hint)
     ):
         prompt_base: str | None = _PRINTED_LATIN_PROMPT
+    elif _is_hebrew_printed_plain_text_contract(prompt_variant, language_hint):
+        prompt_base = _HEBREW_PRINTED_PROMPT
     else:
         prompt_base = _prompt_base_for_variant(prompt_variant)
     if prompt_base is None:
@@ -376,10 +442,15 @@ def gemini_transcription_contract(
         prompt_variant,
         language_hint,
     )
+    prompt_contract_version = (
+        GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION
+        if _is_hebrew_printed_plain_text_contract(prompt_variant, language_hint)
+        else GEMINI_OCR_PROMPT_CONTRACT_VERSION
+    )
 
     return GeminiTranscriptionContract(
         prompt_fingerprint=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
-        prompt_contract_version=GEMINI_OCR_PROMPT_CONTRACT_VERSION,
+        prompt_contract_version=prompt_contract_version,
         output_mode="plain_text" if uses_plain_text_transcription else "json",
         api_version="v1beta" if uses_plain_text_transcription else "v1",
         effective_temperature=0.0 if uses_plain_text_transcription else temperature,

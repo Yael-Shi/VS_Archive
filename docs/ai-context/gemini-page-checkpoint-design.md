@@ -6,7 +6,14 @@ Approved and implemented by PR B in the Gemini OCR root-cause sequence:
 
 1. PR A — safe response diagnostics and failure taxonomy.
 2. **PR B — durable page checkpoint/resume (this document).**
-3. PR C — Hebrew printed plain-text response contract.
+3. PR C — Hebrew printed plain-text response contract (implemented on an
+   uncommitted PR branch; focused/static and full regression validated, not
+   yet merged; Hebrew printed uses the route-specific
+   `gemini-hebrew-printed-prompt-v2` marker, so its JSON-era attempt
+   identities are not reused, while all other routes retain
+   `gemini-ocr-prompt-v1` and their existing identities — see the
+   decision-log entry “Gemini Hebrew printed plain-text OCR response
+   contract (PR C)”).
 4. PR D — bounded per-page retry, backoff, and output-token escalation.
 5. PR E — explicit mixed printed/handwritten routing and prompt contract.
 

@@ -2340,3 +2340,100 @@ in 5.187 seconds. Ruff formatting/lint, Django system and migration checks,
 scoped Pyright/mypy, and the staged-diff check all passed; all eight recorded
 exit codes were zero. The 2,257-test split-run evidence above predates this
 last correction, so no new post-correction full-suite run is claimed.
+
+## Gemini Hebrew printed plain-text OCR response contract (PR C)
+
+**Status:** Implemented and validated on the uncommitted PR C branch
+`feat/gemini-hebrew-printed-plain-text-pr-c`. Not merged.
+
+**Decision / implemented:** Hebrew printed OCR (`prompt_variant=printed` with
+the canonical language hint `he`) uses the plain-text transcription contract
+instead of the previous single-JSON-object contract. This supersedes the
+“Temporary JSON contract” note in the PR A entry above for Hebrew printed
+only. The new `_HEBREW_PRINTED_PROMPT` keeps the archival guardrails of the
+JSON-era Hebrew printed prompt (verbatim typos and unusual Hebrew forms, no
+vowel marks, no silent omissions, URL/header/footer preservation, attention
+to short Hebrew words and personal details, decorative-UI exclusion) and
+requires transcription text only: no JSON, markdown, code fences, comments,
+explanations, labels, or introductory text. Execution uses the existing safe
+plain-text path already used by Latin printed/handwritten and general Hebrew
+handwritten: `v1beta`, effective temperature 0, thinking budget 0, and
+`_plain_text_response_to_page_data`. `has_unclear`, `unclear_count`, and
+`needs_review` are derived from the established `[?]` / `[UNCLEAR]`
+uncertainty markers in the returned transcription; the prompt instructs the
+model to use exactly those markers (the JSON-era `[מילה?]` example form is no
+longer requested).
+
+**Root cause modeled:** The production document 293 failure class — the
+observed provider response began as a JSON object but ended inside its long
+`"text"` string, producing `Unterminated string`. Because the entire page
+depended on that one complete JSON string, mid-string truncation made all
+otherwise returned OCR text unusable. The regression suite models this
+precisely: it starts from valid serialized JSON built with
+`json.dumps(..., ensure_ascii=False)`, deliberately truncates that serialized
+response inside the text value, shows the old JSON parser fails on it, and
+shows the same full synthetic transcription is accepted verbatim through the
+plain-text path without JSON parsing. No production data was used and no live
+Gemini call was made.
+
+**Scope guard:** Only the canonical `he` hint selects the plain-text Hebrew
+printed contract. Other non-Latin hints (e.g. `ar`), non-canonical spellings
+(`hebrew`, `iw`), and missing hints are **not** treated as Hebrew and keep the
+JSON contract via `_PRINTED_TEXT_PROMPT` (currently Arabic printed on the
+Gemini route). Handwritten variants, Hebrew translation, Transkribus,
+Antigravity, routing, and worker/queue behavior are unchanged.
+
+**Contract version and checkpoint identity:** The contract version is
+route-specific. Hebrew printed alone uses the new
+`GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION` =
+`gemini-hebrew-printed-prompt-v2` marker (within the existing 64-character
+field) because the output contract for that route changed semantically. All
+other routes continue to return the unchanged default
+`GEMINI_OCR_PROMPT_CONTRACT_VERSION` = `gemini-ocr-prompt-v1`, so their
+existing checkpoint identities remain valid and reusable. For Hebrew printed,
+attempt identity hashes both the changed effective prompt fingerprint and the
+new route-specific version, so previously completed Hebrew JSON-era
+checkpoints cannot be reused under the plain-text contract. Prompt selection,
+output-mode selection, and version selection share one predicate
+(`_is_hebrew_printed_plain_text_contract`) so they cannot drift apart.
+
+**Failure behavior:** Unchanged PR A taxonomy. Empty Hebrew printed output
+fails typed as `EMPTY_RESPONSE` (retryable once within the existing attempt
+policy); finish/block failures (`SAFETY`, `RECITATION`, `MAX_TOKENS`, etc.)
+remain typed and content-safe; the existing single `MAX_TOKENS` escalation
+retry on the plain-text path applies. PR B checkpoints, fencing,
+deterministic assembly, mixed-model provenance, and
+`OCR_PAGE_CHECKPOINT_PERSISTENCE_RETRYABLE` behavior are preserved.
+
+**Privacy boundary:** Unchanged. Logs, exceptions, and persisted failure
+metadata carry only operational metadata (model, page, attempt, finish/block
+reason, lengths, token counts, output cap, exception class). Prompts, raw
+provider responses, document text, and provider exception text are not logged
+or persisted outside the authorized checkpoint/result text fields.
+
+**Rejected alternative — JSON repair:** Keeping the JSON contract and adding
+repair heuristics (closing an unterminated string, bracket completion,
+lenient parsers, or forcing a provider response schema) was rejected. A
+repaired truncated response cannot recover the missing tail of the page, so
+repair would silently accept an incomplete transcription as complete archival
+text — worse than an explicit typed failure. Plain text removes the
+all-or-nothing single-JSON-string dependency instead of patching it.
+
+**Validation evidence:** Focused PR C validation: 63 tests passed in 2.114
+seconds. Ruff format/check on the four scoped Python files passed. Django
+system check passed. Migration check reported no changes. Scoped Pyright: 0
+errors and 0 warnings. Scoped mypy: no issues in four source files.
+`git diff --check` passed. All eight focused/static exit codes were 0. Full
+`documents` regression: 2,267 tests passed in 1,934.989 seconds,
+`TEST_EXIT_CODE=0`.
+
+**Validation still required:** Live Hebrew printed OCR fidelity/quality
+validation on real (non-production-reference) documents, deployment through
+the existing worker-first runbook, and any production document retry remain
+outstanding and are not claimed here.
+
+**Unchanged / deferred:** No routing changes. No new retry counts, backoff,
+token escalation policy, hard caps, continuation, or page splitting — that is
+PR D. No MIXED printed/handwritten behavior — that is PR E. No translation,
+Transkribus, Antigravity, worker-state, queue, UI, migration, deployment, or
+production-document changes.

@@ -102,8 +102,21 @@ Routing stores `handwritten` or `printed`. Actual prompt text is chosen in `gemi
 |------------------|---------------|-------------|-------------|
 | `printed` | `en` / `fr` | Latin printed prompt | Plain text (`v1beta`, temperature 0) |
 | `handwritten` | `en` / `fr` | Latin handwritten prompt | Plain text |
-| `printed` | `he` (and other non-Latin, e.g. `ar`) | Hebrew-oriented printed prompt (`_PRINTED_TEXT_PROMPT`) | JSON |
+| `printed` | `he` (canonical hint only) | Hebrew printed plain-text prompt (`_HEBREW_PRINTED_PROMPT`) | Plain text (`v1beta`, temperature 0) |
+| `printed` | other non-Latin (e.g. `ar`) or missing hint | Hebrew-oriented printed prompt (`_PRINTED_TEXT_PROMPT`) | JSON |
 | `handwritten` | non-Latin (e.g. `he`, `ar`) | Latin handwritten prompt body | JSON (not plain-text Latin path) |
+
+Hebrew printed moved from the JSON response contract to plain text in PR C.
+That route alone uses the route-specific contract version
+`GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION` =
+`gemini-hebrew-printed-prompt-v2`; all other routes keep
+`GEMINI_OCR_PROMPT_CONTRACT_VERSION` = `gemini-ocr-prompt-v1` and their
+existing checkpoint identities. Only the canonical `he` hint selects the
+plain-text Hebrew printed prompt; other non-Latin or missing hints are
+**not** treated as Hebrew and keep the JSON contract. Uncertainty metadata
+(`has_unclear`, `unclear_count`, `needs_review`) is derived from the `[?]` /
+`[UNCLEAR]` markers in the returned transcription. See the decision-log entry
+“Gemini Hebrew printed plain-text OCR response contract (PR C)”.
 
 `hebrew_translation` is **not** an OCR route variant. It is used only for Hebrew translation rows (below).
 
