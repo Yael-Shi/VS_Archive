@@ -21,6 +21,7 @@ from documents.models import (
 from documents.services.archive_items import create_ocr_document
 from documents.services.env_validation import WorkerEnvConfig
 from documents.services.gemini_engine import (
+    GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION,
     GeminiError,
     GeminiResult,
     gemini_transcription_contract,
@@ -78,21 +79,25 @@ def _identity(
     model_candidates: tuple[str, ...] = ("model-a",),
     temperature: float = 0.2,
     prompt_fingerprint: str | None = None,
+    language_hint: str = Document.Language.ENGLISH,
+    text_input_type: str = Document.TextInputType.HANDWRITTEN,
+    prompt_variant: str = DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+    max_output_tokens_hard_cap: int = 32768,
 ):
     contract = gemini_transcription_contract(
-        prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
-        language_hint=Document.Language.ENGLISH,
+        prompt_variant=prompt_variant,
+        language_hint=language_hint,
         temperature=temperature,
     )
     if prompt_fingerprint is not None:
         contract = replace(contract, prompt_fingerprint=prompt_fingerprint)
     return build_gemini_attempt_identity(
         pages=pages,
-        language_hint=Document.Language.ENGLISH,
-        text_input_type=Document.TextInputType.HANDWRITTEN,
+        language_hint=language_hint,
+        text_input_type=text_input_type,
         handwriting_type=Document.HandwritingType.VS,
         engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
-        prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+        prompt_variant=prompt_variant,
         model_candidates=model_candidates,
         contract=contract,
         min_text_length=20,
@@ -102,6 +107,7 @@ def _identity(
         top_k=40,
         top_p=0.95,
         max_output_tokens=8192,
+        max_output_tokens_hard_cap=max_output_tokens_hard_cap,
     )
 
 
@@ -176,6 +182,68 @@ class GeminiPageCheckpointIdentityTests(TestCase):
             models_changed.identity_fingerprint,
         }
         self.assertEqual(len(fingerprints), 4)
+
+    def test_retry_policy_and_hard_cap_are_part_of_config_identity(self):
+        pages = _pages(b"one")
+        baseline = _identity(pages)
+        duplicate = _identity(pages)
+        hard_cap_changed = _identity(pages, max_output_tokens_hard_cap=65536)
+
+        self.assertEqual(
+            baseline.config_fingerprint,
+            duplicate.config_fingerprint,
+        )
+        self.assertNotEqual(
+            baseline.config_fingerprint,
+            hard_cap_changed.config_fingerprint,
+        )
+        self.assertNotEqual(
+            baseline.identity_fingerprint,
+            hard_cap_changed.identity_fingerprint,
+        )
+
+        with patch(
+            "documents.services.gemini_page_checkpoints."
+            "GEMINI_OCR_PAGE_RETRY_POLICY_VERSION",
+            "gemini-ocr-page-retry-test",
+        ):
+            retry_policy_changed = _identity(pages)
+        self.assertNotEqual(
+            baseline.identity_fingerprint,
+            retry_policy_changed.identity_fingerprint,
+        )
+
+    def test_hebrew_printed_keeps_v2_prompt_version_with_new_config_identity(self):
+        # PR D changes attempt identity for every Gemini OCR route, including
+        # PR C Hebrew printed, via the config fingerprint. The route-specific
+        # prompt-contract version from PR C is unchanged.
+        pages = _pages(b"hebrew printed page")
+        baseline = _identity(
+            pages,
+            language_hint=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.PRINTED,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+        )
+        hard_cap_changed = _identity(
+            pages,
+            language_hint=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.PRINTED,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            max_output_tokens_hard_cap=65536,
+        )
+
+        self.assertEqual(
+            baseline.prompt_contract_version,
+            GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION,
+        )
+        self.assertEqual(
+            hard_cap_changed.prompt_contract_version,
+            GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION,
+        )
+        self.assertNotEqual(
+            baseline.identity_fingerprint,
+            hard_cap_changed.identity_fingerprint,
+        )
 
     def test_identity_requires_contiguous_one_based_pages(self):
         pages = [

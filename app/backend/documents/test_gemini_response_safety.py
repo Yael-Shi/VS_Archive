@@ -9,6 +9,7 @@ from django.test import SimpleTestCase
 from documents.models import DocumentTextResult
 from documents.services.gemini_engine import (
     GeminiApiError,
+    GeminiError,
     GeminiResponseError,
     GeminiResponseFailureCode,
     _classify_response_failure,
@@ -144,6 +145,7 @@ class GeminiResponsePrivacyTests(SimpleTestCase):
         mock_client.models.generate_content.side_effect = [
             invalid_response,
             invalid_response,
+            invalid_response,
         ]
         mock_create_client.return_value = mock_client
 
@@ -163,7 +165,7 @@ class GeminiResponsePrivacyTests(SimpleTestCase):
             ctx.exception.failure_code,
             GeminiResponseFailureCode.JSON_PARSE,
         )
-        self.assertEqual(mock_client.models.generate_content.call_count, 2)
+        self.assertEqual(mock_client.models.generate_content.call_count, 3)
         self.assertNotIn(sensitive_marker, str(ctx.exception))
         self.assertNotIn(sensitive_marker, "\n".join(captured.output))
 
@@ -324,3 +326,54 @@ class GeminiResponsePrivacyTests(SimpleTestCase):
         self.assertNotIn(sensitive_marker, str(ctx.exception))
         formatted_traceback = "".join(traceback.format_exception(ctx.exception))
         self.assertNotIn(sensitive_marker, formatted_traceback)
+
+    @patch("documents.services.gemini_engine.time.sleep")
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_quota_errors_do_not_chain_provider_exception_text(
+        self,
+        _mock_get_key,
+        mock_create_client,
+        _mock_sleep,
+    ):
+        # PR A traceback privacy: safe QUOTA_EXHAUSTED raises must use
+        # ``from None`` so formatted tracebacks never retain provider text.
+        sensitive_marker = "SENSITIVE_QUOTA_PROVIDER_DETAIL_8841"
+        cases = (
+            (
+                f"429 RESOURCE_EXHAUSTED {sensitive_marker} limit: 0",
+                1,
+                "QUOTA_EXHAUSTED: test-model",
+            ),
+            (
+                f"429 RESOURCE_EXHAUSTED {sensitive_marker}",
+                3,
+                "QUOTA_EXHAUSTED: test-model after retries",
+            ),
+        )
+
+        for provider_message, expected_calls, expected_message in cases:
+            with self.subTest(provider_message=provider_message):
+                mock_client = Mock()
+                mock_client.models.generate_content.side_effect = RuntimeError(
+                    provider_message
+                )
+                mock_create_client.return_value = mock_client
+
+                with self.assertRaises(GeminiError) as ctx:
+                    transcribe_pages_with_gemini(
+                        self.pages,
+                        "en",
+                        prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+                        model_name="test-model",
+                    )
+
+                self.assertEqual(str(ctx.exception), expected_message)
+                self.assertIn("QUOTA_EXHAUSTED", str(ctx.exception))
+                self.assertNotIn(sensitive_marker, str(ctx.exception))
+                formatted_traceback = "".join(traceback.format_exception(ctx.exception))
+                self.assertNotIn(sensitive_marker, formatted_traceback)
+                self.assertEqual(
+                    mock_client.models.generate_content.call_count,
+                    expected_calls,
+                )

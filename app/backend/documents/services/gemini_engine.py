@@ -16,6 +16,7 @@ from google.genai import types
 
 from documents.models import DocumentTextResult
 from documents.services.gemini_defaults import (
+    DEFAULT_GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP,
     DEFAULT_GEMINI_TEMPERATURE,
     DEFAULT_GEMINI_TOP_K,
     DEFAULT_GEMINI_TOP_P,
@@ -33,6 +34,12 @@ GEMINI_OCR_PROMPT_CONTRACT_VERSION = "gemini-ocr-prompt-v1"
 # checkpoints created under the v1 JSON-era contract. All other routes keep
 # GEMINI_OCR_PROMPT_CONTRACT_VERSION and their existing checkpoint identities.
 GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION = "gemini-hebrew-printed-prompt-v2"
+
+# PR D bounded per-page OCR recovery (one page, one model candidate).
+GEMINI_OCR_PAGE_RETRY_POLICY_VERSION = "gemini-ocr-page-retry-v1"
+GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS = 3
+_GEMINI_OCR_EMPTY_RESPONSE_BACKOFF_SECONDS = (1.0, 2.0)
+_GEMINI_OCR_MIN_ESCALATED_OUTPUT_TOKENS = 8192
 
 
 class GeminiError(RuntimeError):
@@ -625,6 +632,46 @@ def _is_max_tokens_finish_reason(finish_reason: Optional[str]) -> bool:
     return "MAX_TOKENS" in finish_reason.upper()
 
 
+def _next_max_output_tokens_cap(
+    current: Optional[int],
+    *,
+    hard_cap: int,
+) -> Optional[int]:
+    """Deterministic token-cap ladder for OCR MAX_TOKENS recovery."""
+    if current is None or current < _GEMINI_OCR_MIN_ESCALATED_OUTPUT_TOKENS:
+        next_cap = _GEMINI_OCR_MIN_ESCALATED_OUTPUT_TOKENS
+    else:
+        next_cap = current * 2
+    next_cap = min(next_cap, hard_cap)
+    if current is not None and next_cap <= current:
+        return None
+    return next_cap
+
+
+def _transcription_empty_response_backoff_seconds(
+    completed_attempt: int,
+) -> Optional[float]:
+    if completed_attempt == 1:
+        return _GEMINI_OCR_EMPTY_RESPONSE_BACKOFF_SECONDS[0]
+    if completed_attempt == 2:
+        return _GEMINI_OCR_EMPTY_RESPONSE_BACKOFF_SECONDS[1]
+    return None
+
+
+_PERMANENT_TRANSCRIPTION_FAILURE_CODES = frozenset(
+    {
+        GeminiResponseFailureCode.SAFETY,
+        GeminiResponseFailureCode.RECITATION,
+        GeminiResponseFailureCode.LANGUAGE,
+        GeminiResponseFailureCode.SPII,
+        GeminiResponseFailureCode.BLOCKED,
+        GeminiResponseFailureCode.JSON_SCHEMA,
+        GeminiResponseFailureCode.NO_CANDIDATES,
+        GeminiResponseFailureCode.OTHER,
+    }
+)
+
+
 def _escalated_max_output_tokens(current: Optional[int]) -> int:
     return max(_TRUNCATION_RETRY_MIN_OUTPUT_TOKENS, current or 0)
 
@@ -1000,6 +1047,7 @@ def transcribe_pages_with_gemini(
     top_k: int = DEFAULT_GEMINI_TOP_K,
     top_p: float = DEFAULT_GEMINI_TOP_P,
     max_output_tokens: Optional[int] = 8192,
+    max_output_tokens_hard_cap: int = DEFAULT_GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP,
 ) -> GeminiResult:
     contract = gemini_transcription_contract(
         prompt_variant=prompt_variant,
@@ -1036,11 +1084,12 @@ def transcribe_pages_with_gemini(
         )
 
         success = False
-        attempts = 0
+        attempt = 0
         attempt_max_output_tokens = max_output_tokens
         data: Dict[str, Any] = {}
 
-        while not success and attempts < 2:
+        while not success and attempt < GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS:
+            attempt += 1
             try:
                 attempt_config_kwargs = dict(config_kwargs)
                 attempt_config_kwargs["max_output_tokens"] = attempt_max_output_tokens
@@ -1062,7 +1111,7 @@ def transcribe_pages_with_gemini(
                     resp,
                     model_name=model_name,
                     page_index=page.page_index,
-                    attempt=attempts + 1,
+                    attempt=attempt,
                     max_output_tokens=attempt_max_output_tokens,
                 )
                 trailing_whitespace_chars = response_metadata.trailing_whitespace_chars
@@ -1091,44 +1140,71 @@ def transcribe_pages_with_gemini(
                     model_name,
                 )
 
-                if uses_plain_text_transcription and _is_max_tokens_finish_reason(
-                    response_metadata.finish_reason
-                ):
-                    attempts += 1
-                    if attempts < 2:
-                        retry_max_output_tokens = _escalated_max_output_tokens(
-                            attempt_max_output_tokens
+                failure_code = _classify_response_failure(response_metadata)
+                if failure_code is not None:
+                    if failure_code == GeminiResponseFailureCode.MAX_TOKENS:
+                        if attempt < GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS:
+                            retry_max_output_tokens = _next_max_output_tokens_cap(
+                                attempt_max_output_tokens,
+                                hard_cap=max_output_tokens_hard_cap,
+                            )
+                            if retry_max_output_tokens is not None:
+                                logger.warning(
+                                    "Retrying truncated Gemini transcription page %s "
+                                    "after MAX_TOKENS with model %s: "
+                                    "attempt=%s/%s max_output_tokens=%s -> %s "
+                                    "raw_output_length=%s output_length=%s "
+                                    "trailing_whitespace_chars=%s "
+                                    "prompt_token_count=%s "
+                                    "candidates_token_count=%s "
+                                    "thoughts_token_count=%s total_token_count=%s",
+                                    page.page_index,
+                                    model_name,
+                                    attempt,
+                                    GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS,
+                                    attempt_max_output_tokens,
+                                    retry_max_output_tokens,
+                                    response_metadata.raw_output_length,
+                                    response_metadata.output_length,
+                                    trailing_whitespace_chars,
+                                    response_metadata.prompt_token_count,
+                                    response_metadata.candidates_token_count,
+                                    response_metadata.thoughts_token_count,
+                                    response_metadata.total_token_count,
+                                )
+                                attempt_max_output_tokens = retry_max_output_tokens
+                                continue
+                        raise GeminiResponseError(
+                            GeminiResponseFailureCode.MAX_TOKENS,
+                            response_metadata,
                         )
-                        logger.warning(
-                            "Retrying truncated Gemini transcription page %s "
-                            "after MAX_TOKENS with model %s: "
-                            "max_output_tokens=%s -> %s "
-                            "raw_output_length=%s output_length=%s "
-                            "trailing_whitespace_chars=%s "
-                            "prompt_token_count=%s "
-                            "candidates_token_count=%s "
-                            "thoughts_token_count=%s total_token_count=%s",
-                            page.page_index,
-                            model_name,
-                            attempt_max_output_tokens,
-                            retry_max_output_tokens,
-                            response_metadata.raw_output_length,
-                            response_metadata.output_length,
-                            trailing_whitespace_chars,
-                            response_metadata.prompt_token_count,
-                            response_metadata.candidates_token_count,
-                            response_metadata.thoughts_token_count,
-                            response_metadata.total_token_count,
+
+                    if failure_code == GeminiResponseFailureCode.EMPTY_RESPONSE:
+                        if attempt < GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS:
+                            backoff_seconds = (
+                                _transcription_empty_response_backoff_seconds(attempt)
+                            )
+                            if backoff_seconds is not None:
+                                time.sleep(backoff_seconds)
+                            logger.warning(
+                                "Retrying empty Gemini transcription page %s "
+                                "with model %s: attempt=%s/%s failure_code=%s",
+                                page.page_index,
+                                model_name,
+                                attempt,
+                                GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS,
+                                failure_code.value,
+                            )
+                            continue
+                        raise GeminiResponseError(
+                            GeminiResponseFailureCode.EMPTY_RESPONSE,
+                            response_metadata,
                         )
-                        attempt_max_output_tokens = retry_max_output_tokens
-                        continue
 
-                    raise GeminiResponseError(
-                        GeminiResponseFailureCode.MAX_TOKENS,
-                        response_metadata,
-                    )
+                    if failure_code in _PERMANENT_TRANSCRIPTION_FAILURE_CODES:
+                        raise GeminiResponseError(failure_code, response_metadata)
 
-                _raise_for_response_failure(response_metadata)
+                    raise GeminiResponseError(failure_code, response_metadata)
 
                 if uses_plain_text_transcription:
                     data = _plain_text_response_to_page_data(
@@ -1143,18 +1219,21 @@ def transcribe_pages_with_gemini(
                     )
 
                 success = True
-            except GeminiError as exc:
-                if _is_retryable_gemini_response_error(exc):
-                    attempts += 1
-                    if attempts < 2:
-                        logger.warning(
-                            "Retrying Gemini response format failure on page %s "
-                            "with model %s: %s",
-                            page.page_index,
-                            model_name,
-                            exc,
-                        )
-                        continue
+            except GeminiResponseError as exc:
+                if (
+                    exc.failure_code == GeminiResponseFailureCode.JSON_PARSE
+                    and attempt < GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS
+                ):
+                    logger.warning(
+                        "Retrying Gemini transcription JSON parse failure on page %s "
+                        "with model %s: attempt=%s/%s failure_code=%s",
+                        page.page_index,
+                        model_name,
+                        attempt,
+                        GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS,
+                        exc.failure_code.value,
+                    )
+                    continue
                 raise
             except Exception as exc:
                 err_str = str(exc).upper()
@@ -1162,10 +1241,21 @@ def transcribe_pages_with_gemini(
                     token in err_str for token in ("429", "RESOURCE_EXHAUSTED", "QUOTA")
                 ):
                     if "LIMIT: 0" in err_str:
-                        raise GeminiError(f"QUOTA_EXHAUSTED: {model_name}")
-                    time.sleep(5)
-                    attempts += 1
-                    continue
+                        raise GeminiError(f"QUOTA_EXHAUSTED: {model_name}") from None
+                    if attempt < GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS:
+                        time.sleep(5)
+                        logger.warning(
+                            "Retrying Gemini transcription quota/rate-limit on page %s "
+                            "with model %s: attempt=%s/%s",
+                            page.page_index,
+                            model_name,
+                            attempt,
+                            GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS,
+                        )
+                        continue
+                    raise GeminiError(
+                        f"QUOTA_EXHAUSTED: {model_name} after retries"
+                    ) from None
 
                 raise GeminiApiError(exc.__class__.__name__) from None
 

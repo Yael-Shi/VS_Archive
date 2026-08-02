@@ -1,80 +1,128 @@
-# Gemini OCR bounded per-page retry — PR D planning note
+# Gemini OCR bounded per-page retry — PR D
 
-> **Planning only.** This note describes PR D retry policy, not PR B
-> persistence. Durable checkpoint/resume is implemented separately and
-> documented in `docs/ai-context/gemini-page-checkpoint-design.md`. For current
-> Gemini behavior and layer boundaries, see `.cursor/rules/architecture.mdc`
-> and `docs/ai-context/decision-log.md`.
+> **Implemented and validated** on branch `feat/gemini-bounded-page-recovery-pr-d`
+> (**not yet merged**). Durable checkpoint/resume remains PR B
+> (`docs/ai-context/gemini-page-checkpoint-design.md`). Current layer boundaries:
+> `.cursor/rules/architecture.mdc` and `docs/ai-context/decision-log.md` (PR D
+> entry).
 
 ## Problem
 
-Gemini OCR can fail a page when it returns an empty or otherwise transient
-response (e.g. empty body, parse/format failure, rate-limit blip). PR B
-preserves already-successful pages durably and a later intentional request
-processes only failed/missing pages. It deliberately retains the current
-within-delivery attempt policy.
+Gemini OCR can fail a page on transient empty output, parse failure, rate-limit
+blips, or truncation (`MAX_TOKENS`). PR B preserves successful pages durably;
+PR D adds bounded recovery **within the same delivery** for one page against
+one model candidate without restarting successful checkpoints.
 
-PR D will define a **bounded per-page retry** so a transient page failure may
-recover during the same delivery without an operator-triggered request.
+## Attempt budget scope
 
-## Constraints
+- **Boundary:** `transcribe_pages_with_gemini` per-page loop in
+  `gemini_engine.py`.
+- **Budget:** at most **three provider calls** per page **per model candidate**.
+- **Outer boundary unchanged:** ordered model-candidate fallback in
+  `GeminiAdapter` remains quota-only; exhausting quota on candidate *N* may
+  continue on candidate *N+1* with a **separate** three-call budget.
+- Quota/rate-limit retries inside the engine loop count toward the same
+  three-call budget for that candidate.
+- Hebrew translation (`translate_text_to_hebrew_with_gemini`) is **unchanged**
+  (still uses its existing two-attempt path).
 
-- Do **not** silently accept empty Gemini output.
-- Do **not** restart already successful durable checkpoints.
-- Preserve **page order** in the combined transcript.
-- Avoid **overlapping retry loops** across engine, adapter, and worker layers — one boundary only.
-- Preserve existing behavior for:
-  - model routing and fallback (within Gemini only)
-  - prompt variant selection
-  - generation config (temperature, top_k, top_p, max_output_tokens)
-  - PR B attempt/page persistence and final `DocumentTextResult`
-  - review reasons and routing metadata
-  - logging shape and error classification (`GeminiError`, quota markers, etc.)
+## Classifications
 
-## Proposed investigation
+**Classify finish/block/candidate/empty before parsing.** Never call JSON parsing
+after a classified response failure.
 
-1. Trace the current call chain:
-   - `run_worker.py` → `transcribe_pages` → `GeminiAdapter` → `transcribe_pages_with_gemini` (`gemini_engine.py`)
-2. Map existing retry/error boundaries:
-   - per-page loop and `_is_retryable_gemini_response_error` in `gemini_engine.py`
-   - quota / 429 handling in the same module
-   - adapter-level model fallback in `gemini_adapter.py`
-   - worker dispatch and `_save_ocr_failure` in `run_worker.py`
-3. **Choose exactly one retry boundary** (likely `gemini_engine.py` per-page loop, unless investigation shows adapter fallback must own it).
-4. Classify failures:
-   - **Retryable:** empty response, transient API/429 (non-zero quota), retryable format/parse errors already flagged today.
-   - **Permanent:** quota exhausted (`LIMIT: 0`), auth/config errors, non-retryable API errors, MAX_TOKENS after existing token retry.
+**Retryable within the three-call budget:**
 
-## Proposed retry policy
+- `EMPTY_RESPONSE` — deterministic backoff: **1s** before attempt 2, **2s**
+  before attempt 3.
+- `JSON_PARSE` — immediate retry, no token escalation, no repaired/incomplete
+  JSON acceptance.
+- `MAX_TOKENS` — immediate retry with token-cap ladder (no sleep).
+- Transient quota/rate-limit API errors (existing classification; not
+  `LIMIT: 0`).
 
-- Small explicit **max attempts** per page (e.g. 2–3 total, including first attempt).
-- **Bounded backoff** between attempts (fixed or short exponential; reuse existing sleep patterns where present).
-- **Page-level logging** on each retry and final failure:
-  - `page_index`
-  - `model` (runtime model id)
-  - `attempt` / `max_attempts`
-  - error message or classification
-- On exhaustion: raise the same class of error the layer uses today so worker persistence and classification stay unchanged.
-- Successful pages: retain durable checkpoints; only the failing page re-enters
-  the retry loop.
+**Permanent (no retry):**
 
-## Test plan
+- PR A permanent finish/block codes: `SAFETY`, `RECITATION`, `LANGUAGE`,
+  `SPII`, prohibited/blocked content, `NO_CANDIDATES`, `OTHER`, etc.
+- `JSON_SCHEMA` — non-retryable schema rejection.
 
-Add or extend tests in the Gemini engine/adapter test modules (exact file TBD during investigation):
+## Token-cap ladder (`MAX_TOKENS`)
 
-1. First attempt fails transiently (empty response or retryable parse error); second attempt succeeds — document completes with all pages in order.
-2. All attempts fail — persist the page failure and return an explicit
-   `GEMINI_PAGES_INCOMPLETE` partial outcome; no partial silent success.
-3. Permanent error (e.g. quota exhausted) — **not** retried beyond current policy.
-4. Page 1 succeeds, page 2 fails then retries — page 1 is **not** reprocessed (mock/call-count assertion).
-5. Logs or raised errors include **page index** and **attempt count** on retry and final failure.
+Deterministic escalation per page/candidate:
 
-## Non-goals
+1. If current cap is `None` or below **8192**, next cap is **8192**.
+2. Otherwise double the current cap.
+3. Clamp to `GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP`.
+4. If the cap cannot increase, fail immediately with typed `MAX_TOKENS` — do
+   not repeat an identical call.
 
-- No prompt changes.
-- No model changes or new model fallback rules.
-- No generation config changes.
-- No CI, env, or dependency changes.
-- No worker-level or cross-provider retry redesign.
-- No change to Transkribus or non-Gemini routes.
-- No checkpoint schema or attempt-identity redesign.
+Defaults and validation (`env_validation.py`):
+
+- Default hard cap: **32768**.
+- Maximum allowed configured hard cap: **65536**.
+- Reject booleans, non-integers, non-positive values, values below
+  `GEMINI_MAX_OUTPUT_TOKENS`, and values above 65536.
+
+## Checkpoint identity consequence
+
+PR D retry policy and hard cap affect provider execution. They are hashed into
+the Gemini attempt **configuration fingerprint**:
+
+- `retry_policy_version` = `gemini-ocr-page-retry-v1`
+- `max_provider_calls_per_page` = `3`
+- `max_output_tokens_hard_cap`
+
+These fields sit in the config fingerprint **independently of the
+prompt-contract version**, so this is an intentional identity change for
+**every Gemini OCR route** — including PR C Hebrew printed, which stays on
+`gemini-hebrew-printed-prompt-v2`; PR D adds a new config-identity boundary on
+top of that route-specific prompt version. Source, route, prompt, page,
+fencing, lease, persistence, and assembly semantics are unchanged. No
+page-level `DocumentTextResult` rows are created.
+
+## Privacy boundary
+
+Unchanged from PR A/B/C: logs, raised errors, and persisted failure metadata
+carry operational fields only (model, page, attempt, finish/block reason,
+lengths, token counts, output cap, exception class). Never log or persist
+prompts, raw provider responses, document text, or provider exception text.
+
+## Rejected alternatives
+
+- Infinite or unbounded retries.
+- JSON repair/heuristics for truncated JSON responses.
+- Continuation prompts or page splitting for `MAX_TOKENS`.
+- Cross-provider or worker-level retry redesign.
+- Changing OCR routing, prompts, translation, Transkribus, worker/SQS/DLQ, UI,
+  or schema.
+
+## Tests (synthetic fixtures only)
+
+Focused module: `app/backend/documents/test_gemini_bounded_page_recovery.py`.
+Production reference documents **271, 277, 289, 291** are cited only as modeled
+failure classes. Document **293** belongs to PR C and is not reimplemented here.
+
+## Validation evidence
+
+Focused PR D validation: the initial focused run executed **79** tests. One
+test failed only because its expected final-attempt output-length metadata still
+described the former second-attempt fixture; the test fixture/assertions were
+corrected **without production-code changes**; the corrected test passed in
+isolation; the new quota traceback-privacy test also passed in isolation. Because
+the test-only correction followed the initial run, the focused evidence is
+complementary rather than one uninterrupted 79/79 OK run.
+
+Static validation: Ruff formatting was applied to the two affected test files;
+the final format check reported all **10** scoped files formatted. Ruff lint
+passed. Django system check passed. Migration check reported no changes. Scoped
+Pyright: 0 errors and 0 warnings. Scoped mypy: no issues in **7** files.
+`git diff --check` passed.
+
+Full `documents` regression: one uninterrupted suite ran **2,286** tests in
+**1,886.264** seconds; result **OK**; `TEST_EXIT_CODE=0`.
+
+## Validation still required
+
+Live Gemini provider/fidelity validation; deployment through the existing
+worker-first runbook; production-document retries. **PR D is not merged yet.**

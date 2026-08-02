@@ -2437,3 +2437,90 @@ token escalation policy, hard caps, continuation, or page splitting — that is
 PR D. No MIXED printed/handwritten behavior — that is PR E. No translation,
 Transkribus, Antigravity, worker-state, queue, UI, migration, deployment, or
 production-document changes.
+
+## Gemini bounded per-page OCR recovery (PR D)
+
+**Status:** Implemented and validated on branch
+`feat/gemini-bounded-page-recovery-pr-d`. **Not yet merged.**
+
+**Scope:** `transcribe_pages_with_gemini` per-page loop only. At most **three
+provider calls per page per model candidate**. Ordered model-candidate fallback in
+`GeminiAdapter` is unchanged and quota-only; each candidate may receive its own
+three-call budget after quota exhaustion on the prior candidate.
+
+**Classify before parse:** Finish/block/candidate/empty failures are classified
+before JSON or plain-text parsing. Classified response failures never reach
+`_parse_page_json_strict` or `_plain_text_response_to_page_data`.
+
+**Retryable (within budget):**
+
+- `EMPTY_RESPONSE` — backoff **1s** then **2s** before attempts 2 and 3.
+- `JSON_PARSE` — immediate retry, no token escalation, no JSON repair.
+- `MAX_TOKENS` — immediate retry with deterministic cap ladder (no sleep).
+- Transient quota/rate-limit errors (not `LIMIT: 0`) — existing classification,
+  counts toward the same three-call budget.
+
+**Permanent (no retry):** PR A codes including `SAFETY`, `RECITATION`,
+`LANGUAGE`, `SPII`, blocked/prohibited content, `JSON_SCHEMA`, `NO_CANDIDATES`,
+`OTHER`, etc.
+
+**Token-cap ladder:** `None` or cap below 8192 → 8192; else double; clamp to
+`GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP` (default **32768**, max configured **65536**,
+must be ≥ `GEMINI_MAX_OUTPUT_TOKENS`). If cap cannot increase, fail typed
+`MAX_TOKENS` without repeating an identical call. No continuation and no page
+splitting.
+
+**Configuration:** Optional validated env `GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP`
+via `validate_required_env` / `WorkerEnvConfig.gemini_max_output_tokens_hard_cap`.
+Rejects booleans, non-integers, non-positive values, values below the configured
+initial cap, and values above 65536. No migration.
+
+**Checkpoint identity:** Configuration fingerprint now includes
+`retry_policy_version` (`gemini-ocr-page-retry-v1`),
+`max_provider_calls_per_page` (`3`), and `max_output_tokens_hard_cap`. These
+fields are part of the config fingerprint independently of the prompt-contract
+version, so this is an intentional identity change for **every Gemini OCR
+route** — including PR C Hebrew printed. Hebrew printed remains on
+`gemini-hebrew-printed-prompt-v2`; PR D adds a new config-identity boundary on
+top of that route-specific prompt version.
+Source/route/prompt/page/fencing/lease/persistence/assembly unchanged. No
+page-level `DocumentTextResult` rows.
+
+**PR B/C preservation:** Database-persistence retryable boundary (PR B) and
+route-specific Hebrew printed prompt version (PR C) unchanged. Successful
+checkpoint pages are not re-executed; only failed/missing pages run again.
+
+**Privacy:** Logs and persisted failures remain operational metadata only — never
+prompt, response text, document text, or provider exception text.
+
+**Rejected alternatives:** Infinite retry, JSON repair, continuation prompts,
+page splitting, cross-layer retry loops, routing/prompt/translation/worker/DLQ
+changes.
+
+**Reference failure classes (synthetic tests only):** Documents 271 and 277
+modeled as transient `EMPTY_RESPONSE`; 289 and 291 as `MAX_TOKENS` truncation.
+Document 293 remains PR C (Hebrew printed plain-text contract).
+
+**Validation evidence:** Focused PR D validation: the initial focused run
+executed **79** tests. One test failed only because its expected final-attempt
+output-length metadata still described the former second-attempt fixture; the
+test fixture/assertions were corrected **without production-code changes**; the
+corrected test passed in isolation; the new quota traceback-privacy test also
+passed in isolation. Because the test-only correction followed the initial run,
+the focused evidence is complementary rather than one uninterrupted 79/79 OK run.
+Static validation: Ruff formatting was applied to
+the two affected test files; the final format check reported all **10** scoped
+files formatted. Ruff lint passed. Django system check passed. Migration check
+reported no changes. Scoped Pyright: 0 errors and 0 warnings. Scoped mypy: no
+issues in **7** files. `git diff --check` passed. Full `documents` regression:
+one uninterrupted suite ran **2,286** tests in **1,886.264** seconds; result
+**OK**; `TEST_EXIT_CODE=0`.
+
+**Validation still required:** Live Gemini provider/fidelity validation;
+deployment through the existing worker-first runbook; production-document
+retries. **PR D is not merged yet.**
+
+**Unchanged / deferred:** OCR routing, prompts/output contracts (except identity
+hash inputs for retry policy), translation, Transkribus, Antigravity, worker/SQS
+ack/DLQ, UI, models/migrations, deployment, production documents, MIXED
+printed/handwritten (PR E).

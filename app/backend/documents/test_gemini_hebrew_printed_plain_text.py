@@ -246,8 +246,8 @@ class HebrewPrintedPlainTextExecutionTests(SimpleTestCase):
             ctx.exception.failure_code,
             GeminiResponseFailureCode.EMPTY_RESPONSE,
         )
-        # Empty output stays retryable once, then fails typed — PR A behavior.
-        self.assertEqual(mock_client.models.generate_content.call_count, 2)
+        # Empty output stays retryable twice, then fails typed — PR D policy.
+        self.assertEqual(mock_client.models.generate_content.call_count, 3)
 
 
 class HebrewPrintedCheckpointIdentityTests(SimpleTestCase):
@@ -268,6 +268,7 @@ class HebrewPrintedCheckpointIdentityTests(SimpleTestCase):
             top_k=40,
             top_p=0.95,
             max_output_tokens=8192,
+            max_output_tokens_hard_cap=32768,
         )
 
     def test_old_hebrew_json_checkpoints_cannot_be_reused_under_plain_text(self):

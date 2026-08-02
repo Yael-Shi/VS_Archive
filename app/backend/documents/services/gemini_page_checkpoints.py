@@ -17,7 +17,11 @@ from documents.models import (
     GeminiOcrAttempt,
     GeminiOcrPageCheckpoint,
 )
-from documents.services.gemini_engine import GeminiTranscriptionContract
+from documents.services.gemini_engine import (
+    GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS,
+    GEMINI_OCR_PAGE_RETRY_POLICY_VERSION,
+    GeminiTranscriptionContract,
+)
 from documents.services.page_extraction import PageImage
 
 PAGE_CHECKPOINT_LEASE = timedelta(minutes=45)
@@ -68,6 +72,7 @@ def build_gemini_attempt_identity(
     top_k: int,
     top_p: float,
     max_output_tokens: int | None,
+    max_output_tokens_hard_cap: int,
 ) -> GeminiAttemptIdentity:
     ordered_pages = sorted(pages, key=lambda page: page.page_index)
     expected_indices = list(range(1, len(ordered_pages) + 1))
@@ -117,9 +122,12 @@ def build_gemini_attempt_identity(
             "double_pass": double_pass,
             "effective_temperature": contract.effective_temperature,
             "max_output_tokens": max_output_tokens,
+            "max_output_tokens_hard_cap": max_output_tokens_hard_cap,
+            "max_provider_calls_per_page": GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS,
             "min_text_length": min_text_length,
             "model_candidates": list(normalized_candidates),
             "output_mode": contract.output_mode,
+            "retry_policy_version": GEMINI_OCR_PAGE_RETRY_POLICY_VERSION,
             "temperature": temperature,
             "top_k": top_k,
             "top_p": top_p,
