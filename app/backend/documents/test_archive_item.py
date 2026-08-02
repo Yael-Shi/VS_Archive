@@ -4345,11 +4345,12 @@ class ArchiveItemDiscoveryBrowseTests(TestCase):
 
     def test_existing_archive_search_still_works_after_browse_pages(self):
         item = self._create_public_item(title="Search still works browse regression")
-        category = ArchiveCategory.objects.create(
-            name="Search regression category term",
-            slug="search-regression-category-term",
+        update_archive_item_discovery_metadata(
+            item,
+            category_names=["Search regression category term"],
+            event_names=[],
+            tag_names=[],
         )
-        item.categories.add(category)
 
         resp = self.client.get(
             reverse("archive-list"), {"q": "search regression category"}

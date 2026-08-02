@@ -68,9 +68,31 @@ Resolved in `gemini_model_candidates()` (called from `htr_engine.transcribe_page
 | Arabic (both types) | Default chain: `gemini-2.5-flash` → `gemini-3.1-flash-lite` |
 | Non-Gemini routes | Default chain (unused at runtime for Transkribus) |
 
-`GeminiAdapter` tries candidates in order; on quota-style errors it advances to the next candidate. If all fail, raises `EngineRetryableError`.
+`GeminiAdapter` tries candidates in order; on quota-style errors it advances to
+the next candidate. In the durable worker path, exhaustion is persisted as a
+failed page checkpoint and produces an explicit partial outcome. Legacy direct
+adapter calls without document identity retain the prior
+`EngineRetryableError` behavior.
 
 Other Gemini execution knobs (from `worker_env`, not routing): `GEMINI_TEMPERATURE`, `GEMINI_TOP_K`, `GEMINI_TOP_P`, `GEMINI_MAX_OUTPUT_TOKENS`, `GEMINI_DOUBLE_PASS`, `GEMINI_CONSISTENCY_MIN_RATIO`, `MIN_TEXT_LENGTH`.
+
+### Page checkpoint model provenance
+
+For worker OCR, Gemini candidates are applied per missing page.
+Each successful `GeminiOcrPageCheckpoint` stores the actual model that produced
+that page. A later intentional OCR execution with the same source/route/prompt/
+configuration identity reuses that success instead of restarting it.
+
+- If every page used the same model, `DocumentTextResult.engine` remains that
+  concrete model id.
+- If quota fallback caused different pages to use different Gemini models,
+  `DocumentTextResult.engine` is the deterministic runtime marker
+  `gemini-mixed:<fingerprint>`. Full page-to-model provenance remains on the
+  checkpoints.
+
+This does not add a new fallback or alter route selection. It records the
+existing Gemini candidate behavior truthfully without discarding successful
+pages.
 
 ## Gemini prompt resolution
 
@@ -121,6 +143,9 @@ Translation failure persists a failed `HEBREW_TEXT` row (`HEBREW_TRANSLATION_FAI
 ## Operational notes
 
 - Do **not** change routing casually. New `(language, text_input_type)` pairs require explicit `OCR_ROUTES` (or approved special-case) entries, adapter/registry wiring, tests, and a decision-log update.
-- Keep **routing metadata** (`engine_key`, `prompt_variant`) separate from **runtime engine identity** (`DocumentTextResult.engine`, e.g. concrete Gemini model id or `transkribus-pylaia:{model_id}`).
+- Keep **routing metadata** (`engine_key`, `prompt_variant`) separate from
+  **runtime engine identity** (`DocumentTextResult.engine`, e.g. a concrete
+  Gemini model id, deterministic `gemini-mixed:<fingerprint>`, or
+  `transkribus-pylaia:{model_id}`).
 - Do **not** add silent provider fallbacks.
 - Update **this document** whenever routing, model overrides, or translation policy changes.

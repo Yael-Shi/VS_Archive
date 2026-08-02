@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from io import StringIO
-from types import SimpleNamespace
 from typing import TypedDict
 from unittest.mock import patch
 
@@ -26,6 +25,7 @@ from documents.services.ocr_reprocess import (
     OcrRetryMode,
     assess_ocr_reprocess,
 )
+from documents.services.page_extraction import PageImage
 from documents.services.process_document_ocr_reprocess_enqueue import (
     apply_ocr_reprocess,
 )
@@ -867,7 +867,9 @@ class RunWorkerOcrRetryModeTests(TestCase):
         mock_translate,
     ):
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         mock_transcribe.return_value = HtrResult(
             text="recognized text",
             needs_review=False,
@@ -899,7 +901,9 @@ class RunWorkerOcrRetryModeTests(TestCase):
         mock_translate,
     ):
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         mock_transcribe.return_value = HtrResult(
             text="recognized source text",
             needs_review=False,
@@ -968,7 +972,9 @@ class RunWorkerOcrRetryModeTests(TestCase):
         self.doc.text_input_type = Document.TextInputType.HANDWRITTEN
         self.doc.save(update_fields=["language", "text_input_type"])
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         mock_transcribe.return_value = HtrResult(
             text="recognized text",
             needs_review=False,
@@ -1015,7 +1021,9 @@ class RunWorkerOcrRetryModeTests(TestCase):
             prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
         )
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
 
         self.assertTrue(
             self.command._process_message(

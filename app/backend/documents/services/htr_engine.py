@@ -48,16 +48,19 @@ def transcribe_pages(
     if (
         selected.engine_key == DocumentTextResult.OcrEngineKey.GEMINI
         and worker_env is not None
-        and "model_candidates" not in kwargs
     ):
-        kwargs["model_candidates"] = list(
-            gemini_model_candidates(
-                selected,
-                language=language_hint,
-                text_input_type=text_input_type,
-                gemini_hebrew_printed_model=worker_env.gemini_hebrew_printed_model,
+        if "model_candidates" not in kwargs:
+            kwargs["model_candidates"] = list(
+                gemini_model_candidates(
+                    selected,
+                    language=language_hint,
+                    text_input_type=text_input_type,
+                    gemini_hebrew_printed_model=worker_env.gemini_hebrew_printed_model,
+                )
             )
-        )
+        kwargs.setdefault("text_input_type", text_input_type)
+        kwargs.setdefault("handwriting_type", handwriting_type)
+        kwargs.setdefault("engine_key", selected.engine_key)
     return adapter.execute(
         pages=pages,
         language_hint=language_hint,

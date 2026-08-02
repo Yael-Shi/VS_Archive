@@ -447,6 +447,179 @@ class DocumentTextResult(models.Model):
         ]
 
 
+class GeminiOcrAttempt(models.Model):
+    """Durable, reusable identity for one Gemini OCR input/configuration."""
+
+    class Status(models.TextChoices):
+        IN_PROGRESS = "IN_PROGRESS", "In progress"
+        PARTIAL = "PARTIAL", "Partial"
+        COMPLETED = "COMPLETED", "Completed"
+
+    document = models.ForeignKey(
+        Document,
+        on_delete=models.CASCADE,
+        related_name="gemini_ocr_attempts",
+    )
+    identity_fingerprint = models.CharField(max_length=64)
+    source_fingerprint = models.CharField(max_length=64)
+    route_fingerprint = models.CharField(max_length=64)
+    prompt_fingerprint = models.CharField(max_length=64)
+    config_fingerprint = models.CharField(max_length=64)
+    prompt_contract_version = models.CharField(max_length=64)
+    model_candidates = models.JSONField(default=list)
+    expected_page_count = models.PositiveIntegerField()
+    status = models.CharField(
+        max_length=32,
+        choices=Status.choices,
+        default=Status.IN_PROGRESS,
+    )
+    missing_page_indices = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["document", "-created_at"],
+                name="gem_ocr_attempt_doc_idx",
+            ),
+            models.Index(
+                fields=["document", "status"],
+                name="gem_ocr_attempt_status_idx",
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["document", "identity_fingerprint"],
+                name="uniq_gem_ocr_attempt_identity",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(expected_page_count__gte=1),
+                name="gem_ocr_attempt_page_count_gte_1",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(status__in=["IN_PROGRESS", "PARTIAL", "COMPLETED"]),
+                name="gem_ocr_attempt_status_valid",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="COMPLETED")
+                    | (
+                        models.Q(completed_at__isnull=False)
+                        & models.Q(missing_page_indices=[])
+                    )
+                ),
+                name="gem_ocr_attempt_completed_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(status="COMPLETED") | models.Q(completed_at__isnull=True)
+                ),
+                name="gem_ocr_attempt_noncompleted_shape",
+            ),
+        ]
+
+
+class GeminiOcrPageCheckpoint(models.Model):
+    """Durable fenced Gemini OCR result for one 1-based source page."""
+
+    class Status(models.TextChoices):
+        RUNNING = "RUNNING", "Running"
+        SUCCEEDED = "SUCCEEDED", "Succeeded"
+        FAILED = "FAILED", "Failed"
+
+    attempt = models.ForeignKey(
+        GeminiOcrAttempt,
+        on_delete=models.CASCADE,
+        related_name="page_checkpoints",
+    )
+    page_index = models.PositiveIntegerField()
+    page_fingerprint = models.CharField(max_length=64)
+    source_content_fingerprint = models.CharField(max_length=64)
+    status = models.CharField(max_length=32, choices=Status.choices)
+    lease_token = models.UUIDField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    actual_model = models.CharField(max_length=64, blank=True, default="")
+    text = models.TextField(null=True, blank=True)
+    needs_review = models.BooleanField(default=False)
+    review_reasons = models.JSONField(default=list)
+    failure_code = models.CharField(max_length=64, blank=True, default="")
+    failure_message = models.CharField(max_length=512, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    started_at = models.DateTimeField()
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["page_index"]
+        indexes = [
+            models.Index(
+                fields=["attempt", "status"],
+                name="gem_ocr_page_status_idx",
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["attempt", "page_index"],
+                name="uniq_gem_ocr_attempt_page",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(page_index__gte=1),
+                name="gem_ocr_page_index_gte_1",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(status__in=["RUNNING", "SUCCEEDED", "FAILED"]),
+                name="gem_ocr_page_status_valid",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="RUNNING")
+                    | (
+                        models.Q(lease_token__isnull=False)
+                        & models.Q(lease_expires_at__isnull=False)
+                        & models.Q(completed_at__isnull=True)
+                        & models.Q(actual_model="")
+                        & models.Q(text__isnull=True)
+                        & models.Q(failure_code="")
+                        & models.Q(failure_message="")
+                    )
+                ),
+                name="gem_ocr_page_running_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="SUCCEEDED")
+                    | (
+                        models.Q(lease_token__isnull=True)
+                        & models.Q(lease_expires_at__isnull=True)
+                        & models.Q(completed_at__isnull=False)
+                        & ~models.Q(actual_model="")
+                        & models.Q(text__isnull=False)
+                        & ~models.Q(text="")
+                        & models.Q(failure_code="")
+                        & models.Q(failure_message="")
+                    )
+                ),
+                name="gem_ocr_page_succeeded_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="FAILED")
+                    | (
+                        models.Q(lease_token__isnull=True)
+                        & models.Q(lease_expires_at__isnull=True)
+                        & models.Q(completed_at__isnull=False)
+                        & models.Q(actual_model="")
+                        & models.Q(text__isnull=True)
+                        & ~models.Q(failure_code="")
+                    )
+                ),
+                name="gem_ocr_page_failed_shape",
+            ),
+        ]
+
+
 class DocumentTextResultEdit(models.Model):
     class EditType(models.TextChoices):
         SOURCE_TEXT = "SOURCE_TEXT", "Source text"

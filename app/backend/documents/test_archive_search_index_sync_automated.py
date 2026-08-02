@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
@@ -31,6 +30,7 @@ from documents.services.archive_search_index import (
 from documents.services.gemini_engine import GeminiResult
 from documents.services.htr_adapters.base import HtrResult
 from documents.services.hebrew_translation_retry import run_hebrew_translation_retry
+from documents.services.page_extraction import PageImage
 from documents.services.text_presentation import get_displayed_transcription_text
 from documents.services.transkribus_local_completion import (
     complete_transkribus_local_success,
@@ -112,7 +112,9 @@ class WorkerOcrSearchIndexSyncTests(TestCase):
     ):
         doc = self._english_doc()
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         mock_transcribe.return_value = HtrResult(
             text="recognized source for index",
             needs_review=False,
@@ -151,7 +153,9 @@ class WorkerOcrSearchIndexSyncTests(TestCase):
     ):
         doc = self._hebrew_doc()
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         mock_transcribe.return_value = HtrResult(
             text="טקסט עברי לאינדקס",
             needs_review=False,
@@ -204,7 +208,9 @@ class WorkerOcrSearchIndexSyncTests(TestCase):
         )
 
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         mock_transcribe.side_effect = RuntimeError("adapter boom")
 
         self.assertTrue(self.command._process_message(self._message(doc)))
@@ -249,7 +255,9 @@ class WorkerOcrSearchIndexSyncTests(TestCase):
         pre_processing_state = doc.processing_state_user
 
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         mock_transcribe.side_effect = RuntimeError("adapter boom")
 
         with patch(
@@ -278,7 +286,9 @@ class WorkerOcrSearchIndexSyncTests(TestCase):
         doc = self._english_doc()
         pre_processing_state = doc.processing_state_user
         mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
-        mock_extract_pages.return_value = [SimpleNamespace(page_index=1)]
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
         mock_transcribe.return_value = HtrResult(
             text="recognized text that must roll back",
             needs_review=False,
@@ -550,7 +560,9 @@ class Pr2aPr2b1AndPublicSearchRegressionTests(TestCase):
             ),
             patch(
                 "documents.management.commands.run_worker.extract_pages",
-                return_value=[SimpleNamespace(page_index=1)],
+                return_value=[
+                    PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+                ],
             ),
             patch(
                 "documents.management.commands.run_worker.transcribe_pages",

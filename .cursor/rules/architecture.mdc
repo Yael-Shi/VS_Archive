@@ -27,8 +27,9 @@ The main async document-processing flow is:
 6. Worker extracts pages/images.
 7. Worker selects OCR/HTR route.
 8. Worker dispatches to an OCR/HTR adapter.
-9. Worker persists `DocumentTextResult`.
-10. Worker updates `Document.processing_state_user`.
+9. Gemini OCR durably checkpoints successful pages before final assembly.
+10. Worker persists document-level `DocumentTextResult`.
+11. Worker updates `Document.processing_state_user`.
 
 Do not move OCR/HTR processing into request/response views.
 
@@ -123,6 +124,7 @@ The worker should select the route once, pass it into `transcribe_pages`, and pe
 Examples:
 
 - concrete Gemini model id
+- deterministic `gemini-mixed:<fingerprint>` when assembled pages used more than one Gemini candidate
 - fallback/runtime model marker
 - failure marker such as `ocr-dispatch`
 - unsupported engine marker such as `unsupported:<key>`
@@ -253,6 +255,9 @@ If route selection fails:
 Current worker/SQS policy:
 
 - processing and adapter errors are persisted as failed `DocumentTextResult` rows
+- exception: a Gemini page-incomplete attempt preserves page checkpoints,
+  produces an explicit `PARTIAL` outcome with missing page indices, and does
+  not persist a misleading whole-document failed text row
 - handled failures are acked from SQS
 - retry/backoff/DLQ redesign is deferred
 

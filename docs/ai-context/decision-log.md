@@ -2220,3 +2220,123 @@ generation, response-text extraction, retry behavior, or processing-state
 semantics change. Page-level checkpoint/resume, Hebrew printed plain-text
 output, bounded per-page recovery, and mixed printed/handwritten routing
 remain separate PRs.
+
+## Gemini OCR durable page checkpoint/resume
+
+**Decision / implemented:** Gemini OCR now uses a durable
+`GeminiOcrAttempt` identity plus one fenced `GeminiOcrPageCheckpoint` per
+1-based page. A successful page is saved immediately. A later intentional OCR
+execution with the same complete identity reuses successful pages and calls
+Gemini only for failed or missing pages. `DocumentTextResult` remains
+document-level and is persisted only after deterministic complete assembly.
+
+**Identity:** Attempt identity hashes actual downloaded source bytes, ordered
+source identity, normalized page bytes, language/input/handwriting route,
+engine/prompt variant, exact effective prompt plus explicit contract version,
+ordered model candidates, and output-affecting generation configuration.
+Source replacement/reordering, extraction output, prompt, model candidates, or
+configuration changes therefore cannot silently reuse stale page text.
+
+**Fencing and crash behavior:** Page claims use a 45-minute token/lease and
+database row locking. Unexpired work is not executed twice; expired work may be
+reclaimed; late tokens cannot overwrite a newer claim. Complete page
+checkpoints remain reusable if the worker crashes before document-level
+persistence.
+
+**Partial outcome:** A final page failure stops the current execution, preserves
+earlier successes, marks the attempt/document/request `PARTIAL`, and reports
+`GEMINI_PAGES_INCOMPLETE` with a bounded ordered `missing_pages=...` message.
+It does not create a misleading whole-document failed `DocumentTextResult`.
+Missing-page UI is deferred; durable indices are available on the attempt.
+
+**Local persistence boundary:** Provider execution and checkpoint persistence
+are separate exception domains. A database failure while creating, claiming,
+persisting, assembling, or reading checkpoint state returns a dedicated
+`OCR_PAGE_CHECKPOINT_PERSISTENCE_RETRYABLE` outcome. It leaves the SQS message
+and request lease in place and does not misclassify the failure as provider
+`API_ERROR`, terminalize as `PARTIAL`, or persist provider/document content.
+
+**Runtime model identity:** Each page stores its actual Gemini model. Uniform
+assembly keeps the concrete model name. Multi-model assembly uses
+`gemini-mixed:` plus 48 SHA-256 hex characters over the ordered page/model
+mapping, with full provenance retained on page rows. This preserves the
+existing Gemini-only candidate fallback without reprocessing successful pages.
+
+**Request boundary:** Attempts are intentionally independent of
+`ProcessDocumentRequest` so a later intentional request can reuse them.
+`RECOVERY_REQUIRED` is not reclaimed or replayed by this PR; existing request
+lease/fencing remains authoritative. Request-level recovery is separate work.
+
+**Rationale and rejected alternatives:** Binding page state only to a Request
+would prevent cross-request resume; page-level `DocumentTextResult` rows would
+break document display/edit/search/verification semantics; memory/SQS state is
+not durable; replaying `RECOVERY_REQUIRED` would contradict the existing
+provider-safety fence; reprocessing every page after model fallback would
+defeat the cost/reliability goal; excluding Arabic would leave an existing
+multi-candidate Gemini route unsafe; UI would broaden this concurrency/schema
+PR. Full reasoning is recorded in
+`docs/ai-context/gemini-page-checkpoint-design.md`.
+
+**Unchanged / deferred:** No routing, translation, Transkribus, Antigravity,
+attempt-count, backoff, token-cap, continuation, splitting, Hebrew printed
+plain-text, or MIXED document behavior changes. Those remain in their approved
+separate PRs.
+
+**Validation audit / inherited test repairs:** The initial 2,255-test broad run
+reported ten failures. Nine unchanged worker fixtures supplied `object()` or
+`SimpleNamespace` instead of the now-required complete `PageImage`; they were
+updated to use the production page value object. Weakening the production
+checkpoint/source-identity contract for partial test doubles was rejected.
+The affected three modules then passed 75/75 tests.
+
+The tenth failure, the archive browse/search regression test, reproduced alone
+on a clean worktree at the exact base commit
+`cb10864de0f9180051e4463bd717047bdc17f4a2`. Its setup mutated
+`item.categories` directly after index creation and therefore bypassed the
+documented explicit `update_archive_item_discovery_metadata` search-index hook.
+The fixture now uses that service; the isolated test and `test_archive_item`
+passed 1/1 and 324/324. No model signal or search production change was added:
+that would contradict the established same-transaction explicit-hook and
+no-signals architecture.
+
+The following full-suite rerun exposed an inherited planner-sensitive GIN test.
+The query still contained the independent FTS `UNION` arm, but PostgreSQL could
+prefer the selective one-to-one B-tree index and apply `search_vector @@` as a
+filter for the tiny fixture. The unchanged test passed on the clean base and in
+five isolated current-worktree runs. Its existing `enable_seqscan=off` plan
+probe now also sets `enable_indexscan=off`, leaving bitmap scans enabled so the
+test deterministically demonstrates the intended bitmap/GIN path. Removing the
+GIN assertion, changing production search for a planner-only choice, and
+inflating/analyzing fixtures were rejected. The stabilized check passed five
+consecutive runs and the full 45-test FTS module.
+
+Final staged review found one canonicalization gap: attempt identity stripped
+model-candidate whitespace while adapter execution did not. The adapter now
+normalizes once before identity and execution and rejects candidates that
+become empty. Identity-only normalization was rejected because it could map
+different provider input to the same attempt; hashing surrounding whitespace
+was rejected because it is not part of a valid model identifier.
+
+**Typing evidence:** Scoped PR B Pyright/mypy is clean. Full-tree checks still
+report 41 Pyright and 12 mypy errors in unchanged Transkribus test files; these
+are inherited baseline debt and are not represented as passing PR B
+validation. Before the final staged-review correction, the full Django suite
+passed all 2,255 tests with exit code 0. After the model-candidate
+canonicalization correction, 29 focused checkpoint/adapter tests and all final
+scoped/static checks passed.
+
+The post-correction Django regression covered all 2,257 tests exactly once in
+two complementary segments because the original run was interrupted: the
+first 751 tests completed without a test failure through
+`ArchiveFamilyAccessManagePageTests.test_invalid_post_action_returns_400_and_changes_nothing`,
+and the runner-reconstructed remaining 1,506 test IDs then passed in 1,737.182
+seconds with exit code 0. This is complete split-run regression coverage, not a
+claim that one uninterrupted command reported `Ran 2257 tests`.
+
+Subsequent staged review found and corrected the local checkpoint-persistence
+exception-boundary gap described above. After that correction, the affected
+checkpoint, adapter, worker, and request-worker selection passed all 74 tests
+in 5.187 seconds. Ruff formatting/lint, Django system and migration checks,
+scoped Pyright/mypy, and the staged-diff check all passed; all eight recorded
+exit codes were zero. The 2,257-test split-run evidence above predates this
+last correction, so no new post-correction full-suite run is claimed.
