@@ -304,6 +304,7 @@ class MixedPromptContractTests(SimpleTestCase):
             ("en", DocumentTextResult.OcrPromptVariant.PRINTED),
             ("fr", DocumentTextResult.OcrPromptVariant.HANDWRITTEN),
             ("ar", DocumentTextResult.OcrPromptVariant.PRINTED),
+            ("he", DocumentTextResult.OcrPromptVariant.HEBREW_GENERAL_HANDWRITTEN),
         )
         for language_hint, prompt_variant in cases:
             with self.subTest(prompt_variant=prompt_variant):

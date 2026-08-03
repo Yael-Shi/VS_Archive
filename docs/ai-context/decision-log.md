@@ -2621,73 +2621,72 @@ general Hebrew handwritten prompt/contract, Transkribus, Antigravity,
 worker/SQS ack/lease/DLQ/durable requests, Gemini retry policy/budget/backoff/
 hard-cap configuration, provider models and candidate ordering, unrelated UI.
 
-## General Hebrew handwritten prompt anti-runaway hardening
+## General Hebrew handwritten prompt anti-runaway experiment (PR #371)
 
-**Status:** Implemented and focused/static/full-regression validated on branch
-`fix/gemini-hebrew-general-runaway-prompt`. **Not yet merged.**
+**Status:** Rejected after live validation. PR #371 was merged as `cb69ec0`,
+built as image `20260803122739`, and deployed, but the runtime was rolled back
+to image `202608031223` after the experiment failed on document 291. This code
+rollback restores the source contract used by `202608031223`; merge and a new
+deployment are still required to remove the source/runtime drift.
 
-**Production observations (after PRs B–E):**
+**Evidence before PR #371:**
 
-* Document 289, `hebrew_general_handwritten`, page 1: three bounded attempts;
-  attempt 3 still returned `MAX_TOKENS`; `raw_output_length=30163` with
-  `max_output_tokens=16384`. The source page contains ordinary, relatively
-  sparse handwriting with no plausible amount of text near that length.
-* Document 291, same route: page 1 succeeded with 961 characters and was
-  checkpointed; page 2 contains handwriting plus a pasted portrait and reached
-  `MAX_TOKENS` after three attempts; attempt 3 returned
-  `raw_output_length=30369` with `max_output_tokens=16384`.
+* Document 289, `hebrew_general_handwritten`, page 1 made three bounded
+  provider calls and still returned `MAX_TOKENS`; the final call recorded
+  `raw_output_length=30163`, `candidates_token_count=16384`, and
+  `max_output_tokens=16384` for a relatively sparse page.
+* Document 291 under `gemini-ocr-prompt-v1` created DB attempt 3. Page 1
+  succeeded and was durably saved as checkpoint 4 with 961 characters; page 2
+  failed as checkpoint 5 with `MAX_TOKENS` after three calls and
+  `raw_output_length=30369`. The attempt remained `PARTIAL`, missing page 2.
 
-These observations indicate runaway repetition or hallucinated continuation.
-Bounded recovery (PR D) behaved correctly but cannot repair the output.
+These observations show provider runaway repetition or hallucinated
+continuation. PR D's bounded recovery and PR B's page persistence behaved as
+designed, but neither accepted or repaired the runaway output.
 
-**Decision:** Harden only `_HEBREW_GENERAL_HANDWRITTEN_PROMPT` with concise
-explicit rules that preserve transcription of all visible handwritten text
-(including short, isolated, or faint text); prohibit describing, interpreting,
-classifying, or narrating photographs, portraits, illustrations, handwriting
-style, page condition, stains, or layout; prohibit inventing text from
-non-text visual regions; stop immediately after the last visible text; and
-prohibit repetition, blank-line continuation, and padding. Existing accuracy,
-language, uncertainty, and output requirements are preserved.
+**Rejected experiment:** PR #371 changed only
+`_HEBREW_GENERAL_HANDWRITTEN_PROMPT`. It added instructions against image
+description, invented text from non-text regions, repetition, continuation,
+and padding; it also introduced the route-specific version
+`gemini-hebrew-general-handwritten-prompt-v2`. The change passed 43 focused
+tests, Ruff, Django and migration checks, Pyright, mypy, `git diff --check`,
+and the full 2,318-test `documents` regression. Those results established
+local correctness, not provider fidelity.
 
-**Contract identity:** New route-specific version
-`GEMINI_HEBREW_GENERAL_HANDWRITTEN_PROMPT_CONTRACT_VERSION` =
-`gemini-hebrew-general-handwritten-prompt-v2`, selected only for
-`DocumentTextResult.OcrPromptVariant.HEBREW_GENERAL_HANDWRITTEN` through
-`_is_hebrew_general_handwritten_contract`. Together with the changed prompt
-fingerprint (pinned by SHA-256 in
-`test_gemini_hebrew_general_handwritten_prompt.py`; future prompt edits require
-deliberate version review), this changes attempt/checkpoint identity **only**
-for the general Hebrew handwritten route. `gemini-ocr-prompt-v1`, Hebrew
-printed `gemini-hebrew-printed-prompt-v2`, and MIXED
-`gemini-mixed-content-prompt-v1` are unchanged.
+**Live rejection evidence:** Request 8 on document 291 used DB attempt 8 and
+the v2 prompt contract. Its page 1 did not reuse the earlier v1 checkpoint,
+which proves the checkpoint identity change worked. Instead, page 1 itself
+failed as checkpoint 15 after three calls with `MAX_TOKENS`,
+`raw_output_length=23991`, and `candidates_token_count=16384`; page 2 did not
+run. The request ended `PARTIAL` with `missing_pages=1,2`, and no new
+`DocumentTextResult` was created. A page that had succeeded under v1 therefore
+failed under v2, so prompt-only hardening was rejected as a production
+solution.
 
-**Explicit non-claims:** This is **prompt-contract hardening only**. It does
-**not** add deterministic repetition detection or arbitrary thresholds, does
-**not** salvage or persist partial provider output, and does **not** claim the
-provider runaway issue is fully resolved.
+**Rollback decision:** Restore the exact pre-experiment prompt (SHA-256
+`c576010ed8127d4cd1c65c01d09d5641396dce2fed49374730de60cc342cf863`)
+and the shared `gemini-ocr-prompt-v1` contract for
+`hebrew_general_handwritten`. Remove the v2 constant and selection path. Keep
+the route on Gemini with plain-text `v1beta` output and effective temperature
+0. Keep Hebrew printed on `gemini-hebrew-printed-prompt-v2`, MIXED on
+`gemini-mixed-content-prompt-v1`, and keep PR D's configuration fingerprint,
+retry budget, classification, backoff, token ladder, and hard cap unchanged.
 
-**Validation evidence:** Ruff formatted one of the five scoped Python files;
-the subsequent format check reported all five already formatted. Ruff lint
-passed for all five scoped Python files. Final focused suite: **43** tests in
-**3.024** seconds; result **OK**; `FOCUSED_TEST_EXIT=0`. Django system check
-passed. `makemigrations --check --dry-run`: no changes detected. Pyright: 0
-errors and 0 warnings. mypy: no issues in **5** source files; informational
-untyped-function notes were not errors. `git diff --check` passed. Full
-`documents` regression: **2,318** tests in **1,976.608** seconds; result
-**OK**; `FULL_TEST_EXIT_CODE=0`. Full regression log:
-`/tmp/vs_archive_gemini_hebrew_general_runaway_prompt_full_documents_regression_2026-08-03.txt`
-(SHA-256
-`aeedfd8adfd47557dadd53194a5d8711fa168753305570ce7cfa96b4544e145c`).
-Tracebacks, ERROR logs, and warnings emitted by the regression belong to
-intentional negative-path tests and did not represent test failures.
+The rejected v2 prompt SHA-256
+`ce9aef4f083d6493db5e344b5f8405676bd75f019741bd7aaaa52785a3126988`
+and contract name remain in regression tests and this incident record only.
+Existing v2 attempt/checkpoint rows remain immutable history; current v1
+identity will not reuse them. Request 8, attempts 3/8, and checkpoints 4/5/15
+must not be deleted or rewritten.
 
-**Validation still required:** No live Gemini validation of the hardened
-prompt; documents 289 and 291 have not been retried under the new contract;
-no deployment. **PR is not merged.** The change does not claim the provider
-runaway issue is resolved.
+**Root cause remains open:** This rollback does not solve Gemini runaway and
+does not authorize partial salvage, silent acceptance, new prompt experiments,
+or additional production retries. A deterministic design must separately
+evaluate safe repetition metrics, post-response rejection versus streaming
+early stop, caps/models/preprocessing, and explicit salvage policy. Documents
+289 and 291 are incident evidence and must not be retried meanwhile.
 
-**Unchanged / deferred:** Routing, model candidates/ordering, retry count,
-retry classification, backoff, token budgets, hard cap, output parsing,
-persistence, worker/SQS, schema/migrations, Hebrew printed and MIXED prompts,
-Transkribus/Antigravity, production retries of documents 289/291, live Gemini
-calls, deployment.
+**Unchanged:** PRs #366–#370; migrations 0047/0048; routing; model candidates
+and ordering; page persistence/resume; retry count and classifications;
+backoff, token budgets, and hard cap; output parsing; worker/SQS lifecycle;
+Hebrew printed and MIXED prompts; Transkribus; Antigravity; incident rows.
