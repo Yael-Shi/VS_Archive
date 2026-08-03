@@ -21,13 +21,13 @@ Approved and implemented by PR B in the Gemini OCR root-cause sequence:
    route-specific `gemini-mixed-content-prompt-v1` marker, so checkpoints
    created under another prompt contract are not reused for MIXED. No
    per-page classification was introduced.
-6. General Hebrew handwritten prompt anti-runaway hardening (implemented on
-   branch `fix/gemini-hebrew-general-runaway-prompt`; focused/static/full-
-   regression validated; not yet merged). Route-specific
-   `gemini-hebrew-general-handwritten-prompt-v2` changes attempt identity only
-   for `hebrew_general_handwritten`; remaining shared routes keep
-   `gemini-ocr-prompt-v1`. Prompt-contract hardening only — no deterministic
-   repetition detection.
+6. PR #371 general Hebrew handwritten prompt anti-runaway experiment
+   (rejected after live validation and rolled back). The temporary
+   `gemini-hebrew-general-handwritten-prompt-v2` identity correctly prevented
+   reuse of v1 checkpoints, but document 291 page 1 regressed from a stored
+   961-character v1 success to a v2 `MAX_TOKENS` failure. The active contract
+   is restored to `gemini-ocr-prompt-v1`; v2 attempts/checkpoints remain
+   immutable incident history. The runaway root cause remains open.
 
 This design changes persistence and resume behavior only. It does not authorize a
 production retry or deployment by itself.
