@@ -262,6 +262,7 @@ class Document(models.Model):
     class TextInputType(models.TextChoices):
         HANDWRITTEN = "HANDWRITTEN", "Handwritten"
         PRINTED = "PRINTED", "Printed"
+        MIXED = "MIXED", "Mixed printed and handwritten"
 
     class HandwritingType(models.TextChoices):
         VS = "VS", "VS handwriting"
@@ -385,6 +386,7 @@ class DocumentTextResult(models.Model):
             "General Hebrew handwriting",
         )
         PRINTED = "printed", "Printed"
+        MIXED = "mixed", "Mixed printed and handwritten"
         HEBREW_TRANSLATION = "hebrew_translation", "Hebrew translation"
 
     class ResultType(models.TextChoices):

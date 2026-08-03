@@ -17,6 +17,7 @@ DATE_PRECISION_UI_CHOICES = (
 TEXT_INPUT_TYPE_UI_CHOICES = (
     (Document.TextInputType.HANDWRITTEN, "כתב יד"),
     (Document.TextInputType.PRINTED, "מודפס"),
+    (Document.TextInputType.MIXED, "משולב (מודפס וכתב יד)"),
 )
 
 HANDWRITING_TYPE_UI_CHOICES = (

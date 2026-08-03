@@ -2,7 +2,9 @@
 
 Concise reference for current OCR/HTR route selection, engine dispatch, and related translation behavior. Source of truth for routing logic: `app/backend/documents/services/ocr_routing.py`.
 
-**Supported inputs:** `Document.language` ∈ `{he, en, fr, ar}` and `Document.text_input_type` ∈ `{HANDWRITTEN, PRINTED}`. Any other value raises `ValueError` from `select_ocr_route`. There is no default/fallback route for unknown pairs.
+**Supported inputs:** `Document.language` ∈ `{he, en, fr, ar}` and `Document.text_input_type` ∈ `{HANDWRITTEN, PRINTED, MIXED}`. Any other value raises `ValueError` from `select_ocr_route`. There is no default/fallback route for unknown pairs, and nothing silently routes as `MIXED`.
+
+`MIXED` (PR E) is an explicit **manual document-level** choice: it does not classify individual pages, and every page of a `MIXED` document uses the single mixed printed/handwritten Gemini prompt contract (pages may be entirely printed, entirely handwritten, mixed within the same page, or a printed form filled in by hand).
 
 ## Routing matrix
 
@@ -10,12 +12,18 @@ Concise reference for current OCR/HTR route selection, engine dispatch, and rela
 |----------|-----------------|--------|-------------------------------------|
 | Hebrew (`he`) | Handwritten | **Transkribus** (see gate below) | `handwritten` |
 | Hebrew (`he`) | Printed | **Gemini** | `printed` |
+| Hebrew (`he`) | Mixed | **Gemini** | `mixed` |
 | English (`en`) | Handwritten | **Gemini** | `handwritten` |
 | English (`en`) | Printed | **Gemini** | `printed` |
+| English (`en`) | Mixed | **Gemini** | `mixed` |
 | French (`fr`) | Handwritten | **Gemini** | `handwritten` |
 | French (`fr`) | Printed | **Gemini** | `printed` |
+| French (`fr`) | Mixed | **Gemini** | `mixed` |
 | Arabic (`ar`) | Handwritten | **Gemini** | `handwritten` |
 | Arabic (`ar`) | Printed | **Gemini** (default) or **Antigravity** (see gate below) | `printed` |
+| Arabic (`ar`) | Mixed | **Gemini** | `mixed` |
+
+`MIXED` routes go through the static `OCR_ROUTES` table only: Hebrew mixed does **not** pass the Transkribus Hebrew-handwritten gate, and Arabic mixed is **not** routed to Antigravity.
 
 Static Gemini routes live in `OCR_ROUTES`. Hebrew handwritten and Arabic printed (when Antigravity is enabled) are **not** selected from that table alone; they are handled separately.
 
@@ -65,7 +73,8 @@ Resolved in `gemini_model_candidates()` (called from `htr_engine.transcribe_page
 | Hebrew printed | Single model: `GEMINI_HEBREW_PRINTED_MODEL` env, default `gemini-3.1-flash-lite` |
 | English/French handwritten | `gemini-2.5-flash` |
 | English/French printed | `gemini-2.5-flash` |
-| Arabic (both types) | Default chain: `gemini-2.5-flash` → `gemini-3.1-flash-lite` |
+| Arabic (handwritten/printed) | Default chain: `gemini-2.5-flash` → `gemini-3.1-flash-lite` |
+| Mixed (all languages) | Default chain: `gemini-2.5-flash` → `gemini-3.1-flash-lite` |
 | Non-Gemini routes | Default chain (unused at runtime for Transkribus) |
 
 `GeminiAdapter` tries candidates in order; on quota-style errors it advances to
@@ -105,18 +114,24 @@ Routing stores `handwritten` or `printed`. Actual prompt text is chosen in `gemi
 | `printed` | `he` (canonical hint only) | Hebrew printed plain-text prompt (`_HEBREW_PRINTED_PROMPT`) | Plain text (`v1beta`, temperature 0) |
 | `printed` | other non-Latin (e.g. `ar`) or missing hint | Hebrew-oriented printed prompt (`_PRINTED_TEXT_PROMPT`) | JSON |
 | `handwritten` | non-Latin (e.g. `he`, `ar`) | Latin handwritten prompt body | JSON (not plain-text Latin path) |
+| `mixed` | any | Approved mixed printed/handwritten prompt (`_MIXED_CONTENT_PROMPT`, closed product contract — do not edit) | Plain text (`v1beta`, temperature 0), never JSON |
 
 Hebrew printed moved from the JSON response contract to plain text in PR C.
 That route alone uses the route-specific contract version
 `GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION` =
-`gemini-hebrew-printed-prompt-v2`; all other routes keep
-`GEMINI_OCR_PROMPT_CONTRACT_VERSION` = `gemini-ocr-prompt-v1` and their
-existing checkpoint identities. Only the canonical `he` hint selects the
-plain-text Hebrew printed prompt; other non-Latin or missing hints are
-**not** treated as Hebrew and keep the JSON contract. Uncertainty metadata
-(`has_unclear`, `unclear_count`, `needs_review`) is derived from the `[?]` /
-`[UNCLEAR]` markers in the returned transcription. See the decision-log entry
-“Gemini Hebrew printed plain-text OCR response contract (PR C)”.
+`gemini-hebrew-printed-prompt-v2`. The mixed route (PR E) uses its own
+route-specific contract version `GEMINI_MIXED_PROMPT_CONTRACT_VERSION` =
+`gemini-mixed-content-prompt-v1`, selected for any language hint; this
+identity prevents reuse of checkpoints created under another prompt contract.
+All other routes keep `GEMINI_OCR_PROMPT_CONTRACT_VERSION` =
+`gemini-ocr-prompt-v1` and their existing checkpoint identities. Only the
+canonical `he` hint selects the plain-text Hebrew printed prompt; other
+non-Latin or missing hints are **not** treated as Hebrew and keep the JSON
+contract. Uncertainty metadata (`has_unclear`, `unclear_count`,
+`needs_review`) is derived from the `[?]` / `[UNCLEAR]` markers in the
+returned transcription for all plain-text routes, including mixed. See the
+decision-log entries “Gemini Hebrew printed plain-text OCR response contract
+(PR C)” and “Explicit MIXED printed/handwritten Gemini OCR route (PR E)”.
 
 `hebrew_translation` is **not** an OCR route variant. It is used only for Hebrew translation rows (below).
 

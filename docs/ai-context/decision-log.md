@@ -2441,7 +2441,8 @@ production-document changes.
 ## Gemini bounded per-page OCR recovery (PR D)
 
 **Status:** Implemented and validated on branch
-`feat/gemini-bounded-page-recovery-pr-d`. **Not yet merged.**
+`feat/gemini-bounded-page-recovery-pr-d`; **merged to `main`**
+(“Add bounded Gemini OCR page recovery”, #369).
 
 **Scope:** `transcribe_pages_with_gemini` per-page loop only. At most **three
 provider calls per page per model candidate**. Ordered model-candidate fallback in
@@ -2518,9 +2519,104 @@ one uninterrupted suite ran **2,286** tests in **1,886.264** seconds; result
 
 **Validation still required:** Live Gemini provider/fidelity validation;
 deployment through the existing worker-first runbook; production-document
-retries. **PR D is not merged yet.**
+retries.
 
 **Unchanged / deferred:** OCR routing, prompts/output contracts (except identity
 hash inputs for retry policy), translation, Transkribus, Antigravity, worker/SQS
 ack/DLQ, UI, models/migrations, deployment, production documents, MIXED
 printed/handwritten (PR E).
+
+## Explicit MIXED printed/handwritten Gemini OCR route (PR E)
+
+**Status:** Implemented and focused/static validated on branch
+`feat/gemini-mixed-content-pr-e`. **Not yet merged.**
+
+**Decision:** `MIXED` is an explicit **manual document-level**
+`Document.text_input_type` choice alongside `HANDWRITTEN` and `PRINTED`. It
+does not classify individual pages, and no automatic printed/handwritten
+content detection or per-page route selection was introduced. Every page of a
+MIXED document uses **one** mixed printed/handwritten Gemini prompt contract;
+the contract covers pages that are entirely printed, entirely handwritten,
+mixed within the same page, or a printed form filled in by hand. Both
+meaningful printed and handwritten content must be transcribed.
+
+**Routing:** Static `OCR_ROUTES` gains explicit
+`(he|en|fr|ar, MIXED) → GEMINI / prompt_variant=mixed` entries.
+`select_ocr_route` continues to reject unknown `text_input_type` values with
+`ValueError` — nothing silently routes as MIXED. Hebrew MIXED does not pass
+through the Transkribus Hebrew-handwritten gate; Arabic MIXED is not routed to
+Antigravity. Model candidates for MIXED resolve to
+`DEFAULT_GEMINI_MODEL_CANDIDATES` via the existing `gemini_model_candidates`
+fallthrough (no model-selection change).
+
+**Prompt/output contract:** The approved mixed prompt is stored verbatim as
+`_MIXED_CONTENT_PROMPT` in `gemini_engine.py` and is a **closed product
+contract** — wording, punctuation, examples, ordering, uncertainty markers
+(`[?]` / `[UNCLEAR]`), and backticks are preserved exactly and pinned by a
+SHA-256 assertion in `test_gemini_mixed_content.py`. Output is **raw plain
+text** (`v1beta`, effective temperature 0, thinking budget 0) for every
+language hint; the mixed route never uses JSON parsing. Uncertainty metadata
+derives from the `[?]` / `[UNCLEAR]` markers through the shared plain-text
+page path.
+
+**Contract identity:** New route-specific version
+`GEMINI_MIXED_PROMPT_CONTRACT_VERSION` = `gemini-mixed-content-prompt-v1`,
+selected through the `_is_mixed_content_contract` predicate (same
+single-predicate pattern as PR C Hebrew printed, so prompt, output mode, and
+version cannot drift apart). The mixed prompt fingerprint and contract version
+participate in the Gemini attempt identity exactly like the other
+route-specific contracts, so checkpoints created under any other prompt
+contract are **not** reused for MIXED, and identical MIXED inputs keep a
+stable identity. The general `gemini-ocr-prompt-v1` and Hebrew printed
+`gemini-hebrew-printed-prompt-v2` identities are not reused and not changed.
+
+**Schema/migration:** `MIXED` was added to the application-level
+`Document.TextInputType` and `DocumentTextResult.OcrPromptVariant` choices.
+Migration `0048_document_mixed_text_input_type_and_prompt_variant` was
+generated; it contains two model-state `AlterField` operations for
+`Document.text_input_type` and `DocumentTextResult.prompt_variant`. Both
+columns remain unconstrained `CharField`s; the migration updates
+application-level choices only and makes no effective database
+column/schema change (no type, default, nullability, index, or constraint
+change).
+
+**PR B–D preservation:** Durable page checkpoints/resume, successful-page
+reuse under identical attempt identity, bounded three-call recovery, retry
+classifications, deterministic backoff and output-token hard-cap ladder,
+privacy/safe-error boundaries, and quota-only ordered model-candidate fallback
+are unchanged; MIXED flows through the same adapter and engine paths.
+
+**No per-page persistence:** No page classification field was added to
+`PageImage`, `Document`, or `GeminiOcrPageCheckpoint`; no mixed-specific
+database persistence exists.
+
+**Rejected alternatives:** Automatic printed/handwritten classification,
+per-page routing or per-page prompt contracts, reusing the printed or
+handwritten prompts for mixed pages, heuristic fallback that interprets
+unknown values as MIXED.
+
+**Validation evidence:** The final focused suite ran **82** tests in
+**5.251** seconds; result **OK**; `FOCUSED_TEST_EXIT=0`. Ruff formatted one of
+the two corrected Python files; the subsequent Ruff format check reported both
+scoped files already formatted. Ruff lint passed for both scoped files. Django
+system check passed. `makemigrations --check --dry-run`: no changes. Pyright: 0
+errors and 0 warnings. mypy: no issues in **6** source files.
+`git diff --check` passed. `migrate --plan` succeeded and included migrations
+**0045–0048**, with **0048** containing the two expected `AlterField`
+operations. Full `documents` regression completed successfully on 2026-08-03:
+**2,309** tests ran in **1,870.289** seconds; result **OK**;
+`FULL_TEST_EXIT_CODE=0`. Django system check identified no issues. Full log:
+`/tmp/vs_archive_gemini_pr_e_full_documents_regression_2026-08-03.txt`
+(SHA-256
+`d03f7f7f1a3ad25841d1eb46849128d307c792608c7172eeb5a5957463b653b6`).
+Tracebacks, ERROR logs, and warnings emitted during the run belong to
+intentional negative-path tests and did not represent test failures.
+
+**Validation still required:** Live Gemini provider/fidelity validation,
+deployment, and any production-document retries remain outstanding. **PR E is
+not merged.**
+
+**Unchanged / deferred:** Translation behavior, Hebrew printed prompt/contract,
+general Hebrew handwritten prompt/contract, Transkribus, Antigravity,
+worker/SQS ack/lease/DLQ/durable requests, Gemini retry policy/budget/backoff/
+hard-cap configuration, provider models and candidate ordering, unrelated UI.

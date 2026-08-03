@@ -19,6 +19,13 @@ OCR_ROUTES: dict[tuple[str, str], OcrRouteConfig] = {
         engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
         prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
     ),
+    # MIXED is an explicit manual document-level choice (PR E). Every page in
+    # a MIXED document uses the single mixed printed/handwritten Gemini prompt
+    # contract; there is no per-page classification or per-page routing.
+    ("he", Document.TextInputType.MIXED): OcrRouteConfig(
+        engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+        prompt_variant=DocumentTextResult.OcrPromptVariant.MIXED,
+    ),
     ("en", Document.TextInputType.HANDWRITTEN): OcrRouteConfig(
         engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
         prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
@@ -26,6 +33,10 @@ OCR_ROUTES: dict[tuple[str, str], OcrRouteConfig] = {
     ("en", Document.TextInputType.PRINTED): OcrRouteConfig(
         engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
         prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+    ),
+    ("en", Document.TextInputType.MIXED): OcrRouteConfig(
+        engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+        prompt_variant=DocumentTextResult.OcrPromptVariant.MIXED,
     ),
     ("fr", Document.TextInputType.HANDWRITTEN): OcrRouteConfig(
         engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
@@ -35,6 +46,10 @@ OCR_ROUTES: dict[tuple[str, str], OcrRouteConfig] = {
         engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
         prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
     ),
+    ("fr", Document.TextInputType.MIXED): OcrRouteConfig(
+        engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+        prompt_variant=DocumentTextResult.OcrPromptVariant.MIXED,
+    ),
     ("ar", Document.TextInputType.HANDWRITTEN): OcrRouteConfig(
         engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
         prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
@@ -42,6 +57,10 @@ OCR_ROUTES: dict[tuple[str, str], OcrRouteConfig] = {
     ("ar", Document.TextInputType.PRINTED): OcrRouteConfig(
         engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
         prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+    ),
+    ("ar", Document.TextInputType.MIXED): OcrRouteConfig(
+        engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+        prompt_variant=DocumentTextResult.OcrPromptVariant.MIXED,
     ),
 }
 

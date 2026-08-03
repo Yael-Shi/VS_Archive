@@ -11,12 +11,17 @@ Approved and implemented by PR B in the Gemini OCR root-cause sequence:
    attempt identities are not reused, while all other routes retain
    `gemini-ocr-prompt-v1` — see decision-log entries for PR C and PR D).
 4. **PR D — bounded per-page retry, backoff, and output-token escalation
-   (implemented and validated on branch `feat/gemini-bounded-page-recovery-pr-d`;
-   not yet merged). PR D hashes the retry policy and hard cap into the
+   (merged). PR D hashes the retry policy and hard cap into the
    configuration fingerprint, so it changes attempt identity for every Gemini
    OCR route — including PR C Hebrew printed, which keeps its v2
    prompt-contract version.**
-5. PR E — explicit mixed printed/handwritten routing and prompt contract.
+5. PR E — explicit mixed printed/handwritten routing and prompt contract
+   (implemented on branch `feat/gemini-mixed-content-pr-e`; focused/static
+   validated; not yet merged). `MIXED` is a manual document-level choice;
+   every page of a MIXED document uses one mixed prompt contract with raw
+   plain-text output and the route-specific `gemini-mixed-content-prompt-v1`
+   marker, so checkpoints created under another prompt contract are not
+   reused for MIXED. No per-page classification was introduced.
 
 This design changes persistence and resume behavior only. It does not authorize a
 production retry or deployment by itself.

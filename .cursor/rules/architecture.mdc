@@ -64,8 +64,18 @@ Supported `text_input_type` values are:
 
 - `HANDWRITTEN`
 - `PRINTED`
+- `MIXED`
 
 There is no `UNKNOWN`.
+
+`MIXED` (PR E) is an explicit manual document-level choice. It does not
+classify individual pages; every page of a `MIXED` document uses the single
+mixed printed/handwritten Gemini prompt contract
+(`gemini-mixed-content-prompt-v1`, raw plain-text output). There is no
+automatic printed/handwritten content detection and no per-page route
+selection. `MIXED` routes to Gemini for all supported languages via static
+`OCR_ROUTES`; it never routes to Transkribus or Antigravity. Unknown values
+must not be heuristically interpreted as `MIXED`.
 
 Routing must be explicit per language and text input type. Do not collapse languages into broad groups such as `LATIN`.
 
