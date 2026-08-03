@@ -8,20 +8,26 @@ Approved and implemented by PR B in the Gemini OCR root-cause sequence:
 2. **PR B — durable page checkpoint/resume (this document).**
 3. PR C — Hebrew printed plain-text response contract (merged; Hebrew printed uses
    the route-specific `gemini-hebrew-printed-prompt-v2` marker, so its JSON-era
-   attempt identities are not reused, while all other routes retain
-   `gemini-ocr-prompt-v1` — see decision-log entries for PR C and PR D).
+   attempt identities are not reused — see decision-log entries for PR C and
+   PR D).
 4. **PR D — bounded per-page retry, backoff, and output-token escalation
    (merged). PR D hashes the retry policy and hard cap into the
    configuration fingerprint, so it changes attempt identity for every Gemini
    OCR route — including PR C Hebrew printed, which keeps its v2
    prompt-contract version.**
 5. PR E — explicit mixed printed/handwritten routing and prompt contract
-   (implemented on branch `feat/gemini-mixed-content-pr-e`; focused/static
-   validated; not yet merged). `MIXED` is a manual document-level choice;
-   every page of a MIXED document uses one mixed prompt contract with raw
-   plain-text output and the route-specific `gemini-mixed-content-prompt-v1`
-   marker, so checkpoints created under another prompt contract are not
-   reused for MIXED. No per-page classification was introduced.
+   (merged). `MIXED` is a manual document-level choice; every page of a MIXED
+   document uses one mixed prompt contract with raw plain-text output and the
+   route-specific `gemini-mixed-content-prompt-v1` marker, so checkpoints
+   created under another prompt contract are not reused for MIXED. No
+   per-page classification was introduced.
+6. General Hebrew handwritten prompt anti-runaway hardening (implemented on
+   branch `fix/gemini-hebrew-general-runaway-prompt`; focused/static/full-
+   regression validated; not yet merged). Route-specific
+   `gemini-hebrew-general-handwritten-prompt-v2` changes attempt identity only
+   for `hebrew_general_handwritten`; remaining shared routes keep
+   `gemini-ocr-prompt-v1`. Prompt-contract hardening only — no deterministic
+   repetition detection.
 
 This design changes persistence and resume behavior only. It does not authorize a
 production retry or deployment by itself.

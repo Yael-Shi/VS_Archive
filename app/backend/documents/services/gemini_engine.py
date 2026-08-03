@@ -42,6 +42,16 @@ GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION = "gemini-hebrew-printed-prompt-v2
 # checkpoint identities.
 GEMINI_MIXED_PROMPT_CONTRACT_VERSION = "gemini-mixed-content-prompt-v1"
 
+# Route-specific v2 marker for general Hebrew handwritten (prompt-contract
+# hardening against runaway continuation/repetition/padding and image
+# description). Together with the changed effective prompt fingerprint, this
+# prevents reuse of checkpoints created under the shared
+# gemini-ocr-prompt-v1 general-Hebrew contract. Other routes keep their
+# existing contract versions and checkpoint identities.
+GEMINI_HEBREW_GENERAL_HANDWRITTEN_PROMPT_CONTRACT_VERSION = (
+    "gemini-hebrew-general-handwritten-prompt-v2"
+)
+
 # PR D bounded per-page OCR recovery (one page, one model candidate).
 GEMINI_OCR_PAGE_RETRY_POLICY_VERSION = "gemini-ocr-page-retry-v1"
 GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS = 3
@@ -213,6 +223,9 @@ _HEBREW_GENERAL_HANDWRITTEN_PROMPT = (
     "text that appears faint, crowded, crossed out, or in the margins.\n"
     "12. Do not invent or restore text that is cropped, damaged, obscured, erased, covered, or outside "
     "the image.\n"
+    "13. Transcribe all visible text, including short, isolated, or faint text covered by the "
+    "preceding rules. Do not invent text from non-text visual regions such as photographs, "
+    "portraits, or illustrations.\n"
     "\n"
     "UNCERTAINTY AND UNREADABLE TEXT:\n"
     "- Use the exact marker [?] whenever a reading is uncertain.\n"
@@ -232,12 +245,14 @@ _HEBREW_GENERAL_HANDWRITTEN_PROMPT = (
     "source text.\n"
     "\n"
     "OUTPUT:\n"
-    "- Output only the transcription text.\n"
+    "- Output only the raw transcription text. Do not add commentary or labels.\n"
     "- Do not output JSON, markdown, code fences, comments, explanations, labels, confidence scores, or "
     "introductory text.\n"
-    "- Do not describe illustrations, stains, non-textual marks, handwriting style, page condition, or "
-    "layout.\n"
+    "- Do not describe, interpret, classify, or narrate photographs, portraits, illustrations, stains, "
+    "non-textual marks, handwriting style, page condition, or layout.\n"
     "- Transcribe readable text that appears inside stamps, seals, forms, labels, or other visual elements.\n"
+    "- Stop immediately after the last visible text on the page.\n"
+    "- Do not repeat text, continue with blank lines, or generate padding after the page content.\n"
 )
 
 
@@ -478,11 +493,22 @@ def _is_mixed_content_contract(prompt_variant: str) -> bool:
     return prompt_variant == DocumentTextResult.OcrPromptVariant.MIXED
 
 
+def _is_hebrew_general_handwritten_contract(prompt_variant: str) -> bool:
+    """Single predicate for the general Hebrew handwritten prompt contract.
+
+    Prompt selection, output-mode selection, and prompt-contract-version
+    selection all use this predicate so they cannot drift apart.
+    """
+    return (
+        prompt_variant == DocumentTextResult.OcrPromptVariant.HEBREW_GENERAL_HANDWRITTEN
+    )
+
+
 def _uses_plain_text_transcription(
     prompt_variant: str,
     language_hint: Optional[str],
 ) -> bool:
-    if prompt_variant == DocumentTextResult.OcrPromptVariant.HEBREW_GENERAL_HANDWRITTEN:
+    if _is_hebrew_general_handwritten_contract(prompt_variant):
         return True
 
     if _is_mixed_content_contract(prompt_variant):
@@ -547,6 +573,10 @@ def gemini_transcription_contract(
         prompt_contract_version = GEMINI_MIXED_PROMPT_CONTRACT_VERSION
     elif _is_hebrew_printed_plain_text_contract(prompt_variant, language_hint):
         prompt_contract_version = GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION
+    elif _is_hebrew_general_handwritten_contract(prompt_variant):
+        prompt_contract_version = (
+            GEMINI_HEBREW_GENERAL_HANDWRITTEN_PROMPT_CONTRACT_VERSION
+        )
     else:
         prompt_contract_version = GEMINI_OCR_PROMPT_CONTRACT_VERSION
 
