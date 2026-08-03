@@ -2467,14 +2467,14 @@ before JSON or plain-text parsing. Classified response failures never reach
 
 **Token-cap ladder:** `None` or cap below 8192 → 8192; else double; clamp to
 `GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP` (default **32768**, max configured **65536**,
-must be ≥ `GEMINI_MAX_OUTPUT_TOKENS`). If cap cannot increase, fail typed
+must be ≥ `GEMINI_OCR_MAX_OUTPUT_TOKENS`). If cap cannot increase, fail typed
 `MAX_TOKENS` without repeating an identical call. No continuation and no page
 splitting.
 
 **Configuration:** Optional validated env `GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP`
 via `validate_required_env` / `WorkerEnvConfig.gemini_max_output_tokens_hard_cap`.
-Rejects booleans, non-integers, non-positive values, values below the configured
-initial cap, and values above 65536. No migration.
+Rejects booleans, non-integers, non-positive values, values below the
+configured OCR initial cap, and values above 65536. No migration.
 
 **Checkpoint identity:** Configuration fingerprint now includes
 `retry_policy_version` (`gemini-ocr-page-retry-v1`),
@@ -2486,6 +2486,33 @@ route** — including PR C Hebrew printed. Hebrew printed remains on
 top of that route-specific prompt version.
 Source/route/prompt/page/fencing/lease/persistence/assembly unchanged. No
 page-level `DocumentTextResult` rows.
+
+**2026-08-03 initial output-cap follow-up:** The original
+`GEMINI_MAX_OUTPUT_TOKENS=2048` value entered the project as an early
+page-by-page OCR heuristic. No corpus measurement, Gemini model limit, cost
+calculation, or live-document validation was recorded for that value. Later
+configuration centralization and PR D preserved it for compatibility rather
+than revalidating it.
+
+Live French-handwritten document 272 provided direct evidence that
+the initial cap was too low for this corpus: page 1 consumed exactly 2,048
+candidate tokens, produced 4,862 characters, and finished with `MAX_TOKENS`.
+The following call at 8,192 returned zero output with `RECITATION`. The second
+result does not prove that the larger cap caused `RECITATION`, because it was a
+separate generation.
+
+A separate `GEMINI_OCR_MAX_OUTPUT_TOKENS` worker setting is therefore
+introduced with default **4096**. The existing shared
+`GEMINI_MAX_OUTPUT_TOKENS` remains **2048** for Hebrew translation and no
+longer controls worker OCR. The existing PR D retry algorithm remains
+unchanged, producing the bounded sequence **4096 → 8192 → 16384**.
+Temperature, prompt, model, routing, three-call budget, hard cap, parsing,
+failure classifications, and Hebrew translation behavior remain unchanged;
+`RECITATION` remains permanent and is not retried. This is not a retry-policy
+change, so `gemini-ocr-page-retry-v1` remains current. `max_output_tokens` is
+already included directly in the Gemini configuration fingerprint, so the new
+OCR value creates a new checkpoint identity without a policy-version bump,
+migration, or mutation of historical rows.
 
 **PR B/C preservation:** Database-persistence retryable boundary (PR B) and
 route-specific Hebrew printed prompt version (PR C) unchanged. Successful

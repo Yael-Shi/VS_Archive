@@ -71,6 +71,7 @@ class GeminiRetryHelperTests(SimpleTestCase):
         cases = (
             (None, 32768, 8192),
             (2048, 32768, 8192),
+            (4096, 32768, 8192),
             (8192, 32768, 16384),
             (16384, 32768, 32768),
             (8192, 20000, 16384),
@@ -170,6 +171,7 @@ class GeminiBoundedPageRecoveryTests(SimpleTestCase):
     def test_max_tokens_escalates_caps_without_sleeping(self):
         cases = (
             (2048, 32768, [2048, 8192, 16384]),
+            (4096, 32768, [4096, 8192, 16384]),
             (8192, 32768, [8192, 16384, 32768]),
             (None, 32768, [None, 8192, 16384]),
             (8192, 20000, [8192, 16384, 20000]),  # hard-cap clamping

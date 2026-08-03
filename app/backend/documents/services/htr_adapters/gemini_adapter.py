@@ -77,9 +77,9 @@ class GeminiAdapter:
             kwargs.setdefault("temperature", worker_env.gemini_temperature)
             kwargs.setdefault("top_k", worker_env.gemini_top_k)
             kwargs.setdefault("top_p", worker_env.gemini_top_p)
-            max_tok = worker_env.gemini_max_output_tokens
             kwargs.setdefault(
-                "max_output_tokens", max_tok if max_tok is not None else 8192
+                "max_output_tokens",
+                worker_env.gemini_ocr_max_output_tokens,
             )
             kwargs.setdefault(
                 "max_output_tokens_hard_cap",

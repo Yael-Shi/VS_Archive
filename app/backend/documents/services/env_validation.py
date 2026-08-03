@@ -12,6 +12,7 @@ from documents.services.gemini_defaults import (
     DEFAULT_GEMINI_FREE_DAILY_REQUEST_LIMIT,
     DEFAULT_GEMINI_MAX_OUTPUT_TOKENS,
     DEFAULT_GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP,
+    DEFAULT_GEMINI_OCR_MAX_OUTPUT_TOKENS,
     DEFAULT_GEMINI_TEMPERATURE,
     DEFAULT_GEMINI_TOP_K,
     DEFAULT_GEMINI_TOP_P,
@@ -223,6 +224,12 @@ class WorkerEnvConfig:
     gemini_double_pass: bool
     gemini_consistency_min_ratio: float
 
+    # OCR-specific output cap, separate from the shared translation cap.
+    # The default preserves existing manual WorkerEnvConfig constructors.
+    gemini_ocr_max_output_tokens: int = field(
+        default=DEFAULT_GEMINI_OCR_MAX_OUTPUT_TOKENS
+    )
+
     # PR D bounded OCR recovery hard cap (defaulted for compatibility with
     # existing manual constructors; validate_required_env passes it explicitly)
     gemini_max_output_tokens_hard_cap: int = field(
@@ -299,16 +306,23 @@ def validate_required_env() -> WorkerEnvConfig:
     gemini_max_output_tokens = _get_int(
         "GEMINI_MAX_OUTPUT_TOKENS", default=DEFAULT_GEMINI_MAX_OUTPUT_TOKENS
     )
+    gemini_ocr_max_output_tokens = _get_int(
+        "GEMINI_OCR_MAX_OUTPUT_TOKENS",
+        default=DEFAULT_GEMINI_OCR_MAX_OUTPUT_TOKENS,
+        min_value=1,
+        max_value=MAX_GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP,
+    )
     gemini_max_output_tokens_hard_cap = _get_int(
         "GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP",
         default=DEFAULT_GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP,
         min_value=1,
         max_value=MAX_GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP,
     )
-    if gemini_max_output_tokens_hard_cap < gemini_max_output_tokens:
+    if gemini_max_output_tokens_hard_cap < gemini_ocr_max_output_tokens:
         raise EnvConfigError(
             "Env var GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP must be >= "
-            f"GEMINI_MAX_OUTPUT_TOKENS ({gemini_max_output_tokens}). Got: "
+            "GEMINI_OCR_MAX_OUTPUT_TOKENS "
+            f"({gemini_ocr_max_output_tokens}). Got: "
             f"{gemini_max_output_tokens_hard_cap}"
         )
 
@@ -401,6 +415,7 @@ def validate_required_env() -> WorkerEnvConfig:
         gemini_top_k=gemini_top_k,
         gemini_top_p=gemini_top_p,
         gemini_max_output_tokens=gemini_max_output_tokens,
+        gemini_ocr_max_output_tokens=gemini_ocr_max_output_tokens,
         gemini_max_output_tokens_hard_cap=gemini_max_output_tokens_hard_cap,
         gemini_double_pass=gemini_double_pass,
         gemini_consistency_min_ratio=gemini_consistency_min_ratio,
