@@ -333,9 +333,10 @@ def _parse_text_input_type(raw_value: Optional[str]) -> str:
     valid = {
         Document.TextInputType.HANDWRITTEN,
         Document.TextInputType.PRINTED,
+        Document.TextInputType.MIXED,
     }
     if value not in valid:
-        raise ValueError("text_input_type must be HANDWRITTEN or PRINTED")
+        raise ValueError("text_input_type must be HANDWRITTEN, PRINTED, or MIXED")
     return value
 
 

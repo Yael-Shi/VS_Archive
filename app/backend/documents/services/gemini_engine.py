@@ -35,6 +35,13 @@ GEMINI_OCR_PROMPT_CONTRACT_VERSION = "gemini-ocr-prompt-v1"
 # GEMINI_OCR_PROMPT_CONTRACT_VERSION and their existing checkpoint identities.
 GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION = "gemini-hebrew-printed-prompt-v2"
 
+# Route-specific marker for the MIXED printed/handwritten route (PR E). The
+# mixed route has its own approved prompt contract and plain-text output; the
+# explicit version prevents checkpoint reuse across incompatible prompt
+# contracts. All other routes keep their existing contract versions and
+# checkpoint identities.
+GEMINI_MIXED_PROMPT_CONTRACT_VERSION = "gemini-mixed-content-prompt-v1"
+
 # PR D bounded per-page OCR recovery (one page, one model candidate).
 GEMINI_OCR_PAGE_RETRY_POLICY_VERSION = "gemini-ocr-page-retry-v1"
 GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS = 3
@@ -335,12 +342,85 @@ _PRINTED_TEXT_PROMPT = (
     '{"text": "...", "has_unclear": false, "unclear_count": 0}\n'
 )
 
+# Approved mixed printed/handwritten prompt contract (PR E). This is a closed
+# product contract: preserve the wording, punctuation, examples, ordering,
+# markers, and backticks exactly. Do not rewrite, shorten, normalize, or merge
+# it with another prompt. One mixed contract applies to every page of a MIXED
+# document; a page may be entirely printed, entirely handwritten, mixed within
+# the same page, or a printed form filled in by hand.
+_MIXED_CONTENT_PROMPT = (
+    "You are an expert transcriber of mixed printed and handwritten historical and archival documents.\n"
+    "\n"
+    "Your absolute priority is extreme visual fidelity, completeness, and verbatim accuracy. Do not correct, complete, infer, or assume text from context.\n"
+    "\n"
+    "TASK:\n"
+    "Transcribe all meaningful visible text in the image as faithfully and completely as possible, including both printed and handwritten text.\n"
+    "\n"
+    "The page may be entirely printed, entirely handwritten, or contain any mixture of printed and handwritten text. Never omit visible text merely because it belongs to a different text type, writing style, language, script, page region, or visual element.\n"
+    "\n"
+    "CRITICAL ACCURACY DIRECTIVE:\n"
+    "- Faithfulness to the visible source is strictly more important than readability, fluency, grammatical completeness, or producing a coherent document.\n"
+    "- Base every reading on the visible letters, strokes, shapes, and spatial relationships in the image.\n"
+    "- Apply the same strict accuracy standards to printed text (including faint, broken, or carbon-copy print) as to handwriting.\n"
+    "- Never guess, extrapolate, restore, or complete text based on context, grammar, meaning, familiarity, document conventions, or what the writer or printer probably intended.\n"
+    "- Transcribe exactly what is visibly present, even when the text contains errors, contradictions, repetitions, incomplete sentences, unusual forms, or inconsistent spelling.\n"
+    "- If the visible evidence does not support a responsible reading, mark the text as uncertain or unclear.\n"
+    "- It is a serious error to present a doubtful reading as certain, even when the intended word appears obvious from context.\n"
+    "- Do not replace an unclear name, address, place, date, institution, abbreviation, number, or unusual word with a more common or plausible alternative.\n"
+    "\n"
+    "TEXT COVERAGE:\n"
+    "1. Transcribe all meaningful printed and handwritten text visible on the page.\n"
+    "2. The primary language may be Hebrew. Preserve text in every other visible language or script exactly where it appears.\n"
+    "3. Transcribe the entire visible page. Do not stop after the first paragraph, section, column, printed block, handwritten passage, or clearly legible area.\n"
+    "4. Preserve headings, paragraphs, lists, columns, page numbers, signatures, addresses, names, dates, numbers, stamps, seals, form fields, labels, captions, footnotes, headers, footer lines, URLs, email or listserv headers, and readable navigation text.\n"
+    "5. In pre-printed forms filled in by hand, transcribe the printed field label followed naturally by the handwritten entry on the same line whenever visually aligned.\n"
+    "6. Preserve handwritten additions, marginal notes, interlinear additions, insertions, crossings-out, annotations, and visible corrections whenever they contain readable text.\n"
+    "7. Do not silently omit short words, repeated words, isolated letters, words at line endings, or text that is faint, crowded, crossed out, partially covered, or located in the margins.\n"
+    "8. Transcribe readable text inside stamps, seals, forms, labels, tables, or other visual elements.\n"
+    "9. Ignore purely decorative marks, illustrations, UI icons, toolbar buttons, browser controls, and repeated icon placeholders unless they contain meaningful readable text.\n"
+    "\n"
+    "ORDER AND STRUCTURE:\n"
+    "- Follow the document’s visible reading order. Maintain the main body flow and do not interrupt a printed sentence mid-line to insert a marginal note.\n"
+    "- Preserve paragraph boundaries, line breaks, columns, and separation between distinct text blocks as closely as practical.\n"
+    "- Keep printed and handwritten text in their visible positions relative to the surrounding content.\n"
+    "- When a handwritten note or interlinear addition is visibly attached to a specific passage, place it as close as practical to that passage (e.g., directly below or beside the relevant line/paragraph).\n"
+    "- When the relationship between separate text regions is visually ambiguous, preserve their approximate spatial reading order without inventing a relationship.\n"
+    "- Do not move all handwritten material to the end or group text by whether it is printed or handwritten.\n"
+    "- Do not add labels such as “printed text”, “handwritten note”, “margin”, or “signature” unless those words are themselves visible in the source.\n"
+    "\n"
+    "VERBATIM TRANSCRIPTION:\n"
+    "- Preserve the original wording, spelling, typographical errors, non-standard spelling, unusual Hebrew forms, grammar, punctuation, capitalization, abbreviations, numbers, dates, names, places, and repetitions exactly as seen.\n"
+    "- Preserve visible hyphenation, dashes, apostrophes, quotation marks, parentheses, slashes, and other meaningful punctuation.\n"
+    "- Do not correct spelling, grammar, punctuation, wording, capitalization, or factual errors.\n"
+    "- Do not modernize, normalize, smooth into clean prose, rewrite, summarize, translate, explain, or add context.\n"
+    "- Do not add Hebrew vowel marks or diacritics unless they are clearly visible in the source.\n"
+    "- Do not invent or restore text that is cropped, damaged, obscured, erased, covered, or outside the image.\n"
+    "\n"
+    "UNCERTAINTY AND UNREADABLE TEXT:\n"
+    "- Use the exact marker [?] whenever a reading is uncertain.\n"
+    "- If one character is unclear but the surrounding characters are responsibly readable, replace only the unclear character with [?]. Example: ב[?]ית.\n"
+    "- If a word or short phrase has a visually supported but uncertain reading, write that reading and add [?] immediately after it. Example: ירושלים[?].\n"
+    "- Use an uncertain reading only when it is supported by visible evidence. Do not provide a best guess based mainly on context.\n"
+    "- If no responsible reading is possible, use the exact token [UNCLEAR].\n"
+    "- If several consecutive words are completely unreadable, use a single [UNCLEAR] for that unreadable span rather than inventing its length or content.\n"
+    "- Preserve ordinary question marks and other punctuation that are visibly present in the source.\n"
+    "- For uncertainty annotations that you add, use only the exact strings [?] and [UNCLEAR].\n"
+    "\n"
+    "OUTPUT:\n"
+    "- Output raw plain text only.\n"
+    "- Absolute strict rule: Do NOT use markdown code blocks (no ``` or ```text), JSON, comments, explanations, confidence scores, classifications, labels, or introductory/concluding text.\n"
+    "- Do not describe the handwriting style, printing method, illustrations, stains, page condition, or layout.\n"
+    "- Stop immediately after the last visible meaningful text on the page.\n"
+    "- Do not repeat text, continue with blank lines, or generate padding after the page content.\n"
+)
+
 _PROMPT_BY_VARIANT = {
     DocumentTextResult.OcrPromptVariant.HANDWRITTEN: _HANDWRITTEN_LATIN_PROMPT,
     DocumentTextResult.OcrPromptVariant.HEBREW_GENERAL_HANDWRITTEN: (
         _HEBREW_GENERAL_HANDWRITTEN_PROMPT
     ),
     DocumentTextResult.OcrPromptVariant.PRINTED: _PRINTED_TEXT_PROMPT,
+    DocumentTextResult.OcrPromptVariant.MIXED: _MIXED_CONTENT_PROMPT,
 }
 
 _REQUIRED_KEYS = ("text", "has_unclear", "unclear_count")
@@ -387,11 +467,25 @@ def _is_hebrew_printed_plain_text_contract(
     )
 
 
+def _is_mixed_content_contract(prompt_variant: str) -> bool:
+    """Single predicate for the PR E mixed printed/handwritten contract.
+
+    Prompt selection, output-mode selection, and prompt-contract-version
+    selection all use this predicate so they cannot drift apart. The mixed
+    contract is document-level and language-independent: every page of a
+    MIXED document uses the same approved prompt and raw plain-text output.
+    """
+    return prompt_variant == DocumentTextResult.OcrPromptVariant.MIXED
+
+
 def _uses_plain_text_transcription(
     prompt_variant: str,
     language_hint: Optional[str],
 ) -> bool:
     if prompt_variant == DocumentTextResult.OcrPromptVariant.HEBREW_GENERAL_HANDWRITTEN:
+        return True
+
+    if _is_mixed_content_contract(prompt_variant):
         return True
 
     if _is_hebrew_printed_plain_text_contract(prompt_variant, language_hint):
@@ -449,11 +543,12 @@ def gemini_transcription_contract(
         prompt_variant,
         language_hint,
     )
-    prompt_contract_version = (
-        GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION
-        if _is_hebrew_printed_plain_text_contract(prompt_variant, language_hint)
-        else GEMINI_OCR_PROMPT_CONTRACT_VERSION
-    )
+    if _is_mixed_content_contract(prompt_variant):
+        prompt_contract_version = GEMINI_MIXED_PROMPT_CONTRACT_VERSION
+    elif _is_hebrew_printed_plain_text_contract(prompt_variant, language_hint):
+        prompt_contract_version = GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION
+    else:
+        prompt_contract_version = GEMINI_OCR_PROMPT_CONTRACT_VERSION
 
     return GeminiTranscriptionContract(
         prompt_fingerprint=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
