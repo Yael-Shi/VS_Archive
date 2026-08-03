@@ -7856,7 +7856,7 @@ class GeminiEnginePromptTests(SimpleTestCase):
             "Example: ירושלים[?].",
             "If no responsible reading is possible, use [UNCLEAR]",
             "Preserve ordinary question marks",
-            "Output only the transcription text",
+            "Output only the raw transcription text",
             "Do not output JSON",
         )
         for phrase in guardrails:
@@ -7934,7 +7934,7 @@ class GeminiEnginePromptTests(SimpleTestCase):
         prompt_text = getattr(prompt_part, "text", None)
         if prompt_text is not None:
             self.assertIn(
-                "Output only the transcription text",
+                "Output only the raw transcription text",
                 prompt_text,
             )
             self.assertNotIn("OUTPUT FORMAT", prompt_text)

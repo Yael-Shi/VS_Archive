@@ -2620,3 +2620,74 @@ not merged.**
 general Hebrew handwritten prompt/contract, Transkribus, Antigravity,
 worker/SQS ack/lease/DLQ/durable requests, Gemini retry policy/budget/backoff/
 hard-cap configuration, provider models and candidate ordering, unrelated UI.
+
+## General Hebrew handwritten prompt anti-runaway hardening
+
+**Status:** Implemented and focused/static/full-regression validated on branch
+`fix/gemini-hebrew-general-runaway-prompt`. **Not yet merged.**
+
+**Production observations (after PRs B–E):**
+
+* Document 289, `hebrew_general_handwritten`, page 1: three bounded attempts;
+  attempt 3 still returned `MAX_TOKENS`; `raw_output_length=30163` with
+  `max_output_tokens=16384`. The source page contains ordinary, relatively
+  sparse handwriting with no plausible amount of text near that length.
+* Document 291, same route: page 1 succeeded with 961 characters and was
+  checkpointed; page 2 contains handwriting plus a pasted portrait and reached
+  `MAX_TOKENS` after three attempts; attempt 3 returned
+  `raw_output_length=30369` with `max_output_tokens=16384`.
+
+These observations indicate runaway repetition or hallucinated continuation.
+Bounded recovery (PR D) behaved correctly but cannot repair the output.
+
+**Decision:** Harden only `_HEBREW_GENERAL_HANDWRITTEN_PROMPT` with concise
+explicit rules that preserve transcription of all visible handwritten text
+(including short, isolated, or faint text); prohibit describing, interpreting,
+classifying, or narrating photographs, portraits, illustrations, handwriting
+style, page condition, stains, or layout; prohibit inventing text from
+non-text visual regions; stop immediately after the last visible text; and
+prohibit repetition, blank-line continuation, and padding. Existing accuracy,
+language, uncertainty, and output requirements are preserved.
+
+**Contract identity:** New route-specific version
+`GEMINI_HEBREW_GENERAL_HANDWRITTEN_PROMPT_CONTRACT_VERSION` =
+`gemini-hebrew-general-handwritten-prompt-v2`, selected only for
+`DocumentTextResult.OcrPromptVariant.HEBREW_GENERAL_HANDWRITTEN` through
+`_is_hebrew_general_handwritten_contract`. Together with the changed prompt
+fingerprint (pinned by SHA-256 in
+`test_gemini_hebrew_general_handwritten_prompt.py`; future prompt edits require
+deliberate version review), this changes attempt/checkpoint identity **only**
+for the general Hebrew handwritten route. `gemini-ocr-prompt-v1`, Hebrew
+printed `gemini-hebrew-printed-prompt-v2`, and MIXED
+`gemini-mixed-content-prompt-v1` are unchanged.
+
+**Explicit non-claims:** This is **prompt-contract hardening only**. It does
+**not** add deterministic repetition detection or arbitrary thresholds, does
+**not** salvage or persist partial provider output, and does **not** claim the
+provider runaway issue is fully resolved.
+
+**Validation evidence:** Ruff formatted one of the five scoped Python files;
+the subsequent format check reported all five already formatted. Ruff lint
+passed for all five scoped Python files. Final focused suite: **43** tests in
+**3.024** seconds; result **OK**; `FOCUSED_TEST_EXIT=0`. Django system check
+passed. `makemigrations --check --dry-run`: no changes detected. Pyright: 0
+errors and 0 warnings. mypy: no issues in **5** source files; informational
+untyped-function notes were not errors. `git diff --check` passed. Full
+`documents` regression: **2,318** tests in **1,976.608** seconds; result
+**OK**; `FULL_TEST_EXIT_CODE=0`. Full regression log:
+`/tmp/vs_archive_gemini_hebrew_general_runaway_prompt_full_documents_regression_2026-08-03.txt`
+(SHA-256
+`aeedfd8adfd47557dadd53194a5d8711fa168753305570ce7cfa96b4544e145c`).
+Tracebacks, ERROR logs, and warnings emitted by the regression belong to
+intentional negative-path tests and did not represent test failures.
+
+**Validation still required:** No live Gemini validation of the hardened
+prompt; documents 289 and 291 have not been retried under the new contract;
+no deployment. **PR is not merged.** The change does not claim the provider
+runaway issue is resolved.
+
+**Unchanged / deferred:** Routing, model candidates/ordering, retry count,
+retry classification, backoff, token budgets, hard cap, output parsing,
+persistence, worker/SQS, schema/migrations, Hebrew printed and MIXED prompts,
+Transkribus/Antigravity, production retries of documents 289/291, live Gemini
+calls, deployment.

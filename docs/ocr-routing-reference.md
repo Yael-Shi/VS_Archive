@@ -114,6 +114,7 @@ Routing stores `handwritten` or `printed`. Actual prompt text is chosen in `gemi
 | `printed` | `he` (canonical hint only) | Hebrew printed plain-text prompt (`_HEBREW_PRINTED_PROMPT`) | Plain text (`v1beta`, temperature 0) |
 | `printed` | other non-Latin (e.g. `ar`) or missing hint | Hebrew-oriented printed prompt (`_PRINTED_TEXT_PROMPT`) | JSON |
 | `handwritten` | non-Latin (e.g. `he`, `ar`) | Latin handwritten prompt body | JSON (not plain-text Latin path) |
+| `hebrew_general_handwritten` | any | General Hebrew handwritten prompt (`_HEBREW_GENERAL_HANDWRITTEN_PROMPT`) | Plain text (`v1beta`, temperature 0) |
 | `mixed` | any | Approved mixed printed/handwritten prompt (`_MIXED_CONTENT_PROMPT`, closed product contract — do not edit) | Plain text (`v1beta`, temperature 0), never JSON |
 
 Hebrew printed moved from the JSON response contract to plain text in PR C.
@@ -121,17 +122,22 @@ That route alone uses the route-specific contract version
 `GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION` =
 `gemini-hebrew-printed-prompt-v2`. The mixed route (PR E) uses its own
 route-specific contract version `GEMINI_MIXED_PROMPT_CONTRACT_VERSION` =
-`gemini-mixed-content-prompt-v1`, selected for any language hint; this
-identity prevents reuse of checkpoints created under another prompt contract.
-All other routes keep `GEMINI_OCR_PROMPT_CONTRACT_VERSION` =
-`gemini-ocr-prompt-v1` and their existing checkpoint identities. Only the
-canonical `he` hint selects the plain-text Hebrew printed prompt; other
-non-Latin or missing hints are **not** treated as Hebrew and keep the JSON
-contract. Uncertainty metadata (`has_unclear`, `unclear_count`,
-`needs_review`) is derived from the `[?]` / `[UNCLEAR]` markers in the
-returned transcription for all plain-text routes, including mixed. See the
-decision-log entries “Gemini Hebrew printed plain-text OCR response contract
-(PR C)” and “Explicit MIXED printed/handwritten Gemini OCR route (PR E)”.
+`gemini-mixed-content-prompt-v1`, selected for any language hint. General
+Hebrew handwritten uses
+`GEMINI_HEBREW_GENERAL_HANDWRITTEN_PROMPT_CONTRACT_VERSION` =
+`gemini-hebrew-general-handwritten-prompt-v2` after prompt-contract hardening
+against runaway continuation/repetition/padding and image description; that
+identity change applies only to this route. Remaining routes keep
+`GEMINI_OCR_PROMPT_CONTRACT_VERSION` = `gemini-ocr-prompt-v1` and their
+existing checkpoint identities. Only the canonical `he` hint selects the
+plain-text Hebrew printed prompt; other non-Latin or missing hints are
+**not** treated as Hebrew and keep the JSON contract. Uncertainty metadata
+(`has_unclear`, `unclear_count`, `needs_review`) is derived from the `[?]` /
+`[UNCLEAR]` markers in the returned transcription for all plain-text routes,
+including mixed and general Hebrew handwritten. See the decision-log entries
+“Gemini Hebrew printed plain-text OCR response contract (PR C)”, “Explicit
+MIXED printed/handwritten Gemini OCR route (PR E)”, and “General Hebrew
+handwritten prompt anti-runaway hardening”.
 
 `hebrew_translation` is **not** an OCR route variant. It is used only for Hebrew translation rows (below).
 
