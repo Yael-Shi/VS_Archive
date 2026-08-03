@@ -210,6 +210,8 @@ The existing per-page provider behavior inside `gemini_engine` (PR D) is:
 - retry `MAX_TOKENS` immediately with a deterministic token-cap ladder
   (`None`/below 8192 → 8192, else double, clamped to
   `GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP`, default 32768, max 65536);
+- start worker OCR from `GEMINI_OCR_MAX_OUTPUT_TOKENS`, default **4096**,
+  yielding the bounded `MAX_TOKENS` sequence **4096 → 8192 → 16384**;
 - do **not** retry permanent PR A classifications (`SAFETY`, `RECITATION`,
   `LANGUAGE`, `SPII`, blocked/prohibited content, `JSON_SCHEMA`, etc.);
 - quota/rate-limit retries count toward the same three-call budget; ordered

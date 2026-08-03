@@ -2219,6 +2219,7 @@ class GeminiAdapterTests(TestCase):
             gemini_top_k=41,
             gemini_top_p=0.91,
             gemini_max_output_tokens=2048,
+            gemini_ocr_max_output_tokens=4096,
             gemini_double_pass=True,
             gemini_consistency_min_ratio=0.88,
         )
@@ -2236,7 +2237,7 @@ class GeminiAdapterTests(TestCase):
         self.assertEqual(kwargs["top_p"], 0.91)
         self.assertTrue(kwargs["double_pass"])
         self.assertEqual(kwargs["consistency_min_ratio"], 0.88)
-        self.assertEqual(kwargs["max_output_tokens"], 2048)
+        self.assertEqual(kwargs["max_output_tokens"], 4096)
 
     @patch(
         "documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini"
@@ -3363,6 +3364,33 @@ class WorkerEnvConfigTests(SimpleTestCase):
 
         self.assertEqual(cfg.gemini_hebrew_printed_model, "custom-hebrew-printed-model")
 
+    def test_validate_required_env_defaults_gemini_output_caps_are_separated(
+        self,
+    ):
+        with patch.dict(
+            os.environ,
+            {"GEMINI_API_KEY": "test-gemini-key"},
+            clear=True,
+        ):
+            cfg = validate_required_env()
+
+        self.assertEqual(cfg.gemini_max_output_tokens, 2048)
+        self.assertEqual(cfg.gemini_ocr_max_output_tokens, 4096)
+
+    def test_validate_required_env_accepts_gemini_ocr_output_cap_override(self):
+        with patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": "test-gemini-key",
+                "GEMINI_OCR_MAX_OUTPUT_TOKENS": "6144",
+            },
+            clear=True,
+        ):
+            cfg = validate_required_env()
+
+        self.assertEqual(cfg.gemini_max_output_tokens, 2048)
+        self.assertEqual(cfg.gemini_ocr_max_output_tokens, 6144)
+
     def test_validate_required_env_defaults_gemini_hard_cap_to_32768(self):
         with patch.dict(
             os.environ,
@@ -3387,7 +3415,7 @@ class WorkerEnvConfigTests(SimpleTestCase):
         self.assertEqual(cfg.gemini_max_output_tokens_hard_cap, 65536)
 
     def test_validate_required_env_rejects_invalid_gemini_hard_cap(self):
-        # Booleans, non-positive, above 65536, and below GEMINI_MAX_OUTPUT_TOKENS.
+        # Booleans, non-positive, above 65536, and below GEMINI_OCR_MAX_OUTPUT_TOKENS.
         cases = ("true", "0", "-1", "12.5", "70000", "1024")
         for raw in cases:
             with self.subTest(raw=raw):

@@ -59,10 +59,16 @@ Deterministic escalation per page/candidate:
 
 Defaults and validation (`env_validation.py`):
 
+- OCR-specific `GEMINI_OCR_MAX_OUTPUT_TOKENS` default: **4096**. This is a
+  ceiling, not a target output length; shorter responses are not padded.
+- Legacy/shared `GEMINI_MAX_OUTPUT_TOKENS` remains **2048** for Hebrew
+  translation and does not control worker OCR.
+- With the default OCR cap, the three-call `MAX_TOKENS` sequence is
+  **4096 → 8192 → 16384**.
 - Default hard cap: **32768**.
 - Maximum allowed configured hard cap: **65536**.
 - Reject booleans, non-integers, non-positive values, values below
-  `GEMINI_MAX_OUTPUT_TOKENS`, and values above 65536.
+  `GEMINI_OCR_MAX_OUTPUT_TOKENS`, and values above 65536.
 
 ## Checkpoint identity consequence
 

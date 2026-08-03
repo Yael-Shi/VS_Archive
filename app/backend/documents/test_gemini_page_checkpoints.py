@@ -82,6 +82,7 @@ def _identity(
     language_hint: str = Document.Language.ENGLISH,
     text_input_type: str = Document.TextInputType.HANDWRITTEN,
     prompt_variant: str = DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+    max_output_tokens: int = 8192,
     max_output_tokens_hard_cap: int = 32768,
 ):
     contract = gemini_transcription_contract(
@@ -106,7 +107,7 @@ def _identity(
         temperature=temperature,
         top_k=40,
         top_p=0.95,
-        max_output_tokens=8192,
+        max_output_tokens=max_output_tokens,
         max_output_tokens_hard_cap=max_output_tokens_hard_cap,
     )
 
@@ -183,15 +184,24 @@ class GeminiPageCheckpointIdentityTests(TestCase):
         }
         self.assertEqual(len(fingerprints), 4)
 
-    def test_retry_policy_and_hard_cap_are_part_of_config_identity(self):
+    def test_output_cap_retry_policy_and_hard_cap_are_in_config_identity(self):
         pages = _pages(b"one")
         baseline = _identity(pages)
         duplicate = _identity(pages)
+        output_cap_changed = _identity(pages, max_output_tokens=4096)
         hard_cap_changed = _identity(pages, max_output_tokens_hard_cap=65536)
 
         self.assertEqual(
             baseline.config_fingerprint,
             duplicate.config_fingerprint,
+        )
+        self.assertNotEqual(
+            baseline.config_fingerprint,
+            output_cap_changed.config_fingerprint,
+        )
+        self.assertNotEqual(
+            baseline.identity_fingerprint,
+            output_cap_changed.identity_fingerprint,
         )
         self.assertNotEqual(
             baseline.config_fingerprint,
