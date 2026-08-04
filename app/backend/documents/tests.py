@@ -43,6 +43,7 @@ from documents.services.gemini_engine import (
 )
 from documents.services.gemini_models import (
     DEFAULT_GEMINI_MODEL_CANDIDATES,
+    FRENCH_HANDWRITTEN_GEMINI_MODEL_CANDIDATES,
     LATIN_HANDWRITTEN_GEMINI_MODEL_CANDIDATES,
     LATIN_PRINTED_GEMINI_MODEL,
 )
@@ -8811,7 +8812,7 @@ class GeminiModelCandidatesTests(SimpleTestCase):
         )
         self.assertEqual(candidates, LATIN_HANDWRITTEN_GEMINI_MODEL_CANDIDATES)
 
-    def test_french_handwritten_gemini_route_uses_latin_handwritten_model(self):
+    def test_french_handwritten_gemini_route_uses_gemini_36_flash(self):
         route = OcrRouteConfig(
             engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
             prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
@@ -8822,7 +8823,10 @@ class GeminiModelCandidatesTests(SimpleTestCase):
             text_input_type=Document.TextInputType.HANDWRITTEN,
             gemini_hebrew_printed_model="gemini-3.1-flash-lite",
         )
-        self.assertEqual(candidates, LATIN_HANDWRITTEN_GEMINI_MODEL_CANDIDATES)
+        self.assertEqual(
+            candidates,
+            FRENCH_HANDWRITTEN_GEMINI_MODEL_CANDIDATES,
+        )
 
     def test_english_printed_gemini_route_uses_latin_printed_model(self):
         route = OcrRouteConfig(

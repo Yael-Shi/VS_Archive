@@ -182,9 +182,11 @@ output-affecting input:
 
 The `gemini-ocr-page-retry-v2` marker records the bounded model-switch policy.
 Because the retry marker is shared configuration identity, the v2 bump creates
-a new identity boundary for every Gemini OCR route. The ordered candidate-list
-change independently changes English/French handwritten identities. Historical
-attempt/checkpoint rows remain immutable.
+a new identity boundary for every Gemini OCR route. PR #374's ordered
+candidate-list change independently changed English/French handwritten
+identities. The later French-only move to the single `gemini-3.6-flash`
+candidate changes the French handwritten identity again without changing the
+shared retry marker. Historical attempt/checkpoint rows remain immutable.
 
 The overall attempt identity hashes the source, route, prompt and configuration
 fingerprints, prompt version, ordered candidates, and expected page count.
@@ -227,17 +229,19 @@ bounded model-switch follow-up, is:
   `GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP`, default 32768, max 65536);
 - start worker OCR from `GEMINI_OCR_MAX_OUTPUT_TOKENS`, default **4096**,
   yielding up to **4096 → 8192 → 16384** when all calls remain on one model;
-- English/French handwritten checkpoint-backed OCR uses the ordered chain
+- English handwritten checkpoint-backed OCR uses the ordered chain
   `gemini-2.5-flash` → `gemini-3.1-flash-lite` and shares at most **three
   provider calls per page across both candidates**;
-- `RECITATION` may advance only that scoped route to the next candidate, carries
-  the current output cap forward, and remains terminal for the model that
-  returned it;
+- French handwritten OCR uses the single full-page candidate
+  `gemini-3.6-flash`; it receives minimal thinking and model-default decoding;
+- `RECITATION` may advance only the scoped English handwritten route to its next
+  candidate, carries the current output cap forward, and remains terminal for
+  the model that returned it;
 - `SAFETY`, `LANGUAGE`, `SPII`, blocked/prohibited content, `JSON_SCHEMA`, and
   other permanent PR A classifications do not advance to another model;
 - quota/rate-limit calls count toward the active budget. Outside the scoped
-  English/French handwritten route, the pre-existing quota-only candidate
-  fallback retains a fresh bounded budget on the next candidate;
+  English handwritten route, the pre-existing quota-only candidate fallback
+  retains a fresh bounded budget on the next candidate;
 - processing stops at the first page that remains unsuccessful after the
   applicable bounded candidate chain.
 
@@ -293,9 +297,10 @@ existing 64-character database field. Complete page-to-model provenance remains
 available on the page checkpoints.
 
 The checkpoint schema itself does not implement fallback; it records the
-actual model selected by the adapter. That provenance now covers both the
-pre-existing quota candidate fallback and the scoped English/French handwritten
-`RECITATION` candidate fallback.
+actual model selected by the adapter. That provenance covers both the
+pre-existing quota candidate fallback and the scoped English handwritten
+`RECITATION` candidate fallback. French handwritten pages now record the direct
+`gemini-3.6-flash` model.
 
 ## `PARTIAL` semantics
 

@@ -21,7 +21,10 @@ from documents.services.gemini_defaults import (
     DEFAULT_GEMINI_TOP_K,
     DEFAULT_GEMINI_TOP_P,
 )
-from documents.services.gemini_models import DEFAULT_GEMINI_MODEL
+from documents.services.gemini_models import (
+    DEFAULT_GEMINI_MODEL,
+    FRENCH_HANDWRITTEN_GEMINI_MODEL,
+)
 from documents.services.page_extraction import PageImage
 
 logger = logging.getLogger(__name__)
@@ -1140,6 +1143,40 @@ def _parse_page_json_strict(
     return data
 
 
+def _transcription_generation_config_kwargs(
+    *,
+    model_name: str,
+    contract: GeminiTranscriptionContract,
+    uses_plain_text_transcription: bool,
+    top_k: int,
+    top_p: float,
+    max_output_tokens: Optional[int],
+) -> Dict[str, Any]:
+    if model_name == FRENCH_HANDWRITTEN_GEMINI_MODEL:
+        # Gemini 3.6 Flash performed correctly in the live French handwritten
+        # probes only with minimal thinking and model-default decoding. In
+        # particular, do not inject the legacy thinking_budget=0 or explicit
+        # temperature/top-k/top-p settings into this model.
+        return {
+            "max_output_tokens": max_output_tokens,
+            "thinking_config": types.ThinkingConfig(
+                thinking_level=types.ThinkingLevel.MINIMAL,
+            ),
+        }
+
+    config_kwargs: Dict[str, Any] = {
+        "temperature": contract.effective_temperature,
+        "top_k": top_k,
+        "top_p": top_p,
+        "max_output_tokens": max_output_tokens,
+    }
+    if uses_plain_text_transcription:
+        config_kwargs["thinking_config"] = types.ThinkingConfig(
+            thinking_budget=0,
+        )
+    return config_kwargs
+
+
 # ------------------------------------------------------------------ main
 
 
@@ -1180,16 +1217,14 @@ def transcribe_pages_with_gemini(
         api_version=contract.api_version,
     )
 
-    config_kwargs: Dict[str, Any] = {
-        "temperature": contract.effective_temperature,
-        "top_k": top_k,
-        "top_p": top_p,
-        "max_output_tokens": max_output_tokens,
-    }
-    if uses_plain_text_transcription:
-        config_kwargs["thinking_config"] = types.ThinkingConfig(
-            thinking_budget=0,
-        )
+    config_kwargs = _transcription_generation_config_kwargs(
+        model_name=model_name,
+        contract=contract,
+        uses_plain_text_transcription=uses_plain_text_transcription,
+        top_k=top_k,
+        top_p=top_p,
+        max_output_tokens=max_output_tokens,
+    )
 
     texts: List[str] = []
     any_review = False

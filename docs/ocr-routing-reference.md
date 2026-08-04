@@ -71,7 +71,8 @@ Resolved in `gemini_model_candidates()` (called from `htr_engine.transcribe_page
 | Route context | Model candidate(s) |
 |---------------|-------------------|
 | Hebrew printed | Single model: `GEMINI_HEBREW_PRINTED_MODEL` env, default `gemini-3.1-flash-lite` |
-| English/French handwritten | Ordered chain: `gemini-2.5-flash` → `gemini-3.1-flash-lite` |
+| English handwritten | Ordered chain: `gemini-2.5-flash` → `gemini-3.1-flash-lite` |
+| French handwritten | Single full-page model: `gemini-3.6-flash` |
 | English/French printed | `gemini-2.5-flash` |
 | Arabic (handwritten/printed) | Default chain: `gemini-2.5-flash` → `gemini-3.1-flash-lite` |
 | Mixed (all languages) | Default chain: `gemini-2.5-flash` → `gemini-3.1-flash-lite` |
@@ -79,14 +80,15 @@ Resolved in `gemini_model_candidates()` (called from `htr_engine.transcribe_page
 
 `GeminiAdapter` tries candidates in order. Quota-style errors retain the
 existing candidate fallback. In the durable checkpoint-backed worker path,
-English/French handwritten `RECITATION` may also advance from
-`gemini-2.5-flash` to `gemini-3.1-flash-lite`, within one shared maximum of
-three provider calls per page. The current output cap and remaining budget are
-carried forward. Other permanent response classifications do not advance.
-Exhaustion is persisted as a failed page checkpoint and produces an explicit
-partial outcome. Legacy direct adapter calls without document identity retain
-the prior `EngineRetryableError` behavior and do not gain the new
-`RECITATION` fallback.
+English handwritten `RECITATION` may also advance from `gemini-2.5-flash` to
+`gemini-3.1-flash-lite`, within one shared maximum of three provider calls per
+page. The current output cap and remaining budget are carried forward. French
+handwriting instead uses one direct full-page `gemini-3.6-flash` candidate and
+has no `RECITATION` candidate switch. Other permanent response classifications
+do not advance. Exhaustion is persisted as a failed page checkpoint and
+produces an explicit partial outcome. Legacy direct adapter calls without
+document identity retain the prior `EngineRetryableError` behavior and do not
+gain the scoped `RECITATION` fallback.
 
 Other Gemini execution knobs (from `worker_env`, not routing):
 `GEMINI_TEMPERATURE`, `GEMINI_TOP_K`, `GEMINI_TOP_P`,
@@ -95,6 +97,11 @@ Other Gemini execution knobs (from `worker_env`, not routing):
 `GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP` (PR D bounded OCR recovery hard cap;
 default 32768, max 65536, must be ≥ `GEMINI_OCR_MAX_OUTPUT_TOKENS`),
 `GEMINI_DOUBLE_PASS`, `GEMINI_CONSISTENCY_MIN_RATIO`, and `MIN_TEXT_LENGTH`.
+
+French handwritten `gemini-3.6-flash` is the explicit exception to the legacy
+decoding knobs: OCR requests use `thinking_level=MINIMAL` and omit temperature,
+top-k, and top-p so the provider model defaults apply. Other Gemini OCR and
+Hebrew translation profiles are unchanged.
 
 ### Page checkpoint model provenance
 
@@ -105,15 +112,16 @@ configuration identity reuses that success instead of restarting it.
 
 - If every page used the same model, `DocumentTextResult.engine` remains that
   concrete model id.
-- If quota or scoped English/French handwritten `RECITATION` fallback caused
+- If quota or scoped English handwritten `RECITATION` fallback caused
   different pages to use different Gemini models, `DocumentTextResult.engine`
   is the deterministic runtime marker
   `gemini-mixed:<fingerprint>`. Full page-to-model provenance remains on the
   checkpoints.
+- French handwritten successes record `gemini-3.6-flash` directly.
 
-This provenance behavior does not alter route selection. It records both
-quota fallback and the scoped English/French handwritten `RECITATION` fallback
-truthfully without discarding successful pages.
+This provenance behavior does not alter route selection. It records quota
+fallback, the scoped English handwritten `RECITATION` fallback, and the direct
+French model truthfully without discarding successful pages.
 
 ## Gemini prompt resolution
 

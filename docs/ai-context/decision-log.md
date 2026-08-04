@@ -2516,9 +2516,10 @@ migration, or mutation of historical rows.
 
 ## Bounded RECITATION model fallback for French/English handwriting
 
-**Status:** Implemented and focused-validated on branch
-`fix/gemini-recitation-model-fallback`; not yet merged, deployed, or
-live-validated.
+**Status:** Merged as PR #374 at `9b51f45`, built in worker image
+`20260804045900`, deployed worker-only, and live-validated on document 273.
+The candidate chain remains current for English handwriting but is superseded
+for French handwriting by the 2026-08-04 follow-up below.
 
 **Live evidence:** Raising the worker OCR initial cap from 2048 to 4096 was
 successfully deployed and produced a new configuration/attempt identity, but it
@@ -2532,7 +2533,8 @@ runs show that the 4096 separation was activated correctly but that output-cap
 size alone is insufficient. They do not prove that a larger cap causes
 `RECITATION`.
 
-**Decision:** English/French handwritten Gemini OCR now has the ordered model
+**PR #374 decision (historical for French; still current for English):**
+English/French handwritten Gemini OCR initially received the ordered model
 chain `gemini-2.5-flash` → `gemini-3.1-flash-lite`. In the durable
 checkpoint-backed worker path only, `RECITATION` from the active model may
 advance once to the next configured model when provider-call budget remains.
@@ -2785,3 +2787,78 @@ early stop, caps/models/preprocessing, and explicit salvage policy. Documents
 and ordering; page persistence/resume; retry count and classifications;
 backoff, token budgets, and hard cap; output parsing; worker/SQS lifecycle;
 Hebrew printed and MIXED prompts; Transkribus; Antigravity; incident rows.
+
+## French handwritten best-available full-page Gemini 3.6 route
+
+**Status:** Implemented and focused/static validated on branch
+`fix/gemini-french-handwritten-3-6-flash`; not yet merged or deployed.
+
+**Product constraint and acceptance policy:** The archive owner does not read
+French and cannot perform a line-by-line French fidelity review. For this
+material, an imperfect best-available transcription is preferable to leaving
+the document without OCR. The result is therefore preserved as source-language
+`SOURCE_TEXT`, while the existing automatic OCR lifecycle continues to mark it
+`NEEDS_REVIEW` and `UNVERIFIED`. `READY` means displayable, not
+human-verified. Hebrew translation remains a later, separate result and cannot
+repair source-transcription errors.
+
+**Production evidence after PR #374:** Document 273 request 13 used the merged
+two-model chain. Page 1 received zero-output `RECITATION` from
+`gemini-2.5-flash` and then succeeded through `gemini-3.1-flash-lite` with 669
+characters, but visual review showed substantial omissions and uncertain or
+incorrect readings. Page 2 exhausted all three calls on
+`gemini-2.5-flash` with `MAX_TOKENS`: output grew from 7,297 to 15,151 to
+30,316 characters while the page contained only about twenty handwritten
+lines. The fallback model received no remaining call budget, the attempt
+remained partial, and pages 3–4 were not started.
+
+**Model probes:** Direct non-persistent probes were run against pages 1 and 2.
+`gemini-3.6-flash` with `thinking_level=minimal`, model-default decoding, and a
+4096 output cap returned `STOP` for both full pages (938 and 660 characters).
+`gemini-2.5-pro` required a minimum thinking budget and returned shorter,
+less reliable text with conspicuous unsupported readings. It was rejected.
+`gemini-3.6-flash` was the best available tested model, although its output is
+not claimed to be verbatim or human-verified.
+
+**Segment experiment:** Page 1 was also split into three overlapping horizontal
+bands. All three calls returned `STOP`, but the combined output introduced
+overlap duplication and contradictory readings, including `1943` versus
+`1953`, and still omitted lower-page material. Automatic stitching was rejected
+because it would convert local uncertainty into duplicated or contradictory
+canonical text. Production remains full-page only.
+
+**Decision:** French handwritten OCR now uses one direct full-page candidate:
+`gemini-3.6-flash`. Its generation profile uses minimal thinking and omits
+explicit temperature, top-k, and top-p so the model uses its decoding defaults.
+The legacy `thinking_budget=0` plain-text profile remains unchanged for other
+models. English handwritten OCR keeps the PR #374 chain
+`gemini-2.5-flash` → `gemini-3.1-flash-lite` and its bounded
+`RECITATION` model switch. No segmented fallback is introduced.
+
+**Checkpoint identity:** The French ordered candidate list changes from
+`gemini-2.5-flash` → `gemini-3.1-flash-lite` to the single
+`gemini-3.6-flash` candidate. Because candidates are part of the configuration
+and overall attempt fingerprints, French handwritten retries receive a new
+identity and cannot reuse the earlier page-1 checkpoint. The shared
+`gemini-ocr-page-retry-v2` marker and three-call ceiling remain unchanged.
+Existing attempts and checkpoints stay immutable; no migration is required.
+
+**Unchanged:** Latin handwritten prompt text and prompt-contract version,
+4096 initial OCR cap, hard-cap ladder, failure taxonomy, parsing, page
+checkpoint persistence, document assembly, translation behavior, English and
+Hebrew routing, Transkribus, Antigravity, worker/SQS behavior, database schema,
+and UI.
+
+**Validation:** Ruff format/check passed. Django system and migration checks
+passed. Scoped Pyright and mypy passed after using the SDK-typed
+`types.ThinkingLevel.MINIMAL` enum. The expanded French-model,
+RECITATION, bounded-recovery, checkpoint, and routing suite ran 60 tests and
+completed `OK`. The full `documents` regression ran **2,333 tests** in
+**1,947.639 seconds** and completed `OK`, with `FULL_TEST_STATUS=0`.
+Pre-test and post-test `git diff --check` both passed.
+
+**Validation still required:** Final staged review, merge, worker-only image
+build/deploy, and one intentional reprocessing of document 273. If the new
+attempt completes, the best available French source text may be accepted for
+display as `NEEDS_REVIEW` / `UNVERIFIED`; the owner is not expected to certify
+French fidelity before document 272 is retried.
