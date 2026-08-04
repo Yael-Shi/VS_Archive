@@ -1,5 +1,28 @@
 # VS-Archive Decision Log
 
+## ArchiveItem visibility — `restricted` (PR1 application authz)
+
+**Decision:** Add a third `ArchiveItem.visibility` value, `restricted`, with access controlled only by the explicit Django permission `documents.view_restricted_archiveitem`.
+
+**Contract (approved):**
+
+- `ArchiveItem.visibility` remains the access-control source of truth.
+- `public` behavior unchanged (everyone).
+- `private` behavior unchanged: `archive_family` members and existing document-admins (`is_staff` or `is_superuser`) may view.
+- `restricted` is visible only when `user.has_perm("documents.view_restricted_archiveitem")`.
+- `is_staff` alone must **not** grant restricted access.
+- Active superusers may view restricted through Django’s normal `has_perm` behavior.
+- A non-staff family user with the explicit permission may view restricted.
+- Unknown visibility values fail closed for everyone.
+- Unauthorized direct object access returns **404**.
+- Processing paths (OCR/HTR, Gemini, Transkribus, translation, indexing, sync execution, activation) remain unchanged and out of scope for this PR.
+
+**Implemented in this PR:** model enum + custom permission migration; centralized helpers in `archive_item_access.py` / `document_access.py`; staff application surfaces (manage, backlog, review, suggestions, corrected/current sync) use authorized querysets / `get_viewable_*` so staff without the permission cannot discover restricted titles, counts, text, previews, or presigned URLs.
+
+**Temporary rollout rule:** No production `ArchiveItem` may be marked `restricted` until Django Admin hardening and form/UI PRs that expose the choice are merged. Application authz lands first so the value is safe if set via shell/DB, but operators must not use it in production yet.
+
+**Deferred (follow-up PRs):** form/UI visibility choice and upload validator allowlists; Django Admin queryset/autocomplete hardening; Hebrew UI label / assign-permission UX.
+
 ## ArchiveItem — central content entity foundation
 
 **Decision:** Introduce **`ArchiveItem`** as the long-term central archival content entity. Existing and new OCR-backed **`Document`** rows link via **`Document.archive_item`** (`OneToOneField`, `on_delete=CASCADE`, `related_name="ocr_document"`).
