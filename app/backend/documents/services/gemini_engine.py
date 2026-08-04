@@ -23,7 +23,7 @@ from documents.services.gemini_defaults import (
 )
 from documents.services.gemini_models import (
     DEFAULT_GEMINI_MODEL,
-    FRENCH_HANDWRITTEN_GEMINI_MODEL,
+    GEMINI_36_FLASH_MODEL,
 )
 from documents.services.page_extraction import PageImage
 
@@ -1152,11 +1152,11 @@ def _transcription_generation_config_kwargs(
     top_p: float,
     max_output_tokens: Optional[int],
 ) -> Dict[str, Any]:
-    if model_name == FRENCH_HANDWRITTEN_GEMINI_MODEL:
-        # Gemini 3.6 Flash performed correctly in the live French handwritten
-        # probes only with minimal thinking and model-default decoding. In
-        # particular, do not inject the legacy thinking_budget=0 or explicit
-        # temperature/top-k/top-p settings into this model.
+    if model_name == GEMINI_36_FLASH_MODEL:
+        # Gemini 3.6 Flash performed correctly in live full-page French and
+        # general Hebrew handwritten probes with minimal thinking and
+        # model-default decoding. Do not inject the legacy thinking_budget=0
+        # or explicit temperature/top-k/top-p settings into this model.
         return {
             "max_output_tokens": max_output_tokens,
             "thinking_config": types.ThinkingConfig(

@@ -2862,3 +2862,60 @@ build/deploy, and one intentional reprocessing of document 273. If the new
 attempt completes, the best available French source text may be accepted for
 display as `NEEDS_REVIEW` / `UNVERIFIED`; the owner is not expected to certify
 French fidelity before document 272 is retried.
+
+## Hebrew general handwritten cost-aware Gemini 3.6 fallback
+
+**Status:** Implemented and under validation on branch
+`fix/hebrew-general-handwritten-gemini-36`; not yet merged or deployed.
+
+**Failure evidence:** Documents 289, 291, and 306 are
+`hebrew_general_handwritten` documents with valid source pages. Their earlier
+Gemini 2.5 Flash attempts failed through runaway output rather than upload,
+queue, routing, or checkpoint failure. Examples include document 289 page 1
+ending with `MAX_TOKENS` after 30,163 raw characters, document 291 page 2 after
+30,369 raw characters, and document 306 page 1 after 26,247 raw characters.
+The rejected Hebrew prompt experiment also caused document 291 page 1 to fail
+after 23,991 raw characters. Increasing the 2.5 output cap therefore produced
+more unsupported continuation rather than a usable transcription.
+
+**Prompt decision:** The rejected prompt experiment remains rolled back. The
+general Hebrew handwritten prompt retains `gemini-ocr-prompt-v1` and SHA-256
+`c576010ed8127d4cd1c65c01d09d5641396dce2fed49374730de60cc342cf863`.
+This follow-up changes model selection and bounded fallback, not the
+transcription instructions.
+
+**Non-persistent provider evidence:** Full-page Gemini 3.6 Flash probes used
+the restored production prompt, `thinking_level=MINIMAL`, model-default
+decoding, a 4096 output cap, and one provider call per page. All eight pages
+completed with `STOP`: document 289 pages 1–5 returned 708, 454, 395, 295, and
+258 characters; document 291 pages 1–2 returned 1,535 and 1,276 characters;
+document 306 page 1 returned 1,321 characters. The results are imperfect but
+bounded, coherent, and materially preferable to having no transcription.
+
+**Cost-aware decision:** Hebrew general handwritten OCR uses the ordered chain
+`gemini-2.5-flash` → `gemini-3.6-flash`. The primary 2.5 model receives one
+4096-token provider call. A successful 2.5 result is persisted immediately and
+3.6 is not called. Primary `MAX_TOKENS` or `RECITATION` advances immediately to
+3.6 instead of spending calls on the 8192/16384 2.5 runaway ladder. Gemini 3.6
+receives at most the two remaining calls within the existing global maximum of
+three calls per page. Existing quota candidate fallback remains bounded by that
+same shared budget. Other permanent response classifications do not advance.
+There is no segmented path.
+
+**Scope:** This applies only to checkpoint-backed OCR on the explicit Hebrew
+GENERAL handwritten route. Hebrew VS handwriting remains on Transkribus.
+Hebrew printed, mixed-content, French, English, Arabic, Antigravity,
+translation, and all other routes remain unchanged.
+
+**Checkpoint identity:** The ordered candidates change from the default
+`gemini-2.5-flash` → `gemini-3.1-flash-lite` chain to the Hebrew-specific
+`gemini-2.5-flash` → `gemini-3.6-flash` chain. Because candidates are part of
+the configuration and overall attempt fingerprints, later Hebrew general
+handwritten attempts receive a new identity. The restored prompt fingerprint,
+prompt version, and shared `gemini-ocr-page-retry-v2` marker remain unchanged.
+Historical attempts and checkpoints remain immutable; no migration is required.
+
+**Validation required:** Re-run formatting, lint, Django checks, typing,
+expanded Gemini/checkpoint/routing tests, the full `documents` regression,
+staged review, merge, worker-only deployment, and intentional production
+validation.

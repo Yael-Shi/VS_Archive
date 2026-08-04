@@ -490,3 +490,23 @@ in 5.187 seconds. Ruff formatting/lint, Django system and migration checks,
 scoped Pyright/mypy, and the staged-diff check all passed; all eight recorded
 exit codes were zero. The 2,257-test split-run evidence above predates this
 last correction, so no new post-correction full-suite run is claimed.
+
+## 2026-08-04 Hebrew general handwritten cost-aware model follow-up
+
+Hebrew general handwritten OCR now resolves to the ordered candidates
+`gemini-2.5-flash` → `gemini-3.6-flash`. Because ordered candidates are
+identity inputs, this creates a new configuration and attempt identity without
+changing the restored `gemini-ocr-prompt-v1` prompt fingerprint or the shared
+`gemini-ocr-page-retry-v2` marker. Earlier attempts remain immutable and cannot
+be reused under the new candidate identity.
+
+In checkpoint-backed execution, the primary 2.5 model receives one call at the
+existing 4096 cap. Success is persisted without calling 3.6. `MAX_TOKENS` or
+`RECITATION` advances immediately to 3.6, which receives at most the two
+remaining calls in the shared three-call page budget. This avoids the costly
+2.5 runaway cap ladder while retaining the cheaper model for ordinary pages.
+Quota fallback also remains inside the shared budget.
+
+Gemini 3.6 receives minimal thinking and model-default decoding when selected.
+The route remains full-page. This applies only to Hebrew GENERAL handwriting;
+Hebrew VS handwriting continues to use Transkribus. No migration is required.

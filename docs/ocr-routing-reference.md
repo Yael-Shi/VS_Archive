@@ -71,6 +71,7 @@ Resolved in `gemini_model_candidates()` (called from `htr_engine.transcribe_page
 | Route context | Model candidate(s) |
 |---------------|-------------------|
 | Hebrew printed | Single model: `GEMINI_HEBREW_PRINTED_MODEL` env, default `gemini-3.1-flash-lite` |
+| Hebrew general handwritten | Cost-aware chain: `gemini-2.5-flash` → `gemini-3.6-flash` |
 | English handwritten | Ordered chain: `gemini-2.5-flash` → `gemini-3.1-flash-lite` |
 | French handwritten | Single full-page model: `gemini-3.6-flash` |
 | English/French printed | `gemini-2.5-flash` |
@@ -78,15 +79,20 @@ Resolved in `gemini_model_candidates()` (called from `htr_engine.transcribe_page
 | Mixed (all languages) | Default chain: `gemini-2.5-flash` → `gemini-3.1-flash-lite` |
 | Non-Gemini routes | Default chain (unused at runtime for Transkribus) |
 
+The Hebrew general handwritten row applies only to the explicit GENERAL
+handwriting route. Hebrew VS handwriting continues to use Transkribus.
+
 `GeminiAdapter` tries candidates in order. Quota-style errors retain the
 existing candidate fallback. In the durable checkpoint-backed worker path,
 English handwritten `RECITATION` may also advance from `gemini-2.5-flash` to
 `gemini-3.1-flash-lite`, within one shared maximum of three provider calls per
 page. The current output cap and remaining budget are carried forward. French
-handwriting instead uses one direct full-page `gemini-3.6-flash` candidate and
-has no `RECITATION` candidate switch. Other permanent response classifications
-do not advance. Exhaustion is persisted as a failed page checkpoint and
-produces an explicit partial outcome. Legacy direct adapter calls without
+handwriting uses one direct full-page `gemini-3.6-flash` candidate. Hebrew
+general handwriting uses one 4096-token `gemini-2.5-flash` call first; success
+ends processing, while `MAX_TOKENS` or `RECITATION` advances to
+`gemini-3.6-flash` with at most two calls left in the shared three-call budget.
+Other permanent response classifications do not advance. Exhaustion is
+persisted as a failed page checkpoint and produces an explicit partial outcome. Legacy direct adapter calls without
 document identity retain the prior `EngineRetryableError` behavior and do not
 gain the scoped `RECITATION` fallback.
 
@@ -98,10 +104,11 @@ Other Gemini execution knobs (from `worker_env`, not routing):
 default 32768, max 65536, must be ≥ `GEMINI_OCR_MAX_OUTPUT_TOKENS`),
 `GEMINI_DOUBLE_PASS`, `GEMINI_CONSISTENCY_MIN_RATIO`, and `MIN_TEXT_LENGTH`.
 
-French handwritten `gemini-3.6-flash` is the explicit exception to the legacy
-decoding knobs: OCR requests use `thinking_level=MINIMAL` and omit temperature,
-top-k, and top-p so the provider model defaults apply. Other Gemini OCR and
-Hebrew translation profiles are unchanged.
+French handwritten and Hebrew general handwritten `gemini-3.6-flash` routes
+are explicit exceptions to the legacy decoding knobs: OCR requests use
+`thinking_level=MINIMAL` and omit temperature, top-k, and top-p so the provider
+model defaults apply. Other Gemini OCR and Hebrew translation profiles are
+unchanged.
 
 ### Page checkpoint model provenance
 
@@ -118,10 +125,13 @@ configuration identity reuses that success instead of restarting it.
   `gemini-mixed:<fingerprint>`. Full page-to-model provenance remains on the
   checkpoints.
 - French handwritten successes record `gemini-3.6-flash` directly.
+- Hebrew general handwritten pages record whichever model succeeded:
+  `gemini-2.5-flash` or fallback `gemini-3.6-flash`.
 
 This provenance behavior does not alter route selection. It records quota
-fallback, the scoped English handwritten `RECITATION` fallback, and the direct
-French model truthfully without discarding successful pages.
+fallback, the scoped English handwritten `RECITATION` fallback, the direct
+French model, and the cost-aware Hebrew general fallback truthfully without
+discarding successful pages.
 
 ## Gemini prompt resolution
 
@@ -134,7 +144,7 @@ Routing stores `handwritten` or `printed`. Actual prompt text is chosen in `gemi
 | `printed` | `he` (canonical hint only) | Hebrew printed plain-text prompt (`_HEBREW_PRINTED_PROMPT`) | Plain text (`v1beta`, temperature 0) |
 | `printed` | other non-Latin (e.g. `ar`) or missing hint | Hebrew-oriented printed prompt (`_PRINTED_TEXT_PROMPT`) | JSON |
 | `handwritten` | non-Latin (e.g. `he`, `ar`) | Latin handwritten prompt body | JSON (not plain-text Latin path) |
-| `hebrew_general_handwritten` | any | General Hebrew handwritten prompt (`_HEBREW_GENERAL_HANDWRITTEN_PROMPT`) | Plain text (`v1beta`, temperature 0) |
+| `hebrew_general_handwritten` | any | General Hebrew handwritten prompt (`_HEBREW_GENERAL_HANDWRITTEN_PROMPT`) | Plain text (`v1beta`; 2.5 primary, Gemini 3.6 generation profile when fallback is selected) |
 | `mixed` | any | Approved mixed printed/handwritten prompt (`_MIXED_CONTENT_PROMPT`, closed product contract — do not edit) | Plain text (`v1beta`, temperature 0), never JSON |
 
 Hebrew printed moved from the JSON response contract to plain text in PR C.
