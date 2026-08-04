@@ -29,6 +29,12 @@ Approved and implemented by PR B in the Gemini OCR root-cause sequence:
    is restored to `gemini-ocr-prompt-v1`; v2 attempts/checkpoints remain
    immutable incident history. The runaway root cause remains open.
 
+7. Bounded `RECITATION` model fallback follow-up — English/French
+   handwritten checkpoint-backed OCR may advance from `gemini-2.5-flash` to
+   `gemini-3.1-flash-lite` within one global three-call page budget. Other
+   permanent classifications do not gain fallback. The retry marker advances
+   to `gemini-ocr-page-retry-v2`.
+
 This design changes persistence and resume behavior only. It does not authorize a
 production retry or deployment by itself.
 
@@ -174,6 +180,12 @@ output-affecting input:
 - minimum text length;
 - double-pass and consistency settings.
 
+The `gemini-ocr-page-retry-v2` marker records the bounded model-switch policy.
+Because the retry marker is shared configuration identity, the v2 bump creates
+a new identity boundary for every Gemini OCR route. The ordered candidate-list
+change independently changes English/French handwritten identities. Historical
+attempt/checkpoint rows remain immutable.
+
 The overall attempt identity hashes the source, route, prompt and configuration
 fingerprints, prompt version, ordered candidates, and expected page count.
 
@@ -200,25 +212,34 @@ Gemini remains provider-specific inside `GeminiAdapter`/`gemini_engine`.
 `run_worker.py` receives only provider-neutral page-incomplete or page-busy
 errors.
 
-The existing per-page provider behavior inside `gemini_engine` (PR D) is:
+The existing per-page provider behavior inside `gemini_engine`, plus the
+bounded model-switch follow-up, is:
 
-- at most **three provider calls per page per model candidate**;
+- the engine accepts only a validated provider-call window within the
+  three-call page ceiling and reports global attempt ordinals;
 - classify finish/block/candidate/empty failures **before** parsing;
-- retry `EMPTY_RESPONSE` with deterministic **1s then 2s** backoff;
-- retry `JSON_PARSE` within the same three-call budget without token escalation
-  or JSON repair;
+- retry `EMPTY_RESPONSE` with deterministic **1s then 2s** backoff while the
+  active call window has budget;
+- retry `JSON_PARSE` within the active call window without token escalation or
+  JSON repair;
 - retry `MAX_TOKENS` immediately with a deterministic token-cap ladder
   (`None`/below 8192 → 8192, else double, clamped to
   `GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP`, default 32768, max 65536);
 - start worker OCR from `GEMINI_OCR_MAX_OUTPUT_TOKENS`, default **4096**,
-  yielding the bounded `MAX_TOKENS` sequence **4096 → 8192 → 16384**;
-- do **not** retry permanent PR A classifications (`SAFETY`, `RECITATION`,
-  `LANGUAGE`, `SPII`, blocked/prohibited content, `JSON_SCHEMA`, etc.);
-- quota/rate-limit retries count toward the same three-call budget; ordered
-  **model-candidate fallback remains quota-only** and may start a fresh bounded
-  budget on the next candidate;
-- processing stops at the first page that remains unsuccessful after the bounded
-  attempts for the active candidate chain.
+  yielding up to **4096 → 8192 → 16384** when all calls remain on one model;
+- English/French handwritten checkpoint-backed OCR uses the ordered chain
+  `gemini-2.5-flash` → `gemini-3.1-flash-lite` and shares at most **three
+  provider calls per page across both candidates**;
+- `RECITATION` may advance only that scoped route to the next candidate, carries
+  the current output cap forward, and remains terminal for the model that
+  returned it;
+- `SAFETY`, `LANGUAGE`, `SPII`, blocked/prohibited content, `JSON_SCHEMA`, and
+  other permanent PR A classifications do not advance to another model;
+- quota/rate-limit calls count toward the active budget. Outside the scoped
+  English/French handwritten route, the pre-existing quota-only candidate
+  fallback retains a fresh bounded budget on the next candidate;
+- processing stops at the first page that remains unsuccessful after the
+  applicable bounded candidate chain.
 
 Stopping at the first final failure preserves existing behavior and keeps PR B
 separate from PR D. Earlier successes remain durable. Pages after the failure
@@ -271,8 +292,10 @@ The hash is computed from canonical ordered `(page_index, model)` data. The
 existing 64-character database field. Complete page-to-model provenance remains
 available on the page checkpoints.
 
-This is not a new provider fallback. It makes the already-approved Gemini
-candidate fallback truthful at page granularity.
+The checkpoint schema itself does not implement fallback; it records the
+actual model selected by the adapter. That provenance now covers both the
+pre-existing quota candidate fallback and the scoped English/French handwritten
+`RECITATION` candidate fallback.
 
 ## `PARTIAL` semantics
 

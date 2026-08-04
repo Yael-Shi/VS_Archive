@@ -42,8 +42,9 @@ GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION = "gemini-hebrew-printed-prompt-v2
 # checkpoint identities.
 GEMINI_MIXED_PROMPT_CONTRACT_VERSION = "gemini-mixed-content-prompt-v1"
 
-# PR D bounded per-page OCR recovery (one page, one model candidate).
-GEMINI_OCR_PAGE_RETRY_POLICY_VERSION = "gemini-ocr-page-retry-v1"
+# Bounded per-page OCR recovery. Version v2 adds RECITATION-only model
+# fallback for Latin handwriting while preserving one global three-call budget.
+GEMINI_OCR_PAGE_RETRY_POLICY_VERSION = "gemini-ocr-page-retry-v2"
 GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS = 3
 _GEMINI_OCR_EMPTY_RESPONSE_BACKOFF_SECONDS = (1.0, 2.0)
 _GEMINI_OCR_MIN_ESCALATED_OUTPUT_TOKENS = 8192
@@ -123,6 +124,19 @@ class GeminiApiError(GeminiError):
         super().__init__(
             f"{self.failure_code.value}: exception_class={exception_class}"
         )
+
+
+class GeminiQuotaError(GeminiError):
+    def __init__(
+        self,
+        *,
+        model_name: str,
+        provider_calls_used: int,
+        after_retries: bool = False,
+    ) -> None:
+        self.provider_calls_used = provider_calls_used
+        suffix = " after retries" if after_retries else ""
+        super().__init__(f"QUOTA_EXHAUSTED: {model_name}{suffix}")
 
 
 @dataclass(frozen=True)
@@ -1143,7 +1157,16 @@ def transcribe_pages_with_gemini(
     top_p: float = DEFAULT_GEMINI_TOP_P,
     max_output_tokens: Optional[int] = 8192,
     max_output_tokens_hard_cap: int = DEFAULT_GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP,
+    max_provider_calls: int = GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS,
+    provider_call_offset: int = 0,
 ) -> GeminiResult:
+    if type(max_provider_calls) is not int or max_provider_calls < 1:
+        raise ValueError("max_provider_calls must be a positive integer")
+    if type(provider_call_offset) is not int or provider_call_offset < 0:
+        raise ValueError("provider_call_offset must be a non-negative integer")
+    if provider_call_offset + max_provider_calls > GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS:
+        raise ValueError("provider call window exceeds the per-page global call budget")
+
     contract = gemini_transcription_contract(
         prompt_variant=prompt_variant,
         language_hint=language_hint,
@@ -1183,7 +1206,7 @@ def transcribe_pages_with_gemini(
         attempt_max_output_tokens = max_output_tokens
         data: Dict[str, Any] = {}
 
-        while not success and attempt < GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS:
+        while not success and attempt < max_provider_calls:
             attempt += 1
             try:
                 attempt_config_kwargs = dict(config_kwargs)
@@ -1206,7 +1229,7 @@ def transcribe_pages_with_gemini(
                     resp,
                     model_name=model_name,
                     page_index=page.page_index,
-                    attempt=attempt,
+                    attempt=provider_call_offset + attempt,
                     max_output_tokens=attempt_max_output_tokens,
                 )
                 trailing_whitespace_chars = response_metadata.trailing_whitespace_chars
@@ -1238,7 +1261,7 @@ def transcribe_pages_with_gemini(
                 failure_code = _classify_response_failure(response_metadata)
                 if failure_code is not None:
                     if failure_code == GeminiResponseFailureCode.MAX_TOKENS:
-                        if attempt < GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS:
+                        if attempt < max_provider_calls:
                             retry_max_output_tokens = _next_max_output_tokens_cap(
                                 attempt_max_output_tokens,
                                 hard_cap=max_output_tokens_hard_cap,
@@ -1255,7 +1278,7 @@ def transcribe_pages_with_gemini(
                                     "thoughts_token_count=%s total_token_count=%s",
                                     page.page_index,
                                     model_name,
-                                    attempt,
+                                    provider_call_offset + attempt,
                                     GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS,
                                     attempt_max_output_tokens,
                                     retry_max_output_tokens,
@@ -1275,7 +1298,7 @@ def transcribe_pages_with_gemini(
                         )
 
                     if failure_code == GeminiResponseFailureCode.EMPTY_RESPONSE:
-                        if attempt < GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS:
+                        if attempt < max_provider_calls:
                             backoff_seconds = (
                                 _transcription_empty_response_backoff_seconds(attempt)
                             )
@@ -1286,7 +1309,7 @@ def transcribe_pages_with_gemini(
                                 "with model %s: attempt=%s/%s failure_code=%s",
                                 page.page_index,
                                 model_name,
-                                attempt,
+                                provider_call_offset + attempt,
                                 GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS,
                                 failure_code.value,
                             )
@@ -1317,14 +1340,14 @@ def transcribe_pages_with_gemini(
             except GeminiResponseError as exc:
                 if (
                     exc.failure_code == GeminiResponseFailureCode.JSON_PARSE
-                    and attempt < GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS
+                    and attempt < max_provider_calls
                 ):
                     logger.warning(
                         "Retrying Gemini transcription JSON parse failure on page %s "
                         "with model %s: attempt=%s/%s failure_code=%s",
                         page.page_index,
                         model_name,
-                        attempt,
+                        provider_call_offset + attempt,
                         GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS,
                         exc.failure_code.value,
                     )
@@ -1336,26 +1359,35 @@ def transcribe_pages_with_gemini(
                     token in err_str for token in ("429", "RESOURCE_EXHAUSTED", "QUOTA")
                 ):
                     if "LIMIT: 0" in err_str:
-                        raise GeminiError(f"QUOTA_EXHAUSTED: {model_name}") from None
-                    if attempt < GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS:
+                        raise GeminiQuotaError(
+                            model_name=model_name,
+                            provider_calls_used=attempt,
+                        ) from None
+                    if attempt < max_provider_calls:
                         time.sleep(5)
                         logger.warning(
                             "Retrying Gemini transcription quota/rate-limit on page %s "
                             "with model %s: attempt=%s/%s",
                             page.page_index,
                             model_name,
-                            attempt,
+                            provider_call_offset + attempt,
                             GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS,
                         )
                         continue
-                    raise GeminiError(
-                        f"QUOTA_EXHAUSTED: {model_name} after retries"
+                    raise GeminiQuotaError(
+                        model_name=model_name,
+                        provider_calls_used=attempt,
+                        after_retries=True,
                     ) from None
 
                 raise GeminiApiError(exc.__class__.__name__) from None
 
         if not success:
-            raise GeminiError(f"QUOTA_EXHAUSTED: {model_name} after retries")
+            raise GeminiQuotaError(
+                model_name=model_name,
+                provider_calls_used=attempt,
+                after_retries=True,
+            )
 
         page_text = data["text"].strip()
         texts.append(page_text)

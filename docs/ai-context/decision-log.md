@@ -2514,6 +2514,74 @@ already included directly in the Gemini configuration fingerprint, so the new
 OCR value creates a new checkpoint identity without a policy-version bump,
 migration, or mutation of historical rows.
 
+## Bounded RECITATION model fallback for French/English handwriting
+
+**Status:** Implemented and focused-validated on branch
+`fix/gemini-recitation-model-fallback`; not yet merged, deployed, or
+live-validated.
+
+**Live evidence:** Raising the worker OCR initial cap from 2048 to 4096 was
+successfully deployed and produced a new configuration/attempt identity, but it
+did not solve French-handwritten document 273. Before that deployment, request
+11 produced `MAX_TOKENS` at 2048 and then `RECITATION` with zero output at
+8192. After deployment, request 12 used the new 4096 cap and failed immediately
+on page 1 with `RECITATION`, zero output, and model `gemini-2.5-flash`.
+French-handwritten document 272 had shown the same broad pattern under the old
+cap: `MAX_TOKENS` at 2048 followed by zero-output `RECITATION` at 8192. These
+runs show that the 4096 separation was activated correctly but that output-cap
+size alone is insufficient. They do not prove that a larger cap causes
+`RECITATION`.
+
+**Decision:** English/French handwritten Gemini OCR now has the ordered model
+chain `gemini-2.5-flash` → `gemini-3.1-flash-lite`. In the durable
+checkpoint-backed worker path only, `RECITATION` from the active model may
+advance once to the next configured model when provider-call budget remains.
+`RECITATION` is still terminal for the model that returned it; the same model
+is not called again merely because it returned `RECITATION`.
+
+**Bounded call policy:** English/French handwriting shares one global maximum
+of **three provider calls per page across the candidate chain**. If the first
+model returns `RECITATION` on call 1 at 4096, the fallback model receives at
+most the two remaining calls, starting at 4096. If the first model reaches
+8192 before returning `RECITATION` on call 2, the fallback receives one call at
+8192. The current output cap is carried into the fallback; it is not reset
+downward. A second `RECITATION` is persisted immediately, without spending an
+otherwise-unused call on the same fallback model.
+
+**Scope boundaries:** No prompt, temperature, top-k, top-p, output mode,
+parsing, hard cap, page splitting, continuation, translation, or provider
+change. `SAFETY`, `LANGUAGE`, `SPII`, `JSON_SCHEMA`, prohibited/blocked
+content, and other permanent classifications do not advance to another model.
+Legacy direct adapter calls without document/checkpoint identity do not gain
+the new `RECITATION` fallback. Outside English/French handwriting, the
+pre-existing quota-only candidate fallback retains a fresh bounded three-call
+budget for the next candidate. Inside the scoped route, quota and `RECITATION`
+share the same global three-call ceiling.
+
+**Identity consequence:** The ordered candidate list changes the configuration
+and overall attempt identity for English/French handwritten routes. The retry
+policy marker advances from `gemini-ocr-page-retry-v1` to
+`gemini-ocr-page-retry-v2`; because that marker is part of the shared Gemini
+configuration fingerprint, it intentionally creates a new configuration
+identity for every Gemini OCR route. No migration or historical-row mutation
+is required. Existing attempts/checkpoints remain immutable and are not
+silently reused under the new policy.
+
+**Validation evidence:** Ruff format check reported all six scoped Python
+files already formatted; Ruff lint passed. Django system check passed and
+`makemigrations --check --dry-run` reported no changes. Scoped Pyright reported
+0 errors and 0 warnings; scoped mypy reported no issues in four production
+files. The initial focused Django run executed 57 tests; the expanded Gemini,
+checkpoint, worker, routing, and prompt-contract run executed 108 tests. Both
+completed `OK`. The full `documents` regression then ran 2,330 tests in
+1,777.543 seconds and completed `OK` with `FULL_TEST_STATUS=0`.
+`git diff --check` passed.
+
+**Validation still required:** Final staged review, merge, worker-first
+deployment, and one intentional live retry of document 273. A successful
+provider result still requires human fidelity review in the site before
+document 272 is retried.
+
 **PR B/C preservation:** Database-persistence retryable boundary (PR B) and
 route-specific Hebrew printed prompt version (PR C) unchanged. Successful
 checkpoint pages are not re-executed; only failed/missing pages run again.
