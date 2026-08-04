@@ -9,7 +9,10 @@ from documents.models import ArchiveItem, Document
 
 
 def is_document_admin(user) -> bool:
-    """Staff/superuser: may view all documents and use admin workflows."""
+    """Staff/superuser: may use admin workflows and view private (family) items.
+
+    Restricted items still require ``documents.view_restricted_archiveitem``.
+    """
     return bool(
         user is not None
         and getattr(user, "is_authenticated", False)
@@ -26,19 +29,16 @@ def user_can_view_document(user, document: Document) -> bool:
 
 def filter_documents_for_user(user, queryset: QuerySet[Document]) -> QuerySet[Document]:
     """Restrict ``queryset`` to documents the user may list or open by id."""
-    if is_document_admin(user):
-        return queryset
-
     from documents.services.archive_item_access import filter_archive_items_for_user
 
     visible_archive_item_ids = filter_archive_items_for_user(
         user,
         ArchiveItem.objects.filter(item_type=ArchiveItem.ItemType.OCR_DOCUMENT),
     ).values_list("pk", flat=True)
-    return queryset.filter(
-        archive_item_id__in=visible_archive_item_ids,
-        upload_status=Document.UploadStatus.UPLOADED,
-    )
+    qs = queryset.filter(archive_item_id__in=visible_archive_item_ids)
+    if not is_document_admin(user):
+        qs = qs.filter(upload_status=Document.UploadStatus.UPLOADED)
+    return qs
 
 
 def document_queryset_for_user(user) -> QuerySet[Document]:
@@ -55,7 +55,7 @@ def get_viewable_document(
     """
     Return a document the user may view, or raise Http404.
 
-    Uses 404 for both missing ids and unauthorized private documents.
+    Uses 404 for both missing ids and unauthorized documents.
     """
     base = (
         queryset

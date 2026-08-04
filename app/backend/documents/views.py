@@ -127,12 +127,15 @@ from documents.services.source_files import (
 )
 from documents.services.document_access import (
     document_queryset_for_user,
+    filter_documents_for_user,
     get_viewable_document,
     is_document_admin,
 )
 from documents.services.archive_item_access import (
     ARCHIVE_FAMILY_GROUP_NAME,
     archive_browse_queryset_for_user,
+    archive_item_queryset_for_user,
+    get_accessible_archive_item,
     get_viewable_archive_item,
 )
 from documents.services.archive_metadata_suggestions import (
@@ -1851,14 +1854,15 @@ def admin_backlog_page(request):
         request.GET.get("only_missing_admin_meta") or ""
     ).strip() == "1"
 
-    base_qs = (
+    base_qs = filter_documents_for_user(
+        request.user,
         Document.objects.select_related("admin_meta", "archive_item")
         .prefetch_related("tags_m2m")
         .filter(
             archive_item__metadata_status=ArchiveItem.MetadataStatus.NEEDS_COMPLETION
         )
         .order_by("-created_at")
-        .distinct()
+        .distinct(),
     )
 
     total_backlog = base_qs.count()
@@ -1928,14 +1932,17 @@ def review_backlog_page(request):
     limit = DEFAULT_PAGE_SIZE
     offset = _default_page_offset(request)
 
-    qs = documents_in_review_backlog(
-        q=q,
-        language=language,
-        text_input_type=text_input_type,
-        processing_state_user=processing_state_user,
-        engine_key=engine_key,
-        result_type=result_type,
-        verification_status=verification_status,
+    qs = filter_documents_for_user(
+        request.user,
+        documents_in_review_backlog(
+            q=q,
+            language=language,
+            text_input_type=text_input_type,
+            processing_state_user=processing_state_user,
+            engine_key=engine_key,
+            result_type=result_type,
+            verification_status=verification_status,
+        ),
     )
     total = qs.count()
     # prefetch text_results for attach_review_summaries (batched; avoids N+1).
@@ -2054,11 +2061,14 @@ def review_detail_page(request, doc_id: int):
     if deny:
         return deny
 
-    doc = get_object_or_404(
-        Document.objects.select_related("admin_meta", "archive_item").prefetch_related(
+    doc = get_viewable_document(
+        request.user,
+        doc_id,
+        queryset=Document.objects.select_related(
+            "admin_meta", "archive_item"
+        ).prefetch_related(
             "tags_m2m", "text_results", "transkribus_runs", "source_files"
         ),
-        id=doc_id,
     )
     admin_meta = getattr(doc, "admin_meta", None)
 
@@ -2314,9 +2324,10 @@ def corrected_current_sync_attempts_page(request, doc_id: int):
     if deny:
         return deny
 
-    doc = get_object_or_404(
-        Document.objects.select_related("archive_item"),
-        id=doc_id,
+    doc = get_viewable_document(
+        request.user,
+        doc_id,
+        queryset=Document.objects.select_related("archive_item"),
     )
     attempts = list(
         _corrected_current_sync_attempts_queryset()
@@ -2359,11 +2370,12 @@ def corrected_current_sync_attempt_detail_page(request, doc_id: int, attempt_id:
     if deny:
         return deny
 
-    doc = get_object_or_404(
-        Document.objects.select_related("archive_item").prefetch_related(
+    doc = get_viewable_document(
+        request.user,
+        doc_id,
+        queryset=Document.objects.select_related("archive_item").prefetch_related(
             text_presentation_results_prefetch()
         ),
-        id=doc_id,
     )
     attempt = get_object_or_404(
         _corrected_current_sync_attempts_queryset(with_pages=True),
@@ -2473,11 +2485,16 @@ def corrected_current_sync_attempt_activate(request, doc_id: int, attempt_id: in
     if deny:
         return deny
 
-    # URL ownership/existence parity with GET detail (404, no messages).
+    # Visibility + URL ownership/existence parity with GET detail (404, no messages).
+    doc = get_viewable_document(
+        request.user,
+        doc_id,
+        queryset=Document.objects.select_related("archive_item"),
+    )
     get_object_or_404(
         TranskribusCorrectedCurrentSyncAttempt.objects.only("id"),
         id=attempt_id,
-        document_id=doc_id,
+        document_id=doc.id,
     )
 
     detail_url = _corrected_current_activation_detail_url(
@@ -2553,6 +2570,17 @@ def _review_text_result_not_eligible_response() -> HttpResponseBadRequest:
     )
 
 
+def _get_admin_viewable_text_result(request, result_id: int) -> DocumentTextResult:
+    """Load a text-result row only when its parent document is viewable (404 otherwise)."""
+    return get_object_or_404(
+        DocumentTextResult.objects.select_related(
+            "document",
+            "document__archive_item",
+        ).filter(document__in=document_queryset_for_user(request.user)),
+        id=result_id,
+    )
+
+
 @login_required
 @require_POST
 def review_text_result_verify(request, result_id: int):
@@ -2560,7 +2588,7 @@ def review_text_result_verify(request, result_id: int):
     if deny:
         return deny
 
-    row = get_object_or_404(DocumentTextResult, id=result_id)
+    row = _get_admin_viewable_text_result(request, result_id)
     if not is_review_pending_text_result(row):
         return _review_text_result_not_eligible_response()
 
@@ -2583,7 +2611,7 @@ def review_text_result_reject(request, result_id: int):
     if deny:
         return deny
 
-    row = get_object_or_404(DocumentTextResult, id=result_id)
+    row = _get_admin_viewable_text_result(request, result_id)
     if not is_review_pending_text_result(row):
         return _review_text_result_not_eligible_response()
 
@@ -2606,7 +2634,7 @@ def review_text_result_update_text(request, result_id: int):
     if deny:
         return deny
 
-    row = get_object_or_404(DocumentTextResult, id=result_id)
+    row = _get_admin_viewable_text_result(request, result_id)
     if not is_review_editable_text_result(row):
         return _review_text_result_not_eligible_response()
 
@@ -2642,6 +2670,9 @@ def review_text_result_verified_edit(request, result_id: int):
     deny = _require_admin(request)
     if deny:
         return deny
+
+    # Authorize before mutation so restricted documents do not leak via edit paths.
+    _get_admin_viewable_text_result(request, result_id)
 
     submitted = request.POST.get("text")
     if submitted is None:
@@ -2850,6 +2881,18 @@ def transcription_suggestion_thanks(request, doc_id: int):
     )
 
 
+def _transcription_suggestions_queryset_for_user(user):
+    """Staff suggestion backlog/detail scoped to documents the user may view."""
+    return TranscriptionEditSuggestion.objects.filter(
+        document__in=document_queryset_for_user(user)
+    ).select_related(
+        "document",
+        "document__archive_item",
+        "submitter_user",
+        "reviewed_by",
+    )
+
+
 @login_required
 def transcription_suggestion_backlog_page(request):
     deny = _require_admin_page(request)
@@ -2857,12 +2900,7 @@ def transcription_suggestion_backlog_page(request):
         return deny
 
     suggestions = list(
-        TranscriptionEditSuggestion.objects.select_related(
-            "document",
-            "document__archive_item",
-            "submitter_user",
-            "reviewed_by",
-        )
+        _transcription_suggestions_queryset_for_user(request.user)
         .annotate(
             pending_first=Case(
                 When(
@@ -2895,12 +2933,9 @@ def transcription_suggestion_detail_page(request, suggestion_id: int):
         return deny
 
     suggestion = get_object_or_404(
-        TranscriptionEditSuggestion.objects.select_related(
-            "document",
-            "document__archive_item",
-            "submitter_user",
-            "reviewed_by",
-        ).prefetch_related("document__source_files"),
+        _transcription_suggestions_queryset_for_user(request.user).prefetch_related(
+            "document__source_files"
+        ),
         id=suggestion_id,
     )
     doc = suggestion.document
@@ -2939,6 +2974,12 @@ def transcription_suggestion_approve(request, suggestion_id: int):
     if deny:
         return deny
 
+    # Authorize before mutation (404; no existence leak for restricted docs).
+    get_object_or_404(
+        _transcription_suggestions_queryset_for_user(request.user),
+        id=suggestion_id,
+    )
+
     detail_url = reverse(
         "transcription-suggestion-detail",
         kwargs={"suggestion_id": suggestion_id},
@@ -2968,6 +3009,11 @@ def transcription_suggestion_reject(request, suggestion_id: int):
     deny = _require_admin_page(request)
     if deny:
         return deny
+
+    get_object_or_404(
+        _transcription_suggestions_queryset_for_user(request.user),
+        id=suggestion_id,
+    )
 
     detail_url = reverse(
         "transcription-suggestion-detail",
@@ -3090,6 +3136,17 @@ def archive_metadata_suggestion_thanks(request, item_id: int):
     )
 
 
+def _archive_metadata_suggestions_queryset_for_user(user):
+    """Staff metadata-suggestion backlog scoped to archive items the user may view."""
+    return ArchiveMetadataSuggestion.objects.filter(
+        archive_item__in=archive_item_queryset_for_user(user)
+    ).select_related(
+        "archive_item",
+        "submitter_user",
+        "reviewed_by",
+    )
+
+
 @login_required
 def archive_metadata_suggestion_backlog_page(request):
     deny = _require_admin_page(request)
@@ -3097,11 +3154,7 @@ def archive_metadata_suggestion_backlog_page(request):
         return deny
 
     suggestions = list(
-        ArchiveMetadataSuggestion.objects.select_related(
-            "archive_item",
-            "submitter_user",
-            "reviewed_by",
-        )
+        _archive_metadata_suggestions_queryset_for_user(request.user)
         .annotate(
             pending_first=Case(
                 When(
@@ -3134,6 +3187,11 @@ def archive_metadata_suggestion_approve(request, suggestion_id: int):
     if deny:
         return deny
 
+    get_object_or_404(
+        _archive_metadata_suggestions_queryset_for_user(request.user),
+        id=suggestion_id,
+    )
+
     backlog_url = reverse("archive-metadata-suggestion-backlog")
 
     try:
@@ -3155,6 +3213,11 @@ def archive_metadata_suggestion_reject(request, suggestion_id: int):
     deny = _require_admin_page(request)
     if deny:
         return deny
+
+    get_object_or_404(
+        _archive_metadata_suggestions_queryset_for_user(request.user),
+        id=suggestion_id,
+    )
 
     backlog_url = reverse("archive-metadata-suggestion-backlog")
 
@@ -3178,9 +3241,10 @@ def document_ocr_reprocess(request, doc_id: int):
     if deny:
         return deny
 
-    doc = get_object_or_404(
-        Document.objects.select_related("archive_item"),
-        id=doc_id,
+    doc = get_viewable_document(
+        request.user,
+        doc_id,
+        queryset=Document.objects.select_related("archive_item"),
     )
     try:
         worker_env = validate_required_env()
@@ -3234,9 +3298,10 @@ def document_hebrew_translation_retry(request, doc_id: int):
     if deny:
         return deny
 
-    doc = get_object_or_404(
-        Document.objects.select_related("archive_item"),
-        id=doc_id,
+    doc = get_viewable_document(
+        request.user,
+        doc_id,
+        queryset=Document.objects.select_related("archive_item"),
     )
     try:
         enqueue_result = enqueue_hebrew_translation_retry(
@@ -3748,7 +3813,7 @@ def archive_manage_list_page(request):
         return deny
 
     items = (
-        ArchiveItem.objects.all()
+        archive_item_queryset_for_user(request.user)
         .select_related("manual_text_content", "ocr_document", "photo_content")
         .order_by("-created_at")
     )
@@ -3837,18 +3902,15 @@ def archive_manage_edit_page(request, item_id: int):
     if deny:
         return deny
 
-    try:
-        item = (
-            ArchiveItem.objects.select_related(
-                "manual_text_content",
-                "ocr_document",
-                "photo_content",
-            )
-            .prefetch_related("categories", "events", "tags")
-            .get(id=item_id)
-        )
-    except ArchiveItem.DoesNotExist:
-        raise Http404() from None
+    item = get_accessible_archive_item(
+        request.user,
+        item_id,
+        queryset=ArchiveItem.objects.select_related(
+            "manual_text_content",
+            "ocr_document",
+            "photo_content",
+        ).prefetch_related("categories", "events", "tags"),
+    )
 
     if item.item_type == ArchiveItem.ItemType.MANUAL_TEXT:
         return _archive_manage_edit_manual_text(request, item)
@@ -4130,19 +4192,19 @@ def archive_manage_delete_page(request, item_id: int):
     if deny:
         return deny
 
-    try:
-        item = ArchiveItem.objects.select_related(
+    item = get_accessible_archive_item(
+        request.user,
+        item_id,
+        queryset=ArchiveItem.objects.select_related(
             "manual_text_content",
             "photo_content",
-        ).get(
-            id=item_id,
+        ).filter(
             item_type__in=(
                 ArchiveItem.ItemType.MANUAL_TEXT,
                 ArchiveItem.ItemType.PHOTO,
             ),
-        )
-    except ArchiveItem.DoesNotExist:
-        raise Http404() from None
+        ),
+    )
 
     if request.method == "POST":
         photo_cleanup: tuple[str, str, int | None] | None = None

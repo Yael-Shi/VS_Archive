@@ -20,6 +20,7 @@ class ArchiveItem(models.Model):
     class Visibility(models.TextChoices):
         PRIVATE = "private", "Private"
         PUBLIC = "public", "Public"
+        RESTRICTED = "restricted", "Restricted"
 
     class MetadataStatus(models.TextChoices):
         NEEDS_COMPLETION = "NEEDS_COMPLETION", "Needs completion"
@@ -75,6 +76,14 @@ class ArchiveItem(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        permissions = [
+            (
+                "view_restricted_archiveitem",
+                "Can view restricted archive items",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.title} ({self.item_type})"
