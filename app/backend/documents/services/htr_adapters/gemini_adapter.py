@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import TYPE_CHECKING, Any, List, Optional
 
 from django.db import DatabaseError
 
+from documents.models import Document
 from documents.services.gemini_defaults import (
     DEFAULT_GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP,
     DEFAULT_GEMINI_TEMPERATURE,
@@ -12,9 +14,12 @@ from documents.services.gemini_defaults import (
     DEFAULT_GEMINI_TOP_P,
 )
 from documents.services.gemini_engine import (
+    GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS,
     GeminiApiError,
     GeminiError,
+    GeminiQuotaError,
     GeminiResponseError,
+    GeminiResponseFailureCode,
     gemini_transcription_contract,
     transcribe_pages_with_gemini,
 )
@@ -44,6 +49,33 @@ if TYPE_CHECKING:
     from documents.services.env_validation import WorkerEnvConfig
 
 
+logger = logging.getLogger(__name__)
+
+_QUOTA_ERROR_MARKERS = (
+    "429",
+    "RESOURCE_EXHAUSTED",
+    "QUOTA_EXHAUSTED",
+    "QUOTA",
+)
+
+
+def _is_quota_error(exc: GeminiError) -> bool:
+    error_text = str(exc).upper()
+    return isinstance(exc, GeminiQuotaError) or any(
+        marker in error_text for marker in _QUOTA_ERROR_MARKERS
+    )
+
+
+def _provider_calls_used(
+    exc: GeminiError,
+    *,
+    provider_call_offset: int,
+) -> int:
+    if isinstance(exc, GeminiResponseError):
+        return max(1, exc.metadata.attempt - provider_call_offset)
+    return max(1, int(getattr(exc, "provider_calls_used", 1)))
+
+
 class GeminiAdapter:
     engine_key = "GEMINI"
 
@@ -59,6 +91,14 @@ class GeminiAdapter:
         text_input_type = kwargs.pop("text_input_type", None)
         handwriting_type = kwargs.pop("handwriting_type", None)
         engine_key = kwargs.pop("engine_key", self.engine_key)
+        recitation_model_fallback_enabled = (
+            language_hint
+            in (
+                Document.Language.ENGLISH,
+                Document.Language.FRENCH,
+            )
+            and text_input_type == Document.TextInputType.HANDWRITTEN
+        )
 
         model_candidates = kwargs.pop(
             "model_candidates",
@@ -160,6 +200,7 @@ class GeminiAdapter:
                 language_hint=language_hint,
                 prompt_variant=prompt_variant,
                 model_candidates=model_candidates,
+                recitation_model_fallback_enabled=(recitation_model_fallback_enabled),
                 kwargs=kwargs,
                 checkpoint_id=claim.checkpoint_id,
                 lease_token=claim.lease_token,
@@ -191,13 +232,28 @@ class GeminiAdapter:
         language_hint: Optional[str],
         prompt_variant: str,
         model_candidates: List[str],
+        recitation_model_fallback_enabled: bool,
         kwargs: dict[str, Any],
         checkpoint_id: int,
         lease_token: uuid.UUID,
         attempt_id: int,
     ) -> None:
         last_error: Exception | None = None
-        for model_name in model_candidates:
+        remaining_provider_calls = GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS
+        next_max_output_tokens = kwargs.get("max_output_tokens", 8192)
+
+        for model_index, model_name in enumerate(model_candidates):
+            if remaining_provider_calls <= 0:
+                break
+
+            provider_call_offset = (
+                GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS - remaining_provider_calls
+            )
+            model_kwargs = dict(kwargs)
+            model_kwargs["max_output_tokens"] = next_max_output_tokens
+            model_kwargs["max_provider_calls"] = remaining_provider_calls
+            model_kwargs["provider_call_offset"] = provider_call_offset
+
             result = None
             try:
                 result = transcribe_pages_with_gemini(
@@ -205,21 +261,54 @@ class GeminiAdapter:
                     language_hint=language_hint,
                     prompt_variant=prompt_variant,
                     model_name=model_name,
-                    **kwargs,
+                    **model_kwargs,
                 )
             except GeminiError as exc:
                 last_error = exc
-                error_text = str(exc).upper()
-                if any(
-                    marker in error_text
-                    for marker in [
-                        "429",
-                        "RESOURCE_EXHAUSTED",
-                        "QUOTA_EXHAUSTED",
-                        "QUOTA",
-                    ]
+                calls_used = _provider_calls_used(
+                    exc,
+                    provider_call_offset=provider_call_offset,
+                )
+                remaining_provider_calls = max(
+                    0,
+                    remaining_provider_calls - calls_used,
+                )
+                has_next_model = model_index + 1 < len(model_candidates)
+
+                if _is_quota_error(exc):
+                    if has_next_model and not recitation_model_fallback_enabled:
+                        remaining_provider_calls = GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS
+                        next_max_output_tokens = kwargs.get(
+                            "max_output_tokens",
+                            8192,
+                        )
+                    if has_next_model and remaining_provider_calls > 0:
+                        continue
+                    break
+
+                if (
+                    recitation_model_fallback_enabled
+                    and isinstance(exc, GeminiResponseError)
+                    and exc.failure_code == GeminiResponseFailureCode.RECITATION
+                    and has_next_model
+                    and remaining_provider_calls > 0
                 ):
+                    next_model = model_candidates[model_index + 1]
+                    next_max_output_tokens = exc.metadata.max_output_tokens
+                    logger.warning(
+                        "Retrying Gemini transcription after RECITATION with "
+                        "fallback model: page=%s model=%s -> %s "
+                        "provider_calls_used=%s remaining_provider_calls=%s "
+                        "max_output_tokens=%s",
+                        page.page_index,
+                        model_name,
+                        next_model,
+                        calls_used,
+                        remaining_provider_calls,
+                        next_max_output_tokens,
+                    )
                     continue
+
                 self._persist_page_failure(
                     checkpoint_id=checkpoint_id,
                     lease_token=lease_token,

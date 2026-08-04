@@ -71,17 +71,22 @@ Resolved in `gemini_model_candidates()` (called from `htr_engine.transcribe_page
 | Route context | Model candidate(s) |
 |---------------|-------------------|
 | Hebrew printed | Single model: `GEMINI_HEBREW_PRINTED_MODEL` env, default `gemini-3.1-flash-lite` |
-| English/French handwritten | `gemini-2.5-flash` |
+| English/French handwritten | Ordered chain: `gemini-2.5-flash` → `gemini-3.1-flash-lite` |
 | English/French printed | `gemini-2.5-flash` |
 | Arabic (handwritten/printed) | Default chain: `gemini-2.5-flash` → `gemini-3.1-flash-lite` |
 | Mixed (all languages) | Default chain: `gemini-2.5-flash` → `gemini-3.1-flash-lite` |
 | Non-Gemini routes | Default chain (unused at runtime for Transkribus) |
 
-`GeminiAdapter` tries candidates in order; on quota-style errors it advances to
-the next candidate. In the durable worker path, exhaustion is persisted as a
-failed page checkpoint and produces an explicit partial outcome. Legacy direct
-adapter calls without document identity retain the prior
-`EngineRetryableError` behavior.
+`GeminiAdapter` tries candidates in order. Quota-style errors retain the
+existing candidate fallback. In the durable checkpoint-backed worker path,
+English/French handwritten `RECITATION` may also advance from
+`gemini-2.5-flash` to `gemini-3.1-flash-lite`, within one shared maximum of
+three provider calls per page. The current output cap and remaining budget are
+carried forward. Other permanent response classifications do not advance.
+Exhaustion is persisted as a failed page checkpoint and produces an explicit
+partial outcome. Legacy direct adapter calls without document identity retain
+the prior `EngineRetryableError` behavior and do not gain the new
+`RECITATION` fallback.
 
 Other Gemini execution knobs (from `worker_env`, not routing):
 `GEMINI_TEMPERATURE`, `GEMINI_TOP_K`, `GEMINI_TOP_P`,
@@ -100,14 +105,15 @@ configuration identity reuses that success instead of restarting it.
 
 - If every page used the same model, `DocumentTextResult.engine` remains that
   concrete model id.
-- If quota fallback caused different pages to use different Gemini models,
-  `DocumentTextResult.engine` is the deterministic runtime marker
+- If quota or scoped English/French handwritten `RECITATION` fallback caused
+  different pages to use different Gemini models, `DocumentTextResult.engine`
+  is the deterministic runtime marker
   `gemini-mixed:<fingerprint>`. Full page-to-model provenance remains on the
   checkpoints.
 
-This does not add a new fallback or alter route selection. It records the
-existing Gemini candidate behavior truthfully without discarding successful
-pages.
+This provenance behavior does not alter route selection. It records both
+quota fallback and the scoped English/French handwritten `RECITATION` fallback
+truthfully without discarding successful pages.
 
 ## Gemini prompt resolution
 
