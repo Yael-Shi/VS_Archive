@@ -97,6 +97,9 @@ def gemini_model_candidates(
     if route.engine_key != DocumentTextResult.OcrEngineKey.GEMINI:
         return DEFAULT_GEMINI_MODEL_CANDIDATES
 
+    if route == HEBREW_GENERAL_HANDWRITTEN_GEMINI_ROUTE:
+        return gemini_models.HEBREW_GENERAL_HANDWRITTEN_GEMINI_MODEL_CANDIDATES
+
     lang = (language or "").strip().lower()
     text_type = (text_input_type or "").strip().upper()
 

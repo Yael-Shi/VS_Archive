@@ -91,12 +91,18 @@ class GeminiAdapter:
         text_input_type = kwargs.pop("text_input_type", None)
         handwriting_type = kwargs.pop("handwriting_type", None)
         engine_key = kwargs.pop("engine_key", self.engine_key)
-        # French handwriting now uses its selected single 3.6 Flash model
-        # directly. Preserve the bounded RECITATION candidate switch for the
-        # existing English handwritten chain only.
+        # English handwriting retains its RECITATION-only candidate switch.
+        # Hebrew GENERAL handwriting gets a separate cost-aware policy: one
+        # primary 2.5 Flash call, then 3.6 Flash only for MAX_TOKENS or
+        # RECITATION. Hebrew VS handwriting never reaches this Gemini route.
         recitation_model_fallback_enabled = (
             language_hint == Document.Language.ENGLISH
             and text_input_type == Document.TextInputType.HANDWRITTEN
+        )
+        hebrew_general_model_fallback_enabled = (
+            language_hint == Document.Language.HEBREW
+            and text_input_type == Document.TextInputType.HANDWRITTEN
+            and handwriting_type == Document.HandwritingType.GENERAL
         )
 
         model_candidates = kwargs.pop(
@@ -200,6 +206,9 @@ class GeminiAdapter:
                 prompt_variant=prompt_variant,
                 model_candidates=model_candidates,
                 recitation_model_fallback_enabled=(recitation_model_fallback_enabled),
+                hebrew_general_model_fallback_enabled=(
+                    hebrew_general_model_fallback_enabled
+                ),
                 kwargs=kwargs,
                 checkpoint_id=claim.checkpoint_id,
                 lease_token=claim.lease_token,
@@ -232,6 +241,7 @@ class GeminiAdapter:
         prompt_variant: str,
         model_candidates: List[str],
         recitation_model_fallback_enabled: bool,
+        hebrew_general_model_fallback_enabled: bool,
         kwargs: dict[str, Any],
         checkpoint_id: int,
         lease_token: uuid.UUID,
@@ -250,7 +260,12 @@ class GeminiAdapter:
             )
             model_kwargs = dict(kwargs)
             model_kwargs["max_output_tokens"] = next_max_output_tokens
-            model_kwargs["max_provider_calls"] = remaining_provider_calls
+            if hebrew_general_model_fallback_enabled and model_index == 0:
+                # Do not spend the 2.5 Flash budget on the runaway
+                # 4096 -> 8192 -> 16384 ladder. Preserve two calls for 3.6.
+                model_kwargs["max_provider_calls"] = 1
+            else:
+                model_kwargs["max_provider_calls"] = remaining_provider_calls
             model_kwargs["provider_call_offset"] = provider_call_offset
 
             result = None
@@ -275,7 +290,22 @@ class GeminiAdapter:
                 has_next_model = model_index + 1 < len(model_candidates)
 
                 if _is_quota_error(exc):
-                    if has_next_model and not recitation_model_fallback_enabled:
+                    if (
+                        has_next_model
+                        and hebrew_general_model_fallback_enabled
+                        and remaining_provider_calls > 0
+                    ):
+                        # Keep calls already spent by the primary 2.5 model.
+                        # Gemini 3.6 receives only the remainder of the shared
+                        # three-call page budget.
+                        # Keep the current output cap when advancing.
+                        continue
+
+                    if (
+                        has_next_model
+                        and not recitation_model_fallback_enabled
+                        and not hebrew_general_model_fallback_enabled
+                    ):
                         remaining_provider_calls = GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS
                         next_max_output_tokens = kwargs.get(
                             "max_output_tokens",
@@ -285,20 +315,35 @@ class GeminiAdapter:
                         continue
                     break
 
-                if (
+                response_failure_code = (
+                    exc.failure_code if isinstance(exc, GeminiResponseError) else None
+                )
+                use_recitation_fallback = (
                     recitation_model_fallback_enabled
-                    and isinstance(exc, GeminiResponseError)
-                    and exc.failure_code == GeminiResponseFailureCode.RECITATION
+                    and response_failure_code == GeminiResponseFailureCode.RECITATION
+                )
+                use_hebrew_general_fallback = (
+                    hebrew_general_model_fallback_enabled
+                    and response_failure_code
+                    in (
+                        GeminiResponseFailureCode.MAX_TOKENS,
+                        GeminiResponseFailureCode.RECITATION,
+                    )
+                )
+
+                if (
+                    (use_recitation_fallback or use_hebrew_general_fallback)
                     and has_next_model
                     and remaining_provider_calls > 0
                 ):
+                    assert isinstance(exc, GeminiResponseError)
                     next_model = model_candidates[model_index + 1]
                     next_max_output_tokens = exc.metadata.max_output_tokens
                     logger.warning(
-                        "Retrying Gemini transcription after RECITATION with "
-                        "fallback model: page=%s model=%s -> %s "
-                        "provider_calls_used=%s remaining_provider_calls=%s "
-                        "max_output_tokens=%s",
+                        "Retrying Gemini transcription after %s with fallback "
+                        "model: page=%s model=%s -> %s provider_calls_used=%s "
+                        "remaining_provider_calls=%s max_output_tokens=%s",
+                        exc.failure_code.value,
                         page.page_index,
                         model_name,
                         next_model,

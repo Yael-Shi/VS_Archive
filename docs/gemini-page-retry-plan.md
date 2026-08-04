@@ -175,3 +175,25 @@ The core PR D recovery and PR #374 fallback are merged. The French 3.6
 follow-up still requires final staged review, merge, worker-only deployment,
 and intentional production reprocessing of document 273 followed by document
 272.
+
+## 2026-08-04 Hebrew general handwritten cost-aware model follow-up
+
+Documents 289, 291, and 306 supersede their earlier role as unresolved
+`MAX_TOKENS` references. Their Gemini 2.5 Flash failures were runaway output:
+larger caps produced tens of thousands of characters rather than bounded page
+transcriptions. Non-persistent full-page Gemini 3.6 probes completed all eight
+source pages with `STOP` and bounded outputs.
+
+Production keeps the cheaper 2.5 model first. Each Hebrew GENERAL page receives
+one 2.5 call at 4096. If it succeeds, processing ends without calling 3.6. If it
+returns `MAX_TOKENS` or `RECITATION`, processing advances immediately to
+`gemini-3.6-flash`, with at most two remaining calls. The total remains capped
+at three provider calls per page. Prompt text remains unchanged; segmentation
+and automatic stitching are not introduced.
+
+After merge and worker-only deployment, validate intentionally in increasing
+document size: document 306 first, then document 291, then document 289. Confirm
+the new candidate identity, per-page actual model, bounded provider-call
+sequence, completed checkpoints, assembled source transcription, and absence
+of runaway repetition. Best-available imperfect output remains
+`NEEDS_REVIEW` / `UNVERIFIED`.

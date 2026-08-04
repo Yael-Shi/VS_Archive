@@ -1,13 +1,11 @@
-"""Regression coverage for the rejected PR #371 prompt experiment.
+"""Hebrew general handwritten prompt rollback and Gemini 3.6 coverage.
 
-PR #371 introduced a route-specific v2 prompt for general Hebrew handwriting.
-It passed local validation but failed live on document 291, so production was
-rolled back and this module locks the code rollback to the last known contract.
+PR #371 changed only the prompt and failed live, so the exact restored v1
+prompt remains locked here. Later non-persistent full-page probes on documents
+289, 291, and 306 selected Gemini 3.6 Flash without changing that prompt.
 
-The live failure does not invalidate checkpoint identity: the v2 identity
-correctly prevented reuse of v1 checkpoints. It does show that prompt-only
-hardening is not an accepted solution to provider runaway. No production data
-is used and no live Gemini call is made here.
+The model candidate change creates a new checkpoint configuration identity.
+No production data is used and no live Gemini call is made here.
 """
 
 from __future__ import annotations
@@ -28,7 +26,12 @@ from documents.services.gemini_engine import (
     gemini_transcription_contract,
     transcribe_pages_with_gemini,
 )
-from documents.services.gemini_models import DEFAULT_GEMINI_MODEL_CANDIDATES
+from documents.services.gemini_models import (
+    DEFAULT_GEMINI_MODEL,
+    DEFAULT_GEMINI_MODEL_CANDIDATES,
+    HEBREW_GENERAL_HANDWRITTEN_GEMINI_MODEL,
+    HEBREW_GENERAL_HANDWRITTEN_GEMINI_MODEL_CANDIDATES,
+)
 from documents.services.gemini_page_checkpoints import build_gemini_attempt_identity
 from documents.services.ocr_routing import (
     HEBREW_GENERAL_HANDWRITTEN_GEMINI_ROUTE,
@@ -145,7 +148,7 @@ class HebrewGeneralHandwrittenContractRollbackTests(SimpleTestCase):
 
 
 class HebrewGeneralHandwrittenRoutingAndExecutionTests(SimpleTestCase):
-    def test_routing_and_model_candidates_are_unchanged(self):
+    def test_routing_uses_cost_aware_25_then_36_candidates(self):
         with patch.dict(
             __import__("os").environ,
             {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "false"},
@@ -169,7 +172,67 @@ class HebrewGeneralHandwrittenRoutingAndExecutionTests(SimpleTestCase):
             text_input_type=Document.TextInputType.HANDWRITTEN,
             gemini_hebrew_printed_model="hebrew-printed-model",
         )
-        self.assertEqual(candidates, DEFAULT_GEMINI_MODEL_CANDIDATES)
+        self.assertEqual(
+            candidates,
+            HEBREW_GENERAL_HANDWRITTEN_GEMINI_MODEL_CANDIDATES,
+        )
+        self.assertEqual(
+            candidates,
+            (
+                DEFAULT_GEMINI_MODEL,
+                HEBREW_GENERAL_HANDWRITTEN_GEMINI_MODEL,
+            ),
+        )
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch(
+        "documents.services.gemini_engine._get_api_key",
+        return_value="test-key",
+    )
+    def test_selected_model_uses_minimal_thinking_and_default_decoding(
+        self,
+        _mock_get_key,
+        mock_create_client,
+    ):
+        transcription = "זהו תעתוק עברי כללי ארוך מספיק לבדיקת פרופיל Gemini 3.6 Flash."
+        mock_client = Mock()
+        mock_client.models.generate_content.return_value = _response(text=transcription)
+        mock_create_client.return_value = mock_client
+
+        result = transcribe_pages_with_gemini(
+            _pages(),
+            Document.Language.HEBREW,
+            prompt_variant=(
+                DocumentTextResult.OcrPromptVariant.HEBREW_GENERAL_HANDWRITTEN
+            ),
+            model_name=HEBREW_GENERAL_HANDWRITTEN_GEMINI_MODEL,
+            max_output_tokens=4096,
+            max_provider_calls=1,
+        )
+
+        self.assertEqual(result.text, transcription)
+        self.assertEqual(
+            result.engine_name,
+            HEBREW_GENERAL_HANDWRITTEN_GEMINI_MODEL,
+        )
+
+        config = mock_client.models.generate_content.call_args.kwargs["config"]
+        self.assertIsNone(config.temperature)
+        self.assertIsNone(config.top_k)
+        self.assertIsNone(config.top_p)
+        self.assertEqual(config.max_output_tokens, 4096)
+        self.assertIsNotNone(config.thinking_config)
+        self.assertIsNone(config.thinking_config.thinking_budget)
+
+        thinking_level = getattr(
+            config.thinking_config.thinking_level,
+            "value",
+            config.thinking_config.thinking_level,
+        )
+        self.assertEqual(
+            str(thinking_level).rsplit(".", 1)[-1].lower(),
+            "minimal",
+        )
 
     @patch("documents.services.gemini_engine._parse_page_json_strict")
     @patch("documents.services.gemini_engine._create_client")
@@ -220,6 +283,7 @@ class HebrewGeneralHandwrittenCheckpointIdentityRollbackTests(SimpleTestCase):
         prompt_variant: str,
         text_input_type: str,
         handwriting_type: str | None,
+        model_candidates: tuple[str, ...] = ("model-a",),
     ):
         return build_gemini_attempt_identity(
             pages=_pages(),
@@ -228,7 +292,7 @@ class HebrewGeneralHandwrittenCheckpointIdentityRollbackTests(SimpleTestCase):
             handwriting_type=handwriting_type,
             engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
             prompt_variant=prompt_variant,
-            model_candidates=("model-a",),
+            model_candidates=model_candidates,
             contract=contract,
             min_text_length=20,
             double_pass=False,
@@ -240,7 +304,12 @@ class HebrewGeneralHandwrittenCheckpointIdentityRollbackTests(SimpleTestCase):
             max_output_tokens_hard_cap=32768,
         )
 
-    def _general_identity(self, contract):
+    def _general_identity(
+        self,
+        contract,
+        *,
+        model_candidates: tuple[str, ...] = ("model-a",),
+    ):
         return self._identity(
             contract,
             prompt_variant=(
@@ -248,6 +317,38 @@ class HebrewGeneralHandwrittenCheckpointIdentityRollbackTests(SimpleTestCase):
             ),
             text_input_type=Document.TextInputType.HANDWRITTEN,
             handwriting_type=Document.HandwritingType.GENERAL,
+            model_candidates=model_candidates,
+        )
+
+    def test_selected_model_creates_new_configuration_identity(self):
+        contract = _contract(
+            DocumentTextResult.OcrPromptVariant.HEBREW_GENERAL_HANDWRITTEN,
+            "he",
+        )
+        selected = self._general_identity(
+            contract,
+            model_candidates=(HEBREW_GENERAL_HANDWRITTEN_GEMINI_MODEL_CANDIDATES),
+        )
+        legacy = self._general_identity(
+            contract,
+            model_candidates=DEFAULT_GEMINI_MODEL_CANDIDATES,
+        )
+
+        self.assertEqual(
+            selected.prompt_fingerprint,
+            legacy.prompt_fingerprint,
+        )
+        self.assertEqual(
+            selected.prompt_contract_version,
+            legacy.prompt_contract_version,
+        )
+        self.assertNotEqual(
+            selected.config_fingerprint,
+            legacy.config_fingerprint,
+        )
+        self.assertNotEqual(
+            selected.identity_fingerprint,
+            legacy.identity_fingerprint,
         )
 
     def test_identical_restored_inputs_produce_stable_identity(self):

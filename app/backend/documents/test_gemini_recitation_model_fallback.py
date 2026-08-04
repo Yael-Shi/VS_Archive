@@ -100,6 +100,7 @@ def _execute_claimed_page(
     adapter: GeminiAdapter,
     *,
     recitation_model_fallback_enabled: bool = True,
+    hebrew_general_model_fallback_enabled: bool = False,
 ) -> None:
     adapter._execute_claimed_page(
         page=_PAGE,
@@ -107,6 +108,7 @@ def _execute_claimed_page(
         prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
         model_candidates=["model-a", "model-b"],
         recitation_model_fallback_enabled=(recitation_model_fallback_enabled),
+        hebrew_general_model_fallback_enabled=(hebrew_general_model_fallback_enabled),
         kwargs={"max_output_tokens": 4096},
         checkpoint_id=1,
         lease_token=uuid.uuid4(),
@@ -160,6 +162,207 @@ class GeminiRecitationFallbackAdapterTests(SimpleTestCase):
             "model-b",
         )
         mock_persist_failure.assert_not_called()
+
+    def test_hebrew_general_primary_success_avoids_36_fallback(self):
+        adapter = GeminiAdapter()
+
+        with (
+            patch(
+                "documents.services.htr_adapters.gemini_adapter."
+                "transcribe_pages_with_gemini",
+                return_value=GeminiResult(text="page text", engine_name="model-a"),
+            ) as mock_transcribe,
+            patch(
+                "documents.services.htr_adapters.gemini_adapter."
+                "persist_gemini_page_success"
+            ) as mock_persist_success,
+        ):
+            _execute_claimed_page(
+                adapter,
+                recitation_model_fallback_enabled=False,
+                hebrew_general_model_fallback_enabled=True,
+            )
+
+        self.assertEqual(mock_transcribe.call_count, 1)
+        primary = mock_transcribe.call_args.kwargs
+        self.assertEqual(primary["model_name"], "model-a")
+        self.assertEqual(primary["max_provider_calls"], 1)
+        self.assertEqual(primary["provider_call_offset"], 0)
+        self.assertEqual(primary["max_output_tokens"], 4096)
+        self.assertEqual(
+            mock_persist_success.call_args.kwargs["actual_model"],
+            "model-a",
+        )
+
+    def test_hebrew_general_max_tokens_uses_36_with_remaining_budget(self):
+        adapter = GeminiAdapter()
+        max_tokens = _response_error(
+            GeminiResponseFailureCode.MAX_TOKENS,
+            model="model-a",
+            attempt=1,
+            max_output_tokens=4096,
+        )
+
+        with (
+            patch(
+                "documents.services.htr_adapters.gemini_adapter."
+                "transcribe_pages_with_gemini",
+                side_effect=[
+                    max_tokens,
+                    GeminiResult(text="page text", engine_name="model-b"),
+                ],
+            ) as mock_transcribe,
+            patch(
+                "documents.services.htr_adapters.gemini_adapter."
+                "persist_gemini_page_success"
+            ) as mock_persist_success,
+            patch.object(adapter, "_persist_page_failure") as mock_persist_failure,
+        ):
+            _execute_claimed_page(
+                adapter,
+                recitation_model_fallback_enabled=False,
+                hebrew_general_model_fallback_enabled=True,
+            )
+
+        self.assertEqual(mock_transcribe.call_count, 2)
+        primary = mock_transcribe.call_args_list[0].kwargs
+        fallback = mock_transcribe.call_args_list[1].kwargs
+
+        self.assertEqual(primary["model_name"], "model-a")
+        self.assertEqual(primary["max_provider_calls"], 1)
+        self.assertEqual(primary["provider_call_offset"], 0)
+
+        self.assertEqual(fallback["model_name"], "model-b")
+        self.assertEqual(fallback["max_provider_calls"], 2)
+        self.assertEqual(fallback["provider_call_offset"], 1)
+        self.assertEqual(fallback["max_output_tokens"], 4096)
+        self.assertEqual(
+            mock_persist_success.call_args.kwargs["actual_model"],
+            "model-b",
+        )
+        mock_persist_failure.assert_not_called()
+
+    def test_hebrew_general_recitation_uses_36_after_one_primary_call(self):
+        adapter = GeminiAdapter()
+        recitation = _response_error(
+            GeminiResponseFailureCode.RECITATION,
+            model="model-a",
+            attempt=1,
+            max_output_tokens=4096,
+        )
+
+        with (
+            patch(
+                "documents.services.htr_adapters.gemini_adapter."
+                "transcribe_pages_with_gemini",
+                side_effect=[
+                    recitation,
+                    GeminiResult(text="page text", engine_name="model-b"),
+                ],
+            ) as mock_transcribe,
+            patch(
+                "documents.services.htr_adapters.gemini_adapter."
+                "persist_gemini_page_success"
+            ),
+        ):
+            _execute_claimed_page(
+                adapter,
+                recitation_model_fallback_enabled=False,
+                hebrew_general_model_fallback_enabled=True,
+            )
+
+        primary = mock_transcribe.call_args_list[0].kwargs
+        fallback = mock_transcribe.call_args_list[1].kwargs
+        self.assertEqual(primary["max_provider_calls"], 1)
+        self.assertEqual(fallback["max_provider_calls"], 2)
+        self.assertEqual(fallback["provider_call_offset"], 1)
+
+    def test_hebrew_general_quota_uses_36_with_remaining_budget(self):
+        adapter = GeminiAdapter()
+        quota = _response_error(
+            GeminiResponseFailureCode.MAX_TOKENS,
+            model="model-a",
+            attempt=1,
+            max_output_tokens=4096,
+        )
+
+        with (
+            patch(
+                "documents.services.htr_adapters.gemini_adapter."
+                "transcribe_pages_with_gemini",
+                side_effect=[
+                    quota,
+                    GeminiResult(text="page text", engine_name="model-b"),
+                ],
+            ) as mock_transcribe,
+            patch(
+                "documents.services.htr_adapters.gemini_adapter._is_quota_error",
+                side_effect=lambda exc: exc is quota,
+            ),
+            patch(
+                "documents.services.htr_adapters.gemini_adapter."
+                "persist_gemini_page_success"
+            ) as mock_persist_success,
+            patch.object(adapter, "_persist_page_failure") as mock_persist_failure,
+        ):
+            _execute_claimed_page(
+                adapter,
+                recitation_model_fallback_enabled=False,
+                hebrew_general_model_fallback_enabled=True,
+            )
+
+        self.assertEqual(mock_transcribe.call_count, 2)
+        primary = mock_transcribe.call_args_list[0].kwargs
+        fallback = mock_transcribe.call_args_list[1].kwargs
+
+        self.assertEqual(primary["model_name"], "model-a")
+        self.assertEqual(primary["max_provider_calls"], 1)
+        self.assertEqual(primary["provider_call_offset"], 0)
+
+        self.assertEqual(fallback["model_name"], "model-b")
+        self.assertEqual(fallback["max_provider_calls"], 2)
+        self.assertEqual(fallback["provider_call_offset"], 1)
+        self.assertEqual(fallback["max_output_tokens"], 4096)
+        self.assertEqual(
+            mock_persist_success.call_args.kwargs["actual_model"],
+            "model-b",
+        )
+        mock_persist_failure.assert_not_called()
+
+    def test_hebrew_general_safety_does_not_use_36(self):
+        adapter = GeminiAdapter()
+        safety = _response_error(
+            GeminiResponseFailureCode.SAFETY,
+            model="model-a",
+            attempt=1,
+            max_output_tokens=4096,
+        )
+
+        with (
+            patch(
+                "documents.services.htr_adapters.gemini_adapter."
+                "transcribe_pages_with_gemini",
+                side_effect=safety,
+            ) as mock_transcribe,
+            patch.object(adapter, "_persist_page_failure"),
+            patch.object(
+                adapter,
+                "_raise_incomplete",
+                side_effect=_ExpectedIncomplete,
+            ),
+            self.assertRaises(_ExpectedIncomplete),
+        ):
+            _execute_claimed_page(
+                adapter,
+                recitation_model_fallback_enabled=False,
+                hebrew_general_model_fallback_enabled=True,
+            )
+
+        self.assertEqual(mock_transcribe.call_count, 1)
+        self.assertEqual(
+            mock_transcribe.call_args.kwargs["max_provider_calls"],
+            1,
+        )
 
     def test_recitation_after_two_primary_calls_leaves_one_fallback_call(self):
         adapter = GeminiAdapter()
