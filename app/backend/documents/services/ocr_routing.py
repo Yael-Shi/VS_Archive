@@ -105,6 +105,8 @@ def gemini_model_candidates(
 
     if lang in (Document.Language.ENGLISH, Document.Language.FRENCH):
         if text_type == Document.TextInputType.HANDWRITTEN:
+            if lang == Document.Language.FRENCH:
+                return gemini_models.FRENCH_HANDWRITTEN_GEMINI_MODEL_CANDIDATES
             return gemini_models.LATIN_HANDWRITTEN_GEMINI_MODEL_CANDIDATES
         elif text_type == Document.TextInputType.PRINTED:
             return (gemini_models.LATIN_PRINTED_GEMINI_MODEL,)

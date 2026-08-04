@@ -91,12 +91,11 @@ class GeminiAdapter:
         text_input_type = kwargs.pop("text_input_type", None)
         handwriting_type = kwargs.pop("handwriting_type", None)
         engine_key = kwargs.pop("engine_key", self.engine_key)
+        # French handwriting now uses its selected single 3.6 Flash model
+        # directly. Preserve the bounded RECITATION candidate switch for the
+        # existing English handwritten chain only.
         recitation_model_fallback_enabled = (
-            language_hint
-            in (
-                Document.Language.ENGLISH,
-                Document.Language.FRENCH,
-            )
+            language_hint == Document.Language.ENGLISH
             and text_input_type == Document.TextInputType.HANDWRITTEN
         )
 

@@ -10,21 +10,24 @@
 Gemini OCR can fail a page on transient empty output, parse failure, rate-limit
 blips, or truncation (`MAX_TOKENS`). PR B preserves successful pages durably;
 PR D adds bounded recovery **within the same delivery** for one page without
-restarting successful checkpoints. A later follow-up adds one scoped,
+restarting successful checkpoints. PR #374 added one scoped,
 budget-preserving candidate switch for English/French handwritten
-`RECITATION`.
+`RECITATION`; the later French 3.6 follow-up retains that switch for English
+only and routes French handwriting directly to one full-page model.
 
 ## Attempt budget scope
 
 - **Engine boundary:** `transcribe_pages_with_gemini` receives a validated
   call window whose offset plus size cannot exceed three calls.
-- **Scoped candidate-chain boundary:** English/French handwritten
+- **Scoped candidate-chain boundary:** English handwritten
   checkpoint-backed OCR shares at most **three provider calls per page across**
   `gemini-2.5-flash` and `gemini-3.1-flash-lite`.
-- A `RECITATION` switch carries the current output cap and remaining call budget
-  to the next candidate.
-- Outside that scoped route, the pre-existing quota-only candidate fallback may
-  still start a separate three-call budget on candidate *N+1*.
+- A scoped English `RECITATION` switch carries the current output cap and
+  remaining call budget to the next candidate.
+- French handwritten OCR has one full-page `gemini-3.6-flash` candidate and no
+  `RECITATION` candidate switch.
+- Outside the scoped English route, the pre-existing quota-only candidate
+  fallback may still start a separate three-call budget on candidate *N+1*.
 - Quota/rate-limit retries inside an engine call window count toward that
   window.
 - Hebrew translation (`translate_text_to_hebrew_with_gemini`) is **unchanged**
@@ -48,9 +51,9 @@ after a classified response failure.
 **Permanent for the active model:**
 
 - PR A finish/block codes remain non-retryable on the same model.
-- `RECITATION` may advance only English/French handwritten
-  checkpoint-backed OCR to its next configured candidate when global budget
-  remains.
+- `RECITATION` may advance only English handwritten checkpoint-backed OCR
+  to its next configured candidate when global budget remains. French
+  handwriting has one direct `gemini-3.6-flash` candidate.
 - `SAFETY`, `LANGUAGE`, `SPII`, prohibited/blocked content,
   `NO_CANDIDATES`, `OTHER`, and `JSON_SCHEMA` do not trigger candidate
   fallback.
@@ -148,7 +151,27 @@ checks, scoped Pyright and mypy, a 108-test expanded Gemini/checkpoint/routing
 suite, and the full `documents` regression: **2,330 tests** in **1,777.543
 seconds**, result **OK**, `FULL_TEST_STATUS=0`. `git diff --check` also passed.
 
+## 2026-08-04 French handwritten full-page model follow-up
+
+Document 273 live evidence and non-persistent full-page/model/segment probes
+selected `gemini-3.6-flash` with minimal thinking and model-default decoding.
+The three-band experiment was rejected because overlap produced duplicates and
+contradictions without recovering the full lower-page text. The archive owner
+does not read French; the accepted product policy is to preserve the
+best-available result as `NEEDS_REVIEW` / `UNVERIFIED`, not to leave the
+document without OCR.
+
+## 2026-08-04 French 3.6 follow-up validation
+
+The follow-up passed Ruff format/check, Django system and migration checks,
+scoped Pyright and mypy, and a 60-test expanded French-model, RECITATION,
+bounded-recovery, checkpoint, and routing suite. The full `documents`
+regression ran **2,333 tests** in **1,947.639 seconds** and completed `OK`,
+with `FULL_TEST_STATUS=0`. Pre-test and post-test `git diff --check` passed.
+
 ## Validation still required
 
-Live Gemini provider/fidelity validation; deployment through the existing
-worker-first runbook; production-document retries. **PR D is not merged yet.**
+The core PR D recovery and PR #374 fallback are merged. The French 3.6
+follow-up still requires final staged review, merge, worker-only deployment,
+and intentional production reprocessing of document 273 followed by document
+272.
