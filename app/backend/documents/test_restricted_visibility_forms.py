@@ -15,6 +15,7 @@ from documents.models import ArchiveItem, Document, ManualTextContent, PhotoCont
 from documents.services.archive_item_access import VIEW_RESTRICTED_ARCHIVEITEM_CODENAME
 from documents.services.archive_item_presentation import (
     archive_visibility_ui_choices,
+    visibility_choice_label,
     visibility_label,
 )
 from documents.services.archive_items import (
@@ -88,6 +89,10 @@ class RestrictedVisibilityPresentationTests(TestCase):
     def test_visibility_label_uses_exact_hebrew_restricted_label(self):
         self.assertEqual(
             visibility_label(ArchiveItem.Visibility.RESTRICTED),
+            RESTRICTED_HEBREW_LABEL,
+        )
+        self.assertEqual(
+            visibility_choice_label(ArchiveItem.Visibility.RESTRICTED),
             RESTRICTED_HEBREW_LABEL,
         )
         self.assertEqual(visibility_label("public"), "ציבורי")

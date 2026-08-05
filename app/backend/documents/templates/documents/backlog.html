@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load status_labels %}
+{% load status_labels archive_labels %}
 {% block title %}VSArchive - רשימת השלמת פרטים{% endblock %}
 
 {% block content %}
@@ -90,8 +90,9 @@
       <table class="table">
         <thead>
           <tr>
-            <th class="col-w-55">מסמך</th>
+            <th class="col-w-45">מסמך</th>
             <th class="col-w-10">סוג</th>
+            <th class="col-w-10">נראות</th>
             <th class="col-w-15">תגיות</th>
             <th class="col-w-10">סטטוס</th>
             <th class="col-w-10">פעולות</th>
@@ -140,6 +141,8 @@
                 {% if d.doc_type == "IMAGE" %}תמונה{% elif d.doc_type == "PDF" %}PDF{% else %}{{ d.doc_type }}{% endif %}
               </td>
 
+              <td>{{ d.archive_item.visibility|archive_visibility_display_label }}</td>
+
               <td>
                 {% if d.tags_m2m.exists %}
                   <div class="badge-row">
@@ -167,7 +170,7 @@
             </tr>
           {% empty %}
             <tr>
-              <td colspan="5" class="table-empty">
+              <td colspan="6" class="table-empty">
                 <div class="empty-state">
                   <div class="empty-state__title">אין מסמכים ברשימה</div>
                   {% if only_missing_tags or only_missing_admin_meta %}

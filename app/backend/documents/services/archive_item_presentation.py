@@ -50,7 +50,15 @@ ARCHIVE_PUBLIC_LIST_TYPE_FILTER_CHOICES: tuple[tuple[str, str], ...] = (
     (ARCHIVE_PUBLIC_LIST_TYPE_FILTER_PHOTO, "תמונות"),
 )
 
-_VISIBILITY_LABELS: dict[str, str] = {
+# Short read-only labels for manager-facing metadata (lists, detail leads, queues).
+_VISIBILITY_DISPLAY_LABELS: dict[str, str] = {
+    ArchiveItem.Visibility.PUBLIC.value: "ציבורי",
+    ArchiveItem.Visibility.PRIVATE.value: "פרטי",
+    ArchiveItem.Visibility.RESTRICTED.value: "רגיש",
+}
+
+# Full form-choice labels (selection controls / explanatory form contexts).
+_VISIBILITY_CHOICE_LABELS: dict[str, str] = {
     ArchiveItem.Visibility.PUBLIC.value: "ציבורי",
     ArchiveItem.Visibility.PRIVATE.value: "פרטי",
     ArchiveItem.Visibility.RESTRICTED.value: "רגיש — למורשים בלבד",
@@ -88,8 +96,19 @@ def _safe_label(mapping: dict[str, str], value) -> str:
     return mapping.get(key, mapping.get(key.lower(), key))
 
 
+def visibility_display_label(value) -> str:
+    """Short Hebrew label for read-only manager-facing visibility metadata."""
+    return _safe_label(_VISIBILITY_DISPLAY_LABELS, value)
+
+
+def visibility_choice_label(value) -> str:
+    """Full Hebrew label for visibility form/select options."""
+    return _safe_label(_VISIBILITY_CHOICE_LABELS, value)
+
+
 def visibility_label(value) -> str:
-    return _safe_label(_VISIBILITY_LABELS, value)
+    """Backward-compatible alias for ``visibility_choice_label`` (form choices)."""
+    return visibility_choice_label(value)
 
 
 def archive_metadata_status_label(value) -> str:
@@ -119,18 +138,18 @@ def archive_visibility_ui_choices(user=None) -> list[tuple[str, str]]:
     choices: list[tuple[str, str]] = [
         (
             ArchiveItem.Visibility.PUBLIC.value,
-            visibility_label(ArchiveItem.Visibility.PUBLIC),
+            visibility_choice_label(ArchiveItem.Visibility.PUBLIC),
         ),
         (
             ArchiveItem.Visibility.PRIVATE.value,
-            visibility_label(ArchiveItem.Visibility.PRIVATE),
+            visibility_choice_label(ArchiveItem.Visibility.PRIVATE),
         ),
     ]
     if can_view_restricted_archive_items(user):
         choices.append(
             (
                 ArchiveItem.Visibility.RESTRICTED.value,
-                visibility_label(ArchiveItem.Visibility.RESTRICTED),
+                visibility_choice_label(ArchiveItem.Visibility.RESTRICTED),
             )
         )
     return choices

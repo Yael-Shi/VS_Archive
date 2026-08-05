@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load archive_labels %}
 {% block title %}VSArchive - הצעות שיוך לפריטי ארכיון{% endblock %}
 
 {% block content %}
@@ -18,6 +19,7 @@
           <thead>
             <tr>
               <th>פריט</th>
+              <th>נראות</th>
               <th>שם המציע/ה</th>
               <th>דוא״ל</th>
               <th>קטגוריות מוצעות</th>
@@ -37,6 +39,7 @@
                     {{ row.archive_item.title }}
                   </a>
                 </td>
+                <td>{{ row.archive_item.visibility|archive_visibility_display_label }}</td>
                 <td>{{ row.submitter_name }}</td>
                 <td>
                   {% if row.submitter_email %}

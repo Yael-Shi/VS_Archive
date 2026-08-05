@@ -1,5 +1,22 @@
 # VS-Archive Decision Log
 
+## ArchiveItem visibility — manager-facing display metadata (UI)
+
+**Decision / implemented:** Show each item’s visibility to managers as ordinary metadata throughout existing management and item interfaces. No authorization, queryset, validation, migration, or processing changes.
+
+**Presentation contract:**
+
+- Short read-only display labels (`visibility_display_label` / `archive_visibility_display_label`): `public` → `ציבורי`, `private` → `פרטי`, `restricted` → `רגיש`.
+- Full form-choice labels (`visibility_choice_label` / `archive_visibility_choice_label` / `archive_visibility_ui_choices`): restricted remains `רגיש — למורשים בלבד`. Legacy aliases `visibility_label` and `archive_visibility_label` both remain full choice-label aliases (same semantics in Python and templates).
+- Read-only templates must use `archive_visibility_display_label`; do not use the legacy filter for short display text.
+- Visibility is rendered as ordinary text in existing tables, page leads, and metadata lines — not as badges, pills, chips, alerts, callouts, cards, or standalone visibility sections.
+- Manager-only surfaces gain the short label; anonymous/family viewers do not gain new administrative visibility metadata.
+- Django Admin already showed visibility as ordinary list/detail fields; left unchanged.
+
+**Unchanged:** PR1–PR3 access controls, Admin scoping, write validation, data model, OCR/HTR/processing/infra.
+
+**Tests:** `documents/test_visibility_metadata_ui.py`.
+
 ## ArchiveItem visibility — `restricted` (PR1 application authz)
 
 **Decision:** Add a third `ArchiveItem.visibility` value, `restricted`, with access controlled only by the explicit Django permission `documents.view_restricted_archiveitem`.

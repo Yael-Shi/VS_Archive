@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load document_date_display status_labels %}
+{% load document_date_display status_labels archive_labels %}
 {% block title %}VSArchive - {{ doc.archive_item.title }}{% endblock %}
 
 {% block content %}
@@ -23,6 +23,7 @@
               מסמך #{{ doc.id }}
               {% if doc.file_original_name %} · {{ doc.file_original_name }}{% endif %}
               · {{ doc.archive_item|document_date_display }}
+              · {{ doc.archive_item.visibility|archive_visibility_display_label }}
             {% else %}
               {{ doc.archive_item|document_date_display }}
             {% endif %}

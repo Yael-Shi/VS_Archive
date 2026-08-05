@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load archive_labels %}
 {% block title %}VSArchive - הצעת תיקון · {{ doc.archive_item.title }}{% endblock %}
 
 {% block content %}
@@ -14,6 +15,7 @@
       <div class="page-lead">
         <a href="{% url 'documents-detail-page' doc_id=doc.id %}">{{ doc.archive_item.title }}</a>
         · מסמך #{{ doc.id }}
+        · {{ doc.archive_item.visibility|archive_visibility_display_label }}
       </div>
     </header>
 

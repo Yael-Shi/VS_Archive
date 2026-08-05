@@ -34,7 +34,7 @@
                 <td>{{ item.id }}</td>
                 <td><a href="{% url 'archive-detail' item_id=item.id %}">{{ item.title }}</a></td>
                 <td>{{ item.item_type|archive_item_type_label }}</td>
-                <td>{{ item.visibility|archive_visibility_label }}</td>
+                <td>{{ item.visibility|archive_visibility_display_label }}</td>
                 <td>{{ item.metadata_status|archive_metadata_status_label }}</td>
                 <td>
                   {% if item.item_type == "PHOTO" and item.photo_content %}

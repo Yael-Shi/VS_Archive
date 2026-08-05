@@ -23,7 +23,7 @@
       <h1 class="page-title archive-detail-title">{{ item.title }}</h1>
       <div class="page-lead archive-detail-lead">
         {% if is_admin %}
-          פריט ארכיון #{{ item.id }} · {{ item|document_date_display }}
+          פריט ארכיון #{{ item.id }} · {{ item|document_date_display }} · {{ item.visibility|archive_visibility_display_label }}
         {% else %}
           {{ item|document_date_display }}
         {% endif %}
@@ -36,9 +36,6 @@
       <div class="badge-row archive-detail-badges">
         <span class="badge">{{ item.item_type|archive_item_type_label }}</span>
         {% if is_admin %}
-          <span class="badge{% if item.visibility == 'public' %} badge-ok{% endif %}">
-            {{ item.visibility|archive_visibility_label }}
-          </span>
           <span class="badge">{{ item.metadata_status|archive_metadata_status_label }}</span>
         {% endif %}
       </div>
@@ -46,9 +43,6 @@
     {% elif is_admin %}
       <div class="badge-row archive-detail-badges">
         <span class="badge">{{ item.item_type|archive_item_type_label }}</span>
-        <span class="badge{% if item.visibility == 'public' %} badge-ok{% endif %}">
-          {{ item.visibility|archive_visibility_label }}
-        </span>
         <span class="badge">{{ item.metadata_status|archive_metadata_status_label }}</span>
       </div>
       <div class="spacer-sm"></div>

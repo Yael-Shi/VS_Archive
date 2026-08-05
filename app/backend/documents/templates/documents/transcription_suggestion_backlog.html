@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load archive_labels %}
 {% block title %}VSArchive - הצעות תיקון לתעתוקים{% endblock %}
 
 {% block content %}
@@ -18,6 +19,7 @@
           <thead>
             <tr>
               <th>מסמך</th>
+              <th>נראות</th>
               <th>שם המציע/ה</th>
               <th>דוא״ל</th>
               <th>הערה</th>
@@ -36,6 +38,13 @@
                     </a>
                   {% else %}
                     <span class="muted">מסמך #{{ row.document.id }}</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if row.document.archive_item %}
+                    {{ row.document.archive_item.visibility|archive_visibility_display_label }}
+                  {% else %}
+                    <span class="muted">—</span>
                   {% endif %}
                 </td>
                 <td>{{ row.submitter_name }}</td>

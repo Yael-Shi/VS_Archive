@@ -15,8 +15,21 @@ def meaningful_archive_metadata(value) -> str:
 
 
 @register.filter
+def archive_visibility_display_label(value) -> str:
+    """Short read-only visibility label (ציבורי / פרטי / רגיש)."""
+    return labels.visibility_display_label(value)
+
+
+@register.filter
+def archive_visibility_choice_label(value) -> str:
+    """Full form-choice visibility label (restricted includes explanatory text)."""
+    return labels.visibility_choice_label(value)
+
+
+@register.filter
 def archive_visibility_label(value) -> str:
-    return labels.visibility_label(value)
+    """Backward-compatible alias of ``archive_visibility_choice_label`` / ``visibility_label``."""
+    return labels.visibility_choice_label(value)
 
 
 @register.filter
