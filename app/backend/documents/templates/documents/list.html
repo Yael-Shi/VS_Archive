@@ -93,10 +93,7 @@
           {% endif %}
 
           {% if visibility %}
-            <span class="filter-chip">
-              <span class="filter-chip__key">נראות:</span>
-              {{ visibility|archive_visibility_label }}
-            </span>
+            <span class="filter-chip">{{ visibility|archive_visibility_display_label }}</span>
           {% endif %}
 
           <a class="filter-chip filter-chip--action" href="{% url 'documents-list-page' %}">ניקוי הכל</a>
@@ -153,11 +150,7 @@
             </td>
 
             {% if is_admin %}
-              <td>
-                <span class="badge{% if d.archive_item.visibility == "public" %} badge-ok{% endif %}">
-                  {{ d.archive_item.visibility|archive_visibility_label }}
-                </span>
-              </td>
+              <td>{{ d.archive_item.visibility|archive_visibility_display_label }}</td>
             {% endif %}
           </tr>
         {% empty %}

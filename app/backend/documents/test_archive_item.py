@@ -62,6 +62,8 @@ from documents.services.archive_item_presentation import (
     archive_metadata_status_label,
     build_archive_browse_card,
     language_label,
+    visibility_choice_label,
+    visibility_display_label,
     visibility_label,
 )
 from documents.services.manual_text_body_display import (
@@ -3272,6 +3274,15 @@ class ArchiveItemPresentationUiTests(TestCase):
         return user
 
     def test_presentation_helpers_map_values_to_hebrew(self):
+        self.assertEqual(visibility_display_label("public"), "ציבורי")
+        self.assertEqual(visibility_display_label("private"), "פרטי")
+        self.assertEqual(visibility_display_label("restricted"), "רגיש")
+        self.assertEqual(visibility_choice_label("public"), "ציבורי")
+        self.assertEqual(visibility_choice_label("private"), "פרטי")
+        self.assertEqual(
+            visibility_choice_label("restricted"),
+            "רגיש — למורשים בלבד",
+        )
         self.assertEqual(visibility_label("public"), "ציבורי")
         self.assertEqual(visibility_label("private"), "פרטי")
         self.assertEqual(

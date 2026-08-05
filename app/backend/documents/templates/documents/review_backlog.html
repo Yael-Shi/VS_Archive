@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load status_labels %}
+{% load status_labels archive_labels %}
 {% block title %}VSArchive - רשימת בקרת תעתוק{% endblock %}
 
 {% block content %}
@@ -143,14 +143,15 @@
     <table class="table">
       <thead>
         <tr>
-          <th class="col-w-32">מסמך</th>
+          <th class="col-w-28">מסמך</th>
+          <th class="col-w-8">נראות</th>
           <th class="col-w-8">שפה</th>
           <th class="col-w-10">קלט</th>
           <th class="col-w-8">עיבוד</th>
           <th class="col-w-6">ממתין</th>
           <th class="col-w-12">תוצאות / מנוע</th>
-          <th class="col-w-14">סיבות בדיקה</th>
-          <th class="col-w-10">פעולות</th>
+          <th class="col-w-12">סיבות בדיקה</th>
+          <th class="col-w-8">פעולות</th>
         </tr>
       </thead>
       <tbody>
@@ -166,6 +167,7 @@
                 · עודכן {{ doc.updated_at }}
               </div>
             </td>
+            <td>{{ doc.archive_item.visibility|archive_visibility_display_label }}</td>
             <td>{% if doc.language %}{{ doc.language|language_label }}{% else %}<span class="muted">—</span>{% endif %}</td>
             <td>{{ doc.text_input_type|text_input_type_label }}</td>
             <td>
@@ -211,7 +213,7 @@
           </tr>
         {% empty %}
           <tr>
-            <td colspan="8" class="table-empty">
+            <td colspan="9" class="table-empty">
               <div class="empty-state">
                 <div class="empty-state__title">אין מסמכים ברשימה</div>
                 {% if q or language or text_input_type or processing_state_user or engine_key or result_type or verification_status %}
