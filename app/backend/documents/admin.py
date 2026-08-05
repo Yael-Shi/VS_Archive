@@ -1,4 +1,14 @@
 from django.contrib import admin
+
+from documents.services.archive_item_access import (
+    archive_item_queryset_for_user,
+    filter_archive_items_for_user,
+)
+from documents.services.document_access import (
+    document_queryset_for_user,
+    filter_documents_for_user,
+)
+
 from .models import (
     ArchiveCategory,
     ArchiveEvent,
@@ -34,6 +44,17 @@ class _DiscoveryTaxonomyNameSyncAdmin(admin.ModelAdmin):
 
             archive_item_ids = obj.archive_items.values_list("pk", flat=True)
             sync_archive_item_search_indexes(archive_item_ids)
+
+
+class _VisibilityScopedAdminMixin:
+    """Scope Django Admin rows and FK choices via centralized visibility policy."""
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.related_model is ArchiveItem:
+            kwargs["queryset"] = archive_item_queryset_for_user(request.user)
+        elif db_field.related_model is Document:
+            kwargs["queryset"] = document_queryset_for_user(request.user)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
 @admin.register(Tag)
@@ -73,7 +94,7 @@ class DocumentMetadataInline(admin.StackedInline):
     readonly_fields = ("created_at", "updated_at")
 
 
-class TranskribusRunInline(admin.TabularInline):
+class TranskribusRunInline(_VisibilityScopedAdminMixin, admin.TabularInline):
     model = TranskribusRun
     extra = 0
     can_delete = False
@@ -92,9 +113,13 @@ class TranskribusRunInline(admin.TabularInline):
     def has_add_permission(self, request, obj=None):
         return False
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.filter(document__in=document_queryset_for_user(request.user))
+
 
 @admin.register(ArchiveItem)
-class ArchiveItemAdmin(admin.ModelAdmin):
+class ArchiveItemAdmin(_VisibilityScopedAdminMixin, admin.ModelAdmin):
     list_display = (
         "id",
         "title",
@@ -108,6 +133,11 @@ class ArchiveItemAdmin(admin.ModelAdmin):
     search_fields = ("title",)
     ordering = ("-created_at",)
     readonly_fields = ("created_at", "updated_at")
+
+    def get_queryset(self, request):
+        return filter_archive_items_for_user(
+            request.user, super().get_queryset(request)
+        )
 
     def has_add_permission(self, request):
         return False
@@ -123,11 +153,15 @@ class ArchiveItemAdmin(admin.ModelAdmin):
 
 
 @admin.register(ManualTextContent)
-class ManualTextContentAdmin(admin.ModelAdmin):
+class ManualTextContentAdmin(_VisibilityScopedAdminMixin, admin.ModelAdmin):
     list_display = ("id", "archive_item", "created_at", "updated_at")
     search_fields = ("archive_item__title", "body")
     ordering = ("-created_at",)
     readonly_fields = ("archive_item", "body", "created_at", "updated_at")
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.filter(archive_item__in=archive_item_queryset_for_user(request.user))
 
     def has_add_permission(self, request):
         return False
@@ -140,7 +174,7 @@ class ManualTextContentAdmin(admin.ModelAdmin):
 
 
 @admin.register(PhotoContent)
-class PhotoContentAdmin(admin.ModelAdmin):
+class PhotoContentAdmin(_VisibilityScopedAdminMixin, admin.ModelAdmin):
     list_display = (
         "id",
         "archive_item",
@@ -166,6 +200,10 @@ class PhotoContentAdmin(admin.ModelAdmin):
         "updated_at",
     )
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.filter(archive_item__in=archive_item_queryset_for_user(request.user))
+
     def has_add_permission(self, request):
         return False
 
@@ -177,7 +215,7 @@ class PhotoContentAdmin(admin.ModelAdmin):
 
 
 @admin.register(Document)
-class DocumentAdmin(admin.ModelAdmin):
+class DocumentAdmin(_VisibilityScopedAdminMixin, admin.ModelAdmin):
     inlines = (DocumentMetadataInline, TranskribusRunInline)
 
     list_display = (
@@ -255,7 +293,8 @@ class DocumentAdmin(admin.ModelAdmin):
     )
 
     def get_queryset(self, request):
-        return super().get_queryset(request).select_related("archive_item")
+        qs = super().get_queryset(request).select_related("archive_item")
+        return filter_documents_for_user(request.user, qs)
 
     @admin.display(description="Title", ordering="archive_item__title")
     def canonical_title(self, obj: Document) -> str:
@@ -277,15 +316,19 @@ class DocumentAdmin(admin.ModelAdmin):
 
 
 @admin.register(CorrectionRequest)
-class CorrectionRequestAdmin(admin.ModelAdmin):
+class CorrectionRequestAdmin(_VisibilityScopedAdminMixin, admin.ModelAdmin):
     list_display = ("id", "document", "status", "scope", "created_at")
     list_filter = ("status", "scope")
     search_fields = ("document__archive_item__title", "message")
     ordering = ("-created_at",)
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.filter(document__in=document_queryset_for_user(request.user))
+
 
 @admin.register(DocumentTextResult)
-class DocumentTextResultAdmin(admin.ModelAdmin):
+class DocumentTextResultAdmin(_VisibilityScopedAdminMixin, admin.ModelAdmin):
     list_display = (
         "id",
         "document",
@@ -321,9 +364,13 @@ class DocumentTextResultAdmin(admin.ModelAdmin):
         ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.filter(document__in=document_queryset_for_user(request.user))
+
 
 @admin.register(TranskribusRun)
-class TranskribusRunAdmin(admin.ModelAdmin):
+class TranskribusRunAdmin(_VisibilityScopedAdminMixin, admin.ModelAdmin):
     list_display = (
         "id",
         "document",
@@ -387,6 +434,10 @@ class TranskribusRunAdmin(admin.ModelAdmin):
         ),
         ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.filter(document__in=document_queryset_for_user(request.user))
 
     def has_add_permission(self, request):
         return False
