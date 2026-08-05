@@ -19,9 +19,31 @@
 
 **Implemented in this PR:** model enum + custom permission migration; centralized helpers in `archive_item_access.py` / `document_access.py`; staff application surfaces (manage, backlog, review, suggestions, corrected/current sync) use authorized querysets / `get_viewable_*` so staff without the permission cannot discover restricted titles, counts, text, previews, or presigned URLs.
 
-**Temporary rollout rule:** No production `ArchiveItem` may be marked `restricted` until Django Admin hardening and form/UI PRs that expose the choice are merged. Application authz lands first so the value is safe if set via shell/DB, but operators must not use it in production yet.
+**Temporary rollout rule:** No production `ArchiveItem` may be marked `restricted` until the later form/UI/write-validation PR that exposes the choice is merged. Application authz and Django Admin hardening land first so the value is safer if set via shell/DB, but operators must not use it in production yet.
 
-**Deferred (follow-up PRs):** form/UI visibility choice and upload validator allowlists; Django Admin queryset/autocomplete hardening; Hebrew UI label / assign-permission UX.
+**Deferred (follow-up PRs):** form/UI visibility choice and upload validator allowlists; Hebrew UI label / assign-permission UX.
+
+**Superseded deferral:** Django Admin queryset/autocomplete hardening → completed in the PR2 entry below.
+
+## ArchiveItem visibility — `restricted` (PR2 Django Admin hardening)
+
+**Decision / implemented:** Scope registered Django Admin surfaces that can expose ArchiveItem/Document content through the same centralized visibility helpers used by application authz (`filter_archive_items_for_user` / `archive_item_queryset_for_user` / `filter_documents_for_user` / `document_queryset_for_user`). Do **not** duplicate public/private/restricted rules inside Admin classes.
+
+**Admin classes scoped:** `ArchiveItemAdmin`, `ManualTextContentAdmin`, `PhotoContentAdmin`, `DocumentAdmin`, `DocumentTextResultAdmin`, `CorrectionRequestAdmin`, `TranskribusRunAdmin`, plus `TranskribusRunInline` queryset scoping. FK choice querysets for `ArchiveItem` / `Document` relations are limited via a shared admin mixin (`formfield_for_foreignkey`), covering foreign-key widgets and any future autocomplete/raw-ID lookups that reuse Admin `get_queryset` / search.
+
+**Behavior:**
+
+- Staff without `documents.view_restricted_archiveitem` cannot discover restricted titles, transcription text, filenames, S3 keys, correction messages, or row existence through Admin changelists, search, list filters, or direct object URLs (Admin non-disclosing missing-object behavior).
+- Staff with the permission and active superusers retain access.
+- `public` / `private` Admin visibility unchanged (private remains available to document-admins / staff).
+- Unknown visibility values remain fail-closed (hidden even from superusers).
+- Existing Django model permissions are preserved; this PR only adds visibility scoping on top.
+
+**Unchanged / out of scope:** application views already covered by PR1; upload visibility validators; forms/UI exposing `restricted`; OCR/HTR/Gemini/Transkribus/translation/indexing/sync/activation; new migrations; registering additional Admin models that are not currently registered.
+
+**Temporary rollout rule (still in force):** Do **not** mark production items `restricted` until the forms/UI/write-validation PR is merged.
+
+**Tests:** `documents/test_restricted_visibility_admin.py`.
 
 ## ArchiveItem — central content entity foundation
 
