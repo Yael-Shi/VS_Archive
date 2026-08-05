@@ -59,13 +59,15 @@ def _photo_staff_form_data(
 
 def parse_photo_staff_metadata_form(
     post_data: dict[str, Any],
+    *,
+    user=None,
 ) -> tuple[dict[str, Any], list[str]]:
     """
     Parse shared ArchiveItem fields and PhotoContent metadata for PHOTO staff forms.
 
     Does not read or validate author_name/source_title.
     """
-    parsed_shared, errors = parse_archive_metadata_form(post_data)
+    parsed_shared, errors = parse_archive_metadata_form(post_data, user=user)
     photo_metadata, photo_errors = parse_photo_metadata_form(post_data)
     errors = errors + photo_errors
 
@@ -79,6 +81,7 @@ def parse_photo_staff_metadata_form(
         date_precision=parsed_shared["date_precision"],
         date_start=parsed_shared["date_start_value"],
         date_end=parsed_shared["date_end_value"],
+        user=user,
     )
     if shared_errors:
         return _photo_staff_form_data(parsed_shared, photo_metadata), shared_errors

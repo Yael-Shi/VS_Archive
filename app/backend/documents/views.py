@@ -91,6 +91,7 @@ from documents.services.archive_metadata_validation import (
     archive_metadata_form_data_for_template,
     parse_archive_metadata_form,
     parse_public_note,
+    parse_visibility,
     validate_archive_metadata_fields,
     validate_source_metadata_fields,
 )
@@ -626,6 +627,8 @@ def _parse_create_upload_discovery_metadata(payload: dict):
 
 def _parse_create_upload_common(
     payload: dict,
+    *,
+    user=None,
 ) -> tuple[_CreateUploadCommon | None, HttpResponseBadRequest | None]:
     title = (payload.get("title") or "").strip()
     if not title:
@@ -635,10 +638,10 @@ def _parse_create_upload_common(
     text_input_type_raw = payload.get("text_input_type")
     handwriting_type_present = "handwriting_type" in payload
     handwriting_type_raw = payload.get("handwriting_type")
-    visibility = (payload.get("visibility") or "private").strip()
     admin_meta = payload.get("admin_meta", None)
 
     try:
+        visibility = parse_visibility(payload.get("visibility"), user=user)
         text_input_type = _parse_text_input_type(text_input_type_raw)
         handwriting_type = _parse_handwriting_type(
             handwriting_type_raw,
@@ -664,6 +667,7 @@ def _parse_create_upload_common(
         date_precision=date_precision,
         date_start=ds,
         date_end=de,
+        user=user,
     )
     if field_errors:
         return None, _bad(field_errors[0])
@@ -672,9 +676,6 @@ def _parse_create_upload_common(
         admin_meta = {}
     if not isinstance(admin_meta, dict):
         return None, _bad("admin_meta must be an object")
-
-    if visibility not in ("private", "public"):
-        return None, _bad("visibility must be private or public")
 
     author_name = (payload.get("author_name") or "").strip()
     source_title = (payload.get("source_title") or "").strip()
@@ -1027,7 +1028,7 @@ def create_upload(request):
     except Exception:
         return _bad("invalid json")
 
-    common, err = _parse_create_upload_common(payload)
+    common, err = _parse_create_upload_common(payload, user=request.user)
     if err is not None:
         return err
     assert common is not None
@@ -1631,7 +1632,7 @@ def create_photo_upload(request):
     except Exception:
         return JsonResponse({"error": "invalid json"}, status=400)
 
-    parsed, err = parse_create_photo_upload_metadata(payload)
+    parsed, err = parse_create_photo_upload_metadata(payload, user=request.user)
     if err is not None:
         return JsonResponse({"error": err}, status=400)
     assert parsed is not None
@@ -1819,7 +1820,7 @@ def documents_list_page(request):
         "doc_type_choices": Document.DocType.choices,
         "metadata_status_choices": Document.MetadataStatus.choices,
         "upload_status_choices": Document.UploadStatus.choices,
-        "visibility_choices": archive_visibility_ui_choices(),
+        "visibility_choices": archive_visibility_ui_choices(request.user),
         "is_admin": is_admin,
     }
 
@@ -3349,10 +3350,10 @@ def document_hebrew_translation_retry(request, doc_id: int):
     return redirect("documents-detail-page", doc_id=doc.id)
 
 
-UPLOAD_UI_REVISION = "2026-07-15.1"
+UPLOAD_UI_REVISION = "2026-08-05.1"
 
 
-def _upload_form_context() -> dict:
+def _upload_form_context(*, user=None) -> dict:
     return {
         "doc_type_choices": Document.DocType.choices,
         "text_input_type_choices": TEXT_INPUT_TYPE_UI_CHOICES,
@@ -3361,6 +3362,7 @@ def _upload_form_context() -> dict:
         "hebrew_language_value": Document.Language.HEBREW,
         "handwritten_text_input_value": Document.TextInputType.HANDWRITTEN,
         "date_precision_choices": DATE_PRECISION_UI_CHOICES,
+        "visibility_choices": archive_visibility_ui_choices(user),
         "empty_date_form_data": archive_date_form_data(
             date_start=None,
             date_end=None,
@@ -3374,10 +3376,10 @@ def _upload_form_context() -> dict:
     }
 
 
-def _photo_upload_form_context() -> dict:
+def _photo_upload_form_context(*, user=None) -> dict:
     return {
         "date_precision_choices": DATE_PRECISION_UI_CHOICES,
-        "visibility_choices": archive_visibility_ui_choices(),
+        "visibility_choices": archive_visibility_ui_choices(user),
         "metadata_status_choices": archive_metadata_status_ui_choices(),
         "form_data": {
             **_empty_archive_metadata_form_data(),
@@ -3399,7 +3401,7 @@ def upload_page(request):
     return render(
         request,
         "documents/upload.html",
-        context=_upload_form_context(),
+        context=_upload_form_context(user=request.user),
     )
 
 
@@ -3409,13 +3411,14 @@ def _archive_metadata_form_context(
     form_errors: list[str],
     page_title: str,
     submit_label: str,
+    user=None,
 ) -> dict:
     return {
         "form_data": form_data,
         "form_errors": form_errors,
         "page_title": page_title,
         "submit_label": submit_label,
-        "visibility_choices": archive_visibility_ui_choices(),
+        "visibility_choices": archive_visibility_ui_choices(user),
         "date_precision_choices": DATE_PRECISION_UI_CHOICES,
         "metadata_status_choices": archive_metadata_status_ui_choices(),
     }
@@ -3427,12 +3430,14 @@ def _manual_text_form_context(
     form_errors: list[str],
     page_title: str,
     submit_label: str,
+    user=None,
 ) -> dict:
     return _archive_metadata_form_context(
         form_data=form_data,
         form_errors=form_errors,
         page_title=page_title,
         submit_label=submit_label,
+        user=user,
     )
 
 
@@ -3577,7 +3582,7 @@ def _normalized_archive_item_type(raw: str | None) -> str:
 
 
 def _submit_manual_text_create(request):
-    parsed, form_errors = parse_manual_text_form(request.POST)
+    parsed, form_errors = parse_manual_text_form(request.POST, user=request.user)
     parsed_discovery, discovery_errors = parse_archive_item_discovery_metadata_form(
         request.POST,
         tags_field="tags",
@@ -3849,14 +3854,15 @@ def archive_manage_new_page(request):
             form_errors=form_errors,
             page_title="יצירת פריט חדש",
             submit_label="שמירה",
+            user=request.user,
         ),
     }
     if item_type == ARCHIVE_ITEM_TYPE_MANUAL_TEXT:
         context.update(_manual_text_discovery_metadata_form_context())
     elif item_type == ARCHIVE_ITEM_TYPE_OCR_DOCUMENT:
-        context.update(_upload_form_context())
+        context.update(_upload_form_context(user=request.user))
     elif item_type == ARCHIVE_ITEM_TYPE_PHOTO:
-        context.update(_photo_upload_form_context())
+        context.update(_photo_upload_form_context(user=request.user))
     response = render(
         request,
         "documents/archive/manage_new.html",
@@ -3890,6 +3896,7 @@ def archive_manage_manual_text_create_page(request):
                 form_errors=form_errors,
                 page_title="יצירת טקסט מוקלד",
                 submit_label="שמירה",
+                user=request.user,
             ),
             **_manual_text_discovery_metadata_form_context(),
         },
@@ -3926,7 +3933,7 @@ def _archive_manage_edit_manual_text(request, item: ArchiveItem):
     form_data = _manual_text_form_data_from_item(item)
 
     if request.method == "POST":
-        parsed, form_errors = parse_manual_text_form(request.POST)
+        parsed, form_errors = parse_manual_text_form(request.POST, user=request.user)
         parsed_discovery, discovery_errors = parse_archive_item_discovery_metadata_form(
             request.POST,
             tags_field="tags",
@@ -3965,6 +3972,7 @@ def _archive_manage_edit_manual_text(request, item: ArchiveItem):
                 form_errors=form_errors,
                 page_title="עריכת טקסט מוקלד",
                 submit_label="עדכון",
+                user=request.user,
             ),
             **_manual_text_discovery_metadata_form_context(),
         },
@@ -3976,7 +3984,9 @@ def _archive_manage_edit_photo(request, item: ArchiveItem):
     form_data = _photo_form_data_from_item(item)
 
     if request.method == "POST":
-        parsed, form_errors = parse_photo_staff_metadata_form(request.POST)
+        parsed, form_errors = parse_photo_staff_metadata_form(
+            request.POST, user=request.user
+        )
         parsed_discovery, discovery_errors = parse_archive_item_discovery_metadata_form(
             request.POST,
             tags_field="tags",
@@ -4018,6 +4028,7 @@ def _archive_manage_edit_photo(request, item: ArchiveItem):
                 form_errors=form_errors,
                 page_title="עריכת תמונה",
                 submit_label="עדכון",
+                user=request.user,
             ),
             **_manual_text_discovery_metadata_form_context(),
         },
@@ -4037,7 +4048,9 @@ def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
     form_data = _ocr_document_edit_form_data_from_document(doc)
 
     if request.method == "POST":
-        parsed_shared, shared_errors = parse_archive_metadata_form(request.POST)
+        parsed_shared, shared_errors = parse_archive_metadata_form(
+            request.POST, user=request.user
+        )
         parsed_catalog, catalog_errors = parse_ocr_catalog_metadata_form(request.POST)
         parsed_discovery, discovery_errors = parse_archive_item_discovery_metadata_form(
             request.POST,
@@ -4087,6 +4100,7 @@ def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
                 form_errors=form_errors,
                 page_title="עריכת מטא־דאטה",
                 submit_label="עדכון",
+                user=request.user,
             ),
             "show_discovery_metadata": True,
             **_ocr_discovery_metadata_form_context(),

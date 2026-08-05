@@ -133,8 +133,11 @@
             <div class="field">
               <label for="visibility">נראות</label>
               <select id="visibility" name="visibility">
-                <option value="private" selected>פרטי</option>
-                <option value="public">ציבורי</option>
+                {% for value, label in visibility_choices %}
+                  <option value="{{ value }}" {% if value == "private" %}selected{% endif %}>
+                    {{ label }}
+                  </option>
+                {% endfor %}
               </select>
             </div>
           </div>

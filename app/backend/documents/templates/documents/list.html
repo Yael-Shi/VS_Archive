@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load status_labels document_date_display %}
+{% load status_labels document_date_display archive_labels %}
 {% block title %}VSArchive - מסמכים{% endblock %}
 
 {% block content %}
@@ -95,7 +95,7 @@
           {% if visibility %}
             <span class="filter-chip">
               <span class="filter-chip__key">נראות:</span>
-              {% if visibility == "public" %}ציבורי{% elif visibility == "private" %}פרטי{% else %}{{ visibility }}{% endif %}
+              {{ visibility|archive_visibility_label }}
             </span>
           {% endif %}
 
@@ -154,11 +154,9 @@
 
             {% if is_admin %}
               <td>
-                {% if d.archive_item.visibility == "public" %}
-                  <span class="badge badge-ok">ציבורי</span>
-                {% else %}
-                  <span class="badge">פרטי</span>
-                {% endif %}
+                <span class="badge{% if d.archive_item.visibility == "public" %} badge-ok{% endif %}">
+                  {{ d.archive_item.visibility|archive_visibility_label }}
+                </span>
               </td>
             {% endif %}
           </tr>

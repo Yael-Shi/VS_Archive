@@ -53,6 +53,7 @@ ARCHIVE_PUBLIC_LIST_TYPE_FILTER_CHOICES: tuple[tuple[str, str], ...] = (
 _VISIBILITY_LABELS: dict[str, str] = {
     ArchiveItem.Visibility.PUBLIC.value: "ציבורי",
     ArchiveItem.Visibility.PRIVATE.value: "פרטי",
+    ArchiveItem.Visibility.RESTRICTED.value: "רגיש — למורשים בלבד",
 }
 
 _ARCHIVE_METADATA_STATUS_LABELS: dict[str, str] = {
@@ -106,17 +107,33 @@ def language_label(value) -> str:
     return _LANGUAGE_LABELS.get(key, _LANGUAGE_LABELS.get(key.lower(), key))
 
 
-def archive_visibility_ui_choices() -> list[tuple[str, str]]:
-    return [
+def archive_visibility_ui_choices(user=None) -> list[tuple[str, str]]:
+    """Return visibility options for staff forms/filters.
+
+    ``public`` / ``private`` are always included. ``restricted`` is included only
+    when ``user`` has ``documents.view_restricted_archiveitem`` (active superusers
+    follow Django's normal ``has_perm`` behavior).
+    """
+    from documents.services.archive_item_access import can_view_restricted_archive_items
+
+    choices: list[tuple[str, str]] = [
         (
-            ArchiveItem.Visibility.PUBLIC,
+            ArchiveItem.Visibility.PUBLIC.value,
             visibility_label(ArchiveItem.Visibility.PUBLIC),
         ),
         (
-            ArchiveItem.Visibility.PRIVATE,
+            ArchiveItem.Visibility.PRIVATE.value,
             visibility_label(ArchiveItem.Visibility.PRIVATE),
         ),
     ]
+    if can_view_restricted_archive_items(user):
+        choices.append(
+            (
+                ArchiveItem.Visibility.RESTRICTED.value,
+                visibility_label(ArchiveItem.Visibility.RESTRICTED),
+            )
+        )
+    return choices
 
 
 def archive_metadata_status_ui_choices() -> list[tuple[str, str]]:
