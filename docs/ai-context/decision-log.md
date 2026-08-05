@@ -19,11 +19,9 @@
 
 **Implemented in this PR:** model enum + custom permission migration; centralized helpers in `archive_item_access.py` / `document_access.py`; staff application surfaces (manage, backlog, review, suggestions, corrected/current sync) use authorized querysets / `get_viewable_*` so staff without the permission cannot discover restricted titles, counts, text, previews, or presigned URLs.
 
-**Temporary rollout rule:** No production `ArchiveItem` may be marked `restricted` until the later form/UI/write-validation PR that exposes the choice is merged. Application authz and Django Admin hardening land first so the value is safer if set via shell/DB, but operators must not use it in production yet.
+**Rollout rule (superseded):** The temporary prohibition on marking production items `restricted` applied until forms/UI/write validation landed. See PR3 below for the accurate production rollout condition (merge alone is not sufficient).
 
-**Deferred (follow-up PRs):** form/UI visibility choice and upload validator allowlists; Hebrew UI label / assign-permission UX.
-
-**Superseded deferral:** Django Admin queryset/autocomplete hardening → completed in the PR2 entry below.
+**Superseded deferral:** form/UI visibility choice and upload validator allowlists; Hebrew UI label → completed in the PR3 entry below. Django Admin queryset/autocomplete hardening → completed in the PR2 entry below.
 
 ## ArchiveItem visibility — `restricted` (PR2 Django Admin hardening)
 
@@ -39,11 +37,47 @@
 - Unknown visibility values remain fail-closed (hidden even from superusers).
 - Existing Django model permissions are preserved; this PR only adds visibility scoping on top.
 
-**Unchanged / out of scope:** application views already covered by PR1; upload visibility validators; forms/UI exposing `restricted`; OCR/HTR/Gemini/Transkribus/translation/indexing/sync/activation; new migrations; registering additional Admin models that are not currently registered.
+**Unchanged / out of scope:** application views already covered by PR1; upload visibility validators; forms/UI exposing `restricted` (see PR3); OCR/HTR/Gemini/Transkribus/translation/indexing/sync/activation; new migrations; registering additional Admin models that are not currently registered.
 
-**Temporary rollout rule (still in force):** Do **not** mark production items `restricted` until the forms/UI/write-validation PR is merged.
+**Rollout rule:** Superseded by PR3 — see the PR3 rollout condition below (merge alone is not sufficient for production use).
 
 **Tests:** `documents/test_restricted_visibility_admin.py`.
+
+## ArchiveItem visibility — `restricted` (PR3 forms / UI / write validation)
+
+**Decision / implemented:** Expose and validate `restricted` on staff create/edit/upload surfaces. Reuse the same permission that controls viewing:
+
+- `documents.view_restricted_archiveitem`
+
+That permission currently controls **both** viewing restricted items and assigning/changing `ArchiveItem.visibility` to/from `restricted`. A separate write-only permission is a possible future refinement and is **not** part of this PR.
+
+**Contract:**
+
+- Hebrew UI label: `רגיש — למורשים בלבד` via centralized `visibility_label` / `archive_visibility_ui_choices(user)`.
+- Choice lists include `restricted` only when the requesting user has the permission (active superusers follow Django `has_perm`).
+- Staff without the permission must not see the option and must not be able to submit `restricted` via crafted POST/JSON.
+- Enum-valid alone is not sufficient; unauthorized `restricted` writes fail with the same `visibility is invalid` error as unknown values.
+- Default visibility remains `private`.
+- `public` / `private` behavior unchanged.
+
+**Write paths covered:** manual text create/edit; OCR upload create JSON + OCR metadata edit; photo upload create JSON + photo metadata edit; shared archive metadata form parser; upload form / photo form / manage form choice rendering; documents list visibility filter choices.
+
+**Rollout:** Production use of `restricted` is allowed only after **all** of the following:
+
+- PR3 is merged;
+- the resulting code is deployed to the target environment;
+- migration `0049_archiveitem_restricted_visibility` is applied there;
+- `documents.view_restricted_archiveitem` is granted only to intended authorized users;
+- a short role-based smoke test confirms:
+  - unauthorized staff do not see or submit restricted;
+  - authorized staff can create/view/edit restricted;
+  - anonymous/family behavior remains correct.
+
+Merge of PR3 alone does **not** authorize production use.
+
+**Unchanged / out of scope:** PR1 application authz; PR2 Django Admin scoping; new permissions/migrations; OCR/HTR/Gemini/Transkribus/translation/indexing/queues/sync/activation/infra/S3; reclassification of existing production items.
+
+**Tests:** `documents/test_restricted_visibility_forms.py`.
 
 ## ArchiveItem — central content entity foundation
 

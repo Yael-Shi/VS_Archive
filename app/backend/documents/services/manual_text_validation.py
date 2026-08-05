@@ -9,9 +9,11 @@ from documents.services.archive_metadata_validation import parse_archive_metadat
 
 def parse_manual_text_form(
     post_data: dict[str, Any],
+    *,
+    user=None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Parse POST fields and return normalized form data plus validation errors."""
-    parsed, errors = parse_archive_metadata_form(post_data)
+    parsed, errors = parse_archive_metadata_form(post_data, user=user)
     parsed["body"] = post_data.get("body") or ""
 
     if not errors and (not parsed["body"] or not parsed["body"].strip()):

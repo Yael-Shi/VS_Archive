@@ -13,7 +13,10 @@ from documents.services.archive_date_input import (
     parse_archive_date_bounds,
     scalar_post_field,
 )
+from documents.services.archive_item_access import can_view_restricted_archive_items
 from documents.services.archive_item_validation import parse_date_precision
+
+VISIBILITY_INVALID_ERROR = "visibility is invalid"
 
 
 def parse_optional_date(value: str | None, field_name: str) -> date | None:
@@ -28,11 +31,27 @@ def parse_optional_date(value: str | None, field_name: str) -> date | None:
         raise ValueError(f"invalid {field_name} format, expected YYYY-MM-DD") from None
 
 
-def parse_visibility(raw_value: str | None, *, default: str | None = None) -> str:
+def parse_visibility(
+    raw_value: str | None,
+    *,
+    default: str | None = None,
+    user=None,
+) -> str:
+    """Parse and authorize a visibility value for staff create/update writes.
+
+    Enum-valid alone is not sufficient for ``restricted``: the requesting
+    ``user`` must have ``documents.view_restricted_archiveitem``. Missing user
+    or missing permission rejects ``restricted`` (same error as unknown values).
+    """
     value = (raw_value or default or ArchiveItem.Visibility.PRIVATE).strip().lower()
     valid = {choice.value for choice in ArchiveItem.Visibility}
     if value not in valid:
-        raise ValueError("visibility is invalid")
+        raise ValueError(VISIBILITY_INVALID_ERROR)
+    if (
+        value == ArchiveItem.Visibility.RESTRICTED
+        and not can_view_restricted_archive_items(user)
+    ):
+        raise ValueError(VISIBILITY_INVALID_ERROR)
     return value
 
 
@@ -106,6 +125,7 @@ def validate_archive_metadata_fields(
     date_end: date | None,
     author_name: str = "",
     source_title: str = "",
+    user=None,
 ) -> list[str]:
     """Return a list of user-facing validation error messages."""
     errors: list[str] = []
@@ -113,9 +133,10 @@ def validate_archive_metadata_fields(
     if not title or not title.strip():
         errors.append("title is required")
 
-    valid_visibility = {choice.value for choice in ArchiveItem.Visibility}
-    if visibility not in valid_visibility:
-        errors.append("visibility is invalid")
+    try:
+        parse_visibility(visibility, user=user)
+    except ValueError:
+        errors.append(VISIBILITY_INVALID_ERROR)
 
     valid_metadata_status = {choice.value for choice in ArchiveItem.MetadataStatus}
     if metadata_status not in valid_metadata_status:
@@ -158,6 +179,8 @@ def _base_form_data_from_post(post_data: dict[str, Any]) -> dict[str, Any]:
 
 def parse_archive_metadata_form(
     post_data: dict[str, Any],
+    *,
+    user=None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Parse POST fields for shared archive metadata and return normalized data plus errors."""
     errors: list[str] = []
@@ -201,7 +224,7 @@ def parse_archive_metadata_form(
         return parsed, errors
 
     try:
-        visibility = parse_visibility(form_data["visibility"])
+        visibility = parse_visibility(form_data["visibility"], user=user)
         metadata_status = parse_metadata_status(form_data["metadata_status"])
         date_precision = parse_date_precision(form_data["date_precision"])
     except ValueError as exc:
@@ -225,6 +248,7 @@ def parse_archive_metadata_form(
                 date_end=date_end,
                 author_name=form_data["author_name"],
                 source_title=form_data["source_title"],
+                user=user,
             )
         )
 

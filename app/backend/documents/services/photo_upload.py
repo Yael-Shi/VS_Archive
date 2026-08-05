@@ -276,15 +276,13 @@ def _json_value_as_discovery_string(value) -> str:
 
 def parse_create_photo_upload_metadata(
     payload: dict[str, Any],
+    *,
+    user=None,
 ) -> tuple[dict | None, str | None]:
     """Parse JSON body for photo upload create; return (parsed, error_message)."""
     title = (payload.get("title") or "").strip()
     if not title:
         return None, "title required"
-
-    visibility = (payload.get("visibility") or ArchiveItem.Visibility.PRIVATE).strip()
-    if visibility not in {choice.value for choice in ArchiveItem.Visibility}:
-        return None, "visibility must be private or public"
 
     from documents.services.archive_discovery_metadata_validation import (
         empty_discovery_metadata_form_fields,
@@ -295,10 +293,12 @@ def parse_create_photo_upload_metadata(
     from documents.services.archive_metadata_validation import (
         parse_metadata_status,
         parse_public_note,
+        parse_visibility,
         validate_archive_metadata_fields,
     )
 
     try:
+        visibility = parse_visibility(payload.get("visibility"), user=user)
         date_precision = parse_date_precision(payload.get("date_precision"))
         metadata_status = parse_metadata_status(payload.get("metadata_status"))
         date_start, date_end, _, date_errors = parse_archive_date_bounds(
@@ -318,6 +318,7 @@ def parse_create_photo_upload_metadata(
         date_precision=date_precision,
         date_start=date_start,
         date_end=date_end,
+        user=user,
     )
     if field_errors:
         return None, field_errors[0]

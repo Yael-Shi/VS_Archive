@@ -3275,6 +3275,10 @@ class ArchiveItemPresentationUiTests(TestCase):
         self.assertEqual(visibility_label("public"), "ציבורי")
         self.assertEqual(visibility_label("private"), "פרטי")
         self.assertEqual(
+            visibility_label("restricted"),
+            "רגיש — למורשים בלבד",
+        )
+        self.assertEqual(
             archive_metadata_status_label("NEEDS_COMPLETION"),
             "דרושה השלמת פרטים",
         )
