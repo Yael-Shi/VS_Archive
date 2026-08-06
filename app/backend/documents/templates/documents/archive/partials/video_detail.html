@@ -13,20 +13,23 @@
       data-embed-src="{{ video_presentation.youtube_embed_src }}"
       data-iframe-title="{{ video_presentation.iframe_title }}"
     >
-      <div class="video-embed-facade__placeholder" data-video-placeholder>
-        <h3 class="video-embed-facade__title">{{ video_presentation.placeholder_title }}</h3>
-        <p class="video-embed-facade__explainer">
-          {{ video_presentation.activation_explainer }}
-        </p>
-        <button
-          type="button"
-          class="btn btn-primary video-embed-facade__activate"
-          data-video-activate
-        >
-          {{ video_presentation.activate_label }}
-        </button>
+      <div class="video-embed-facade__media">
+        <div class="video-embed-facade__placeholder" data-video-placeholder>
+          <span class="video-embed-facade__play" aria-hidden="true"></span>
+          <h3 class="video-embed-facade__title">{{ video_presentation.placeholder_title }}</h3>
+          <p class="video-embed-facade__explainer">
+            {{ video_presentation.activation_explainer }}
+          </p>
+          <button
+            type="button"
+            class="btn btn-primary video-embed-facade__activate"
+            data-video-activate
+          >
+            {{ video_presentation.activate_label }}
+          </button>
+        </div>
+        <div class="video-embed-facade__player" data-video-player hidden></div>
       </div>
-      <div class="video-embed-facade__player" data-video-player hidden></div>
     </div>
 
     <p class="archive-detail-video__fallback">
