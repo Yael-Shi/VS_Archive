@@ -3376,6 +3376,7 @@ class ArchiveItemPresentationUiTests(TestCase):
         self.assertContains(resp, "הכל")
         self.assertContains(resp, "מסמכים וטקסטים")
         self.assertContains(resp, "תמונות")
+        self.assertContains(resp, "סרטונים")
         self.assertNotContains(resp, "מסמכים (OCR)")
 
     def test_archive_list_documents_and_texts_filter_includes_ocr_and_manual(self):

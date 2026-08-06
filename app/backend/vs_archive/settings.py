@@ -4,6 +4,7 @@ import re
 import tempfile
 
 from django.core.exceptions import ImproperlyConfigured
+from django.utils.csp import CSP  # pyright: ignore[reportMissingImports]
 
 _VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 
@@ -82,6 +83,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "vs_archive.alb_health_check_middleware.AlbHealthCheckMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "django.middleware.csp.ContentSecurityPolicyMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -171,6 +173,18 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_HTTPONLY = True
+
+# Smallest CSP change for public YouTube click-to-load: restrict outbound frames
+# only. Other directives remain unset so existing scripts/styles/fonts keep working.
+# Approved embed origin is youtube-nocookie.com only (no broad video wildcards).
+SECURE_CSP = {
+    "frame-src": [CSP.SELF, "https://www.youtube-nocookie.com"],
+}
+
+# Preserve Django's same-origin Referrer-Policy site-wide. YouTube click-to-load
+# iframes set referrerPolicy="no-referrer" client-side; do not weaken the site
+# policy to send the VS-Archive origin on cross-origin requests.
+SECURE_REFERRER_POLICY = "same-origin"
 
 LOG_LEVEL = _log_level_from_env("LOG_LEVEL")
 

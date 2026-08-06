@@ -1,5 +1,33 @@
 # VS-Archive Decision Log
 
+## VIDEO ArchiveItems — PR3 public discovery, detail, click-to-load, security
+
+**Decision / implemented:** Ship the public VIDEO experience on existing `/archive/` browse/detail routes, including YouTube click-to-load, KAN/OTHER external-link presentation, public type filter “סרטונים”, CSP `frame-src`, Referrer-Policy, privacy copy, and accessibility for the activation control.
+
+**Public contract:**
+
+- VIDEO appears in authorized browse/search/pagination via existing `archive_browse_queryset_for_user` / search-index metadata hooks from PR1.
+- Public type filter choices are: הכל / מסמכים וטקסטים / תמונות / סרטונים. VIDEO is never merged into documents/texts.
+- Browse cards use a local `--video` marker and provider label preview; no third-party thumbnails or network fetches at render time.
+- Public detail reuses ArchiveItem metadata partials; media UI is provider-specific via `documents/services/video_presentation.py`.
+- YouTube: no iframe / no YouTube request before explicit activation; local placeholder shows the ArchiveItem title (fallback “סרטון”) plus activation control; iframe `src` is built server-side as `https://www.youtube-nocookie.com/embed/<validated-id>` with integer start/end only; no autoplay; no-JS fallback link to normalized `source_url`.
+- KAN / OTHER: external-link only (`target="_blank" rel="noopener noreferrer"`); never iframe / HLS / posters.
+- Missing or inconsistent `VideoContent` fails closed (`Http404` / no unsafe link).
+
+**Security headers (site-wide via Django settings/middleware):**
+
+- `ContentSecurityPolicyMiddleware` + `SECURE_CSP = {"frame-src": ['self', https://www.youtube-nocookie.com]}` — smallest CSP change; does not set/open `default-src` / `script-src` / `object-src`.
+- `SECURE_REFERRER_POLICY = "same-origin"` — preserves Django’s prior site-wide default. YouTube click-to-load iframes use `referrerPolicy="no-referrer"`; do not weaken the site policy to send the VS-Archive origin on cross-origin requests.
+- Public presentation re-parses `VideoContent.source_url` with `parse_video_url()` and requires stored provider/mode/id/canonical URL to match; explicit YouTube start/end may differ from URL-derived times when otherwise valid.
+
+**Privacy copy:** About page section “פרטיות וסרטונים חיצוניים” plus on-detail YouTube activation explainer. No cookie-consent system.
+
+**Management list (current):** VIDEO titles link to public `archive-detail`. Edit and delete remain separate management actions. Public VIDEO detail is implemented.
+
+**Out of scope:** uploads, thumbnails, provider metadata APIs, captions/transcription, OCR/HTR/workers/infra, analytics, autoplay, arbitrary embeds.
+
+**Tests:** `documents/test_video_public.py`; manage-list regression updated in `documents/test_video_manage.py`.
+
 ## VIDEO ArchiveItems — PR2 management UI
 
 **Decision / implemented:** Add staff management create/edit/delete for `ArchiveItem.ItemType.VIDEO` on existing `/archive/manage/` routes, reusing PR1 services (`create_video_archive_item` / `update_video_archive_item` / `parse_video_archive_item_form`).
@@ -12,12 +40,13 @@
 - Management UI shows a Hebrew presentation-mode explanation (`הסרטון יוצג כאן באתר` / `הצפייה תיפתח באתר המקורי`). Progressive-enhancement script toggles time fields/hint only; validation stays server-side.
 - Restricted visibility choices and write authorization reuse `parse_visibility(user=)` exactly as MANUAL_TEXT / PHOTO / OCR.
 - Delete allowlist includes VIDEO; cascading `VideoContent` delete follows the OneToOne CASCADE (no S3 cleanup).
-- Successful create/edit redirects to the manage list (public VIDEO detail remains PR3).
-- Until PR3, manage-list VIDEO titles link to `archive-manage-edit` (not `archive-detail`, which would 404). OCR/MANUAL_TEXT/PHOTO title links remain `archive-detail`.
+- Successful create/edit redirects to the manage list.
 - Delete uses `get_accessible_archive_item` (visibility-scoped via `filter_archive_items_for_user`); restricted VIDEO cannot be opened or deleted without `documents.view_restricted_archiveitem`.
 - Management subtitle copy: “הוספה באמצעות קישור, ללא העלאת קובץ” (not “קישור חיצוני בלבד”, which contradicted YouTube embedded mode).
 
-**Unchanged / out of scope for this PR:** public detail/cards/filters/search presentation, click-to-load embeds, CSP/Referrer-Policy, privacy copy, thumbnails, uploads, OCR/HTR/workers/infra.
+**Historical note (superseded by PR3):** While public VIDEO detail did not yet exist, PR2 temporarily linked manage-list VIDEO titles to `archive-manage-edit` to avoid a 404. That workaround is no longer current. **Current behavior:** manage-list VIDEO titles link to public `archive-detail`; edit/delete remain separate actions.
+
+**Unchanged / out of scope for this PR:** public detail/cards/filters/search presentation, click-to-load embeds, CSP/Referrer-Policy, privacy copy, thumbnails, uploads, OCR/HTR/workers/infra. *(Public surfaces completed in PR3 entry above.)*
 
 **Tests:** `documents/test_video_manage.py`; restricted visibility form coverage extended in `documents/test_restricted_visibility_forms.py`.
 

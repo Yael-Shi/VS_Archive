@@ -44,6 +44,24 @@ PROVIDER_OTHER = "OTHER"
 MODE_EMBEDDED = "EMBEDDED"
 MODE_EXTERNAL_LINK = "EXTERNAL_LINK"
 
+PROVIDER_DISPLAY_LABELS: dict[str, str] = {
+    PROVIDER_YOUTUBE: "YouTube",
+    PROVIDER_KAN: "כאן",
+    PROVIDER_OTHER: "אתר חיצוני",
+}
+
+
+def video_provider_display_label(provider: str | None) -> str:
+    """Short provider label for management UI and public presentation.
+
+    Blank/missing provider → empty string. Known providers → fixed labels.
+    Unrecognized non-empty values fall back to the OTHER label.
+    """
+    key = str(provider or "").strip().upper()
+    if not key:
+        return ""
+    return PROVIDER_DISPLAY_LABELS.get(key, PROVIDER_DISPLAY_LABELS[PROVIDER_OTHER])
+
 
 @dataclass(frozen=True, slots=True)
 class ParsedVideoUrl:

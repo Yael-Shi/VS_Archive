@@ -28,6 +28,7 @@ from documents.services.video_url_contract import (
     PROVIDER_YOUTUBE,
     ParsedVideoUrl,
     is_valid_youtube_video_id,
+    video_provider_display_label,
 )
 
 _UNSET = object()
@@ -67,18 +68,6 @@ def video_presentation_mode_explanation(
         return VIDEO_PRESENTATION_EMBEDDED_HINT
     if provider_key in {PROVIDER_KAN, PROVIDER_OTHER}:
         return VIDEO_PRESENTATION_EXTERNAL_HINT
-    return ""
-
-
-def video_provider_display_label(provider: str | None) -> str:
-    """Short Hebrew/Latin provider label for management UI hints."""
-    key = (provider or "").strip().upper()
-    if key == PROVIDER_YOUTUBE:
-        return "YouTube"
-    if key == PROVIDER_KAN:
-        return "כאן"
-    if key == PROVIDER_OTHER:
-        return "אתר חיצוני"
     return ""
 
 

@@ -1,0 +1,62 @@
+{# Public VIDEO media area — no third-party requests before activation. #}
+<section class="archive-detail-video" aria-labelledby="archive-detail-video-heading">
+  <h2 id="archive-detail-video-heading" class="section-title archive-detail-text-heading">סרטון</h2>
+
+  <p class="archive-detail-video__provider muted">
+    מקור: {{ video_presentation.provider_label }}
+  </p>
+
+  {% if video_presentation.is_youtube_embed %}
+    <div
+      class="video-embed-facade"
+      data-video-embed
+      data-embed-src="{{ video_presentation.youtube_embed_src }}"
+      data-iframe-title="{{ video_presentation.iframe_title }}"
+    >
+      <div class="video-embed-facade__placeholder" data-video-placeholder>
+        <h3 class="video-embed-facade__title">{{ video_presentation.placeholder_title }}</h3>
+        <p class="video-embed-facade__explainer">
+          {{ video_presentation.activation_explainer }}
+        </p>
+        <button
+          type="button"
+          class="btn btn-primary video-embed-facade__activate"
+          data-video-activate
+        >
+          {{ video_presentation.activate_label }}
+        </button>
+      </div>
+      <div class="video-embed-facade__player" data-video-player hidden></div>
+    </div>
+
+    <p class="archive-detail-video__fallback">
+      <a
+        class="btn btn-secondary"
+        href="{{ video_presentation.source_url }}"
+        target="_blank"
+        rel="noopener noreferrer"
+      >{{ video_presentation.open_on_youtube_label }}</a>
+      <span class="visually-hidden">{{ video_presentation.external_link_opens_note }}</span>
+    </p>
+  {% else %}
+    <div class="video-external-card">
+      <p class="video-external-card__note muted">
+        VS-Archive אינו מארח את הסרטון עצמו. הצפייה נפתחת באתר המקורי.
+      </p>
+      {% if video_presentation.source_domain_display %}
+        <p class="video-external-card__domain muted">
+          אתר: {{ video_presentation.source_domain_display }}
+        </p>
+      {% endif %}
+      <p class="video-external-card__action">
+        <a
+          class="btn btn-primary"
+          href="{{ video_presentation.source_url }}"
+          target="_blank"
+          rel="noopener noreferrer"
+        >{{ video_presentation.external_button_label }}</a>
+        <span class="visually-hidden">{{ video_presentation.external_link_opens_note }}</span>
+      </p>
+    </div>
+  {% endif %}
+</section>

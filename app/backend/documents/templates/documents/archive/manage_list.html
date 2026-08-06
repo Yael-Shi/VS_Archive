@@ -33,11 +33,7 @@
               <tr>
                 <td>{{ item.id }}</td>
                 <td>
-                  {% if item.item_type == "VIDEO" %}
-                    <a href="{% url 'archive-manage-edit' item_id=item.id %}">{{ item.title }}</a>
-                  {% else %}
-                    <a href="{% url 'archive-detail' item_id=item.id %}">{{ item.title }}</a>
-                  {% endif %}
+                  <a href="{% url 'archive-detail' item_id=item.id %}">{{ item.title }}</a>
                 </td>
                 <td>{{ item.item_type|archive_item_type_label }}</td>
                 <td>{{ item.visibility|archive_visibility_display_label }}</td>
