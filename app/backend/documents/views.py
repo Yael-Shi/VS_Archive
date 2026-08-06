@@ -154,12 +154,15 @@ from documents.services.archive_item_validation import (
     parse_date_precision,
 )
 from documents.services.manual_text_validation import parse_manual_text_form
-from documents.services.video_url_contract import PROVIDER_YOUTUBE
+from documents.services.video_url_contract import (
+    PROVIDER_YOUTUBE,
+    video_provider_display_label,
+)
+from documents.services.video_presentation import build_video_public_presentation
 from documents.services.video_validation import (
     format_video_time_for_form,
     parse_video_archive_item_form,
     video_presentation_mode_explanation,
-    video_provider_display_label,
 )
 from documents.services.photo_upload import (
     create_photo_upload_plan,
@@ -3731,6 +3734,7 @@ def _archive_browse_select_related(queryset):
         "manual_text_content",
         "ocr_document",
         "photo_content",
+        "video_content",
     ).prefetch_related(
         "categories",
         "events",
@@ -3917,6 +3921,22 @@ def archive_detail_page(request, item_id: int):
                 "body": None,
                 "photo_url": photo_url,
                 "photo_content": photo_content,
+                "is_admin": _is_admin(request.user),
+            },
+        )
+
+    if item.item_type == ArchiveItem.ItemType.VIDEO:
+        video_presentation = build_video_public_presentation(item)
+        if video_presentation is None:
+            raise Http404()
+        return render(
+            request,
+            "documents/archive/detail.html",
+            context={
+                "item": item,
+                "body": None,
+                "photo_url": None,
+                "video_presentation": video_presentation,
                 "is_admin": _is_admin(request.user),
             },
         )

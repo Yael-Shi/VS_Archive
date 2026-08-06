@@ -412,10 +412,9 @@ class VideoManageListAndPermissionsTests(TestCase):
         self.assertContains(resp, f'href="{delete_href}"')
         self.assertContains(
             resp,
-            f'<a href="{edit_href}">Listed video</a>',
+            f'<a href="{detail_href}">Listed video</a>',
             html=True,
         )
-        self.assertNotContains(resp, f'href="{detail_href}"')
 
     def test_manage_list_manual_title_still_links_to_detail(self):
         item = create_manual_text_archive_item(

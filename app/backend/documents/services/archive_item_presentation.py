@@ -31,6 +31,7 @@ from documents.services.text_presentation import (
     archive_item_displayable_text_results_prefetch,
     get_displayed_transcription_text,
 )
+from documents.services.video_url_contract import video_provider_display_label
 
 ARCHIVE_LIST_ITEM_TYPE_FILTER_ALL = ""
 ARCHIVE_LIST_ITEM_TYPE_FILTER_OCR = "ocr_document"
@@ -41,6 +42,7 @@ ARCHIVE_LIST_ITEM_TYPE_FILTER_VIDEO = "video"
 ARCHIVE_PUBLIC_LIST_TYPE_FILTER_ALL = ""
 ARCHIVE_PUBLIC_LIST_TYPE_FILTER_DOCUMENTS_AND_TEXTS = "documents_and_texts"
 ARCHIVE_PUBLIC_LIST_TYPE_FILTER_PHOTO = "photo"
+ARCHIVE_PUBLIC_LIST_TYPE_FILTER_VIDEO = "video"
 
 ARCHIVE_PUBLIC_LIST_TYPE_FILTER_CHOICES: tuple[tuple[str, str], ...] = (
     (ARCHIVE_PUBLIC_LIST_TYPE_FILTER_ALL, "הכל"),
@@ -49,6 +51,7 @@ ARCHIVE_PUBLIC_LIST_TYPE_FILTER_CHOICES: tuple[tuple[str, str], ...] = (
         "מסמכים וטקסטים",
     ),
     (ARCHIVE_PUBLIC_LIST_TYPE_FILTER_PHOTO, "תמונות"),
+    (ARCHIVE_PUBLIC_LIST_TYPE_FILTER_VIDEO, "סרטונים"),
 )
 
 # Short read-only labels for manager-facing metadata (lists, detail leads, queues).
@@ -225,6 +228,12 @@ def normalize_archive_public_list_type_filter(raw: str | None) -> str:
         ArchiveItem.ItemType.PHOTO.value.lower(),
     ):
         return ARCHIVE_PUBLIC_LIST_TYPE_FILTER_PHOTO
+    if value in (
+        ARCHIVE_PUBLIC_LIST_TYPE_FILTER_VIDEO,
+        ARCHIVE_LIST_ITEM_TYPE_FILTER_VIDEO,
+        ArchiveItem.ItemType.VIDEO.value.lower(),
+    ):
+        return ARCHIVE_PUBLIC_LIST_TYPE_FILTER_VIDEO
     return ""
 
 
@@ -245,6 +254,8 @@ def filter_archive_items_by_public_list_type(
         )
     if slug == ARCHIVE_PUBLIC_LIST_TYPE_FILTER_PHOTO:
         return queryset.filter(item_type=ArchiveItem.ItemType.PHOTO)
+    if slug == ARCHIVE_PUBLIC_LIST_TYPE_FILTER_VIDEO:
+        return queryset.filter(item_type=ArchiveItem.ItemType.VIDEO)
     return queryset
 
 
@@ -715,6 +726,7 @@ _TYPE_MARKER_BY_ITEM_TYPE: dict[str, str] = {
     ArchiveItem.ItemType.OCR_DOCUMENT: "ocr",
     ArchiveItem.ItemType.MANUAL_TEXT: "manual",
     ArchiveItem.ItemType.PHOTO: "photo",
+    ArchiveItem.ItemType.VIDEO: "video",
 }
 
 
@@ -787,6 +799,18 @@ def _photo_preview(archive_item: ArchiveItem) -> str:
     return ""
 
 
+def _video_preview(archive_item: ArchiveItem) -> str:
+    """Local provider label (+ optional public note); never fetches remote media."""
+    content = getattr(archive_item, "video_content", None)
+    provider_label = video_provider_display_label(
+        getattr(content, "provider", None) if content is not None else None
+    )
+    note = _normalize_preview_source(getattr(archive_item, "public_note", None))
+    if note:
+        return _truncate_preview(f"{provider_label} · {note}")
+    return provider_label
+
+
 def _ocr_document_preview(archive_item: ArchiveItem) -> str:
     document = getattr(archive_item, "ocr_document", None)
     if document is None:
@@ -807,6 +831,9 @@ def _preview_text_for_archive_item(archive_item: ArchiveItem) -> str:
         return preview or ARCHIVE_BROWSE_PREVIEW_EMPTY
     if item_type == ArchiveItem.ItemType.PHOTO:
         preview = _photo_preview(archive_item)
+        return preview or ARCHIVE_BROWSE_PREVIEW_EMPTY
+    if item_type == ArchiveItem.ItemType.VIDEO:
+        preview = _video_preview(archive_item)
         return preview or ARCHIVE_BROWSE_PREVIEW_EMPTY
     return ARCHIVE_BROWSE_PREVIEW_EMPTY
 

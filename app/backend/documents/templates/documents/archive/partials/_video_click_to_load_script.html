@@ -1,0 +1,75 @@
+<script>
+(function () {
+  var root = document.querySelector("[data-video-embed]");
+  if (!root) {
+    return;
+  }
+
+  var activate = root.querySelector("[data-video-activate]");
+  var placeholder = root.querySelector("[data-video-placeholder]");
+  var player = root.querySelector("[data-video-player]");
+  if (!activate || !placeholder || !player) {
+    return;
+  }
+
+  var ALLOWED_EMBED_PREFIX = "https://www.youtube-nocookie.com/embed/";
+
+  function isApprovedEmbedSrc(src) {
+    if (typeof src !== "string" || !src) {
+      return false;
+    }
+    if (src.indexOf(ALLOWED_EMBED_PREFIX) !== 0) {
+      return false;
+    }
+    // Reject unexpected schemes/hosts sneaked via whitespace or control chars.
+    if (/\s/.test(src) || src.toLowerCase().indexOf("javascript:") === 0) {
+      return false;
+    }
+    try {
+      var parsed = new URL(src);
+      return (
+        parsed.protocol === "https:" &&
+        parsed.hostname === "www.youtube-nocookie.com" &&
+        parsed.pathname.indexOf("/embed/") === 0
+      );
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function activateEmbed() {
+    if (root.getAttribute("data-video-activated") === "1") {
+      return;
+    }
+    var src = root.getAttribute("data-embed-src") || "";
+    var title = root.getAttribute("data-iframe-title") || "נגן YouTube";
+    if (!isApprovedEmbedSrc(src)) {
+      return;
+    }
+
+    var iframe = document.createElement("iframe");
+    iframe.className = "video-embed-facade__iframe";
+    iframe.src = src;
+    iframe.title = title;
+    iframe.setAttribute("allowfullscreen", "");
+    iframe.setAttribute(
+      "allow",
+      "accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+    );
+    iframe.setAttribute("loading", "lazy");
+    iframe.referrerPolicy = "no-referrer";
+
+    player.hidden = false;
+    player.appendChild(iframe);
+    placeholder.hidden = true;
+    root.setAttribute("data-video-activated", "1");
+    activate.setAttribute("aria-expanded", "true");
+  }
+
+  activate.setAttribute("aria-expanded", "false");
+  activate.addEventListener("click", function (event) {
+    event.preventDefault();
+    activateEmbed();
+  });
+})();
+</script>

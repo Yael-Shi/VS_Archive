@@ -10,7 +10,7 @@
         <span aria-hidden="true">←</span>
       </a>
       {% if is_admin %}
-        {% if item.item_type == "MANUAL_TEXT" or item.item_type == "PHOTO" %}
+        {% if item.item_type == "MANUAL_TEXT" or item.item_type == "PHOTO" or item.item_type == "VIDEO" %}
           <a class="btn" href="{% url 'archive-manage-edit' item_id=item.id %}">עריכה</a>
           <a class="btn" href="{% url 'archive-manage-delete' item_id=item.id %}">מחיקה</a>
         {% endif %}
@@ -84,5 +84,12 @@
         <p class="muted">התמונה אינה זמינה כרגע.</p>
       {% endif %}
     {% endif %}
+    {% if item.item_type == "VIDEO" and video_presentation %}
+      <div class="spacer"></div>
+      {% include "documents/archive/partials/video_detail.html" with video_presentation=video_presentation %}
+    {% endif %}
   </div>
+  {% if item.item_type == "VIDEO" and video_presentation and video_presentation.is_youtube_embed %}
+    {% include "documents/archive/partials/_video_click_to_load_script.html" %}
+  {% endif %}
 {% endblock %}
