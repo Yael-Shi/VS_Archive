@@ -181,9 +181,10 @@ SECURE_CSP = {
     "frame-src": [CSP.SELF, "https://www.youtube-nocookie.com"],
 }
 
-# Preserve Django's same-origin Referrer-Policy site-wide. YouTube click-to-load
-# iframes set referrerPolicy="no-referrer" client-side; do not weaken the site
-# policy to send the VS-Archive origin on cross-origin requests.
+# Preserve Django's same-origin Referrer-Policy site-wide (does not send the
+# archive-item path cross-origin). Activated YouTube click-to-load iframes set
+# referrerPolicy="strict-origin-when-cross-origin" client-side so YouTube receives
+# an origin-level Referer (avoids error 153) without weakening this site policy.
 SECURE_REFERRER_POLICY = "same-origin"
 
 LOG_LEVEL = _log_level_from_env("LOG_LEVEL")

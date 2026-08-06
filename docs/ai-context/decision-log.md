@@ -1,5 +1,28 @@
 # VS-Archive Decision Log
 
+## VIDEO public YouTube — error 153 referrer fix + unified click-to-load facade
+
+**Decision / implemented:** Narrow public VIDEO follow-up after PR3. Production YouTube embeds showed error 153 after click-to-load activation because the iframe used `referrerPolicy="no-referrer"`, which withheld the Referer/client identification YouTube requires. Also unify the pre-activation privacy placeholder and post-activation player into one media component.
+
+**Current behavior:**
+
+- Site-wide Django `SECURE_REFERRER_POLICY` remains `same-origin` (archive-item path is not sent cross-origin on ordinary navigations).
+- Activated YouTube iframe sets `referrerPolicy="strict-origin-when-cross-origin"` so YouTube receives an origin-level Referer without sending the full item path.
+- Do **not** use iframe `no-referrer`. Do **not** weaken the site-wide Referrer-Policy.
+- External KAN/OTHER and YouTube fallback links keep `rel="noopener noreferrer"`.
+- Approved embed host remains `https://www.youtube-nocookie.com` only; CSP `frame-src` unchanged; no autoplay; no fallback to `youtube.com/embed`.
+- Click-to-load still creates the iframe only after explicit activation (initial HTML has no iframe / no third-party thumbnail).
+- Unified `.video-embed-facade__media` holds both the local placeholder and the hidden player; activation hides the complete facade content and reveals the iframe in the same media area (no second player block below the placeholder).
+- Layout: **16:9 by default** (`aspect-ratio: 16 / 9`) with **`min-height: 200px`** so title, explainer, and activation control remain usable. On sufficiently narrow content widths (e.g. ~320px), the box may become **slightly taller than 16:9**; the player fills the same container (no layout jump). No explicit 4:3 media-query override.
+- After activation, focus moves to the iframe; the iframe stays in sequential Tab order (native focusability — do **not** set `tabindex="-1"`). The activation button is disabled only after successful iframe creation/insertion.
+- Client-side embed validation (defense-in-depth; server still builds the URL): exact HTTPS + `www.youtube-nocookie.com` + `/embed/<11-char id>`; no userinfo/non-default port/hash; query allowlist only `playsinline` / `start` / `end` (no duplicates; canonical integer times; `playsinline` must be `1` when present; reject `autoplay` and any unknown key).
+
+**Supersedes (PR3 referrer note):** PR3 documented iframe `referrerPolicy="no-referrer"`. That choice caused YouTube error 153 in production and is no longer current.
+
+**Out of scope:** VIDEO models/migrations/parser/provider classification, management forms, search/visibility, KAN/OTHER presentation mode, metadata/thumbnails/uploads/captions/transcription/workers/queues, unrelated infrastructure.
+
+**Tests:** `documents/test_video_public.py` (referrer contract, unified facade HTML/script contract, query allowlist, keyboard/focus contract, CSP/Referrer-Policy, security regressions).
+
 ## VIDEO ArchiveItems — PR3 public discovery, detail, click-to-load, security
 
 **Decision / implemented:** Ship the public VIDEO experience on existing `/archive/` browse/detail routes, including YouTube click-to-load, KAN/OTHER external-link presentation, public type filter “סרטונים”, CSP `frame-src`, Referrer-Policy, privacy copy, and accessibility for the activation control.
@@ -17,16 +40,17 @@
 **Security headers (site-wide via Django settings/middleware):**
 
 - `ContentSecurityPolicyMiddleware` + `SECURE_CSP = {"frame-src": ['self', https://www.youtube-nocookie.com]}` — smallest CSP change; does not set/open `default-src` / `script-src` / `object-src`.
-- `SECURE_REFERRER_POLICY = "same-origin"` — preserves Django’s prior site-wide default. YouTube click-to-load iframes use `referrerPolicy="no-referrer"`; do not weaken the site policy to send the VS-Archive origin on cross-origin requests.
+- `SECURE_REFERRER_POLICY = "same-origin"` — preserves Django’s prior site-wide default. *(Historical PR3 note: iframes originally used `referrerPolicy="no-referrer"`. Superseded by the error-153 follow-up above: activated iframes now use `strict-origin-when-cross-origin`; site-wide policy stays `same-origin`.)*
 - Public presentation re-parses `VideoContent.source_url` with `parse_video_url()` and requires stored provider/mode/id/canonical URL to match; explicit YouTube start/end may differ from URL-derived times when otherwise valid.
 
-**Privacy copy:** About page section “פרטיות וסרטונים חיצוניים” plus on-detail YouTube activation explainer. No cookie-consent system.
+**Privacy copy:** About page section “פרטיות וסרטונים חיצוניים” plus on-detail YouTube activation explainer. No cookie-consent system. Copy states YouTube loads only after activation via `youtube-nocookie.com`; it does not claim that no information is sent after activation.
 
 **Management list (current):** VIDEO titles link to public `archive-detail`. Edit and delete remain separate management actions. Public VIDEO detail is implemented.
 
 **Out of scope:** uploads, thumbnails, provider metadata APIs, captions/transcription, OCR/HTR/workers/infra, analytics, autoplay, arbitrary embeds.
 
 **Tests:** `documents/test_video_public.py`; manage-list regression updated in `documents/test_video_manage.py`.
+
 
 ## VIDEO ArchiveItems — PR2 management UI
 

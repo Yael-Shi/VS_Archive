@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
+from typing import Any
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group, Permission
 from django.contrib.contenttypes.models import ContentType
@@ -38,6 +43,61 @@ YOUTUBE_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 YOUTUBE_URL_TIMES = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=12"
 KAN_URL = "https://www.kan.org.il/content/kan/item/999/"
 OTHER_URL = "https://example.com/videos/clip-1"
+
+
+def _extract_click_to_load_script(html: str) -> str:
+    """Return the inline click-to-load script body from a rendered detail page."""
+    marker = 'document.querySelector("[data-video-embed]")'
+    start = html.find(marker)
+    if start == -1:
+        raise AssertionError("click-to-load script not found in rendered HTML")
+    script_open = html.rfind("<script>", 0, start)
+    script_close = html.find("</script>", start)
+    if script_open == -1 or script_close == -1:
+        raise AssertionError("click-to-load script tags not found")
+    return html[script_open + len("<script>") : script_close]
+
+
+def _eval_is_approved_embed_src_with_node(
+    script: str, urls: list[str]
+) -> dict[str, bool] | None:
+    """Execute rendered ``isApprovedEmbedSrc`` in Node; return None if Node missing."""
+    if shutil.which("node") is None:
+        return None
+    # Isolate validator helpers from DOM wiring / activateEmbed.
+    helpers_start = script.find("var ALLOWED_EMBED_PREFIX")
+    helpers_end = script.find("function activateEmbed")
+    if helpers_start == -1 or helpers_end == -1:
+        raise AssertionError("validator helpers not found in click-to-load script")
+    helpers = script[helpers_start:helpers_end]
+    payload = json.dumps(urls)
+    node_program = (
+        helpers
+        + "\n"
+        + "var urls = "
+        + payload
+        + ";\n"
+        + "var out = {};\n"
+        + "for (var i = 0; i < urls.length; i++) {\n"
+        + "  out[urls[i]] = isApprovedEmbedSrc(urls[i]);\n"
+        + "}\n"
+        + "process.stdout.write(JSON.stringify(out));\n"
+    )
+    completed = subprocess.run(
+        ["node", "-e", node_program],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise AssertionError(
+            "node failed to evaluate isApprovedEmbedSrc: "
+            f"{completed.stderr or completed.stdout}"
+        )
+    parsed: Any = json.loads(completed.stdout)
+    if not isinstance(parsed, dict):
+        raise AssertionError("unexpected node evaluator payload")
+    return {str(k): bool(v) for k, v in parsed.items()}
 
 
 def _grant_restricted_permission(user):
@@ -86,11 +146,11 @@ class VideoPublicPresentationHelperTests(TestCase):
         self.assertIsNone(_normalized_youtube_times(10, 5))
         self.assertIsNone(_normalized_youtube_times(None, 0))
         # bool must not count as int (shared by embed builder + presentation).
-        self.assertIsNone(_normalized_youtube_times(True, None))  # type: ignore[arg-type]
+        self.assertIsNone(_normalized_youtube_times(True, None))
         self.assertIsNone(
             build_youtube_nocookie_embed_src(
                 "dQw4w9WgXcQ",
-                start_seconds=True,  # type: ignore[arg-type]
+                start_seconds=True,
             )
         )
         self.assertIsNone(
@@ -460,6 +520,26 @@ class VideoPublicDetailTests(TestCase):
         self.assertContains(resp, item.video_content.source_url)
         self.assertContains(resp, "youtube-nocookie.com")
 
+        # One unified media wrapper contains placeholder + hidden player.
+        facade_start = html.find('class="video-embed-facade"')
+        self.assertNotEqual(facade_start, -1)
+        section_end = html.find("</section>", facade_start)
+        self.assertNotEqual(section_end, -1)
+        section_html = html[facade_start:section_end]
+        media_start = section_html.find('class="video-embed-facade__media"')
+        self.assertNotEqual(media_start, -1)
+        fallback_start = section_html.find("archive-detail-video__fallback")
+        self.assertNotEqual(fallback_start, -1)
+        media_region = section_html[media_start:fallback_start]
+        self.assertIn("data-video-placeholder", media_region)
+        self.assertIn("data-video-player", media_region)
+        self.assertIn("data-video-player hidden", media_region)
+        # Exactly one player region, inside the unified media wrapper only.
+        self.assertEqual(section_html.count("data-video-player"), 1)
+        self.assertEqual(section_html.count("video-embed-facade__player"), 1)
+        self.assertEqual(section_html.count("video-embed-facade__media"), 1)
+        self.assertNotIn("data-video-player", section_html[fallback_start:])
+
         # Placeholder facade includes the ArchiveItem title and activation control.
         start = html.find("data-video-placeholder")
         self.assertNotEqual(start, -1)
@@ -470,6 +550,8 @@ class VideoPublicDetailTests(TestCase):
         self.assertIn("data-video-activate", placeholder_region)
         self.assertIn("הפעלת הסרטון", placeholder_region)
         self.assertIn('class="video-embed-facade__title"', placeholder_region)
+        self.assertIn("video-embed-facade__explainer", placeholder_region)
+        self.assertIn("video-embed-facade__play", placeholder_region)
 
     def test_youtube_placeholder_title_escapes_html_like_metadata(self):
         dangerous = 'Clip <script>alert(1)</script> & "quote"'
@@ -621,7 +703,7 @@ class VideoSecurityHeaderTests(TestCase):
             self.assertNotIn("object-src", csp)
             self.assertEqual(resp.get("Referrer-Policy"), "same-origin")
 
-    def test_click_to_load_script_sets_iframe_referrer_policy_no_referrer(self):
+    def test_click_to_load_script_sets_iframe_referrer_policy_strict_origin(self):
         item = create_video_archive_item(
             title="Referrer iframe video",
             source_url=YOUTUBE_URL,
@@ -630,12 +712,183 @@ class VideoSecurityHeaderTests(TestCase):
         resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode("utf-8")
-        self.assertIn('iframe.referrerPolicy = "no-referrer"', html)
-        self.assertNotIn(
+        self.assertNotIn("<iframe", html.lower())
+        self.assertIn(
             'iframe.referrerPolicy = "strict-origin-when-cross-origin"',
             html,
         )
+        self.assertNotIn('iframe.referrerPolicy = "no-referrer"', html)
+        self.assertNotIn('referrerPolicy = "no-referrer"', html)
+        self.assertNotIn('referrerpolicy="no-referrer"', html.lower())
         self.assertIn('rel="noopener noreferrer"', html)
+        self.assertNotIn("autoplay", html.lower().split("data-embed-src")[0])
+        self.assertNotIn("autoplay=1", html.lower())
+        # Script contract: hide facade, reveal player, one-time activation.
+        self.assertIn("placeholder.hidden = true", html)
+        self.assertIn("player.hidden = false", html)
+        self.assertIn('data-video-activated", "1"', html)
+        self.assertIn("EMBED_PATH_RE = /^\\/embed\\/[A-Za-z0-9_-]{11}$/", html)
+        # Site-wide header remains same-origin (origin-only for iframe Referer).
+        self.assertEqual(resp.get("Referrer-Policy"), "same-origin")
+        csp = resp.get("Content-Security-Policy", "")
+        self.assertIn("https://www.youtube-nocookie.com", csp)
+        self.assertNotIn("https://www.youtube.com", csp)
+
+    def test_click_to_load_script_keeps_iframe_keyboard_reachable(self):
+        item = create_video_archive_item(
+            title="Keyboard focus video",
+            source_url=YOUTUBE_URL,
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+        script = _extract_click_to_load_script(html)
+        self.assertNotIn('tabindex", "-1"', script)
+        self.assertNotIn("tabindex='-1'", script)
+        self.assertNotIn('tabindex="-1"', script)
+        self.assertNotIn('setAttribute("tabindex", "-1")', script)
+        # Native iframe focusability: focus after insert; no tabindex=-1 removal
+        # from sequential Tab order. Explicit tabindex=0 is optional and unused.
+        self.assertIn("iframe.focus()", script)
+        self.assertNotIn('tabindex", "0"', script)
+        # Disable only after successful iframe creation/insertion.
+        create_idx = script.find('document.createElement("iframe")')
+        append_idx = script.find("player.appendChild(iframe)")
+        disable_idx = script.find('activate.setAttribute("disabled", "")')
+        focus_idx = script.find("iframe.focus()")
+        self.assertNotEqual(create_idx, -1)
+        self.assertNotEqual(append_idx, -1)
+        self.assertNotEqual(disable_idx, -1)
+        self.assertNotEqual(focus_idx, -1)
+        self.assertLess(create_idx, append_idx)
+        self.assertLess(append_idx, disable_idx)
+        self.assertLess(disable_idx, focus_idx)
+        # Early return on invalid src happens before createElement/disable.
+        reject_idx = script.find("if (!isApprovedEmbedSrc(src))")
+        self.assertNotEqual(reject_idx, -1)
+        self.assertLess(reject_idx, create_idx)
+
+    def test_click_to_load_script_query_allowlist_contract(self):
+        item = create_video_archive_item(
+            title="Query allowlist video",
+            source_url=YOUTUBE_URL_TIMES,
+            visibility=ArchiveItem.Visibility.PUBLIC,
+            start_seconds=12,
+            end_seconds=120,
+        )
+        resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+        script = _extract_click_to_load_script(html)
+        # Allowlist matches server-emittable keys only.
+        self.assertIn("ALLOWED_QUERY_KEYS", script)
+        self.assertIn("playsinline: true", script)
+        self.assertIn("start: true", script)
+        self.assertIn("end: true", script)
+        self.assertIn("function isApprovedEmbedQuery", script)
+        self.assertIn("function queryHasDuplicateKeys", script)
+        self.assertIn("CANONICAL_NONNEG_INT_RE", script)
+        self.assertIn("CANONICAL_POS_INT_RE", script)
+        # Empty query allowed; playsinline must be exactly "1" when present.
+        self.assertIn("if (!search)", script)
+        self.assertIn('playsinlineRaw !== "1"', script)
+        # Time ordering and integer shape.
+        self.assertIn("parseInt(endRaw, 10) <= parseInt(startRaw, 10)", script)
+        self.assertIn("/^(0|[1-9]\\d*)$/", script)
+        self.assertIn("/^[1-9]\\d*$/", script)
+        # Unknown keys / autoplay rejected via allowlist (not a special-case only).
+        self.assertIn("if (!ALLOWED_QUERY_KEYS[key])", script)
+        self.assertIn("queryHasDuplicateKeys(search)", script)
+        # Path/port/hash defenses remain.
+        self.assertIn("EMBED_PATH_RE", script)
+        self.assertIn('parsed.port !== "443"', script)
+        self.assertIn("if (parsed.hash)", script)
+        # Server-built data-embed-src still uses approved params (no autoplay).
+        self.assertIn("playsinline=1", html)
+        self.assertIn("start=12", html)
+        self.assertIn("end=120", html)
+        self.assertNotIn("autoplay", html.lower().split("<script>")[0])
+
+        # Execute the rendered validator in Node when available (no JS framework).
+        cases = [
+            ("https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ", True),
+            (
+                "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?playsinline=1",
+                True,
+            ),
+            (
+                "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+                "?playsinline=1&start=12&end=120",
+                True,
+            ),
+            (
+                "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+                "?playsinline=1&start=0",
+                True,
+            ),
+            (
+                "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+                "?playsinline=1&foo=1",
+                False,
+            ),
+            (
+                "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+                "?playsinline=1&playsinline=1",
+                False,
+            ),
+            (
+                "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+                "?playsinline=1&start=12a",
+                False,
+            ),
+            (
+                "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+                "?playsinline=1&start=01",
+                False,
+            ),
+            (
+                "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+                "?playsinline=1&start=20&end=10",
+                False,
+            ),
+            (
+                "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+                "?playsinline=1&autoplay=1",
+                False,
+            ),
+            (
+                "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+                "?playsinline=1&Autoplay=1",
+                False,
+            ),
+            (
+                "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?playsinline=1#t=1",
+                False,
+            ),
+            (
+                "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ/extra"
+                "?playsinline=1",
+                False,
+            ),
+            (
+                "https://www.youtube-nocookie.com:8443/embed/dQw4w9WgXcQ?playsinline=1",
+                False,
+            ),
+        ]
+        node_results = _eval_is_approved_embed_src_with_node(
+            script, [c[0] for c in cases]
+        )
+        if node_results is None:
+            self.skipTest(
+                "node is required to execute click-to-load query allowlist cases"
+            )
+        for src, expected in cases:
+            self.assertEqual(
+                node_results[src],
+                expected,
+                msg=f"isApprovedEmbedSrc({src!r}) expected {expected}",
+            )
 
     def test_external_provider_links_retain_noreferrer(self):
         kan = create_video_archive_item(
