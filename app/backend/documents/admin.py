@@ -21,6 +21,7 @@ from .models import (
     Tag,
     DocumentMetadata,
     TranskribusRun,
+    VideoContent,
 )
 
 
@@ -196,6 +197,44 @@ class PhotoContentAdmin(_VisibilityScopedAdminMixin, admin.ModelAdmin):
         "thumbnail_file_key",
         "thumbnail_mime_type",
         "thumbnail_size_bytes",
+        "created_at",
+        "updated_at",
+    )
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.filter(archive_item__in=archive_item_queryset_for_user(request.user))
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(VideoContent)
+class VideoContentAdmin(_VisibilityScopedAdminMixin, admin.ModelAdmin):
+    list_display = (
+        "id",
+        "archive_item",
+        "provider",
+        "presentation_mode",
+        "created_at",
+        "updated_at",
+    )
+    search_fields = ("archive_item__title", "source_url", "provider_video_id")
+    ordering = ("-created_at",)
+    readonly_fields = (
+        "archive_item",
+        "source_url",
+        "provider",
+        "presentation_mode",
+        "provider_video_id",
+        "start_seconds",
+        "end_seconds",
         "created_at",
         "updated_at",
     )

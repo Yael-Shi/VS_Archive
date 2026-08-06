@@ -101,6 +101,7 @@ def _body_text_for_archive_item(archive_item: ArchiveItem) -> str:
             return ""
         return _normalize_body(get_displayed_transcription_text(document))
 
+    # PHOTO / VIDEO / unknown: metadata-only indexing (no body/transcript).
     return ""
 
 

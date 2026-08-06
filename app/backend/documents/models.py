@@ -16,6 +16,7 @@ class ArchiveItem(models.Model):
         OCR_DOCUMENT = "OCR_DOCUMENT", "OCR document"
         MANUAL_TEXT = "MANUAL_TEXT", "Manual text"
         PHOTO = "PHOTO", "Photo"
+        VIDEO = "VIDEO", "Video"
 
     class Visibility(models.TextChoices):
         PRIVATE = "private", "Private"
@@ -228,6 +229,106 @@ class PhotoContent(models.Model):
 
     def __str__(self) -> str:
         return f"PhotoContent(archive_item_id={self.archive_item_id})"
+
+
+class VideoContent(models.Model):
+    """External video reference for VIDEO archive items (URL metadata only; no media bytes)."""
+
+    class Provider(models.TextChoices):
+        YOUTUBE = "YOUTUBE", "YouTube"
+        KAN = "KAN", "Kan"
+        OTHER = "OTHER", "Other"
+
+    class PresentationMode(models.TextChoices):
+        EMBEDDED = "EMBEDDED", "Embedded"
+        EXTERNAL_LINK = "EXTERNAL_LINK", "External link"
+
+    archive_item = models.OneToOneField(
+        ArchiveItem,
+        on_delete=models.CASCADE,
+        related_name="video_content",
+    )
+    source_url = models.CharField(max_length=2048)
+    provider = models.CharField(max_length=16, choices=Provider.choices)
+    presentation_mode = models.CharField(
+        max_length=16,
+        choices=PresentationMode.choices,
+    )
+    provider_video_id = models.CharField(max_length=32, blank=True, default="")
+    start_seconds = models.IntegerField(null=True, blank=True)
+    end_seconds = models.IntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(provider__in=["YOUTUBE", "KAN", "OTHER"]),
+                name="video_content_provider_valid",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(presentation_mode__in=["EMBEDDED", "EXTERNAL_LINK"]),
+                name="video_content_presentation_mode_valid",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        provider="YOUTUBE",
+                        presentation_mode="EMBEDDED",
+                    )
+                    & models.Q(provider_video_id__regex=r"^[A-Za-z0-9_-]{11}$")
+                )
+                | models.Q(
+                    provider="KAN",
+                    presentation_mode="EXTERNAL_LINK",
+                    provider_video_id="",
+                )
+                | models.Q(
+                    provider="OTHER",
+                    presentation_mode="EXTERNAL_LINK",
+                    provider_video_id="",
+                ),
+                name="video_content_provider_mode_id_shape",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(start_seconds__isnull=True)
+                | models.Q(start_seconds__gte=0),
+                name="video_content_start_seconds_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(end_seconds__isnull=True)
+                | models.Q(end_seconds__gt=0),
+                name="video_content_end_seconds_positive",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(end_seconds__isnull=True)
+                | (models.Q(start_seconds__isnull=True) & models.Q(end_seconds__gt=0))
+                | models.Q(end_seconds__gt=models.F("start_seconds")),
+                name="video_content_end_after_start",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(provider="YOUTUBE")
+                | models.Q(
+                    start_seconds__isnull=True,
+                    end_seconds__isnull=True,
+                ),
+                name="video_content_times_youtube_only",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(source_url=""),
+                name="video_content_source_url_nonempty",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        # Lazy import avoids circular imports with the URL parser/validation layer.
+        from documents.services.video_validation import validate_video_content_instance
+
+        validate_video_content_instance(self)
+
+    def __str__(self) -> str:
+        return f"VideoContent(archive_item_id={self.archive_item_id})"
 
 
 class DocumentQuerySet(models.QuerySet):
