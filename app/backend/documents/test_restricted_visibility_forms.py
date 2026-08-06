@@ -11,7 +11,13 @@ from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from documents.models import ArchiveItem, Document, ManualTextContent, PhotoContent
+from documents.models import (
+    ArchiveItem,
+    Document,
+    ManualTextContent,
+    PhotoContent,
+    VideoContent,
+)
 from documents.services.archive_item_access import VIEW_RESTRICTED_ARCHIVEITEM_CODENAME
 from documents.services.archive_item_presentation import (
     archive_visibility_ui_choices,
@@ -21,6 +27,7 @@ from documents.services.archive_item_presentation import (
 from documents.services.archive_items import (
     create_manual_text_archive_item,
     create_ocr_document,
+    create_video_archive_item,
 )
 from documents.services.archive_metadata_validation import (
     VISIBILITY_INVALID_ERROR,
@@ -670,3 +677,223 @@ class RestrictedPhotoUploadWriteTests(TestCase):
         self.assertEqual(resp.status_code, 201)
         item = ArchiveItem.objects.get(id=resp.json()["archive_item_id"])
         self.assertEqual(item.visibility, ArchiveItem.Visibility.PUBLIC)
+
+
+class RestrictedVideoFormWriteTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="restricted_video_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.authorized = _grant_restricted_permission(
+            User.objects.create_user(
+                username="restricted_video_authorized",
+                password="test-pass",
+                is_staff=True,
+            )
+        )
+        self.superuser = User.objects.create_superuser(
+            username="restricted_video_super",
+            email="video-super@example.com",
+            password="test-pass",
+        )
+
+    def _payload(self, **overrides):
+        payload = {
+            "item_type": "video",
+            "title": "Video restricted write",
+            "source_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "visibility": ArchiveItem.Visibility.PUBLIC,
+            "metadata_status": ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
+            "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
+            "start_seconds": "",
+            "end_seconds": "",
+            "categories": "",
+            "events": "",
+            "tags": "",
+        }
+        payload.update(overrides)
+        return merge_default_date_fields(payload)
+
+    def test_create_form_hides_restricted_option_without_permission(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(MANAGE_NEW_URL, {"item_type": "video"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "ציבורי")
+        self.assertContains(resp, "פרטי")
+        self.assertNotContains(resp, RESTRICTED_HEBREW_LABEL)
+        self.assertNotContains(resp, 'value="restricted"')
+
+    def test_create_form_shows_restricted_option_with_permission(self):
+        self.client.force_login(self.authorized)
+        resp = self.client.get(MANAGE_NEW_URL, {"item_type": "video"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, RESTRICTED_HEBREW_LABEL)
+        self.assertContains(resp, 'value="restricted"')
+
+    def test_unauthorized_staff_cannot_create_restricted_via_crafted_post(self):
+        before_items = ArchiveItem.objects.count()
+        before_videos = VideoContent.objects.count()
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            MANAGE_NEW_URL,
+            data=self._payload(visibility=ArchiveItem.Visibility.RESTRICTED),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, VISIBILITY_INVALID_ERROR)
+        self.assertEqual(ArchiveItem.objects.count(), before_items)
+        self.assertEqual(VideoContent.objects.count(), before_videos)
+
+    def test_authorized_staff_can_create_restricted_video(self):
+        self.client.force_login(self.authorized)
+        resp = self.client.post(
+            MANAGE_NEW_URL,
+            data=self._payload(
+                title="Authorized restricted video",
+                visibility=ArchiveItem.Visibility.RESTRICTED,
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        item = ArchiveItem.objects.get(title="Authorized restricted video")
+        self.assertEqual(item.item_type, ArchiveItem.ItemType.VIDEO)
+        self.assertEqual(item.visibility, ArchiveItem.Visibility.RESTRICTED)
+
+    def test_superuser_can_create_restricted_video(self):
+        self.client.force_login(self.superuser)
+        resp = self.client.post(
+            MANAGE_NEW_URL,
+            data=self._payload(
+                title="Superuser restricted video",
+                visibility=ArchiveItem.Visibility.RESTRICTED,
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        item = ArchiveItem.objects.get(title="Superuser restricted video")
+        self.assertEqual(item.visibility, ArchiveItem.Visibility.RESTRICTED)
+
+    def test_unauthorized_staff_cannot_change_item_to_restricted_on_edit(self):
+        item = create_video_archive_item(
+            title="Video edit stay public",
+            source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            EDIT_URL_TEMPLATE.format(item_id=item.id),
+            data=self._payload(
+                title="Video edit stay public",
+                visibility=ArchiveItem.Visibility.RESTRICTED,
+            ),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, VISIBILITY_INVALID_ERROR)
+        item.refresh_from_db()
+        self.assertEqual(item.visibility, ArchiveItem.Visibility.PUBLIC)
+
+    def test_authorized_staff_can_change_visibility_to_and_from_restricted(self):
+        item = create_video_archive_item(
+            title="Video toggle visibility",
+            source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            visibility=ArchiveItem.Visibility.PRIVATE,
+        )
+        self.client.force_login(self.authorized)
+        resp = self.client.post(
+            EDIT_URL_TEMPLATE.format(item_id=item.id),
+            data=self._payload(
+                title="Video toggle visibility",
+                visibility=ArchiveItem.Visibility.RESTRICTED,
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        item.refresh_from_db()
+        self.assertEqual(item.visibility, ArchiveItem.Visibility.RESTRICTED)
+
+        resp = self.client.post(
+            EDIT_URL_TEMPLATE.format(item_id=item.id),
+            data=self._payload(
+                title="Video toggle visibility",
+                visibility=ArchiveItem.Visibility.PUBLIC,
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        item.refresh_from_db()
+        self.assertEqual(item.visibility, ArchiveItem.Visibility.PUBLIC)
+
+    def test_unauthorized_staff_cannot_get_or_post_delete_restricted_video(self):
+        item = create_video_archive_item(
+            title="Restricted video delete blocked",
+            source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            visibility=ArchiveItem.Visibility.RESTRICTED,
+            user=self.authorized,
+        )
+        content_id = item.video_content.pk
+        delete_url = reverse("archive-manage-delete", kwargs={"item_id": item.id})
+
+        self.client.force_login(self.staff)
+        get_resp = self.client.get(delete_url)
+        self.assertEqual(get_resp.status_code, 404)
+
+        before_items = ArchiveItem.objects.count()
+        before_videos = VideoContent.objects.count()
+        post_resp = self.client.post(delete_url)
+        self.assertEqual(post_resp.status_code, 404)
+        self.assertEqual(ArchiveItem.objects.count(), before_items)
+        self.assertEqual(VideoContent.objects.count(), before_videos)
+        self.assertTrue(ArchiveItem.objects.filter(pk=item.pk).exists())
+        self.assertTrue(VideoContent.objects.filter(pk=content_id).exists())
+
+    def test_authorized_staff_can_delete_restricted_video(self):
+        item = create_video_archive_item(
+            title="Restricted video delete allowed",
+            source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            visibility=ArchiveItem.Visibility.RESTRICTED,
+            user=self.authorized,
+        )
+        item_id = item.pk
+        content_id = item.video_content.pk
+        delete_url = reverse("archive-manage-delete", kwargs={"item_id": item_id})
+
+        self.client.force_login(self.authorized)
+        get_resp = self.client.get(delete_url)
+        self.assertEqual(get_resp.status_code, 200)
+        self.assertContains(get_resp, "מחיקת סרטון")
+
+        post_resp = self.client.post(delete_url)
+        self.assertEqual(post_resp.status_code, 302)
+        self.assertEqual(post_resp["Location"], reverse("archive-manage-list"))
+        self.assertFalse(ArchiveItem.objects.filter(pk=item_id).exists())
+        self.assertFalse(VideoContent.objects.filter(pk=content_id).exists())
+
+    def test_superuser_can_delete_restricted_video(self):
+        item = create_video_archive_item(
+            title="Restricted video delete superuser",
+            source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            visibility=ArchiveItem.Visibility.RESTRICTED,
+            user=self.superuser,
+        )
+        item_id = item.pk
+        delete_url = reverse("archive-manage-delete", kwargs={"item_id": item_id})
+
+        self.client.force_login(self.superuser)
+        post_resp = self.client.post(delete_url)
+        self.assertEqual(post_resp.status_code, 302)
+        self.assertFalse(ArchiveItem.objects.filter(pk=item_id).exists())
+
+    def test_public_and_private_video_delete_remain_available_to_staff(self):
+        for visibility, title in (
+            (ArchiveItem.Visibility.PUBLIC, "Public video delete ok"),
+            (ArchiveItem.Visibility.PRIVATE, "Private video delete ok"),
+        ):
+            item = create_video_archive_item(
+                title=title,
+                source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                visibility=visibility,
+            )
+            delete_url = reverse("archive-manage-delete", kwargs={"item_id": item.id})
+            self.client.force_login(self.staff)
+            get_resp = self.client.get(delete_url)
+            self.assertEqual(get_resp.status_code, 200)
+            post_resp = self.client.post(delete_url)
+            self.assertEqual(post_resp.status_code, 302)
+            self.assertFalse(ArchiveItem.objects.filter(pk=item.pk).exists())

@@ -36,6 +36,7 @@ ARCHIVE_LIST_ITEM_TYPE_FILTER_ALL = ""
 ARCHIVE_LIST_ITEM_TYPE_FILTER_OCR = "ocr_document"
 ARCHIVE_LIST_ITEM_TYPE_FILTER_MANUAL = "manual_text"
 ARCHIVE_LIST_ITEM_TYPE_FILTER_PHOTO = "photo"
+ARCHIVE_LIST_ITEM_TYPE_FILTER_VIDEO = "video"
 
 ARCHIVE_PUBLIC_LIST_TYPE_FILTER_ALL = ""
 ARCHIVE_PUBLIC_LIST_TYPE_FILTER_DOCUMENTS_AND_TEXTS = "documents_and_texts"
@@ -183,6 +184,10 @@ def archive_manage_item_type_ui_choices() -> list[tuple[str, str]]:
         (
             ARCHIVE_LIST_ITEM_TYPE_FILTER_PHOTO,
             archive_item_type_label(ArchiveItem.ItemType.PHOTO),
+        ),
+        (
+            ARCHIVE_LIST_ITEM_TYPE_FILTER_VIDEO,
+            archive_item_type_label(ArchiveItem.ItemType.VIDEO),
         ),
     ]
 

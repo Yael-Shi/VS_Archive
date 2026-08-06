@@ -32,7 +32,13 @@
             {% for item in items %}
               <tr>
                 <td>{{ item.id }}</td>
-                <td><a href="{% url 'archive-detail' item_id=item.id %}">{{ item.title }}</a></td>
+                <td>
+                  {% if item.item_type == "VIDEO" %}
+                    <a href="{% url 'archive-manage-edit' item_id=item.id %}">{{ item.title }}</a>
+                  {% else %}
+                    <a href="{% url 'archive-detail' item_id=item.id %}">{{ item.title }}</a>
+                  {% endif %}
+                </td>
                 <td>{{ item.item_type|archive_item_type_label }}</td>
                 <td>{{ item.visibility|archive_visibility_display_label }}</td>
                 <td>{{ item.metadata_status|archive_metadata_status_label }}</td>
@@ -51,7 +57,7 @@
                   {% endif %}
                 </td>
                 <td>
-                  {% if item.item_type == "MANUAL_TEXT" or item.item_type == "PHOTO" %}
+                  {% if item.item_type == "MANUAL_TEXT" or item.item_type == "PHOTO" or item.item_type == "VIDEO" %}
                     <a class="btn" href="{% url 'archive-manage-edit' item_id=item.id %}">עריכה</a>
                     <a class="btn" href="{% url 'archive-manage-delete' item_id=item.id %}">מחיקה</a>
                   {% elif item.item_type == "OCR_DOCUMENT" %}

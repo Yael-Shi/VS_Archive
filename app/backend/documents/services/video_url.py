@@ -235,7 +235,12 @@ def _extract_youtube_end_seconds(query: dict[str, list[str]]) -> int | None:
     return _parse_youtube_time_value(values[0], allow_zero=False)
 
 
-def _parse_youtube_time_value(raw: str, *, allow_zero: bool = True) -> int:
+def parse_video_time_input(raw: str, *, allow_zero: bool = True) -> int:
+    """Parse a friendly video time value into whole seconds.
+
+    Accepts plain integer seconds (``90``) or YouTube-style clock components
+    (``1h2m3s``). Performs no network I/O.
+    """
     value = unquote(str(raw or "")).strip()
     if not value:
         raise ValueError(VIDEO_URL_INVALID_ERROR)
@@ -252,6 +257,10 @@ def _parse_youtube_time_value(raw: str, *, allow_zero: bool = True) -> int:
     if seconds < 0 or (seconds == 0 and not allow_zero):
         raise ValueError(VIDEO_URL_INVALID_ERROR)
     return seconds
+
+
+def _parse_youtube_time_value(raw: str, *, allow_zero: bool = True) -> int:
+    return parse_video_time_input(raw, allow_zero=allow_zero)
 
 
 def _validate_time_bounds(start_seconds: int | None, end_seconds: int | None) -> None:

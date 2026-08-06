@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - מחיקת סרטון{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-manage-list' %}">חזרה לניהול</a>
+    </div>
+
+    <h1 class="page-title">מחיקת סרטון</h1>
+
+    <div class="spacer"></div>
+
+    <p><strong>{{ item.title }}</strong></p>
+    <p class="page-subtitle">
+      פעולה זו תמחק את פריט הארכיון (סרטון) ואת נתוני הקישור המשויכים לו.
+      לא ניתן לשחזר מתוך האתר כרגע.
+    </p>
+    <p class="muted">
+      הסרטון עצמו אינו מאוחסן ב־VS-Archive; נמחק רק התיעוד בארכיון.
+    </p>
+
+    <div class="spacer"></div>
+
+    <form method="post">
+      {% csrf_token %}
+      <div class="page-toolbar">
+        <button type="submit" class="btn btn-danger">מחיקה</button>
+        <a class="btn" href="{% url 'archive-manage-list' %}">ביטול</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}
