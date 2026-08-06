@@ -1,0 +1,67 @@
+{% include "documents/archive/archive_metadata_form_fields.html" %}
+
+<div class="field">
+  <label for="source_url">קישור לסרטון *</label>
+  <input
+    id="source_url"
+    name="source_url"
+    type="url"
+    value="{{ form_data.source_url }}"
+    dir="ltr"
+    autocomplete="off"
+    data-video-source-url
+  />
+  <div class="field-hint">
+    הדביקו קישור ל־YouTube, לאתר כאן, או למקור חיצוני אחר.
+    המערכת מזהה את אופן ההצגה אוטומטית.
+  </div>
+</div>
+
+<div
+  id="video-presentation-hint"
+  class="field-hint"
+  {% if not form_data.presentation_mode_explanation %}hidden{% endif %}
+  data-video-presentation-hint
+>
+  <span data-video-presentation-text>
+    {% if form_data.provider_display_label %}{{ form_data.provider_display_label }} — {% endif %}{{ form_data.presentation_mode_explanation }}
+  </span>
+</div>
+
+<div
+  id="video-time-fields"
+  {% if not show_video_time_fields %}hidden{% endif %}
+  data-video-time-fields
+>
+  <div class="spacer"></div>
+  <div class="section-title">זמני צפייה (יוטיוב בלבד)</div>
+  <p class="page-subtitle">אופציונלי. אפשר להזין שניות או פורמט כמו 1h2m3s.</p>
+  <div class="meta-grid">
+    <div class="field">
+      <label for="start_seconds">זמן התחלה</label>
+      <input
+        id="start_seconds"
+        name="start_seconds"
+        type="text"
+        value="{{ form_data.start_seconds_display }}"
+        dir="ltr"
+        autocomplete="off"
+        {% if not show_video_time_fields %}disabled{% endif %}
+        data-video-time-input
+      />
+    </div>
+    <div class="field">
+      <label for="end_seconds">זמן סיום</label>
+      <input
+        id="end_seconds"
+        name="end_seconds"
+        type="text"
+        value="{{ form_data.end_seconds_display }}"
+        dir="ltr"
+        autocomplete="off"
+        {% if not show_video_time_fields %}disabled{% endif %}
+        data-video-time-input
+      />
+    </div>
+  </div>
+</div>

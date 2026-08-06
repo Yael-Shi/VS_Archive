@@ -14,7 +14,12 @@ from documents.services.archive_metadata_validation import (
     parse_public_note,
     validate_archive_metadata_fields,
 )
-from documents.services.video_url import parse_video_url
+from documents.services.video_url import (
+    VIDEO_URL_INVALID_ERROR,
+    VIDEO_URL_UNSUPPORTED_ERROR,
+    parse_video_time_input,
+    parse_video_url,
+)
 from documents.services.video_url_contract import (
     MODE_EMBEDDED,
     MODE_EXTERNAL_LINK,
@@ -28,6 +33,60 @@ from documents.services.video_url_contract import (
 _UNSET = object()
 
 VIDEO_TIME_UNSET = _UNSET
+
+VIDEO_SOURCE_URL_REQUIRED_ERROR = "יש להזין קישור לסרטון"
+VIDEO_SOURCE_URL_INVALID_ERROR = "קישור הסרטון אינו תקין"
+VIDEO_SOURCE_URL_UNSUPPORTED_ERROR = "קישור הסרטון אינו נתמך"
+VIDEO_START_TIME_INVALID_ERROR = "זמן התחלה אינו תקין. הזינו שניות או פורמט כמו 1h2m3s"
+VIDEO_END_TIME_INVALID_ERROR = "זמן סיום אינו תקין. הזינו שניות או פורמט כמו 1h2m3s"
+VIDEO_TIME_YOUTUBE_ONLY_ERROR = "זמני התחלה וסיום רלוונטיים ליוטיוב בלבד"
+VIDEO_END_AFTER_START_ERROR = "זמן הסיום חייב להיות גדול מזמן ההתחלה"
+
+VIDEO_PRESENTATION_EMBEDDED_HINT = "הסרטון יוצג כאן באתר"
+VIDEO_PRESENTATION_EXTERNAL_HINT = "הצפייה תיפתח באתר המקורי"
+
+_VIDEO_URL_ERROR_MESSAGES = {
+    VIDEO_URL_INVALID_ERROR: VIDEO_SOURCE_URL_INVALID_ERROR,
+    VIDEO_URL_UNSUPPORTED_ERROR: VIDEO_SOURCE_URL_UNSUPPORTED_ERROR,
+}
+
+
+def video_presentation_mode_explanation(
+    presentation_mode: str | None,
+    *,
+    provider: str | None = None,
+) -> str:
+    """Return the Hebrew management-UI explanation for a presentation mode."""
+    mode = (presentation_mode or "").strip().upper()
+    if mode == MODE_EMBEDDED:
+        return VIDEO_PRESENTATION_EMBEDDED_HINT
+    if mode == MODE_EXTERNAL_LINK:
+        return VIDEO_PRESENTATION_EXTERNAL_HINT
+    provider_key = (provider or "").strip().upper()
+    if provider_key == PROVIDER_YOUTUBE:
+        return VIDEO_PRESENTATION_EMBEDDED_HINT
+    if provider_key in {PROVIDER_KAN, PROVIDER_OTHER}:
+        return VIDEO_PRESENTATION_EXTERNAL_HINT
+    return ""
+
+
+def video_provider_display_label(provider: str | None) -> str:
+    """Short Hebrew/Latin provider label for management UI hints."""
+    key = (provider or "").strip().upper()
+    if key == PROVIDER_YOUTUBE:
+        return "YouTube"
+    if key == PROVIDER_KAN:
+        return "כאן"
+    if key == PROVIDER_OTHER:
+        return "אתר חיצוני"
+    return ""
+
+
+def format_video_time_for_form(seconds: int | None) -> str:
+    """Format stored seconds for optional time inputs (empty when unset)."""
+    if seconds is None:
+        return ""
+    return str(seconds)
 
 
 def apply_parsed_video_url(
@@ -215,48 +274,81 @@ def validate_video_archive_item_metadata(
         raise ValueError(errors[0])
 
 
+def _humanize_video_url_error(exc: Exception) -> str:
+    message = str(exc)
+    return _VIDEO_URL_ERROR_MESSAGES.get(message, message)
+
+
+def _parse_optional_time_override(
+    raw_value: Any,
+    *,
+    allow_zero: bool,
+    invalid_error: str,
+) -> tuple[Any, str | None]:
+    """Return ``(override, error)`` for an optional YouTube time form field.
+
+    Blank / missing → ``VIDEO_TIME_UNSET`` so URL-derived times remain.
+    """
+    if raw_value is _UNSET:
+        return _UNSET, None
+    text = str(raw_value).strip()
+    if not text:
+        return _UNSET, None
+    try:
+        return parse_video_time_input(text, allow_zero=allow_zero), None
+    except ValueError:
+        return _UNSET, invalid_error
+
+
 def parse_video_archive_item_form(
     post_data: dict[str, Any],
     *,
     user=None,
 ) -> tuple[dict[str, Any], list[str]]:
-    """Parse VIDEO create/edit POST fields (no UI in PR1; used by services/tests)."""
+    """Parse VIDEO create/edit POST fields for management UI.
+
+    Provider, presentation mode, and provider video id remain server-derived.
+    Optional time fields accept seconds or friendly clock syntax and apply only
+    to YouTube; blank times keep URL-derived values.
+    """
     parsed, errors = parse_archive_metadata_form(post_data, user=user)
     discovery, discovery_errors = parse_archive_item_discovery_metadata_form(post_data)
     errors.extend(discovery_errors)
+    parsed.update(discovery)
 
-    source_url = (post_data.get("source_url") or "").strip()
+    source_url_raw = post_data.get("source_url") or ""
+    source_url = str(source_url_raw).strip()
+    start_raw = post_data.get("start_seconds", _UNSET)
+    end_raw = post_data.get("end_seconds", _UNSET)
+    start_display = "" if start_raw is _UNSET else str(start_raw)
+    end_display = "" if end_raw is _UNSET else str(end_raw)
+
     parsed["source_url"] = source_url
+    parsed["start_seconds_display"] = start_display
+    parsed["end_seconds_display"] = end_display
     parsed["public_note"] = parse_public_note(
         post_data.get("public_note", parsed.get("public_note"))
     )
-    parsed["category_names"] = discovery["category_names"]
-    parsed["event_names"] = discovery["event_names"]
-    parsed["tag_names"] = discovery["tag_names"]
 
-    start_raw = post_data.get("start_seconds", _UNSET)
-    end_raw = post_data.get("end_seconds", _UNSET)
-    start_override: Any = _UNSET
-    end_override: Any = _UNSET
-    if start_raw is not _UNSET and str(start_raw).strip() != "":
-        try:
-            start_override = int(str(start_raw).strip())
-        except (TypeError, ValueError):
-            errors.append("start_seconds must be a non-negative integer")
-    elif start_raw is not _UNSET:
-        start_override = None
-    if end_raw is not _UNSET and str(end_raw).strip() != "":
-        try:
-            end_override = int(str(end_raw).strip())
-        except (TypeError, ValueError):
-            errors.append("end_seconds must be a positive integer")
-    elif end_raw is not _UNSET:
-        end_override = None
+    start_override, start_error = _parse_optional_time_override(
+        start_raw,
+        allow_zero=True,
+        invalid_error=VIDEO_START_TIME_INVALID_ERROR,
+    )
+    end_override, end_error = _parse_optional_time_override(
+        end_raw,
+        allow_zero=False,
+        invalid_error=VIDEO_END_TIME_INVALID_ERROR,
+    )
+    if start_error:
+        errors.append(start_error)
+    if end_error:
+        errors.append(end_error)
 
     video_fields: dict[str, Any] | None = None
     if not errors:
         if not source_url:
-            errors.append("source_url is required")
+            errors.append(VIDEO_SOURCE_URL_REQUIRED_ERROR)
         else:
             try:
                 video_fields = parse_video_content_from_source_url(
@@ -265,10 +357,27 @@ def parse_video_archive_item_form(
                     end_seconds=end_override,
                 )
             except ValueError as exc:
-                errors.append(str(exc))
+                message = str(exc)
+                if (
+                    message
+                    == "start_seconds and end_seconds are allowed only for YouTube"
+                ):
+                    errors.append(VIDEO_TIME_YOUTUBE_ONLY_ERROR)
+                elif message == "end_seconds must be greater than start_seconds":
+                    errors.append(VIDEO_END_AFTER_START_ERROR)
+                else:
+                    errors.append(_humanize_video_url_error(exc))
 
     if video_fields is not None:
         parsed.update(video_fields)
+        if not str(parsed.get("start_seconds_display") or "").strip():
+            parsed["start_seconds_display"] = format_video_time_for_form(
+                video_fields.get("start_seconds")
+            )
+        if not str(parsed.get("end_seconds_display") or "").strip():
+            parsed["end_seconds_display"] = format_video_time_for_form(
+                video_fields.get("end_seconds")
+            )
     else:
         parsed.setdefault("provider", "")
         parsed.setdefault("presentation_mode", "")
@@ -276,4 +385,11 @@ def parse_video_archive_item_form(
         parsed.setdefault("start_seconds", None)
         parsed.setdefault("end_seconds", None)
 
+    parsed["presentation_mode_explanation"] = video_presentation_mode_explanation(
+        parsed.get("presentation_mode"),
+        provider=parsed.get("provider"),
+    )
+    parsed["provider_display_label"] = video_provider_display_label(
+        parsed.get("provider")
+    )
     return parsed, errors

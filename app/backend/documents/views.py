@@ -59,6 +59,7 @@ from documents.services.archive_discovery_metadata_validation import (
 from documents.services.archive_items import (
     create_manual_text_archive_item,
     create_ocr_document,
+    create_video_archive_item,
     discovery_metadata_form_data_from_item,
     shared_archive_item_for_document,
     update_archive_item_discovery_metadata,
@@ -66,6 +67,7 @@ from documents.services.archive_items import (
     update_photo_archive_item_metadata,
     update_ocr_document_catalog_metadata,
     update_ocr_document_metadata,
+    update_video_archive_item,
 )
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -152,6 +154,13 @@ from documents.services.archive_item_validation import (
     parse_date_precision,
 )
 from documents.services.manual_text_validation import parse_manual_text_form
+from documents.services.video_url_contract import PROVIDER_YOUTUBE
+from documents.services.video_validation import (
+    format_video_time_for_form,
+    parse_video_archive_item_form,
+    video_presentation_mode_explanation,
+    video_provider_display_label,
+)
 from documents.services.photo_upload import (
     create_photo_upload_plan,
     finalize_photo_upload,
@@ -255,11 +264,13 @@ logger = logging.getLogger(__name__)
 ARCHIVE_ITEM_TYPE_MANUAL_TEXT = "manual_text"
 ARCHIVE_ITEM_TYPE_OCR_DOCUMENT = "ocr_document"
 ARCHIVE_ITEM_TYPE_PHOTO = "photo"
+ARCHIVE_ITEM_TYPE_VIDEO = "video"
 _VALID_ARCHIVE_ITEM_CREATE_TYPES = frozenset(
     {
         ARCHIVE_ITEM_TYPE_MANUAL_TEXT,
         ARCHIVE_ITEM_TYPE_OCR_DOCUMENT,
         ARCHIVE_ITEM_TYPE_PHOTO,
+        ARCHIVE_ITEM_TYPE_VIDEO,
     }
 )
 DEFAULT_PAGE_SIZE = 50
@@ -3570,6 +3581,108 @@ def _photo_form_data_from_item(item: ArchiveItem) -> dict:
     }
 
 
+def _empty_video_form_data() -> dict:
+    return {
+        **_empty_archive_metadata_form_data(),
+        "source_url": "",
+        "provider": "",
+        "presentation_mode": "",
+        "provider_video_id": "",
+        "start_seconds": None,
+        "end_seconds": None,
+        "start_seconds_display": "",
+        "end_seconds_display": "",
+        "presentation_mode_explanation": "",
+        "provider_display_label": "",
+        **empty_discovery_metadata_form_fields(),
+    }
+
+
+def _video_form_data_from_item(item: ArchiveItem) -> dict:
+    content = item.video_content
+    return {
+        **_archive_metadata_form_data(
+            title=item.title,
+            visibility=item.visibility,
+            date_start=item.date_start,
+            date_end=item.date_end,
+            date_precision=item.date_precision,
+            metadata_status=item.metadata_status,
+            author_name=item.author_name,
+            source_title=item.source_title,
+            public_note=item.public_note,
+        ),
+        "source_url": content.source_url,
+        "provider": content.provider,
+        "presentation_mode": content.presentation_mode,
+        "provider_video_id": content.provider_video_id,
+        "start_seconds": content.start_seconds,
+        "end_seconds": content.end_seconds,
+        "start_seconds_display": format_video_time_for_form(content.start_seconds),
+        "end_seconds_display": format_video_time_for_form(content.end_seconds),
+        "presentation_mode_explanation": video_presentation_mode_explanation(
+            content.presentation_mode,
+            provider=content.provider,
+        ),
+        "provider_display_label": video_provider_display_label(content.provider),
+        **discovery_metadata_form_data_from_item(item),
+    }
+
+
+def _video_form_context(
+    *,
+    form_data: dict,
+    form_errors: list[str],
+    page_title: str,
+    submit_label: str,
+    user=None,
+) -> dict:
+    provider = (form_data.get("provider") or "").strip().upper()
+    return {
+        **_archive_metadata_form_context(
+            form_data=form_data,
+            form_errors=form_errors,
+            page_title=page_title,
+            submit_label=submit_label,
+            user=user,
+        ),
+        "show_video_time_fields": provider in ("", PROVIDER_YOUTUBE),
+    }
+
+
+def _video_service_time_kwargs(parsed: dict) -> dict:
+    """Pass form-resolved times into create/update (already merged with URL defaults)."""
+    return {
+        "start_seconds": parsed["start_seconds"],
+        "end_seconds": parsed["end_seconds"],
+    }
+
+
+def _submit_video_create(request):
+    parsed, form_errors = parse_video_archive_item_form(request.POST, user=request.user)
+    form_data = parsed
+    if form_errors:
+        return None, form_data, form_errors
+    create_video_archive_item(
+        title=parsed["title"],
+        source_url=parsed["source_url"],
+        visibility=parsed["visibility"],
+        date_start=parsed["date_start_value"],
+        date_end=parsed["date_end_value"],
+        date_precision=parsed["date_precision"],
+        metadata_status=parsed["metadata_status"],
+        author_name=parsed["author_name"],
+        source_title=parsed["source_title"],
+        public_note=parsed["public_note"],
+        category_names=parsed["category_names"],
+        event_names=parsed["event_names"],
+        tag_names=parsed["tag_names"],
+        user=request.user,
+        **_video_service_time_kwargs(parsed),
+    )
+    return redirect("archive-manage-list"), form_data, form_errors
+
+
 def _archive_item_type_choices() -> list[tuple[str, str]]:
     return archive_manage_item_type_ui_choices()
 
@@ -3819,7 +3932,12 @@ def archive_manage_list_page(request):
 
     items = (
         archive_item_queryset_for_user(request.user)
-        .select_related("manual_text_content", "ocr_document", "photo_content")
+        .select_related(
+            "manual_text_content",
+            "ocr_document",
+            "photo_content",
+            "video_content",
+        )
         .order_by("-created_at")
     )
     return render(
@@ -3839,30 +3957,51 @@ def archive_manage_new_page(request):
         request.POST.get("item_type") or request.GET.get("item_type")
     )
     form_errors: list[str] = []
-    form_data = _empty_manual_text_form_data()
+    if item_type == ARCHIVE_ITEM_TYPE_VIDEO:
+        form_data = _empty_video_form_data()
+    else:
+        form_data = _empty_manual_text_form_data()
 
     if request.method == "POST" and item_type == ARCHIVE_ITEM_TYPE_MANUAL_TEXT:
         success_redirect, form_data, form_errors = _submit_manual_text_create(request)
         if success_redirect:
             return success_redirect
+    elif request.method == "POST" and item_type == ARCHIVE_ITEM_TYPE_VIDEO:
+        success_redirect, form_data, form_errors = _submit_video_create(request)
+        if success_redirect:
+            return success_redirect
 
-    context = {
-        "item_type": item_type,
-        "item_type_choices": _archive_item_type_choices(),
-        **_manual_text_form_context(
-            form_data=form_data,
-            form_errors=form_errors,
-            page_title="יצירת פריט חדש",
-            submit_label="שמירה",
-            user=request.user,
-        ),
-    }
-    if item_type == ARCHIVE_ITEM_TYPE_MANUAL_TEXT:
-        context.update(_manual_text_discovery_metadata_form_context())
-    elif item_type == ARCHIVE_ITEM_TYPE_OCR_DOCUMENT:
-        context.update(_upload_form_context(user=request.user))
-    elif item_type == ARCHIVE_ITEM_TYPE_PHOTO:
-        context.update(_photo_upload_form_context(user=request.user))
+    if item_type == ARCHIVE_ITEM_TYPE_VIDEO:
+        context = {
+            "item_type": item_type,
+            "item_type_choices": _archive_item_type_choices(),
+            **_video_form_context(
+                form_data=form_data,
+                form_errors=form_errors,
+                page_title="יצירת פריט חדש",
+                submit_label="שמירה",
+                user=request.user,
+            ),
+            **_manual_text_discovery_metadata_form_context(),
+        }
+    else:
+        context = {
+            "item_type": item_type,
+            "item_type_choices": _archive_item_type_choices(),
+            **_manual_text_form_context(
+                form_data=form_data,
+                form_errors=form_errors,
+                page_title="יצירת פריט חדש",
+                submit_label="שמירה",
+                user=request.user,
+            ),
+        }
+        if item_type == ARCHIVE_ITEM_TYPE_MANUAL_TEXT:
+            context.update(_manual_text_discovery_metadata_form_context())
+        elif item_type == ARCHIVE_ITEM_TYPE_OCR_DOCUMENT:
+            context.update(_upload_form_context(user=request.user))
+        elif item_type == ARCHIVE_ITEM_TYPE_PHOTO:
+            context.update(_photo_upload_form_context(user=request.user))
     response = render(
         request,
         "documents/archive/manage_new.html",
@@ -3916,6 +4055,7 @@ def archive_manage_edit_page(request, item_id: int):
             "manual_text_content",
             "ocr_document",
             "photo_content",
+            "video_content",
         ).prefetch_related("categories", "events", "tags"),
     )
 
@@ -3925,6 +4065,8 @@ def archive_manage_edit_page(request, item_id: int):
         return _archive_manage_edit_ocr_document(request, item)
     if item.item_type == ArchiveItem.ItemType.PHOTO:
         return _archive_manage_edit_photo(request, item)
+    if item.item_type == ArchiveItem.ItemType.VIDEO:
+        return _archive_manage_edit_video(request, item)
     raise Http404()
 
 
@@ -4027,6 +4169,53 @@ def _archive_manage_edit_photo(request, item: ArchiveItem):
                 form_data=form_data,
                 form_errors=form_errors,
                 page_title="עריכת תמונה",
+                submit_label="עדכון",
+                user=request.user,
+            ),
+            **_manual_text_discovery_metadata_form_context(),
+        },
+    )
+
+
+def _archive_manage_edit_video(request, item: ArchiveItem):
+    form_errors: list[str] = []
+    form_data = _video_form_data_from_item(item)
+
+    if request.method == "POST":
+        parsed, form_errors = parse_video_archive_item_form(
+            request.POST, user=request.user
+        )
+        form_data = parsed
+        if not form_errors:
+            update_video_archive_item(
+                item,
+                title=parsed["title"],
+                source_url=parsed["source_url"],
+                visibility=parsed["visibility"],
+                date_start=parsed["date_start_value"],
+                date_end=parsed["date_end_value"],
+                date_precision=parsed["date_precision"],
+                metadata_status=parsed["metadata_status"],
+                author_name=parsed["author_name"],
+                source_title=parsed["source_title"],
+                public_note=parsed["public_note"],
+                category_names=parsed["category_names"],
+                event_names=parsed["event_names"],
+                tag_names=parsed["tag_names"],
+                user=request.user,
+                **_video_service_time_kwargs(parsed),
+            )
+            return redirect("archive-manage-list")
+
+    return render(
+        request,
+        "documents/archive/video_form.html",
+        context={
+            "item": item,
+            **_video_form_context(
+                form_data=form_data,
+                form_errors=form_errors,
+                page_title="עריכת סרטון",
                 submit_label="עדכון",
                 user=request.user,
             ),
@@ -4212,10 +4401,12 @@ def archive_manage_delete_page(request, item_id: int):
         queryset=ArchiveItem.objects.select_related(
             "manual_text_content",
             "photo_content",
+            "video_content",
         ).filter(
             item_type__in=(
                 ArchiveItem.ItemType.MANUAL_TEXT,
                 ArchiveItem.ItemType.PHOTO,
+                ArchiveItem.ItemType.VIDEO,
             ),
         ),
     )
@@ -4249,6 +4440,8 @@ def archive_manage_delete_page(request, item_id: int):
 
     if item.item_type == ArchiveItem.ItemType.PHOTO:
         template_name = "documents/archive/photo_delete_confirm.html"
+    elif item.item_type == ArchiveItem.ItemType.VIDEO:
+        template_name = "documents/archive/video_delete_confirm.html"
     else:
         template_name = "documents/archive/manual_text_delete_confirm.html"
 

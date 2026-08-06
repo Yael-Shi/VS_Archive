@@ -69,6 +69,34 @@
       </p>
       <div class="spacer"></div>
       {% include "documents/archive/_photo_upload_form.html" %}
+    {% elif item_type == "video" %}
+      <div class="spacer"></div>
+
+      {% if form_errors %}
+        <div class="alert alert-danger">
+          <div class="alert-title">שגיאה בטופס</div>
+          <ul>
+            {% for error in form_errors %}
+              <li>{{ error }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+        <div class="spacer"></div>
+      {% endif %}
+
+      <p class="page-subtitle">פריט ארכיון מסוג סרטון — הוספה באמצעות קישור, ללא העלאת קובץ.</p>
+
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="item_type" value="video" />
+        {% include "documents/archive/video_form_fields.html" %}
+        {% if show_discovery_metadata %}
+          <div class="spacer"></div>
+          {% include "documents/archive/discovery_metadata_form_fields.html" %}
+        {% endif %}
+        <div class="spacer"></div>
+        <button type="submit" class="btn btn-primary">{{ submit_label }}</button>
+      </form>
     {% endif %}
   </div>
   {% if item_type == "ocr_document" %}
@@ -77,5 +105,8 @@
   {% elif item_type == "photo" %}
     {% include "documents/archive/_photo_upload_script.html" %}
     {% include "documents/archive/archive_date_form_script.html" %}
+  {% elif item_type == "video" %}
+    {% include "documents/archive/archive_date_form_script.html" %}
+    {% include "documents/archive/_video_form_script.html" %}
   {% endif %}
 {% endblock %}

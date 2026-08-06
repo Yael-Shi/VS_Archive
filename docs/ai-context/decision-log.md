@@ -1,5 +1,26 @@
 # VS-Archive Decision Log
 
+## VIDEO ArchiveItems — PR2 management UI
+
+**Decision / implemented:** Add staff management create/edit/delete for `ArchiveItem.ItemType.VIDEO` on existing `/archive/manage/` routes, reusing PR1 services (`create_video_archive_item` / `update_video_archive_item` / `parse_video_archive_item_form`).
+
+**Management contract:**
+
+- Unified create chooser slug `video` (“סרטון”) on `/archive/manage/new/`.
+- Primary VIDEO input is `source_url`; provider, presentation mode, and provider video id remain server-derived and are not manually editable.
+- Optional YouTube start/end accept seconds or friendly clock syntax (`1h2m3s`); blank keeps URL-derived times. Non-YouTube POSTs with times are rejected.
+- Management UI shows a Hebrew presentation-mode explanation (`הסרטון יוצג כאן באתר` / `הצפייה תיפתח באתר המקורי`). Progressive-enhancement script toggles time fields/hint only; validation stays server-side.
+- Restricted visibility choices and write authorization reuse `parse_visibility(user=)` exactly as MANUAL_TEXT / PHOTO / OCR.
+- Delete allowlist includes VIDEO; cascading `VideoContent` delete follows the OneToOne CASCADE (no S3 cleanup).
+- Successful create/edit redirects to the manage list (public VIDEO detail remains PR3).
+- Until PR3, manage-list VIDEO titles link to `archive-manage-edit` (not `archive-detail`, which would 404). OCR/MANUAL_TEXT/PHOTO title links remain `archive-detail`.
+- Delete uses `get_accessible_archive_item` (visibility-scoped via `filter_archive_items_for_user`); restricted VIDEO cannot be opened or deleted without `documents.view_restricted_archiveitem`.
+- Management subtitle copy: “הוספה באמצעות קישור, ללא העלאת קובץ” (not “קישור חיצוני בלבד”, which contradicted YouTube embedded mode).
+
+**Unchanged / out of scope for this PR:** public detail/cards/filters/search presentation, click-to-load embeds, CSP/Referrer-Policy, privacy copy, thumbnails, uploads, OCR/HTR/workers/infra.
+
+**Tests:** `documents/test_video_manage.py`; restricted visibility form coverage extended in `documents/test_restricted_visibility_forms.py`.
+
 ## VIDEO ArchiveItems — PR1 foundation (model, URL parser, services)
 
 **Decision / implemented:** Add top-level `ArchiveItem.ItemType.VIDEO` (“סרטון”) backed by one-to-one `VideoContent`. V1 stores URL/provider presentation metadata only — no media bytes, S3 upload, transcription, captions, workers, or OCR/HTR coupling.

@@ -1,0 +1,144 @@
+<script>
+(function () {
+  var urlInput = document.querySelector("[data-video-source-url]");
+  var hint = document.querySelector("[data-video-presentation-hint]");
+  var hintText = document.querySelector("[data-video-presentation-text]");
+  var timeFields = document.querySelector("[data-video-time-fields]");
+  var timeInputs = document.querySelectorAll("[data-video-time-input]");
+  if (!urlInput || !hint || !hintText || !timeFields) {
+    return;
+  }
+
+  var EMBEDDED_HINT = "הסרטון יוצג כאן באתר";
+  var EXTERNAL_HINT = "הצפייה תיפתח באתר המקורי";
+  var YOUTUBE_HOSTS = {
+    "youtu.be": true,
+    "www.youtu.be": true,
+    "youtube.com": true,
+    "www.youtube.com": true,
+    "m.youtube.com": true,
+    "youtube-nocookie.com": true,
+    "www.youtube-nocookie.com": true
+  };
+  var KAN_HOSTS = {
+    "kan.org.il": true,
+    "www.kan.org.il": true
+  };
+  var PROTECTED_APEXES = [
+    "youtube.com",
+    "youtu.be",
+    "youtube-nocookie.com",
+    "kan.org.il"
+  ];
+
+  function parseSourceUrl(raw) {
+    try {
+      return new URL(String(raw || "").trim());
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function labelsMatch(labels, start, expected) {
+    if (labels.length < start + expected.length) {
+      return false;
+    }
+    for (var i = 0; i < expected.length; i += 1) {
+      if (labels[start + i] !== expected[i]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function isImpersonationHost(host) {
+    if (!host || YOUTUBE_HOSTS[host] || KAN_HOSTS[host]) {
+      return false;
+    }
+    var labels = host.split(".");
+    for (var i = 0; i < PROTECTED_APEXES.length; i += 1) {
+      var apex = PROTECTED_APEXES[i];
+      var apexLabels = apex.split(".");
+      if (host === apex || host.slice(-(apex.length + 1)) === "." + apex) {
+        return true;
+      }
+      if (
+        labels.length > apexLabels.length &&
+        labelsMatch(labels, 0, apexLabels)
+      ) {
+        return true;
+      }
+      if (
+        (labels[0] === "www" || labels[0] === "m") &&
+        labels.length > apexLabels.length + 1 &&
+        labelsMatch(labels, 1, apexLabels)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function classifyUrl(parsed) {
+    if (!parsed) {
+      return "";
+    }
+    var protocol = String(parsed.protocol || "").toLowerCase();
+    if (protocol !== "http:" && protocol !== "https:") {
+      return "";
+    }
+    var host = String(parsed.hostname || "")
+      .replace(/\.$/, "")
+      .toLowerCase();
+    if (!host || isImpersonationHost(host)) {
+      return "";
+    }
+    if (YOUTUBE_HOSTS[host]) {
+      return "youtube";
+    }
+    if (KAN_HOSTS[host]) {
+      return "kan";
+    }
+    if (protocol === "https:") {
+      return "other";
+    }
+    return "";
+  }
+
+  function updateHint() {
+    var kind = classifyUrl(parseSourceUrl(urlInput.value));
+    var label = "";
+    var explanation = "";
+    var showTimes = false;
+
+    if (kind === "youtube") {
+      label = "YouTube";
+      explanation = EMBEDDED_HINT;
+      showTimes = true;
+    } else if (kind === "kan") {
+      label = "כאן";
+      explanation = EXTERNAL_HINT;
+    } else if (kind === "other") {
+      label = "אתר חיצוני";
+      explanation = EXTERNAL_HINT;
+    }
+
+    if (explanation) {
+      hint.hidden = false;
+      hintText.textContent = (label ? label + " — " : "") + explanation;
+    } else {
+      hint.hidden = true;
+      hintText.textContent = "";
+    }
+
+    timeFields.hidden = !showTimes;
+    timeInputs.forEach(function (input) {
+      input.disabled = !showTimes;
+    });
+  }
+
+  urlInput.addEventListener("input", updateHint);
+  urlInput.addEventListener("change", updateHint);
+  updateHint();
+})();
+</script>
