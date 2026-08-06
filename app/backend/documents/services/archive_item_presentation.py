@@ -73,6 +73,7 @@ _ARCHIVE_ITEM_TYPE_LABELS: dict[str, str] = {
     ArchiveItem.ItemType.OCR_DOCUMENT.value: "מסמך",
     ArchiveItem.ItemType.MANUAL_TEXT.value: "טקסט",
     ArchiveItem.ItemType.PHOTO.value: "תמונה",
+    ArchiveItem.ItemType.VIDEO.value: "סרטון",
 }
 
 _LANGUAGE_LABELS: dict[str, str] = {

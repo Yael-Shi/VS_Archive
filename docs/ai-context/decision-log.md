@@ -1,5 +1,32 @@
 # VS-Archive Decision Log
 
+## VIDEO ArchiveItems — PR1 foundation (model, URL parser, services)
+
+**Decision / implemented:** Add top-level `ArchiveItem.ItemType.VIDEO` (“סרטון”) backed by one-to-one `VideoContent`. V1 stores URL/provider presentation metadata only — no media bytes, S3 upload, transcription, captions, workers, or OCR/HTR coupling.
+
+**Contract:**
+
+- Shared catalog metadata stays on `ArchiveItem` (title, author_name, source_title, public_note, visibility, dates, metadata_status, discovery M2Ms).
+- `VideoContent` holds `source_url`, `provider` (`YOUTUBE` | `KAN` | `OTHER`), `presentation_mode` (`EMBEDDED` | `EXTERNAL_LINK`), `provider_video_id`, optional YouTube-only `start_seconds` / `end_seconds`.
+- Provider/mode are computed server-side by an isolated URL parser (`documents/services/video_url.py`) with no network I/O, redirects, or metadata fetches.
+- YouTube is the only `EMBEDDED` provider; KAN and OTHER are always `EXTERNAL_LINK`. Spoofed hosts are not treated as YouTube/KAN.
+- Changing `source_url` fully recomputes provider fields so stale YouTube IDs/times cannot remain after a KAN/OTHER transition.
+- Create/update are atomic service writers that call `sync_archive_item_search_index` explicitly (no Django signals). Restricted visibility continues to use `parse_visibility` / `documents.view_restricted_archiveitem`.
+- Search indexes ArchiveItem metadata only; `body_text` and `hebrew_translation_text` stay empty; `source_url` / `provider_video_id` are not indexed.
+- Browse renderability fails closed for VIDEO without valid `VideoContent`; OCR/MANUAL_TEXT/PHOTO gates unchanged.
+- Semantic validity: `VideoContent.clean()` re-parses `source_url` and requires provider/mode/id to match the normalized parse; YouTube IDs must match `^[A-Za-z0-9_-]{11}$`. Start/end may be explicit YouTube overrides. Shared contract lives in `video_url_contract.py` (no model import) to avoid circular imports.
+- Obvious YouTube/KAN impersonation hosts are rejected (not stored as OTHER). Ordinary unknown HTTPS hosts remain OTHER.
+- Hostname classification strips trailing DNS root dots so `www.youtube.com.` / `www.kan.org.il.` classify as YouTube/KAN, not OTHER.
+- KAN port contract: `http` with no port or `:80`, and `https` with no port or `:443`, normalize to canonical `https://host/...` without a default port; non-default KAN ports are rejected. OTHER HTTPS still preserves non-default ports/path/query/fragment. Userinfo and IPv6 literals are rejected; YouTube rejects non-default ports.
+- VIDEO create/update discovery follows `update_archive_item_discovery_metadata` replace-all: `category_names`, `event_names`, and `tag_names` must be supplied together or all omitted; partial calls raise before any write.
+- Create/update perform exactly one search-index sync (via discovery helper when discovery is written, otherwise direct sync).
+
+**Out of scope for this PR:** manage UI, public detail/cards/filters, embeds/click-to-load, CSP/Referrer-Policy, privacy copy, accessibility UI, thumbnails, uploads.
+
+**Migration:** `0050_video_content` — additive `ItemType.VIDEO` choice + `VideoContent` table/constraints; no backfill or reclassification of existing rows. App rollback before reverse migration may leave `item_type=VIDEO` rows that older code treats as unknown (fail-closed on public detail). Reverse drops `VideoContent`; orphan `VIDEO` ArchiveItems would need manual cleanup if production data exists.
+
+**Tests:** `documents/test_video_url.py`, `documents/test_video_content.py`, `documents/test_video_archive_items.py`.
+
 ## ArchiveItem visibility — manager-facing display metadata (UI)
 
 **Decision / implemented:** Show each item’s visibility to managers as ordinary metadata throughout existing management and item interfaces. No authorization, queryset, validation, migration, or processing changes.

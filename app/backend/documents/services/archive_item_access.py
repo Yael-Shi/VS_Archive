@@ -5,8 +5,9 @@ from __future__ import annotations
 from django.db.models import Q, QuerySet
 from django.http import Http404
 
-from documents.models import ArchiveItem, Document, PhotoContent
+from documents.models import ArchiveItem, Document, PhotoContent, VideoContent
 from documents.services.document_access import is_document_admin
+from documents.services.video_url_contract import YOUTUBE_VIDEO_ID_PATTERN
 
 ARCHIVE_FAMILY_GROUP_NAME = "archive_family"
 
@@ -79,6 +80,9 @@ def filter_browse_renderable_archive_items(
 
     PHOTO is renderable only when linked ``PhotoContent`` is uploaded with a key.
     OCR_DOCUMENT is renderable only when linked ``Document.upload_status`` is UPLOADED.
+    VIDEO is renderable only when linked ``VideoContent`` matches the DB-enforceable
+    provider/mode/id/source_url shape (missing content fails closed). Semantic
+    source_url↔provider consistency is enforced at write time via ``full_clean()``.
     Other item types (e.g. MANUAL_TEXT) are unchanged.
     """
     uploaded_photo = Q(
@@ -90,13 +94,38 @@ def filter_browse_renderable_archive_items(
         item_type=ArchiveItem.ItemType.OCR_DOCUMENT,
         ocr_document__upload_status=Document.UploadStatus.UPLOADED,
     )
+    valid_video = Q(item_type=ArchiveItem.ItemType.VIDEO) & (
+        Q(
+            video_content__provider=VideoContent.Provider.YOUTUBE,
+            video_content__presentation_mode=VideoContent.PresentationMode.EMBEDDED,
+            video_content__provider_video_id__regex=YOUTUBE_VIDEO_ID_PATTERN,
+            video_content__source_url__gt="",
+        )
+        | Q(
+            video_content__provider=VideoContent.Provider.KAN,
+            video_content__presentation_mode=(
+                VideoContent.PresentationMode.EXTERNAL_LINK
+            ),
+            video_content__provider_video_id="",
+            video_content__source_url__gt="",
+        )
+        | Q(
+            video_content__provider=VideoContent.Provider.OTHER,
+            video_content__presentation_mode=(
+                VideoContent.PresentationMode.EXTERNAL_LINK
+            ),
+            video_content__provider_video_id="",
+            video_content__source_url__gt="",
+        )
+    )
     other_types = ~Q(
         item_type__in=(
             ArchiveItem.ItemType.PHOTO,
             ArchiveItem.ItemType.OCR_DOCUMENT,
+            ArchiveItem.ItemType.VIDEO,
         )
     )
-    return queryset.filter(uploaded_photo | uploaded_ocr | other_types)
+    return queryset.filter(uploaded_photo | uploaded_ocr | valid_video | other_types)
 
 
 def filter_browse_renderable_photo_items(
@@ -135,6 +164,7 @@ def get_accessible_archive_item(
             "manual_text_content",
             "ocr_document",
             "photo_content",
+            "video_content",
         ).get(id=item_id)
     except ArchiveItem.DoesNotExist:
         raise Http404() from None
@@ -161,6 +191,7 @@ def get_viewable_archive_item(
             "manual_text_content",
             "ocr_document",
             "photo_content",
+            "video_content",
         ).get(id=item_id)
     except ArchiveItem.DoesNotExist:
         raise Http404() from None

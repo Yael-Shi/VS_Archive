@@ -7,6 +7,13 @@ from typing import Any
 from django.db import transaction
 from django.utils.text import slugify
 
+from documents.services.video_validation import VIDEO_TIME_UNSET
+
+VIDEO_DISCOVERY_PARTIAL_ERROR = (
+    "category_names, event_names, and tag_names must be supplied together "
+    "or all omitted"
+)
+
 ARCHIVE_ITEM_SHARED_FIELD_NAMES = (
     "title",
     "visibility",
@@ -175,6 +182,227 @@ def update_manual_text_archive_item(
     from documents.services.archive_search_index import sync_archive_item_search_index
 
     sync_archive_item_search_index(archive_item.pk)
+    return archive_item
+
+
+def _video_discovery_names_or_none(
+    *,
+    category_names: list[str] | None,
+    event_names: list[str] | None,
+    tag_names: list[str] | None,
+) -> dict[str, list[str]] | None:
+    """Return discovery names when all three are supplied, else ``None``.
+
+    Matches the replace-all contract of ``update_archive_item_discovery_metadata``:
+    callers must supply categories, events, and tags together, or omit all three
+    to leave discovery unchanged. Partial updates are rejected before any write.
+    """
+    provided = (
+        category_names is not None,
+        event_names is not None,
+        tag_names is not None,
+    )
+    if not any(provided):
+        return None
+    if not all(provided):
+        raise ValueError(VIDEO_DISCOVERY_PARTIAL_ERROR)
+    return {
+        "category_names": list(category_names or []),
+        "event_names": list(event_names or []),
+        "tag_names": list(tag_names or []),
+    }
+
+
+@transaction.atomic
+def create_video_archive_item(
+    *,
+    title: str,
+    source_url: str,
+    visibility: str | None = None,
+    date_start=None,
+    date_end=None,
+    date_precision: str | None = None,
+    metadata_status: str | None = None,
+    author_name: str = "",
+    source_title: str = "",
+    public_note: str = "",
+    start_seconds=VIDEO_TIME_UNSET,
+    end_seconds=VIDEO_TIME_UNSET,
+    category_names: list[str] | None = None,
+    event_names: list[str] | None = None,
+    tag_names: list[str] | None = None,
+    user=None,
+):
+    """
+    Create a VIDEO ArchiveItem with linked VideoContent.
+
+    Provider fields are derived server-side from ``source_url``. Does not create
+    Document rows, enqueue processing, or store media bytes.
+
+    Discovery metadata follows ``update_archive_item_discovery_metadata``: supply
+    ``category_names``, ``event_names``, and ``tag_names`` together, or omit all
+    three.
+    """
+    from documents.models import ArchiveItem, VideoContent
+    from documents.services.video_validation import (
+        parse_video_content_from_source_url,
+        validate_video_archive_item_metadata,
+    )
+
+    discovery = _video_discovery_names_or_none(
+        category_names=category_names,
+        event_names=event_names,
+        tag_names=tag_names,
+    )
+    resolved_visibility = visibility or ArchiveItem.Visibility.PRIVATE
+    resolved_date_precision = date_precision or ArchiveItem.DatePrecision.UNKNOWN
+    resolved_metadata_status = (
+        metadata_status or ArchiveItem.MetadataStatus.NEEDS_COMPLETION
+    )
+    validate_video_archive_item_metadata(
+        title=title,
+        visibility=resolved_visibility,
+        metadata_status=resolved_metadata_status,
+        date_precision=resolved_date_precision,
+        date_start=date_start,
+        date_end=date_end,
+        author_name=author_name,
+        source_title=source_title,
+        user=user,
+    )
+    video_fields = parse_video_content_from_source_url(
+        source_url,
+        start_seconds=start_seconds,
+        end_seconds=end_seconds,
+    )
+
+    archive_item = ArchiveItem.objects.create(
+        item_type=ArchiveItem.ItemType.VIDEO,
+        title=title,
+        visibility=resolved_visibility,
+        date_start=date_start,
+        date_end=date_end,
+        date_precision=resolved_date_precision,
+        metadata_status=resolved_metadata_status,
+        author_name=author_name,
+        source_title=source_title,
+        public_note=public_note,
+    )
+    content = VideoContent(
+        archive_item=archive_item,
+        **video_fields,
+    )
+    content.full_clean()
+    content.save()
+
+    from documents.services.archive_search_index import sync_archive_item_search_index
+
+    if discovery is not None:
+        update_archive_item_discovery_metadata(archive_item, **discovery)
+    else:
+        sync_archive_item_search_index(archive_item.pk)
+    return archive_item
+
+
+@transaction.atomic
+def update_video_archive_item(
+    archive_item,
+    *,
+    title: str,
+    source_url: str,
+    visibility: str,
+    date_start=None,
+    date_end=None,
+    date_precision: str,
+    metadata_status: str,
+    author_name: str = "",
+    source_title: str = "",
+    public_note: str = "",
+    start_seconds=VIDEO_TIME_UNSET,
+    end_seconds=VIDEO_TIME_UNSET,
+    category_names: list[str] | None = None,
+    event_names: list[str] | None = None,
+    tag_names: list[str] | None = None,
+    user=None,
+):
+    """
+    Update a VIDEO ArchiveItem and recompute VideoContent from ``source_url``.
+
+    Changing ``source_url`` fully recomputes provider, presentation mode,
+    provider_video_id, and start/end seconds so stale YouTube values cannot remain.
+
+    Discovery metadata follows ``update_archive_item_discovery_metadata``: supply
+    ``category_names``, ``event_names``, and ``tag_names`` together, or omit all
+    three to preserve existing discovery relations.
+    """
+    from documents.models import ArchiveItem
+    from documents.services.video_validation import (
+        parse_video_content_from_source_url,
+        validate_video_archive_item_metadata,
+    )
+
+    if archive_item.item_type != ArchiveItem.ItemType.VIDEO:
+        raise ValueError("archive item is not VIDEO")
+
+    discovery = _video_discovery_names_or_none(
+        category_names=category_names,
+        event_names=event_names,
+        tag_names=tag_names,
+    )
+    validate_video_archive_item_metadata(
+        title=title,
+        visibility=visibility,
+        metadata_status=metadata_status,
+        date_precision=date_precision,
+        date_start=date_start,
+        date_end=date_end,
+        author_name=author_name,
+        source_title=source_title,
+        user=user,
+    )
+    video_fields = parse_video_content_from_source_url(
+        source_url,
+        start_seconds=start_seconds,
+        end_seconds=end_seconds,
+    )
+
+    archive_item.title = title
+    archive_item.visibility = visibility
+    archive_item.date_start = date_start
+    archive_item.date_end = date_end
+    archive_item.date_precision = date_precision
+    archive_item.metadata_status = metadata_status
+    archive_item.author_name = author_name
+    archive_item.source_title = source_title
+    archive_item.public_note = public_note
+    archive_item.save()
+
+    content = archive_item.video_content
+    content.source_url = video_fields["source_url"]
+    content.provider = video_fields["provider"]
+    content.presentation_mode = video_fields["presentation_mode"]
+    content.provider_video_id = video_fields["provider_video_id"]
+    content.start_seconds = video_fields["start_seconds"]
+    content.end_seconds = video_fields["end_seconds"]
+    content.full_clean()
+    content.save(
+        update_fields=[
+            "source_url",
+            "provider",
+            "presentation_mode",
+            "provider_video_id",
+            "start_seconds",
+            "end_seconds",
+            "updated_at",
+        ]
+    )
+
+    from documents.services.archive_search_index import sync_archive_item_search_index
+
+    if discovery is not None:
+        update_archive_item_discovery_metadata(archive_item, **discovery)
+    else:
+        sync_archive_item_search_index(archive_item.pk)
     return archive_item
 
 
