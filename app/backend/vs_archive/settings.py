@@ -177,8 +177,17 @@ SESSION_COOKIE_HTTPONLY = True
 # Smallest CSP change for public YouTube click-to-load: restrict outbound frames
 # only. Other directives remain unset so existing scripts/styles/fonts keep working.
 # Approved embed origin is youtube-nocookie.com only (no broad video wildcards).
+_frame_src = [CSP.SELF, "https://www.youtube-nocookie.com"]
+if UPLOADS_BUCKET_NAME:
+    _frame_src.extend(
+        [
+            f"https://{UPLOADS_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com",
+            f"https://{UPLOADS_BUCKET_NAME}.s3.amazonaws.com",
+        ]
+    )
+
 SECURE_CSP = {
-    "frame-src": [CSP.SELF, "https://www.youtube-nocookie.com"],
+    "frame-src": _frame_src,
 }
 
 # Preserve Django's same-origin Referrer-Policy site-wide (does not send the
