@@ -3186,3 +3186,37 @@ alignment for SOURCE/`source_revision` and HEBREW/`based_on_source_revision`,
 jump-to-match endpoints, image overlays, schema/migrations. Local completion
 keeps its distinct never-bound / human-edited-after-bind / corrupt semantics
 and only reuses equivalent lower-level predicates.
+
+## Transkribus trusted text-range geometry resolver
+
+**Decision:** Text-to-image geometry for Hover / Jump-to-match is resolved only
+from a current `DocumentTextResult` through its trusted
+`TranskribusTextResultBinding`. The resolver never falls back to another
+snapshot owned by the same document.
+
+Text ranges use Python half-open coordinates: `[start, end)`.
+
+A stored Transkribus line intersects a requested range only when:
+
+- `line.char_start < end`
+- `line.char_end > start`
+
+This preserves the snapshot parser's existing canonical-text offset contract.
+
+**Separators:** Canonical line separators (`\n`) and page separators (`\n\n`)
+have no geometry of their own. A separator-only range resolves to no geometry.
+A range spanning text on both sides of a separator may resolve to multiple
+lines and, when applicable, multiple pages.
+
+**Fail-closed geometry:** Resolution requires the binding to be trusted for
+hover. Every intersecting contributing line must also contain safe stored
+polygon and bounding-box geometry. If any intersecting line cannot be safely
+resolved, the entire request returns no geometry rather than a partial or
+potentially misleading highlight.
+
+Results are deterministic and ordered by snapshot `page_index`, then
+`order_index`.
+
+**Non-goals for this PR:** search integration, matching/query generation,
+public endpoints, HTML/JavaScript hover behavior, scrolling/jump UI, polygon
+merging, or schema changes.
