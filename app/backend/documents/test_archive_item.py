@@ -3889,7 +3889,8 @@ class ArchiveBrowseCardPresentationTests(TestCase):
         self.assertContains(
             resp, reverse("archive-detail", kwargs={"item_id": item.id})
         )
-        self.assertContains(resp, "archive-browse-card__marker--manual")
+        self.assertContains(resp, "archive-browse-card__fallback-preview--manual")
+        self.assertNotContains(resp, "archive-browse-card__marker--manual")
         self.assertNotContains(resp, "archive-browse-chip")
 
     def test_anonymous_archive_list_hides_private_items(self):

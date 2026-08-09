@@ -270,7 +270,7 @@ class DocumentArchiveBrowseThumbnailIntegrationTests(TestCase):
         self.assertNotContains(resp, "archive-browse-card__document-preview")
         self.assertContains(resp, item.title)
 
-    def test_pdf_document_keeps_css_marker_fallback(self):
+    def test_pdf_document_renders_fallback_preview(self):
         item = _ocr_pdf_item(
             title="PDF OCR browse marker",
             thumbnail_file_key=self.THUMBNAIL_KEY,
@@ -281,7 +281,8 @@ class DocumentArchiveBrowseThumbnailIntegrationTests(TestCase):
             resp = self.client.get(reverse("archive-list"))
         self.assertEqual(resp.status_code, 200)
         mock_presigned_get.assert_not_called()
-        self.assertContains(resp, "archive-browse-card__marker--ocr")
+        self.assertContains(resp, "archive-browse-card__fallback-preview--pdf")
+        self.assertNotContains(resp, "archive-browse-card__marker--ocr")
         self.assertNotContains(resp, "archive-browse-card__document-preview")
         self.assertContains(resp, item.title)
 
@@ -319,7 +320,9 @@ class DocumentArchiveBrowseThumbnailIntegrationTests(TestCase):
         "documents.services.document_archive_urls.create_presigned_get",
         return_value=THUMBNAIL_PRESIGNED_URL,
     )
-    def test_manual_text_remains_unchanged(self, mock_presigned_get):
+    def test_manual_text_uses_fallback_preview_not_document_thumbnail(
+        self, mock_presigned_get
+    ):
         manual_item = create_manual_text_archive_item(
             title="Manual browse unchanged with docs",
             body="manual body",
@@ -328,7 +331,8 @@ class DocumentArchiveBrowseThumbnailIntegrationTests(TestCase):
         resp = self.client.get(reverse("archive-list"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, manual_item.title)
-        self.assertContains(resp, "archive-browse-card__marker--manual")
+        self.assertContains(resp, "archive-browse-card__fallback-preview--manual")
+        self.assertNotContains(resp, "archive-browse-card__marker--manual")
         self.assertNotContains(resp, "archive-browse-card__document-preview")
         self.assertNotContains(resp, 'alt="Manual browse unchanged with docs"')
         mock_presigned_get.assert_not_called()

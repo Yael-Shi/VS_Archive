@@ -2623,6 +2623,130 @@ pre {
   object-position: top center;
 }
 
+.archive-browse-card--fallback-preview {
+  padding: 0;
+  overflow: hidden;
+}
+
+.archive-browse-card__layout--fallback-preview {
+  gap: 0;
+}
+
+.archive-browse-card--fallback-preview .archive-browse-card__content {
+  padding: var(--space-4);
+}
+
+.archive-browse-card__fallback-preview {
+  position: relative;
+  width: 100%;
+  height: 160px;
+  flex-shrink: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.archive-browse-card__fallback-preview--pdf {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--card) 88%, var(--accent-soft)) 0%, var(--surface-muted) 100%);
+}
+
+.archive-browse-card__fallback-preview--manual {
+  background:
+    linear-gradient(180deg, var(--card-elevated) 0%, var(--surface-muted) 100%);
+}
+
+.archive-browse-card__fallback-preview--video {
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--text-heading) 55%, var(--primary-hover)) 0%, color-mix(in srgb, var(--text) 72%, var(--primary-hover)) 100%);
+}
+
+.archive-browse-card__fallback-preview-art {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.archive-browse-card__fallback-preview-page {
+  display: block;
+  width: 78px;
+  height: 98px;
+  border-radius: 3px 10px 3px 3px;
+  box-sizing: border-box;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 42%, var(--border-strong));
+  background:
+    linear-gradient(135deg, transparent 68%, color-mix(in srgb, var(--accent) 28%, transparent) 68%) top right / 18px 18px no-repeat,
+    linear-gradient(currentColor, currentColor) 12px 28px / 42px 2px no-repeat,
+    linear-gradient(currentColor, currentColor) 12px 38px / 48px 2px no-repeat,
+    linear-gradient(currentColor, currentColor) 12px 48px / 36px 2px no-repeat,
+    linear-gradient(currentColor, currentColor) 12px 58px / 44px 2px no-repeat,
+    linear-gradient(currentColor, currentColor) 12px 68px / 30px 2px no-repeat,
+    var(--card);
+  color: color-mix(in srgb, var(--accent) 55%, var(--muted));
+  box-shadow: var(--shadow-soft);
+}
+
+.archive-browse-card__fallback-preview-page--lines {
+  border-color: color-mix(in srgb, var(--border-strong) 80%, var(--accent));
+  background:
+    linear-gradient(currentColor, currentColor) 12px 22px / 48px 2px no-repeat,
+    linear-gradient(currentColor, currentColor) 12px 34px / 52px 2px no-repeat,
+    linear-gradient(currentColor, currentColor) 12px 46px / 40px 2px no-repeat,
+    linear-gradient(currentColor, currentColor) 12px 58px / 50px 2px no-repeat,
+    linear-gradient(currentColor, currentColor) 12px 70px / 34px 2px no-repeat,
+    linear-gradient(currentColor, currentColor) 12px 82px / 44px 2px no-repeat,
+    var(--card);
+  color: color-mix(in srgb, var(--muted) 70%, var(--text-soft));
+  border-radius: 3px;
+}
+
+.archive-browse-card__fallback-preview-badge {
+  position: absolute;
+  inset-block-end: calc(50% - 56px);
+  inset-inline-end: calc(50% - 52px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.1rem;
+  padding: 0.12rem 0.35rem;
+  border-radius: 3px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  color: var(--card);
+  background: var(--accent);
+  box-shadow: var(--shadow-soft);
+}
+
+.archive-browse-card__fallback-preview-play {
+  display: block;
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--card) 18%, transparent);
+  border: 2px solid color-mix(in srgb, var(--card) 72%, transparent);
+  box-sizing: border-box;
+  position: relative;
+}
+
+.archive-browse-card__fallback-preview-play::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 54%;
+  transform: translate(-50%, -50%);
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 9px 0 9px 15px;
+  border-color: transparent transparent transparent color-mix(in srgb, var(--card) 92%, transparent);
+}
+
 .archive-browse-card__marker--generic::before {
   content: "";
   display: block;
@@ -2827,6 +2951,10 @@ pre {
   }
 
   .archive-browse-card--document-preview .archive-browse-card__content {
+    padding: var(--space-3);
+  }
+
+  .archive-browse-card--fallback-preview .archive-browse-card__content {
     padding: var(--space-3);
   }
 
