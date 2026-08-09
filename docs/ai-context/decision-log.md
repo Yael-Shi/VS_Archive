@@ -3220,3 +3220,37 @@ Results are deterministic and ordered by snapshot `page_index`, then
 **Non-goals for this PR:** search integration, matching/query generation,
 public endpoints, HTML/JavaScript hover behavior, scrolling/jump UI, polygon
 merging, or schema changes.
+
+## Archive search matches map to geometry only through exact displayed-text ranges
+
+**Decision:** Hover / Jump-to-match must not derive image geometry directly
+from PostgreSQL full-text-search positions or from normalized
+`ArchiveItemSearchIndex.body_text`.
+
+Public archive search may match through PostgreSQL FTS even when no exact,
+safe substring range can be reconstructed in the displayed
+`DocumentTextResult`. Search results remain valid in that case, but no
+hover/jump target is exposed.
+
+`archive_search_match_ranges.py` therefore:
+
+- reuses the public archive query tokenization contract;
+- resolves the exact `DocumentTextResult` rows used by the displayed
+  transcription and, where applicable, displayed Hebrew translation;
+- searches the original `DocumentTextResult.text`, not the stripped search
+  index body;
+- emits only exact case-insensitive literal `[start, end)` ranges whose
+  offsets are safe in the original string;
+- may return multiple occurrences for a term;
+- preserves deterministic order: query-term order, occurrence order, primary
+  transcription before separate translation;
+- never changes whether an `ArchiveItem` itself is a valid search result.
+
+Geometry projection is a second fail-closed step. Each exact text match is
+passed to the trusted Transkribus text-range geometry resolver. Matches without
+a current trusted binding, with stale provenance, with hover-ineligible
+snapshots, or otherwise without safe geometry are omitted.
+
+**Non-goals for this PR:** changing public search ranking/filtering, generating
+search snippets, choosing a single current/next occurrence, templates,
+JavaScript hover behavior, scrolling, image overlays, or schema changes.
