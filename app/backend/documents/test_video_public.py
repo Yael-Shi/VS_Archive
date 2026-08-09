@@ -9,7 +9,13 @@ from django.contrib.contenttypes.models import ContentType
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
-from documents.models import ArchiveItem, ManualTextContent, PhotoContent, VideoContent
+from documents.models import (
+    ArchiveCategory,
+    ArchiveItem,
+    ManualTextContent,
+    PhotoContent,
+    VideoContent,
+)
 from documents.services.archive_item_access import (
     ARCHIVE_FAMILY_GROUP_NAME,
     VIEW_RESTRICTED_ARCHIVEITEM_CODENAME,
@@ -456,6 +462,54 @@ class VideoPublicDetailTests(TestCase):
         self.assertNotIn("autoplay", html.lower())
         self.assertNotIn("הפעלת הסרטון", html)
         self.assertContains(resp, "פתיחה ב־YouTube")
+
+    def test_video_detail_shows_public_note_without_label(self):
+        item = create_video_archive_item(
+            title="Video with public note",
+            source_url=YOUTUBE_URL,
+            visibility=ArchiveItem.Visibility.PUBLIC,
+            public_note="Video archive note text",
+        )
+        resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "archive-detail-meta-block--public-note")
+        self.assertContains(resp, "Video archive note text")
+        self.assertNotContains(resp, "הערת הארכיון:")
+
+    def test_video_detail_hides_empty_public_note(self):
+        item = create_video_archive_item(
+            title="Video without public note",
+            source_url=YOUTUBE_URL,
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "archive-detail-meta-block--public-note")
+        self.assertNotContains(resp, "הערת הארכיון:")
+
+    def test_video_detail_renders_discovery_before_public_note_without_label(self):
+        item = create_video_archive_item(
+            title="Video note after discovery",
+            source_url=YOUTUBE_URL,
+            visibility=ArchiveItem.Visibility.PUBLIC,
+            public_note="Video note after discovery text",
+            category_names=["קטגוריית הערת סרטון"],
+            event_names=[],
+            tag_names=[],
+        )
+        self.assertTrue(
+            ArchiveCategory.objects.filter(name="קטגוריית הערת סרטון").exists()
+        )
+        resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+        discovery_idx = html.find("archive-detail-meta-block--discovery")
+        note_idx = html.find("archive-detail-meta-block--public-note")
+        self.assertNotEqual(discovery_idx, -1)
+        self.assertNotEqual(note_idx, -1)
+        self.assertLess(discovery_idx, note_idx)
+        self.assertContains(resp, "Video note after discovery text")
+        self.assertNotContains(resp, "הערת הארכיון:")
 
     def test_youtube_iframe_title_escapes_html_like_metadata(self):
         dangerous = 'Clip <script>alert(1)</script> & "quote"'
