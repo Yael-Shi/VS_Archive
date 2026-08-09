@@ -1,8 +1,8 @@
 <ul class="archive-browse-list">
   {% for card in browse_cards %}
-    <li class="archive-browse-card{% if card.type_marker == "photo" and card.thumbnail_url %} archive-browse-card--photo-preview{% elif card.type_marker == "ocr" and card.thumbnail_url %} archive-browse-card--document-preview{% endif %}">
+    <li class="archive-browse-card{% if card.type_marker == "photo" and card.thumbnail_url %} archive-browse-card--photo-preview{% elif card.type_marker == "ocr" and card.thumbnail_url %} archive-browse-card--document-preview{% elif card.fallback_preview %} archive-browse-card--fallback-preview{% endif %}">
       <article class="archive-browse-card__article">
-        <div class="archive-browse-card__layout{% if card.type_marker == "photo" and card.thumbnail_url %} archive-browse-card__layout--photo-preview{% elif card.type_marker == "ocr" and card.thumbnail_url %} archive-browse-card__layout--document-preview{% endif %}">
+        <div class="archive-browse-card__layout{% if card.type_marker == "photo" and card.thumbnail_url %} archive-browse-card__layout--photo-preview{% elif card.type_marker == "ocr" and card.thumbnail_url %} archive-browse-card__layout--document-preview{% elif card.fallback_preview %} archive-browse-card__layout--fallback-preview{% endif %}">
           {% if card.type_marker == "photo" and card.thumbnail_url %}
             <div class="archive-browse-card__photo-preview">
               <img
@@ -26,6 +26,37 @@
                 loading="lazy"
                 decoding="async"
               />
+            </div>
+          {% elif card.fallback_preview == "pdf" %}
+            <div
+              class="archive-browse-card__fallback-preview archive-browse-card__fallback-preview--pdf"
+              role="img"
+              aria-label="{{ card.type_label }}"
+            >
+              <div class="archive-browse-card__fallback-preview-art" aria-hidden="true">
+                <span class="archive-browse-card__fallback-preview-page"></span>
+                <span class="archive-browse-card__fallback-preview-badge">PDF</span>
+              </div>
+            </div>
+          {% elif card.fallback_preview == "manual" %}
+            <div
+              class="archive-browse-card__fallback-preview archive-browse-card__fallback-preview--manual"
+              role="img"
+              aria-label="{{ card.type_label }}"
+            >
+              <div class="archive-browse-card__fallback-preview-art" aria-hidden="true">
+                <span class="archive-browse-card__fallback-preview-page archive-browse-card__fallback-preview-page--lines"></span>
+              </div>
+            </div>
+          {% elif card.fallback_preview == "video" %}
+            <div
+              class="archive-browse-card__fallback-preview archive-browse-card__fallback-preview--video"
+              role="img"
+              aria-label="{{ card.type_label }}"
+            >
+              <div class="archive-browse-card__fallback-preview-art" aria-hidden="true">
+                <span class="archive-browse-card__fallback-preview-play"></span>
+              </div>
             </div>
           {% else %}
             <div

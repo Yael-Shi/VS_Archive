@@ -24,7 +24,7 @@ from django.db.models import (
 from django.db.models.functions import Coalesce
 from django.urls import reverse
 
-from documents.models import ArchiveItem
+from documents.models import ArchiveItem, Document
 from documents.services.archive_search_index import SEARCH_VECTOR_CONFIG
 from documents.services.document_date import format_document_date
 from documents.services.text_presentation import (
@@ -32,6 +32,11 @@ from documents.services.text_presentation import (
     get_displayed_transcription_text,
 )
 from documents.services.video_url_contract import video_provider_display_label
+
+# Local 160px browse-card visual fallbacks (no remote media / PDF rendering).
+ARCHIVE_BROWSE_FALLBACK_PREVIEW_PDF = "pdf"
+ARCHIVE_BROWSE_FALLBACK_PREVIEW_MANUAL = "manual"
+ARCHIVE_BROWSE_FALLBACK_PREVIEW_VIDEO = "video"
 
 ARCHIVE_LIST_ITEM_TYPE_FILTER_ALL = ""
 ARCHIVE_LIST_ITEM_TYPE_FILTER_OCR = "ocr_document"
@@ -757,6 +762,8 @@ class ArchiveBrowseCard:
     category_links: tuple[ArchiveBrowseLink, ...]
     related_links: tuple[ArchiveBrowseLink, ...]
     thumbnail_url: str | None = None
+    # Local 160px visual when no image thumbnail: "pdf" | "manual" | "video" | "".
+    fallback_preview: str = ""
     # PR4 search presentation (empty / false when not searching or N/A).
     search_match_source_label: str = ""
     search_snippet_segments: tuple[ArchiveSearchSnippetSegment, ...] = ()
@@ -842,6 +849,24 @@ def _type_marker_for_item(archive_item: ArchiveItem) -> str:
     return _TYPE_MARKER_BY_ITEM_TYPE.get(archive_item.item_type, "generic")
 
 
+def _fallback_preview_for_item(archive_item: ArchiveItem) -> str:
+    """Return a local visual fallback kind for browse cards without thumbnails.
+
+    PHOTO and OCR IMAGE cards keep the small CSS type marker when they have no
+    ``thumbnail_url``; PDF OCR, manual text, and video use a 160px placeholder.
+    """
+    item_type = archive_item.item_type
+    if item_type == ArchiveItem.ItemType.MANUAL_TEXT:
+        return ARCHIVE_BROWSE_FALLBACK_PREVIEW_MANUAL
+    if item_type == ArchiveItem.ItemType.VIDEO:
+        return ARCHIVE_BROWSE_FALLBACK_PREVIEW_VIDEO
+    if item_type == ArchiveItem.ItemType.OCR_DOCUMENT:
+        document = getattr(archive_item, "ocr_document", None)
+        if document is not None and document.doc_type == Document.DocType.PDF:
+            return ARCHIVE_BROWSE_FALLBACK_PREVIEW_PDF
+    return ""
+
+
 def _author_display_for_archive_item(archive_item: ArchiveItem) -> str:
     return (archive_item.author_name or "").strip()
 
@@ -923,6 +948,7 @@ def build_archive_browse_card(archive_item: ArchiveItem) -> ArchiveBrowseCard:
         preview_text=_preview_text_for_archive_item(archive_item),
         category_links=_category_links_for_item(archive_item),
         related_links=_related_links_for_item(archive_item),
+        fallback_preview=_fallback_preview_for_item(archive_item),
     )
 
 
