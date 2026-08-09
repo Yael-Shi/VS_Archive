@@ -3116,3 +3116,24 @@ Historical attempts and checkpoints remain immutable; no migration is required.
 expanded Gemini/checkpoint/routing tests, the full `documents` regression,
 staged review, merge, worker-only deployment, and intentional production
 validation.
+
+## Checkpoint-backed Gemini PARTIAL documents remain reprocessable
+
+**Status:** Implemented and under validation on branch
+`fix/partial-gemini-checkpoint-reprocess`; not yet merged or deployed.
+
+Gemini page-checkpoint failures can terminate a document as `PARTIAL` before a
+failed `DocumentTextResult(SOURCE_TEXT)` row exists. OCR reprocess eligibility
+now accepts a failed `GeminiOcrPageCheckpoint` as durable source-OCR failure
+evidence when the existing safeguards also hold: the document routes to Gemini,
+has no usable source text, has no VERIFIED text result, is uploaded, and belongs
+to an OCR archive item.
+
+A generic `PARTIAL` document remains ineligible without explicit failed source
+OCR evidence. Active-request coalescing and recovery behavior remain owned by
+the durable `ProcessDocumentRequest` enqueue service.
+
+Production evidence motivating this change is document 306: its sole historical
+Gemini attempt was `PARTIAL`, page 1 checkpoint was `FAILED/MAX_TOKENS`, and no
+`DocumentTextResult` was created. This caused both the detail-page action and
+the backend assessment to reject an otherwise recoverable OCR failure.

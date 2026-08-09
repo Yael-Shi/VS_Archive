@@ -5,7 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from documents.models import ArchiveItem, Document, DocumentTextResult, TranskribusRun
+from documents.models import (
+    ArchiveItem,
+    Document,
+    DocumentTextResult,
+    GeminiOcrPageCheckpoint,
+    TranskribusRun,
+)
 from documents.services import transkribus_run_persistence as trp
 from documents.services.ocr_routing import OcrRouteConfig, select_ocr_route
 
@@ -75,11 +81,20 @@ def _has_usable_source_text(doc: Document) -> bool:
 
 
 def _has_failed_source_ocr(doc: Document) -> bool:
-    return DocumentTextResult.objects.filter(
+    if DocumentTextResult.objects.filter(
         document_id=doc.id,
         result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
         status=DocumentTextResult.Status.FAILED,
         error_code="OCR_FAILED",
+    ).exists():
+        return True
+
+    # Checkpoint-backed Gemini OCR can fail before a DocumentTextResult exists.
+    # A failed page checkpoint is durable source-OCR failure evidence and must
+    # not leave a PARTIAL document without an intentional reprocess path.
+    return GeminiOcrPageCheckpoint.objects.filter(
+        attempt__document_id=doc.id,
+        status=GeminiOcrPageCheckpoint.Status.FAILED,
     ).exists()
 
 
