@@ -8,11 +8,14 @@ from unittest.mock import patch
 
 from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase, TransactionTestCase
+from django.utils import timezone
 
 from documents.management.commands.run_worker import Command as RunWorkerCommand
 from documents.models import (
     Document,
     DocumentTextResult,
+    GeminiOcrAttempt,
+    GeminiOcrPageCheckpoint,
     ProcessDocumentRequest,
     TranskribusRun,
 )
@@ -24,6 +27,7 @@ from documents.services.ocr_reprocess import (
     OcrReprocessError,
     OcrRetryMode,
     assess_ocr_reprocess,
+    is_ocr_reprocess_ui_eligible,
 )
 from documents.services.page_extraction import PageImage
 from documents.services.process_document_ocr_reprocess_enqueue import (
@@ -458,6 +462,97 @@ def _gemini_partial_failed_source_document(**kwargs) -> Document:
 
 
 class GeminiPartialOcrReprocessTests(TransactionTestCase):
+    def _checkpoint_failed_document(self) -> Document:
+        doc = create_ocr_document(
+            title="Gemini checkpoint-only failed OCR",
+            doc_type=Document.DocType.IMAGE,
+            language=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            handwriting_type=Document.HandwritingType.GENERAL,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.PARTIAL,
+            file_s3_key="documents/checkpoint-failed/source/0.jpeg",
+            mime_type="image/jpeg",
+        )
+        attempt = GeminiOcrAttempt.objects.create(
+            document=doc,
+            identity_fingerprint="1" * 64,
+            source_fingerprint="2" * 64,
+            route_fingerprint="3" * 64,
+            prompt_fingerprint="4" * 64,
+            config_fingerprint="5" * 64,
+            prompt_contract_version="gemini-ocr-prompt-v1",
+            model_candidates=[
+                "gemini-2.5-flash",
+                "gemini-3.1-flash-lite",
+            ],
+            expected_page_count=1,
+            status=GeminiOcrAttempt.Status.PARTIAL,
+            missing_page_indices=[1],
+        )
+        GeminiOcrPageCheckpoint.objects.create(
+            attempt=attempt,
+            page_index=1,
+            page_fingerprint="6" * 64,
+            source_content_fingerprint="7" * 64,
+            status=GeminiOcrPageCheckpoint.Status.FAILED,
+            failure_code="MAX_TOKENS",
+            failure_message="bounded provider failure",
+            started_at=timezone.now(),
+            completed_at=timezone.now(),
+        )
+        return doc
+
+    @patch.dict(
+        "os.environ",
+        {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "false"},
+        clear=False,
+    )
+    def test_partial_failed_checkpoint_without_text_result_is_eligible(self):
+        doc = self._checkpoint_failed_document()
+
+        self.assertFalse(DocumentTextResult.objects.filter(document=doc).exists())
+        self.assertTrue(is_ocr_reprocess_ui_eligible(doc))
+
+        assessment = assess_ocr_reprocess(
+            doc.id,
+            collection_id=COLLECTION_ID,
+            model_id=MODEL_ID,
+        )
+
+        self.assertEqual(
+            assessment.retry_mode,
+            OcrRetryMode.NORMAL_REENQUEUE,
+        )
+        self.assertIsNone(assessment.source_transkribus_run_id)
+
+    @patch.dict(
+        "os.environ",
+        {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "false"},
+        clear=False,
+    )
+    def test_partial_without_failure_evidence_remains_ineligible(self):
+        doc = create_ocr_document(
+            title="Partial without OCR failure evidence",
+            doc_type=Document.DocType.IMAGE,
+            language=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            handwriting_type=Document.HandwritingType.GENERAL,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.PARTIAL,
+            file_s3_key="documents/partial-no-failure/source/0.jpeg",
+            mime_type="image/jpeg",
+        )
+
+        self.assertFalse(is_ocr_reprocess_ui_eligible(doc))
+
+        with self.assertRaises(OcrReprocessError):
+            assess_ocr_reprocess(
+                doc.id,
+                collection_id=COLLECTION_ID,
+                model_id=MODEL_ID,
+            )
+
     def test_partial_failed_source_ocr_is_eligible(self):
         doc = _gemini_partial_failed_source_document()
 
