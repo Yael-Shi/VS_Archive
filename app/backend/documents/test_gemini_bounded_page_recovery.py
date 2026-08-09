@@ -265,13 +265,34 @@ class GeminiBoundedPageRecoveryTests(SimpleTestCase):
     # ---------------------------------------------- quota/rate-limit budget
 
     def test_transient_quota_exhaustion_consumes_the_same_three_call_budget(self):
-        run = self._run(
-            [
-                RuntimeError("429 RESOURCE_EXHAUSTED"),
-                RuntimeError("429 RESOURCE_EXHAUSTED"),
-                RuntimeError("429 RESOURCE_EXHAUSTED"),
-            ]
+        with self.assertLogs(
+            "documents.services.gemini_engine",
+            level="WARNING",
+        ) as captured:
+            run = self._run(
+                [
+                    RuntimeError("429 RESOURCE_EXHAUSTED"),
+                    RuntimeError("429 RESOURCE_EXHAUSTED"),
+                    RuntimeError("429 RESOURCE_EXHAUSTED"),
+                ]
+            )
+
+        retry_logs = [
+            message
+            for message in captured.output
+            if "Retrying Gemini transcription quota/rate-limit" in message
+        ]
+        self.assertEqual(len(retry_logs), 2)
+        self.assertIn(
+            "provider_call_ordinal=1 candidate_call=1/3",
+            retry_logs[0],
         )
+        self.assertIn(
+            "provider_call_ordinal=2 candidate_call=2/3",
+            retry_logs[1],
+        )
+        self.assertNotIn("attempt=1/3", retry_logs[0])
+        self.assertNotIn("attempt=2/3", retry_logs[1])
 
         # Exactly three provider calls — never a fourth.
         self.assertEqual(run.calls, GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS)

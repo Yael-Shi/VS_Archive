@@ -54,6 +54,21 @@ def _metadata(response: object):
     )[0]
 
 
+class GeminiResponseMetadataTests(SimpleTestCase):
+    def test_safe_details_labels_provider_call_ordinal(self):
+        metadata = _metadata(
+            _response(
+                text="page text",
+                finish_reason="STOP",
+            )
+        )
+
+        details = metadata.safe_details()
+
+        self.assertIn("provider_call_ordinal=2", details)
+        self.assertNotIn("attempt=2", details)
+
+
 class GeminiResponseClassificationTests(SimpleTestCase):
     def test_known_finish_reasons_have_stable_failure_codes(self):
         cases = (

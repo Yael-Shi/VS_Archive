@@ -74,6 +74,14 @@ class GeminiResponseFailureCode(str, Enum):
 
 @dataclass(frozen=True)
 class GeminiResponseMetadata:
+    """Safe operational metadata for one Gemini provider response.
+
+    ``attempt`` is the global 1-based provider-call ordinal for the page,
+    including calls consumed by earlier model candidates. The field name is
+    retained for internal compatibility; human-facing diagnostics use the
+    explicit ``provider_call_ordinal`` label.
+    """
+
     model: str
     page_index: int
     attempt: int
@@ -92,7 +100,7 @@ class GeminiResponseMetadata:
     def safe_details(self) -> str:
         return (
             f"page_index={self.page_index}, "
-            f"attempt={self.attempt}, "
+            f"provider_call_ordinal={self.attempt}, "
             f"finish_reason={self.finish_reason}, "
             f"block_reason={self.block_reason}, "
             f"candidate_count={self.candidate_count}, "
@@ -1273,7 +1281,7 @@ def transcribe_pages_with_gemini(
                     "Gemini transcription response received: "
                     "page=%s raw_output_length=%s output_length=%s "
                     "trailing_whitespace_chars=%s finish_reason=%s "
-                    "block_reason=%s candidate_count=%s attempt=%s "
+                    "block_reason=%s candidate_count=%s provider_call_ordinal=%s "
                     "prompt_token_count=%s "
                     "candidates_token_count=%s thoughts_token_count=%s "
                     "total_token_count=%s max_output_tokens=%s model=%s",
@@ -1305,7 +1313,7 @@ def transcribe_pages_with_gemini(
                                 logger.warning(
                                     "Retrying truncated Gemini transcription page %s "
                                     "after MAX_TOKENS with model %s: "
-                                    "attempt=%s/%s max_output_tokens=%s -> %s "
+                                    "provider_call_ordinal=%s candidate_call=%s/%s max_output_tokens=%s -> %s "
                                     "raw_output_length=%s output_length=%s "
                                     "trailing_whitespace_chars=%s "
                                     "prompt_token_count=%s "
@@ -1314,6 +1322,7 @@ def transcribe_pages_with_gemini(
                                     page.page_index,
                                     model_name,
                                     provider_call_offset + attempt,
+                                    attempt,
                                     GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS,
                                     attempt_max_output_tokens,
                                     retry_max_output_tokens,
@@ -1341,10 +1350,11 @@ def transcribe_pages_with_gemini(
                                 time.sleep(backoff_seconds)
                             logger.warning(
                                 "Retrying empty Gemini transcription page %s "
-                                "with model %s: attempt=%s/%s failure_code=%s",
+                                "with model %s: provider_call_ordinal=%s candidate_call=%s/%s failure_code=%s",
                                 page.page_index,
                                 model_name,
                                 provider_call_offset + attempt,
+                                attempt,
                                 GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS,
                                 failure_code.value,
                             )
@@ -1379,10 +1389,11 @@ def transcribe_pages_with_gemini(
                 ):
                     logger.warning(
                         "Retrying Gemini transcription JSON parse failure on page %s "
-                        "with model %s: attempt=%s/%s failure_code=%s",
+                        "with model %s: provider_call_ordinal=%s candidate_call=%s/%s failure_code=%s",
                         page.page_index,
                         model_name,
                         provider_call_offset + attempt,
+                        attempt,
                         GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS,
                         exc.failure_code.value,
                     )
@@ -1402,10 +1413,11 @@ def transcribe_pages_with_gemini(
                         time.sleep(5)
                         logger.warning(
                             "Retrying Gemini transcription quota/rate-limit on page %s "
-                            "with model %s: attempt=%s/%s",
+                            "with model %s: provider_call_ordinal=%s candidate_call=%s/%s",
                             page.page_index,
                             model_name,
                             provider_call_offset + attempt,
+                            attempt,
                             GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS,
                         )
                         continue

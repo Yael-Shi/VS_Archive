@@ -3137,3 +3137,24 @@ Production evidence motivating this change is document 306: its sole historical
 Gemini attempt was `PARTIAL`, page 1 checkpoint was `FAILED/MAX_TOKENS`, and no
 `DocumentTextResult` was created. This caused both the detail-page action and
 the backend assessment to reject an otherwise recoverable OCR failure.
+
+## Gemini OCR attempt lifecycle / provider-call observability clarification
+
+**Decision:** Preserve the existing `GeminiOcrAttempt` lifecycle from durable
+page checkpoints. `PARTIAL` is a resumable, non-terminal attempt state: an
+identical future execution may reuse successful page checkpoints, reclaim only
+failed/missing pages, and move the same attempt back to `IN_PROGRESS`.
+`completed_at` therefore remains `NULL` for `IN_PROGRESS` and `PARTIAL` and is
+set only after complete deterministic assembly reaches `COMPLETED`. No schema,
+migration, or historical-row rewrite is required.
+
+**Observability clarification:** `GeminiResponseMetadata.attempt` is retained
+for internal compatibility, but its value is the global 1-based Gemini provider
+call ordinal for the page, not a `GeminiOcrAttempt` database id. New safe
+diagnostics label it `provider_call_ordinal`. Retry logs also expose the local
+`candidate_call=N/M` separately so a fallback-model call cannot be mistaken for
+a database attempt id or for an `N-of-M` global call count.
+
+**Unchanged:** provider-call budget, fallback policy, response classification,
+checkpoint identity/reuse, persistence semantics, processing-state behavior,
+and historical incident evidence.
