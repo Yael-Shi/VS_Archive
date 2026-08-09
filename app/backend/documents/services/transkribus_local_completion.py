@@ -294,6 +294,12 @@ def inspect_local_completion_bindings(
     current DTR text/revision and otherwise-valid binding metadata counts as
     ``human_edited_after_bind``.
     """
+    # Lazy import: avoid module-level cycle through snapshot_parser / adapter.
+    from documents.services.transkribus_binding_freshness import (
+        binding_matches_current_baseline,
+        expected_binding_role_for_result_type,
+    )
+
     human_edited = False
     bound_revisions: list[int] = []
     canonical_sha = (snapshot.canonical_text_sha256 or "").strip()
@@ -321,11 +327,15 @@ def inspect_local_completion_bindings(
                 human_edited_after_bind=False,
                 corrupt=False,
             )
-        expected_role = (
-            TranskribusTextResultBinding.BindingRole.SNAPSHOT_SOURCE
-            if result_type == DocumentTextResult.ResultType.SOURCE_TEXT
-            else TranskribusTextResultBinding.BindingRole.HEBREW_MIRROR
-        )
+        # Role mapping is shared; do not flatten never-bound / human-edit /
+        # corrupt distinctions into the hover freshness helper.
+        expected_role = expected_binding_role_for_result_type(result_type)
+        if expected_role is None:
+            return LocalCompletionBindingStatus(
+                structurally_complete=False,
+                human_edited_after_bind=False,
+                corrupt=True,
+            )
         if binding.snapshot_id != snapshot.pk:
             # Binding exists for a different snapshot: not complete for this one
             # (allows a later run to rebind). Not corrupt original metadata.
@@ -356,15 +366,9 @@ def inspect_local_completion_bindings(
             )
         bound_revisions.append(bound_rev)
 
-        current_sha = compute_sha256_hex(row.text or "")
-        if current_sha != bound_sha:
+        # Shared baseline match preserves text/revision drift semantics only.
+        if not binding_matches_current_baseline(row, binding):
             human_edited = True
-        if result_type == DocumentTextResult.ResultType.SOURCE_TEXT:
-            if int(row.source_revision) != bound_rev:
-                human_edited = True
-        elif result_type == DocumentTextResult.ResultType.HEBREW_TEXT:
-            if int(row.based_on_source_revision or 0) != bound_rev:
-                human_edited = True
 
     if (
         is_hebrew

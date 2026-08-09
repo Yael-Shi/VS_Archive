@@ -3158,3 +3158,31 @@ a database attempt id or for an `N-of-M` global call count.
 **Unchanged:** provider-call budget, fallback policy, response classification,
 checkpoint identity/reuse, persistence semantics, processing-state behavior,
 and historical incident evidence.
+
+## Transkribus binding freshness is the hover/geometry trust gate
+
+**Decision:** Hover geometry and any future jump-to-match / text↔image alignment
+must be exposed only through a **current, trustworthy**
+`TranskribusTextResultBinding`. Document ownership of a
+`TranskribusTranscriptSnapshot` alone is **never** sufficient.
+
+**Current behavior / primitive:** Read-only fail-closed assessment lives in
+`documents/services/transkribus_binding_freshness.py`
+(`assess_binding_freshness`, `is_binding_structurally_fresh`,
+`is_binding_trusted_for_hover`). It reuses the same trust invariants already
+enforced by corrected/current activation (ready snapshot, verified canonical
+SHA, role matched to `DocumentTextResult.result_type`, bound hash equals
+verified canonical hash, current text SHA equals bound hash, revision
+alignment for SOURCE/`source_revision` and HEBREW/`based_on_source_revision`,
+`bound_source_revision >= 1`). Unsupported result types fail closed.
+
+**Structural freshness vs hover trust:** A binding may be structurally fresh
+(baseline trustworthy for activation / edit-history proofs) while
+`snapshot.hover_eligible` is False. Hover trust requires structural freshness
+**and** `hover_eligible=True`. Activation continues to allow
+`hover_eligible=False` snapshots.
+
+**Non-goals for this PR:** UI, hover JavaScript, search integration,
+jump-to-match endpoints, image overlays, schema/migrations. Local completion
+keeps its distinct never-bound / human-edited-after-bind / corrupt semantics
+and only reuses equivalent lower-level predicates.

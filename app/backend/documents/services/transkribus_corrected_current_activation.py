@@ -26,6 +26,11 @@ from documents.services.transkribus_corrected_current_sync import (
     _SnapshotPageMismatchError,
     _verify_snapshot_matches_attempt_pages,
 )
+from documents.services.transkribus_binding_freshness import (
+    binding_has_valid_original_metadata,
+    binding_matches_current_baseline,
+    is_binding_structurally_fresh,
+)
 from documents.services.transkribus_snapshot_binding import (
     TranskribusSnapshotBindingError,
     bind_text_result_to_snapshot,
@@ -176,59 +181,6 @@ def _binding_for_row(
     )
 
 
-def _snapshot_has_verified_canonical_integrity(
-    snapshot: TranskribusTranscriptSnapshot,
-) -> bool:
-    """READY snapshot with non-empty stored SHA matching sha256(canonical_text)."""
-    if snapshot.storage_status != TranskribusTranscriptSnapshot.StorageStatus.READY:
-        return False
-    stored_sha = (snapshot.canonical_text_sha256 or "").strip()
-    if not stored_sha:
-        return False
-    return compute_sha256_hex(snapshot.canonical_text or "") == stored_sha
-
-
-def _binding_has_valid_original_metadata(
-    binding: TranskribusTextResultBinding,
-    *,
-    expected_role: str,
-    text_result: DocumentTextResult,
-) -> bool:
-    """Trustworthy prior binding provenance (no hover_eligible requirement)."""
-    if binding.binding_role != expected_role:
-        return False
-    if int(binding.bound_source_revision or 0) < 1:
-        return False
-
-    snapshot = binding.snapshot
-    if snapshot.document_id != text_result.document_id:
-        return False
-    if not _snapshot_has_verified_canonical_integrity(snapshot):
-        return False
-
-    verified_canonical_sha = (snapshot.canonical_text_sha256 or "").strip()
-    bound_sha = (binding.bound_text_sha256 or "").strip()
-    if not bound_sha or bound_sha != verified_canonical_sha:
-        return False
-    return True
-
-
-def _binding_matches_current_baseline(
-    row: DocumentTextResult,
-    binding: TranskribusTextResultBinding,
-) -> bool:
-    """True when binding metadata matches the row's current text/revision."""
-    bound_sha = (binding.bound_text_sha256 or "").strip()
-    if compute_sha256_hex(row.text or "") != bound_sha:
-        return False
-    bound_rev = int(binding.bound_source_revision)
-    if row.result_type == DocumentTextResult.ResultType.SOURCE_TEXT:
-        return int(row.source_revision) == bound_rev
-    if row.result_type == DocumentTextResult.ResultType.HEBREW_TEXT:
-        return int(row.based_on_source_revision or 0) == bound_rev
-    return False
-
-
 def _binding_indicates_human_drift(
     row: DocumentTextResult,
     *,
@@ -238,13 +190,13 @@ def _binding_indicates_human_drift(
     binding = _binding_for_row(row)
     if binding is None:
         return False
-    if not _binding_has_valid_original_metadata(
+    if not binding_has_valid_original_metadata(
         binding,
         expected_role=expected_role,
         text_result=row,
     ):
         return False
-    return not _binding_matches_current_baseline(row, binding)
+    return not binding_matches_current_baseline(row, binding)
 
 
 def _source_has_human_edit_history(source_row: DocumentTextResult) -> bool:
@@ -259,16 +211,7 @@ def _source_has_proven_current_baseline(source_row: DocumentTextResult) -> bool:
     verified canonical integrity). Used to allow activation-created edit history
     + fresh binding while blocking unbound or untrustworthy-binding human edits.
     """
-    binding = _binding_for_row(source_row)
-    if binding is None:
-        return False
-    if not _binding_has_valid_original_metadata(
-        binding,
-        expected_role=TranskribusTextResultBinding.BindingRole.SNAPSHOT_SOURCE,
-        text_result=source_row,
-    ):
-        return False
-    return _binding_matches_current_baseline(source_row, binding)
+    return is_binding_structurally_fresh(source_row)
 
 
 def _human_edit_history_blocks_activation(source_row: DocumentTextResult) -> bool:
@@ -283,24 +226,15 @@ def _source_binding_is_fresh_for_snapshot(
     *,
     snapshot: TranskribusTranscriptSnapshot,
 ) -> bool:
+    """True when SOURCE is structurally fresh for the attempt-resolved snapshot."""
     binding = _binding_for_row(row)
     if binding is None:
         return False
     if binding.snapshot_id != snapshot.pk:
         return False
-    if binding.binding_role != TranskribusTextResultBinding.BindingRole.SNAPSHOT_SOURCE:
-        return False
-    # Attempt-resolved snapshot integrity is verified earlier; still require
-    # binding hash/revision alignment with that snapshot and current row.
-    canonical_sha = (snapshot.canonical_text_sha256 or "").strip()
-    bound_sha = (binding.bound_text_sha256 or "").strip()
-    if not canonical_sha or bound_sha != canonical_sha:
-        return False
-    if compute_sha256_hex(row.text or "") != bound_sha:
-        return False
-    if int(binding.bound_source_revision) != int(row.source_revision):
-        return False
-    return True
+    # Shared structural freshness covers role, same-document READY snapshot,
+    # verified canonical integrity, bound hash, current text/revision alignment.
+    return is_binding_structurally_fresh(row, binding=binding)
 
 
 def _hebrew_binding_is_fresh_for_snapshot(
@@ -309,24 +243,17 @@ def _hebrew_binding_is_fresh_for_snapshot(
     snapshot: TranskribusTranscriptSnapshot,
     bound_source_revision: int,
 ) -> bool:
+    """True when HEBREW mirror is structurally fresh for the attempt snapshot."""
     binding = _binding_for_row(row)
     if binding is None:
         return False
     if binding.snapshot_id != snapshot.pk:
         return False
-    if binding.binding_role != TranskribusTextResultBinding.BindingRole.HEBREW_MIRROR:
-        return False
-    canonical_sha = (snapshot.canonical_text_sha256 or "").strip()
-    bound_sha = (binding.bound_text_sha256 or "").strip()
-    if not canonical_sha or bound_sha != canonical_sha:
-        return False
-    if compute_sha256_hex(row.text or "") != bound_sha:
-        return False
     if int(binding.bound_source_revision) != int(bound_source_revision):
         return False
     if int(row.based_on_source_revision or 0) != int(bound_source_revision):
         return False
-    return True
+    return is_binding_structurally_fresh(row, binding=binding)
 
 
 def _lock_bindings_for_rows(row_ids: list[int]) -> None:

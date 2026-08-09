@@ -1508,8 +1508,9 @@ class TranskribusTextResultBinding(models.Model):
     """
     Explicit active binding from a DocumentTextResult to a transcript snapshot.
 
-    Geometry/hover must follow this binding (and freshness checks in later PRs),
-    not document-level snapshot ownership alone.
+    Geometry/hover must follow this binding after binding-freshness trust checks
+    (see ``documents.services.transkribus_binding_freshness``), not
+    document-level snapshot ownership alone.
 
     Cross-document mismatches are rejected in ``save()``. Do not use
     ``bulk_create`` for this model (bypasses that check).
