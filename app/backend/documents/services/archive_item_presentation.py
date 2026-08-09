@@ -936,7 +936,15 @@ def archive_browse_displayable_text_results_prefetch() -> Prefetch:
     return archive_item_displayable_text_results_prefetch()
 
 
-def build_archive_browse_card(archive_item: ArchiveItem) -> ArchiveBrowseCard:
+def build_archive_browse_card(
+    archive_item: ArchiveItem,
+    *,
+    search_query: str = "",
+) -> ArchiveBrowseCard:
+    detail_url = reverse("archive-detail", kwargs={"item_id": archive_item.id})
+    if search_query and archive_item.item_type == ArchiveItem.ItemType.OCR_DOCUMENT:
+        detail_url = f"{detail_url}?{urlencode({'q': search_query})}"
+
     return ArchiveBrowseCard(
         item=archive_item,
         title=archive_item.title,
@@ -944,7 +952,7 @@ def build_archive_browse_card(archive_item: ArchiveItem) -> ArchiveBrowseCard:
         type_marker=_type_marker_for_item(archive_item),
         date_display=format_document_date(archive_item),
         author_display=_author_display_for_archive_item(archive_item),
-        detail_url=reverse("archive-detail", kwargs={"item_id": archive_item.id}),
+        detail_url=detail_url,
         preview_text=_preview_text_for_archive_item(archive_item),
         category_links=_category_links_for_item(archive_item),
         related_links=_related_links_for_item(archive_item),
@@ -954,6 +962,8 @@ def build_archive_browse_card(archive_item: ArchiveItem) -> ArchiveBrowseCard:
 
 def build_archive_browse_cards(
     items: Sequence[ArchiveItem] | Iterable[ArchiveItem],
+    *,
+    search_query: str = "",
 ) -> list[ArchiveBrowseCard]:
     """Build public browse cards for archive list and discovery browse pages.
 
@@ -961,4 +971,6 @@ def build_archive_browse_cards(
     equivalent) so ``categories``, ``events``, ``tags``, and displayable OCR
     ``DocumentTextResult`` rows are prefetched.
     """
-    return [build_archive_browse_card(item) for item in items]
+    return [
+        build_archive_browse_card(item, search_query=search_query) for item in items
+    ]

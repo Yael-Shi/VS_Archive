@@ -123,6 +123,32 @@
           {% endif %}
         </div>
 
+        {% if archive_search_overlay_targets %}
+          <div
+            class="archive-search-match-nav"
+            data-archive-search-match-nav
+            aria-label="ניווט בין התאמות החיפוש"
+          >
+            <span
+              class="archive-search-match-nav__status"
+              data-archive-search-match-status
+              aria-live="polite"
+            ></span>
+            <div class="archive-search-match-nav__actions">
+              <button
+                type="button"
+                class="btn btn-secondary archive-search-match-nav__button"
+                data-archive-search-match-previous
+              >הקודם</button>
+              <button
+                type="button"
+                class="btn btn-secondary archive-search-match-nav__button"
+                data-archive-search-match-next
+              >הבא</button>
+            </div>
+          </div>
+        {% endif %}
+
         {% if doc.upload_status == "FAILED" %}
           <div class="document-detail-viewer document-detail-viewer-placeholder">
             <div class="muted">
@@ -131,14 +157,28 @@
           </div>
         {% elif source_preview_items or source_preview_unavailable_count %}
           <div class="document-detail-source-previews">
-            {% for item in source_preview_items %}
-              <div class="source-preview-page">
+            {% for item in archive_search_source_preview_items %}
+              <div
+                class="source-preview-page"
+                data-archive-search-page-index="{{ item.display_number }}"
+              >
                 <div class="muted text-sm source-preview-page__label">
                   עמוד {{ item.display_number }}
                 </div>
                 {% if item.url %}
                   <div class="viewer document-detail-viewer">
-                    <img src="{{ item.url }}" alt="עמוד {{ item.display_number }}" />
+                    <div class="archive-search-image-stage">
+                      <img src="{{ item.url }}" alt="עמוד {{ item.display_number }}" />
+                      {% for target in item.archive_search_overlay_targets %}
+                        <span
+                          class="archive-search-overlay-target"
+                          data-archive-search-match-index="{{ target.match_index }}"
+                          data-archive-search-term="{{ target.term }}"
+                          style="left: {{ target.left_pct }}%; top: {{ target.top_pct }}%; width: {{ target.width_pct }}%; height: {{ target.height_pct }}%;"
+                          aria-hidden="true"
+                        ></span>
+                      {% endfor %}
+                    </div>
                   </div>
                 {% else %}
                   <div class="document-detail-viewer document-detail-viewer-placeholder">
@@ -174,9 +214,25 @@
             </div>
           </div>
         {% else %}
-          <div class="viewer document-detail-viewer">
+          <div
+            class="viewer document-detail-viewer"
+            {% if doc.doc_type == "IMAGE" %}data-archive-search-page-index="1"{% endif %}
+          >
             {% if doc.doc_type == "IMAGE" %}
-              <img src="{{ content_url }}" alt="{{ doc.archive_item.title }}" />
+              <div class="archive-search-image-stage">
+                <img src="{{ content_url }}" alt="{{ doc.archive_item.title }}" />
+                {% if archive_search_single_image_overlay %}
+                  {% for target in archive_search_single_image_overlay.targets %}
+                    <span
+                      class="archive-search-overlay-target"
+                      data-archive-search-match-index="{{ target.match_index }}"
+                      data-archive-search-term="{{ target.term }}"
+                      style="left: {{ target.left_pct }}%; top: {{ target.top_pct }}%; width: {{ target.width_pct }}%; height: {{ target.height_pct }}%;"
+                      aria-hidden="true"
+                    ></span>
+                  {% endfor %}
+                {% endif %}
+              </div>
             {% elif doc.doc_type == "PDF" %}
               <iframe src="{{ content_url }}" title="{{ doc.archive_item.title }}"></iframe>
             {% else %}
@@ -228,4 +284,8 @@
       </div>
     </div>
   </div>
+
+  {% if archive_search_overlay_targets %}
+    {% include "documents/partials/_archive_search_overlay_script.html" %}
+  {% endif %}
 {% endblock %}
