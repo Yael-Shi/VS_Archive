@@ -1,4 +1,3 @@
-{# Public VIDEO media area — no third-party requests before activation. #}
 <section class="archive-detail-video" aria-labelledby="archive-detail-video-heading">
   <h2 id="archive-detail-video-heading" class="section-title archive-detail-text-heading">סרטון</h2>
 
@@ -7,29 +6,15 @@
   </p>
 
   {% if video_presentation.is_youtube_embed %}
-    <div
-      class="video-embed-facade"
-      data-video-embed
-      data-embed-src="{{ video_presentation.youtube_embed_src }}"
-      data-iframe-title="{{ video_presentation.iframe_title }}"
-    >
-      <div class="video-embed-facade__media">
-        <div class="video-embed-facade__placeholder" data-video-placeholder>
-          <span class="video-embed-facade__play" aria-hidden="true"></span>
-          <h3 class="video-embed-facade__title">{{ video_presentation.placeholder_title }}</h3>
-          <p class="video-embed-facade__explainer">
-            {{ video_presentation.activation_explainer }}
-          </p>
-          <button
-            type="button"
-            class="btn btn-primary video-embed-facade__activate"
-            data-video-activate
-          >
-            {{ video_presentation.activate_label }}
-          </button>
-        </div>
-        <div class="video-embed-facade__player" data-video-player hidden></div>
-      </div>
+    <div class="video-embed-direct">
+      <iframe
+        class="video-embed-direct__iframe"
+        src="{{ video_presentation.youtube_embed_src }}"
+        title="{{ video_presentation.iframe_title }}"
+        allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+        referrerpolicy="strict-origin-when-cross-origin"
+        allowfullscreen
+      ></iframe>
     </div>
 
     <p class="archive-detail-video__fallback">

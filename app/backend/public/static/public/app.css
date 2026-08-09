@@ -3760,105 +3760,20 @@ pre {
   margin: 0;
 }
 
-.video-embed-facade {
-  width: 100%;
-  max-width: 56rem;
-  min-width: 0;
-}
 
-/* 16:9 by default; min-height 200px keeps title/explainer/button usable on
-   narrow viewports (e.g. ~320px content width → slightly taller than 16:9).
-   Placeholder and player share this box so activation does not jump layout. */
-.video-embed-facade__media {
-  position: relative;
+
+.video-embed-direct {
   width: 100%;
-  min-width: 200px;
-  min-height: 200px;
   aspect-ratio: 16 / 9;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  background:
-    linear-gradient(160deg, var(--accent-soft) 0%, var(--card-muted) 55%, var(--surface-muted) 100%);
+  min-height: 200px;
 }
 
-.video-embed-facade__placeholder {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  box-sizing: border-box;
-  width: 100%;
-  height: 100%;
-  padding: var(--space-4);
-  text-align: center;
-  overflow: auto;
-}
-
-.video-embed-facade__placeholder[hidden] {
-  display: none;
-}
-
-.video-embed-facade__play {
+.video-embed-direct__iframe {
   display: block;
-  width: 0;
-  height: 0;
-  margin-bottom: var(--space-1);
-  border-style: solid;
-  border-width: 0.55rem 0 0.55rem 0.9rem;
-  border-color: transparent transparent transparent var(--primary);
-}
-
-.video-embed-facade__title {
-  margin: 0;
-  max-width: 36rem;
-  font-size: var(--font-md);
-  font-weight: 700;
-  line-height: var(--line-tight);
-  color: var(--text-heading);
-  overflow-wrap: anywhere;
-}
-
-.video-embed-facade__explainer {
-  margin: 0;
-  max-width: 28rem;
-  color: var(--text-soft);
-  font-size: var(--font-sm);
-  line-height: var(--line-normal);
-  overflow-wrap: anywhere;
-}
-
-.video-embed-facade__activate {
-  margin-top: var(--space-1);
-  flex-shrink: 0;
-}
-
-.video-embed-facade__player {
-  position: absolute;
-  inset: 0;
   width: 100%;
   height: 100%;
-  min-width: 200px;
-  min-height: 200px;
-  background: var(--card-muted);
-}
-
-.video-embed-facade__player[hidden] {
-  display: none;
-}
-
-.video-embed-facade__iframe {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  min-width: 200px;
-  min-height: 200px;
   border: 0;
+  border-radius: var(--radius);
 }
 
 .archive-detail-video__fallback {
@@ -3880,19 +3795,4 @@ pre {
 .video-external-card__domain,
 .video-external-card__action {
   margin: 0;
-}
-
-@media (max-width: 400px) {
-  .video-embed-facade__media {
-    min-width: 0;
-  }
-
-  .video-embed-facade__placeholder {
-    gap: var(--space-1);
-    padding: var(--space-3);
-  }
-
-  .video-embed-facade__explainer {
-    font-size: 0.9rem;
-  }
 }

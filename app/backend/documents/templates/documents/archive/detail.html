@@ -89,7 +89,4 @@
       {% include "documents/archive/partials/video_detail.html" with video_presentation=video_presentation %}
     {% endif %}
   </div>
-  {% if item.item_type == "VIDEO" and video_presentation and video_presentation.is_youtube_embed %}
-    {% include "documents/archive/partials/_video_click_to_load_script.html" %}
-  {% endif %}
 {% endblock %}

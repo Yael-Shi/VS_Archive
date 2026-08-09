@@ -29,12 +29,7 @@ YOUTUBE_NOCOOKIE_EMBED_BASE = f"{YOUTUBE_NOCOOKIE_EMBED_ORIGIN}/embed"
 
 EXTERNAL_BUTTON_LABEL_KAN = "צפייה בסרטון באתר כאן"
 EXTERNAL_BUTTON_LABEL_OTHER = "צפייה בסרטון באתר המקורי"
-YOUTUBE_ACTIVATE_LABEL = "הפעלת הסרטון"
 YOUTUBE_OPEN_LABEL = "פתיחה ב־YouTube"
-YOUTUBE_ACTIVATION_EXPLAINER = (
-    "הסרטון לא נטען עדיין. לחיצה על ההפעלה תטען תוכן מאתר YouTube "
-    "(דומיין הפרטיות youtube-nocookie.com). VS-Archive אינו מארח את הסרטון עצמו."
-)
 EXTERNAL_LINK_OPENS_NOTE = "הקישור נפתח באתר חיצוני בכרטיסייה חדשה."
 PLACEHOLDER_TITLE_FALLBACK = "סרטון"
 
@@ -54,9 +49,7 @@ class VideoPublicPresentation:
     end_seconds: int | None
     placeholder_title: str
     iframe_title: str
-    activate_label: str
     open_on_youtube_label: str
-    activation_explainer: str
     external_button_label: str
     source_domain_display: str
     external_link_opens_note: str
@@ -246,9 +239,7 @@ def build_video_public_presentation(
             end_seconds=end,
             placeholder_title=placeholder_title,
             iframe_title=f"נגן YouTube: {placeholder_title}",
-            activate_label=YOUTUBE_ACTIVATE_LABEL,
             open_on_youtube_label=YOUTUBE_OPEN_LABEL,
-            activation_explainer=YOUTUBE_ACTIVATION_EXPLAINER,
             external_button_label="",
             source_domain_display=domain,
             external_link_opens_note=EXTERNAL_LINK_OPENS_NOTE,
@@ -271,9 +262,7 @@ def build_video_public_presentation(
             end_seconds=None,
             placeholder_title=placeholder_title,
             iframe_title="",
-            activate_label="",
             open_on_youtube_label="",
-            activation_explainer="",
             external_button_label=EXTERNAL_BUTTON_LABEL_KAN,
             source_domain_display=domain or "kan.org.il",
             external_link_opens_note=EXTERNAL_LINK_OPENS_NOTE,
@@ -296,9 +285,7 @@ def build_video_public_presentation(
             end_seconds=None,
             placeholder_title=placeholder_title,
             iframe_title="",
-            activate_label="",
             open_on_youtube_label="",
-            activation_explainer="",
             external_button_label=EXTERNAL_BUTTON_LABEL_OTHER,
             source_domain_display=domain,
             external_link_opens_note=EXTERNAL_LINK_OPENS_NOTE,
