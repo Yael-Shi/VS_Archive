@@ -55,8 +55,8 @@
       {% if item.item_type == "PHOTO" %}
         {% include "documents/archive/partials/photo_metadata_display.html" with photo_content=photo_content %}
       {% endif %}
-      {% include "documents/archive/partials/public_note_display.html" with item=item %}
       {% include "documents/archive/partials/discovery_metadata.html" with item=item %}
+      {% include "documents/archive/partials/public_note_display.html" with item=item %}
     </div>
 
     <div class="spacer-sm"></div>

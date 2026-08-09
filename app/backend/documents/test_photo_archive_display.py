@@ -371,8 +371,9 @@ class PhotoArchiveDisplayDetailTests(TestCase):
             reverse("archive-detail", kwargs={"item_id": self.public_uploaded.id})
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "הערת הארכיון:")
+        self.assertContains(resp, "archive-detail-meta-block--public-note")
         self.assertContains(resp, "Photo archive note")
+        self.assertNotContains(resp, "הערת הארכיון:")
 
     @patch(
         "documents.views.create_presigned_get",
@@ -383,6 +384,35 @@ class PhotoArchiveDisplayDetailTests(TestCase):
             reverse("archive-detail", kwargs={"item_id": self.public_uploaded.id})
         )
         self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "archive-detail-meta-block--public-note")
+        self.assertNotContains(resp, "הערת הארכיון:")
+
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value=PRESIGNED_URL,
+    )
+    def test_photo_detail_renders_discovery_before_public_note_without_label(
+        self, _mock_presigned_get
+    ):
+        self.public_uploaded.public_note = "Photo note after discovery"
+        self.public_uploaded.save(update_fields=["public_note", "updated_at"])
+        category, _ = ArchiveCategory.objects.get_or_create(
+            slug="photo-public-note-order",
+            defaults={"name": "קטגוריית הערת תמונה"},
+        )
+        self.public_uploaded.categories.set([category])
+
+        resp = self.client.get(
+            reverse("archive-detail", kwargs={"item_id": self.public_uploaded.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+        discovery_idx = html.find("archive-detail-meta-block--discovery")
+        note_idx = html.find("archive-detail-meta-block--public-note")
+        self.assertNotEqual(discovery_idx, -1)
+        self.assertNotEqual(note_idx, -1)
+        self.assertLess(discovery_idx, note_idx)
+        self.assertContains(resp, "Photo note after discovery")
         self.assertNotContains(resp, "הערת הארכיון:")
 
     @patch(

@@ -3516,6 +3516,25 @@ class ArchiveItemSourceMetadataTests(TestCase):
 
 
 class ArchiveItemPublicNoteTests(TestCase):
+    def _assert_public_note_after_discovery(self, resp, *, note_text: str) -> None:
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+        discovery_idx = html.find("archive-detail-meta-block--discovery")
+        note_idx = html.find("archive-detail-meta-block--public-note")
+        self.assertNotEqual(discovery_idx, -1)
+        self.assertNotEqual(note_idx, -1)
+        self.assertLess(discovery_idx, note_idx)
+        self.assertContains(resp, note_text)
+        self.assertContains(resp, "archive-detail-meta-block--public-note")
+        self.assertNotContains(resp, "הערת הארכיון:")
+
+    def _attach_discovery_for_order_test(self, item: ArchiveItem) -> None:
+        category, _ = ArchiveCategory.objects.get_or_create(
+            slug="public-note-order-category",
+            defaults={"name": "קטגוריית סדר הערה"},
+        )
+        item.categories.set([category])
+
     def test_empty_public_note_not_shown_on_manual_text_detail(self):
         item = create_manual_text_archive_item(
             title="Manual without public note",
@@ -3525,6 +3544,7 @@ class ArchiveItemPublicNoteTests(TestCase):
         resp = self.client.get(f"/archive/{item.id}/")
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Only body text.")
+        self.assertNotContains(resp, "archive-detail-meta-block--public-note")
         self.assertNotContains(resp, "הערת הארכיון:")
 
     def test_manual_text_detail_shows_public_note_when_present(self):
@@ -3538,8 +3558,9 @@ class ArchiveItemPublicNoteTests(TestCase):
 
         resp = self.client.get(f"/archive/{item.id}/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "הערת הארכיון:")
+        self.assertContains(resp, "archive-detail-meta-block--public-note")
         self.assertContains(resp, "הערה ציבורית מהארכיון")
+        self.assertNotContains(resp, "הערת הארכיון:")
 
     def test_manual_text_detail_preserves_public_note_line_breaks(self):
         item = create_manual_text_archive_item(
@@ -3554,6 +3575,21 @@ class ArchiveItemPublicNoteTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "first line<br />second line", html=True)
 
+    def test_manual_text_detail_renders_discovery_before_public_note_without_label(
+        self,
+    ):
+        item = create_manual_text_archive_item(
+            title="Manual note after discovery",
+            body="Body.",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        item.public_note = "הערת סדר ידני"
+        item.save(update_fields=["public_note", "updated_at"])
+        self._attach_discovery_for_order_test(item)
+
+        resp = self.client.get(f"/archive/{item.id}/")
+        self._assert_public_note_after_discovery(resp, note_text="הערת סדר ידני")
+
     def test_ocr_document_detail_shows_public_note_when_present(self):
         doc = create_viewable_ocr_document(
             title="OCR with public note",
@@ -3566,8 +3602,9 @@ class ArchiveItemPublicNoteTests(TestCase):
         )
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "הערת הארכיון:")
+        self.assertContains(resp, "archive-detail-meta-block--public-note")
         self.assertContains(resp, "הערת מסמך מהארכיון")
+        self.assertNotContains(resp, "הערת הארכיון:")
 
     def test_empty_public_note_not_shown_on_ocr_document_detail(self):
         doc = create_viewable_ocr_document(
@@ -3579,7 +3616,25 @@ class ArchiveItemPublicNoteTests(TestCase):
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "OCR without public note")
+        self.assertNotContains(resp, "archive-detail-meta-block--public-note")
         self.assertNotContains(resp, "הערת הארכיון:")
+
+    def test_ocr_document_detail_renders_discovery_before_public_note_without_label(
+        self,
+    ):
+        doc = create_viewable_ocr_document(
+            title="OCR note after discovery",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.PRINTED,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
+            public_note="הערת סדר OCR",
+        )
+        self._attach_discovery_for_order_test(doc.archive_item)
+
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self._assert_public_note_after_discovery(resp, note_text="הערת סדר OCR")
 
 
 class ArchiveItemDiscoveryMetadataDisplayTests(TestCase):
