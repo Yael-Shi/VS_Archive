@@ -1,0 +1,130 @@
+<script>
+(() => {
+  const targets = Array.from(
+    document.querySelectorAll(
+      ".archive-search-overlay-target[data-archive-search-match-index]"
+    )
+  );
+
+  if (!targets.length) {
+    return;
+  }
+
+  const pages = Array.from(
+    document.querySelectorAll("[data-archive-search-page-index]")
+  );
+  const nav = document.querySelector("[data-archive-search-match-nav]");
+  const status = nav?.querySelector("[data-archive-search-match-status]");
+  const previousButton = nav?.querySelector(
+    "[data-archive-search-match-previous]"
+  );
+  const nextButton = nav?.querySelector(
+    "[data-archive-search-match-next]"
+  );
+
+  const targetByMatchIndex = new Map();
+
+  targets.forEach((target) => {
+    const matchIndex = target.dataset.archiveSearchMatchIndex;
+    if (!targetByMatchIndex.has(matchIndex)) {
+      targetByMatchIndex.set(matchIndex, target);
+    }
+  });
+
+  const orderedMatchIndexes = Array.from(targetByMatchIndex.keys())
+    .map((value) => Number.parseInt(value, 10))
+    .filter((value) => Number.isInteger(value))
+    .sort((left, right) => left - right);
+
+  if (!orderedMatchIndexes.length) {
+    return;
+  }
+
+  let activePosition = 0;
+
+  const updateNavigation = () => {
+    if (status) {
+      status.textContent =
+        `התאמה ${activePosition + 1} מתוך ${orderedMatchIndexes.length}`;
+    }
+
+    if (previousButton) {
+      previousButton.disabled = activePosition === 0;
+    }
+
+    if (nextButton) {
+      nextButton.disabled =
+        activePosition === orderedMatchIndexes.length - 1;
+    }
+  };
+
+  const setActiveMatch = (matchIndex, { scroll = false } = {}) => {
+    const matchValue = String(matchIndex);
+    const position = orderedMatchIndexes.indexOf(matchIndex);
+
+    if (position === -1) {
+      return;
+    }
+
+    activePosition = position;
+
+    targets.forEach((target) => {
+      target.classList.toggle(
+        "archive-search-overlay-target--active",
+        target.dataset.archiveSearchMatchIndex === matchValue
+      );
+    });
+
+    updateNavigation();
+
+    if (!scroll) {
+      return;
+    }
+
+    const activeTarget = targetByMatchIndex.get(matchValue);
+    const activePage = activeTarget?.closest(
+      "[data-archive-search-page-index]"
+    );
+
+    if (activePage && typeof activePage.scrollIntoView === "function") {
+      activePage.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }
+  };
+
+  const activatePosition = (position) => {
+    if (position < 0 || position >= orderedMatchIndexes.length) {
+      return;
+    }
+
+    setActiveMatch(orderedMatchIndexes[position], { scroll: true });
+  };
+
+  targets.forEach((target) => {
+    target.addEventListener("click", () => {
+      const matchIndex = Number.parseInt(
+        target.dataset.archiveSearchMatchIndex || "",
+        10
+      );
+
+      if (Number.isInteger(matchIndex)) {
+        setActiveMatch(matchIndex);
+      }
+    });
+  });
+
+  previousButton?.addEventListener("click", () => {
+    activatePosition(activePosition - 1);
+  });
+
+  nextButton?.addEventListener("click", () => {
+    activatePosition(activePosition + 1);
+  });
+
+  setActiveMatch(orderedMatchIndexes[0], {
+    scroll: pages.length > 1,
+  });
+})();
+</script>

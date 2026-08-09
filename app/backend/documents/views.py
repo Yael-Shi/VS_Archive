@@ -198,6 +198,19 @@ from documents.services.archive_item_presentation import (
 from documents.services.archive_search_snippets import (
     apply_archive_search_match_presentation_to_cards,
 )
+from documents.services.archive_search_match_ranges import (
+    resolve_archive_search_geometry_matches,
+)
+from documents.services.archive_search_overlay_payload import (
+    build_archive_search_overlay_targets,
+)
+from documents.services.archive_search_overlay_pages import (
+    build_archive_search_overlay_pages,
+)
+from documents.services.archive_search_overlay_presentation import (
+    apply_archive_search_overlay_to_source_previews,
+    build_archive_search_single_image_overlay,
+)
 from documents.services.env_validation import EnvConfigError, validate_required_env
 from documents.services.ocr_reprocess import (
     OcrReprocessError,
@@ -2737,6 +2750,37 @@ def document_detail_page(request, doc_id: int):
 
     text_presentation = get_text_presentation_for_document(doc)
     displayed_transcription_text = get_displayed_transcription_text(doc)
+
+    archive_search_query = normalize_archive_list_search_query(request.GET.get("q", ""))
+    archive_search_geometry_matches = (
+        resolve_archive_search_geometry_matches(
+            doc,
+            search_query=archive_search_query,
+        )
+        if archive_search_query
+        else ()
+    )
+    archive_search_overlay_targets = build_archive_search_overlay_targets(
+        archive_search_geometry_matches
+    )
+    archive_search_overlay_pages = build_archive_search_overlay_pages(
+        doc,
+        source_preview_items=source_context["source_preview_items"],
+        content_url=source_context["content_url"],
+        overlay_targets=archive_search_overlay_targets,
+    )
+    archive_search_source_preview_items = (
+        apply_archive_search_overlay_to_source_previews(
+            source_context["source_preview_items"],
+            archive_search_overlay_pages,
+        )
+    )
+    archive_search_single_image_overlay = build_archive_search_single_image_overlay(
+        doc,
+        content_url=source_context["content_url"],
+        overlay_pages=archive_search_overlay_pages,
+    )
+
     detail_jump_nav = build_document_detail_jump_nav(
         doc,
         text_presentation,
@@ -2757,6 +2801,12 @@ def document_detail_page(request, doc_id: int):
         "text_presentation": text_presentation,
         "detail_jump_nav": detail_jump_nav,
         "displayed_transcription_text": displayed_transcription_text,
+        "archive_search_query": archive_search_query,
+        "archive_search_geometry_matches": archive_search_geometry_matches,
+        "archive_search_overlay_targets": archive_search_overlay_targets,
+        "archive_search_overlay_pages": archive_search_overlay_pages,
+        "archive_search_source_preview_items": archive_search_source_preview_items,
+        "archive_search_single_image_overlay": archive_search_single_image_overlay,
         "is_admin": is_admin,
         "show_ocr_reprocess_action": is_admin and is_ocr_reprocess_ui_eligible(doc),
         "show_hebrew_translation_retry_action": is_admin
@@ -3749,8 +3799,8 @@ def _archive_browse_items_queryset(user, **filter_kwargs):
     ).order_by("-created_at")
 
 
-def _archive_browse_cards_for_items(items):
-    cards = build_archive_browse_cards(items)
+def _archive_browse_cards_for_items(items, *, search_query: str = ""):
+    cards = build_archive_browse_cards(items, search_query=search_query)
     bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
     cards = apply_photo_thumbnail_urls_to_browse_cards(
         cards,
@@ -3842,7 +3892,10 @@ def archive_list_page(request):
     )
     offset = (page - 1) * per_page
     page_items = list(items[offset : offset + per_page])
-    browse_cards = _archive_browse_cards_for_items(page_items)
+    browse_cards = _archive_browse_cards_for_items(
+        page_items,
+        search_query=search_query,
+    )
     # PR4: snippets/match-source only for the authorized page slice (no N+1).
     browse_cards = apply_archive_search_match_presentation_to_cards(
         browse_cards,
@@ -3881,7 +3934,12 @@ def archive_detail_page(request, item_id: int):
         doc = Document.objects.filter(archive_item_id=item.id).first()
         if doc is None:
             raise Http404()
-        return redirect("documents-detail-page", doc_id=doc.id)
+
+        detail_url = reverse("documents-detail-page", kwargs={"doc_id": doc.id})
+        search_query = normalize_archive_list_search_query(request.GET.get("q"))
+        if search_query:
+            detail_url = f"{detail_url}?{urlencode({'q': search_query})}"
+        return redirect(detail_url)
 
     if item.item_type == ArchiveItem.ItemType.MANUAL_TEXT:
         return render(

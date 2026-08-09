@@ -742,6 +742,86 @@ class ArchiveSearchSnippetPresentationTests(TestCase):
         self.assertTrue(plain.startswith("…"))
         self.assertNotEqual(card.preview_text, plain)
 
+    def test_ocr_search_card_detail_url_preserves_search_query(self):
+        token = "hover wiring token"
+        doc = create_viewable_ocr_document(
+            title="OCR hover wiring",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        _create_text_result(
+            doc,
+            text=f"before {token} after",
+        )
+        _rebuild(doc.archive_item_id)
+
+        resp = self.client.get(
+            reverse("archive-list"),
+            {"q": token},
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        card = _card_by_item_id(
+            resp.context["browse_cards"],
+            doc.archive_item_id,
+        )
+        self.assertEqual(
+            card.detail_url,
+            (
+                reverse(
+                    "archive-detail",
+                    kwargs={"item_id": doc.archive_item_id},
+                )
+                + "?q=hover+wiring+token"
+            ),
+        )
+
+    def test_ocr_search_card_detail_url_encodes_query_once(self):
+        doc = create_viewable_ocr_document(
+            title="OCR encoded hover wiring",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            visibility=Document.Visibility.PUBLIC,
+        )
+
+        item = _load_item(doc.archive_item_id)
+        card = build_archive_browse_cards(
+            [item],
+            search_query="מילה & alpha/beta",
+        )[0]
+
+        self.assertIn("?q=", card.detail_url)
+        self.assertIn("%26", card.detail_url)
+        self.assertIn("%2F", card.detail_url)
+        self.assertNotIn("& alpha", card.detail_url)
+
+    def test_ocr_browse_card_without_query_keeps_plain_detail_url(self):
+        doc = create_viewable_ocr_document(
+            title="OCR no-query hover wiring",
+            doc_type=Document.DocType.PDF,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            visibility=Document.Visibility.PUBLIC,
+        )
+
+        resp = self.client.get(reverse("archive-list"))
+
+        self.assertEqual(resp.status_code, 200)
+        card = _card_by_item_id(
+            resp.context["browse_cards"],
+            doc.archive_item_id,
+        )
+        self.assertEqual(
+            card.detail_url,
+            reverse(
+                "archive-detail",
+                kwargs={"item_id": doc.archive_item_id},
+            ),
+        )
+
     def test_manual_body_match_shows_text_label(self):
         item = create_manual_text_archive_item(
             title="Manual snippet title",

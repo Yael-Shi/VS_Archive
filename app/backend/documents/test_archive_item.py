@@ -1,6 +1,7 @@
 import datetime
 import json
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth.models import Group, User
@@ -2334,6 +2335,496 @@ class OcrDocumentTagsEditTests(TestCase):
             update_ocr_document_tags(doc, tag_names=["a"])
 
 
+class OcrDocumentArchiveSearchGeometryContextTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="ocr_hover_detail_user",
+            password="x",
+        )
+        self.doc = create_viewable_ocr_document(
+            title="OCR hover detail context",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            language=Document.Language.HEBREW,
+            visibility=Document.Visibility.PUBLIC,
+        )
+
+    @patch("documents.views.build_archive_search_overlay_targets")
+    @patch("documents.views.resolve_archive_search_geometry_matches")
+    def test_search_query_resolves_geometry_into_detail_context(
+        self,
+        mock_resolve,
+        mock_build_targets,
+    ):
+        sentinel = (object(),)
+        mock_resolve.return_value = sentinel
+        mock_build_targets.return_value = ()
+
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse("documents-detail-page", kwargs={"doc_id": self.doc.id}),
+            {"q": "  alpha   beta  "},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["archive_search_query"], "alpha   beta")
+        self.assertIs(response.context["archive_search_geometry_matches"], sentinel)
+        mock_resolve.assert_called_once_with(
+            self.doc,
+            search_query="alpha   beta",
+        )
+        mock_build_targets.assert_called_once_with(sentinel)
+
+    @patch("documents.views.build_archive_search_single_image_overlay")
+    @patch("documents.views.apply_archive_search_overlay_to_source_previews")
+    @patch("documents.views.build_archive_search_overlay_pages")
+    @patch("documents.views.build_archive_search_overlay_targets")
+    @patch("documents.views.resolve_archive_search_geometry_matches")
+    def test_overlay_targets_are_mapped_to_renderable_source_pages(
+        self,
+        mock_resolve,
+        mock_build_targets,
+        mock_build_pages,
+        mock_apply_previews,
+        mock_build_single_image,
+    ):
+        geometry_matches = (object(),)
+        overlay_targets = (object(),)
+        overlay_pages = (object(),)
+        rendered_previews = [object()]
+        single_image_overlay = object()
+
+        mock_resolve.return_value = geometry_matches
+        mock_build_targets.return_value = overlay_targets
+        mock_build_pages.return_value = overlay_pages
+        mock_apply_previews.return_value = rendered_previews
+        mock_build_single_image.return_value = single_image_overlay
+
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse("documents-detail-page", kwargs={"doc_id": self.doc.id}),
+            {"q": "alpha"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        mock_build_pages.assert_called_once_with(
+            self.doc,
+            source_preview_items=response.context["source_preview_items"],
+            content_url=response.context["content_url"],
+            overlay_targets=overlay_targets,
+        )
+        mock_apply_previews.assert_called_once_with(
+            response.context["source_preview_items"],
+            overlay_pages,
+        )
+        mock_build_single_image.assert_called_once_with(
+            self.doc,
+            content_url=response.context["content_url"],
+            overlay_pages=overlay_pages,
+        )
+
+        self.assertIs(
+            response.context["archive_search_overlay_pages"],
+            overlay_pages,
+        )
+        self.assertIs(
+            response.context["archive_search_source_preview_items"],
+            rendered_previews,
+        )
+        self.assertIs(
+            response.context["archive_search_single_image_overlay"],
+            single_image_overlay,
+        )
+
+    @patch("documents.views.build_archive_search_overlay_targets")
+    @patch("documents.views.resolve_archive_search_geometry_matches")
+    def test_search_geometry_is_converted_to_overlay_targets(
+        self,
+        mock_resolve,
+        mock_build_targets,
+    ):
+        geometry_matches = (object(),)
+        overlay_targets = (object(),)
+        mock_resolve.return_value = geometry_matches
+        mock_build_targets.return_value = overlay_targets
+
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse("documents-detail-page", kwargs={"doc_id": self.doc.id}),
+            {"q": "alpha"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_build_targets.assert_called_once_with(geometry_matches)
+        self.assertIs(
+            response.context["archive_search_overlay_targets"],
+            overlay_targets,
+        )
+
+    @patch("documents.views.resolve_archive_search_geometry_matches")
+    def test_search_without_trusted_geometry_exposes_empty_tuple(self, mock_resolve):
+        mock_resolve.return_value = ()
+
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse("documents-detail-page", kwargs={"doc_id": self.doc.id}),
+            {"q": "alpha"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["archive_search_query"], "alpha")
+        self.assertEqual(response.context["archive_search_geometry_matches"], ())
+        mock_resolve.assert_called_once_with(
+            self.doc,
+            search_query="alpha",
+        )
+
+    @patch("documents.views.resolve_archive_search_geometry_matches")
+    def test_detail_without_search_query_does_not_resolve_geometry(self, mock_resolve):
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse("documents-detail-page", kwargs={"doc_id": self.doc.id})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["archive_search_query"], "")
+        self.assertEqual(response.context["archive_search_geometry_matches"], ())
+        mock_resolve.assert_not_called()
+
+
+class OcrDocumentArchiveSearchOverlayRenderTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="ocr_hover_render_user",
+            password="x",
+        )
+
+    @patch("documents.views.build_archive_search_single_image_overlay")
+    @patch("documents.views.apply_archive_search_overlay_to_source_previews")
+    @patch("documents.views.build_archive_search_overlay_pages")
+    @patch("documents.views.build_archive_search_overlay_targets")
+    @patch("documents.views.resolve_archive_search_geometry_matches")
+    def test_single_image_renders_page_index_and_overlay_rectangle(
+        self,
+        mock_resolve,
+        mock_build_targets,
+        mock_build_pages,
+        mock_apply_previews,
+        mock_build_single_image,
+    ):
+        doc = create_viewable_ocr_document(
+            title="Single image hover render",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            language=Document.Language.HEBREW,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        doc.file_s3_key = "documents/single-image.png"
+        doc.save(update_fields=["file_s3_key"])
+
+        target = SimpleNamespace(
+            match_index=2,
+            term="alpha",
+            left_pct=10.0,
+            top_pct=20.0,
+            width_pct=30.0,
+            height_pct=40.0,
+        )
+
+        mock_resolve.return_value = (object(),)
+        mock_build_targets.return_value = (target,)
+        mock_build_pages.return_value = (
+            SimpleNamespace(page_index=1, targets=(target,)),
+        )
+        mock_apply_previews.return_value = []
+        mock_build_single_image.return_value = SimpleNamespace(
+            page_index=1,
+            targets=(target,),
+        )
+
+        self.client.force_login(self.user)
+
+        with patch(
+            "documents.views.create_presigned_get",
+            return_value="https://example.test/source.png",
+        ):
+            response = self.client.get(
+                reverse("documents-detail-page", kwargs={"doc_id": doc.id}),
+                {"q": "alpha"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            'data-archive-search-page-index="1"',
+            html=False,
+        )
+        self.assertContains(
+            response,
+            'data-archive-search-match-index="2"',
+            html=False,
+        )
+        self.assertContains(
+            response,
+            'data-archive-search-term="alpha"',
+            html=False,
+        )
+        self.assertContains(
+            response,
+            "left: 10.0%; top: 20.0%; width: 30.0%; height: 40.0%;",
+            html=False,
+        )
+
+    @patch("documents.views.build_archive_search_single_image_overlay")
+    @patch("documents.views.apply_archive_search_overlay_to_source_previews")
+    @patch("documents.views.build_archive_search_overlay_pages")
+    @patch("documents.views.build_archive_search_overlay_targets")
+    @patch("documents.views.resolve_archive_search_geometry_matches")
+    def test_multi_image_renders_overlay_on_matching_page_only(
+        self,
+        mock_resolve,
+        mock_build_targets,
+        mock_build_pages,
+        mock_apply_previews,
+        mock_build_single_image,
+    ):
+        doc = create_viewable_ocr_document(
+            title="Multi image hover render",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            language=Document.Language.HEBREW,
+            visibility=Document.Visibility.PUBLIC,
+        )
+
+        target = SimpleNamespace(
+            match_index=0,
+            term="beta",
+            left_pct=12.5,
+            top_pct=25.0,
+            width_pct=20.0,
+            height_pct=10.0,
+        )
+
+        preview_items = [
+            {
+                "display_number": 1,
+                "order_index": 0,
+                "url": "https://example.test/1.png",
+                "mime_type": "image/png",
+                "original_name": "1.png",
+                "upload_status": "UPLOADED",
+                "archive_search_overlay_targets": (),
+            },
+            {
+                "display_number": 2,
+                "order_index": 1,
+                "url": "https://example.test/2.png",
+                "mime_type": "image/png",
+                "original_name": "2.png",
+                "upload_status": "UPLOADED",
+                "archive_search_overlay_targets": (target,),
+            },
+        ]
+
+        mock_resolve.return_value = (object(),)
+        mock_build_targets.return_value = (target,)
+        mock_build_pages.return_value = (
+            SimpleNamespace(page_index=1, targets=()),
+            SimpleNamespace(page_index=2, targets=(target,)),
+        )
+        mock_apply_previews.return_value = preview_items
+        mock_build_single_image.return_value = None
+
+        self.client.force_login(self.user)
+
+        with (
+            patch(
+                "documents.views._document_source_preview_context",
+                return_value={
+                    "content_url": None,
+                    "source_preview_items": [
+                        {
+                            "display_number": 1,
+                            "order_index": 0,
+                            "url": "https://example.test/1.png",
+                        },
+                        {
+                            "display_number": 2,
+                            "order_index": 1,
+                            "url": "https://example.test/2.png",
+                        },
+                    ],
+                    "source_preview_unavailable_count": 0,
+                },
+            ),
+        ):
+            response = self.client.get(
+                reverse("documents-detail-page", kwargs={"doc_id": doc.id}),
+                {"q": "beta"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            'data-archive-search-page-index="1"',
+            count=1,
+            html=False,
+        )
+        self.assertContains(
+            response,
+            'data-archive-search-page-index="2"',
+            count=1,
+            html=False,
+        )
+        self.assertContains(
+            response,
+            'data-archive-search-match-index="0"',
+            count=1,
+            html=False,
+        )
+        self.assertContains(
+            response,
+            'data-archive-search-term="beta"',
+            count=1,
+            html=False,
+        )
+
+
+class OcrDocumentArchiveSearchNavigationRenderTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="ocr_hover_nav_user",
+            password="x",
+        )
+
+    @patch("documents.views.build_archive_search_single_image_overlay")
+    @patch("documents.views.apply_archive_search_overlay_to_source_previews")
+    @patch("documents.views.build_archive_search_overlay_pages")
+    @patch("documents.views.build_archive_search_overlay_targets")
+    @patch("documents.views.resolve_archive_search_geometry_matches")
+    def test_search_overlay_renders_navigation_controls(
+        self,
+        mock_resolve,
+        mock_build_targets,
+        mock_build_pages,
+        mock_apply_previews,
+        mock_build_single_image,
+    ):
+        doc = create_viewable_ocr_document(
+            title="Hover navigation render",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            language=Document.Language.HEBREW,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        doc.file_s3_key = "documents/hover-nav.png"
+        doc.save(update_fields=["file_s3_key"])
+
+        first = SimpleNamespace(
+            match_index=0,
+            term="alpha",
+            left_pct=10.0,
+            top_pct=10.0,
+            width_pct=20.0,
+            height_pct=10.0,
+        )
+        second = SimpleNamespace(
+            match_index=1,
+            term="beta",
+            left_pct=10.0,
+            top_pct=30.0,
+            width_pct=20.0,
+            height_pct=10.0,
+        )
+
+        mock_resolve.return_value = (object(), object())
+        mock_build_targets.return_value = (first, second)
+        mock_build_pages.return_value = (
+            SimpleNamespace(page_index=1, targets=(first, second)),
+        )
+        mock_apply_previews.return_value = []
+        mock_build_single_image.return_value = SimpleNamespace(
+            page_index=1,
+            targets=(first, second),
+        )
+
+        self.client.force_login(self.user)
+
+        with patch(
+            "documents.views.create_presigned_get",
+            return_value="https://example.test/source.png",
+        ):
+            response = self.client.get(
+                reverse("documents-detail-page", kwargs={"doc_id": doc.id}),
+                {"q": "alpha beta"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            'class="archive-search-match-nav"',
+            count=1,
+            html=False,
+        )
+        self.assertContains(
+            response,
+            "data-archive-search-match-status",
+            html=False,
+        )
+        self.assertContains(
+            response,
+            "data-archive-search-match-previous",
+            html=False,
+        )
+        self.assertContains(
+            response,
+            "data-archive-search-match-next",
+            html=False,
+        )
+
+    @patch("documents.views.build_archive_search_single_image_overlay")
+    @patch("documents.views.apply_archive_search_overlay_to_source_previews")
+    @patch("documents.views.build_archive_search_overlay_pages")
+    @patch("documents.views.build_archive_search_overlay_targets")
+    @patch("documents.views.resolve_archive_search_geometry_matches")
+    def test_search_without_overlay_targets_does_not_render_navigation(
+        self,
+        mock_resolve,
+        mock_build_targets,
+        mock_build_pages,
+        mock_apply_previews,
+        mock_build_single_image,
+    ):
+        doc = create_viewable_ocr_document(
+            title="Hover navigation absent",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            language=Document.Language.HEBREW,
+            visibility=Document.Visibility.PUBLIC,
+        )
+
+        mock_resolve.return_value = ()
+        mock_build_targets.return_value = ()
+        mock_build_pages.return_value = ()
+        mock_apply_previews.return_value = []
+        mock_build_single_image.return_value = None
+
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            reverse("documents-detail-page", kwargs={"doc_id": doc.id}),
+            {"q": "no geometry"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(
+            response,
+            "data-archive-search-match-nav",
+            html=False,
+        )
+
+
 class OcrDocumentArchiveItemAccessTests(TestCase):
     def setUp(self):
         self.staff = User.objects.create_user(
@@ -2427,6 +2918,58 @@ class OcrDocumentArchiveItemAccessTests(TestCase):
             visibility=Document.Visibility.PUBLIC,
         )
         resp = self.client.get(f"/archive/{doc.archive_item_id}/")
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], f"/api/ui/documents/{doc.id}/")
+
+    def test_archive_detail_ocr_redirect_preserves_search_query(self):
+        doc = create_viewable_ocr_document(
+            title="OCR redirect preserves query",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PUBLIC,
+        )
+
+        resp = self.client.get(
+            f"/archive/{doc.archive_item_id}/",
+            {"q": "hover wiring token"},
+        )
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            resp["Location"],
+            f"/api/ui/documents/{doc.id}/?q=hover+wiring+token",
+        )
+
+    def test_archive_detail_ocr_redirect_encodes_search_query_once(self):
+        doc = create_viewable_ocr_document(
+            title="OCR redirect query encoding",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PUBLIC,
+        )
+
+        resp = self.client.get(
+            f"/archive/{doc.archive_item_id}/",
+            {"q": "מילה & alpha/beta"},
+        )
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            resp["Location"],
+            f"/api/ui/documents/{doc.id}/?q=%D7%9E%D7%99%D7%9C%D7%94+%26+alpha%2Fbeta",
+        )
+        self.assertNotIn("%2526", resp["Location"])
+
+    def test_archive_detail_ocr_redirect_without_query_remains_plain(self):
+        doc = create_viewable_ocr_document(
+            title="OCR redirect without query",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            visibility=Document.Visibility.PUBLIC,
+        )
+
+        resp = self.client.get(f"/archive/{doc.archive_item_id}/")
+
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp["Location"], f"/api/ui/documents/{doc.id}/")
 
