@@ -510,3 +510,30 @@ Quota fallback also remains inside the shared budget.
 Gemini 3.6 receives minimal thinking and model-default decoding when selected.
 The route remains full-page. This applies only to Hebrew GENERAL handwriting;
 Hebrew VS handwriting continues to use Transkribus. No migration is required.
+
+## Attempt lifecycle and observability clarification
+
+`GeminiOcrAttempt.PARTIAL` is intentionally resumable and is not a terminal
+attempt state. A partial attempt retains successful page checkpoints and may
+later return to `IN_PROGRESS` when a failed or missing page is claimed again
+under the same complete attempt identity. Only successful complete assembly
+transitions the attempt to `COMPLETED`.
+
+Accordingly, `GeminiOcrAttempt.completed_at` is intentionally `NULL` for both
+`IN_PROGRESS` and `PARTIAL`. The database constraint
+`gem_ocr_attempt_noncompleted_shape` enforces that contract. Historical
+`PARTIAL` attempts must not be rewritten merely to populate `completed_at`.
+
+Gemini response diagnostics also distinguish two different notions that were
+previously both described as `attempt`:
+
+- `GeminiResponseMetadata.attempt` remains the internal compatibility field and
+  represents the global 1-based provider-call ordinal for the page, including
+  calls consumed by earlier model candidates.
+- Human-facing diagnostics label that value as `provider_call_ordinal`.
+- Retry logs additionally report `candidate_call=N/M`, where `N` is the local
+  call ordinal within the current model candidate and `M` is the configured
+  per-candidate call window.
+
+This clarification changes observability labels only. It does not change retry
+budgets, model fallback, checkpoint identity, persistence, or historical rows.
