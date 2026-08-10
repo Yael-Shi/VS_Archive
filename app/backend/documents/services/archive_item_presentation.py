@@ -56,7 +56,7 @@ ARCHIVE_PUBLIC_LIST_TYPE_FILTER_CHOICES: tuple[tuple[str, str], ...] = (
         "מסמכים וטקסטים",
     ),
     (ARCHIVE_PUBLIC_LIST_TYPE_FILTER_PHOTO, "תמונות"),
-    (ARCHIVE_PUBLIC_LIST_TYPE_FILTER_VIDEO, "סרטונים"),
+    (ARCHIVE_PUBLIC_LIST_TYPE_FILTER_VIDEO, "קטעי וידאו"),
 )
 
 # Short read-only labels for manager-facing metadata (lists, detail leads, queues).
