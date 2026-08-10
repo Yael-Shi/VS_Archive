@@ -1,6 +1,13 @@
-# Text-to-Source Hover/Highlight Design (Future)
+# Text-to-Source Hover/Highlight Design
 
-This note captures a future-facing design exploration for text-to-source alignment assistance during transcription review. It is documentation only and does not implement behavior.
+Status: the public OCR document-detail text-line hover → source-image highlight
+behavior, and sticky archive-search match navigation on the same detail page,
+are implemented in the current P1 change (not merged/deployed yet). Broader
+review/edit hover interactions described below remain pending / future work.
+
+This note began as a future-facing design exploration for text-to-source
+alignment assistance during transcription review. Keep the historical sections
+below for context; do not read unimplemented phases as current product behavior.
 
 ## 1. Problem statement
 
@@ -174,7 +181,7 @@ This is a cautious proposal, not a committed implementation plan.
 
 ## 10. Stop lines / non-goals
 
-For this PR and this design note:
+Historical stop lines for the original design-only PR:
 
 - Do not implement hover/highlight behavior.
 - Do not add migrations.
@@ -185,6 +192,11 @@ For this PR and this design note:
 - Do not broaden Transkribus usage scope.
 - Do not add fake/guessed geometry to the UI.
 - Do not make final schema/UI/API/model/persistence decisions in this note.
+
+**Update:** Public OCR detail text→image line hover (trusted Transkribus only)
+and sticky `.archive-search-match-nav` are implemented in the current P1
+change; they are not merged/deployed yet. Review/edit hover remains out of
+scope until explicitly implemented.
 
 ## 11. Open questions
 

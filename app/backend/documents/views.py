@@ -211,6 +211,12 @@ from documents.services.archive_search_overlay_presentation import (
     apply_archive_search_overlay_to_source_previews,
     build_archive_search_single_image_overlay,
 )
+from documents.services.text_line_hover_presentation import (
+    apply_text_line_hover_overlay_to_source_previews,
+    build_text_line_hover_overlay_pages,
+    build_text_line_hover_presentation,
+    build_text_line_hover_single_image_overlay,
+)
 from documents.services.env_validation import EnvConfigError, validate_required_env
 from documents.services.ocr_reprocess import (
     OcrReprocessError,
@@ -2781,6 +2787,40 @@ def document_detail_page(request, doc_id: int):
         overlay_pages=archive_search_overlay_pages,
     )
 
+    text_line_hover = build_text_line_hover_presentation(
+        doc,
+        source_preview_items=source_context["source_preview_items"],
+        content_url=source_context["content_url"],
+    )
+    text_line_hover_overlay_pages = build_text_line_hover_overlay_pages(
+        doc,
+        source_preview_items=source_context["source_preview_items"],
+        content_url=source_context["content_url"],
+        overlay_targets=text_line_hover.overlay_targets,
+    )
+    text_line_hover_targets_by_page = {
+        int(item["display_number"]): item.get("text_line_hover_overlay_targets", ())
+        for item in apply_text_line_hover_overlay_to_source_previews(
+            source_context["source_preview_items"],
+            text_line_hover_overlay_pages,
+        )
+    }
+    archive_search_source_preview_items = [
+        {
+            **item,
+            "text_line_hover_overlay_targets": text_line_hover_targets_by_page.get(
+                int(item["display_number"]),
+                (),
+            ),
+        }
+        for item in archive_search_source_preview_items
+    ]
+    text_line_hover_single_image_overlay = build_text_line_hover_single_image_overlay(
+        doc,
+        content_url=source_context["content_url"],
+        overlay_pages=text_line_hover_overlay_pages,
+    )
+
     detail_jump_nav = build_document_detail_jump_nav(
         doc,
         text_presentation,
@@ -2807,6 +2847,9 @@ def document_detail_page(request, doc_id: int):
         "archive_search_overlay_pages": archive_search_overlay_pages,
         "archive_search_source_preview_items": archive_search_source_preview_items,
         "archive_search_single_image_overlay": archive_search_single_image_overlay,
+        "text_line_hover": text_line_hover,
+        "text_line_hover_overlay_pages": text_line_hover_overlay_pages,
+        "text_line_hover_single_image_overlay": text_line_hover_single_image_overlay,
         "is_admin": is_admin,
         "show_ocr_reprocess_action": is_admin and is_ocr_reprocess_ui_eligible(doc),
         "show_hebrew_translation_retry_action": is_admin
