@@ -819,6 +819,16 @@ class TextLineHoverDetailRenderTests(TestCase):
             'data-archive-search-transcription-match-index="0"',
             html=False,
         )
+        self.assertContains(
+            response,
+            'role="button"',
+            html=False,
+        )
+        self.assertContains(
+            response,
+            'tabindex="0"',
+            html=False,
+        )
         self.assertContains(response, "archive-search-overlay-target", html=False)
         self.assertContains(response, "text-line-hover-overlay-target", html=False)
         # Search active-class wiring remains present and distinct from hover.
@@ -836,6 +846,20 @@ class TextLineHoverDetailRenderTests(TestCase):
             response,
             "archive-search-transcription-match--active",
             html=False,
+        )
+        body = response.content.decode("utf-8")
+        # Hover + search coexist on one span; visible text unchanged.
+        self.assertIn(
+            'class="text-line-hover-source archive-search-transcription-match"',
+            body,
+        )
+        self.assertIn(
+            'data-text-line-hover-id="p1-o0"',
+            body,
+        )
+        self.assertIn(
+            'data-archive-search-transcription-match-index="0">Alpha</span>',
+            body,
         )
 
 

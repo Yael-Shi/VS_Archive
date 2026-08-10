@@ -3972,7 +3972,13 @@ pre {
 /* Active archive-search match in the displayed transcription (distinct from hover). */
 .archive-search-transcription-match {
   border-radius: 2px;
+  cursor: pointer;
   transition: background-color 120ms ease;
+}
+
+.archive-search-transcription-match:focus-visible {
+  outline: 2px solid rgba(185, 112, 0, 0.85);
+  outline-offset: 1px;
 }
 
 .archive-search-transcription-match--active {
