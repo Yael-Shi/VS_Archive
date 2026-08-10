@@ -788,6 +788,7 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
 
     def test_document_detail_links_to_attempt_list_for_staff(self):
         doc = self._create_doc()
+        self._upload_run(doc)
         self.client.force_login(self.staff)
         resp = self.client.get(
             reverse("documents-detail-page", kwargs={"doc_id": doc.id})
@@ -796,3 +797,51 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
         self.assertContains(resp, self._list_url(doc.id))
         self.assertContains(resp, "גרסאות תעתוק מ־Transkribus")
         self.assertNotContains(resp, "היסטוריית סנכרון Transkribus מתוקן")
+
+    def test_document_detail_hides_transkribus_sync_for_document_without_run(self):
+        doc = self._create_doc(
+            language=Document.Language.ENGLISH,
+            text_input_type=Document.TextInputType.PRINTED,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(
+            reverse("documents-detail-page", kwargs={"doc_id": doc.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, self._list_url(doc.id))
+        self.assertNotContains(resp, "גרסאות תעתוק מ־Transkribus")
+
+    def test_document_detail_hides_transkribus_sync_for_hebrew_general_gemini_doc(self):
+        doc = self._create_doc(
+            language=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            handwriting_type=Document.HandwritingType.GENERAL,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(
+            reverse("documents-detail-page", kwargs={"doc_id": doc.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, self._list_url(doc.id))
+        self.assertNotContains(resp, "גרסאות תעתוק מ־Transkribus")
+
+    def test_document_detail_hides_transkribus_sync_for_unusable_run(self):
+        doc = self._create_doc()
+        TranskribusRun.objects.create(
+            document=doc,
+            status=TranskribusRun.Status.FAILED,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id="col",
+            model_id="42",
+            remote_doc_id="777",
+            pages_query="1",
+            recognition_job_id="job-1",
+            page_index_to_page_nr={1: 1},
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(
+            reverse("documents-detail-page", kwargs={"doc_id": doc.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, self._list_url(doc.id))
+        self.assertNotContains(resp, "גרסאות תעתוק מ־Transkribus")
