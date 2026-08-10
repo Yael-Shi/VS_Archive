@@ -1359,6 +1359,11 @@ class ArchiveDateScriptIncludeTests(TestCase):
     def test_upload_page_loads_date_script_once(self):
         self._assert_single_script_include(self.client.get("/api/ui/upload/"))
 
+    def test_manual_text_create_loads_date_script_once(self):
+        self._assert_single_script_include(
+            self.client.get("/archive/manage/new/?item_type=manual_text")
+        )
+
     def test_manual_text_edit_loads_date_script_once(self):
         item = create_manual_text_archive_item(title="Script once", body="x")
         self._assert_single_script_include(
