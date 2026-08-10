@@ -273,6 +273,53 @@ class ArchiveSearchTranscriptionPresentationTests(TestCase):
         self.assertEqual(match_piece.text, "lph")
         self.assertEqual(match_piece.hover_line_id, "p1-o0")
 
+    def test_match_crossing_hover_boundary_emits_multiple_spans_same_index(self):
+        doc = create_viewable_ocr_document(
+            title="Multi-span match",
+            language=Document.Language.ENGLISH,
+            visibility=Document.Visibility.PUBLIC,
+        )
+        source = _result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="Alpha\nBeta",
+        )
+        hover = TextLineHoverPresentation(
+            enabled=True,
+            result_type="SOURCE_TEXT",
+            text_result_id=source.pk,
+            segments=(
+                TextLineHoverSegment(text="Alpha", hover_line_id="p1-o0"),
+                TextLineHoverSegment(text="\n", hover_line_id=None),
+                TextLineHoverSegment(text="Beta", hover_line_id="p1-o1"),
+            ),
+            overlay_targets=(),
+        )
+        # Match crosses the hover line boundary (Alpha + newline + Be).
+        matches = (_match(source, term="Alpha\nBe", start=0, end=8),)
+
+        presentation = build_archive_search_transcription_presentation(
+            doc,
+            geometry_matches=matches,
+            text_line_hover=hover,
+        )
+
+        self.assertTrue(presentation.enabled)
+        match_segments = [
+            segment
+            for segment in presentation.segments
+            if segment.archive_search_match_index == 0
+        ]
+        self.assertGreaterEqual(len(match_segments), 2)
+        self.assertEqual(
+            "".join(segment.text for segment in match_segments),
+            "Alpha\nBe",
+        )
+        self.assertEqual(
+            "".join(segment.text for segment in presentation.segments),
+            "Alpha\nBeta",
+        )
+
     def test_no_geometry_matches_disables_presentation(self):
         doc = create_viewable_ocr_document(
             title="No matches",
@@ -406,6 +453,16 @@ class ArchiveSearchTranscriptionDetailRenderTests(TestCase):
         )
         self.assertContains(
             response,
+            'role="button"',
+            html=False,
+        )
+        self.assertContains(
+            response,
+            'tabindex="0"',
+            html=False,
+        )
+        self.assertContains(
+            response,
             "archive-search-transcription-match--active",
             html=False,
         )
@@ -427,6 +484,11 @@ class ArchiveSearchTranscriptionDetailRenderTests(TestCase):
         body = response.content.decode("utf-8")
         self.assertIn("Alpha", body)
         self.assertIn("Beta", body)
+        # Visible transcription text remains exact (no injected link chrome).
+        self.assertIn(
+            'data-archive-search-transcription-match-index="0">Alpha</span>',
+            body,
+        )
 
     @patch(
         "documents.views.create_presigned_get",
@@ -463,7 +525,7 @@ class ArchiveSearchTranscriptionDetailRenderTests(TestCase):
 
 
 class ArchiveSearchOverlayScrollContractTests(SimpleTestCase):
-    """Source-level contract checks for previous/next transcription scroll."""
+    """Source-level contract checks for bidirectional match scroll intents."""
 
     @classmethod
     def setUpClass(cls):
@@ -472,62 +534,143 @@ class ArchiveSearchOverlayScrollContractTests(SimpleTestCase):
             encoding="utf-8"
         )
 
-    def test_previous_next_prefers_transcription_scroll_when_requested(self):
-        self.assertIn("preferTranscriptionScroll: true", self.js_source)
+    def test_previous_next_prefers_transcription_then_source_fallback(self):
+        self.assertIn('scrollSide: "preferTranscription"', self.js_source)
         self.assertIn("scrollTranscriptionForMatch", self.js_source)
+        self.assertIn("scrollSourceForMatch", self.js_source)
         self.assertIn(
-            "preferTranscriptionScroll &&\n      scrollTranscriptionForMatch(matchValue)",
+            'if (scrollSide === "preferTranscription") {\n'
+            "      if (scrollTranscriptionForMatch(matchValue)) {\n"
+            "        return;\n"
+            "      }\n"
+            "      scrollSourceForMatch(matchValue);\n"
+            "    }",
             self.js_source,
         )
 
-    def test_source_page_scroll_remains_fallback_when_no_transcription_target(self):
-        self.assertIn("scrollSourcePageForMatch", self.js_source)
-        # After a preferred transcription scroll succeeds, return without
-        # also scrolling the source page in the same activation.
+    def test_source_overlay_click_requests_transcription_only_scroll(self):
+        self.assertIn(
+            'setActiveMatch(matchIndex, { scrollSide: "transcription" });',
+            self.js_source,
+        )
+        self.assertIn(
+            'if (scrollSide === "transcription") {\n'
+            "      scrollTranscriptionForMatch(matchValue);\n"
+            "      return;\n"
+            "    }",
+            self.js_source,
+        )
+        overlay_handler = self.js_source[
+            self.js_source.index(
+                "// Source overlay click: activate + scroll transcription only."
+            ) : self.js_source.index(
+                "// All spans sharing a match index are valid click sources"
+            )
+        ]
+        self.assertIn('scrollSide: "transcription"', overlay_handler)
+        self.assertNotIn('scrollSide: "source"', overlay_handler)
+        self.assertNotIn('scrollSide: "preferTranscription"', overlay_handler)
+
+    def test_transcription_match_click_requests_source_only_scroll(self):
+        self.assertIn(
+            'setActiveMatch(matchIndex, { scrollSide: "source" });',
+            self.js_source,
+        )
+        self.assertIn(
+            'if (scrollSide === "source") {\n'
+            "      scrollSourceForMatch(matchValue);\n"
+            "      return;\n"
+            "    }",
+            self.js_source,
+        )
+        # Transcription click path must not request transcription scroll.
+        transcription_handler = self.js_source[
+            self.js_source.index(
+                "// All spans sharing a match index are valid click sources"
+            ) : self.js_source.index("previousButton?.addEventListener")
+        ]
+        self.assertIn('scrollSide: "source"', transcription_handler)
+        self.assertNotIn('scrollSide: "transcription"', transcription_handler)
+        self.assertNotIn('scrollSide: "preferTranscription"', transcription_handler)
+
+    def test_all_transcription_spans_are_valid_click_sources(self):
+        # Handlers bind over every transcriptionTargets entry, not only the
+        # first span retained in transcriptionTargetByMatchIndex for scrolling.
+        self.assertIn(
+            "transcriptionTargets.forEach((target) => {\n"
+            "    const activateFromTranscription = () => {",
+            self.js_source,
+        )
+        self.assertIn(
+            'target.addEventListener("click", activateFromTranscription);',
+            self.js_source,
+        )
+
+    def test_initial_set_active_match_uses_source_scroll_only_when_multipage(self):
+        self.assertIn(
+            "setActiveMatch(orderedMatchIndexes[0], {\n"
+            '    scrollSide: pages.length > 1 ? "source" : "none",\n'
+            "  });",
+            self.js_source,
+        )
+        self.assertNotIn(
+            'scrollSide: pages.length > 1 ? "preferTranscription"',
+            self.js_source,
+        )
+        self.assertNotIn(
+            'scrollSide: pages.length > 1 ? "transcription"',
+            self.js_source,
+        )
+
+    def test_missing_opposite_side_does_not_guess_scroll_target(self):
+        # Fail-closed: scroll helpers return false when no mapped target exists.
+        self.assertIn(
+            'if (!activeTarget || typeof activeTarget.scrollIntoView !== "function") {\n'
+            "      return false;\n"
+            "    }",
+            self.js_source,
+        )
         self.assertIn(
             "if (\n"
-            "      preferTranscriptionScroll &&\n"
-            "      scrollTranscriptionForMatch(matchValue)\n"
+            "      !transcriptionTarget ||\n"
+            '      typeof transcriptionTarget.scrollIntoView !== "function"\n'
             "    ) {\n"
+            "      return false;\n"
+            "    }",
+            self.js_source,
+        )
+        # No DOM text search / query-string reconstruction of matches.
+        self.assertNotIn(".textContent.indexOf", self.js_source)
+        self.assertNotIn("new RegExp", self.js_source)
+        self.assertNotIn('querySelectorAll("*"', self.js_source)
+
+    def test_scroll_sides_are_mutually_exclusive_per_activation(self):
+        # Each scrollSide branch returns after at most one scroll helper call.
+        self.assertIn(
+            'if (scrollSide === "none") {\n      return;\n    }', self.js_source
+        )
+        self.assertIn(
+            'if (scrollSide === "transcription") {\n'
+            "      scrollTranscriptionForMatch(matchValue);\n"
             "      return;\n"
-            "    }\n\n"
-            "    scrollSourcePageForMatch(matchValue);",
+            "    }",
             self.js_source,
         )
-
-    def test_initial_set_active_match_does_not_prefer_transcription_scroll(self):
         self.assertIn(
-            "setActiveMatch(orderedMatchIndexes[0], {\n"
-            "    scroll: pages.length > 1,\n"
-            "  });",
+            'if (scrollSide === "source") {\n'
+            "      scrollSourceForMatch(matchValue);\n"
+            "      return;\n"
+            "    }",
             self.js_source,
         )
-        self.assertNotIn(
-            "setActiveMatch(orderedMatchIndexes[0], {\n"
-            "    scroll: pages.length > 1,\n"
-            "    preferTranscriptionScroll: true,\n"
-            "  });",
-            self.js_source,
-        )
+        # No reciprocal programmatic click that could loop.
+        self.assertNotIn(".click()", self.js_source)
 
-    def test_overlay_click_activates_without_scroll_side_effect(self):
-        self.assertIn(
-            "if (Number.isInteger(matchIndex)) {\n"
-            "        setActiveMatch(matchIndex);\n"
-            "      }",
-            self.js_source,
-        )
-        self.assertNotIn("setActiveMatch(matchIndex, { scroll: true", self.js_source)
-        self.assertNotIn(
-            "setActiveMatch(matchIndex, {\n          scroll: true",
-            self.js_source,
-        )
+    def test_transcription_keyboard_activation_uses_enter_and_space(self):
+        self.assertIn('event.key !== "Enter" && event.key !== " "', self.js_source)
+        self.assertIn("event.preventDefault();", self.js_source)
+        self.assertIn("activateFromTranscription();", self.js_source)
 
-    def test_scroll_is_gated_behind_explicit_scroll_flag(self):
-        self.assertIn("if (!scroll) {\n      return;\n    }", self.js_source)
-        # Transcription scroll must not run before the scroll gate.
-        gate_index = self.js_source.index("if (!scroll) {\n      return;\n    }")
-        transcription_scroll_index = self.js_source.index(
-            "preferTranscriptionScroll &&\n      scrollTranscriptionForMatch(matchValue)"
-        )
-        self.assertLess(gate_index, transcription_scroll_index)
+    def test_search_activation_does_not_clear_text_line_hover_classes(self):
+        self.assertNotIn("text-line-hover-source--active", self.js_source)
+        self.assertNotIn("text-line-hover-overlay-target--active", self.js_source)

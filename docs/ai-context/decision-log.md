@@ -2,14 +2,18 @@
 
 ## Public OCR detail — archive-search match ↔ transcription sync
 
-**Decision / implemented in this working tree (not merged/deployed yet):**
-Follow-up to merged/deployed P1 search overlays + sticky nav. When previous /
-next activates an archive-search match on the OCR document detail page, the
-existing source-image active overlay behavior is unchanged, and the displayed
-transcription also scrolls to a server-authored target for that same match
-index when one exists.
+**Decision / #398 merged/deployed; bidirectional click follow-up is this branch
+(not merged/deployed yet):**
+Follow-up to merged/deployed P1 search overlays + sticky nav. Previous / next
+activates an archive-search match on the OCR document detail page with the
+existing source-image active overlay behavior, and the displayed transcription
+also scrolls to a server-authored target for that same match index when one
+exists. A narrow follow-up on
+`feature/search-match-bidirectional-click-sync` makes click activation
+bidirectional (source overlay ↔ transcription match) with explicit one-sided
+scroll intent.
 
-**Intended behavior (this branch / uncommitted follow-up):**
+**Current behavior (#398 deployed):**
 
 - Transcription targets reuse the exact `ArchiveSearchGeometryMatch` enumerate
   indexes already used for `data-archive-search-match-index` on source-image
@@ -31,17 +35,34 @@ index when one exists.
   `.archive-search-transcription-match--active` (warm/amber), distinct from the
   blue-ish `.text-line-hover-source--active` hover state. Clearing/changing the
   active search match does not clear hover classes.
-- Previous/next navigation requests scroll with
-  `preferTranscriptionScroll: true`: if a transcription target exists for the
-  active match, scroll that target only; otherwise fall back to the existing
-  source-page `scrollIntoView`. Do **not** issue both scrolls in one activation.
-- Overlay click continues to activate/highlight only (no page scroll), matching
-  the pre-follow-up contract.
-- Initial page-load `setActiveMatch` preserves the prior multi-page source-page
-  scroll behavior and does **not** prefer transcription scroll merely because a
-  transcription target exists.
+- Previous/next navigation uses `scrollSide: "preferTranscription"`: if a
+  transcription target exists for the active match, scroll that target only;
+  otherwise fall back to source-side scroll. Do **not** issue both scrolls in
+  one activation.
+- Initial page-load `setActiveMatch` preserves multi-page source scroll and does
+  **not** prefer transcription scroll merely because a transcription target
+  exists.
 - The text panel is not a separate overflow container; desktop sticky overflow
   applies only to the source-image panel.
+
+**Intended behavior (bidirectional click follow-up on this branch):**
+
+- Source overlay click: activate the match and scroll **transcription only**
+  when a transcription target exists; never also scroll the source page the
+  user just clicked. Missing transcription target → highlight only (fail
+  closed; no guessed page scroll).
+- Transcription match click: activate the same canonical match index and scroll
+  **source only** (prefer the matching overlay target inside the sticky/
+  overflow source panel). Do not re-scroll the transcription. Missing source
+  overlay → highlight only.
+- A canonical match may span multiple transcription elements (same
+  `data-archive-search-transcription-match-index`); clicking any span activates
+  that match. Transcription match spans are minimally interactive
+  (`role="button"`, `tabindex="0"`, Enter/Space) without changing visible text
+  or nesting invalid interactive markup.
+- Scroll intent is explicit via `scrollSide`
+  (`none` / `transcription` / `source` / `preferTranscription`). No reciprocal
+  programmatic clicks (avoids scroll loops).
 
 **Deferred:** reverse image→text hover; PDF/Gemini geometry; search matching /
 indexing changes.
@@ -61,10 +82,10 @@ On the public OCR document detail page:
    control remains visible while scrolling via CSS `position: sticky`.
 
 Sticky search-match navigation is presentation-only: no second nav component,
-and no changes to archive-search matching, redirect, or geometry. A separate
-uncommitted follow-up may sync previous/next to displayed-transcription anchors
-(see “archive-search match ↔ transcription sync” above); that follow-up is
-**not** production behavior yet.
+and no changes to archive-search matching, redirect, or geometry. Previous/next
+↔ displayed-transcription sync (#398) is merged/deployed; see “archive-search
+match ↔ transcription sync” above. Bidirectional click sync remains a separate
+unmerged follow-up on this branch.
 
 **Current behavior (as implemented in this change):**
 

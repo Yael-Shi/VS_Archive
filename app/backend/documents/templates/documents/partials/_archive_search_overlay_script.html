@@ -72,18 +72,21 @@
     }
   };
 
-  const scrollSourcePageForMatch = (matchValue) => {
+  // Scroll the overlay target inside the sticky/overflow source panel when
+  // possible. Fail closed if no mapped overlay exists for the match index.
+  const scrollSourceForMatch = (matchValue) => {
     const activeTarget = targetByMatchIndex.get(matchValue);
-    const activePage = activeTarget?.closest(
-      "[data-archive-search-page-index]"
-    );
 
-    if (activePage && typeof activePage.scrollIntoView === "function") {
-      activePage.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-      });
+    if (!activeTarget || typeof activeTarget.scrollIntoView !== "function") {
+      return false;
     }
+
+    activeTarget.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+      inline: "nearest",
+    });
+    return true;
   };
 
   const scrollTranscriptionForMatch = (matchValue) => {
@@ -105,10 +108,13 @@
     return true;
   };
 
-  const setActiveMatch = (
-    matchIndex,
-    { scroll = false, preferTranscriptionScroll = false } = {}
-  ) => {
+  // scrollSide:
+  //   "none" — activate/highlight only
+  //   "transcription" — opposite-side transcription only (source overlay click)
+  //   "source" — opposite-side source only (transcription match click)
+  //   "preferTranscription" — previous/next: transcription, else source fallback
+  // Never issues both page-level scrolls in one activation.
+  const setActiveMatch = (matchIndex, { scrollSide = "none" } = {}) => {
     const matchValue = String(matchIndex);
     const position = orderedMatchIndexes.indexOf(matchIndex);
 
@@ -134,18 +140,26 @@
 
     updateNavigation();
 
-    if (!scroll) {
+    if (scrollSide === "none") {
       return;
     }
 
-    if (
-      preferTranscriptionScroll &&
-      scrollTranscriptionForMatch(matchValue)
-    ) {
+    if (scrollSide === "transcription") {
+      scrollTranscriptionForMatch(matchValue);
       return;
     }
 
-    scrollSourcePageForMatch(matchValue);
+    if (scrollSide === "source") {
+      scrollSourceForMatch(matchValue);
+      return;
+    }
+
+    if (scrollSide === "preferTranscription") {
+      if (scrollTranscriptionForMatch(matchValue)) {
+        return;
+      }
+      scrollSourceForMatch(matchValue);
+    }
   };
 
   const activatePosition = (position) => {
@@ -154,21 +168,50 @@
     }
 
     setActiveMatch(orderedMatchIndexes[position], {
-      scroll: true,
-      preferTranscriptionScroll: true,
+      scrollSide: "preferTranscription",
     });
+  };
+
+  const parseMatchIndex = (rawValue) => {
+    const matchIndex = Number.parseInt(rawValue || "", 10);
+    return Number.isInteger(matchIndex) ? matchIndex : null;
   };
 
   targets.forEach((target) => {
     target.addEventListener("click", () => {
-      const matchIndex = Number.parseInt(
-        target.dataset.archiveSearchMatchIndex || "",
-        10
+      const matchIndex = parseMatchIndex(
+        target.dataset.archiveSearchMatchIndex
       );
 
-      if (Number.isInteger(matchIndex)) {
-        setActiveMatch(matchIndex);
+      if (matchIndex !== null) {
+        // Source overlay click: activate + scroll transcription only.
+        // Do not scroll the source page the user just clicked.
+        setActiveMatch(matchIndex, { scrollSide: "transcription" });
       }
+    });
+  });
+
+  // All spans sharing a match index are valid click sources (multi-span case).
+  transcriptionTargets.forEach((target) => {
+    const activateFromTranscription = () => {
+      const matchIndex = parseMatchIndex(
+        target.dataset.archiveSearchTranscriptionMatchIndex
+      );
+
+      if (matchIndex !== null) {
+        // Transcription click: activate + scroll source only.
+        // Do not re-scroll the transcription the user just clicked.
+        setActiveMatch(matchIndex, { scrollSide: "source" });
+      }
+    };
+
+    target.addEventListener("click", activateFromTranscription);
+    target.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+      event.preventDefault();
+      activateFromTranscription();
     });
   });
 
@@ -183,7 +226,7 @@
   // Initial activation: highlight only, with legacy multi-page source scroll.
   // Do not prefer transcription scroll on page load.
   setActiveMatch(orderedMatchIndexes[0], {
-    scroll: pages.length > 1,
+    scrollSide: pages.length > 1 ? "source" : "none",
   });
 })();
 </script>
