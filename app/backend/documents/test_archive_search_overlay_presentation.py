@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 from django.test import SimpleTestCase
@@ -7,6 +8,26 @@ from documents.services.archive_search_overlay_presentation import (
     apply_archive_search_overlay_to_source_previews,
     build_archive_search_single_image_overlay,
 )
+
+
+class ArchiveSearchMatchNavStickyCssTests(SimpleTestCase):
+    def test_match_nav_uses_sticky_positioning_with_existing_top_offset(self):
+        css_path = (
+            Path(__file__).resolve().parents[1]
+            / "public"
+            / "static"
+            / "public"
+            / "app.css"
+        )
+        css = css_path.read_text(encoding="utf-8")
+        marker = ".archive-search-match-nav {"
+        start = css.index(marker)
+        block = css[start : css.index("}", start)]
+
+        self.assertIn("position: sticky;", block)
+        self.assertIn("top: var(--space-4);", block)
+        self.assertIn("z-index: 5;", block)
+        self.assertIn("background: var(--card-muted);", block)
 
 
 class ArchiveSearchOverlayPresentationTests(SimpleTestCase):

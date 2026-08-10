@@ -1,0 +1,57 @@
+<script>
+(() => {
+  const sources = Array.from(
+    document.querySelectorAll(
+      ".text-line-hover-source[data-text-line-hover-id]"
+    )
+  );
+
+  if (!sources.length) {
+    return;
+  }
+
+  const overlays = Array.from(
+    document.querySelectorAll(
+      ".text-line-hover-overlay-target[data-text-line-hover-id]"
+    )
+  );
+
+  if (!overlays.length) {
+    return;
+  }
+
+  const setHoverActive = (hoverLineId, isActive) => {
+    const matchValue = String(hoverLineId);
+
+    sources.forEach((source) => {
+      if (source.dataset.textLineHoverId === matchValue) {
+        source.classList.toggle("text-line-hover-source--active", isActive);
+      }
+    });
+
+    overlays.forEach((overlay) => {
+      if (overlay.dataset.textLineHoverId === matchValue) {
+        overlay.classList.toggle(
+          "text-line-hover-overlay-target--active",
+          isActive
+        );
+      }
+    });
+  };
+
+  sources.forEach((source) => {
+    const hoverLineId = source.dataset.textLineHoverId;
+    if (!hoverLineId) {
+      return;
+    }
+
+    source.addEventListener("pointerenter", () => {
+      setHoverActive(hoverLineId, true);
+    });
+
+    source.addEventListener("pointerleave", () => {
+      setHoverActive(hoverLineId, false);
+    });
+  });
+})();
+</script>

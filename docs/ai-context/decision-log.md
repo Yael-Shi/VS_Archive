@@ -1,5 +1,65 @@
 # VS-Archive Decision Log
 
+## Public OCR detail — text-line hover + sticky archive-search match nav (P1)
+
+**Decision / implemented in the current P1 change (not merged/deployed yet):**
+On the public OCR document detail page:
+
+1. Hovering a displayed transcription line may highlight the corresponding
+   trusted Transkribus source-image line geometry.
+2. When archive-search match navigation is present
+   (`.archive-search-match-nav`: previous / status / next), that existing
+   control remains visible while scrolling via CSS `position: sticky`.
+
+Sticky search-match navigation is presentation-only: no second nav component,
+and no changes to archive-search matching, redirect, geometry, or active-match
+JS logic.
+
+**Current behavior (as implemented in this change):**
+
+- Hover mapping is built server-side from the exact
+  `DocumentTextResult` selected by `resolve_displayed_transcription_result`
+  (Hebrew: HEBREW_TEXT then SOURCE_TEXT; non-Hebrew: SOURCE_TEXT then
+  HEBREW_TEXT). Do **not** infer the row by matching display text strings.
+- Binding/snapshot trust is gated by `resolve_trusted_hover_binding` (shared
+  with the text-range geometry service via `is_binding_trusted_for_hover`).
+  Missing, stale, untrusted, or `hover_eligible=False` bindings disable **all**
+  hover. There is no snapshot fallback and no client-side offset reconstruction.
+- Canonical line offsets come from stored Transkribus `char_start` / `char_end`.
+  Each line's geometry is resolved independently through
+  `resolve_text_range_geometry` for that line's exact range. A line with
+  invalid/unusable geometry stays plain/non-hoverable; other independently
+  valid lines may remain hoverable. Geometry is never guessed or fabricated.
+- Archive-search multi-line geometry resolution is unchanged: one invalid
+  intersecting line still fails that whole search-match range closed.
+- Other fail-closed cases: missing page dimensions / out-of-bounds bbox for a
+  line, PDF / non-renderable source pages for a line, inability to reconstruct
+  the visible text character-for-character, or no remaining hoverable overlays
+  → no hover UI (or plain text for the affected line only, when binding trust
+  still holds).
+- Browser overlays reuse fail-closed page-relative percent conversion
+  (`overlay_bbox_percent.page_bbox_to_percent`) and the same renderable-page
+  contract as archive-search overlays (multi-image `display_number` /
+  single IMAGE page 1 only).
+- Hover DOM/CSS/JS uses a separate namespace from search matches
+  (`data-text-line-hover-id`, `.text-line-hover-*`). Clearing hover must not
+  remove `.archive-search-overlay-target--active`. Search and hover overlays
+  may coexist.
+- Displayed text remains character-equivalent to the existing reading-prose
+  presentation, including separators/newlines. Django autoescaping stays
+  intact; hover markup is not arbitrary JS-generated HTML.
+- Sticky match nav reuses `.archive-search-match-nav` with
+  `position: sticky; top: var(--space-4)` (same offset as other detail sticky
+  panels; site nav is not fixed). Minimal `z-index` / `box-shadow` /
+  existing `var(--card-muted)` background keep it readable over scrolling
+  source content. Existing ≤480px column flex layout is preserved.
+
+**Deferred:** reverse image→text hover; PDF/Gemini geometry; edit/review hover
+surfaces; search matching changes.
+
+**Tests:** `documents/test_text_line_hover_presentation.py` plus existing
+archive-search overlay/geometry/navigation suites.
+
 ## VIDEO public YouTube — error 153 referrer fix + unified click-to-load facade
 
 **Decision / implemented:** Narrow public VIDEO follow-up after PR3. Production YouTube embeds showed error 153 after click-to-load activation because the iframe used `referrerPolicy="no-referrer"`, which withheld the Referer/client identification YouTube requires. Also unify the pre-activation privacy placeholder and post-activation player into one media component.

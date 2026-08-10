@@ -178,6 +178,14 @@
                           aria-hidden="true"
                         ></span>
                       {% endfor %}
+                      {% for target in item.text_line_hover_overlay_targets %}
+                        <span
+                          class="text-line-hover-overlay-target"
+                          data-text-line-hover-id="{{ target.hover_line_id }}"
+                          style="left: {{ target.left_pct }}%; top: {{ target.top_pct }}%; width: {{ target.width_pct }}%; height: {{ target.height_pct }}%;"
+                          aria-hidden="true"
+                        ></span>
+                      {% endfor %}
                     </div>
                   </div>
                 {% else %}
@@ -227,6 +235,16 @@
                       class="archive-search-overlay-target"
                       data-archive-search-match-index="{{ target.match_index }}"
                       data-archive-search-term="{{ target.term }}"
+                      style="left: {{ target.left_pct }}%; top: {{ target.top_pct }}%; width: {{ target.width_pct }}%; height: {{ target.height_pct }}%;"
+                      aria-hidden="true"
+                    ></span>
+                  {% endfor %}
+                {% endif %}
+                {% if text_line_hover_single_image_overlay %}
+                  {% for target in text_line_hover_single_image_overlay.targets %}
+                    <span
+                      class="text-line-hover-overlay-target"
+                      data-text-line-hover-id="{{ target.hover_line_id }}"
                       style="left: {{ target.left_pct }}%; top: {{ target.top_pct }}%; width: {{ target.width_pct }}%; height: {{ target.height_pct }}%;"
                       aria-hidden="true"
                     ></span>
@@ -287,5 +305,8 @@
 
   {% if archive_search_overlay_targets %}
     {% include "documents/partials/_archive_search_overlay_script.html" %}
+  {% endif %}
+  {% if text_line_hover.enabled %}
+    {% include "documents/partials/_text_line_hover_script.html" %}
   {% endif %}
 {% endblock %}

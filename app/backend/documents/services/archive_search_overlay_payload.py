@@ -15,6 +15,7 @@ from documents.models import TranskribusSnapshotPage
 from documents.services.archive_search_match_ranges import (
     ArchiveSearchGeometryMatch,
 )
+from documents.services.overlay_bbox_percent import page_bbox_to_percent
 
 
 @dataclass(frozen=True)
@@ -77,43 +78,28 @@ def build_archive_search_overlay_targets(
                 match_targets = []
                 break
 
-            image_width = page["image_width"]
-            image_height = page["image_height"]
-
-            if (
-                image_width is None
-                or image_height is None
-                or image_width <= 0
-                or image_height <= 0
-            ):
+            percents = page_bbox_to_percent(
+                min_x=geometry.bbox_min_x,
+                min_y=geometry.bbox_min_y,
+                max_x=geometry.bbox_max_x,
+                max_y=geometry.bbox_max_y,
+                image_width=page["image_width"],
+                image_height=page["image_height"],
+            )
+            if percents is None:
                 match_targets = []
                 break
 
-            min_x = geometry.bbox_min_x
-            min_y = geometry.bbox_min_y
-            max_x = geometry.bbox_max_x
-            max_y = geometry.bbox_max_y
-
-            if (
-                min_x < 0
-                or min_y < 0
-                or max_x <= min_x
-                or max_y <= min_y
-                or max_x > image_width
-                or max_y > image_height
-            ):
-                match_targets = []
-                break
-
+            left_pct, top_pct, width_pct, height_pct = percents
             match_targets.append(
                 ArchiveSearchOverlayTarget(
                     match_index=match_index,
                     term=match.term,
                     page_index=geometry.page_index,
-                    left_pct=(min_x / image_width) * 100,
-                    top_pct=(min_y / image_height) * 100,
-                    width_pct=((max_x - min_x) / image_width) * 100,
-                    height_pct=((max_y - min_y) / image_height) * 100,
+                    left_pct=left_pct,
+                    top_pct=top_pct,
+                    width_pct=width_pct,
+                    height_pct=height_pct,
                 )
             )
 

@@ -110,6 +110,36 @@ def _line_geometry(
     )
 
 
+def resolve_trusted_hover_binding(
+    text_result: DocumentTextResult,
+    *,
+    binding: TranskribusTextResultBinding | None = None,
+) -> TranskribusTextResultBinding | None:
+    """Return the current hover-trusted binding for ``text_result``, else None.
+
+    This is the shared binding/snapshot trust gate used by text-range geometry
+    resolution. Callers must not load snapshot line geometry unless this returns
+    a binding. Missing bindings and untrusted/stale/hover-ineligible snapshots
+    fail closed here via ``is_binding_trusted_for_hover``.
+    """
+    resolved_binding = binding
+    if resolved_binding is None:
+        resolved_binding = (
+            TranskribusTextResultBinding.objects.filter(text_result_id=text_result.pk)
+            .select_related("snapshot", "text_result")
+            .first()
+        )
+
+    if resolved_binding is None:
+        return None
+    if not is_binding_trusted_for_hover(
+        text_result,
+        binding=resolved_binding,
+    ):
+        return None
+    return resolved_binding
+
+
 def resolve_text_range_geometry(
     text_result: DocumentTextResult,
     *,
@@ -125,6 +155,12 @@ def resolve_text_range_geometry(
 
     Multi-line and multi-page ranges are supported. Returned targets are
     ordered deterministically by page index and line order.
+
+    Binding trust is evaluated once through ``resolve_trusted_hover_binding``.
+    For multi-line ranges, one invalid intersecting line still fails the whole
+    range closed (archive-search / jump semantics). Callers that need per-line
+    isolation should resolve each line range separately after the trusted
+    binding gate succeeds.
     """
     if isinstance(start, bool) or isinstance(end, bool):
         return ()
@@ -135,20 +171,11 @@ def resolve_text_range_geometry(
     if start < 0 or start >= end or end > len(text):
         return ()
 
-    resolved_binding = binding
-    if resolved_binding is None:
-        resolved_binding = (
-            TranskribusTextResultBinding.objects.filter(text_result_id=text_result.pk)
-            .select_related("snapshot", "text_result")
-            .first()
-        )
-
-    if resolved_binding is None:
-        return ()
-    if not is_binding_trusted_for_hover(
+    resolved_binding = resolve_trusted_hover_binding(
         text_result,
-        binding=resolved_binding,
-    ):
+        binding=binding,
+    )
+    if resolved_binding is None:
         return ()
 
     lines = list(
@@ -178,4 +205,5 @@ def resolve_text_range_geometry(
 __all__ = [
     "TextRangeLineGeometry",
     "resolve_text_range_geometry",
+    "resolve_trusted_hover_binding",
 ]

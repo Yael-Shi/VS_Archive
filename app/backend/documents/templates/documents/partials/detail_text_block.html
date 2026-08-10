@@ -19,7 +19,7 @@
     {% endif %}
 
     {% if block.text %}
-      <div class="detail-text-block__body document-detail-reading-prose{% if block.result_type == 'HEBREW_TEXT' or doc|source_text_is_rtl_filter %} detail-text-block__body--rtl{% else %} detail-text-block__body--ltr{% endif %}">{{ block.text }}</div>
+      <div class="detail-text-block__body document-detail-reading-prose{% if block.result_type == 'HEBREW_TEXT' or doc|source_text_is_rtl_filter %} detail-text-block__body--rtl{% else %} detail-text-block__body--ltr{% endif %}">{% if text_line_hover and text_line_hover.enabled and text_line_hover.result_type == block.result_type %}{% for segment in text_line_hover.segments %}{% if segment.hover_line_id %}<span class="text-line-hover-source" data-text-line-hover-id="{{ segment.hover_line_id }}">{{ segment.text }}</span>{% else %}{{ segment.text }}{% endif %}{% endfor %}{% else %}{{ block.text }}{% endif %}</div>
       {% include "documents/partials/detail_back_to_top.html" %}
     {% else %}
       <div class="muted">{{ meta.empty_message }}</div>

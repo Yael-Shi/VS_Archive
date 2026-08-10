@@ -2391,7 +2391,13 @@ class OcrDocumentArchiveSearchGeometryContextTests(TestCase):
         geometry_matches = (object(),)
         overlay_targets = (object(),)
         overlay_pages = (object(),)
-        rendered_previews = [object()]
+        rendered_previews = [
+            {
+                "display_number": 1,
+                "url": "https://example.test/1",
+                "archive_search_overlay_targets": (),
+            }
+        ]
         single_image_overlay = object()
 
         mock_resolve.return_value = geometry_matches
@@ -2428,9 +2434,14 @@ class OcrDocumentArchiveSearchGeometryContextTests(TestCase):
             response.context["archive_search_overlay_pages"],
             overlay_pages,
         )
-        self.assertIs(
+        self.assertEqual(
             response.context["archive_search_source_preview_items"],
-            rendered_previews,
+            [
+                {
+                    **rendered_previews[0],
+                    "text_line_hover_overlay_targets": (),
+                }
+            ],
         )
         self.assertIs(
             response.context["archive_search_single_image_overlay"],
@@ -2769,6 +2780,16 @@ class OcrDocumentArchiveSearchNavigationRenderTests(TestCase):
         )
         self.assertContains(
             response,
+            "data-archive-search-match-nav",
+            html=False,
+        )
+        self.assertContains(
+            response,
+            'aria-label="ניווט בין התאמות החיפוש"',
+            html=False,
+        )
+        self.assertContains(
+            response,
             "data-archive-search-match-status",
             html=False,
         )
@@ -2782,6 +2803,8 @@ class OcrDocumentArchiveSearchNavigationRenderTests(TestCase):
             "data-archive-search-match-next",
             html=False,
         )
+        self.assertContains(response, "הקודם", html=False)
+        self.assertContains(response, "הבא", html=False)
 
     @patch("documents.views.build_archive_search_single_image_overlay")
     @patch("documents.views.apply_archive_search_overlay_to_source_previews")

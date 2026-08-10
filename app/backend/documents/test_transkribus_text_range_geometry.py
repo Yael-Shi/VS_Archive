@@ -188,6 +188,24 @@ class TranskribusTextRangeGeometryTests(TestCase):
 
         self.assertEqual(self._resolve(4, 7), ())
 
+    def test_single_line_range_still_resolves_when_sibling_line_geometry_is_invalid(
+        self,
+    ):
+        from documents.services.transkribus_text_range_geometry import (
+            resolve_trusted_hover_binding,
+        )
+
+        self.beta.coords_valid = False
+        self.beta.save(update_fields=["coords_valid"])
+
+        self.assertIsNotNone(
+            resolve_trusted_hover_binding(self.result, binding=self.binding)
+        )
+        resolved = self._resolve(0, 5)
+        self.assertEqual(len(resolved), 1)
+        self.assertEqual(resolved[0].provider_line_id, "line-1-0")
+        self.assertEqual(self._resolve(6, 10), ())
+
     def test_binding_for_different_text_result_fails_closed(self):
         other_result = DocumentTextResult.objects.create(
             document=self.doc,
