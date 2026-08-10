@@ -134,6 +134,10 @@ from documents.services.document_access import (
     get_viewable_document,
     is_document_admin,
 )
+from documents.services.transkribus_page_xml_geometry import (
+    TranskribusPageXmlGeometryError,
+    resolve_audit_transkribus_run,
+)
 from documents.services.archive_item_access import (
     ARCHIVE_FAMILY_GROUP_NAME,
     archive_browse_queryset_for_user,
@@ -2735,6 +2739,16 @@ def review_text_result_verified_edit(request, result_id: int):
     return redirect(reverse("review-detail-page", kwargs={"doc_id": row.document_id}))
 
 
+def _is_transkribus_corrected_current_sync_ui_eligible(
+    doc: Document,
+) -> bool:
+    try:
+        resolve_audit_transkribus_run(doc.id)
+    except TranskribusPageXmlGeometryError:
+        return False
+    return True
+
+
 def document_detail_page(request, doc_id: int):
     is_admin = _is_admin(request.user)
     detail_qs = Document.objects.select_related(
@@ -2860,6 +2874,8 @@ def document_detail_page(request, doc_id: int):
         "text_line_hover_single_image_overlay": text_line_hover_single_image_overlay,
         "archive_search_transcription": archive_search_transcription,
         "is_admin": is_admin,
+        "show_transkribus_corrected_current_sync_action": is_admin
+        and _is_transkribus_corrected_current_sync_ui_eligible(doc),
         "show_ocr_reprocess_action": is_admin and is_ocr_reprocess_ui_eligible(doc),
         "show_hebrew_translation_retry_action": is_admin
         and is_hebrew_translation_retry_ui_eligible(doc),
