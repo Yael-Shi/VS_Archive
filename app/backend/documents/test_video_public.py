@@ -317,7 +317,7 @@ class VideoPublicBrowseAndFilterTests(TestCase):
         self.assertContains(resp, "הכל")
         self.assertContains(resp, "מסמכים וטקסטים")
         self.assertContains(resp, "תמונות")
-        self.assertContains(resp, "סרטונים")
+        self.assertContains(resp, "קטעי וידאו")
         self.assertContains(resp, "?item_type=video")
 
     def test_public_video_appears_in_browse_and_links_to_detail(self):
