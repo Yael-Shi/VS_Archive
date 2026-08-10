@@ -1,8 +1,57 @@
 # VS-Archive Decision Log
 
+## Public OCR detail — archive-search match ↔ transcription sync
+
+**Decision / implemented in this working tree (not merged/deployed yet):**
+Follow-up to merged/deployed P1 search overlays + sticky nav. When previous /
+next activates an archive-search match on the OCR document detail page, the
+existing source-image active overlay behavior is unchanged, and the displayed
+transcription also scrolls to a server-authored target for that same match
+index when one exists.
+
+**Intended behavior (this branch / uncommitted follow-up):**
+
+- Transcription targets reuse the exact `ArchiveSearchGeometryMatch` enumerate
+  indexes already used for `data-archive-search-match-index` on source-image
+  overlays. The browser does **not** re-search the query string in displayed
+  text (no `indexOf`, regex reconstruction, or fuzzy DOM matching).
+- A transcription target is emitted only when the geometry match belongs to the
+  exact `DocumentTextResult` selected by
+  `resolve_displayed_transcription_result`. Matches on a non-displayed indexed
+  surface (e.g. separate Hebrew translation while source transcription is shown)
+  keep image navigation and omit transcription sync (fail closed).
+- Invalid / out-of-range / overlapping canonical offsets fail closed for that
+  match index only. Visible transcription text remains character-for-character
+  identical to `DocumentTextResult.text`; Django autoescaping stays intact.
+- Presentation builds a single segment list that can carry both
+  `data-text-line-hover-id` and
+  `data-archive-search-transcription-match-index` so hover markup and search
+  anchors coexist without a second independent reconstruction of the same text.
+- Active transcription highlight uses
+  `.archive-search-transcription-match--active` (warm/amber), distinct from the
+  blue-ish `.text-line-hover-source--active` hover state. Clearing/changing the
+  active search match does not clear hover classes.
+- Previous/next navigation requests scroll with
+  `preferTranscriptionScroll: true`: if a transcription target exists for the
+  active match, scroll that target only; otherwise fall back to the existing
+  source-page `scrollIntoView`. Do **not** issue both scrolls in one activation.
+- Overlay click continues to activate/highlight only (no page scroll), matching
+  the pre-follow-up contract.
+- Initial page-load `setActiveMatch` preserves the prior multi-page source-page
+  scroll behavior and does **not** prefer transcription scroll merely because a
+  transcription target exists.
+- The text panel is not a separate overflow container; desktop sticky overflow
+  applies only to the source-image panel.
+
+**Deferred:** reverse image→text hover; PDF/Gemini geometry; search matching /
+indexing changes.
+
+**Tests:** `documents/test_archive_search_transcription_presentation.py` plus
+existing hover and archive-search overlay/navigation suites.
+
 ## Public OCR detail — text-line hover + sticky archive-search match nav (P1)
 
-**Decision / implemented in the current P1 change (not merged/deployed yet):**
+**Decision / current behavior (P1 — merged/deployed):**
 On the public OCR document detail page:
 
 1. Hovering a displayed transcription line may highlight the corresponding
@@ -12,8 +61,10 @@ On the public OCR document detail page:
    control remains visible while scrolling via CSS `position: sticky`.
 
 Sticky search-match navigation is presentation-only: no second nav component,
-and no changes to archive-search matching, redirect, geometry, or active-match
-JS logic.
+and no changes to archive-search matching, redirect, or geometry. A separate
+uncommitted follow-up may sync previous/next to displayed-transcription anchors
+(see “archive-search match ↔ transcription sync” above); that follow-up is
+**not** production behavior yet.
 
 **Current behavior (as implemented in this change):**
 
@@ -26,12 +77,17 @@ JS logic.
   Missing, stale, untrusted, or `hover_eligible=False` bindings disable **all**
   hover. There is no snapshot fallback and no client-side offset reconstruction.
 - Canonical line offsets come from stored Transkribus `char_start` / `char_end`.
-  Each line's geometry is resolved independently through
-  `resolve_text_range_geometry` for that line's exact range. A line with
-  invalid/unusable geometry stays plain/non-hoverable; other independently
-  valid lines may remain hoverable. Geometry is never guessed or fabricated.
-- Archive-search multi-line geometry resolution is unchanged: one invalid
-  intersecting line still fails that whole search-match range closed.
+  After `resolve_trusted_hover_binding` succeeds, contributing lines are loaded
+  once from that trusted snapshot (`select_related("page")`). Each line is
+  validated independently through shared
+  `text_range_geometry_from_snapshot_line` (no per-line
+  `resolve_text_range_geometry` re-query). A line with invalid/unusable
+  geometry stays plain/non-hoverable; other independently valid lines may
+  remain hoverable. Geometry is never guessed or fabricated. Page dimensions
+  are loaded from the trusted `binding.snapshot_id` only.
+- Archive-search multi-line geometry resolution via
+  `resolve_text_range_geometry` is unchanged: one invalid intersecting line
+  still fails that whole search-match range closed.
 - Other fail-closed cases: missing page dimensions / out-of-bounds bbox for a
   line, PDF / non-renderable source pages for a line, inability to reconstruct
   the visible text character-for-character, or no remaining hoverable overlays

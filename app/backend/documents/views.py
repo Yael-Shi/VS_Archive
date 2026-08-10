@@ -211,6 +211,9 @@ from documents.services.archive_search_overlay_presentation import (
     apply_archive_search_overlay_to_source_previews,
     build_archive_search_single_image_overlay,
 )
+from documents.services.archive_search_transcription_presentation import (
+    build_archive_search_transcription_presentation,
+)
 from documents.services.text_line_hover_presentation import (
     apply_text_line_hover_overlay_to_source_previews,
     build_text_line_hover_overlay_pages,
@@ -2820,6 +2823,11 @@ def document_detail_page(request, doc_id: int):
         content_url=source_context["content_url"],
         overlay_pages=text_line_hover_overlay_pages,
     )
+    archive_search_transcription = build_archive_search_transcription_presentation(
+        doc,
+        geometry_matches=archive_search_geometry_matches,
+        text_line_hover=text_line_hover,
+    )
 
     detail_jump_nav = build_document_detail_jump_nav(
         doc,
@@ -2850,6 +2858,7 @@ def document_detail_page(request, doc_id: int):
         "text_line_hover": text_line_hover,
         "text_line_hover_overlay_pages": text_line_hover_overlay_pages,
         "text_line_hover_single_image_overlay": text_line_hover_single_image_overlay,
+        "archive_search_transcription": archive_search_transcription,
         "is_admin": is_admin,
         "show_ocr_reprocess_action": is_admin and is_ocr_reprocess_ui_eligible(doc),
         "show_hebrew_translation_retry_action": is_admin

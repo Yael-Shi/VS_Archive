@@ -5,7 +5,9 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
+from django.db import connection
 from django.test import SimpleTestCase, TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from documents.models import (
@@ -684,6 +686,7 @@ class TextLineHoverDetailRenderTests(TestCase):
         self.assertIn('data-text-line-hover-id="p1-o0"', body)
         self.assertIn("text-line-hover-overlay-target--active", body)
 
+    @patch("documents.views.build_archive_search_transcription_presentation")
     @patch("documents.views.apply_text_line_hover_overlay_to_source_previews")
     @patch("documents.views.build_text_line_hover_single_image_overlay")
     @patch("documents.views.build_text_line_hover_overlay_pages")
@@ -707,6 +710,7 @@ class TextLineHoverDetailRenderTests(TestCase):
         mock_build_hover_pages,
         mock_build_hover_single,
         mock_apply_hover_previews,
+        mock_build_transcription,
     ):
         doc = create_viewable_ocr_document(
             title="Coexist overlays",
@@ -769,6 +773,29 @@ class TextLineHoverDetailRenderTests(TestCase):
             targets=(hover_target,),
         )
         mock_apply_hover_previews.side_effect = lambda items, pages: items
+        mock_build_transcription.return_value = SimpleNamespace(
+            enabled=True,
+            result_type="SOURCE_TEXT",
+            text_result_id=1,
+            match_indexes=(0,),
+            segments=(
+                SimpleNamespace(
+                    text="Alpha",
+                    hover_line_id="p1-o0",
+                    archive_search_match_index=0,
+                ),
+                SimpleNamespace(
+                    text="\n",
+                    hover_line_id=None,
+                    archive_search_match_index=None,
+                ),
+                SimpleNamespace(
+                    text="Beta",
+                    hover_line_id="p1-o1",
+                    archive_search_match_index=None,
+                ),
+            ),
+        )
 
         self.client.force_login(self.user)
         response = self.client.get(
@@ -787,6 +814,11 @@ class TextLineHoverDetailRenderTests(TestCase):
             'data-text-line-hover-id="p1-o0"',
             html=False,
         )
+        self.assertContains(
+            response,
+            'data-archive-search-transcription-match-index="0"',
+            html=False,
+        )
         self.assertContains(response, "archive-search-overlay-target", html=False)
         self.assertContains(response, "text-line-hover-overlay-target", html=False)
         # Search active-class wiring remains present and distinct from hover.
@@ -800,3 +832,131 @@ class TextLineHoverDetailRenderTests(TestCase):
             "text-line-hover-overlay-target--active",
             html=False,
         )
+        self.assertContains(
+            response,
+            "archive-search-transcription-match--active",
+            html=False,
+        )
+
+
+class TextLineHoverPresentationQueryCountTests(TestCase):
+    """Prove hover presentation query count does not grow with line count."""
+
+    def _sha(self, text: str) -> str:
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def _fixture_with_line_count(self, *, n_lines: int):
+        words = [f"Line{i:03d}" for i in range(n_lines)]
+        text = "\n".join(words)
+        doc = create_ocr_document(
+            title=f"Hover query count {n_lines}",
+            doc_type=Document.DocType.IMAGE,
+            language=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADED,
+            file_s3_key=f"documents/hover-q/{n_lines}/source.jpg",
+            mime_type="image/jpeg",
+            visibility=Document.Visibility.PUBLIC,
+        )
+        result = DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="transkribus-test",
+            engine_key=DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            text=text,
+            source_revision=1,
+        )
+        sha = self._sha(text)
+        snapshot = TranskribusTranscriptSnapshot.objects.create(
+            document=doc,
+            source_kind=TranskribusTranscriptSnapshot.SourceKind.AUTOMATIC_HTR,
+            parser_version="page_xml_snapshot_v1",
+            provider_identity_fingerprint="q" * 64,
+            raw_xml_fingerprint="s" * 64,
+            canonical_text=text,
+            canonical_text_sha256=sha,
+            storage_status=TranskribusTranscriptSnapshot.StorageStatus.READY,
+            geometry_capability=(
+                TranskribusTranscriptSnapshot.GeometryCapability.VERIFIED
+            ),
+            hover_eligible=True,
+        )
+        TranskribusTextResultBinding.objects.create(
+            text_result=result,
+            snapshot=snapshot,
+            binding_role=TranskribusTextResultBinding.BindingRole.SNAPSHOT_SOURCE,
+            bound_text_sha256=sha,
+            bound_source_revision=1,
+        )
+        page = TranskribusSnapshotPage.objects.create(
+            snapshot=snapshot,
+            page_index=1,
+            page_nr=1,
+            transcript_ts_id="ts-q",
+            image_width=1000,
+            image_height=5000,
+            page_geometry_capability=(
+                TranskribusSnapshotPage.GeometryCapability.VERIFIED
+            ),
+        )
+        cursor = 0
+        for index, word in enumerate(words):
+            start = cursor
+            end = start + len(word)
+            y = 10 + index * 12
+            TranskribusSnapshotLine.objects.create(
+                page=page,
+                order_index=index,
+                provider_region_id="region-1",
+                provider_line_id=f"line-{index}",
+                text=word,
+                contributes_to_canonical=True,
+                char_start=start,
+                char_end=end,
+                polygon_points=[
+                    [10, y],
+                    [100, y],
+                    [100, y + 10],
+                    [10, y + 10],
+                ],
+                bbox_min_x=10,
+                bbox_min_y=y,
+                bbox_max_x=100,
+                bbox_max_y=y + 10,
+                coords_valid=True,
+                has_meaningful_geometry=True,
+            )
+            cursor = end + 1
+        return doc
+
+    def _presentation_query_count(self, *, n_lines: int) -> tuple[int, int]:
+        doc = self._fixture_with_line_count(n_lines=n_lines)
+        with CaptureQueriesContext(connection) as context:
+            presentation = build_text_line_hover_presentation(
+                doc,
+                source_preview_items=[],
+                content_url="https://example.test/source.png",
+            )
+        self.assertTrue(presentation.enabled)
+        hoverable = sum(1 for segment in presentation.segments if segment.hover_line_id)
+        self.assertEqual(hoverable, n_lines)
+        line_queries = sum(
+            1
+            for query in context.captured_queries
+            if "documents_transkribussnapshotline" in query["sql"]
+        )
+        return len(context), line_queries
+
+    def test_query_count_does_not_grow_with_line_count(self):
+        total_small, line_small = self._presentation_query_count(n_lines=2)
+        total_large, line_large = self._presentation_query_count(n_lines=40)
+
+        self.assertEqual(line_small, 1)
+        self.assertEqual(line_large, 1)
+        self.assertEqual(total_small, total_large)
+        # Hard upper bound for the service itself (display selection + binding +
+        # one lines query + one pages query). Keep loose enough for selection
+        # prefetch differences, but far below the old N+1 path (~N+7).
+        self.assertLessEqual(total_large, 8)

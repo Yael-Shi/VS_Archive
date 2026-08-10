@@ -13,6 +13,11 @@
   const pages = Array.from(
     document.querySelectorAll("[data-archive-search-page-index]")
   );
+  const transcriptionTargets = Array.from(
+    document.querySelectorAll(
+      "[data-archive-search-transcription-match-index]"
+    )
+  );
   const nav = document.querySelector("[data-archive-search-match-nav]");
   const status = nav?.querySelector("[data-archive-search-match-status]");
   const previousButton = nav?.querySelector(
@@ -28,6 +33,15 @@
     const matchIndex = target.dataset.archiveSearchMatchIndex;
     if (!targetByMatchIndex.has(matchIndex)) {
       targetByMatchIndex.set(matchIndex, target);
+    }
+  });
+
+  const transcriptionTargetByMatchIndex = new Map();
+
+  transcriptionTargets.forEach((target) => {
+    const matchIndex = target.dataset.archiveSearchTranscriptionMatchIndex;
+    if (!transcriptionTargetByMatchIndex.has(matchIndex)) {
+      transcriptionTargetByMatchIndex.set(matchIndex, target);
     }
   });
 
@@ -58,7 +72,43 @@
     }
   };
 
-  const setActiveMatch = (matchIndex, { scroll = false } = {}) => {
+  const scrollSourcePageForMatch = (matchValue) => {
+    const activeTarget = targetByMatchIndex.get(matchValue);
+    const activePage = activeTarget?.closest(
+      "[data-archive-search-page-index]"
+    );
+
+    if (activePage && typeof activePage.scrollIntoView === "function") {
+      activePage.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }
+  };
+
+  const scrollTranscriptionForMatch = (matchValue) => {
+    const transcriptionTarget =
+      transcriptionTargetByMatchIndex.get(matchValue);
+
+    if (
+      !transcriptionTarget ||
+      typeof transcriptionTarget.scrollIntoView !== "function"
+    ) {
+      return false;
+    }
+
+    transcriptionTarget.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+      inline: "nearest",
+    });
+    return true;
+  };
+
+  const setActiveMatch = (
+    matchIndex,
+    { scroll = false, preferTranscriptionScroll = false } = {}
+  ) => {
     const matchValue = String(matchIndex);
     const position = orderedMatchIndexes.indexOf(matchIndex);
 
@@ -75,23 +125,27 @@
       );
     });
 
+    transcriptionTargets.forEach((target) => {
+      target.classList.toggle(
+        "archive-search-transcription-match--active",
+        target.dataset.archiveSearchTranscriptionMatchIndex === matchValue
+      );
+    });
+
     updateNavigation();
 
     if (!scroll) {
       return;
     }
 
-    const activeTarget = targetByMatchIndex.get(matchValue);
-    const activePage = activeTarget?.closest(
-      "[data-archive-search-page-index]"
-    );
-
-    if (activePage && typeof activePage.scrollIntoView === "function") {
-      activePage.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-      });
+    if (
+      preferTranscriptionScroll &&
+      scrollTranscriptionForMatch(matchValue)
+    ) {
+      return;
     }
+
+    scrollSourcePageForMatch(matchValue);
   };
 
   const activatePosition = (position) => {
@@ -99,7 +153,10 @@
       return;
     }
 
-    setActiveMatch(orderedMatchIndexes[position], { scroll: true });
+    setActiveMatch(orderedMatchIndexes[position], {
+      scroll: true,
+      preferTranscriptionScroll: true,
+    });
   };
 
   targets.forEach((target) => {
@@ -123,6 +180,8 @@
     activatePosition(activePosition + 1);
   });
 
+  // Initial activation: highlight only, with legacy multi-page source scroll.
+  // Do not prefer transcription scroll on page load.
   setActiveMatch(orderedMatchIndexes[0], {
     scroll: pages.length > 1,
   });
