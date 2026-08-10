@@ -3713,6 +3713,9 @@ pre {
     overflow: auto;
   }
 
+  .document-detail-source-panel .document-detail-viewer img {
+    max-height: none;
+  }
 }
 
 .document-detail-source-previews {
