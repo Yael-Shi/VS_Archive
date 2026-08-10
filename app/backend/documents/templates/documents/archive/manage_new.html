@@ -99,7 +99,9 @@
       </form>
     {% endif %}
   </div>
-  {% if item_type == "ocr_document" %}
+  {% if item_type == "manual_text" %}
+    {% include "documents/archive/archive_date_form_script.html" %}
+  {% elif item_type == "ocr_document" %}
     {% include "documents/upload/_upload_script.html" %}
     {% include "documents/archive/archive_date_form_script.html" %}
   {% elif item_type == "photo" %}
