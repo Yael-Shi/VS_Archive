@@ -110,6 +110,18 @@ def _line_geometry(
     )
 
 
+def text_range_geometry_from_snapshot_line(
+    line: TranskribusSnapshotLine,
+) -> TextRangeLineGeometry | None:
+    """Convert one already-loaded snapshot line to safe geometry, or fail closed.
+
+    Callers must already have passed ``resolve_trusted_hover_binding`` for the
+    binding/snapshot that owns ``line``. This helper does not re-query lines and
+    does not re-evaluate binding trust; it only validates stored line geometry.
+    """
+    return _line_geometry(line)
+
+
 def resolve_trusted_hover_binding(
     text_result: DocumentTextResult,
     *,
@@ -159,8 +171,9 @@ def resolve_text_range_geometry(
     Binding trust is evaluated once through ``resolve_trusted_hover_binding``.
     For multi-line ranges, one invalid intersecting line still fails the whole
     range closed (archive-search / jump semantics). Callers that need per-line
-    isolation should resolve each line range separately after the trusted
-    binding gate succeeds.
+    isolation should resolve each already-loaded line through
+    ``text_range_geometry_from_snapshot_line`` after the trusted binding gate
+    succeeds (without re-querying the same snapshot lines).
     """
     if isinstance(start, bool) or isinstance(end, bool):
         return ()
@@ -194,7 +207,7 @@ def resolve_text_range_geometry(
 
     resolved: list[TextRangeLineGeometry] = []
     for line in lines:
-        geometry = _line_geometry(line)
+        geometry = text_range_geometry_from_snapshot_line(line)
         if geometry is None:
             return ()
         resolved.append(geometry)
@@ -206,4 +219,5 @@ __all__ = [
     "TextRangeLineGeometry",
     "resolve_text_range_geometry",
     "resolve_trusted_hover_binding",
+    "text_range_geometry_from_snapshot_line",
 ]

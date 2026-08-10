@@ -2,9 +2,10 @@
 
 Displayed transcription offsets come from the selected DocumentTextResult and
 its stored Transkribus line char ranges. Binding/snapshot trust is gated by
-``resolve_trusted_hover_binding``. Per-line geometry is gated by
-``resolve_text_range_geometry`` for that line's exact ``[char_start, char_end)``
-range. This layer never bypasses those authorities and never fabricates
+``resolve_trusted_hover_binding``. Per-line geometry is validated from the
+already-loaded contributing ``TranskribusSnapshotLine`` rows via
+``text_range_geometry_from_snapshot_line`` (shared with the text-range geometry
+service). This layer never bypasses those authorities and never fabricates
 geometry.
 """
 
@@ -14,7 +15,6 @@ from dataclasses import dataclass
 
 from documents.models import (
     Document,
-    DocumentTextResult,
     TranskribusSnapshotLine,
     TranskribusSnapshotPage,
     TranskribusTextResultBinding,
@@ -26,8 +26,8 @@ from documents.services.text_presentation import (
 )
 from documents.services.transkribus_text_range_geometry import (
     TextRangeLineGeometry,
-    resolve_text_range_geometry,
     resolve_trusted_hover_binding,
+    text_range_geometry_from_snapshot_line,
 )
 
 
@@ -110,18 +110,14 @@ def _renderable_page_indexes(
 
 
 def _page_dimensions_by_index(
-    text_result: DocumentTextResult,
+    *,
+    snapshot_id: int,
 ) -> dict[int, dict]:
-    pages = (
-        TranskribusSnapshotPage.objects.filter(
-            snapshot__text_result_bindings__text_result_id=text_result.pk,
-        )
-        .values(
-            "page_index",
-            "image_width",
-            "image_height",
-        )
-        .distinct()
+    """Load page dimensions for the already-trusted binding snapshot only."""
+    pages = TranskribusSnapshotPage.objects.filter(snapshot_id=snapshot_id).values(
+        "page_index",
+        "image_width",
+        "image_height",
     )
     return {page["page_index"]: page for page in pages}
 
@@ -179,26 +175,17 @@ def _overlay_targets_for_geometry(
     )
 
 
-def _geometry_for_line(
-    text_result: DocumentTextResult,
-    *,
-    binding: TranskribusTextResultBinding,
+def _geometry_for_loaded_line(
     line: TranskribusSnapshotLine,
 ) -> TextRangeLineGeometry | None:
-    """Resolve one stored line through the trusted geometry authority."""
+    """Validate one already-loaded contributing line without re-querying."""
     if line.char_end <= line.char_start:
         return None
 
-    geometries = resolve_text_range_geometry(
-        text_result,
-        start=line.char_start,
-        end=line.char_end,
-        binding=binding,
-    )
-    if len(geometries) != 1:
+    geometry = text_range_geometry_from_snapshot_line(line)
+    if geometry is None:
         return None
 
-    geometry = geometries[0]
     if (
         geometry.char_start != line.char_start
         or geometry.char_end != line.char_end
@@ -211,9 +198,7 @@ def _geometry_for_line(
 
 def _build_segments_and_targets(
     text: str,
-    text_result: DocumentTextResult,
     *,
-    binding: TranskribusTextResultBinding,
     lines: list[TranskribusSnapshotLine],
     pages_by_index: dict[int, dict],
     renderable_page_indexes: set[int],
@@ -237,11 +222,7 @@ def _build_segments_and_targets(
             )
 
         line_text = text[line.char_start : line.char_end]
-        geometry = _geometry_for_line(
-            text_result,
-            binding=binding,
-            line=line,
-        )
+        geometry = _geometry_for_loaded_line(line)
         if geometry is None:
             segments.append(
                 TextLineHoverSegment(
@@ -301,7 +282,7 @@ def build_text_line_hover_presentation(
     Binding-level trust failures disable all hover. Invalid/unusable geometry on
     one stored line leaves that slice plain while other independently valid lines
     may remain hoverable. Never fabricates geometry or bypasses the trusted
-    binding / ``resolve_text_range_geometry`` authorities.
+    binding / shared line-geometry validation authorities.
     """
     text_result = resolve_displayed_transcription_result(document)
     if text_result is None:
@@ -327,11 +308,9 @@ def build_text_line_hover_presentation(
     if not lines:
         return _DISABLED
 
-    pages_by_index = _page_dimensions_by_index(text_result)
+    pages_by_index = _page_dimensions_by_index(snapshot_id=binding.snapshot_id)
     segments, overlay_targets = _build_segments_and_targets(
         text,
-        text_result,
-        binding=binding,
         lines=lines,
         pages_by_index=pages_by_index,
         renderable_page_indexes=set(renderable),

@@ -2,8 +2,11 @@
 
 Status: the public OCR document-detail text-line hover → source-image highlight
 behavior, and sticky archive-search match navigation on the same detail page,
-are implemented in the current P1 change (not merged/deployed yet). Broader
-review/edit hover interactions described below remain pending / future work.
+are merged/deployed (P1; production smoke-tested). A search-match ↔
+transcription sync follow-up exists in the working tree on
+`feature/search-match-sync-transcription` and is **not** merged/deployed yet.
+Broader review/edit hover interactions described below remain pending / future
+work.
 
 This note began as a future-facing design exploration for text-to-source
 alignment assistance during transcription review. Keep the historical sections
@@ -194,9 +197,12 @@ Historical stop lines for the original design-only PR:
 - Do not make final schema/UI/API/model/persistence decisions in this note.
 
 **Update:** Public OCR detail text→image line hover (trusted Transkribus only)
-and sticky `.archive-search-match-nav` are implemented in the current P1
-change; they are not merged/deployed yet. Review/edit hover remains out of
-scope until explicitly implemented.
+and sticky `.archive-search-match-nav` are merged/deployed (P1). A separate
+search-match ↔ transcription sync follow-up is implemented in the working tree
+and is not merged/deployed yet; it syncs previous/next to server-authored
+transcription anchors on the exact displayed `DocumentTextResult` when
+canonical offsets are available. Review/edit hover remains out of scope until
+explicitly implemented.
 
 ## 11. Open questions
 
