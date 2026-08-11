@@ -33,14 +33,22 @@
   <div class="field-hint">להוספת ערכים חדשים, הפרידי בפסיקים.</div>
 </div>
 
-<div class="field">
+<div class="field" data-existing-tags-field>
   <label for="selected_tags">תגיות קיימות</label>
-  <select id="selected_tags" name="selected_tags" multiple size="6">
+  <input
+    type="search"
+    data-existing-tags-search
+    autocomplete="off"
+    placeholder="חיפוש בתגיות קיימות…"
+    aria-label="חיפוש בתגיות קיימות"
+  />
+  <select id="selected_tags" name="selected_tags" multiple size="6" data-existing-tags-select>
     {% for tag in discovery_all_tags %}
       <option value="{{ tag.id }}"{% if tag.id in form_data.selected_tag_ids %} selected{% endif %}>{{ tag.name }}</option>
     {% endfor %}
   </select>
   <div class="field-hint">אפשר לבחור כמה ערכים קיימים.</div>
+  <div class="field-hint" data-existing-tags-empty hidden>לא נמצאו תגיות תואמות.</div>
 </div>
 
 <div class="field">
@@ -48,3 +56,45 @@
   <input id="{{ discovery_tags_input_id }}" name="{{ discovery_tags_input_name }}" type="text" value="{{ form_data.discovery_tags }}" placeholder="למשל: משפחה, ירושלים, 1948" />
   <div class="field-hint">להוספת ערכים חדשים, הפרידי בפסיקים.</div>
 </div>
+
+<script>
+  (function () {
+    document.querySelectorAll("[data-existing-tags-field]").forEach(function (field) {
+      if (field.dataset.existingTagsSearchReady === "1") {
+        return;
+      }
+      field.dataset.existingTagsSearchReady = "1";
+
+      const searchInput = field.querySelector("[data-existing-tags-search]");
+      const select = field.querySelector("[data-existing-tags-select]");
+      const emptyMessage = field.querySelector("[data-existing-tags-empty]");
+
+      if (!searchInput || !select || !emptyMessage) {
+        return;
+      }
+
+      function applyFilter() {
+        const query = searchInput.value.trim().toLocaleLowerCase();
+        let matchCount = 0;
+
+        Array.from(select.options).forEach(function (option) {
+          const matches =
+            !query || option.textContent.toLocaleLowerCase().includes(query);
+
+          if (matches) {
+            matchCount += 1;
+          }
+
+          const shouldHide = !matches && !option.selected;
+          option.hidden = shouldHide;
+          option.style.display = shouldHide ? "none" : "";
+        });
+
+        emptyMessage.hidden = !query || matchCount > 0;
+      }
+
+      searchInput.addEventListener("input", applyFilter);
+      select.addEventListener("change", applyFilter);
+    });
+  })();
+</script>
