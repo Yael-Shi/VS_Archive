@@ -2188,7 +2188,7 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 **Validation boundary:** service requires Document existence + persisted `initiated_by`. Authz / CSRF / admin gate belong at the staff POST (see staff enqueue UI entry).
 
-**Still deferred (after PR3 service):** ~~staff UI POST~~ → **implemented** (fetch/sync enqueue only); feature gate; IAM `grant_send_messages` (repo CDK still grants consume only); ops recovery/requeue for stranded `QUEUED`; automatic activation; search / DTR / bindings / processing-state changes.
+**Still deferred (after PR3 service):** ~~staff UI POST~~ → **implemented** (fetch/sync enqueue only); feature gate; ops recovery/requeue for stranded `QUEUED`; automatic activation; search / DTR / bindings / processing-state changes.
 
 ## Archive full-text search — architecture (docs-only)
 
@@ -3400,4 +3400,4 @@ JavaScript hover behavior, scrolling, image overlays, or schema changes.
 
 **UX:** Form label **משיכת תעתוק עדכני מ־Transkribus** on `corrected_current_sync_attempts.html`; PRG redirect back to the attempts list with Hebrew Django messages mapped from enqueue outcomes (`CREATED_AND_ENQUEUED`/`REENQUEUED`, `ALREADY_QUEUED`, `ALREADY_RUNNING`, `BLOCKED_RECOVERY_REQUIRED`, `ENQUEUE_FAILED`, `ENQUEUE_OUTCOME_UNKNOWN`, `ALREADY_TERMINAL`). No polling/JS added.
 
-**Still deferred:** feature gate; IAM `grant_send_messages`; stranded-`QUEUED` recovery/requeue; automatic activation.
+**Still deferred:** feature gate; stranded-`QUEUED` recovery/requeue; automatic activation.
