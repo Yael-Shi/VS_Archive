@@ -11149,7 +11149,7 @@ class NavigationLabelTests(TestCase):
         self.assertNotIn("רשימת השלמת פרטים", toolbar_section)
         self.assertContains(resp, "nav-staff-panel")
         self.assertContains(resp, "רשימת בקרת תעתוק")
-        self.assertContains(resp, "בקרת תעתוק למסמך זה")
+        self.assertContains(resp, "בקרת תעתוק")
         self.assertNotContains(resp, "בדיקת תעתוק למסמך זה")
         self.assertContains(resp, 'href="/api/ui/admin/review/"')
         self.assertContains(resp, f'href="/api/ui/admin/review/{doc.id}/"')
@@ -11170,7 +11170,8 @@ class NavigationLabelTests(TestCase):
         self.assertNotIn("חזרה לרשימה", toolbar_section)
         self.assertNotIn('href="/api/ui/documents/"', toolbar_section)
         # Admin navigation/actions stay hidden (gating unchanged).
-        self.assertNotContains(resp, "בקרת תעתוק למסמך זה")
+        self.assertNotContains(resp, "staff-document-nav")
+        self.assertNotContains(resp, f'href="/api/ui/admin/review/{doc.id}/"')
         self.assertNotContains(resp, "רשימת בקרת תעתוק")
         self.assertNotContains(resp, "/api/ui/admin/review/")
 
@@ -11214,10 +11215,10 @@ class NavigationLabelTests(TestCase):
         management_start = html.index("document-detail-staff-management-actions")
         self.assertLess(
             html.index("עריכת מטא־דאטה", management_start),
-            html.index("בקרת תעתוק למסמך זה", management_start),
+            html.index("בקרת תעתוק", management_start),
         )
         self.assertLess(
-            html.index("בקרת תעתוק למסמך זה", management_start),
+            html.index("בקרת תעתוק", management_start),
             html.index("עריכה טכנית (Django Admin)", management_start),
         )
         nav_start = html.index("document-detail-navigation-actions")
@@ -11312,7 +11313,7 @@ class NavigationLabelTests(TestCase):
         self.assertIn(reverse("archive-list"), toolbar_section)
         self.assertNotIn("document-detail-staff-management-actions", toolbar_section)
 
-    def test_detail_metadata_edit_uses_primary_toolbar_button_style(self):
+    def test_detail_metadata_edit_uses_staff_nav_button_style(self):
         doc = self._create_document()
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
@@ -11320,18 +11321,24 @@ class NavigationLabelTests(TestCase):
         html = resp.content.decode()
         edit_href = f"/archive/manage/{doc.archive_item_id}/edit/"
         self.assertEqual(self._link_label(html, edit_href), "עריכת מטא־דאטה")
-        self.assertIn("btn-primary", self._link_opening_tag(html, edit_href))
+        self.assertIn(
+            "staff-document-nav__button", self._link_opening_tag(html, edit_href)
+        )
+        self.assertNotIn("btn-primary", self._link_opening_tag(html, edit_href))
 
-    def test_detail_review_link_uses_primary_toolbar_button_style(self):
+    def test_detail_review_link_uses_staff_nav_button_style(self):
         doc = self._create_document()
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
         html = resp.content.decode()
         review_href = f"/api/ui/admin/review/{doc.id}/"
-        self.assertEqual(self._link_label(html, review_href), "בקרת תעתוק למסמך זה")
-        self.assertIn("btn-primary", self._link_opening_tag(html, review_href))
+        self.assertEqual(self._link_label(html, review_href), "בקרת תעתוק")
+        self.assertIn(
+            "staff-document-nav__button", self._link_opening_tag(html, review_href)
+        )
+        self.assertNotIn("btn-primary", self._link_opening_tag(html, review_href))
 
-    def test_detail_django_admin_uses_primary_toolbar_button_style(self):
+    def test_detail_django_admin_uses_staff_nav_button_style(self):
         doc = self._create_document()
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
@@ -11340,7 +11347,10 @@ class NavigationLabelTests(TestCase):
         self.assertEqual(
             self._link_label(html, admin_href), "עריכה טכנית (Django Admin)"
         )
-        self.assertIn("btn-primary", self._link_opening_tag(html, admin_href))
+        self.assertIn(
+            "staff-document-nav__button", self._link_opening_tag(html, admin_href)
+        )
+        self.assertNotIn("btn-primary", self._link_opening_tag(html, admin_href))
 
     def test_detail_no_delete_action_for_ocr_document(self):
         from django.urls import reverse
@@ -11377,7 +11387,7 @@ class NavigationLabelTests(TestCase):
         self.assertNotIn("חזרה לרשימה", toolbar_section)
         self.assertNotIn('href="/api/ui/documents/"', toolbar_section)
         self.assertNotContains(resp, "עריכת מטא־דאטה")
-        self.assertNotContains(resp, "בקרת תעתוק למסמך זה")
+        self.assertNotContains(resp, "staff-document-nav")
         self.assertNotContains(resp, "עריכה טכנית (Django Admin)")
 
     def test_review_detail_omits_duplicate_global_navigation_links(self):
@@ -11397,6 +11407,7 @@ class NavigationLabelTests(TestCase):
         self.assertContains(resp, f'href="/api/ui/documents/{doc.id}/"')
         self.assertContains(resp, "עריכת מטא־דאטה")
         self.assertContains(resp, "עריכה טכנית (Django Admin)")
+        self.assertNotContains(resp, f'href="/api/ui/admin/review/{doc.id}/"')
 
     def test_review_detail_metadata_edit_link_for_staff(self):
         doc = self._create_document()
@@ -11408,7 +11419,7 @@ class NavigationLabelTests(TestCase):
         edit_href = f"/archive/manage/{doc.archive_item_id}/edit/"
         self.assertEqual(self._link_label(html, edit_href), "עריכת מטא־דאטה")
         edit_tag = self._link_opening_tag(html, edit_href)
-        self.assertIn("btn", edit_tag)
+        self.assertIn("staff-document-nav__button", edit_tag)
         self.assertNotIn("btn-primary", edit_tag)
 
     def test_review_detail_django_admin_is_technical_secondary(self):
@@ -11422,7 +11433,7 @@ class NavigationLabelTests(TestCase):
             self._link_label(html, admin_href), "עריכה טכנית (Django Admin)"
         )
         admin_tag = self._link_opening_tag(html, admin_href)
-        self.assertIn("btn", admin_tag)
+        self.assertIn("staff-document-nav__button", admin_tag)
         self.assertNotIn("btn-primary", admin_tag)
 
     def test_review_detail_has_no_redundant_open_review_action(self):
@@ -11431,7 +11442,7 @@ class NavigationLabelTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, "בקרת תעתוק למסמך זה")
+        self.assertNotContains(resp, f'href="/api/ui/admin/review/{doc.id}/"')
         self.assertNotContains(resp, "פתח לבדיקה")
         self.assertNotContains(resp, "פתח בבקרת תעתוק")
 

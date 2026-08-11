@@ -47,14 +47,7 @@
 
           {% if is_admin %}
             <div class="document-detail-staff-management-actions">
-              {# Primary actions for the current document #}
-              {% if doc.archive_item_id %}
-                <a class="btn btn-primary" href="{% url 'archive-manage-edit' item_id=doc.archive_item_id %}">עריכת מטא־דאטה</a>
-              {% endif %}
-              <a class="btn btn-primary" href="{% url 'review-detail-page' doc_id=doc.id %}">בקרת תעתוק למסמך זה</a>
-              {% if show_transkribus_corrected_current_sync_action %}
-                <a class="btn btn-primary" href="{% url 'corrected-current-sync-attempts' doc_id=doc.id %}">גרסאות תעתוק מ־Transkribus</a>
-              {% endif %}
+              {% include "documents/partials/staff_document_nav.html" with doc=doc current_section="document" show_transkribus_corrected_current_sync_action=show_transkribus_corrected_current_sync_action %}
 
               {% if show_ocr_reprocess_action or show_hebrew_translation_retry_action %}
                 <details class="review-details review-details--secondary document-detail-staff-actions">
@@ -80,11 +73,8 @@
                         <button type="submit" class="btn btn-primary">נסה תרגום לעברית מחדש</button>
                       </form>
                     {% endif %}
-                    <a class="btn btn-primary" href="/admin/documents/document/{{ doc.id }}/change/">עריכה טכנית (Django Admin)</a>
                   </div>
                 </details>
-              {% else %}
-                <a class="btn btn-primary" href="/admin/documents/document/{{ doc.id }}/change/">עריכה טכנית (Django Admin)</a>
               {% endif %}
             </div>
           {% endif %}

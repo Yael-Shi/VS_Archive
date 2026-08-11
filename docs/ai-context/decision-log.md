@@ -425,11 +425,11 @@ Manual text body displayed with Django auto-escape + **`linebreaksbr`** (no **`s
 
 ## ArchiveItem — OCR staff action hierarchy on detail pages (PR4)
 
-**Decision:** OCR **document detail** (`/api/ui/documents/<doc_id>/`) and **transcription review detail** (`/api/ui/admin/review/<doc_id>/`) staff toolbars follow the same first-party action hierarchy as the metadata completion backlog (PR3): **`עריכת מטא־דאטה`** is the emphasized first-party metadata path; **בקרת תמלול** / **תצוגת מסמך** remain secondary cross-workflow links; **Django Admin** is a secondary technical escape hatch labeled **`עריכה טכנית (Django Admin)`** (plain `btn`, not primary). Review detail adds the metadata edit link when **`archive_item_id`** exists; no redundant “open review” link on review detail. **`/archive/manage/`** OCR rows use **`עריכת מטא־דאטה`** (MANUAL_TEXT labels unchanged).
+**Decision:** OCR document-management staff surfaces share one cross-management nav partial (`documents/partials/staff_document_nav.html`) for the same OCR document: **document detail** (`/api/ui/documents/<doc_id>/`), **transcription review detail** (`/api/ui/admin/review/<doc_id>/`), and Transkribus corrected/current-sync list/detail. Links: **`עריכת מטא־דאטה`** (when **`archive_item_id`** exists), **`בקרת תעתוק`**, **`תצוגת מסמך`**, **`גרסאות תעתוק מ־Transkribus`** (only when the existing Transkribus corrected/current-sync UI eligibility applies), and **`עריכה טכנית (Django Admin)`**. The current section is omitted (no self-navigation). Buttons use dedicated smaller/distinct **`staff-document-nav` / `staff-document-nav__button`** styling (not ordinary **`btn-primary`**). The shared nav is **not** placed on the metadata-edit page. Transkribus attempt detail keeps local **`חזרה לגרסאות תעתוק`** separately. **`/archive/manage/`** OCR rows still use **`עריכת מטא־דאטה`** (MANUAL_TEXT labels unchanged).
 
-**Unchanged:** Metadata edit save behavior, review POST handlers, **`DocumentTextResult`** status/verification semantics, backlog queryset/filters/counts, permissions, OCR/HTR processing, upload API, worker/SQS, **`ArchiveItem`** runtime cutover. **No** delete action for **`OCR_DOCUMENT`**.
+**Unchanged:** Metadata edit save behavior, review POST handlers, **`DocumentTextResult`** status/verification semantics, backlog queryset/filters/counts, permissions, OCR/HTR processing, upload API, worker/SQS, Transkribus sync/enqueue/activation eligibility, **`ArchiveItem`** runtime cutover. **No** delete action for **`OCR_DOCUMENT`**.
 
-**Scope (PR4):** Detail/review-detail/manage-list template action links, focused tests, this log entry.
+**Scope (PR4):** Detail/review-detail/manage-list / Transkribus preview template action links, shared staff nav partial, focused tests, this log entry.
 
 ## ArchiveItem — OCR metadata edit audit follow-up (pre-PR5)
 

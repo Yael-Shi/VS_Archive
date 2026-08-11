@@ -858,3 +858,218 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, self._list_url(doc.id))
         self.assertNotContains(resp, "גרסאות תעתוק מ־Transkribus")
+
+
+def _staff_document_nav_html(html: str) -> str:
+    marker = 'class="staff-document-nav"'
+    start = html.find(marker)
+    if start == -1:
+        return ""
+    # Back up to the opening <nav
+    nav_start = html.rfind("<nav", 0, start)
+    nav_end = html.find("</nav>", start)
+    if nav_start == -1 or nav_end == -1:
+        return ""
+    return html[nav_start : nav_end + len("</nav>")]
+
+
+def _link_label_in(html: str, href: str) -> str | None:
+    marker = f'href="{href}"'
+    href_pos = html.find(marker)
+    if href_pos == -1:
+        return None
+    tag_end = html.find(">", href_pos)
+    close_start = html.find("</a>", tag_end)
+    if tag_end == -1 or close_start == -1:
+        return None
+    return html[tag_end + 1 : close_start].strip()
+
+
+@override_settings(UPLOADS_BUCKET_NAME="")
+class StaffDocumentManagementNavTests(TestCase):
+    """Cross-management staff navigation contract for the same OCR document."""
+
+    def setUp(self) -> None:
+        self.staff = User.objects.create_user(
+            username="staff_doc_nav",
+            password="test-pass",
+            is_staff=True,
+        )
+
+    def _create_doc(self, **kwargs) -> Document:
+        defaults: dict[str, Any] = dict(
+            title="Staff nav doc",
+            doc_type=Document.DocType.PDF,
+            language=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.READY,
+            file_s3_key="documents/staff-nav/original.pdf",
+            mime_type="application/pdf",
+            visibility=Document.Visibility.PUBLIC,
+        )
+        defaults.update(kwargs)
+        return create_ocr_document(**defaults)
+
+    def _upload_run(self, doc: Document) -> TranskribusRun:
+        return TranskribusRun.objects.create(
+            document=doc,
+            status=TranskribusRun.Status.SUCCEEDED,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id="col",
+            model_id="42",
+            remote_doc_id="777",
+            pages_query="1",
+            recognition_job_id="job-1",
+            page_index_to_page_nr={1: 1},
+        )
+
+    def _create_text_result(self, doc: Document) -> DocumentTextResult:
+        return DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="transkribus-pylaia:1",
+            engine_key=DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="שורת בדיקה",
+        )
+
+    def _detail_urls(self, doc: Document) -> dict[str, str]:
+        return {
+            "document": reverse("documents-detail-page", kwargs={"doc_id": doc.id}),
+            "metadata": reverse(
+                "archive-manage-edit", kwargs={"item_id": doc.archive_item_id}
+            ),
+            "review": reverse("review-detail-page", kwargs={"doc_id": doc.id}),
+            "transkribus": reverse(
+                "corrected-current-sync-attempts", kwargs={"doc_id": doc.id}
+            ),
+            "admin": f"/admin/documents/document/{doc.id}/change/",
+        }
+
+    def test_document_detail_eligible_shows_cross_management_nav(self):
+        doc = self._create_doc()
+        self._upload_run(doc)
+        urls = self._detail_urls(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.get(urls["document"])
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        nav = _staff_document_nav_html(html)
+        self.assertTrue(nav)
+        self.assertEqual(_link_label_in(nav, urls["metadata"]), "עריכת מטא־דאטה")
+        self.assertEqual(_link_label_in(nav, urls["review"]), "בקרת תעתוק")
+        self.assertEqual(
+            _link_label_in(nav, urls["transkribus"]), "גרסאות תעתוק מ־Transkribus"
+        )
+        self.assertEqual(
+            _link_label_in(nav, urls["admin"]), "עריכה טכנית (Django Admin)"
+        )
+        self.assertIsNone(_link_label_in(nav, urls["document"]))
+        self.assertNotIn("תצוגת מסמך", nav)
+
+    def test_document_detail_ineligible_hides_transkribus_versions_nav(self):
+        doc = self._create_doc(
+            language=Document.Language.ENGLISH,
+            text_input_type=Document.TextInputType.PRINTED,
+        )
+        urls = self._detail_urls(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.get(urls["document"])
+        self.assertEqual(resp.status_code, 200)
+        nav = _staff_document_nav_html(resp.content.decode())
+        self.assertTrue(nav)
+        self.assertIsNone(_link_label_in(nav, urls["transkribus"]))
+        self.assertNotIn("גרסאות תעתוק מ־Transkribus", nav)
+
+    def test_review_detail_eligible_shows_cross_management_nav(self):
+        doc = self._create_doc()
+        self._upload_run(doc)
+        self._create_text_result(doc)
+        urls = self._detail_urls(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.get(urls["review"])
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        nav = _staff_document_nav_html(html)
+        self.assertTrue(nav)
+        self.assertEqual(_link_label_in(nav, urls["document"]), "תצוגת מסמך")
+        self.assertEqual(_link_label_in(nav, urls["metadata"]), "עריכת מטא־דאטה")
+        self.assertEqual(
+            _link_label_in(nav, urls["transkribus"]), "גרסאות תעתוק מ־Transkribus"
+        )
+        self.assertEqual(
+            _link_label_in(nav, urls["admin"]), "עריכה טכנית (Django Admin)"
+        )
+        self.assertIsNone(_link_label_in(nav, urls["review"]))
+        self.assertNotIn(f'href="{urls["review"]}"', nav)
+
+    def test_review_detail_ineligible_hides_transkribus_versions_nav(self):
+        doc = self._create_doc(
+            language=Document.Language.ENGLISH,
+            text_input_type=Document.TextInputType.PRINTED,
+        )
+        self._create_text_result(doc)
+        urls = self._detail_urls(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.get(urls["review"])
+        self.assertEqual(resp.status_code, 200)
+        nav = _staff_document_nav_html(resp.content.decode())
+        self.assertTrue(nav)
+        self.assertIsNone(_link_label_in(nav, urls["transkribus"]))
+        self.assertNotIn("גרסאות תעתוק מ־Transkribus", nav)
+
+    def test_transkribus_attempts_list_shows_cross_management_nav_without_self(self):
+        doc = self._create_doc()
+        self._upload_run(doc)
+        urls = self._detail_urls(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.get(urls["transkribus"])
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        nav = _staff_document_nav_html(html)
+        self.assertTrue(nav)
+        self.assertEqual(_link_label_in(nav, urls["document"]), "תצוגת מסמך")
+        self.assertEqual(_link_label_in(nav, urls["metadata"]), "עריכת מטא־דאטה")
+        self.assertEqual(_link_label_in(nav, urls["review"]), "בקרת תעתוק")
+        self.assertEqual(
+            _link_label_in(nav, urls["admin"]), "עריכה טכנית (Django Admin)"
+        )
+        self.assertIsNone(_link_label_in(nav, urls["transkribus"]))
+        self.assertNotIn("גרסאות תעתוק מ־Transkribus", nav)
+
+    def test_transkribus_attempt_detail_keeps_local_back_and_shared_nav(self):
+        doc = self._create_doc()
+        run = self._upload_run(doc)
+        attempt = TranskribusCorrectedCurrentSyncAttempt.objects.create(
+            document=doc,
+            transkribus_run=run,
+            initiated_by=self.staff,
+            status=TranskribusCorrectedCurrentSyncAttempt.Status.STARTED,
+        )
+        urls = self._detail_urls(doc)
+        detail_url = reverse(
+            "corrected-current-sync-attempt-detail",
+            kwargs={"doc_id": doc.id, "attempt_id": attempt.id},
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(detail_url)
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertContains(resp, "חזרה לגרסאות תעתוק")
+        self.assertEqual(
+            _link_label_in(html, urls["transkribus"]), "חזרה לגרסאות תעתוק"
+        )
+        nav = _staff_document_nav_html(html)
+        self.assertTrue(nav)
+        self.assertEqual(_link_label_in(nav, urls["document"]), "תצוגת מסמך")
+        self.assertEqual(_link_label_in(nav, urls["metadata"]), "עריכת מטא־דאטה")
+        self.assertEqual(_link_label_in(nav, urls["review"]), "בקרת תעתוק")
+        self.assertEqual(
+            _link_label_in(nav, urls["admin"]), "עריכה טכנית (Django Admin)"
+        )
+        self.assertIsNone(_link_label_in(nav, urls["transkribus"]))
+        self.assertNotIn("גרסאות תעתוק מ־Transkribus", nav)
+        self.assertNotIn("חזרה לגרסאות תעתוק", nav)
