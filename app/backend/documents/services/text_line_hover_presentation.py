@@ -24,6 +24,9 @@ from documents.services.text_presentation import (
     ResultTypeStr,
     resolve_displayed_transcription_result,
 )
+from documents.services.source_image_renderability import (
+    renderable_source_page_indexes,
+)
 from documents.services.transkribus_text_range_geometry import (
     TextRangeLineGeometry,
     resolve_trusted_hover_binding,
@@ -89,24 +92,6 @@ _DISABLED = TextLineHoverPresentation(
 
 def _hover_line_id(geometry: TextRangeLineGeometry) -> str:
     return f"p{geometry.page_index}-o{geometry.order_index}"
-
-
-def _renderable_page_indexes(
-    document: Document,
-    *,
-    source_preview_items: list[dict],
-    content_url: str | None,
-) -> tuple[int, ...]:
-    """Match the archive-search overlay-page renderability contract."""
-    if source_preview_items:
-        return tuple(
-            int(item["display_number"])
-            for item in source_preview_items
-            if item.get("url")
-        )
-    if document.doc_type == Document.DocType.IMAGE and content_url:
-        return (1,)
-    return ()
 
 
 def _page_dimensions_by_index(
@@ -292,7 +277,7 @@ def build_text_line_hover_presentation(
     if not text:
         return _DISABLED
 
-    renderable = _renderable_page_indexes(
+    renderable = renderable_source_page_indexes(
         document,
         source_preview_items=source_preview_items,
         content_url=content_url,
@@ -337,7 +322,7 @@ def build_text_line_hover_overlay_pages(
     overlay_targets: tuple[TextLineHoverOverlayTarget, ...],
 ) -> tuple[TextLineHoverOverlayPage, ...]:
     """Expose hover overlays only on source pages that are actually renderable."""
-    renderable_page_indexes = _renderable_page_indexes(
+    renderable_page_indexes = renderable_source_page_indexes(
         document,
         source_preview_items=source_preview_items,
         content_url=content_url,

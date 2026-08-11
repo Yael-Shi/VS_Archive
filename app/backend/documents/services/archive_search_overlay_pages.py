@@ -8,6 +8,9 @@ from documents.models import Document
 from documents.services.archive_search_overlay_payload import (
     ArchiveSearchOverlayTarget,
 )
+from documents.services.source_image_renderability import (
+    renderable_source_page_indexes,
+)
 
 
 @dataclass(frozen=True)
@@ -35,16 +38,11 @@ def build_archive_search_overlay_pages(
     PDF and other document types deliberately expose no overlay pages here.
     """
 
-    renderable_page_indexes: list[int] = []
-
-    if source_preview_items:
-        renderable_page_indexes = [
-            int(item["display_number"])
-            for item in source_preview_items
-            if item.get("url")
-        ]
-    elif document.doc_type == Document.DocType.IMAGE and content_url:
-        renderable_page_indexes = [1]
+    renderable_page_indexes = renderable_source_page_indexes(
+        document,
+        source_preview_items=source_preview_items,
+        content_url=content_url,
+    )
 
     if not renderable_page_indexes:
         return ()
