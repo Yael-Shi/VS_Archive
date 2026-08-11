@@ -3064,6 +3064,26 @@ pre {
   gap: var(--space-2);
 }
 
+.archive-detail-photo-top {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.archive-detail-toolbar--public {
+  margin-bottom: 0;
+}
+
+.archive-detail-staff-management-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
 .archive-detail-page .archive-detail-badges.badge-row {
   margin-top: 0;
 }
@@ -3137,7 +3157,9 @@ pre {
 }
 
 .archive-detail-photo {
-  margin: var(--space-5) 0 0;
+  margin: var(--space-5) auto 0;
+  max-width: 960px;
+  width: 100%;
   min-width: 0;
 }
 
@@ -3196,6 +3218,22 @@ pre {
 
   .archive-detail-photo {
     margin-top: var(--space-4);
+  }
+
+  .archive-detail-photo-top {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .archive-detail-staff-management-actions {
+    width: 100%;
+  }
+
+  .archive-detail-staff-management-actions .staff-document-nav__button {
+    flex: 1 1 auto;
+    min-height: 44px;
+    white-space: normal;
+    text-align: center;
   }
 }
 

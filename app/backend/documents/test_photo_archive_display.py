@@ -428,6 +428,110 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         self.assertContains(resp, "btn-secondary archive-detail-suggest-btn")
         self.assertContains(resp, "הוספת מידע על הפריט")
 
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value=PRESIGNED_URL,
+    )
+    def test_public_photo_detail_keeps_public_actions_without_staff_controls(
+        self, _mock_presigned_get
+    ):
+        resp = self.client.get(
+            reverse("archive-detail", kwargs={"item_id": self.public_uploaded.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+        self.assertContains(resp, "חזרה לארכיון")
+        self.assertContains(resp, reverse("archive-list"))
+        self.assertContains(resp, "הוספת מידע על הפריט")
+        self.assertContains(resp, "archive-detail-toolbar--public")
+        self.assertNotContains(resp, "archive-detail-staff-management-actions")
+        self.assertNotContains(resp, "עריכת מטא־דאטה")
+        self.assertNotContains(
+            resp,
+            reverse("archive-manage-edit", kwargs={"item_id": self.public_uploaded.id}),
+        )
+        self.assertNotContains(
+            resp,
+            reverse(
+                "archive-manage-delete",
+                kwargs={"item_id": self.public_uploaded.id},
+            ),
+        )
+        self.assertNotIn("<summary>פרטים</summary>", html)
+        self.assertContains(resp, 'class="photo-detail__image"')
+        page_start = html.index("archive-detail-page--photo")
+        self.assertNotIn('href="/admin/', html[page_start:])
+
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value=PRESIGNED_URL,
+    )
+    def test_staff_photo_detail_separates_public_nav_from_staff_management(
+        self, _mock_presigned_get
+    ):
+        self.client.force_login(self.staff)
+        resp = self.client.get(
+            reverse("archive-detail", kwargs={"item_id": self.public_uploaded.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        edit_href = reverse(
+            "archive-manage-edit", kwargs={"item_id": self.public_uploaded.id}
+        )
+        delete_href = reverse(
+            "archive-manage-delete", kwargs={"item_id": self.public_uploaded.id}
+        )
+
+        self.assertContains(resp, "archive-detail-photo-top")
+        self.assertContains(resp, "archive-detail-toolbar--public")
+        self.assertContains(resp, "archive-detail-staff-management-actions")
+        self.assertContains(resp, "חזרה לארכיון")
+        self.assertContains(resp, "הוספת מידע על הפריט")
+        self.assertContains(resp, "עריכת מטא־דאטה")
+        self.assertContains(resp, "מחיקה")
+        self.assertContains(resp, edit_href)
+        self.assertContains(resp, delete_href)
+        self.assertNotContains(resp, ">עריכה</a>")
+        self.assertNotContains(resp, "<summary>פרטים</summary>")
+        self.assertContains(resp, 'class="photo-detail__image"')
+
+        page_start = html.index("archive-detail-page--photo")
+        page_end = html.find("</div>", html.rfind("archive-detail-photo"))
+        if page_end == -1:
+            page_end = len(html)
+        page_html = html[page_start:page_end]
+        self.assertNotIn('href="/admin/', page_html)
+        self.assertNotIn("עריכה טכנית", page_html)
+
+        public_toolbar_start = html.index("archive-detail-toolbar--public")
+        public_toolbar_end = html.index("</div>", public_toolbar_start)
+        public_toolbar = html[public_toolbar_start:public_toolbar_end]
+        self.assertIn("חזרה לארכיון", public_toolbar)
+        self.assertNotIn(edit_href, public_toolbar)
+        self.assertNotIn(delete_href, public_toolbar)
+        self.assertNotIn("עריכת מטא־דאטה", public_toolbar)
+        self.assertNotIn("מחיקה", public_toolbar)
+
+        staff_start = html.index("archive-detail-staff-management-actions")
+        staff_end = html.index("</div>", staff_start)
+        staff_section = html[staff_start:staff_end]
+        self.assertIn("עריכת מטא־דאטה", staff_section)
+        self.assertIn("מחיקה", staff_section)
+        self.assertIn("staff-document-nav__button", staff_section)
+        self.assertNotIn("חזרה לארכיון", staff_section)
+        self.assertNotIn("הוספת מידע על הפריט", staff_section)
+        self.assertNotIn('href="/admin/', staff_section)
+
+        edit_tag_start = html.rfind("<a", 0, html.index(f'href="{edit_href}"'))
+        edit_tag_end = html.find(">", html.index(f'href="{edit_href}"')) + 1
+        self.assertIn("staff-document-nav__button", html[edit_tag_start:edit_tag_end])
+        delete_tag_start = html.rfind("<a", 0, html.index(f'href="{delete_href}"'))
+        delete_tag_end = html.find(">", html.index(f'href="{delete_href}"')) + 1
+        self.assertIn(
+            "staff-document-nav__button", html[delete_tag_start:delete_tag_end]
+        )
+
 
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
 class PhotoArchiveDiscoveryBrowseTests(TestCase):
@@ -637,3 +741,21 @@ class PhotoArchiveBrowsePreviewStyleTests(SimpleTestCase):
         self.assertNotIn("object-fit: contain", image_block)
         self.assertNotIn("border:", image_block)
         self.assertNotIn("box-shadow:", image_block)
+
+
+class PhotoArchiveDetailLayoutStyleTests(SimpleTestCase):
+    def test_photo_detail_figure_is_centered_and_width_capped(self):
+        css_path = settings.BASE_DIR / "public" / "static" / "public" / "app.css"
+        css = css_path.read_text(encoding="utf-8")
+        figure_start = css.index(".archive-detail-photo {")
+        figure_block = css[figure_start : css.index("}", figure_start) + 1]
+        self.assertIn("max-width: 960px", figure_block)
+        self.assertIn("margin: var(--space-5) auto 0", figure_block)
+        self.assertIn("width: 100%", figure_block)
+
+        image_start = css.index(".archive-detail-photo .photo-detail__image {")
+        image_block = css[image_start : css.index("}", image_start) + 1]
+        self.assertIn("height: auto", image_block)
+        self.assertIn("width: 100%", image_block)
+        self.assertIn("border-radius: var(--radius)", image_block)
+        self.assertIn("box-shadow: var(--shadow-soft)", image_block)

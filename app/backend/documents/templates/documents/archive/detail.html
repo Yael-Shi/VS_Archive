@@ -3,19 +3,42 @@
 {% block title %}VSArchive - {{ item.title }}{% endblock %}
 
 {% block content %}
-  <div class="card card--pad-lg archive-detail-page">
-    <div class="page-toolbar archive-detail-toolbar">
-      <a class="btn" href="{% url 'archive-list' %}">
-        <span>חזרה לארכיון</span>
-        <span aria-hidden="true">←</span>
-      </a>
-      {% if is_admin %}
-        {% if item.item_type == "MANUAL_TEXT" or item.item_type == "PHOTO" or item.item_type == "VIDEO" %}
-          <a class="btn" href="{% url 'archive-manage-edit' item_id=item.id %}">עריכה</a>
-          <a class="btn" href="{% url 'archive-manage-delete' item_id=item.id %}">מחיקה</a>
+  <div class="card card--pad-lg archive-detail-page{% if item.item_type == 'PHOTO' %} archive-detail-page--photo{% endif %}">
+    {% if item.item_type == "PHOTO" %}
+      <div class="archive-detail-photo-top">
+        <div class="page-toolbar archive-detail-toolbar archive-detail-toolbar--public">
+          <a class="btn" href="{% url 'archive-list' %}">
+            <span>חזרה לארכיון</span>
+            <span aria-hidden="true">←</span>
+          </a>
+        </div>
+        {% if is_admin %}
+          <div class="archive-detail-staff-management-actions">
+            <a
+              class="btn staff-document-nav__button"
+              href="{% url 'archive-manage-edit' item_id=item.id %}"
+            >עריכת מטא־דאטה</a>
+            <a
+              class="btn staff-document-nav__button"
+              href="{% url 'archive-manage-delete' item_id=item.id %}"
+            >מחיקה</a>
+          </div>
         {% endif %}
-      {% endif %}
-    </div>
+      </div>
+    {% else %}
+      <div class="page-toolbar archive-detail-toolbar">
+        <a class="btn" href="{% url 'archive-list' %}">
+          <span>חזרה לארכיון</span>
+          <span aria-hidden="true">←</span>
+        </a>
+        {% if is_admin %}
+          {% if item.item_type == "MANUAL_TEXT" or item.item_type == "VIDEO" %}
+            <a class="btn" href="{% url 'archive-manage-edit' item_id=item.id %}">עריכה</a>
+            <a class="btn" href="{% url 'archive-manage-delete' item_id=item.id %}">מחיקה</a>
+          {% endif %}
+        {% endif %}
+      </div>
+    {% endif %}
 
     <div class="spacer"></div>
 
