@@ -9736,11 +9736,17 @@ class ReviewUiTests(TestCase):
     def _text_url(self, result_id: int) -> str:
         return f"/api/ui/admin/review/text-results/{result_id}/text/"
 
+    def _verify_post(self, row, **extra):
+        """POST verify with current row text (combined save+verify contract)."""
+        data = {"text": row.text or ""}
+        data.update(extra)
+        return self.client.post(self._verify_url(row.id), data)
+
     def test_staff_can_verify_pending_transcription_result(self):
         doc = self._create_document()
         row = self._create_text_result(doc)
         self.client.force_login(self.staff)
-        resp = self.client.post(self._verify_url(row.id))
+        resp = self._verify_post(row)
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp["Location"], f"/api/ui/admin/review/{doc.id}/")
         row.refresh_from_db()
@@ -9763,16 +9769,16 @@ class ReviewUiTests(TestCase):
         doc = self._create_document()
         row = self._create_text_result(doc)
         self.client.force_login(self.user)
-        self.assertEqual(self.client.post(self._verify_url(row.id)).status_code, 403)
+        self.assertEqual(self._verify_post(row).status_code, 403)
         self.assertEqual(self.client.post(self._reject_url(row.id)).status_code, 403)
 
     def test_verify_reject_post_redirects_anonymous(self):
         doc = self._create_document()
         row = self._create_text_result(doc)
-        self.assertEqual(self.client.post(self._verify_url(row.id)).status_code, 302)
+        self.assertEqual(self._verify_post(row).status_code, 302)
         self.assertEqual(self.client.post(self._reject_url(row.id)).status_code, 302)
 
-    def test_verify_changes_only_verification_status(self):
+    def test_verify_with_unchanged_text_changes_only_verification_status(self):
         doc = self._create_document()
         row = self._create_text_result(
             doc,
@@ -9785,7 +9791,7 @@ class ReviewUiTests(TestCase):
             "processing_state_user": doc.processing_state_user,
         }
         self.client.force_login(self.staff)
-        self.client.post(self._verify_url(row.id))
+        self._verify_post(row)
         row.refresh_from_db()
         doc.refresh_from_db()
         self.assertEqual(
@@ -9795,6 +9801,21 @@ class ReviewUiTests(TestCase):
         self.assertEqual(row.text, before["text"])
         self.assertEqual(row.review_reasons, before["review_reasons"])
         self.assertEqual(doc.processing_state_user, before["processing_state_user"])
+
+    def test_verify_with_changed_text_persists_and_verifies(self):
+        doc = self._create_document()
+        row = self._create_hebrew_mirror_for_pending_edit(doc, text="לפני אישור")
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self._verify_url(row.id),
+            {"text": "  אחרי אישור  \n"},
+        )
+        self.assertEqual(resp.status_code, 302)
+        row.refresh_from_db()
+        self.assertEqual(row.text, "  אחרי אישור  \n")
+        self.assertEqual(
+            row.verification_status, DocumentTextResult.VerificationStatus.VERIFIED
+        )
 
     def test_reject_changes_only_verification_status(self):
         doc = self._create_document()
@@ -9830,11 +9851,11 @@ class ReviewUiTests(TestCase):
             engine="transkribus-pylaia:1",
         )
         self.client.force_login(self.staff)
-        self.client.post(self._verify_url(r1.id))
+        self._verify_post(r1)
         self.assertIn(
             doc.id, set(documents_in_review_backlog().values_list("id", flat=True))
         )
-        self.client.post(self._verify_url(r2.id))
+        self._verify_post(r2)
         self.assertNotIn(
             doc.id, set(documents_in_review_backlog().values_list("id", flat=True))
         )
@@ -9857,7 +9878,7 @@ class ReviewUiTests(TestCase):
             engine="transkribus-pylaia:1",
         )
         self.client.force_login(self.staff)
-        self.client.post(self._verify_url(r1.id))
+        self._verify_post(r1)
         self.assertIn(
             doc.id, set(documents_in_review_backlog().values_list("id", flat=True))
         )
@@ -9889,7 +9910,7 @@ class ReviewUiTests(TestCase):
             error_code="OCR_DISPATCH",
         )
         self.client.force_login(self.staff)
-        resp = self.client.post(self._verify_url(row.id))
+        resp = self._verify_post(row)
         self.assertEqual(resp.status_code, 400)
         row.refresh_from_db()
         self.assertEqual(
@@ -9914,13 +9935,13 @@ class ReviewUiTests(TestCase):
             text="legacy succeeded",
         )
         self.client.force_login(self.staff)
-        self.assertEqual(self.client.post(self._verify_url(row.id)).status_code, 400)
+        self.assertEqual(self._verify_post(row).status_code, 400)
 
     def test_cannot_verify_whitespace_only_text(self):
         doc = self._create_document()
         row = self._create_text_result(doc, text="  \n\t  ")
         self.client.force_login(self.staff)
-        self.assertEqual(self.client.post(self._verify_url(row.id)).status_code, 400)
+        self.assertEqual(self._verify_post(row).status_code, 400)
 
     def test_cannot_verify_already_verified_transcription_result(self):
         doc = self._create_document()
@@ -9929,11 +9950,26 @@ class ReviewUiTests(TestCase):
             verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
         )
         self.client.force_login(self.staff)
-        self.assertEqual(self.client.post(self._verify_url(row.id)).status_code, 400)
+        self.assertEqual(self._verify_post(row).status_code, 400)
+
+    def test_verify_requires_text_field(self):
+        doc = self._create_document()
+        row = self._create_text_result(doc)
+        self.client.force_login(self.staff)
+        resp = self.client.post(self._verify_url(row.id))
+        self.assertEqual(resp.status_code, 400)
+        row.refresh_from_db()
+        self.assertEqual(
+            row.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
 
     def test_invalid_result_id_returns_404(self):
         self.client.force_login(self.staff)
-        self.assertEqual(self.client.post(self._verify_url(999999)).status_code, 404)
+        self.assertEqual(
+            self.client.post(self._verify_url(999999), {"text": "x"}).status_code,
+            404,
+        )
         self.assertEqual(self.client.post(self._reject_url(999999)).status_code, 404)
 
     def test_review_detail_shows_verify_reject_for_pending_unverified(self):

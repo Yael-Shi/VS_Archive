@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load status_labels archive_labels %}
+{% load static status_labels archive_labels %}
 {% block title %}VSArchive - בקרת תעתוק · {{ doc.archive_item.title }}{% endblock %}
 
 {% block content %}
@@ -123,12 +123,21 @@
         </div>
 
         {% for card in text_result_cards %}
-          <article class="card review-result-card{% if card.is_pending_review %} review-result-card--pending{% endif %}">
+          <article
+            class="card review-result-card{% if card.is_pending_review %} review-result-card--pending{% endif %}"
+            data-review-card
+            data-result-id="{{ card.row.id }}"
+            data-result-type="{{ card.row.result_type }}"
+            data-verification-status="{{ card.row.verification_status }}"
+            data-label-verified="{{ "VERIFIED"|verification_status_label }}"
+            data-label-rejected="{{ "REJECTED"|verification_status_label }}"
+            {% if card.is_pending_review %}data-pending-review{% endif %}
+          >
             <div class="review-result-head">
               <span class="badge review-result-type-badge">{{ card.result_type_label }}</span>
               {% verification_status_badge card.row.verification_status %}
               {% if card.is_pending_review %}
-                <span class="badge badge-warn">ממתין לבקרה</span>
+                <span class="badge badge-warn review-pending-badge">ממתין לבקרה</span>
               {% endif %}
             </div>
 
@@ -136,15 +145,34 @@
               <div class="muted review-result-description">{{ card.result_type_description }}</div>
             {% endif %}
 
+            <div class="review-feedback" role="status" aria-live="polite"></div>
+
             {# Primary workflow: text (edit or read) #}
             <div class="review-zone review-zone--primary">
               <div class="review-zone-title">טקסט שחולץ</div>
               {% if card.is_editable %}
-                <form method="post" action="{% url 'review-text-result-update-text' result_id=card.row.id %}" class="inline-form">
+                <form
+                  method="post"
+                  action="{% url 'review-text-result-update-text' result_id=card.row.id %}"
+                  class="inline-form review-pending-text-form"
+                  data-review-text-form
+                  data-verified-edit-url="{% url 'review-text-result-verified-edit' result_id=card.row.id %}"
+                  data-verified-edit-title="{% if card.row.result_type == "SOURCE_TEXT" %}עריכת תעתוק מאושר{% else %}עריכת תרגום מאושר{% endif %}"
+                  data-verified-save-label="שמור עריכה"
+                >
                   {% csrf_token %}
                   <textarea class="review-textarea" name="text" rows="12">{{ card.row.text }}</textarea>
                   <div class="review-zone-actions review-zone-actions--spaced">
-                    <button class="btn btn-primary" type="submit">שמור טקסט</button>
+                    <button class="btn btn-primary" type="submit" data-review-action="save">שמור טקסט</button>
+                    {% if card.is_pending_review and card.row.verification_status != "VERIFIED" %}
+                      <button
+                        class="btn btn-primary"
+                        type="submit"
+                        formaction="{% url 'review-text-result-verify' result_id=card.row.id %}"
+                        formmethod="post"
+                        data-review-action="verify"
+                      >אשר תעתוק</button>
+                    {% endif %}
                   </div>
                 </form>
               {% elif card.is_verified_editable %}
@@ -153,7 +181,7 @@
                 {% endif %}
                 <form method="post" action="{% url 'review-text-result-verified-edit' result_id=card.row.id %}" class="inline-form">
                   {% csrf_token %}
-                  <div class="review-zone-title" style="margin-bottom: 8px;">
+                  <div class="review-zone-title review-verified-edit-title" style="margin-bottom: 8px;">
                     {% if card.row.result_type == "SOURCE_TEXT" %}
                       עריכת תעתוק מאושר
                     {% else %}
@@ -172,23 +200,20 @@
               {% endif %}
             </div>
 
-            {# Primary workflow: approve / reject #}
-            {% if card.is_pending_review %}
-              <div class="review-zone review-zone--primary">
+            {# Reject is a separate form so unsaved textarea edits are never persisted. #}
+            {% if card.is_pending_review and card.row.verification_status != "REJECTED" %}
+              <div class="review-zone review-zone--primary review-verify-zone">
                 <div class="review-zone-title">אימות תעתוק</div>
                 <div class="review-zone-actions">
-                  {% if card.row.verification_status != "VERIFIED" %}
-                    <form method="post" action="{% url 'review-text-result-verify' result_id=card.row.id %}" class="inline-form">
-                      {% csrf_token %}
-                      <button class="btn btn-primary" type="submit">אשר תעתוק</button>
-                    </form>
-                  {% endif %}
-                  {% if card.row.verification_status != "REJECTED" %}
-                    <form method="post" action="{% url 'review-text-result-reject' result_id=card.row.id %}" class="inline-form">
-                      {% csrf_token %}
-                      <button class="btn" type="submit">דחה תעתוק</button>
-                    </form>
-                  {% endif %}
+                  <form
+                    method="post"
+                    action="{% url 'review-text-result-reject' result_id=card.row.id %}"
+                    class="inline-form review-reject-form"
+                    data-review-reject-form
+                  >
+                    {% csrf_token %}
+                    <button class="btn" type="submit" data-review-action="reject">דחה תעתוק</button>
+                  </form>
                 </div>
               </div>
             {% elif card.non_actionable_reason %}
@@ -287,4 +312,5 @@
       </main>
     </div>
   </div>
+  <script src="{% static 'public/review_detail_actions.js' %}"></script>
 {% endblock %}

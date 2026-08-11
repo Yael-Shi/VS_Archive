@@ -754,6 +754,7 @@ class RestrictedVisibilityMutationGateTests(TestCase):
                 "review-text-result-verify",
                 kwargs={"result_id": self.pending_result.pk},
             ),
+            data={"text": self.pending_result.text},
         )
         self.assertEqual(verify.status_code, 404)
         self.pending_result.refresh_from_db()
@@ -777,6 +778,7 @@ class RestrictedVisibilityMutationGateTests(TestCase):
                 "review-text-result-verify",
                 kwargs={"result_id": self.pending_result.pk},
             ),
+            data={"text": self.pending_result.text},
         )
         self.assertEqual(resp.status_code, 302)
         self.pending_result.refresh_from_db()
@@ -784,6 +786,19 @@ class RestrictedVisibilityMutationGateTests(TestCase):
             self.pending_result.verification_status,
             DocumentTextResult.VerificationStatus.VERIFIED,
         )
+
+    @patch("documents.views.verify_pending_text_result")
+    def test_review_verify_404_without_perm_before_mutation(self, mock_verify):
+        resp = self._post_as(
+            self.staff,
+            reverse(
+                "review-text-result-verify",
+                kwargs={"result_id": self.pending_result.pk},
+            ),
+            data={"text": self.pending_result.text},
+        )
+        self.assertEqual(resp.status_code, 404)
+        mock_verify.assert_not_called()
 
     @patch("documents.views.approve_suggestion")
     def test_transcription_approve_404_without_perm_before_mutation(self, mock_approve):
@@ -1047,7 +1062,14 @@ class RestrictedVisibilityMutationGateTests(TestCase):
 
     @patch("documents.views.edit_pending_text_result")
     def test_review_update_text_reaches_mutation_with_permission(self, mock_edit):
-        mock_edit.return_value = self.pending_result
+        from documents.services.verified_text_result_edit import (
+            PendingTextResultEditResult,
+        )
+
+        mock_edit.return_value = PendingTextResultEditResult(
+            row=self.pending_result,
+            text_saved=True,
+        )
         resp = self._post_as(
             self.staff_with_perm,
             reverse(

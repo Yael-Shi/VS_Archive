@@ -291,6 +291,7 @@ from documents.services.verified_text_result_edit import (
     edit_verified_text_result,
     is_hebrew_translation_stale,
     is_verified_editable_text_result,
+    verify_pending_text_result,
 )
 
 logger = logging.getLogger(__name__)
@@ -2733,6 +2734,41 @@ def _review_text_result_not_eligible_response() -> HttpResponseBadRequest:
     )
 
 
+def _wants_review_async_json(request) -> bool:
+    return request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+
+def _review_async_error(request, message: str, *, status: int):
+    if _wants_review_async_json(request):
+        return JsonResponse({"ok": False, "error": message}, status=status)
+    if status == 403:
+        return HttpResponseForbidden(message)
+    if status == 404:
+        raise Http404(message)
+    return HttpResponseBadRequest(message)
+
+
+def _review_mutation_success(
+    request,
+    *,
+    row: DocumentTextResult,
+    action: str,
+    text_saved: bool,
+):
+    if _wants_review_async_json(request):
+        return JsonResponse(
+            {
+                "ok": True,
+                "action": action,
+                "result_id": row.id,
+                "document_id": row.document_id,
+                "verification_status": row.verification_status,
+                "text_saved": text_saved,
+            }
+        )
+    return redirect(reverse("review-detail-page", kwargs={"doc_id": row.document_id}))
+
+
 def _get_admin_viewable_text_result(request, result_id: int) -> DocumentTextResult:
     """Load a text-result row only when its parent document is viewable (404 otherwise)."""
     return get_object_or_404(
@@ -2749,22 +2785,60 @@ def _get_admin_viewable_text_result(request, result_id: int) -> DocumentTextResu
 def review_text_result_verify(request, result_id: int):
     deny = _require_admin(request)
     if deny:
-        return deny
+        return _review_async_error(request, "Admins only", status=403)
 
-    row = _get_admin_viewable_text_result(request, result_id)
+    try:
+        row = _get_admin_viewable_text_result(request, result_id)
+    except Http404:
+        return _review_async_error(request, "לא נמצא.", status=404)
+
     if not is_review_pending_text_result(row):
+        if _wants_review_async_json(request):
+            return _review_async_error(
+                request,
+                "transcription result is not eligible for review action",
+                status=400,
+            )
         return _review_text_result_not_eligible_response()
 
-    row.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
-    row.save(update_fields=["verification_status", "updated_at"])
+    submitted = request.POST.get("text")
+    if submitted is None or not submitted.strip():
+        return _review_async_error(
+            request,
+            "text is required and must be non-empty",
+            status=400,
+        )
 
+    try:
+        outcome = verify_pending_text_result(
+            result_id=row.id,
+            new_text=submitted,
+            editor=request.user,
+        )
+    except DocumentTextResult.DoesNotExist:
+        return _review_async_error(request, "לא נמצא.", status=404)
+    except PendingTextResultEditError as exc:
+        message = str(exc)
+        if message == "transcription result is not eligible for review action":
+            if _wants_review_async_json(request):
+                return _review_async_error(request, message, status=400)
+            return _review_text_result_not_eligible_response()
+        return _review_async_error(request, message, status=400)
+
+    row = outcome.row
     logger.info(
-        "review_text_result_verify user=%s result_id=%s document_id=%s",
+        "review_text_result_verify user=%s result_id=%s document_id=%s text_saved=%s",
         getattr(request.user, "username", None),
         row.id,
         row.document_id,
+        outcome.text_saved,
     )
-    return redirect(reverse("review-detail-page", kwargs={"doc_id": row.document_id}))
+    return _review_mutation_success(
+        request,
+        row=row,
+        action="verify",
+        text_saved=outcome.text_saved,
+    )
 
 
 @login_required
@@ -2772,12 +2846,23 @@ def review_text_result_verify(request, result_id: int):
 def review_text_result_reject(request, result_id: int):
     deny = _require_admin(request)
     if deny:
-        return deny
+        return _review_async_error(request, "Admins only", status=403)
 
-    row = _get_admin_viewable_text_result(request, result_id)
+    try:
+        row = _get_admin_viewable_text_result(request, result_id)
+    except Http404:
+        return _review_async_error(request, "לא נמצא.", status=404)
+
     if not is_review_pending_text_result(row):
+        if _wants_review_async_json(request):
+            return _review_async_error(
+                request,
+                "transcription result is not eligible for review action",
+                status=400,
+            )
         return _review_text_result_not_eligible_response()
 
+    # Reject only — never persist unsaved textarea edits from the client.
     row.verification_status = DocumentTextResult.VerificationStatus.REJECTED
     row.save(update_fields=["verification_status", "updated_at"])
 
@@ -2787,7 +2872,12 @@ def review_text_result_reject(request, result_id: int):
         row.id,
         row.document_id,
     )
-    return redirect(reverse("review-detail-page", kwargs={"doc_id": row.document_id}))
+    return _review_mutation_success(
+        request,
+        row=row,
+        action="reject",
+        text_saved=False,
+    )
 
 
 @login_required
@@ -2795,36 +2885,60 @@ def review_text_result_reject(request, result_id: int):
 def review_text_result_update_text(request, result_id: int):
     deny = _require_admin(request)
     if deny:
-        return deny
+        return _review_async_error(request, "Admins only", status=403)
 
-    row = _get_admin_viewable_text_result(request, result_id)
+    try:
+        row = _get_admin_viewable_text_result(request, result_id)
+    except Http404:
+        return _review_async_error(request, "לא נמצא.", status=404)
+
     if not is_review_editable_text_result(row):
+        if _wants_review_async_json(request):
+            return _review_async_error(
+                request,
+                "transcription result is not eligible for review action",
+                status=400,
+            )
         return _review_text_result_not_eligible_response()
 
     submitted = request.POST.get("text")
     if submitted is None or not submitted.strip():
-        return HttpResponseBadRequest("text is required and must be non-empty")
+        return _review_async_error(
+            request,
+            "text is required and must be non-empty",
+            status=400,
+        )
 
     try:
-        row = edit_pending_text_result(
+        outcome = edit_pending_text_result(
             result_id=row.id,
             new_text=submitted,
             editor=request.user,
         )
     except DocumentTextResult.DoesNotExist:
-        raise Http404() from None
+        return _review_async_error(request, "לא נמצא.", status=404)
     except PendingTextResultEditError as exc:
-        if str(exc) == "transcription result is not eligible for review action":
+        message = str(exc)
+        if message == "transcription result is not eligible for review action":
+            if _wants_review_async_json(request):
+                return _review_async_error(request, message, status=400)
             return _review_text_result_not_eligible_response()
-        return HttpResponseBadRequest(str(exc))
+        return _review_async_error(request, message, status=400)
 
+    row = outcome.row
     logger.info(
-        "review_text_result_update_text user=%s result_id=%s document_id=%s",
+        "review_text_result_update_text user=%s result_id=%s document_id=%s text_saved=%s",
         getattr(request.user, "username", None),
         row.id,
         row.document_id,
+        outcome.text_saved,
     )
-    return redirect(reverse("review-detail-page", kwargs={"doc_id": row.document_id}))
+    return _review_mutation_success(
+        request,
+        row=row,
+        action="save",
+        text_saved=outcome.text_saved,
+    )
 
 
 @login_required
