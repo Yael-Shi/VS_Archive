@@ -1,11 +1,41 @@
 # VS-Archive Decision Log
 
+## Public global nav/header archive search (PR3)
+
+**Decision / implemented (this branch):** Add a compact global archive search form
+to the shared public navigation (`partials/nav.html`). This completes the planned
+PR1→PR3 public search chain.
+
+**Current behavior:**
+
+- Primary nav order: brand → `ארכיון` / `אודות` → compact archive search →
+  flexible spacer → auth controls. Staff nav panel is unchanged and does not
+  host a second search form.
+- Form is HTML/CSS only (`method="get"`, `action` = `archive-list`, `name="q"`,
+  `type="search"`, accessible visually-hidden label, normal submit button).
+  No JavaScript, autocomplete suggestions, API, or new view/service.
+- Header search is **q-only**. Submitting starts a **fresh** `/archive/?q=…`
+  search and does **not** carry advanced filters, item type, pagination,
+  `advanced=1`, or other current-page query state.
+- The nav input stays **empty by default on all pages**, including `/archive/`
+  when a `q` is active. The page’s main archive search field remains the
+  authoritative display of the current query.
+- Existing `/archive/` search semantics, ranking, advanced panel, and PR2 year
+  validation / choice-context optimization are unchanged. No second search
+  backend or duplicated normalize helper was introduced.
+
+**Still deferred (separate future work, not part of this chain):** Hebrew
+morphology, fuzzy OCR / pg_trgm, phrase search improvements, places authority,
+Author model, `related` filter.
+
 ## Public `/archive/` advanced search UI (PR2)
 
-**Decision / implemented (this branch):** Add the public `/archive/` advanced-search
+**Decision / implemented (merged #410):** Add the public `/archive/` advanced-search
 UX on top of the PR1 backend filter contract. Two mandatory closure items are
 included: authoritative reverse/malformed year validation in the public UI, and
 conditional loading of authorized advanced-filter choice context.
+**PR3 completes the planned search chain with global nav/header q search**
+(see entry above).
 
 **Current behavior:**
 
@@ -35,9 +65,9 @@ conditional loading of authorized advanced-filter choice context.
   queries (regression-tested; before: 4 choice queries every request; after: 0
   on ordinary/q-only, 4 when panel/filters need them).
 
-**Deferred / PR3:** global navigation/header search. Still deferred: Hebrew
-morphology, fuzzy OCR / pg_trgm, phrase search, places authority, Author model,
-`related` filter.
+**Deferred (historical PR2 note):** ~~global navigation/header search~~ → **done
+in PR3**. Still deferred: Hebrew morphology, fuzzy OCR / pg_trgm, phrase search,
+places authority, Author model, `related` filter.
 
 ## Public `/archive/` advanced filters — backend contract (PR1)
 
@@ -45,8 +75,8 @@ morphology, fuzzy OCR / pg_trgm, phrase search, places authority, Author model,
 advanced-filter backend contract on the existing public `/archive/` list
 pipeline. Collapsible advanced UI / chips / global header search were deferred
 to later PRs; **PR2 implements the `/archive/` advanced UI + year validation +
-choice-context loading optimization** (see entry above). Global nav search
-remains PR3.
+choice-context loading optimization**; **PR3 implements global nav/header q
+search and completes the planned PR1→PR3 chain** (see entries above).
 
 **Current behavior:**
 
@@ -69,8 +99,8 @@ remains PR3.
 - Query construction extends `build_archive_public_list_query` so advanced
   filters survive type links, pagination, and per-page forms.
 
-**Deferred:** global nav search (PR3), Hebrew morphology, fuzzy OCR / pg_trgm,
-places authority.
+**Deferred (historical PR1 note):** ~~global nav search (PR3)~~ → **done in
+PR3**. Still deferred: Hebrew morphology, fuzzy OCR / pg_trgm, places authority.
 
 ## Public OCR detail — archive-search match ↔ transcription sync
 

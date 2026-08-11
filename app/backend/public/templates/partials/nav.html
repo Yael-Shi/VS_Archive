@@ -9,6 +9,26 @@
       <a class="btn btn-link" href="{% url 'public-about' %}">אודות</a>
     </div>
 
+    <form
+      method="get"
+      action="{% url 'archive-list' %}"
+      class="nav-archive-search"
+      role="search"
+    >
+      <label class="visually-hidden" for="nav-archive-search-q">חיפוש בארכיון</label>
+      <input
+        id="nav-archive-search-q"
+        class="nav-archive-search__input"
+        type="search"
+        name="q"
+        placeholder="חיפוש בארכיון…"
+        autocomplete="off"
+      >
+      <button type="submit" class="btn btn-primary nav-archive-search__submit">
+        חיפוש
+      </button>
+    </form>
+
     <div class="nav-spacer" aria-hidden="true"></div>
 
     <div class="nav-auth">

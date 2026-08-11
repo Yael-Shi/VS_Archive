@@ -46,6 +46,212 @@ class PublicNavTests(TestCase):
         self.assertNotContains(resp, '<a class="btn btn-link" href="/">דף הבית</a>')
 
 
+def _nav_archive_search_form_html(html: str) -> str:
+    marker = 'class="nav-archive-search"'
+    start = html.find(marker)
+    if start < 0:
+        raise AssertionError("nav-archive-search form not found")
+    form_start = html.rfind("<form", 0, start)
+    if form_start < 0:
+        raise AssertionError("nav-archive-search opening form tag not found")
+    form_end = html.find("</form>", start)
+    if form_end < 0:
+        raise AssertionError("nav-archive-search closing form tag not found")
+    return html[form_start : form_end + len("</form>")]
+
+
+def _input_tag_by_id(html: str, input_id: str) -> str:
+    needle = f'id="{input_id}"'
+    idx = html.find(needle)
+    if idx < 0:
+        raise AssertionError(f'input id="{input_id}" not found')
+    tag_start = html.rfind("<input", 0, idx)
+    if tag_start < 0:
+        raise AssertionError(f'opening <input for id="{input_id}" not found')
+    tag_end = html.find(">", idx)
+    if tag_end < 0:
+        raise AssertionError(f'closing > for id="{input_id}" not found')
+    return html[tag_start : tag_end + 1]
+
+
+class PublicNavArchiveSearchTests(TestCase):
+    """PR3: compact global header q search in shared public nav."""
+
+    ARCHIVE_LIST_URL = reverse("archive-list")
+
+    def _assert_nav_archive_search_contract(self, resp):
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+        form_html = _nav_archive_search_form_html(html)
+
+        self.assertIn('method="get"', form_html)
+        self.assertIn(f'action="{self.ARCHIVE_LIST_URL}"', form_html)
+        self.assertIn('role="search"', form_html)
+        self.assertIn('for="nav-archive-search-q"', form_html)
+        self.assertIn("חיפוש בארכיון", form_html)
+        self.assertIn('class="visually-hidden"', form_html)
+
+        input_tag = _input_tag_by_id(form_html, "nav-archive-search-q")
+        self.assertIn('type="search"', input_tag)
+        self.assertIn('name="q"', input_tag)
+        self.assertIn('class="nav-archive-search__input"', input_tag)
+        self.assertIn('placeholder="חיפוש בארכיון…"', input_tag)
+        self.assertNotIn("value=", input_tag)
+
+        self.assertIn('type="submit"', form_html)
+        self.assertIn("nav-archive-search__submit", form_html)
+        self.assertRegex(
+            form_html,
+            r'<button[^>]*type="submit"[^>]*>\s*חיפוש\s*</button>',
+        )
+
+        # q-only: no advanced / pagination / type state preserved by the form.
+        for forbidden in (
+            'name="author"',
+            'name="category"',
+            'name="event"',
+            'name="tag"',
+            'name="year"',
+            'name="year_to"',
+            'name="item_type"',
+            'name="per_page"',
+            'name="page"',
+            'name="advanced"',
+        ):
+            self.assertNotIn(forbidden, form_html)
+
+        return html
+
+    def test_shared_public_nav_renders_archive_search_form(self):
+        resp = self.client.get(self.ARCHIVE_LIST_URL)
+        self._assert_nav_archive_search_contract(resp)
+
+    def test_home_page_includes_header_search(self):
+        resp = self.client.get(reverse("public-home"))
+        self._assert_nav_archive_search_contract(resp)
+
+    def test_about_page_includes_header_search(self):
+        resp = self.client.get(reverse("public-about"))
+        self._assert_nav_archive_search_contract(resp)
+
+    def test_archive_page_keeps_main_search_and_empty_nav_q(self):
+        resp = self.client.get(self.ARCHIVE_LIST_URL, {"q": "חיים מרזוק"})
+        html = self._assert_nav_archive_search_contract(resp)
+
+        self.assertIn('id="archive-search-form"', html)
+        self.assertIn('id="archive-filter-q"', html)
+        main_input = _input_tag_by_id(html, "archive-filter-q")
+        self.assertIn('name="q"', main_input)
+        self.assertIn("חיים מרזוק", main_input)
+
+        nav_input = _input_tag_by_id(html, "nav-archive-search-q")
+        self.assertNotIn("value=", nav_input)
+        self.assertNotIn("חיים מרזוק", nav_input)
+
+    def test_archive_detail_includes_shared_header_search(self):
+        from documents.models import ArchiveItem
+        from documents.services.archive_items import create_manual_text_archive_item
+
+        item = create_manual_text_archive_item(
+            title="Nav header search detail item",
+            body="detail body",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        resp = self.client.get(
+            reverse("archive-detail", kwargs={"item_id": item.pk})
+        )
+        self._assert_nav_archive_search_contract(resp)
+
+    def test_header_q_get_uses_existing_archive_search_contract(self):
+        from documents.models import ArchiveItem
+        from documents.services.archive_items import create_manual_text_archive_item
+        from documents.services.archive_search_index import (
+            sync_archive_item_search_index,
+        )
+
+        hit = create_manual_text_archive_item(
+            title="חיים מרזוק header chain",
+            body="body without the query token",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        miss = create_manual_text_archive_item(
+            title="unrelated archive title",
+            body="no match here",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        sync_archive_item_search_index(hit.pk)
+        sync_archive_item_search_index(miss.pk)
+
+        # Same GET contract a nav form submit produces: /archive/?q=...
+        resp = self.client.get(self.ARCHIVE_LIST_URL, {"q": "חיים מרזוק"})
+        html = self._assert_nav_archive_search_contract(resp)
+
+        self.assertEqual(resp.status_code, 200)
+        page_ids = [item.pk for item in resp.context["items"]]
+        self.assertIn(hit.pk, page_ids)
+        self.assertNotIn(miss.pk, page_ids)
+        self.assertContains(resp, "חיים מרזוק header chain")
+        self.assertIn("חיפוש מתקדם", html)
+        self.assertIn('id="archive-search-form"', html)
+        self.assertNotIn("advanced", resp.wsgi_request.GET)
+
+    def test_global_search_does_not_carry_advanced_or_current_query_state(self):
+        resp = self.client.get(
+            self.ARCHIVE_LIST_URL,
+            {
+                "q": "existing-q",
+                "author": "Some Author",
+                "category": "1",
+                "event": "2",
+                "tag": "3",
+                "year": "1950",
+                "year_to": "1960",
+                "item_type": "manual_text",
+                "per_page": "48",
+                "page": "2",
+                "advanced": "1",
+            },
+        )
+        html = self._assert_nav_archive_search_contract(resp)
+        form_html = _nav_archive_search_form_html(html)
+        self.assertEqual(form_html.count('name="q"'), 1)
+        self.assertNotIn("existing-q", form_html)
+        self.assertNotIn("Some Author", form_html)
+
+    def test_responsive_scoped_css_classes_present_without_staff_nav_change(self):
+        staff = _create_test_user("nav_search_staff", is_staff=True)
+        self.client.force_login(staff)
+        resp = self.client.get(reverse("public-home"))
+        html = self._assert_nav_archive_search_contract(resp)
+
+        self.assertIn("nav-archive-search", html)
+        self.assertIn("nav-archive-search__input", html)
+        self.assertIn("nav-archive-search__submit", html)
+        self.assertContains(resp, 'class="card nav-shell nav-staff-panel"')
+        self.assertContains(resp, "nav-staff-links")
+        self.assertContains(resp, "ניהול ארכיון")
+
+        staff_panel_start = html.find("nav-staff-panel")
+        self.assertGreater(staff_panel_start, 0)
+        staff_section = html[staff_panel_start:]
+        self.assertNotIn("nav-archive-search", staff_section)
+
+    def test_anonymous_and_authenticated_nav_still_render(self):
+        anon = self.client.get(reverse("public-home"))
+        anon_html = self._assert_nav_archive_search_contract(anon)
+        self.assertIn("הרשמה", anon_html)
+        self.assertIn("התחברות", anon_html)
+        self.assertNotIn("התנתקות", anon_html)
+
+        user = _create_test_user("nav_search_viewer")
+        self.client.force_login(user)
+        auth = self.client.get(reverse("public-home"))
+        auth_html = self._assert_nav_archive_search_contract(auth)
+        self.assertIn("התנתקות", auth_html)
+        self.assertIn(user.username, auth_html)
+        self.assertNotIn("הרשמה", auth_html)
+
+
 class AboutPageCopyTests(TestCase):
     def test_about_page_does_not_show_english_version_roadmap_copy(self):
         resp = self.client.get(reverse("public-about"))
