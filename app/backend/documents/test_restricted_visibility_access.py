@@ -920,6 +920,50 @@ class RestrictedVisibilityMutationGateTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         mock_activate.assert_called_once()
 
+    @patch("documents.views.enqueue_transkribus_corrected_current_sync")
+    @patch("documents.views._is_transkribus_corrected_current_sync_ui_eligible")
+    def test_corrected_current_enqueue_404_without_perm_before_service(
+        self, mock_eligible, mock_enqueue
+    ):
+        resp = self._post_as(
+            self.staff,
+            reverse(
+                "corrected-current-sync-enqueue",
+                kwargs={"doc_id": self.restricted_ocr.pk},
+            ),
+        )
+        self.assertEqual(resp.status_code, 404)
+        mock_eligible.assert_not_called()
+        mock_enqueue.assert_not_called()
+
+    @patch("documents.views.enqueue_transkribus_corrected_current_sync")
+    @patch(
+        "documents.views._is_transkribus_corrected_current_sync_ui_eligible",
+        return_value=True,
+    )
+    def test_corrected_current_enqueue_reaches_service_with_permission(
+        self, mock_eligible, mock_enqueue
+    ):
+        mock_enqueue.return_value = SimpleNamespace(
+            outcome="CREATED_AND_ENQUEUED",
+            request=SimpleNamespace(pk=55),
+            message_sent=True,
+            observed_status="QUEUED",
+        )
+        resp = self._post_as(
+            self.staff_with_perm,
+            reverse(
+                "corrected-current-sync-enqueue",
+                kwargs={"doc_id": self.restricted_ocr.pk},
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        mock_eligible.assert_called_once()
+        mock_enqueue.assert_called_once_with(
+            document_id=self.restricted_ocr.pk,
+            initiated_by=self.staff_with_perm,
+        )
+
     @patch("documents.views.validate_required_env")
     @patch("documents.views.apply_ocr_reprocess")
     def test_ocr_reprocess_404_without_perm_before_env_or_apply(

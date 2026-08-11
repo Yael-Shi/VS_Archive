@@ -329,6 +329,16 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
         self.assertContains(resp, "גרסאות תעתוק מ־Transkribus")
         self.assertContains(resp, "אין עדיין ניסיונות סנכרון")
         self.assertContains(resp, _PREVIEW_BANNER)
+        # No usable Transkribus run → ineligible; enqueue form hidden (PR #399).
+        self.assertNotContains(resp, "משיכת תעתוק עדכני מ־Transkribus")
+        self.assertNotContains(resp, "corrected-sync-enqueue-form")
+        self.assertNotContains(
+            resp,
+            reverse(
+                "corrected-current-sync-enqueue",
+                kwargs={"doc_id": doc.id},
+            ),
+        )
         self.assertNotContains(resp, "corrected-sync-activation-form")
         self.assertNotContains(resp, "החלפת התעתוק המוצג בגרסת Transkribus")
         self.assertNotContains(resp, "/activate/")
@@ -493,7 +503,10 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
         self.assertNotIn("COMPLETED", primary)
         self.assertNotIn("CORRECTED_CURRENT_SYNC", primary)
         self.assertNotIn("297019349", primary)
-        self.assertNotIn(f"#{source.id}", primary)
+        # Page lead intentionally shows מסמך #<doc.id> / ניסיון #<attempt.id>.
+        # Only assert source-result id absence when it cannot collide with those.
+        if source.id not in {doc.id, attempt.id}:
+            self.assertNotIn(f"#{source.id}", primary)
         self.assertNotIn("revision 3", primary)
         self.assertNotIn("מזהה snapshot", primary)
         self.assertNotIn("טקסט קנוני מה־snapshot", primary)
