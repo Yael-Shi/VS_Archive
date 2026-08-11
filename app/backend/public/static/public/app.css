@@ -1845,6 +1845,29 @@ pre {
   background: linear-gradient(180deg, #f5f9fc 0%, var(--card) 100%);
 }
 
+.review-feedback {
+  min-height: 1.25em;
+  margin-top: var(--space-2);
+  font-size: 0.9rem;
+}
+
+.review-feedback--ok {
+  color: var(--success, #1b6b3a);
+}
+
+.review-feedback--error {
+  color: var(--danger, #9b1c1c);
+}
+
+.review-feedback--busy {
+  color: var(--muted, #5c6b7a);
+}
+
+.review-result-card--busy .btn[disabled] {
+  opacity: 0.65;
+  cursor: wait;
+}
+
 .review-result-head {
   display: flex;
   gap: var(--space-2);

@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 from django.db import transaction
 
 from documents.models import Document, DocumentTextResult, DocumentTextResultEdit
-from documents.services.review_backlog import is_review_editable_text_result
+from documents.services.review_backlog import (
+    is_review_editable_text_result,
+    is_review_pending_text_result,
+)
 from documents.services.text_presentation import get_displayed_transcription_text
 from documents.services.transcription_edit_suggestions import (
     normalize_transcription_text,
@@ -276,12 +281,17 @@ def edit_verified_text_result(
     return target
 
 
+class PendingTextResultEditResult(NamedTuple):
+    row: DocumentTextResult
+    text_saved: bool
+
+
 def edit_pending_text_result(
     *,
     result_id: int,
     new_text: str,
     editor,
-) -> DocumentTextResult:
+) -> PendingTextResultEditResult:
     normalized = normalize_transcription_text(new_text)
     if not normalized:
         raise PendingTextResultEditError("text is required and must be non-empty")
@@ -296,7 +306,7 @@ def edit_pending_text_result(
         doc = Document.objects.select_for_update().get(pk=target.document_id)
 
         if not _submitted_text_differs_from_current(target, doc, normalized):
-            return target
+            return PendingTextResultEditResult(row=target, text_saved=False)
 
         try:
             target = _apply_text_result_edit(
@@ -316,4 +326,38 @@ def edit_pending_text_result(
 
         sync_archive_item_search_index(doc.archive_item_id)
 
-    return target
+    return PendingTextResultEditResult(row=target, text_saved=True)
+
+
+class PendingTextResultVerifyResult(NamedTuple):
+    row: DocumentTextResult
+    text_saved: bool
+
+
+def verify_pending_text_result(
+    *,
+    result_id: int,
+    new_text: str,
+    editor,
+) -> PendingTextResultVerifyResult:
+    """Save-if-changed via pending-edit semantics, then mark VERIFIED atomically."""
+    with transaction.atomic():
+        edit_outcome = edit_pending_text_result(
+            result_id=result_id,
+            new_text=new_text,
+            editor=editor,
+        )
+
+        row = DocumentTextResult.objects.select_for_update().get(pk=result_id)
+        if not is_review_pending_text_result(row):
+            raise PendingTextResultEditError(
+                "transcription result is not eligible for review action"
+            )
+
+        row.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
+        row.save(update_fields=["verification_status", "updated_at"])
+
+    return PendingTextResultVerifyResult(
+        row=row,
+        text_saved=edit_outcome.text_saved,
+    )

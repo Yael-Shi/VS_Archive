@@ -141,14 +141,15 @@ class PendingTextResultEditTests(TestCase):
         )
         updated_at_before = source.updated_at
 
-        row = edit_pending_text_result(
+        outcome = edit_pending_text_result(
             result_id=source.id,
             new_text="Same text",
             editor=self.staff,
         )
 
         source.refresh_from_db()
-        self.assertEqual(row.id, source.id)
+        self.assertEqual(outcome.row.id, source.id)
+        self.assertFalse(outcome.text_saved)
         self.assertEqual(source.source_revision, 3)
         self.assertEqual(source.text, "Same text")
         self.assertEqual(source.updated_at, updated_at_before)
