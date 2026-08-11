@@ -4190,7 +4190,9 @@ class ArchiveItemPresentationUiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'name="q"')
         self.assertContains(resp, 'value="preserve-query"')
-        self.assertContains(resp, "חפשו בארכיון")
+        self.assertContains(resp, "חיפוש מתקדם")
+        self.assertContains(resp, 'placeholder="חיפוש בארכיון…"')
+        self.assertNotContains(resp, "חפשו בארכיון")
 
     def test_archive_manage_list_shows_hebrew_visibility_and_metadata(self):
         create_manual_text_archive_item(

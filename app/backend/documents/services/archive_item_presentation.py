@@ -26,8 +26,13 @@ from django.urls import reverse
 
 from documents.models import ArchiveItem, Document
 from documents.services.archive_advanced_search import (
+    ARCHIVE_ADVANCED_PANEL_PARAM,
+    ARCHIVE_ADVANCED_PANEL_VALUE,
     EMPTY_ARCHIVE_ADVANCED_FILTERS,
     ArchiveAdvancedFilters,
+    archive_advanced_filters_without_author,
+    archive_advanced_filters_without_year,
+    build_archive_advanced_filter_summary_items,
 )
 from documents.services.archive_search_index import SEARCH_VECTOR_CONFIG
 from documents.services.document_date import format_document_date
@@ -512,6 +517,7 @@ def build_archive_public_list_query(
     page: int = 1,
     per_page: int = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
     advanced_filters: ArchiveAdvancedFilters | None = None,
+    advanced_open: bool = False,
 ) -> str:
     """Build a query string for public ``/archive/`` list links."""
     params: list[tuple[str, str]] = []
@@ -521,6 +527,8 @@ def build_archive_public_list_query(
         params.append(("item_type", item_type_filter))
     filters = advanced_filters or EMPTY_ARCHIVE_ADVANCED_FILTERS
     params.extend(filters.query_param_pairs())
+    if advanced_open:
+        params.append((ARCHIVE_ADVANCED_PANEL_PARAM, ARCHIVE_ADVANCED_PANEL_VALUE))
     if page > 1:
         params.append(("page", str(page)))
     if per_page != ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE:
@@ -539,6 +547,20 @@ def archive_public_list_clear_search_query_suffix(
         item_type_filter=item_type_filter,
         per_page=per_page,
         advanced_filters=advanced_filters,
+    )
+    return f"?{query}" if query else ""
+
+
+def archive_public_list_clear_all_query_suffix(
+    *,
+    item_type_filter: str = "",
+    per_page: int = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
+) -> str:
+    """Query suffix clearing ``q`` and all advanced filters; keeps type/per-page."""
+    query = build_archive_public_list_query(
+        item_type_filter=item_type_filter,
+        per_page=per_page,
+        advanced_filters=EMPTY_ARCHIVE_ADVANCED_FILTERS,
     )
     return f"?{query}" if query else ""
 
@@ -577,8 +599,16 @@ def archive_public_list_filter_context(
     item_type_filter: str = "",
     per_page: int = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
     advanced_filters: ArchiveAdvancedFilters | None = None,
+    advanced_open: bool = False,
 ) -> dict[str, object]:
     """Template context for archive list search/filter query preservation."""
+    open_advanced_query = build_archive_public_list_query(
+        q=q,
+        item_type_filter=item_type_filter,
+        per_page=per_page,
+        advanced_filters=advanced_filters,
+        advanced_open=True,
+    )
     return {
         "preserve_per_page_in_query": per_page != ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
         "item_type_filter_links": build_archive_public_list_type_filter_links(
@@ -591,6 +621,86 @@ def archive_public_list_filter_context(
             item_type_filter=item_type_filter,
             per_page=per_page,
             advanced_filters=advanced_filters,
+        ),
+        "clear_all_query_suffix": archive_public_list_clear_all_query_suffix(
+            item_type_filter=item_type_filter,
+            per_page=per_page,
+        ),
+        "advanced_search_open_href_suffix": (
+            f"?{open_advanced_query}" if open_advanced_query else ""
+        ),
+        "advanced_panel_open": advanced_open,
+    }
+
+
+def archive_public_list_active_filter_summary_context(
+    *,
+    q: str = "",
+    item_type_filter: str = "",
+    per_page: int = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
+    advanced_filters: ArchiveAdvancedFilters | None = None,
+    category_choices: Sequence[object] = (),
+    event_choices: Sequence[object] = (),
+    tag_choices: Sequence[object] = (),
+) -> dict[str, object]:
+    """Compact active-filter chips with canonical remove/edit/clear links."""
+    from dataclasses import replace
+
+    filters = advanced_filters or EMPTY_ARCHIVE_ADVANCED_FILTERS
+    summary_items = build_archive_advanced_filter_summary_items(
+        q=q,
+        filters=filters,
+        category_choices=category_choices,
+        event_choices=event_choices,
+        tag_choices=tag_choices,
+    )
+    chips: list[dict[str, object]] = []
+    for item in summary_items:
+        kind = str(item["kind"])
+        remove_filters = filters
+        remove_q = q
+        if kind == "q":
+            remove_q = ""
+        elif kind == "author":
+            remove_filters = archive_advanced_filters_without_author(filters)
+        elif kind == "category":
+            remove_filters = replace(filters, category_ids=())
+        elif kind == "event":
+            remove_filters = replace(filters, event_ids=())
+        elif kind == "tag":
+            remove_filters = replace(filters, tag_ids=())
+        elif kind == "year":
+            remove_filters = archive_advanced_filters_without_year(filters)
+        remove_query = build_archive_public_list_query(
+            q=remove_q,
+            item_type_filter=item_type_filter,
+            per_page=per_page,
+            advanced_filters=remove_filters,
+        )
+        chips.append(
+            {
+                "kind": kind,
+                "label": item["label"],
+                "value": item["value"],
+                "remove_href_suffix": f"?{remove_query}" if remove_query else "",
+            }
+        )
+
+    edit_query = build_archive_public_list_query(
+        q=q,
+        item_type_filter=item_type_filter,
+        per_page=per_page,
+        advanced_filters=filters,
+        advanced_open=True,
+    )
+    has_active = bool(q or filters.is_active())
+    return {
+        "active_filter_summary_visible": has_active,
+        "active_filter_chips": chips,
+        "edit_advanced_search_href_suffix": f"?{edit_query}" if edit_query else "",
+        "clear_all_query_suffix": archive_public_list_clear_all_query_suffix(
+            item_type_filter=item_type_filter,
+            per_page=per_page,
         ),
     }
 
