@@ -3,10 +3,9 @@
 Status: the public OCR document-detail text-line hover → source-image highlight
 behavior, and sticky archive-search match navigation on the same detail page,
 are merged/deployed (P1; production smoke-tested). Archive-search match ↔
-transcription sync for previous/next (#398) is merged/deployed. A bidirectional
-click follow-up exists on `feature/search-match-bidirectional-click-sync` and
-is **not** merged/deployed yet. Broader review/edit hover interactions
-described below remain pending / future work.
+transcription sync for previous/next (#398) and bidirectional click sync
+(source overlay ↔ transcription match, #400) are merged/deployed. Broader
+review/edit hover interactions described below remain pending / future work.
 
 This note began as a future-facing design exploration for text-to-source
 alignment assistance during transcription review. Keep the historical sections
@@ -198,11 +197,10 @@ Historical stop lines for the original design-only PR:
 
 **Update:** Public OCR detail text→image line hover (trusted Transkribus only)
 and sticky `.archive-search-match-nav` are merged/deployed (P1). Archive-search
-match ↔ transcription sync for previous/next (#398) is merged/deployed.
-Bidirectional click sync (source overlay ↔ transcription match, explicit
-one-sided scroll) is on `feature/search-match-bidirectional-click-sync` and is
-not merged/deployed yet. Review/edit hover remains out of scope until
-explicitly implemented.
+match ↔ transcription sync for previous/next (#398) and bidirectional click
+sync (source overlay ↔ transcription match, explicit one-sided scroll, #400)
+are merged/deployed. Review/edit hover remains out of scope until explicitly
+implemented.
 
 ## 11. Open questions
 
