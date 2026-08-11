@@ -319,7 +319,7 @@ poetry run cdk diff \
   -c image_tag="$IMAGE_TAG" \
   -c web_image_tag="$IMAGE_TAG" \
   -c worker_image_tag="$IMAGE_TAG" \
-  | tee "$DIFF_FILE"
+  2>&1 | tee "$DIFF_FILE"
 
 echo
 echo "CDK diff saved to: $DIFF_FILE"
