@@ -258,6 +258,11 @@ from documents.services.transkribus_corrected_current_activation import (
     CorrectedCurrentActivationResult,
     activate_corrected_current_sync_attempt,
 )
+from documents.services.transkribus_corrected_current_sync_enqueue import (
+    CorrectedCurrentSyncEnqueueError,
+    EnqueueResult,
+    enqueue_transkribus_corrected_current_sync,
+)
 from documents.services.transkribus_snapshot_parser import compute_sha256_hex
 from documents.services.transcription_edit_suggestions import (
     IDENTICAL_TEXT_ERROR,
@@ -2359,6 +2364,64 @@ def _corrected_current_activation_detail_url(*, doc_id: int, attempt_id: int) ->
     )
 
 
+def _corrected_current_sync_attempts_url(*, doc_id: int) -> str:
+    return reverse("corrected-current-sync-attempts", kwargs={"doc_id": doc_id})
+
+
+_CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_CREATED = (
+    "בקשת משיכת תעתוק עדכני מ־Transkribus נשלחה לעיבוד ברקע."
+)
+_CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_ALREADY_QUEUED = (
+    "בקשת משיכת תעתוק עדכני מ־Transkribus כבר ממתינה בתור."
+)
+_CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_ALREADY_RUNNING = (
+    "סנכרון תעתוק מ־Transkribus כבר מתבצע."
+)
+_CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_BLOCKED_RECOVERY = (
+    "לא ניתן להתחיל סנכרון חדש כעת. נדרש טיפול במצב קיים לפני משיכה נוספת."
+)
+_CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_FAILED = (
+    "לא ניתן היה לשלוח את בקשת הסנכרון לתור. אפשר לנסות שוב."
+)
+_CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_OUTCOME_UNKNOWN = (
+    "לא ניתן לאשר אם בקשת הסנכרון התקבלה בתור. "
+    "בדקו את רשימת הניסיונות או נסו שוב מאוחר יותר."
+)
+_CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_ALREADY_TERMINAL = (
+    "עיבוד בקשת הסנכרון כבר הסתיים. התעתוק המוצג לא הוחלף."
+)
+_CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_INELIGIBLE = (
+    "לא ניתן למשוך תעתוק עדכני מ־Transkribus עבור מסמך זה."
+)
+_CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_GENERIC = (
+    "לא ניתן לשלוח בקשת סנכרון כעת. נסו שוב מאוחר יותר."
+)
+
+
+def _corrected_current_sync_enqueue_message_level_and_text(
+    result: EnqueueResult,
+) -> tuple[str, str]:
+    """Map enqueue service outcomes to (messages level, Hebrew copy)."""
+    outcome = result.outcome
+    if outcome in {"CREATED_AND_ENQUEUED", "REENQUEUED"}:
+        return "success", _CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_CREATED
+    if outcome == "ALREADY_QUEUED":
+        return "success", _CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_ALREADY_QUEUED
+    if outcome == "ALREADY_RUNNING":
+        return "success", _CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_ALREADY_RUNNING
+    if outcome == "BLOCKED_RECOVERY_REQUIRED":
+        return "error", _CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_BLOCKED_RECOVERY
+    if outcome == "ENQUEUE_FAILED":
+        return "error", _CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_FAILED
+    if outcome == "ENQUEUE_OUTCOME_UNKNOWN":
+        return "warning", _CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_OUTCOME_UNKNOWN
+    if outcome == "ALREADY_TERMINAL":
+        # Realistic when SendMessage is accepted and the worker terminalizes
+        # before post-send CAS reload. Does not activate displayed text.
+        return "success", _CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_ALREADY_TERMINAL
+    raise AssertionError(f"Unhandled corrected/current sync enqueue outcome: {outcome}")
+
+
 @login_required
 def corrected_current_sync_attempts_page(request, doc_id: int):
     deny = _require_admin_page(request)
@@ -2389,11 +2452,14 @@ def corrected_current_sync_attempts_page(request, doc_id: int):
         for attempt in attempts
     ]
 
+    show_enqueue_action = _is_transkribus_corrected_current_sync_ui_eligible(doc)
     logger.info(
-        "corrected_current_sync_attempts_page user=%s doc_id=%s attempts=%s",
+        "corrected_current_sync_attempts_page user=%s doc_id=%s attempts=%s "
+        "show_enqueue=%s",
         getattr(request.user, "username", None),
         doc.id,
         len(attempt_rows),
+        show_enqueue_action,
     )
     return render(
         request,
@@ -2401,8 +2467,64 @@ def corrected_current_sync_attempts_page(request, doc_id: int):
         {
             "doc": doc,
             "attempt_rows": attempt_rows,
+            "show_transkribus_corrected_current_sync_enqueue_action": (
+                show_enqueue_action
+            ),
         },
     )
+
+
+@login_required
+@require_POST
+def corrected_current_sync_enqueue(request, doc_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    doc = get_viewable_document(
+        request.user,
+        doc_id,
+        queryset=Document.objects.select_related("archive_item"),
+    )
+    list_url = _corrected_current_sync_attempts_url(doc_id=doc.id)
+
+    if not _is_transkribus_corrected_current_sync_ui_eligible(doc):
+        messages.error(request, _CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_INELIGIBLE)
+        logger.info(
+            "corrected_current_sync_enqueue ineligible user=%s doc_id=%s",
+            getattr(request.user, "username", None),
+            doc.id,
+        )
+        return redirect(list_url)
+
+    try:
+        result = enqueue_transkribus_corrected_current_sync(
+            document_id=doc.id,
+            initiated_by=request.user,
+        )
+    except CorrectedCurrentSyncEnqueueError:
+        messages.error(request, _CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_GENERIC)
+        logger.warning(
+            "corrected_current_sync_enqueue service error user=%s doc_id=%s",
+            getattr(request.user, "username", None),
+            doc.id,
+            exc_info=True,
+        )
+        return redirect(list_url)
+
+    level, text = _corrected_current_sync_enqueue_message_level_and_text(result)
+    getattr(messages, level)(request, text)
+    logger.info(
+        "corrected_current_sync_enqueue user=%s doc_id=%s request_id=%s "
+        "outcome=%s message_sent=%s observed_status=%s",
+        getattr(request.user, "username", None),
+        doc.id,
+        result.request.pk,
+        result.outcome,
+        result.message_sent,
+        result.observed_status,
+    )
+    return redirect(list_url)
 
 
 @login_required

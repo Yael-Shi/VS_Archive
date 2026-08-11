@@ -2172,7 +2172,7 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 ## Transkribus corrected/current sync enqueue (PR3 — service only)
 
-**Decision / implemented:** `enqueue_transkribus_corrected_current_sync(*, document_id, initiated_by)` in `documents/services/transkribus_corrected_current_sync_enqueue.py`, plus `send_sync_transkribus_corrected_current_message(request_id)` in `documents/services/sqs.py`. Staff UI, feature gate, IAM/CDK, recovery/requeue command, and worker changes are **out of scope**.
+**Decision / implemented:** `enqueue_transkribus_corrected_current_sync(*, document_id, initiated_by)` in `documents/services/transkribus_corrected_current_sync_enqueue.py`, plus `send_sync_transkribus_corrected_current_message(request_id)` in `documents/services/sqs.py`. Staff UI POST was deferred at PR3 time and is now implemented (see staff enqueue UI entry). Feature gate, IAM/CDK, recovery/requeue command, and worker changes remain out of scope for the enqueue-service PR.
 
 **Document-lock send-right:** Under a short `Document` `select_for_update` transaction, only (1) the caller that **creates** a new **`QUEUED`** Request, or (2) the caller that atomically transitions **`ENQUEUE_FAILED → QUEUED`**, receives local send right. Existing **`QUEUED`**, **`RUNNING`**, and **`RECOVERY_REQUIRED`** never resend. `SendMessage` runs **after commit**, never inside a DB atomic block, and **not** via `transaction.on_commit` as an outbox.
 
@@ -2186,9 +2186,9 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 **Known limitation:** crash after DB commit but before `SendMessage` can leave a stranded **`QUEUED`** Request; peers will not resend. Repair is deferred to a later recovery/requeue command.
 
-**Validation boundary:** service requires Document existence + persisted `initiated_by`. Authz / CSRF / admin gate / feature flag remain at the future staff POST.
+**Validation boundary:** service requires Document existence + persisted `initiated_by`. Authz / CSRF / admin gate belong at the staff POST (see staff enqueue UI entry).
 
-**Still deferred:** staff UI POST + feature gate; IAM `grant_send_messages` (repo CDK still grants consume only); ops recovery/requeue for stranded `QUEUED`; automatic activation; search / DTR / bindings / processing-state changes.
+**Still deferred (after PR3 service):** ~~staff UI POST~~ → **implemented** (fetch/sync enqueue only); feature gate; IAM `grant_send_messages` (repo CDK still grants consume only); ops recovery/requeue for stranded `QUEUED`; automatic activation; search / DTR / bindings / processing-state changes.
 
 ## Archive full-text search — architecture (docs-only)
 
@@ -3391,3 +3391,13 @@ snapshots, or otherwise without safe geometry are omitted.
 **Non-goals for this PR:** changing public search ranking/filtering, generating
 search snippets, choosing a single current/next occurrence, templates,
 JavaScript hover behavior, scrolling, image overlays, or schema changes.
+
+## Transkribus corrected/current staff sync enqueue UI (fetch/sync only)
+
+**Decision / implemented:** Authorized staff may request a fresh corrected/current Transkribus sync from the existing attempts list page via POST `corrected_current_sync_enqueue` → `enqueue_transkribus_corrected_current_sync(...)`. This is enqueue-only: it does **not** activate or replace the displayed transcription; preview/diff/explicit activation remain unchanged.
+
+**Boundary:** `login_required` + `@require_POST` + `_require_admin_page` + `get_viewable_document` + CSRF. Eligibility reuses `_is_transkribus_corrected_current_sync_ui_eligible` (fail-closed on `TranskribusPageXmlGeometryError`). Hiding the button is not authorization.
+
+**UX:** Form label **משיכת תעתוק עדכני מ־Transkribus** on `corrected_current_sync_attempts.html`; PRG redirect back to the attempts list with Hebrew Django messages mapped from enqueue outcomes (`CREATED_AND_ENQUEUED`/`REENQUEUED`, `ALREADY_QUEUED`, `ALREADY_RUNNING`, `BLOCKED_RECOVERY_REQUIRED`, `ENQUEUE_FAILED`, `ENQUEUE_OUTCOME_UNKNOWN`, `ALREADY_TERMINAL`). No polling/JS added.
+
+**Still deferred:** feature gate; IAM `grant_send_messages`; stranded-`QUEUED` recovery/requeue; automatic activation.

@@ -22,6 +22,20 @@
     <div class="alert">
       זוהי תצוגה מקדימה בלבד. שום דבר עדיין לא השתנה באתר.
     </div>
+
+    {% if show_transkribus_corrected_current_sync_enqueue_action %}
+      <div class="spacer-sm"></div>
+      <form
+        method="post"
+        action="{% url 'corrected-current-sync-enqueue' doc_id=doc.id %}"
+        class="corrected-sync-enqueue-form"
+      >
+        {% csrf_token %}
+        <button type="submit" class="btn">
+          משיכת תעתוק עדכני מ־Transkribus
+        </button>
+      </form>
+    {% endif %}
   </div>
 
   <div class="spacer"></div>
