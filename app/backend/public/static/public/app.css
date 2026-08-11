@@ -2359,6 +2359,122 @@ pre {
   text-decoration: underline;
 }
 
+.archive-advanced-search-toggle {
+  margin: var(--space-3) 0 0;
+}
+
+.archive-advanced-search-toggle__link {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.archive-advanced-search-toggle__link:hover {
+  text-decoration: underline;
+}
+
+.archive-advanced-search {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.archive-advanced-search__header {
+  margin-bottom: var(--space-3);
+}
+
+.archive-advanced-search__title {
+  margin: 0;
+  font-size: var(--font-md);
+  font-weight: 700;
+  color: var(--text-heading);
+}
+
+.archive-advanced-search__errors {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--text);
+  font-size: var(--font-sm);
+}
+
+.archive-advanced-search__errors ul {
+  margin: 0;
+  padding-inline-start: 1.25rem;
+}
+
+.archive-advanced-search__fields {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.archive-advanced-search__field label {
+  display: block;
+  margin-bottom: var(--space-1);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--text-soft);
+}
+
+.archive-advanced-search__field select,
+.archive-advanced-search__field input[type="text"],
+.archive-advanced-search__choice-filter {
+  width: 100%;
+  max-width: 100%;
+  min-height: 2.5rem;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card-input);
+  font: inherit;
+  font-size: var(--font-base);
+  color: var(--text);
+}
+
+.archive-advanced-search__field select[multiple] {
+  min-height: 7.5rem;
+}
+
+.archive-advanced-search__choice-filter {
+  margin-bottom: var(--space-2);
+}
+
+.archive-advanced-search__year-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.archive-advanced-search__hint {
+  margin: var(--space-2) 0 0;
+  font-size: var(--font-sm);
+  color: var(--muted);
+}
+
+.archive-advanced-search__actions {
+  margin-top: var(--space-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.archive-active-filters {
+  margin-top: var(--space-3);
+}
+
+.archive-active-filters__actions {
+  margin-top: var(--space-2);
+}
+
+.archive-search-results-count {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-sm);
+  color: var(--text-soft);
+}
+
 .archive-type-filter {
   display: flex;
   flex-wrap: wrap;
@@ -2987,6 +3103,14 @@ pre {
     flex: 0 0 auto;
     min-height: 2.125rem;
     padding-inline: var(--space-3);
+  }
+
+  .archive-advanced-search__year-row {
+    grid-template-columns: 1fr;
+  }
+
+  .archive-advanced-search__field select[multiple] {
+    min-height: 6.5rem;
   }
 
   .archive-type-filter__option {

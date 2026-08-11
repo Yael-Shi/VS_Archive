@@ -185,15 +185,21 @@ from documents.services.photo_archive_urls import (
     apply_photo_thumbnail_urls_to_browse_cards,
 )
 from documents.services.archive_advanced_search import (
+    EMPTY_ARCHIVE_ADVANCED_FILTER_CHOICE_CONTEXT,
     archive_advanced_filter_choice_context,
     archive_advanced_filter_template_context,
+    archive_advanced_panel_is_requested,
+    archive_advanced_year_form_values,
     filter_archive_items_by_advanced_filters,
-    normalize_archive_advanced_filters,
+    filters_for_archive_list_search,
+    should_load_archive_advanced_filter_choices,
+    validate_archive_advanced_year_fields,
 )
 from documents.services.archive_item_presentation import (
     archive_browse_displayable_text_results_prefetch,
     archive_manage_item_type_ui_choices,
     archive_metadata_status_ui_choices,
+    archive_public_list_active_filter_summary_context,
     archive_public_list_filter_context,
     archive_public_list_pagination_context,
     archive_visibility_ui_choices,
@@ -4191,12 +4197,36 @@ def archive_list_page(request):
         request.GET.get("item_type")
     )
     search_query = normalize_archive_list_search_query(request.GET.get("q"))
-    advanced_filters = normalize_archive_advanced_filters(request.GET)
+    year_validation = validate_archive_advanced_year_fields(request.GET)
+    advanced_filters = filters_for_archive_list_search(
+        request.GET,
+        year_validation=year_validation,
+    )
+    year_validation_failed = not year_validation.is_valid
+    advanced_panel_open = (
+        archive_advanced_panel_is_requested(request.GET) or year_validation_failed
+    )
+    load_advanced_choices = should_load_archive_advanced_filter_choices(
+        panel_open=advanced_panel_open,
+        advanced_filters_active=advanced_filters.is_active(),
+    )
+
     authorized_items = archive_browse_queryset_for_user(request.user)
+    if load_advanced_choices:
+        choice_context = archive_advanced_filter_choice_context(authorized_items)
+    else:
+        choice_context = dict(EMPTY_ARCHIVE_ADVANCED_FILTER_CHOICE_CONTEXT)
+
+    # Any authoritative year-validation failure blocks result execution until
+    # the form is corrected. Non-date filters remain in the redisplayed form
+    # (via advanced_filters / q) but must not produce a successful result set.
     items = _archive_browse_select_related(authorized_items).order_by("-created_at")
     items = filter_archive_items_by_public_list_type(items, item_type_filter)
-    items = filter_archive_items_by_advanced_filters(items, advanced_filters)
-    items = filter_archive_items_by_search_query(items, search_query)
+    if year_validation_failed:
+        items = items.none()
+    else:
+        items = filter_archive_items_by_advanced_filters(items, advanced_filters)
+        items = filter_archive_items_by_search_query(items, search_query)
     total_count = items.count()
     per_page = normalize_archive_public_list_per_page(request.GET.get("per_page"))
     page = normalize_archive_public_list_page(
@@ -4215,6 +4245,9 @@ def archive_list_page(request):
         browse_cards,
         search_query=search_query,
     )
+    search_or_filters_active = bool(
+        search_query or advanced_filters.is_active() or year_validation_failed
+    )
     return render(
         request,
         "documents/archive/list.html",
@@ -4224,13 +4257,29 @@ def archive_list_page(request):
             "is_admin": _is_admin(request.user),
             "item_type_filter": item_type_filter,
             "q": search_query,
+            "advanced_panel_open": advanced_panel_open,
+            "advanced_year_validation_errors": year_validation.errors,
+            "advanced_year_validation_failed": year_validation_failed,
+            "search_or_filters_active": search_or_filters_active,
+            "load_advanced_choices": load_advanced_choices,
             **archive_advanced_filter_template_context(advanced_filters),
-            **archive_advanced_filter_choice_context(authorized_items),
+            **archive_advanced_year_form_values(advanced_filters, year_validation),
+            **choice_context,
             **archive_public_list_filter_context(
                 q=search_query,
                 item_type_filter=item_type_filter,
                 per_page=per_page,
                 advanced_filters=advanced_filters,
+                advanced_open=advanced_panel_open,
+            ),
+            **archive_public_list_active_filter_summary_context(
+                q=search_query,
+                item_type_filter=item_type_filter,
+                per_page=per_page,
+                advanced_filters=advanced_filters,
+                category_choices=choice_context["advanced_filter_category_choices"],
+                event_choices=choice_context["advanced_filter_event_choices"],
+                tag_choices=choice_context["advanced_filter_tag_choices"],
             ),
             **archive_public_list_pagination_context(
                 total_count=total_count,

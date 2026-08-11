@@ -6,66 +6,252 @@
     <h1 class="page-title">ארכיון</h1>
 
     <section class="archive-search-panel" aria-label="חיפוש בארכיון">
-      <h2 class="archive-search-panel__title">חפשו בארכיון</h2>
-      <p class="archive-search-panel__help">
-        אפשר לחפש לפי כותרת, מחבר/ת, קטגוריות, אירועים, תגיות או מילים מתוך הטקסט.
-      </p>
-
-      <form method="get" class="archive-search-form">
+      <form method="get" class="archive-search-form" id="archive-search-form">
         {% if item_type_filter %}
           <input type="hidden" name="item_type" value="{{ item_type_filter }}">
         {% endif %}
         {% if preserve_per_page_in_query %}
           <input type="hidden" name="per_page" value="{{ per_page }}">
         {% endif %}
-        {% if advanced_filter_author %}
-          <input type="hidden" name="author" value="{{ advanced_filter_author }}">
-        {% endif %}
-        {% for category_id in advanced_filter_category_ids %}
-          <input type="hidden" name="category" value="{{ category_id }}">
-        {% endfor %}
-        {% for event_id in advanced_filter_event_ids %}
-          <input type="hidden" name="event" value="{{ event_id }}">
-        {% endfor %}
-        {% for tag_id in advanced_filter_tag_ids %}
-          <input type="hidden" name="tag" value="{{ tag_id }}">
-        {% endfor %}
-        {% if advanced_filter_year %}
-          <input type="hidden" name="year" value="{{ advanced_filter_year }}">
-        {% endif %}
-        {% if advanced_filter_year_to %}
-          <input type="hidden" name="year_to" value="{{ advanced_filter_year_to }}">
+        {% if not advanced_panel_open %}
+          {% if advanced_filter_author %}
+            <input type="hidden" name="author" value="{{ advanced_filter_author }}">
+          {% endif %}
+          {% for category_id in advanced_filter_category_ids %}
+            <input type="hidden" name="category" value="{{ category_id }}">
+          {% endfor %}
+          {% for event_id in advanced_filter_event_ids %}
+            <input type="hidden" name="event" value="{{ event_id }}">
+          {% endfor %}
+          {% for tag_id in advanced_filter_tag_ids %}
+            <input type="hidden" name="tag" value="{{ tag_id }}">
+          {% endfor %}
+          {% if advanced_filter_year_input %}
+            <input type="hidden" name="year" value="{{ advanced_filter_year_input }}">
+          {% endif %}
+          {% if advanced_filter_year_to_input %}
+            <input type="hidden" name="year_to" value="{{ advanced_filter_year_to_input }}">
+          {% endif %}
         {% endif %}
 
         <div class="archive-search-form__row">
+          <label class="visually-hidden" for="archive-filter-q">מילות חיפוש</label>
           <input
             id="archive-filter-q"
             class="archive-search-form__input"
             type="search"
             name="q"
-            placeholder="כותרת, מחבר/ת, קטגוריות, אירועים, תגיות או מילים מהטקסט..."
+            placeholder="חיפוש בארכיון…"
             value="{{ q }}"
-            aria-label="חיפוש בארכיון"
+            autocomplete="off"
           >
 
           <div class="archive-search-form__actions">
             <button class="btn btn-primary archive-search-form__submit" type="submit">חיפוש</button>
-            <a class="archive-search-form__clear" href="{% url 'archive-list' %}{{ clear_search_query_suffix }}">ניקוי</a>
+            {% if q %}
+              <a
+                class="archive-search-form__clear"
+                href="{% url 'archive-list' %}{{ clear_search_query_suffix }}"
+              >ניקוי החיפוש</a>
+            {% endif %}
           </div>
         </div>
-      </form>
 
-      <div class="archive-type-filter" role="group" aria-label="סינון לפי סוג פריט">
-        {% for link in item_type_filter_links %}
-          <a
-            class="archive-type-filter__option{% if link.is_active %} is-active{% endif %}"
-            href="{% url 'archive-list' %}{{ link.href_suffix }}"
-          >{{ link.label }}</a>
-        {% endfor %}
-      </div>
+        <div class="archive-type-filter" role="group" aria-label="סינון לפי סוג פריט">
+          {% for link in item_type_filter_links %}
+            <a
+              class="archive-type-filter__option{% if link.is_active %} is-active{% endif %}"
+              href="{% url 'archive-list' %}{{ link.href_suffix }}"
+            >{{ link.label }}</a>
+          {% endfor %}
+        </div>
+
+        {% if advanced_panel_open %}
+          <div
+            class="archive-advanced-search is-open"
+            id="archive-advanced-search"
+          >
+            <div class="archive-advanced-search__header">
+              <h2 class="archive-advanced-search__title">חיפוש מתקדם</h2>
+            </div>
+
+            {% if advanced_year_validation_errors %}
+              <div
+                class="archive-advanced-search__errors"
+                role="alert"
+                aria-live="polite"
+              >
+                <ul>
+                  {% for error in advanced_year_validation_errors %}
+                    <li>{{ error }}</li>
+                  {% endfor %}
+                </ul>
+              </div>
+            {% endif %}
+
+            <div class="archive-advanced-search__fields">
+              <div class="archive-advanced-search__field">
+                <label for="archive-filter-author">מחבר/ת</label>
+                <select id="archive-filter-author" name="author">
+                  <option value="">הכל</option>
+                  {% for author_name in advanced_filter_author_choices %}
+                    <option
+                      value="{{ author_name }}"
+                      {% if author_name == advanced_filter_author %}selected{% endif %}
+                    >{{ author_name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="archive-advanced-search__field">
+                <label for="archive-filter-category">קטגוריות</label>
+                <select
+                  id="archive-filter-category"
+                  name="category"
+                  multiple
+                  size="5"
+                >
+                  {% for category in advanced_filter_category_choices %}
+                    <option
+                      value="{{ category.id }}"
+                      {% if category.id in advanced_filter_category_ids %}selected{% endif %}
+                    >{{ category.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="archive-advanced-search__field">
+                <label for="archive-filter-event">אירועים</label>
+                <select
+                  id="archive-filter-event"
+                  name="event"
+                  multiple
+                  size="5"
+                >
+                  {% for event in advanced_filter_event_choices %}
+                    <option
+                      value="{{ event.id }}"
+                      {% if event.id in advanced_filter_event_ids %}selected{% endif %}
+                    >{{ event.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div
+                class="archive-advanced-search__field"
+                data-existing-tags-field
+              >
+                <label for="archive-filter-tag">תגיות</label>
+                <input
+                  type="search"
+                  class="archive-advanced-search__choice-filter"
+                  data-existing-tags-search
+                  autocomplete="off"
+                  placeholder="סינון תגיות…"
+                  aria-label="סינון תגיות ברשימה"
+                >
+                <select
+                  id="archive-filter-tag"
+                  name="tag"
+                  multiple
+                  size="5"
+                  data-existing-tags-select
+                >
+                  {% for tag in advanced_filter_tag_choices %}
+                    <option
+                      value="{{ tag.id }}"
+                      {% if tag.id in advanced_filter_tag_ids %}selected{% endif %}
+                    >{{ tag.name }}</option>
+                  {% endfor %}
+                </select>
+                <div class="field-hint" data-existing-tags-empty hidden>
+                  לא נמצאו תגיות תואמות.
+                </div>
+              </div>
+
+              <div class="archive-advanced-search__field archive-advanced-search__field--years">
+                <div class="archive-advanced-search__year-row">
+                  <div class="archive-advanced-search__year-control">
+                    <label for="archive-filter-year">שנה</label>
+                    <input
+                      id="archive-filter-year"
+                      name="year"
+                      type="text"
+                      inputmode="numeric"
+                      autocomplete="off"
+                      value="{{ advanced_filter_year_input }}"
+                      {% if advanced_year_validation_failed %}aria-invalid="true"{% endif %}
+                    >
+                  </div>
+                  <div class="archive-advanced-search__year-control">
+                    <label for="archive-filter-year-to">עד שנה</label>
+                    <input
+                      id="archive-filter-year-to"
+                      name="year_to"
+                      type="text"
+                      inputmode="numeric"
+                      autocomplete="off"
+                      value="{{ advanced_filter_year_to_input }}"
+                      {% if advanced_year_validation_failed %}aria-invalid="true"{% endif %}
+                    >
+                  </div>
+                </div>
+                <p class="archive-advanced-search__hint">
+                  אפשר לחפש שנה אחת או טווח שנים.
+                </p>
+              </div>
+            </div>
+
+            <div class="archive-advanced-search__actions">
+              <button class="btn btn-primary" type="submit">חיפוש</button>
+            </div>
+          </div>
+        {% else %}
+          <p class="archive-advanced-search-toggle">
+            <a
+              class="archive-advanced-search-toggle__link"
+              href="{% url 'archive-list' %}{{ advanced_search_open_href_suffix }}"
+            >חיפוש מתקדם</a>
+          </p>
+        {% endif %}
+      </form>
     </section>
 
+    {% if active_filter_summary_visible and not advanced_year_validation_failed %}
+      <div class="archive-active-filters" aria-label="סינון פעיל">
+        <div class="filter-chips">
+          <span class="filter-chips__label">סינון פעיל:</span>
+          {% for chip in active_filter_chips %}
+            <a
+              class="filter-chip filter-chip--action"
+              href="{% url 'archive-list' %}{{ chip.remove_href_suffix }}"
+              title="הסרת {{ chip.label }}"
+            >
+              <span class="filter-chip__key">{{ chip.label }}:</span>
+              {{ chip.value }}
+            </a>
+          {% endfor %}
+        </div>
+        <div class="archive-active-filters__actions filter-chips filter-chips--controls">
+          <a
+            class="filter-chip filter-chip--action"
+            href="{% url 'archive-list' %}{{ edit_advanced_search_href_suffix }}"
+          >שינוי החיפוש המתקדם</a>
+          <a
+            class="filter-chip filter-chip--action"
+            href="{% url 'archive-list' %}{{ clear_all_query_suffix }}"
+          >ניקוי הכול</a>
+        </div>
+      </div>
+    {% endif %}
+
     <div class="spacer"></div>
+
+    {% if search_or_filters_active and not advanced_year_validation_failed %}
+      <p class="archive-search-results-count" aria-live="polite">
+        נמצאו {{ total_count }} תוצאות{% if q %} עבור "{{ q }}"{% endif %}
+      </p>
+    {% endif %}
 
     {% if items %}
       {% include "documents/archive/partials/item_list_cards.html" with browse_cards=browse_cards %}
@@ -74,10 +260,69 @@
         <div class="spacer"></div>
         {% include "documents/archive/partials/list_pagination.html" %}
       {% endif %}
-    {% elif q or advanced_filters_active %}
+    {% elif advanced_year_validation_failed %}
+      <p class="muted">יש לתקן את החיפוש המתקדם כדי להציג תוצאות.</p>
+      {% if not advanced_panel_open %}
+        <p>
+          <a href="{% url 'archive-list' %}{{ advanced_search_open_href_suffix }}">חיפוש מתקדם</a>
+        </p>
+      {% endif %}
+    {% elif search_or_filters_active %}
       <p class="muted">לא נמצאו פריטים התואמים את החיפוש.</p>
+      {% if not advanced_panel_open %}
+        <p class="archive-advanced-search-toggle">
+          <a
+            class="archive-advanced-search-toggle__link"
+            href="{% url 'archive-list' %}{{ advanced_search_open_href_suffix }}"
+          >חיפוש מתקדם</a>
+        </p>
+      {% endif %}
     {% else %}
       <p class="muted">אין פריטי ארכיון להצגה.</p>
     {% endif %}
   </div>
+
+  {% if advanced_panel_open %}
+    <script>
+      (function () {
+        document.querySelectorAll("[data-existing-tags-field]").forEach(function (field) {
+          if (field.dataset.existingTagsSearchReady === "1") {
+            return;
+          }
+          field.dataset.existingTagsSearchReady = "1";
+
+          const searchInput = field.querySelector("[data-existing-tags-search]");
+          const select = field.querySelector("[data-existing-tags-select]");
+          const emptyMessage = field.querySelector("[data-existing-tags-empty]");
+
+          if (!searchInput || !select || !emptyMessage) {
+            return;
+          }
+
+          function applyFilter() {
+            const query = searchInput.value.trim().toLocaleLowerCase();
+            let matchCount = 0;
+
+            Array.from(select.options).forEach(function (option) {
+              const matches =
+                !query || option.textContent.toLocaleLowerCase().includes(query);
+
+              if (matches) {
+                matchCount += 1;
+              }
+
+              const shouldHide = !matches && !option.selected;
+              option.hidden = shouldHide;
+              option.style.display = shouldHide ? "none" : "";
+            });
+
+            emptyMessage.hidden = !query || matchCount > 0;
+          }
+
+          searchInput.addEventListener("input", applyFilter);
+          select.addEventListener("change", applyFilter);
+        });
+      })();
+    </script>
+  {% endif %}
 {% endblock %}

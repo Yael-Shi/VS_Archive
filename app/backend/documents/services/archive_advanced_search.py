@@ -7,7 +7,7 @@ and must not bypass visibility helpers or replace FTS ranking.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import Any, Mapping, Sequence
 
@@ -25,6 +25,28 @@ ARCHIVE_ADVANCED_FILTER_PARAM_EVENT = "event"
 ARCHIVE_ADVANCED_FILTER_PARAM_TAG = "tag"
 ARCHIVE_ADVANCED_FILTER_PARAM_YEAR = "year"
 ARCHIVE_ADVANCED_FILTER_PARAM_YEAR_TO = "year_to"
+
+# UI-only panel open state. Must not affect filter semantics.
+ARCHIVE_ADVANCED_PANEL_PARAM = "advanced"
+ARCHIVE_ADVANCED_PANEL_VALUE = "1"
+
+ARCHIVE_ADVANCED_YEAR_REVERSE_RANGE_ERROR = (
+    "עד שנה חייבת להיות שווה לשנה הראשונה או מאוחרת ממנה."
+)
+ARCHIVE_ADVANCED_YEAR_MALFORMED_ERROR = "יש להזין שנה תקינה (למשל 1950)."
+ARCHIVE_ADVANCED_YEAR_TO_MALFORMED_ERROR = (
+    'יש להזין שנה תקינה בשדה "עד שנה" (למשל 1955).'
+)
+ARCHIVE_ADVANCED_YEAR_TO_WITHOUT_YEAR_ERROR = (
+    "כדי לחפש לפי טווח שנים יש להזין גם את השנה הראשונה."
+)
+
+EMPTY_ARCHIVE_ADVANCED_FILTER_CHOICE_CONTEXT: dict[str, object] = {
+    "advanced_filter_author_choices": (),
+    "advanced_filter_category_choices": (),
+    "advanced_filter_event_choices": (),
+    "advanced_filter_tag_choices": (),
+}
 
 
 @dataclass(frozen=True)
@@ -145,8 +167,8 @@ def normalize_archive_advanced_filters(
       ``year`` is ignored. Malformed ``year`` drops the date filter. Malformed
       ``year_to`` with a valid ``year`` falls back to a single-year window.
       Reverse ranges (``year_to < year``) also fall back to a single-year
-      window on ``year`` (no silent swap). Explicit reverse-range UI validation
-      is deferred to PR2.
+      window on ``year`` (no silent swap). Public UI validation rejects reverse
+      and malformed years before this defensive fallback is relied on for search.
     """
     if params is None:
         return EMPTY_ARCHIVE_ADVANCED_FILTERS
@@ -305,3 +327,251 @@ def archive_advanced_filter_template_context(
         ),
         "advanced_filters_active": filters.is_active(),
     }
+
+
+@dataclass(frozen=True)
+class ArchiveAdvancedYearFieldValidation:
+    """Authoritative public-UI validation for ``year`` / ``year_to`` inputs."""
+
+    year_raw: str = ""
+    year_to_raw: str = ""
+    errors: tuple[str, ...] = ()
+
+    @property
+    def is_valid(self) -> bool:
+        return not self.errors
+
+
+def validate_archive_advanced_year_fields(
+    params: Mapping[str, Any] | Any | None,
+) -> ArchiveAdvancedYearFieldValidation:
+    """
+    Validate public advanced year fields for user-facing search.
+
+    Unlike ``normalize_archive_advanced_filters``, malformed and reverse ranges
+    are explicit errors. Submitted raw strings are preserved for form redisplay.
+    """
+    if params is None:
+        return ArchiveAdvancedYearFieldValidation()
+
+    year_values = _raw_values(params, ARCHIVE_ADVANCED_FILTER_PARAM_YEAR)
+    year_to_values = _raw_values(params, ARCHIVE_ADVANCED_FILTER_PARAM_YEAR_TO)
+    year_raw = _normalize_single_string(year_values[-1] if year_values else "")
+    year_to_raw = _normalize_single_string(year_to_values[-1] if year_to_values else "")
+
+    errors: list[str] = []
+    year: int | None = None
+    if year_raw:
+        year = _parse_year_value(year_raw)
+        if year is None:
+            errors.append(ARCHIVE_ADVANCED_YEAR_MALFORMED_ERROR)
+
+    if year_to_raw:
+        year_to = _parse_year_value(year_to_raw)
+        if year_to is None:
+            errors.append(ARCHIVE_ADVANCED_YEAR_TO_MALFORMED_ERROR)
+        elif not year_raw:
+            errors.append(ARCHIVE_ADVANCED_YEAR_TO_WITHOUT_YEAR_ERROR)
+        elif year is not None and year_to < year:
+            errors.append(ARCHIVE_ADVANCED_YEAR_REVERSE_RANGE_ERROR)
+
+    return ArchiveAdvancedYearFieldValidation(
+        year_raw=year_raw,
+        year_to_raw=year_to_raw,
+        errors=tuple(errors),
+    )
+
+
+def filters_for_archive_list_search(
+    params: Mapping[str, Any] | Any | None,
+    *,
+    year_validation: ArchiveAdvancedYearFieldValidation | None = None,
+) -> ArchiveAdvancedFilters:
+    """
+    Normalize filters for queryset application.
+
+    When UI year validation fails, date filters are dropped so the defensive
+    normalize fallback is never treated as a successful reverse-range search.
+    """
+    filters = normalize_archive_advanced_filters(params)
+    validation = year_validation or validate_archive_advanced_year_fields(params)
+    if validation.is_valid:
+        return filters
+    return replace(filters, year=None, year_to=None)
+
+
+def archive_advanced_panel_is_requested(
+    params: Mapping[str, Any] | Any | None,
+) -> bool:
+    """Return True when the advanced panel open flag is present (``advanced=1``)."""
+    if params is None:
+        return False
+    values = _raw_values(params, ARCHIVE_ADVANCED_PANEL_PARAM)
+    if not values:
+        return False
+    return _normalize_single_string(values[-1]) == ARCHIVE_ADVANCED_PANEL_VALUE
+
+
+def should_load_archive_advanced_filter_choices(
+    *,
+    panel_open: bool,
+    advanced_filters_active: bool,
+) -> bool:
+    """Load authorized choice context only when the advanced UI needs it."""
+    return bool(panel_open or advanced_filters_active)
+
+
+def archive_advanced_year_form_values(
+    filters: ArchiveAdvancedFilters,
+    year_validation: ArchiveAdvancedYearFieldValidation,
+) -> dict[str, str]:
+    """String year inputs for the advanced form (preserve raw on validation error)."""
+    if not year_validation.is_valid:
+        return {
+            "advanced_filter_year_input": year_validation.year_raw,
+            "advanced_filter_year_to_input": year_validation.year_to_raw,
+        }
+    year_input = str(filters.year) if filters.year is not None else ""
+    year_to_input = ""
+    if (
+        filters.year is not None
+        and filters.year_to is not None
+        and filters.year_to != filters.year
+    ):
+        year_to_input = str(filters.year_to)
+    return {
+        "advanced_filter_year_input": year_input,
+        "advanced_filter_year_to_input": year_to_input,
+    }
+
+
+def archive_advanced_filters_without_author(
+    filters: ArchiveAdvancedFilters,
+) -> ArchiveAdvancedFilters:
+    return replace(filters, author="")
+
+
+def archive_advanced_filters_without_category(
+    filters: ArchiveAdvancedFilters,
+    category_id: int,
+) -> ArchiveAdvancedFilters:
+    return replace(
+        filters,
+        category_ids=tuple(
+            value for value in filters.category_ids if value != category_id
+        ),
+    )
+
+
+def archive_advanced_filters_without_event(
+    filters: ArchiveAdvancedFilters,
+    event_id: int,
+) -> ArchiveAdvancedFilters:
+    return replace(
+        filters,
+        event_ids=tuple(value for value in filters.event_ids if value != event_id),
+    )
+
+
+def archive_advanced_filters_without_tag(
+    filters: ArchiveAdvancedFilters,
+    tag_id: int,
+) -> ArchiveAdvancedFilters:
+    return replace(
+        filters,
+        tag_ids=tuple(value for value in filters.tag_ids if value != tag_id),
+    )
+
+
+def archive_advanced_filters_without_year(
+    filters: ArchiveAdvancedFilters,
+) -> ArchiveAdvancedFilters:
+    return replace(filters, year=None, year_to=None)
+
+
+def _choice_name_by_id(choices: Sequence[Any], choice_id: int) -> str:
+    for choice in choices:
+        if getattr(choice, "pk", None) == choice_id:
+            return str(getattr(choice, "name", choice_id))
+    return str(choice_id)
+
+
+def build_archive_advanced_filter_summary_items(
+    *,
+    q: str,
+    filters: ArchiveAdvancedFilters,
+    category_choices: Sequence[Any] = (),
+    event_choices: Sequence[Any] = (),
+    tag_choices: Sequence[Any] = (),
+) -> list[dict[str, object]]:
+    """
+    Compact active-filter summary descriptors (labels/values only).
+
+    Remove hrefs are attached by the presentation/query-builder layer.
+    """
+    items: list[dict[str, object]] = []
+    if q:
+        items.append(
+            {
+                "kind": "q",
+                "label": "חיפוש",
+                "value": q,
+            }
+        )
+    if filters.author:
+        items.append(
+            {
+                "kind": "author",
+                "label": "מחבר/ת",
+                "value": filters.author,
+            }
+        )
+    if filters.category_ids:
+        names = [
+            _choice_name_by_id(category_choices, category_id)
+            for category_id in filters.category_ids
+        ]
+        items.append(
+            {
+                "kind": "category",
+                "label": "קטגוריה" if len(names) == 1 else "קטגוריות",
+                "value": ", ".join(names),
+                "ids": filters.category_ids,
+            }
+        )
+    if filters.event_ids:
+        names = [
+            _choice_name_by_id(event_choices, event_id)
+            for event_id in filters.event_ids
+        ]
+        items.append(
+            {
+                "kind": "event",
+                "label": "אירוע" if len(names) == 1 else "אירועים",
+                "value": ", ".join(names),
+                "ids": filters.event_ids,
+            }
+        )
+    if filters.tag_ids:
+        names = [_choice_name_by_id(tag_choices, tag_id) for tag_id in filters.tag_ids]
+        items.append(
+            {
+                "kind": "tag",
+                "label": "תגית" if len(names) == 1 else "תגיות",
+                "value": ", ".join(names),
+                "ids": filters.tag_ids,
+            }
+        )
+    if filters.year is not None:
+        if filters.year_to is not None and filters.year_to != filters.year:
+            year_value = f"{filters.year}–{filters.year_to}"
+        else:
+            year_value = str(filters.year)
+        items.append(
+            {
+                "kind": "year",
+                "label": "שנים",
+                "value": year_value,
+            }
+        )
+    return items

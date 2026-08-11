@@ -1,11 +1,52 @@
 # VS-Archive Decision Log
 
+## Public `/archive/` advanced search UI (PR2)
+
+**Decision / implemented (this branch):** Add the public `/archive/` advanced-search
+UX on top of the PR1 backend filter contract. Two mandatory closure items are
+included: authoritative reverse/malformed year validation in the public UI, and
+conditional loading of authorized advanced-filter choice context.
+
+**Current behavior:**
+
+- Default `/archive/` keeps page title `ארכיון`, a compact `q` field + `חיפוש`,
+  visible item-type filter, and a `חיפוש מתקדם` link. The advanced panel is
+  closed by default and is not a separate page.
+- Panel open state uses GET `advanced=1` (UI-only; does not change filter
+  semantics). Validation errors also force the panel open and preserve submitted
+  year strings.
+- Advanced fields: author (single authorized choice), multi category/event/tag
+  from authorized choice context, year + optional year_to. No `קשור ל־` filter.
+- Year validation is server-authoritative via
+  `validate_archive_advanced_year_fields`. Reverse ranges and malformed years
+  show Hebrew errors, force the advanced panel open, preserve submitted values,
+  and suppress **all** result execution (`total_count=0`) until fixed — including
+  when valid `q` / author / category / event / tag values were also submitted.
+  They do **not** execute the PR1 defensive single-year fallback as a successful
+  search. PR1 `normalize_archive_advanced_filters` fallback remains low-level
+  safety only.
+- After a valid filtered search, show result count, compact active-filter chips,
+  `שינוי החיפוש המתקדם`, and `ניקוי הכול`. Compact `ניקוי החיפוש` clears `q`
+  only while preserving advanced filters. Item-type / pagination / per-page
+  continue to use `build_archive_public_list_query`.
+- Choice-context optimization: `archive_advanced_filter_choice_context` runs only
+  when the advanced panel is open or advanced filters are active. Ordinary
+  `/archive/` and q-only requests skip the author/category/event/tag choice
+  queries (regression-tested; before: 4 choice queries every request; after: 0
+  on ordinary/q-only, 4 when panel/filters need them).
+
+**Deferred / PR3:** global navigation/header search. Still deferred: Hebrew
+morphology, fuzzy OCR / pg_trgm, phrase search, places authority, Author model,
+`related` filter.
+
 ## Public `/archive/` advanced filters — backend contract (PR1)
 
-**Decision / implemented (this branch, not merged yet):** Add a structured
+**Decision / implemented (merged #408):** Add a structured
 advanced-filter backend contract on the existing public `/archive/` list
-pipeline. This is backend + tests only; collapsible advanced UI / chips / global
-header search are deferred to later PRs.
+pipeline. Collapsible advanced UI / chips / global header search were deferred
+to later PRs; **PR2 implements the `/archive/` advanced UI + year validation +
+choice-context loading optimization** (see entry above). Global nav search
+remains PR3.
 
 **Current behavior:**
 
@@ -16,19 +57,20 @@ header search are deferred to later PRs.
   (single exact `author_name`), repeatable `category` / `event` / `tag`
   (integer ids; OR within each group, AND across groups), optional `year` and
   `year_to` (inclusive calendar-year overlap on known archival dates).
-- `year_to` without `year` is ignored. Malformed `year` drops the date filter.
-  Reverse ranges (`year_to < year`) fall back to a single-year window on `year`
-  (same defensive fallback as malformed `year_to`; no silent swap). Explicit
-  reverse-range UI validation/messaging is deferred to PR2. `UNKNOWN` / missing
-  date bounds never match while a date filter is active.
+- `year_to` without `year` is ignored by low-level normalize. Malformed `year`
+  drops the date filter in normalize. Reverse ranges (`year_to < year`) fall
+  back to a single-year window on `year` in normalize (same defensive fallback
+  as malformed `year_to`; no silent swap). **Public UI validation (PR2) rejects
+  reverse/malformed years before relying on that fallback for search.**
+  `UNKNOWN` / missing date bounds never match while a date filter is active.
 - No `related` filter (presentation-only concatenation of events+tags). No new
   Author model. Choice context for author/category/event/tag is derived only
   from the caller’s authorized archive universe.
 - Query construction extends `build_archive_public_list_query` so advanced
   filters survive type links, pagination, and per-page forms.
 
-**Deferred:** advanced-search UI redesign, result chips, global nav search,
-Hebrew morphology, fuzzy OCR / pg_trgm, places authority.
+**Deferred:** global nav search (PR3), Hebrew morphology, fuzzy OCR / pg_trgm,
+places authority.
 
 ## Public OCR detail — archive-search match ↔ transcription sync
 

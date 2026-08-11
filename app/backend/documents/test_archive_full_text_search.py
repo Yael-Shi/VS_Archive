@@ -1269,13 +1269,13 @@ class ArchiveSearchSnippetPresentationTests(TestCase):
     def test_help_text_and_placeholder_no_longer_claim_date_or_place(self):
         resp = self.client.get(reverse("archive-list"))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(
+        # PR2: compact archive search chrome (no long explanatory copy).
+        self.assertContains(resp, 'placeholder="חיפוש בארכיון…"')
+        self.assertContains(resp, "חיפוש מתקדם")
+        self.assertNotContains(resp, "חפשו בארכיון")
+        self.assertNotContains(
             resp,
             "אפשר לחפש לפי כותרת, מחבר/ת, קטגוריות, אירועים, תגיות או מילים מתוך הטקסט.",
-        )
-        self.assertContains(
-            resp,
-            'placeholder="כותרת, מחבר/ת, קטגוריות, אירועים, תגיות או מילים מהטקסט..."',
         )
         self.assertNotContains(resp, "שם, מקום, נושא, תאריך")
         self.assertNotContains(resp, "תאריך או מילת מפתח")
