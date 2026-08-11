@@ -6,6 +6,24 @@
     {% if item_type_filter %}
       <input type="hidden" name="item_type" value="{{ item_type_filter }}">
     {% endif %}
+    {% if advanced_filter_author %}
+      <input type="hidden" name="author" value="{{ advanced_filter_author }}">
+    {% endif %}
+    {% for category_id in advanced_filter_category_ids %}
+      <input type="hidden" name="category" value="{{ category_id }}">
+    {% endfor %}
+    {% for event_id in advanced_filter_event_ids %}
+      <input type="hidden" name="event" value="{{ event_id }}">
+    {% endfor %}
+    {% for tag_id in advanced_filter_tag_ids %}
+      <input type="hidden" name="tag" value="{{ tag_id }}">
+    {% endfor %}
+    {% if advanced_filter_year %}
+      <input type="hidden" name="year" value="{{ advanced_filter_year }}">
+    {% endif %}
+    {% if advanced_filter_year_to %}
+      <input type="hidden" name="year_to" value="{{ advanced_filter_year_to }}">
+    {% endif %}
     <label class="archive-list-pagination__label" for="archive-list-per-page">פריטים בעמוד:</label>
     <select
       id="archive-list-per-page"

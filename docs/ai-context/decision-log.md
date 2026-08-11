@@ -1,5 +1,35 @@
 # VS-Archive Decision Log
 
+## Public `/archive/` advanced filters — backend contract (PR1)
+
+**Decision / implemented (this branch, not merged yet):** Add a structured
+advanced-filter backend contract on the existing public `/archive/` list
+pipeline. This is backend + tests only; collapsible advanced UI / chips / global
+header search are deferred to later PRs.
+
+**Current behavior:**
+
+- Pipeline remains authoritative:
+  authorized browse queryset → `item_type` → advanced filters → full-text `q`
+  → count → paginate → browse cards/snippets.
+- GET parameters: preserve `q`, `item_type`, `per_page`, `page`; add `author`
+  (single exact `author_name`), repeatable `category` / `event` / `tag`
+  (integer ids; OR within each group, AND across groups), optional `year` and
+  `year_to` (inclusive calendar-year overlap on known archival dates).
+- `year_to` without `year` is ignored. Malformed `year` drops the date filter.
+  Reverse ranges (`year_to < year`) fall back to a single-year window on `year`
+  (same defensive fallback as malformed `year_to`; no silent swap). Explicit
+  reverse-range UI validation/messaging is deferred to PR2. `UNKNOWN` / missing
+  date bounds never match while a date filter is active.
+- No `related` filter (presentation-only concatenation of events+tags). No new
+  Author model. Choice context for author/category/event/tag is derived only
+  from the caller’s authorized archive universe.
+- Query construction extends `build_archive_public_list_query` so advanced
+  filters survive type links, pagination, and per-page forms.
+
+**Deferred:** advanced-search UI redesign, result chips, global nav search,
+Hebrew morphology, fuzzy OCR / pg_trgm, places authority.
+
 ## Public OCR detail — archive-search match ↔ transcription sync
 
 **Decision / #398 merged/deployed; bidirectional click follow-up is this branch

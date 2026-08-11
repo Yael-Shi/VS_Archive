@@ -184,6 +184,12 @@ from documents.services.document_archive_urls import (
 from documents.services.photo_archive_urls import (
     apply_photo_thumbnail_urls_to_browse_cards,
 )
+from documents.services.archive_advanced_search import (
+    archive_advanced_filter_choice_context,
+    archive_advanced_filter_template_context,
+    filter_archive_items_by_advanced_filters,
+    normalize_archive_advanced_filters,
+)
 from documents.services.archive_item_presentation import (
     archive_browse_displayable_text_results_prefetch,
     archive_manage_item_type_ui_choices,
@@ -4185,10 +4191,11 @@ def archive_list_page(request):
         request.GET.get("item_type")
     )
     search_query = normalize_archive_list_search_query(request.GET.get("q"))
-    items = _archive_browse_select_related(
-        archive_browse_queryset_for_user(request.user)
-    ).order_by("-created_at")
+    advanced_filters = normalize_archive_advanced_filters(request.GET)
+    authorized_items = archive_browse_queryset_for_user(request.user)
+    items = _archive_browse_select_related(authorized_items).order_by("-created_at")
     items = filter_archive_items_by_public_list_type(items, item_type_filter)
+    items = filter_archive_items_by_advanced_filters(items, advanced_filters)
     items = filter_archive_items_by_search_query(items, search_query)
     total_count = items.count()
     per_page = normalize_archive_public_list_per_page(request.GET.get("per_page"))
@@ -4217,10 +4224,13 @@ def archive_list_page(request):
             "is_admin": _is_admin(request.user),
             "item_type_filter": item_type_filter,
             "q": search_query,
+            **archive_advanced_filter_template_context(advanced_filters),
+            **archive_advanced_filter_choice_context(authorized_items),
             **archive_public_list_filter_context(
                 q=search_query,
                 item_type_filter=item_type_filter,
                 per_page=per_page,
+                advanced_filters=advanced_filters,
             ),
             **archive_public_list_pagination_context(
                 total_count=total_count,
@@ -4228,6 +4238,7 @@ def archive_list_page(request):
                 per_page=per_page,
                 q=search_query,
                 item_type_filter=item_type_filter,
+                advanced_filters=advanced_filters,
             ),
         },
     )
