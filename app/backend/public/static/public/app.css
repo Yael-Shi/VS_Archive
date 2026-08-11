@@ -408,6 +408,34 @@ code {
   color: var(--primary-hover);
 }
 
+/* Staff OCR document cross-management navigation */
+.staff-document-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.staff-document-nav__button {
+  padding: 6px 12px;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  background: linear-gradient(180deg, #4a7aa3 0%, #356589 100%);
+  border-color: #356589;
+  color: #f7fafc;
+  box-shadow: var(--shadow-soft);
+}
+
+.staff-document-nav__button:hover {
+  background: linear-gradient(180deg, #5a8bb4 0%, #2f5f89 100%);
+  border-color: var(--primary-hover);
+  color: #fff;
+}
+
+.staff-document-nav__button:focus-visible {
+  box-shadow: 0 0 0 2px var(--card-elevated), var(--focus-ring);
+}
+
 /* Forms */
 
 .toolbar {
@@ -3549,8 +3577,17 @@ pre {
   min-width: 0;
 }
 
-.document-detail-staff-management-actions > .btn,
+.document-detail-staff-management-actions > .staff-document-nav,
 .document-detail-staff-management-actions > .document-detail-staff-actions {
+  width: 100%;
+}
+
+.document-detail-staff-management-actions .staff-document-nav {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.document-detail-staff-management-actions .staff-document-nav__button {
   width: 100%;
 }
 
@@ -3804,7 +3841,7 @@ pre {
     text-align: center;
   }
 
-  .document-detail-staff-management-actions > .btn {
+  .document-detail-staff-management-actions > .staff-document-nav {
     flex: none;
     width: 100%;
   }
@@ -3897,7 +3934,7 @@ pre {
     flex: 1 1 calc(50% - var(--space-2));
   }
 
-  .document-detail-staff-management-actions > .btn {
+  .document-detail-staff-management-actions > .staff-document-nav {
     flex: none;
     width: 100%;
   }

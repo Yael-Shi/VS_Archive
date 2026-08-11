@@ -7,12 +7,7 @@
     <header class="card review-header">
       <div class="review-header-toolbar">
         <div class="flex-spacer"></div>
-        {# Actions for the current document #}
-        <a class="btn" href="{% url 'documents-detail-page' doc_id=doc.id %}">תצוגת מסמך</a>
-        {% if doc.archive_item_id %}
-          <a class="btn" href="{% url 'archive-manage-edit' item_id=doc.archive_item_id %}">עריכת מטא־דאטה</a>
-        {% endif %}
-        <a class="btn" href="/admin/documents/document/{{ doc.id }}/change/">עריכה טכנית (Django Admin)</a>
+        {% include "documents/partials/staff_document_nav.html" with doc=doc current_section="review" show_transkribus_corrected_current_sync_action=show_transkribus_corrected_current_sync_action %}
       </div>
 
       <div class="spacer"></div>

@@ -2170,6 +2170,9 @@ def review_detail_page(request, doc_id: int):
         "text_result_cards": text_result_cards,
         "latest_transkribus_run": latest_transkribus_run,
         "transkribus_run_count": len(transkribus_runs),
+        "show_transkribus_corrected_current_sync_action": (
+            _is_transkribus_corrected_current_sync_ui_eligible(doc)
+        ),
     }
 
     logger.info(
