@@ -25,6 +25,10 @@ from django.db.models.functions import Coalesce
 from django.urls import reverse
 
 from documents.models import ArchiveItem, Document
+from documents.services.archive_advanced_search import (
+    EMPTY_ARCHIVE_ADVANCED_FILTERS,
+    ArchiveAdvancedFilters,
+)
 from documents.services.archive_search_index import SEARCH_VECTOR_CONFIG
 from documents.services.document_date import format_document_date
 from documents.services.text_presentation import (
@@ -507,6 +511,7 @@ def build_archive_public_list_query(
     item_type_filter: str = "",
     page: int = 1,
     per_page: int = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
+    advanced_filters: ArchiveAdvancedFilters | None = None,
 ) -> str:
     """Build a query string for public ``/archive/`` list links."""
     params: list[tuple[str, str]] = []
@@ -514,6 +519,8 @@ def build_archive_public_list_query(
         params.append(("q", q))
     if item_type_filter:
         params.append(("item_type", item_type_filter))
+    filters = advanced_filters or EMPTY_ARCHIVE_ADVANCED_FILTERS
+    params.extend(filters.query_param_pairs())
     if page > 1:
         params.append(("page", str(page)))
     if per_page != ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE:
@@ -525,11 +532,13 @@ def archive_public_list_clear_search_query_suffix(
     *,
     item_type_filter: str = "",
     per_page: int = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
+    advanced_filters: ArchiveAdvancedFilters | None = None,
 ) -> str:
-    """Query suffix for clearing archive search while preserving type/per-page."""
+    """Query suffix for clearing archive search while preserving type/filters/per-page."""
     query = build_archive_public_list_query(
         item_type_filter=item_type_filter,
         per_page=per_page,
+        advanced_filters=advanced_filters,
     )
     return f"?{query}" if query else ""
 
@@ -539,6 +548,7 @@ def build_archive_public_list_type_filter_links(
     q: str = "",
     per_page: int = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
     active_item_type_filter: str = "",
+    advanced_filters: ArchiveAdvancedFilters | None = None,
 ) -> list[dict[str, object]]:
     """Link metadata for public archive list type-filter controls."""
     links: list[dict[str, object]] = []
@@ -547,6 +557,7 @@ def build_archive_public_list_type_filter_links(
             q=q,
             item_type_filter=slug,
             per_page=per_page,
+            advanced_filters=advanced_filters,
         )
         links.append(
             {
@@ -565,6 +576,7 @@ def archive_public_list_filter_context(
     q: str = "",
     item_type_filter: str = "",
     per_page: int = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
+    advanced_filters: ArchiveAdvancedFilters | None = None,
 ) -> dict[str, object]:
     """Template context for archive list search/filter query preservation."""
     return {
@@ -573,10 +585,12 @@ def archive_public_list_filter_context(
             q=q,
             per_page=per_page,
             active_item_type_filter=item_type_filter,
+            advanced_filters=advanced_filters,
         ),
         "clear_search_query_suffix": archive_public_list_clear_search_query_suffix(
             item_type_filter=item_type_filter,
             per_page=per_page,
+            advanced_filters=advanced_filters,
         ),
     }
 
@@ -587,12 +601,14 @@ def _archive_public_list_href_suffix(
     item_type_filter: str = "",
     page: int = 1,
     per_page: int = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
+    advanced_filters: ArchiveAdvancedFilters | None = None,
 ) -> str:
     query = build_archive_public_list_query(
         q=q,
         item_type_filter=item_type_filter,
         page=page,
         per_page=per_page,
+        advanced_filters=advanced_filters,
     )
     return f"?{query}" if query else ""
 
@@ -650,6 +666,7 @@ def build_archive_public_list_page_number_items(
     q: str = "",
     item_type_filter: str = "",
     per_page: int = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
+    advanced_filters: ArchiveAdvancedFilters | None = None,
 ) -> list[dict[str, object]]:
     """Numbered page link metadata for public archive list pagination."""
     page_numbers = _archive_public_list_page_number_sequence(total_pages, page)
@@ -669,6 +686,7 @@ def build_archive_public_list_page_number_items(
                     item_type_filter=item_type_filter,
                     page=page_number,
                     per_page=per_page,
+                    advanced_filters=advanced_filters,
                 ),
             }
         )
@@ -682,6 +700,7 @@ def archive_public_list_pagination_context(
     per_page: int,
     q: str,
     item_type_filter: str,
+    advanced_filters: ArchiveAdvancedFilters | None = None,
 ) -> dict[str, object]:
     """Template context for public archive list pagination controls."""
     total_pages = (total_count + per_page - 1) // per_page if total_count > 0 else 0
@@ -695,6 +714,7 @@ def archive_public_list_pagination_context(
             item_type_filter=item_type_filter,
             page=page - 1,
             per_page=per_page,
+            advanced_filters=advanced_filters,
         )
     if page < total_pages:
         next_href_suffix = _archive_public_list_href_suffix(
@@ -702,6 +722,7 @@ def archive_public_list_pagination_context(
             item_type_filter=item_type_filter,
             page=page + 1,
             per_page=per_page,
+            advanced_filters=advanced_filters,
         )
     return {
         "page": page,
@@ -717,6 +738,7 @@ def archive_public_list_pagination_context(
             q=q,
             item_type_filter=item_type_filter,
             per_page=per_page,
+            advanced_filters=advanced_filters,
         ),
         "prev_href_suffix": prev_href_suffix,
         "next_href_suffix": next_href_suffix,
