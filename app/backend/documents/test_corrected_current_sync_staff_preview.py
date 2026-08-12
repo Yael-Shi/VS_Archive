@@ -861,16 +861,19 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
 
 
 def _staff_document_nav_html(html: str) -> str:
-    marker = 'class="staff-document-nav"'
-    start = html.find(marker)
-    if start == -1:
-        return ""
-    # Back up to the opening <nav
-    nav_start = html.rfind("<nav", 0, start)
-    nav_end = html.find("</nav>", start)
-    if nav_start == -1 or nav_end == -1:
-        return ""
-    return html[nav_start : nav_end + len("</nav>")]
+    # Match the shared staff nav <nav class="staff-document-nav" ...>.
+    marker = "staff-document-nav"
+    search_from = 0
+    while True:
+        start = html.find(marker, search_from)
+        if start == -1:
+            return ""
+        nav_start = html.rfind("<nav", 0, start)
+        if nav_start != -1 and html.find(">", nav_start) > start:
+            nav_end = html.find("</nav>", start)
+            if nav_end != -1:
+                return html[nav_start : nav_end + len("</nav>")]
+        search_from = start + len(marker)
 
 
 def _link_label_in(html: str, href: str) -> str | None:
@@ -969,6 +972,22 @@ class StaffDocumentManagementNavTests(TestCase):
         )
         self.assertIsNone(_link_label_in(nav, urls["document"]))
         self.assertNotIn("תצוגת מסמך", nav)
+        self.assertIn("btn-primary", nav)
+        self.assertNotIn("staff-document-nav__button", nav)
+        self.assertNotIn("staff-document-nav--stack", nav)
+        self.assertNotIn("Shared staff cross-management", html)
+        self.assertNotIn("Expects: doc", html)
+        self.assertIn("document-detail-navigation-actions", html)
+        self.assertIn("document-detail-staff-management-actions", html)
+        staff_start = html.index("document-detail-staff-management-actions")
+        staff_section = html[staff_start : html.index("</header>", staff_start)]
+        self.assertIn(urls["admin"], staff_section)
+        self.assertEqual(html.count(urls["admin"]), 1)
+        if "פעולות נוספות" in staff_section:
+            details_body = staff_section[
+                staff_section.index("document-detail-staff-actions-body") :
+            ]
+            self.assertNotIn(urls["admin"], details_body)
 
     def test_document_detail_ineligible_hides_transkribus_versions_nav(self):
         doc = self._create_doc(
@@ -1005,6 +1024,10 @@ class StaffDocumentManagementNavTests(TestCase):
         )
         self.assertIsNone(_link_label_in(nav, urls["review"]))
         self.assertNotIn(f'href="{urls["review"]}"', nav)
+        self.assertNotIn("staff-document-nav--stack", nav)
+        self.assertIn("staff-document-nav__button", nav)
+        self.assertNotIn("Shared staff cross-management", html)
+        self.assertNotIn("Expects: doc", html)
 
     def test_review_detail_ineligible_hides_transkribus_versions_nav(self):
         doc = self._create_doc(
@@ -1039,6 +1062,10 @@ class StaffDocumentManagementNavTests(TestCase):
         )
         self.assertIsNone(_link_label_in(nav, urls["transkribus"]))
         self.assertNotIn("גרסאות תעתוק מ־Transkribus", nav)
+        self.assertNotIn("staff-document-nav--stack", nav)
+        self.assertIn("staff-document-nav__button", nav)
+        self.assertNotIn("Shared staff cross-management", html)
+        self.assertNotIn("Expects: doc", html)
 
     def test_transkribus_attempt_detail_keeps_local_back_and_shared_nav(self):
         doc = self._create_doc()

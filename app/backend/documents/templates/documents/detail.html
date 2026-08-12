@@ -47,7 +47,7 @@
 
           {% if is_admin %}
             <div class="document-detail-staff-management-actions">
-              {% include "documents/partials/staff_document_nav.html" with doc=doc current_section="document" show_transkribus_corrected_current_sync_action=show_transkribus_corrected_current_sync_action %}
+              {% include "documents/partials/staff_document_nav.html" with doc=doc current_section="document" staff_nav_variant="stack" show_transkribus_corrected_current_sync_action=show_transkribus_corrected_current_sync_action %}
 
               {% if show_ocr_reprocess_action or show_hebrew_translation_retry_action %}
                 <details class="review-details review-details--secondary document-detail-staff-actions">

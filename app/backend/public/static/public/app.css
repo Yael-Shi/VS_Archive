@@ -3285,23 +3285,41 @@ pre {
 }
 
 .archive-detail-photo-top {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
+  flex: 0 1 auto;
+  gap: var(--space-2);
+  margin-bottom: 0;
+  max-width: 100%;
+  justify-content: flex-end;
   align-items: flex-start;
-  gap: var(--space-3);
+  align-content: flex-start;
 }
 
-.archive-detail-toolbar--public {
-  margin-bottom: 0;
+.archive-detail-navigation-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  inline-size: max-content;
+  max-inline-size: 100%;
+  min-width: 0;
+}
+
+.archive-detail-navigation-actions > .btn {
+  inline-size: 100%;
 }
 
 .archive-detail-staff-management-actions {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: var(--space-2);
+  inline-size: max-content;
+  max-inline-size: 100%;
   min-width: 0;
+}
+
+.archive-detail-staff-management-actions > .btn {
+  width: 100%;
 }
 
 .archive-detail-page .archive-detail-badges.badge-row {
@@ -3441,19 +3459,29 @@ pre {
   }
 
   .archive-detail-photo-top {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .archive-detail-staff-management-actions {
     width: 100%;
+    justify-content: flex-end;
   }
 
-  .archive-detail-staff-management-actions .staff-document-nav__button {
+  .archive-detail-navigation-actions {
+    flex: 1 1 100%;
+  }
+
+  .archive-detail-photo-top .btn {
     flex: 1 1 auto;
+    min-width: 0;
     min-height: 44px;
     white-space: normal;
     text-align: center;
+  }
+
+  .archive-detail-staff-management-actions {
+    flex: 1 1 100%;
+  }
+
+  .archive-detail-staff-management-actions > .btn {
+    flex: none;
+    width: 100%;
   }
 }
 
@@ -3835,17 +3863,20 @@ pre {
   min-width: 0;
 }
 
-.document-detail-staff-management-actions > .staff-document-nav,
+.document-detail-staff-management-actions > .btn,
 .document-detail-staff-management-actions > .document-detail-staff-actions {
   width: 100%;
 }
 
-.document-detail-staff-management-actions .staff-document-nav {
+/* Compact staff column: same proportions as pre-#407 direct btn stack.
+   Parent-scoped so review/Transkribus keep the wide chip nav. */
+.document-detail-staff-management-actions > .staff-document-nav {
   flex-direction: column;
+  flex-wrap: nowrap;
   align-items: stretch;
 }
 
-.document-detail-staff-management-actions .staff-document-nav__button {
+.document-detail-staff-management-actions > .staff-document-nav > .btn {
   width: 100%;
 }
 
@@ -4099,6 +4130,11 @@ pre {
     text-align: center;
   }
 
+  .document-detail-staff-management-actions {
+    flex: 1 1 100%;
+  }
+
+  .document-detail-staff-management-actions > .btn,
   .document-detail-staff-management-actions > .staff-document-nav {
     flex: none;
     width: 100%;
@@ -4192,6 +4228,7 @@ pre {
     flex: 1 1 calc(50% - var(--space-2));
   }
 
+  .document-detail-staff-management-actions > .btn,
   .document-detail-staff-management-actions > .staff-document-nav {
     flex: none;
     width: 100%;

@@ -5,21 +5,25 @@
 {% block content %}
   <div class="card card--pad-lg archive-detail-page{% if item.item_type == 'PHOTO' %} archive-detail-page--photo{% endif %}">
     {% if item.item_type == "PHOTO" %}
-      <div class="archive-detail-photo-top">
-        <div class="page-toolbar archive-detail-toolbar archive-detail-toolbar--public">
+      <div class="page-toolbar archive-detail-photo-top">
+        <div class="archive-detail-navigation-actions">
           <a class="btn" href="{% url 'archive-list' %}">
             <span>חזרה לארכיון</span>
             <span aria-hidden="true">←</span>
           </a>
+          <a
+            class="btn btn-secondary archive-detail-suggest-btn"
+            href="{% url 'archive-metadata-suggestion-new' item_id=item.id %}"
+          >הוספת מידע על הפריט</a>
         </div>
         {% if is_admin %}
           <div class="archive-detail-staff-management-actions">
             <a
-              class="btn staff-document-nav__button"
+              class="btn btn-primary"
               href="{% url 'archive-manage-edit' item_id=item.id %}"
             >עריכת מטא־דאטה</a>
             <a
-              class="btn staff-document-nav__button"
+              class="btn btn-primary"
               href="{% url 'archive-manage-delete' item_id=item.id %}"
             >מחיקה</a>
           </div>
@@ -82,11 +86,13 @@
       {% include "documents/archive/partials/public_note_display.html" with item=item %}
     </div>
 
-    <div class="spacer-sm"></div>
-    <a
-      class="btn{% if item.item_type == 'PHOTO' %} btn-secondary archive-detail-suggest-btn{% endif %}"
-      href="{% url 'archive-metadata-suggestion-new' item_id=item.id %}"
-    >הוספת מידע על הפריט</a>
+    {% if item.item_type != "PHOTO" %}
+      <div class="spacer-sm"></div>
+      <a
+        class="btn"
+        href="{% url 'archive-metadata-suggestion-new' item_id=item.id %}"
+      >הוספת מידע על הפריט</a>
+    {% endif %}
 
     {% if item.item_type == "MANUAL_TEXT" %}
       <div class="section-title archive-detail-text-heading">טקסט</div>

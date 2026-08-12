@@ -11313,7 +11313,7 @@ class NavigationLabelTests(TestCase):
         self.assertIn(reverse("archive-list"), toolbar_section)
         self.assertNotIn("document-detail-staff-management-actions", toolbar_section)
 
-    def test_detail_metadata_edit_uses_staff_nav_button_style(self):
+    def test_detail_metadata_edit_uses_primary_button_style(self):
         doc = self._create_document()
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
@@ -11321,24 +11321,22 @@ class NavigationLabelTests(TestCase):
         html = resp.content.decode()
         edit_href = f"/archive/manage/{doc.archive_item_id}/edit/"
         self.assertEqual(self._link_label(html, edit_href), "עריכת מטא־דאטה")
-        self.assertIn(
-            "staff-document-nav__button", self._link_opening_tag(html, edit_href)
-        )
-        self.assertNotIn("btn-primary", self._link_opening_tag(html, edit_href))
+        tag = self._link_opening_tag(html, edit_href)
+        self.assertIn("btn-primary", tag)
+        self.assertNotIn("staff-document-nav__button", tag)
 
-    def test_detail_review_link_uses_staff_nav_button_style(self):
+    def test_detail_review_link_uses_primary_button_style(self):
         doc = self._create_document()
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
         html = resp.content.decode()
         review_href = f"/api/ui/admin/review/{doc.id}/"
         self.assertEqual(self._link_label(html, review_href), "בקרת תעתוק")
-        self.assertIn(
-            "staff-document-nav__button", self._link_opening_tag(html, review_href)
-        )
-        self.assertNotIn("btn-primary", self._link_opening_tag(html, review_href))
+        tag = self._link_opening_tag(html, review_href)
+        self.assertIn("btn-primary", tag)
+        self.assertNotIn("staff-document-nav__button", tag)
 
-    def test_detail_django_admin_uses_staff_nav_button_style(self):
+    def test_detail_django_admin_uses_primary_button_style(self):
         doc = self._create_document()
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/documents/{doc.id}/")
@@ -11347,10 +11345,81 @@ class NavigationLabelTests(TestCase):
         self.assertEqual(
             self._link_label(html, admin_href), "עריכה טכנית (Django Admin)"
         )
-        self.assertIn(
-            "staff-document-nav__button", self._link_opening_tag(html, admin_href)
+        tag = self._link_opening_tag(html, admin_href)
+        self.assertIn("btn-primary", tag)
+        self.assertNotIn("staff-document-nav__button", tag)
+
+    def test_detail_staff_column_is_compact_vertical_not_wide_bar(self):
+        css_path = (
+            Path(__file__).resolve().parents[1]
+            / "public"
+            / "static"
+            / "public"
+            / "app.css"
         )
-        self.assertNotIn("btn-primary", self._link_opening_tag(html, admin_href))
+        css = css_path.read_text(encoding="utf-8")
+        staff_nav_rule_marker = (
+            ".document-detail-staff-management-actions > .staff-document-nav {"
+        )
+        staff_nav_start = css.index(staff_nav_rule_marker)
+        staff_nav_rule = css[staff_nav_start : css.index("}", staff_nav_start)]
+        self.assertIn("flex-direction: column;", staff_nav_rule)
+        self.assertNotIn("staff-document-nav--stack", css)
+        self.assertNotIn(
+            "display: grid",
+            css[
+                css.index(".document-detail-staff-management-actions {") : css.index(
+                    ".document-detail-staff-actions {"
+                )
+            ],
+        )
+
+        doc = self._create_document()
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        toolbar_start = html.index("document-detail-toolbar")
+        toolbar_section = html[toolbar_start : html.index("</header>", toolbar_start)]
+        self.assertIn("document-detail-navigation-actions", toolbar_section)
+        self.assertIn("document-detail-staff-management-actions", toolbar_section)
+        self.assertIn("staff-document-nav", toolbar_section)
+        self.assertNotIn("staff-document-nav--stack", toolbar_section)
+        self.assertNotIn("staff-document-nav__button", toolbar_section)
+        self.assertNotIn("Shared staff cross-management", html)
+        self.assertNotIn("Expects: doc", html)
+        self.assertNotIn("Do not include on the metadata-edit page", html)
+        self.assertNotIn(f'href="/api/ui/documents/{doc.id}/"', toolbar_section)
+
+    def test_detail_django_admin_visible_in_staff_column_not_extra_actions(self):
+        from unittest.mock import patch
+
+        doc = self._create_document()
+        self.client.force_login(self.staff)
+        admin_href = f"/admin/documents/document/{doc.id}/change/"
+
+        with patch("documents.views.is_ocr_reprocess_ui_eligible", return_value=True):
+            resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+
+        staff_start = html.index("document-detail-staff-management-actions")
+        staff_end = html.index("</header>", staff_start)
+        staff_section = html[staff_start:staff_end]
+        self.assertIn("עריכת מטא־דאטה", staff_section)
+        self.assertIn("בקרת תעתוק", staff_section)
+        self.assertIn("עריכה טכנית (Django Admin)", staff_section)
+        self.assertEqual(staff_section.count(admin_href), 1)
+        self.assertEqual(html.count(admin_href), 1)
+
+        self.assertIn("פעולות נוספות", staff_section)
+        details_start = staff_section.index("document-detail-staff-actions")
+        details_body_start = staff_section.index(
+            "document-detail-staff-actions-body", details_start
+        )
+        details_body = staff_section[details_body_start:]
+        self.assertNotIn(admin_href, details_body)
+        self.assertNotIn("עריכה טכנית (Django Admin)", details_body)
 
     def test_detail_no_delete_action_for_ocr_document(self):
         from django.urls import reverse
