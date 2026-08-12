@@ -92,6 +92,22 @@ class ArchiveAdvancedFilterNormalizationTests(SimpleTestCase):
         filters = normalize_archive_advanced_filters({"author": "  Alice  "})
         self.assertEqual(filters.author, "Alice")
 
+    def test_repeatable_author_params_keep_first_nonempty_only(self):
+        filters = normalize_archive_advanced_filters(
+            [
+                ("author", "  "),
+                ("author", "Alice"),
+                ("author", "Bob"),
+            ]
+        )
+        self.assertEqual(filters.author, "Alice")
+        self.assertEqual(
+            normalize_archive_advanced_filters(
+                [("author", "Alice"), ("author", "Bob")]
+            ).query_param_pairs(),
+            [("author", "Alice")],
+        )
+
     def test_repeatable_ids_preserve_order_and_dedupe(self):
         filters = normalize_archive_advanced_filters(
             [

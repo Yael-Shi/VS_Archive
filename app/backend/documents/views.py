@@ -203,6 +203,7 @@ from documents.services.archive_item_presentation import (
     archive_public_list_filter_context,
     archive_public_list_pagination_context,
     archive_visibility_ui_choices,
+    aggregate_archive_public_list_type_counts,
     build_archive_browse_cards,
     filter_archive_items_by_public_list_type,
     filter_archive_items_by_search_query,
@@ -4220,14 +4221,28 @@ def archive_list_page(request):
     # Any authoritative year-validation failure blocks result execution until
     # the form is corrected. Non-date filters remain in the redisplayed form
     # (via advanced_filters / q) but must not produce a successful result set.
-    items = _archive_browse_select_related(authorized_items).order_by("-created_at")
-    items = filter_archive_items_by_public_list_type(items, item_type_filter)
+    #
+    # Type-tab counts use the authorized + advanced + q universe BEFORE
+    # item_type filtering so switching tabs does not change sibling counts.
+    browse_base = authorized_items.order_by("-created_at")
     if year_validation_failed:
-        items = items.none()
+        filtered_universe = browse_base.none()
     else:
-        items = filter_archive_items_by_advanced_filters(items, advanced_filters)
-        items = filter_archive_items_by_search_query(items, search_query)
-    total_count = items.count()
+        filtered_universe = filter_archive_items_by_advanced_filters(
+            browse_base,
+            advanced_filters,
+        )
+        filtered_universe = filter_archive_items_by_search_query(
+            filtered_universe,
+            search_query,
+        )
+    type_counts = aggregate_archive_public_list_type_counts(filtered_universe)
+    items = filter_archive_items_by_public_list_type(
+        filtered_universe,
+        item_type_filter,
+    )
+    items = _archive_browse_select_related(items)
+    total_count = type_counts.get(item_type_filter, type_counts[""])
     per_page = normalize_archive_public_list_per_page(request.GET.get("per_page"))
     page = normalize_archive_public_list_page(
         request.GET.get("page"),
@@ -4271,6 +4286,7 @@ def archive_list_page(request):
                 per_page=per_page,
                 advanced_filters=advanced_filters,
                 advanced_open=advanced_panel_open,
+                type_counts=type_counts,
             ),
             **archive_public_list_active_filter_summary_context(
                 q=search_query,
