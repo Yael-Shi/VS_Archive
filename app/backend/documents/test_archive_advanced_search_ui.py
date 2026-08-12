@@ -364,6 +364,67 @@ class ArchiveAdvancedSearchUiTests(TestCase):
         self.assertIn(f'value="{tag_a.id}"', html)
         self.assertIn(f'value="{tag_b.id}"', html)
 
+    def test_author_control_matches_taxonomy_choice_list_pattern_as_single_select(self):
+        _public_item(title="Author UI A", author_name="Author Alpha")
+        _public_item(title="Author UI B", author_name="Author Beta")
+        resp = self.client.get(
+            self.url,
+            {"advanced": "1", "author": "Author Alpha"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["advanced_filter_author"], "Author Alpha")
+        html = resp.content.decode("utf-8")
+
+        author_start = html.find('id="archive-filter-author"')
+        self.assertNotEqual(author_start, -1)
+        author_tag = html[author_start : html.find(">", author_start) + 1]
+        self.assertIn('name="author"', author_tag)
+        self.assertIn('size="5"', author_tag)
+        self.assertIn("archive-advanced-search__choice-list", author_tag)
+        self.assertNotIn("multiple", author_tag)
+
+        category_start = html.find('id="archive-filter-category"')
+        category_tag = html[category_start : html.find(">", category_start) + 1]
+        self.assertIn('size="5"', category_tag)
+        self.assertIn("archive-advanced-search__choice-list", category_tag)
+
+        self.assertIn("data-archive-choice-filter-field", html)
+        self.assertIn('placeholder="סינון מחברים…"', html)
+        self.assertIn("archive-advanced-search__choice-filter", html)
+        self.assertRegex(
+            html,
+            r'value="Author Alpha"\s+selected',
+        )
+        self.assertIn("Author Beta", html)
+
+    def test_only_one_author_is_applied_when_multiple_author_params_submitted(self):
+        match = _public_item(title="Single Author Match", author_name="Only Alice")
+        other = _public_item(title="Single Author Other", author_name="Only Bob")
+        resp = self.client.get(
+            self.url,
+            [
+                ("advanced", "1"),
+                ("author", "Only Alice"),
+                ("author", "Only Bob"),
+            ],
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["advanced_filter_author"], "Only Alice")
+        titles = {item.title for item in resp.context["items"]}
+        self.assertIn(match.title, titles)
+        self.assertNotIn(other.title, titles)
+        html = resp.content.decode("utf-8")
+        author_id_at = html.find('id="archive-filter-author"')
+        self.assertNotEqual(author_id_at, -1)
+        select_open = html.rfind("<select", 0, author_id_at)
+        select_close = html.find("</select>", author_id_at)
+        self.assertGreaterEqual(select_open, 0)
+        self.assertGreater(select_close, select_open)
+        select_html = html[select_open:select_close]
+        self.assertIn('name="author"', select_html)
+        self.assertNotIn("multiple", select_html)
+        self.assertEqual(html.count('id="archive-filter-author"'), 1)
+
     def test_single_year_and_year_range_through_ui(self):
         _public_item(
             title="UIYEAR-1953",

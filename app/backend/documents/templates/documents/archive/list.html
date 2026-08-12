@@ -75,7 +75,7 @@
             <a
               class="archive-type-filter__option{% if link.is_active %} is-active{% endif %}"
               href="{% url 'archive-list' %}{{ link.href_suffix }}"
-            >{{ link.label }}</a>
+            ><span class="archive-type-filter__label">{{ link.label }}</span>{% if link.count is not None %} <span class="archive-type-filter__count">({{ link.count }})</span>{% endif %}</a>
           {% endfor %}
         </div>
 
@@ -103,10 +103,28 @@
             {% endif %}
 
             <div class="archive-advanced-search__fields">
-              <div class="archive-advanced-search__field">
+              <div
+                class="archive-advanced-search__field"
+                data-archive-choice-filter-field
+              >
                 <label for="archive-filter-author">מחבר/ת</label>
-                <select id="archive-filter-author" name="author">
-                  <option value="">הכל</option>
+                <input
+                  type="search"
+                  class="archive-advanced-search__choice-filter"
+                  data-archive-choice-filter-search
+                  autocomplete="off"
+                  placeholder="סינון מחברים…"
+                  aria-label="סינון מחברים ברשימה"
+                >
+                {# Single-choice listbox (size, no multiple): visual parity with taxonomy fields. #}
+                <select
+                  id="archive-filter-author"
+                  class="archive-advanced-search__choice-list"
+                  name="author"
+                  size="5"
+                  data-archive-choice-filter-select
+                >
+                  <option value="" {% if not advanced_filter_author %}selected{% endif %}>הכל</option>
                   {% for author_name in advanced_filter_author_choices %}
                     <option
                       value="{{ author_name }}"
@@ -114,12 +132,16 @@
                     >{{ author_name }}</option>
                   {% endfor %}
                 </select>
+                <div class="field-hint" data-archive-choice-filter-empty hidden>
+                  לא נמצאו מחברים תואמים.
+                </div>
               </div>
 
               <div class="archive-advanced-search__field">
                 <label for="archive-filter-category">קטגוריות</label>
                 <select
                   id="archive-filter-category"
+                  class="archive-advanced-search__choice-list"
                   name="category"
                   multiple
                   size="5"
@@ -137,6 +159,7 @@
                 <label for="archive-filter-event">אירועים</label>
                 <select
                   id="archive-filter-event"
+                  class="archive-advanced-search__choice-list"
                   name="event"
                   multiple
                   size="5"
@@ -152,23 +175,24 @@
 
               <div
                 class="archive-advanced-search__field"
-                data-existing-tags-field
+                data-archive-choice-filter-field
               >
                 <label for="archive-filter-tag">תגיות</label>
                 <input
                   type="search"
                   class="archive-advanced-search__choice-filter"
-                  data-existing-tags-search
+                  data-archive-choice-filter-search
                   autocomplete="off"
                   placeholder="סינון תגיות…"
                   aria-label="סינון תגיות ברשימה"
                 >
                 <select
                   id="archive-filter-tag"
+                  class="archive-advanced-search__choice-list"
                   name="tag"
                   multiple
                   size="5"
-                  data-existing-tags-select
+                  data-archive-choice-filter-select
                 >
                   {% for tag in advanced_filter_tag_choices %}
                     <option
@@ -177,7 +201,7 @@
                     >{{ tag.name }}</option>
                   {% endfor %}
                 </select>
-                <div class="field-hint" data-existing-tags-empty hidden>
+                <div class="field-hint" data-archive-choice-filter-empty hidden>
                   לא נמצאו תגיות תואמות.
                 </div>
               </div>
@@ -276,15 +300,15 @@
   {% if advanced_panel_open %}
     <script>
       (function () {
-        document.querySelectorAll("[data-existing-tags-field]").forEach(function (field) {
-          if (field.dataset.existingTagsSearchReady === "1") {
+        document.querySelectorAll("[data-archive-choice-filter-field]").forEach(function (field) {
+          if (field.dataset.archiveChoiceFilterReady === "1") {
             return;
           }
-          field.dataset.existingTagsSearchReady = "1";
+          field.dataset.archiveChoiceFilterReady = "1";
 
-          const searchInput = field.querySelector("[data-existing-tags-search]");
-          const select = field.querySelector("[data-existing-tags-select]");
-          const emptyMessage = field.querySelector("[data-existing-tags-empty]");
+          const searchInput = field.querySelector("[data-archive-choice-filter-search]");
+          const select = field.querySelector("[data-archive-choice-filter-select]");
+          const emptyMessage = field.querySelector("[data-archive-choice-filter-empty]");
 
           if (!searchInput || !select || !emptyMessage) {
             return;

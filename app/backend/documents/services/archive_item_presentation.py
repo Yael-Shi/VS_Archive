@@ -6,13 +6,14 @@ Stored enum/database values are unchanged; templates and forms map values here.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from urllib.parse import urlencode
 
 from django.contrib.postgres.search import SearchQuery, SearchRank
 from django.db.models import (
     Case,
+    Count,
     F,
     FloatField,
     Prefetch,
@@ -271,6 +272,51 @@ def filter_archive_items_by_public_list_type(
     if slug == ARCHIVE_PUBLIC_LIST_TYPE_FILTER_VIDEO:
         return queryset.filter(item_type=ArchiveItem.ItemType.VIDEO)
     return queryset
+
+
+def aggregate_archive_public_list_type_counts(
+    queryset: QuerySet[ArchiveItem],
+) -> dict[str, int]:
+    """
+    Per-tab counts for the public archive type filter.
+
+    Counts the CURRENT search/filter universe (authorization + advanced filters
+    + ``q``) BEFORE ``item_type`` filtering. Uses one conditional aggregate so
+    switching the active type tab does not change sibling tab counts and does
+    not issue one ``.count()`` per tab.
+
+    Rows are scoped through ``pk__in`` so ranking annotations / joins on the
+    input queryset cannot inflate counts.
+    """
+    scoped = ArchiveItem.objects.filter(pk__in=queryset.order_by().values("pk"))
+    row = scoped.aggregate(
+        all_count=Count("pk"),
+        documents_and_texts_count=Count(
+            "pk",
+            filter=Q(
+                item_type__in=(
+                    ArchiveItem.ItemType.OCR_DOCUMENT,
+                    ArchiveItem.ItemType.MANUAL_TEXT,
+                )
+            ),
+        ),
+        photo_count=Count(
+            "pk",
+            filter=Q(item_type=ArchiveItem.ItemType.PHOTO),
+        ),
+        video_count=Count(
+            "pk",
+            filter=Q(item_type=ArchiveItem.ItemType.VIDEO),
+        ),
+    )
+    return {
+        ARCHIVE_PUBLIC_LIST_TYPE_FILTER_ALL: int(row["all_count"] or 0),
+        ARCHIVE_PUBLIC_LIST_TYPE_FILTER_DOCUMENTS_AND_TEXTS: int(
+            row["documents_and_texts_count"] or 0
+        ),
+        ARCHIVE_PUBLIC_LIST_TYPE_FILTER_PHOTO: int(row["photo_count"] or 0),
+        ARCHIVE_PUBLIC_LIST_TYPE_FILTER_VIDEO: int(row["video_count"] or 0),
+    }
 
 
 def normalize_archive_list_item_type_filter(raw: str | None) -> str:
@@ -571,6 +617,7 @@ def build_archive_public_list_type_filter_links(
     per_page: int = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
     active_item_type_filter: str = "",
     advanced_filters: ArchiveAdvancedFilters | None = None,
+    type_counts: Mapping[str, int] | None = None,
 ) -> list[dict[str, object]]:
     """Link metadata for public archive list type-filter controls."""
     links: list[dict[str, object]] = []
@@ -581,15 +628,18 @@ def build_archive_public_list_type_filter_links(
             per_page=per_page,
             advanced_filters=advanced_filters,
         )
-        links.append(
-            {
-                "label": label,
-                "href_suffix": f"?{query}" if query else "",
-                "is_active": active_item_type_filter == slug
-                if slug
-                else not active_item_type_filter,
-            }
-        )
+        link: dict[str, object] = {
+            "label": label,
+            "href_suffix": f"?{query}" if query else "",
+            "is_active": active_item_type_filter == slug
+            if slug
+            else not active_item_type_filter,
+            "slug": slug,
+            "count": (
+                int(type_counts.get(slug, 0)) if type_counts is not None else None
+            ),
+        }
+        links.append(link)
     return links
 
 
@@ -600,6 +650,7 @@ def archive_public_list_filter_context(
     per_page: int = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
     advanced_filters: ArchiveAdvancedFilters | None = None,
     advanced_open: bool = False,
+    type_counts: Mapping[str, int] | None = None,
 ) -> dict[str, object]:
     """Template context for archive list search/filter query preservation."""
     open_advanced_query = build_archive_public_list_query(
@@ -623,7 +674,9 @@ def archive_public_list_filter_context(
             per_page=per_page,
             active_item_type_filter=item_type_filter,
             advanced_filters=advanced_filters,
+            type_counts=type_counts,
         ),
+        "item_type_counts": type_counts or {},
         "clear_search_query_suffix": archive_public_list_clear_search_query_suffix(
             item_type_filter=item_type_filter,
             per_page=per_page,
