@@ -6,7 +6,8 @@ import hashlib
 from typing import Any
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, override_settings
+from django.conf import settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -1028,6 +1029,27 @@ class StaffDocumentManagementNavTests(TestCase):
         self.assertIn("staff-document-nav__button", nav)
         self.assertNotIn("Shared staff cross-management", html)
         self.assertNotIn("Expects: doc", html)
+        self.assertNotIn("Compact vertical staff column", html)
+
+        header_start = html.index('class="card review-header"')
+        header_end = html.index("</header>", header_start)
+        header = html[header_start:header_end]
+        self.assertIn("review-header-main", header)
+        self.assertIn("review-header-staff-nav", header)
+        self.assertIn("staff-document-nav", header)
+        self.assertIn(urls["document"], header)
+        self.assertIn(urls["admin"], header)
+        self.assertNotIn(f'href="{urls["review"]}"', header)
+
+        main_start = header.index("review-header-main")
+        staff_start = header.index("review-header-staff-nav")
+        main_section = header[main_start:staff_start]
+        staff_section = header[staff_start:]
+        self.assertIn(doc.archive_item.title, main_section)
+        self.assertIn("בקרת תעתוק · מסמך", main_section)
+        self.assertNotIn("staff-document-nav", main_section)
+        self.assertIn("staff-document-nav", staff_section)
+        self.assertNotIn(doc.archive_item.title, staff_section)
 
     def test_review_detail_ineligible_hides_transkribus_versions_nav(self):
         doc = self._create_doc(
@@ -1100,3 +1122,32 @@ class StaffDocumentManagementNavTests(TestCase):
         self.assertIsNone(_link_label_in(nav, urls["transkribus"]))
         self.assertNotIn("גרסאות תעתוק מ־Transkribus", nav)
         self.assertNotIn("חזרה לגרסאות תעתוק", nav)
+
+
+class ReviewHeaderLayoutStyleTests(SimpleTestCase):
+    def test_review_staff_nav_uses_vertical_compact_header_column(self):
+        css_path = settings.BASE_DIR / "public" / "static" / "public" / "app.css"
+        css = css_path.read_text(encoding="utf-8")
+
+        header_start = css.index(".review-header {")
+        header_rule = css[header_start : css.index("}", header_start)]
+        self.assertIn("display: flex;", header_rule)
+        self.assertIn("flex-wrap: wrap;", header_rule)
+        self.assertIn("align-items: flex-start;", header_rule)
+
+        main_start = css.index(".review-header-main {")
+        main_rule = css[main_start : css.index("}", main_start)]
+        self.assertIn("flex: 1 1 16rem;", main_rule)
+
+        staff_start = css.index(".review-header-staff-nav > .staff-document-nav {")
+        staff_rule = css[staff_start : css.index("}", staff_start)]
+        self.assertIn("flex-direction: column;", staff_rule)
+        self.assertIn("inline-size: max-content;", staff_rule)
+        self.assertIn("align-items: stretch;", staff_rule)
+
+        # Keep shared horizontal chip nav for Transkribus / non-review pages.
+        base_nav_start = css.index(".staff-document-nav {")
+        base_nav_rule = css[base_nav_start : css.index("}", base_nav_start)]
+        self.assertIn("display: flex;", base_nav_rule)
+        self.assertNotIn("flex-direction: column;", base_nav_rule)
+        self.assertNotIn(".review-header-toolbar", css)

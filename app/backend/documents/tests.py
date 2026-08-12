@@ -11465,6 +11465,7 @@ class NavigationLabelTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(f"/api/ui/admin/review/{doc.id}/")
         self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
 
         # Global review/backlog navigation lives in the staff management panel,
         # not duplicated inside the review-detail document header.
@@ -11477,6 +11478,14 @@ class NavigationLabelTests(TestCase):
         self.assertContains(resp, "עריכת מטא־דאטה")
         self.assertContains(resp, "עריכה טכנית (Django Admin)")
         self.assertNotContains(resp, f'href="/api/ui/admin/review/{doc.id}/"')
+        self.assertIn("review-header-main", html)
+        self.assertIn("review-header-staff-nav", html)
+        header_start = html.index('class="card review-header"')
+        header_end = html.index("</header>", header_start)
+        header = html[header_start:header_end]
+        self.assertIn("review-header-main", header)
+        self.assertIn("review-header-staff-nav", header)
+        self.assertIn("staff-document-nav", header)
 
     def test_review_detail_metadata_edit_link_for_staff(self):
         doc = self._create_document()
