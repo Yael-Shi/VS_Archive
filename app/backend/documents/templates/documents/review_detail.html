@@ -5,40 +5,39 @@
 {% block content %}
   <div class="review-page">
     <header class="card review-header">
-      <div class="review-header-toolbar">
-        <div class="flex-spacer"></div>
+      <div class="review-header-main">
+        <h1 class="page-title">{{ doc.archive_item.title }}</h1>
+        <div class="page-lead">
+          בקרת תעתוק · מסמך #{{ doc.id }}
+          {% if doc.file_original_name %} · {{ doc.file_original_name }}{% endif %}
+          · {{ doc.archive_item.visibility|archive_visibility_display_label }}
+        </div>
+
+        <div class="review-header-badges">
+          {% upload_status_badge doc.upload_status %}
+          {% processing_state_badge doc.processing_state_user %}
+        </div>
+
+        <details class="review-details review-header-meta">
+          <summary>פרטי מסמך ומשמעות סטטוסים</summary>
+          <div class="review-details-body">
+            <div class="badge-row badge-row--tight-bottom">
+              <span class="badge">{% if doc.language %}{{ doc.language|language_label }}{% else %}שפה לא ידועה{% endif %}</span>
+              <span class="badge">{{ doc.text_input_type|text_input_type_label }}</span>
+              <span class="badge">{{ doc.doc_type|doc_type_label }}</span>
+            </div>
+            <ul>
+              <li><strong>מוכן לצפייה</strong> — העיבוד האוטומטי הסתיים והטקסט זמין להצגה ולבדיקה.</li>
+              <li><strong>טרם אושר</strong> — התעתוק נוצר אוטומטית ודורש אימות ידני.</li>
+              <li><strong>אושר / נדחה</strong> — תוצאת האימות הידני.</li>
+            </ul>
+          </div>
+        </details>
+      </div>
+
+      <div class="review-header-staff-nav">
         {% include "documents/partials/staff_document_nav.html" with doc=doc current_section="review" show_transkribus_corrected_current_sync_action=show_transkribus_corrected_current_sync_action %}
       </div>
-
-      <div class="spacer"></div>
-
-      <h1 class="page-title">{{ doc.archive_item.title }}</h1>
-      <div class="page-lead">
-        בקרת תעתוק · מסמך #{{ doc.id }}
-        {% if doc.file_original_name %} · {{ doc.file_original_name }}{% endif %}
-        · {{ doc.archive_item.visibility|archive_visibility_display_label }}
-      </div>
-
-      <div class="review-header-badges">
-        {% upload_status_badge doc.upload_status %}
-        {% processing_state_badge doc.processing_state_user %}
-      </div>
-
-      <details class="review-details review-header-meta">
-        <summary>פרטי מסמך ומשמעות סטטוסים</summary>
-        <div class="review-details-body">
-          <div class="badge-row badge-row--tight-bottom">
-            <span class="badge">{% if doc.language %}{{ doc.language|language_label }}{% else %}שפה לא ידועה{% endif %}</span>
-            <span class="badge">{{ doc.text_input_type|text_input_type_label }}</span>
-            <span class="badge">{{ doc.doc_type|doc_type_label }}</span>
-          </div>
-          <ul>
-            <li><strong>מוכן לצפייה</strong> — העיבוד האוטומטי הסתיים והטקסט זמין להצגה ולבדיקה.</li>
-            <li><strong>טרם אושר</strong> — התעתוק נוצר אוטומטית ודורש אימות ידני.</li>
-            <li><strong>אושר / נדחה</strong> — תוצאת האימות הידני.</li>
-          </ul>
-        </div>
-      </details>
     </header>
 
     <div class="spacer"></div>

@@ -440,6 +440,8 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode("utf-8")
+        self.assertContains(resp, "archive-detail-photo-header")
+        self.assertContains(resp, "archive-detail-photo-header-main")
         self.assertContains(resp, "חזרה לארכיון")
         self.assertContains(resp, reverse("archive-list"))
         self.assertContains(resp, "הוספת מידע על הפריט")
@@ -461,6 +463,21 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         self.assertContains(resp, 'class="photo-detail__image"')
         page_start = html.index("archive-detail-page--photo")
         self.assertNotIn('href="/admin/', html[page_start:])
+        self.assertNotIn(f"פריט ארכיון #{self.public_uploaded.id}", html)
+        self.assertNotContains(resp, "archive-detail-badges")
+
+        public_start = html.index("archive-detail-navigation-actions")
+        public_end = html.index("</div>", public_start)
+        public_column = html[public_start:public_end]
+        back_pos = public_column.index("חזרה לארכיון")
+        suggest_pos = public_column.index("הוספת מידע על הפריט")
+        self.assertLess(back_pos, suggest_pos)
+        archive_list_href = reverse("archive-list")
+        back_href_pos = public_column.index(f'href="{archive_list_href}"')
+        back_tag_start = public_column.rfind("<a", 0, back_href_pos)
+        back_tag_end = public_column.find(">", back_href_pos) + 1
+        self.assertIn("btn-primary", public_column[back_tag_start:back_tag_end])
+        self.assertNotIn("btn-link", public_column[back_tag_start:back_tag_end])
 
     @patch(
         "documents.views.create_presigned_get",
@@ -483,6 +500,8 @@ class PhotoArchiveDisplayDetailTests(TestCase):
             "archive-manage-delete", kwargs={"item_id": self.public_uploaded.id}
         )
 
+        self.assertContains(resp, "archive-detail-photo-header")
+        self.assertContains(resp, "archive-detail-photo-header-main")
         self.assertContains(resp, "archive-detail-photo-top")
         self.assertContains(resp, "archive-detail-navigation-actions")
         self.assertContains(resp, "archive-detail-staff-management-actions")
@@ -506,15 +525,36 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         self.assertNotIn('href="/admin/', page_html)
         self.assertNotIn("עריכה טכנית", page_html)
 
+        header_start = html.index("archive-detail-photo-header")
+        header_end = html.index("</header>", header_start)
+        header = html[header_start:header_end]
+        self.assertIn("archive-detail-photo-header-main", header)
+        self.assertIn("archive-detail-photo-top", header)
+        self.assertIn(self.public_uploaded.title, header)
+        self.assertIn("חזרה לארכיון", header)
+        self.assertIn("עריכת מטא־דאטה", header)
+        self.assertIn(f"פריט ארכיון #{self.public_uploaded.id}", header)
+
         public_start = html.index("archive-detail-navigation-actions")
         public_end = html.index("</div>", public_start)
         public_column = html[public_start:public_end]
         self.assertIn("חזרה לארכיון", public_column)
         self.assertIn("הוספת מידע על הפריט", public_column)
+        self.assertLess(
+            public_column.index("חזרה לארכיון"),
+            public_column.index("הוספת מידע על הפריט"),
+        )
         self.assertNotIn(edit_href, public_column)
         self.assertNotIn(delete_href, public_column)
         self.assertNotIn("עריכת מטא־דאטה", public_column)
         self.assertNotIn("מחיקה", public_column)
+
+        archive_list_href = reverse("archive-list")
+        back_href_pos = public_column.index(f'href="{archive_list_href}"')
+        back_tag_start = public_column.rfind("<a", 0, back_href_pos)
+        back_tag_end = public_column.find(">", back_href_pos) + 1
+        self.assertIn("btn-primary", public_column[back_tag_start:back_tag_end])
+        self.assertNotIn("btn-link", public_column[back_tag_start:back_tag_end])
 
         staff_start = html.index("archive-detail-staff-management-actions")
         staff_end = html.index("</div>", staff_start)
@@ -526,6 +566,12 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         self.assertNotIn("חזרה לארכיון", staff_section)
         self.assertNotIn("הוספת מידע על הפריט", staff_section)
         self.assertNotIn('href="/admin/', staff_section)
+
+        # Admin-only item/status badges remain below the header, unchanged.
+        badges_start = html.index("archive-detail-badges", header_end)
+        badges_section = html[badges_start : html.index("</div>", badges_start)]
+        self.assertIn("תמונה", badges_section)
+        self.assertNotIn("חזרה לארכיון", badges_section)
 
         edit_tag_start = html.rfind("<a", 0, html.index(f'href="{edit_href}"'))
         edit_tag_end = html.find(">", html.index(f'href="{edit_href}"')) + 1
@@ -755,6 +801,16 @@ class PhotoArchiveDetailLayoutStyleTests(SimpleTestCase):
     def test_photo_top_action_columns_match_document_detail_pattern(self):
         css_path = settings.BASE_DIR / "public" / "static" / "public" / "app.css"
         css = css_path.read_text(encoding="utf-8")
+
+        header_start = css.index(".archive-detail-photo-header {")
+        header_rule = css[header_start : css.index("}", header_start)]
+        self.assertIn("display: flex;", header_rule)
+        self.assertIn("flex-wrap: wrap;", header_rule)
+        self.assertIn("align-items: flex-start;", header_rule)
+
+        main_start = css.index(".archive-detail-photo-header-main {")
+        main_rule = css[main_start : css.index("}", main_start)]
+        self.assertIn("flex: 1 1 16rem;", main_rule)
 
         top_start = css.index(".archive-detail-photo-top {")
         top_rule = css[top_start : css.index("}", top_start)]
