@@ -609,6 +609,13 @@ def archive_public_list_filter_context(
         advanced_filters=advanced_filters,
         advanced_open=True,
     )
+    close_advanced_query = build_archive_public_list_query(
+        q=q,
+        item_type_filter=item_type_filter,
+        per_page=per_page,
+        advanced_filters=advanced_filters,
+        advanced_open=False,
+    )
     return {
         "preserve_per_page_in_query": per_page != ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
         "item_type_filter_links": build_archive_public_list_type_filter_links(
@@ -628,6 +635,9 @@ def archive_public_list_filter_context(
         ),
         "advanced_search_open_href_suffix": (
             f"?{open_advanced_query}" if open_advanced_query else ""
+        ),
+        "advanced_search_close_href_suffix": (
+            f"?{close_advanced_query}" if close_advanced_query else ""
         ),
         "advanced_panel_open": advanced_open,
     }

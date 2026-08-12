@@ -47,7 +47,20 @@
           >
 
           <div class="archive-search-form__actions">
-            <button class="btn btn-primary archive-search-form__submit" type="submit">חיפוש</button>
+            <div class="archive-search-form__primary-controls">
+              <button class="btn btn-primary archive-search-form__submit" type="submit">חיפוש</button>
+              {% if advanced_panel_open %}
+                <a
+                  class="archive-advanced-search-toggle__link"
+                  href="{% url 'archive-list' %}{{ advanced_search_close_href_suffix }}"
+                >סגירת החיפוש המתקדם</a>
+              {% else %}
+                <a
+                  class="archive-advanced-search-toggle__link"
+                  href="{% url 'archive-list' %}{{ advanced_search_open_href_suffix }}"
+                >חיפוש מתקדם</a>
+              {% endif %}
+            </div>
             {% if q %}
               <a
                 class="archive-search-form__clear"
@@ -206,13 +219,6 @@
               <button class="btn btn-primary" type="submit">חיפוש</button>
             </div>
           </div>
-        {% else %}
-          <p class="archive-advanced-search-toggle">
-            <a
-              class="archive-advanced-search-toggle__link"
-              href="{% url 'archive-list' %}{{ advanced_search_open_href_suffix }}"
-            >חיפוש מתקדם</a>
-          </p>
         {% endif %}
       </form>
     </section>
@@ -232,16 +238,14 @@
             </a>
           {% endfor %}
         </div>
-        <div class="archive-active-filters__actions filter-chips filter-chips--controls">
-          <a
-            class="filter-chip filter-chip--action"
-            href="{% url 'archive-list' %}{{ edit_advanced_search_href_suffix }}"
-          >שינוי החיפוש המתקדם</a>
-          <a
-            class="filter-chip filter-chip--action"
-            href="{% url 'archive-list' %}{{ clear_all_query_suffix }}"
-          >ניקוי הכול</a>
-        </div>
+        {% if advanced_filters_active %}
+          <div class="archive-active-filters__actions filter-chips filter-chips--controls">
+            <a
+              class="filter-chip filter-chip--action"
+              href="{% url 'archive-list' %}{{ clear_all_query_suffix }}"
+            >ניקוי הכול</a>
+          </div>
+        {% endif %}
       </div>
     {% endif %}
 
@@ -262,21 +266,8 @@
       {% endif %}
     {% elif advanced_year_validation_failed %}
       <p class="muted">יש לתקן את החיפוש המתקדם כדי להציג תוצאות.</p>
-      {% if not advanced_panel_open %}
-        <p>
-          <a href="{% url 'archive-list' %}{{ advanced_search_open_href_suffix }}">חיפוש מתקדם</a>
-        </p>
-      {% endif %}
     {% elif search_or_filters_active %}
       <p class="muted">לא נמצאו פריטים התואמים את החיפוש.</p>
-      {% if not advanced_panel_open %}
-        <p class="archive-advanced-search-toggle">
-          <a
-            class="archive-advanced-search-toggle__link"
-            href="{% url 'archive-list' %}{{ advanced_search_open_href_suffix }}"
-          >חיפוש מתקדם</a>
-        </p>
-      {% endif %}
     {% else %}
       <p class="muted">אין פריטי ארכיון להצגה.</p>
     {% endif %}

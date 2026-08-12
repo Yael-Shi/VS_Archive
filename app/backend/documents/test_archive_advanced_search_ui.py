@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 from urllib.parse import parse_qs
 
 from unittest.mock import patch
@@ -536,8 +537,9 @@ class ArchiveAdvancedSearchUiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.context["active_filter_summary_visible"])
         html = resp.content.decode("utf-8")
-        self.assertIn("שינוי החיפוש המתקדם", html)
+        self.assertNotIn("שינוי החיפוש המתקדם", html)
         self.assertIn("ניקוי הכול", html)
+        self.assertIn("ניקוי החיפוש", html)
         self.assertIn("מחבר/ת", html)
         self.assertIn("Chip Author", html)
         self.assertIn("Chip Cat", html)
@@ -652,6 +654,7 @@ class ArchiveAdvancedSearchUiTests(TestCase):
         self.assertIn("נמצאו 1 תוצאות", html)
         self.assertIn('עבור "QOnly Unique"', html)
         self.assertIn("ניקוי החיפוש", html)
+        self.assertNotIn("ניקוי הכול", html)
         self.assertNotIn(">ניקוי<", html)
         self.assertFalse(resp.context["advanced_panel_open"])
         self.assertIn("archive-search-form__row", html)
@@ -682,3 +685,163 @@ class ArchiveAdvancedSearchUiTests(TestCase):
         self.assertIn("archive-advanced-search", html)
         self.assertIn("archive-advanced-search__year-row", html)
         self.assertIn("archive-search-form__row", html)
+
+    def _actions_html(self, html: str) -> str:
+        marker = 'class="archive-search-form__actions"'
+        start = html.index(marker)
+        # Nested primary-controls div: close at the actions container end.
+        depth = 0
+        i = html.index(">", start) + 1
+        while i < len(html):
+            if html.startswith("<div", i):
+                depth += 1
+                i = html.index(">", i) + 1
+                continue
+            if html.startswith("</div>", i):
+                if depth == 0:
+                    return html[start:i]
+                depth -= 1
+                i += len("</div>")
+                continue
+            i += 1
+        raise AssertionError("archive-search-form__actions not closed")
+
+    def _primary_controls_html(self, html: str) -> str:
+        marker = 'class="archive-search-form__primary-controls"'
+        start = html.index(marker)
+        end = html.index("</div>", start)
+        return html[start:end]
+
+    def test_advanced_toggle_lives_in_main_search_actions(self):
+        resp = self.client.get(self.url)
+        html = resp.content.decode("utf-8")
+        actions = self._actions_html(html)
+        primary = self._primary_controls_html(html)
+        self.assertIn("חיפוש מתקדם", primary)
+        self.assertIn("advanced=1", primary)
+        self.assertIn("archive-search-form__submit", primary)
+        self.assertIn("archive-search-form__primary-controls", actions)
+        self.assertNotIn("שינוי החיפוש המתקדם", html)
+
+    def test_advanced_toggle_closed_and_open_wording(self):
+        closed = self.client.get(self.url)
+        closed_html = closed.content.decode("utf-8")
+        closed_primary = self._primary_controls_html(closed_html)
+        self.assertIn(">חיפוש מתקדם<", closed_primary)
+        self.assertNotIn("סגירת החיפוש המתקדם", closed_html)
+        self.assertNotIn("שינוי החיפוש המתקדם", closed_html)
+
+        opened = self.client.get(self.url, {"advanced": "1", "q": "לבון"})
+        opened_html = opened.content.decode("utf-8")
+        opened_primary = self._primary_controls_html(opened_html)
+        self.assertIn(">סגירת החיפוש המתקדם<", opened_primary)
+        self.assertNotIn(">חיפוש מתקדם<", opened_primary)
+        self.assertNotIn("שינוי החיפוש המתקדם", opened_html)
+        close_parsed = parse_qs(
+            str(opened.context["advanced_search_close_href_suffix"]).lstrip("?")
+        )
+        self.assertEqual(close_parsed.get("q"), ["לבון"])
+        self.assertNotIn("advanced", close_parsed)
+
+    def test_primary_row_order_keeps_toggle_beside_submit(self):
+        """DOM order: q → חיפוש → advanced toggle; clear never between them."""
+        _public_item(title="Order Item", body="hello")
+        resp = self.client.get(self.url, {"q": "Order"})
+        html = resp.content.decode("utf-8")
+        row_start = html.index('class="archive-search-form__row"')
+        row_end = html.index('class="archive-type-filter"', row_start)
+        row = html[row_start:row_end]
+
+        q_pos = row.index('id="archive-filter-q"')
+        submit_pos = row.index("archive-search-form__submit")
+        toggle_pos = row.index("archive-advanced-search-toggle__link")
+        clear_pos = row.index("archive-search-form__clear")
+        primary_pos = row.index("archive-search-form__primary-controls")
+
+        self.assertLess(q_pos, submit_pos)
+        self.assertLess(primary_pos, submit_pos)
+        self.assertLess(submit_pos, toggle_pos)
+        self.assertLess(toggle_pos, clear_pos)
+        primary = self._primary_controls_html(html)
+        self.assertIn("archive-search-form__submit", primary)
+        self.assertIn("archive-advanced-search-toggle__link", primary)
+        self.assertNotIn("archive-search-form__clear", primary)
+
+    def test_clear_actions_q_only_hides_clear_all(self):
+        _public_item(title="לבון מסמך", body="hello")
+        resp = self.client.get(self.url, {"q": "לבון"})
+        html = resp.content.decode("utf-8")
+        self.assertTrue(resp.context["active_filter_summary_visible"])
+        self.assertFalse(resp.context["advanced_filters_active"])
+        self.assertIn("ניקוי החיפוש", html)
+        self.assertNotIn("ניקוי הכול", html)
+
+    def test_clear_actions_q_plus_advanced_shows_both(self):
+        _public_item(title="Both Clears", author_name="Both Author")
+        resp = self.client.get(
+            self.url,
+            {"q": "Both", "author": "Both Author"},
+        )
+        html = resp.content.decode("utf-8")
+        self.assertTrue(resp.context["advanced_filters_active"])
+        self.assertIn("ניקוי החיפוש", html)
+        self.assertIn("ניקוי הכול", html)
+
+    def test_clear_actions_advanced_only_hides_q_clear(self):
+        _public_item(title="Adv Only", author_name="AdvOnly Author")
+        resp = self.client.get(self.url, {"author": "AdvOnly Author"})
+        html = resp.content.decode("utf-8")
+        self.assertTrue(resp.context["advanced_filters_active"])
+        self.assertEqual(resp.context["q"], "")
+        self.assertIn("ניקוי הכול", html)
+        self.assertNotIn("ניקוי החיפוש", html)
+
+    def test_advanced_panel_param_alone_is_not_active_filter(self):
+        resp = self.client.get(self.url, {"advanced": "1"})
+        html = resp.content.decode("utf-8")
+        self.assertTrue(resp.context["advanced_panel_open"])
+        self.assertFalse(resp.context["advanced_filters_active"])
+        self.assertFalse(resp.context["active_filter_summary_visible"])
+        self.assertNotIn("ניקוי הכול", html)
+        self.assertNotIn("ניקוי החיפוש", html)
+        self.assertIn("סגירת החיפוש המתקדם", html)
+
+
+class ArchiveAdvancedSearchSmokeUiCssTests(SimpleTestCase):
+    def test_advanced_multi_column_css_scoped(self):
+        css = (
+            Path(__file__).resolve().parents[1]
+            / "public"
+            / "static"
+            / "public"
+            / "app.css"
+        )
+        text = css.read_text(encoding="utf-8")
+        fields_rule = text[
+            text.index(".archive-advanced-search__fields") : text.index(
+                ".archive-advanced-search__field label"
+            )
+        ]
+        self.assertIn("display: grid", fields_rule)
+        self.assertIn("grid-template-columns: minmax(0, 1fr)", fields_rule)
+        self.assertIn(
+            ".archive-advanced-search__fields {\n"
+            "    grid-template-columns: repeat(2, minmax(0, 1fr));",
+            text,
+        )
+        self.assertIn(
+            ".archive-advanced-search__fields {\n"
+            "    grid-template-columns: repeat(4, minmax(0, 1fr));",
+            text,
+        )
+        self.assertIn("@media (min-width: 700px)", text)
+        self.assertIn("@media (min-width: 1100px)", text)
+        self.assertIn(".archive-advanced-search__fields", text)
+        self.assertIn(".archive-advanced-search__field--years", text)
+        self.assertIn(".archive-search-form__primary-controls", text)
+        row_rule = text[
+            text.index(".archive-search-form__row {") : text.index(
+                ".archive-search-form__input {"
+            )
+        ]
+        self.assertNotIn("max-width: 48rem", row_rule)
