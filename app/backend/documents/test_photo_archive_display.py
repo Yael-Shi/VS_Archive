@@ -443,7 +443,7 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         self.assertContains(resp, "חזרה לארכיון")
         self.assertContains(resp, reverse("archive-list"))
         self.assertContains(resp, "הוספת מידע על הפריט")
-        self.assertContains(resp, "archive-detail-toolbar--public")
+        self.assertContains(resp, "archive-detail-navigation-actions")
         self.assertNotContains(resp, "archive-detail-staff-management-actions")
         self.assertNotContains(resp, "עריכת מטא־דאטה")
         self.assertNotContains(
@@ -484,7 +484,7 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         )
 
         self.assertContains(resp, "archive-detail-photo-top")
-        self.assertContains(resp, "archive-detail-toolbar--public")
+        self.assertContains(resp, "archive-detail-navigation-actions")
         self.assertContains(resp, "archive-detail-staff-management-actions")
         self.assertContains(resp, "חזרה לארכיון")
         self.assertContains(resp, "הוספת מידע על הפריט")
@@ -495,6 +495,8 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         self.assertNotContains(resp, ">עריכה</a>")
         self.assertNotContains(resp, "<summary>פרטים</summary>")
         self.assertContains(resp, 'class="photo-detail__image"')
+        self.assertNotContains(resp, "staff-document-nav")
+        self.assertNotContains(resp, "staff-document-nav__button")
 
         page_start = html.index("archive-detail-page--photo")
         page_end = html.find("</div>", html.rfind("archive-detail-photo"))
@@ -504,31 +506,37 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         self.assertNotIn('href="/admin/', page_html)
         self.assertNotIn("עריכה טכנית", page_html)
 
-        public_toolbar_start = html.index("archive-detail-toolbar--public")
-        public_toolbar_end = html.index("</div>", public_toolbar_start)
-        public_toolbar = html[public_toolbar_start:public_toolbar_end]
-        self.assertIn("חזרה לארכיון", public_toolbar)
-        self.assertNotIn(edit_href, public_toolbar)
-        self.assertNotIn(delete_href, public_toolbar)
-        self.assertNotIn("עריכת מטא־דאטה", public_toolbar)
-        self.assertNotIn("מחיקה", public_toolbar)
+        public_start = html.index("archive-detail-navigation-actions")
+        public_end = html.index("</div>", public_start)
+        public_column = html[public_start:public_end]
+        self.assertIn("חזרה לארכיון", public_column)
+        self.assertIn("הוספת מידע על הפריט", public_column)
+        self.assertNotIn(edit_href, public_column)
+        self.assertNotIn(delete_href, public_column)
+        self.assertNotIn("עריכת מטא־דאטה", public_column)
+        self.assertNotIn("מחיקה", public_column)
 
         staff_start = html.index("archive-detail-staff-management-actions")
         staff_end = html.index("</div>", staff_start)
         staff_section = html[staff_start:staff_end]
         self.assertIn("עריכת מטא־דאטה", staff_section)
         self.assertIn("מחיקה", staff_section)
-        self.assertIn("staff-document-nav__button", staff_section)
+        self.assertIn("btn-primary", staff_section)
+        self.assertNotIn("staff-document-nav__button", staff_section)
         self.assertNotIn("חזרה לארכיון", staff_section)
         self.assertNotIn("הוספת מידע על הפריט", staff_section)
         self.assertNotIn('href="/admin/', staff_section)
 
         edit_tag_start = html.rfind("<a", 0, html.index(f'href="{edit_href}"'))
         edit_tag_end = html.find(">", html.index(f'href="{edit_href}"')) + 1
-        self.assertIn("staff-document-nav__button", html[edit_tag_start:edit_tag_end])
+        self.assertIn("btn-primary", html[edit_tag_start:edit_tag_end])
+        self.assertNotIn(
+            "staff-document-nav__button", html[edit_tag_start:edit_tag_end]
+        )
         delete_tag_start = html.rfind("<a", 0, html.index(f'href="{delete_href}"'))
         delete_tag_end = html.find(">", html.index(f'href="{delete_href}"')) + 1
-        self.assertIn(
+        self.assertIn("btn-primary", html[delete_tag_start:delete_tag_end])
+        self.assertNotIn(
             "staff-document-nav__button", html[delete_tag_start:delete_tag_end]
         )
 
@@ -744,6 +752,26 @@ class PhotoArchiveBrowsePreviewStyleTests(SimpleTestCase):
 
 
 class PhotoArchiveDetailLayoutStyleTests(SimpleTestCase):
+    def test_photo_top_action_columns_match_document_detail_pattern(self):
+        css_path = settings.BASE_DIR / "public" / "static" / "public" / "app.css"
+        css = css_path.read_text(encoding="utf-8")
+
+        top_start = css.index(".archive-detail-photo-top {")
+        top_rule = css[top_start : css.index("}", top_start)]
+        self.assertIn("justify-content: flex-end;", top_rule)
+        self.assertIn("align-items: flex-start;", top_rule)
+
+        public_start = css.index(".archive-detail-navigation-actions {")
+        public_rule = css[public_start : css.index("}", public_start)]
+        self.assertIn("flex-direction: column;", public_rule)
+        self.assertIn("inline-size: max-content;", public_rule)
+
+        staff_start = css.index(".archive-detail-staff-management-actions {")
+        staff_rule = css[staff_start : css.index("}", staff_start)]
+        self.assertIn("flex-direction: column;", staff_rule)
+        self.assertIn("inline-size: max-content;", staff_rule)
+        self.assertNotIn("display: grid", staff_rule)
+
     def test_photo_detail_figure_is_centered_and_width_capped(self):
         css_path = settings.BASE_DIR / "public" / "static" / "public" / "app.css"
         css = css_path.read_text(encoding="utf-8")

@@ -1,19 +1,39 @@
-{# Shared staff cross-management navigation for the same OCR document.
-   Expects: doc, current_section ("document"|"review"|"transkribus"),
-   show_transkribus_corrected_current_sync_action.
-   Do not include on the metadata-edit page. #}
+{% comment %}
+Shared staff cross-management navigation for the same OCR document.
+Expects: doc, current_section ("document"|"review"|"transkribus"),
+show_transkribus_corrected_current_sync_action.
+Optional staff_nav_variant="stack" uses btn-primary for document-detail
+(compact staff column CSS is parent-scoped under
+document-detail-staff-management-actions).
+Do not include on the metadata-edit page.
+{% endcomment %}
 <nav class="staff-document-nav" aria-label="ניווט ניהול מסמך">
   {% if current_section != "document" %}
-    <a class="btn staff-document-nav__button" href="{% url 'documents-detail-page' doc_id=doc.id %}">תצוגת מסמך</a>
+    <a
+      class="btn {% if staff_nav_variant == 'stack' %}btn-primary{% else %}staff-document-nav__button{% endif %}"
+      href="{% url 'documents-detail-page' doc_id=doc.id %}"
+    >תצוגת מסמך</a>
   {% endif %}
   {% if doc.archive_item_id %}
-    <a class="btn staff-document-nav__button" href="{% url 'archive-manage-edit' item_id=doc.archive_item_id %}">עריכת מטא־דאטה</a>
+    <a
+      class="btn {% if staff_nav_variant == 'stack' %}btn-primary{% else %}staff-document-nav__button{% endif %}"
+      href="{% url 'archive-manage-edit' item_id=doc.archive_item_id %}"
+    >עריכת מטא־דאטה</a>
   {% endif %}
   {% if current_section != "review" %}
-    <a class="btn staff-document-nav__button" href="{% url 'review-detail-page' doc_id=doc.id %}">בקרת תעתוק</a>
+    <a
+      class="btn {% if staff_nav_variant == 'stack' %}btn-primary{% else %}staff-document-nav__button{% endif %}"
+      href="{% url 'review-detail-page' doc_id=doc.id %}"
+    >בקרת תעתוק</a>
   {% endif %}
   {% if current_section != "transkribus" and show_transkribus_corrected_current_sync_action %}
-    <a class="btn staff-document-nav__button" href="{% url 'corrected-current-sync-attempts' doc_id=doc.id %}">גרסאות תעתוק מ־Transkribus</a>
+    <a
+      class="btn {% if staff_nav_variant == 'stack' %}btn-primary{% else %}staff-document-nav__button{% endif %}"
+      href="{% url 'corrected-current-sync-attempts' doc_id=doc.id %}"
+    >גרסאות תעתוק מ־Transkribus</a>
   {% endif %}
-  <a class="btn staff-document-nav__button" href="/admin/documents/document/{{ doc.id }}/change/">עריכה טכנית (Django Admin)</a>
+  <a
+    class="btn {% if staff_nav_variant == 'stack' %}btn-primary{% else %}staff-document-nav__button{% endif %}"
+    href="/admin/documents/document/{{ doc.id }}/change/"
+  >עריכה טכנית (Django Admin)</a>
 </nav>
