@@ -4191,6 +4191,32 @@ pre {
   color: var(--text);
 }
 
+/*
+ * Transkribus paragraph overlay: canonical separators (\n, \n\n) stay in the
+ * DOM but must not force visual line breaks inside a human paragraph.
+ * Source-line spans keep pre-wrap so intra-line spaces are not collapsed.
+ */
+.document-detail-reading-prose--paragraphs {
+  white-space: normal;
+}
+
+.document-detail-reading-prose--paragraphs .document-detail-transcription-paragraph {
+  margin: 0.85em 0 0;
+}
+
+.document-detail-reading-prose--paragraphs .document-detail-transcription-paragraph:first-child {
+  margin-top: 0;
+}
+
+.document-detail-reading-prose--paragraphs .document-detail-source-line,
+.document-detail-reading-prose--paragraphs .text-line-hover-source {
+  white-space: pre-wrap;
+}
+
+.document-detail-reading-prose--paragraphs .document-detail-canonical-separator {
+  white-space: normal;
+}
+
 .detail-text-block__body--ltr {
   direction: ltr;
   text-align: left;
