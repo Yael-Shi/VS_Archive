@@ -3585,6 +3585,114 @@ pre {
   }
 }
 
+/* MANUAL_TEXT public detail only — do not reuse PHOTO/document selectors */
+
+.archive-detail-manual-text-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.archive-detail-manual-text-header-main {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.archive-detail-manual-text-top {
+  flex: 0 1 auto;
+  gap: var(--space-2);
+  margin-bottom: 0;
+  max-width: 100%;
+  justify-content: flex-end;
+  align-items: flex-start;
+  align-content: flex-start;
+}
+
+.archive-detail-manual-text-navigation-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  inline-size: max-content;
+  max-inline-size: 100%;
+  min-width: 0;
+}
+
+.archive-detail-manual-text-navigation-actions > .btn {
+  inline-size: 100%;
+}
+
+.archive-detail-manual-text-staff-management-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  inline-size: max-content;
+  max-inline-size: 100%;
+  min-width: 0;
+}
+
+.archive-detail-manual-text-staff-management-actions > .btn {
+  width: 100%;
+}
+
+.archive-detail-manual-text-suggest-btn {
+  align-self: flex-start;
+  max-width: 100%;
+}
+
+.archive-detail-page--manual-text .archive-detail-manual-text-body {
+  max-width: min(66ch, 100%);
+  width: 100%;
+  min-width: 0;
+  margin-inline-start: 0;
+  margin-inline-end: auto;
+}
+
+.archive-detail-page--manual-text .archive-detail-manual-text-body .text-block {
+  white-space: normal;
+  line-height: var(--line-relaxed);
+}
+
+@media (max-width: 768px) {
+  .archive-detail-manual-text-header {
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .archive-detail-manual-text-header-main {
+    flex: 0 1 auto;
+  }
+
+  .archive-detail-manual-text-top {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .archive-detail-manual-text-navigation-actions {
+    flex: 1 1 100%;
+  }
+
+  .archive-detail-manual-text-top .btn {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 44px;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .archive-detail-manual-text-staff-management-actions {
+    flex: 1 1 100%;
+  }
+
+  .archive-detail-manual-text-staff-management-actions > .btn {
+    flex: none;
+    width: 100%;
+  }
+}
+
 /* Responsive — OCR/document detail page (/api/ui/documents/<id>/) */
 
 .document-detail-page {

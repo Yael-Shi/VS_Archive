@@ -3,7 +3,7 @@
 {% block title %}VSArchive - {{ item.title }}{% endblock %}
 
 {% block content %}
-  <div class="card card--pad-lg archive-detail-page{% if item.item_type == 'PHOTO' %} archive-detail-page--photo{% endif %}">
+  <div class="card card--pad-lg archive-detail-page{% if item.item_type == 'PHOTO' %} archive-detail-page--photo{% elif item.item_type == 'MANUAL_TEXT' %} archive-detail-page--manual-text{% endif %}">
     {% if item.item_type == "PHOTO" %}
       <header class="archive-detail-photo-header">
         <div class="archive-detail-header archive-detail-photo-header-main">
@@ -46,6 +46,53 @@
       {% if is_admin %}
         <div class="badge-row archive-detail-badges">
           <span class="badge">{{ item.item_type|archive_item_type_label }}</span>
+          <span class="badge">{{ item.metadata_status|archive_metadata_status_label }}</span>
+        </div>
+        <div class="spacer-sm"></div>
+      {% else %}
+        <div class="spacer"></div>
+      {% endif %}
+    {% elif item.item_type == "MANUAL_TEXT" %}
+      <header class="archive-detail-manual-text-header">
+        <div class="archive-detail-header archive-detail-manual-text-header-main">
+          <h1 class="page-title archive-detail-title">{{ item.title }}</h1>
+          <div class="page-lead archive-detail-lead">
+            {% if is_admin %}
+              פריט ארכיון #{{ item.id }} · {{ item|document_date_display }} · {{ item.visibility|archive_visibility_display_label }}
+            {% else %}
+              {{ item|document_date_display }}
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="page-toolbar archive-detail-manual-text-top">
+          <div class="archive-detail-manual-text-navigation-actions">
+            <a class="btn btn-primary" href="{% url 'archive-list' %}">
+              <span>חזרה לארכיון</span>
+              <span aria-hidden="true">←</span>
+            </a>
+            <a
+              class="btn btn-secondary archive-detail-manual-text-suggest-btn"
+              href="{% url 'archive-metadata-suggestion-new' item_id=item.id %}"
+            >הוספת מידע על הפריט</a>
+          </div>
+          {% if is_admin %}
+            <div class="archive-detail-manual-text-staff-management-actions">
+              <a
+                class="btn btn-primary"
+                href="{% url 'archive-manage-edit' item_id=item.id %}"
+              >עריכה</a>
+              <a
+                class="btn btn-primary"
+                href="{% url 'archive-manage-delete' item_id=item.id %}"
+              >מחיקה</a>
+            </div>
+          {% endif %}
+        </div>
+      </header>
+
+      {% if is_admin %}
+        <div class="badge-row archive-detail-badges archive-detail-manual-text-badges">
           <span class="badge">{{ item.metadata_status|archive_metadata_status_label }}</span>
         </div>
         <div class="spacer-sm"></div>
@@ -101,7 +148,7 @@
       {% include "documents/archive/partials/public_note_display.html" with item=item %}
     </div>
 
-    {% if item.item_type != "PHOTO" %}
+    {% if item.item_type != "PHOTO" and item.item_type != "MANUAL_TEXT" %}
       <div class="spacer-sm"></div>
       <a
         class="btn"
@@ -110,8 +157,7 @@
     {% endif %}
 
     {% if item.item_type == "MANUAL_TEXT" %}
-      <div class="section-title archive-detail-text-heading">טקסט</div>
-      <div class="archive-detail-text">
+      <div class="archive-detail-text archive-detail-manual-text-body">
         <div class="text-block text-block--pre">{{ body|manual_text_body_display }}</div>
       </div>
     {% endif %}
