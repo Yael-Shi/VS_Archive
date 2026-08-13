@@ -3517,7 +3517,8 @@ class ArchiveItemSourceMetadataTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Regression manual detail")
         self.assertContains(resp, "Regression body.")
-        self.assertContains(resp, "טקסט")
+        self.assertNotContains(resp, "archive-detail-text-heading")
+        self.assertNotContains(resp, '<span class="badge">טקסט</span>', html=True)
 
     def test_existing_ocr_document_detail_behavior_unchanged_without_source_metadata(
         self,
@@ -4227,9 +4228,10 @@ class ArchiveItemPresentationUiTests(TestCase):
         )
         self.client.force_login(self.staff)
         resp = self.client.get(f"/archive/{item.id}/")
-        self.assertContains(resp, "טקסט")
         self.assertContains(resp, "ציבורי")
         self.assertContains(resp, "פרטים הושלמו")
+        self.assertNotContains(resp, '<span class="badge">טקסט</span>', html=True)
+        self.assertNotContains(resp, "archive-detail-text-heading")
         self.assertNotContains(resp, "MANUAL_TEXT")
         self.assertNotContains(resp, "COMPLETED")
 
