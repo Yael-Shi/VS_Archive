@@ -12,7 +12,7 @@
     <div class="spacer"></div>
 
     {% if items %}
-      {% include "documents/archive/partials/item_list_cards.html" with browse_cards=browse_cards %}
+      {% include "documents/archive/partials/item_list_cards.html" with browse_cards=browse_cards is_admin=is_admin %}
     {% else %}
       <p class="muted">אין פריטי ארכיון להצגה.</p>
     {% endif %}

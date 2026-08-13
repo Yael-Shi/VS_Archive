@@ -17,7 +17,7 @@
         <a href="{% url 'documents-detail-page' doc_id=doc.id %}">{{ doc.archive_item.title }}</a>
         · מסמך #{{ doc.id }}
         · ניסיון #{{ attempt.id }}
-        · {{ doc.archive_item.visibility|archive_visibility_display_label }}
+        · נראות: {{ doc.archive_item.visibility|archive_visibility_display_label }}
       </div>
 
       <div class="spacer-sm"></div>

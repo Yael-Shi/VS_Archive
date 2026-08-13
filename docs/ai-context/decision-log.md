@@ -349,9 +349,11 @@ archive-search overlay/geometry/navigation suites.
 - Short read-only display labels (`visibility_display_label` / `archive_visibility_display_label`): `public` → `ציבורי`, `private` → `פרטי`, `restricted` → `רגיש`.
 - Full form-choice labels (`visibility_choice_label` / `archive_visibility_choice_label` / `archive_visibility_ui_choices`): restricted remains `רגיש — למורשים בלבד`. Legacy aliases `visibility_label` and `archive_visibility_label` both remain full choice-label aliases (same semantics in Python and templates).
 - Read-only templates must use `archive_visibility_display_label`; do not use the legacy filter for short display text.
-- Visibility is rendered as ordinary text in existing tables, page leads, and metadata lines — not as badges, pills, chips, alerts, callouts, cards, or standalone visibility sections.
+- Visibility is rendered as ordinary text in existing tables, page leads, and metadata lines — not as badges, pills, chips, alerts, callouts, standalone visibility cards, or standalone visibility sections.
 - Manager-only surfaces gain the short label; anonymous/family viewers do not gain new administrative visibility metadata.
 - Django Admin already showed visibility as ordinary list/detail fields; left unchanged.
+- Public archive browse cards (`/archive/` and category/event/tag browse; shared `item_list_cards.html`) show staff/document-admins only: `נראות: ציבורי` / `נראות: פרטי` / `נראות: רגיש` as ordinary text in the existing card meta line. Family and anonymous viewers do not receive this metadata. Restricted cards appear only when the existing access queryset already includes the item. Form-only `רגיש — למורשים בלבד` is not used on cards. Category/event/tag browse pass `is_admin` so the shared partial can gate this line.
+- Staff-facing detail leads that already showed the short visibility value prefix it as `נראות: <short-label>` (archive PHOTO / MANUAL_TEXT / VIDEO detail, OCR document detail, review detail, transcription suggestion detail, Transkribus corrected-current attempts list/detail). Tables, queues, filters, and Django Admin are unchanged.
 
 **Unchanged:** PR1–PR3 access controls, Admin scoping, write validation, data model, OCR/HTR/processing/infra.
 
