@@ -231,6 +231,9 @@ from documents.services.archive_search_overlay_presentation import (
 from documents.services.archive_search_transcription_presentation import (
     build_archive_search_transcription_presentation,
 )
+from documents.services.transkribus_paragraph_presentation import (
+    build_transkribus_paragraph_presentation,
+)
 from documents.services.text_line_hover_presentation import (
     apply_text_line_hover_overlay_to_source_previews,
     build_text_line_hover_overlay_pages,
@@ -3094,6 +3097,11 @@ def document_detail_page(request, doc_id: int):
         geometry_matches=archive_search_geometry_matches,
         text_line_hover=text_line_hover,
     )
+    transkribus_paragraph_presentation = build_transkribus_paragraph_presentation(
+        doc,
+        text_line_hover=text_line_hover,
+        archive_search_transcription=archive_search_transcription,
+    )
 
     detail_jump_nav = build_document_detail_jump_nav(
         doc,
@@ -3125,6 +3133,7 @@ def document_detail_page(request, doc_id: int):
         "text_line_hover_overlay_pages": text_line_hover_overlay_pages,
         "text_line_hover_single_image_overlay": text_line_hover_single_image_overlay,
         "archive_search_transcription": archive_search_transcription,
+        "transkribus_paragraph_presentation": transkribus_paragraph_presentation,
         "is_admin": is_admin,
         "show_transkribus_corrected_current_sync_action": is_admin
         and _is_transkribus_corrected_current_sync_ui_eligible(doc),

@@ -3525,6 +3525,23 @@ JavaScript hover behavior, scrolling, image overlays, or schema changes.
 
 **Must not change (this PR and later paragraph work unless explicitly approved):** `DocumentTextResult.text`, `TranskribusTranscriptSnapshot.canonical_text`, `TranskribusSnapshotLine.text`, source geometry, canonical char offsets, hover IDs, search offsets.
 
-**Not implemented (later PRs, do not treat as done):** staff paragraph editor UI; public paragraph rendering/CSS; copy/adopt POST; automatic adoption; Gemini/general-provider paragraph mappings; AI/fuzzy matching; dehyphenation; same-snapshot local typo remapper.
+**Not implemented (later PRs, do not treat as done):** staff paragraph editor UI; copy/adopt POST; automatic adoption; Gemini/general-provider paragraph mappings; AI/fuzzy matching; dehyphenation; same-snapshot local typo remapper. Public paragraph rendering is implemented in the PR2 entry below.
+
+## Transkribus paragraph public rendering (PR2 — presentation overlay only)
+
+**Decision / implemented:** Public v1 paragraph presentation is Transkribus-only. An applicable **current** mapping activates human-paragraph markup on the public document detail transcription. Paragraph grouping is an explicit presentation overlay: it wraps existing hover/search/plain fragments. It does **not** create a replacement display string, mutate `DocumentTextResult.text`, mutate snapshot canonical text, or recompute search offsets from browser-visible text.
+
+**Current behavior:**
+
+- Applicability reuses PR1 `assess_paragraph_mapping_currentness`. No mapping, stale mapping, other-snapshot mapping, structurally stale binding, or locally drifted displayed text → `enabled=False` and the **legacy** renderer is used unchanged.
+- A current mapping with **zero break rows** is not fallback: the contributing transcription is one flowing paragraph, including across source lines and pages.
+- Paragraph breaks after contributing source lines produce visual/semantic `<p>` separation. A source-page boundary does not automatically create a paragraph; a paragraph may contain lines from more than one page.
+- Canonical characters, including `\n` and `\n\n`, remain in the DOM in document order. Concatenating text-bearing DOM content reconstructs the canonical transcription character-for-character. Newlines are not replaced with spaces in the text data.
+- Visual flow inside a paragraph comes from CSS: the paragraph container uses normal whitespace so canonical separators collapse visually; source-line spans keep `pre-wrap` so intra-line spaces are not destroyed.
+- Source-line hover IDs, overlay bbox calculation, and `pointer-events: none` overlays are unchanged. Search match indexes, click-sync attributes, previous/next navigation, and sticky source behavior keep the existing identities/order.
+- Gemini, other non-Transkribus OCR, manual text, photo, and video public paths are unchanged. No new public paragraph endpoint.
+
+**Not implemented (later PRs):** staff paragraph editor UI; staff status UI; historical suggestion UI; copy/adopt POST; automatic inheritance; paragraph inference; Gemini/general-provider paragraph support; transcription editing; dehyphenation; canonical-text rewriting.
+
 
 **Explicit non-goals for correspondence:** canonical-text equality, char offsets, fuzzy text, geometry epsilon, `provider_region_id`, provider page identity alone, raw XML equality, or matching line counts alone.
