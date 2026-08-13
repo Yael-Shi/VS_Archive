@@ -151,7 +151,7 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 WHITENOISE_USE_FINDERS = DEBUG
 
 LOGIN_URL = "/accounts/login/"
-LOGIN_REDIRECT_URL = "/api/ui/documents/"
+LOGIN_REDIRECT_URL = "archive-list"
 LOGOUT_REDIRECT_URL = "/"
 
 if DEBUG:
