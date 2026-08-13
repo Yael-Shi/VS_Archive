@@ -1586,6 +1586,221 @@ class TranskribusTextResultBinding(models.Model):
         )
 
 
+class TranskribusParagraphMapping(models.Model):
+    """
+    Staff-authored paragraph presentation metadata for one Transkribus snapshot.
+
+    Presentation only: never stores transcription text, char offsets, hover IDs,
+    or geometry. A row with zero break rows is an explicit one-paragraph save.
+    Absence of this row means paragraph grouping has never been saved.
+
+    Cross-document snapshot mismatches are rejected in ``save()``. Do not use
+    ``bulk_create`` for this model (bypasses that check).
+    """
+
+    snapshot = models.OneToOneField(
+        TranskribusTranscriptSnapshot,
+        on_delete=models.CASCADE,
+        related_name="paragraph_mapping",
+    )
+    document = models.ForeignKey(
+        Document,
+        on_delete=models.CASCADE,
+        related_name="transkribus_paragraph_mappings",
+    )
+    copied_from = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="copied_to_mappings",
+        help_text="Optional provenance when a manager later adopts a historical mapping.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="transkribus_paragraph_mappings_created",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="transkribus_paragraph_mappings_updated",
+    )
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["document", "-updated_at"],
+                name="tr_para_map_doc_upd_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        self._ensure_document_from_snapshot()
+        self._validate_document_matches_snapshot()
+        self._validate_copied_from()
+
+    def _ensure_document_from_snapshot(self) -> None:
+        if self.document_id or not self.snapshot_id:
+            return
+        self.document_id = self.snapshot.document_id
+
+    def _validate_document_matches_snapshot(self) -> None:
+        if not self.snapshot_id:
+            return
+        snapshot_document_id = self.snapshot.document_id
+        if not self.document_id:
+            self.document_id = snapshot_document_id
+            return
+        if self.document_id != snapshot_document_id:
+            raise ValidationError(
+                {
+                    "document": (
+                        "TranskribusParagraphMapping requires document to match "
+                        "the snapshot's document."
+                    )
+                }
+            )
+
+    def _validate_copied_from(self) -> None:
+        if not self.copied_from_id:
+            return
+        source = self.copied_from
+        if source is None:
+            raise ValidationError(
+                {
+                    "copied_from": (
+                        "TranskribusParagraphMapping requires a valid mapping "
+                        "when copied_from_id is set."
+                    )
+                }
+            )
+        if self.pk is not None and source.pk == self.pk:
+            raise ValidationError(
+                {"copied_from": "A paragraph mapping cannot copy from itself."}
+            )
+        if self.snapshot_id and source.snapshot_id == self.snapshot_id:
+            raise ValidationError(
+                {
+                    "copied_from": (
+                        "copied_from must refer to a mapping on a different snapshot."
+                    )
+                }
+            )
+        if self.document_id and source.document_id != self.document_id:
+            raise ValidationError(
+                {
+                    "copied_from": (
+                        "copied_from must belong to the same document as this mapping."
+                    )
+                }
+            )
+
+    def save(self, *args, **kwargs):
+        # bulk_create bypasses save(); do not use it for this model.
+        self._ensure_document_from_snapshot()
+        self._validate_document_matches_snapshot()
+        self._validate_copied_from()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"TranskribusParagraphMapping(id={self.pk}, snapshot={self.snapshot_id})"
+
+
+class TranskribusParagraphBreak(models.Model):
+    """
+    Paragraph break after one contributing source line of the mapping's snapshot.
+
+    Each row means: start a new paragraph after this contributing line.
+    Page boundaries are independent of paragraph boundaries.
+
+    Do not persist provider IDs, char offsets, or presentation hover IDs.
+    Do not use ``bulk_create`` for this model (bypasses ``save()`` checks).
+    """
+
+    mapping = models.ForeignKey(
+        TranskribusParagraphMapping,
+        on_delete=models.CASCADE,
+        related_name="breaks",
+    )
+    after_line = models.ForeignKey(
+        TranskribusSnapshotLine,
+        on_delete=models.CASCADE,
+        related_name="paragraph_breaks_after",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["mapping", "after_line"],
+                name="uniq_tr_para_break_after_line",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        self._validate_after_line()
+
+    def _validate_after_line(self) -> None:
+        if not self.mapping_id or not self.after_line_id:
+            return
+        mapping = self.mapping
+        after_line = self.after_line
+        if after_line.page.snapshot_id != mapping.snapshot_id:
+            raise ValidationError(
+                {
+                    "after_line": (
+                        "Paragraph break after_line must belong to the mapping's "
+                        "snapshot."
+                    )
+                }
+            )
+        if not after_line.contributes_to_canonical:
+            raise ValidationError(
+                {
+                    "after_line": (
+                        "Paragraph break after_line must be a contributing source line."
+                    )
+                }
+            )
+        final_line_id = (
+            TranskribusSnapshotLine.objects.filter(
+                page__snapshot_id=mapping.snapshot_id,
+                contributes_to_canonical=True,
+            )
+            .order_by("page__page_index", "order_index")
+            .values_list("pk", flat=True)
+            .last()
+        )
+        if final_line_id is not None and after_line.pk == final_line_id:
+            raise ValidationError(
+                {
+                    "after_line": (
+                        "A paragraph break after the final contributing source "
+                        "line is not meaningful."
+                    )
+                }
+            )
+
+    def save(self, *args, **kwargs):
+        # bulk_create bypasses save(); do not use it for this model.
+        self._validate_after_line()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return (
+            f"TranskribusParagraphBreak(mapping={self.mapping_id}, "
+            f"after_line={self.after_line_id})"
+        )
+
+
 class TranskribusRunAutomaticSnapshot(models.Model):
     """
     Durable association from a TranskribusRun to the READY AUTOMATIC_HTR snapshot

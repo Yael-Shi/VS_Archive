@@ -3503,3 +3503,26 @@ JavaScript hover behavior, scrolling, image overlays, or schema changes.
 **UX:** Form label **משיכת תעתוק עדכני מ־Transkribus** on `corrected_current_sync_attempts.html`; PRG redirect back to the attempts list with Hebrew Django messages mapped from enqueue outcomes (`CREATED_AND_ENQUEUED`/`REENQUEUED`, `ALREADY_QUEUED`, `ALREADY_RUNNING`, `BLOCKED_RECOVERY_REQUIRED`, `ENQUEUE_FAILED`, `ENQUEUE_OUTCOME_UNKNOWN`, `ALREADY_TERMINAL`). No polling/JS added.
 
 **Still deferred:** feature gate; stranded-`QUEUED` recovery/requeue; automatic activation.
+
+## Transkribus paragraph presentation metadata (PR1 — persistence and proof only)
+
+**Decision / implemented:** v1 paragraph grouping is Transkribus-only presentation metadata. The normal workflow is: correct transcription in Transkribus, pull/activate the corrected snapshot in VS-Archive, then staff save paragraph boundaries in VS-Archive (staff UI is **not** in this PR).
+
+**Current behavior:**
+
+- `TranskribusParagraphMapping` is owned by one `TranskribusTranscriptSnapshot` (one mapping maximum per snapshot). Stored `document` must match `snapshot.document`. `copied_from` is the source of the **current** saved paragraph division, not permanent ancestry. An explicit future adoption write sets it; an ordinary/manual resave through `save_paragraph_mapping` without `copied_from` clears it. Create without `copied_from` remains valid (null). There is no adoption UI in this PR.
+- `save_paragraph_mapping` may omit `actor` on create. On resave, a provided `actor` updates `updated_by`; `actor=None` preserves the existing editor.
+- `TranskribusParagraphBreak` means: paragraph break **after** this contributing source line. Identity is the snapshot-line PK, not `provider_region_id`, provider paragraph ids, char offsets, or hover ids such as `p1-o3`.
+- Mapping row + zero breaks = staff explicitly saved one flowing paragraph. No mapping row = grouping has never been saved for that snapshot.
+- Page boundary and paragraph boundary are independent: a paragraph may cross a page when there is no break after that page's final contributing line.
+- Services in `transkribus_paragraph_mapping.py` retrieve contributing lines, validate breaks, save/replace a mapping transactionally, and assess currentness. Re-saving replaces that snapshot's break rows only.
+- Public/current applicability uses the existing Transkribus baseline: displayed `DocumentTextResult`, a `TranskribusTextResultBinding`, `is_binding_structurally_fresh(...)`, and `binding.snapshot_id == mapping.snapshot_id`. `hover_eligible=False` does **not** by itself make a mapping non-current.
+- Local `DocumentTextResult` text/revision drift makes the mapping non-current (structural freshness fails) but the mapping row is kept. A new snapshot/rebinding makes an old mapping non-current because mappings belong to the snapshot on which they were authored.
+- Cross-snapshot transfer proof (`transkribus_paragraph_correspondence.py`) is strict and fail-closed. It allows differing line text. It requires same document, both READY, same parser version, matching ordered `page_index` structure, matching per-page contributing-line counts, complete unique `(page_index, provider_line_id)` identities, and identical ordered identity sequences. `(page_index, provider_line_id)` is the identity because PAGE XML TextLine ids are page-scoped and `provider_line_id` is not unique at snapshot level.
+- Historical suggestion discovery is read-only: older snapshots that already have mappings, newest-to-oldest, filtered through that proof. Suggestions may come from more than the immediately previous snapshot. Discovery never writes, adopts, or overwrites. A current mapping on the target does not suppress suggestions.
+
+**Must not change (this PR and later paragraph work unless explicitly approved):** `DocumentTextResult.text`, `TranskribusTranscriptSnapshot.canonical_text`, `TranskribusSnapshotLine.text`, source geometry, canonical char offsets, hover IDs, search offsets.
+
+**Not implemented (later PRs, do not treat as done):** staff paragraph editor UI; public paragraph rendering/CSS; copy/adopt POST; automatic adoption; Gemini/general-provider paragraph mappings; AI/fuzzy matching; dehyphenation; same-snapshot local typo remapper.
+
+**Explicit non-goals for correspondence:** canonical-text equality, char offsets, fuzzy text, geometry epsilon, `provider_region_id`, provider page identity alone, raw XML equality, or matching line counts alone.
