@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group, Permission
 from django.contrib.contenttypes.models import ContentType
@@ -9,11 +11,14 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from documents.models import (
+    ArchiveCategory,
     ArchiveItem,
     ArchiveMetadataSuggestion,
     Document,
     DocumentTextResult,
     TranscriptionEditSuggestion,
+    TranskribusCorrectedCurrentSyncAttempt,
+    TranskribusRun,
 )
 from documents.services.archive_item_access import (
     ARCHIVE_FAMILY_GROUP_NAME,
@@ -39,6 +44,65 @@ User = get_user_model()
 
 RESTRICTED_CHOICE_LABEL = "רגיש — למורשים בלבד"
 RESTRICTED_DISPLAY_LABEL = "רגיש"
+VISIBILITY_LEAD_PUBLIC = "נראות: ציבורי"
+VISIBILITY_LEAD_RESTRICTED = "נראות: רגיש"
+
+
+def _browse_card_html(page_html: str, *, title: str) -> str:
+    cards = re.findall(
+        r'<li class="archive-browse-card[\s\S]*?</li>',
+        page_html,
+    )
+    matches = [card for card in cards if title in card]
+    if len(matches) != 1:
+        raise AssertionError(
+            f"Expected 1 browse card for {title!r}, found {len(matches)}"
+        )
+    return matches[0]
+
+
+def _browse_card_meta_html(page_html: str, *, title: str) -> str:
+    card = _browse_card_html(page_html, title=title)
+    match = re.search(
+        r'<div class="archive-browse-card__meta">[\s\S]*?</div>',
+        card,
+    )
+    if match is None:
+        raise AssertionError(f"No meta block in browse card for {title!r}")
+    return match.group(0)
+
+
+def _visible_text(html: str) -> str:
+    text = re.sub(r"<[^>]+>", " ", html)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _assert_staff_visibility_in_card_meta(
+    testcase, page_html, *, title: str, short_label: str
+):
+    meta = _browse_card_meta_html(page_html, title=title)
+    testcase.assertIn('class="archive-browse-card__visibility"', meta)
+    testcase.assertIn(f"נראות: {short_label}", _visible_text(meta))
+    testcase.assertNotIn(RESTRICTED_CHOICE_LABEL, meta)
+    testcase.assertNotRegex(meta, r'class="badge')
+
+
+def _assert_no_staff_visibility_in_card_meta(testcase, page_html, *, title):
+    meta = _browse_card_meta_html(page_html, title=title)
+    visible = _visible_text(meta)
+    testcase.assertNotIn("נראות:", visible)
+    testcase.assertNotIn('class="archive-browse-card__visibility"', meta)
+    testcase.assertNotIn("ציבורי", visible)
+    testcase.assertNotIn("פרטי", visible)
+    testcase.assertNotIn(RESTRICTED_DISPLAY_LABEL, visible)
+    testcase.assertNotIn(RESTRICTED_CHOICE_LABEL, meta)
+
+
+def _page_lead_html(page_html: str) -> str:
+    match = re.search(r'<div class="page-lead[^"]*">([\s\S]*?)</div>', page_html)
+    if match is None:
+        raise AssertionError("No page-lead block found")
+    return match.group(0)
 
 
 def _grant_restricted_permission(user):
@@ -251,7 +315,8 @@ class VisibilityMetadataUiSurfaceTests(TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
-        self.assertIn("ציבורי", html)
+        lead = _page_lead_html(html)
+        self.assertIn(VISIBILITY_LEAD_PUBLIC, lead)
         self.assertNotIn('class="badge badge-ok"', html)
         self.assertNotIn(RESTRICTED_CHOICE_LABEL, html)
 
@@ -261,7 +326,9 @@ class VisibilityMetadataUiSurfaceTests(TestCase):
         )
         self.assertEqual(family_resp.status_code, 200)
         family_html = family_resp.content.decode()
+        family_lead = _page_lead_html(family_html)
         # Family viewers keep date/title; manager visibility text is not exposed.
+        self.assertNotIn("נראות:", family_lead)
         self.assertNotIn("ציבורי", family_html)
         self.assertNotIn("פרטי", family_html)
         self.assertNotIn(RESTRICTED_DISPLAY_LABEL, family_html)
@@ -273,6 +340,8 @@ class VisibilityMetadataUiSurfaceTests(TestCase):
         # Anonymous may view public items; still no manager visibility metadata.
         self.assertEqual(anon.status_code, 200)
         anon_html = anon.content.decode()
+        anon_lead = _page_lead_html(anon_html)
+        self.assertNotIn("נראות:", anon_lead)
         self.assertNotIn("ציבורי", anon_html)
 
     def test_restricted_detail_remains_404_for_unauthorized_staff(self):
@@ -287,7 +356,8 @@ class VisibilityMetadataUiSurfaceTests(TestCase):
             reverse("archive-detail", kwargs={"item_id": self.restricted_item.pk})
         )
         self.assertEqual(ok.status_code, 200)
-        self.assertContains(ok, RESTRICTED_DISPLAY_LABEL)
+        ok_lead = _page_lead_html(ok.content.decode())
+        self.assertIn(VISIBILITY_LEAD_RESTRICTED, ok_lead)
         self.assertNotContains(ok, RESTRICTED_CHOICE_LABEL)
 
     def test_documents_list_shows_plain_short_visibility_for_staff(self):
@@ -368,7 +438,8 @@ class VisibilityMetadataUiSurfaceTests(TestCase):
             reverse("review-detail-page", kwargs={"doc_id": self.public_ocr.pk})
         )
         self.assertEqual(review_detail.status_code, 200)
-        self.assertContains(review_detail, "ציבורי")
+        review_lead = _page_lead_html(review_detail.content.decode())
+        self.assertIn(VISIBILITY_LEAD_PUBLIC, review_lead)
         self.assertNotContains(review_detail, RESTRICTED_CHOICE_LABEL)
 
     def test_suggestion_queues_show_short_visibility_without_leaking_restricted(self):
@@ -406,15 +477,180 @@ class VisibilityMetadataUiSurfaceTests(TestCase):
             reverse("documents-detail-page", kwargs={"doc_id": self.public_ocr.pk})
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "ציבורי")
+        lead = _page_lead_html(resp.content.decode())
+        self.assertIn(VISIBILITY_LEAD_PUBLIC, lead)
         self.assertNotContains(resp, RESTRICTED_CHOICE_LABEL)
         # Old technical-details badge mapping must not remain.
         html = resp.content.decode()
         self.assertNotIn('badge-ok">ציבורי', html)
+
+        self.client.force_login(self.family)
+        family = self.client.get(
+            reverse("documents-detail-page", kwargs={"doc_id": self.public_ocr.pk})
+        )
+        self.assertEqual(family.status_code, 200)
+        family_lead = _page_lead_html(family.content.decode())
+        self.assertNotIn("נראות:", family_lead)
+        self.assertNotContains(family, "ציבורי")
 
         self.client.logout()
         anon = self.client.get(
             reverse("documents-detail-page", kwargs={"doc_id": self.public_ocr.pk})
         )
         self.assertEqual(anon.status_code, 200)
+        anon_lead = _page_lead_html(anon.content.decode())
+        self.assertNotIn("נראות:", anon_lead)
         self.assertNotContains(anon, "ציבורי")
+
+    def test_archive_browse_cards_show_staff_only_visibility_meta(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(reverse("archive-list"))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        _assert_staff_visibility_in_card_meta(
+            self, html, title=self.public_item.title, short_label="ציבורי"
+        )
+        _assert_staff_visibility_in_card_meta(
+            self, html, title=self.private_item.title, short_label="פרטי"
+        )
+        self.assertNotIn(self.restricted_item.title, html)
+        self.assertNotIn(RESTRICTED_CHOICE_LABEL, html)
+        public_meta = _browse_card_meta_html(html, title=self.public_item.title)
+        self.assertNotIn(RESTRICTED_CHOICE_LABEL, public_meta)
+
+        self.client.force_login(self.staff_with_perm)
+        restricted_resp = self.client.get(reverse("archive-list"))
+        self.assertEqual(restricted_resp.status_code, 200)
+        restricted_html = restricted_resp.content.decode()
+        _assert_staff_visibility_in_card_meta(
+            self,
+            restricted_html,
+            title=self.restricted_item.title,
+            short_label=RESTRICTED_DISPLAY_LABEL,
+        )
+        self.assertNotIn(RESTRICTED_CHOICE_LABEL, restricted_html)
+
+        self.client.force_login(self.family)
+        family_resp = self.client.get(reverse("archive-list"))
+        self.assertEqual(family_resp.status_code, 200)
+        family_html = family_resp.content.decode()
+        _assert_no_staff_visibility_in_card_meta(
+            self, family_html, title=self.public_item.title
+        )
+        _assert_no_staff_visibility_in_card_meta(
+            self, family_html, title=self.private_item.title
+        )
+        self.assertNotIn(self.restricted_item.title, family_html)
+
+        self.client.logout()
+        anon_resp = self.client.get(reverse("archive-list"))
+        self.assertEqual(anon_resp.status_code, 200)
+        anon_html = anon_resp.content.decode()
+        _assert_no_staff_visibility_in_card_meta(
+            self, anon_html, title=self.public_item.title
+        )
+        self.assertNotIn(self.private_item.title, anon_html)
+        self.assertNotIn(self.restricted_item.title, anon_html)
+
+    def test_category_browse_cards_show_staff_only_visibility_meta(self):
+        category = ArchiveCategory.objects.create(
+            name="Vis-UI Browse Category",
+            slug="vis-ui-browse-category",
+        )
+        self.public_item.categories.add(category)
+        self.private_item.categories.add(category)
+        browse_url = reverse(
+            "archive-category-browse", kwargs={"category_id": category.id}
+        )
+
+        self.client.force_login(self.staff)
+        resp = self.client.get(browse_url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.context["is_admin"])
+        html = resp.content.decode()
+        _assert_staff_visibility_in_card_meta(
+            self, html, title=self.public_item.title, short_label="ציבורי"
+        )
+        _assert_staff_visibility_in_card_meta(
+            self, html, title=self.private_item.title, short_label="פרטי"
+        )
+        self.assertNotIn(RESTRICTED_CHOICE_LABEL, html)
+
+        self.client.force_login(self.family)
+        family_resp = self.client.get(browse_url)
+        self.assertEqual(family_resp.status_code, 200)
+        self.assertFalse(family_resp.context["is_admin"])
+        family_html = family_resp.content.decode()
+        _assert_no_staff_visibility_in_card_meta(
+            self, family_html, title=self.public_item.title
+        )
+        _assert_no_staff_visibility_in_card_meta(
+            self, family_html, title=self.private_item.title
+        )
+
+        self.client.logout()
+        anon_resp = self.client.get(browse_url)
+        self.assertEqual(anon_resp.status_code, 200)
+        self.assertFalse(anon_resp.context["is_admin"])
+        _assert_no_staff_visibility_in_card_meta(
+            self, anon_resp.content.decode(), title=self.public_item.title
+        )
+
+    def test_staff_detail_leads_prefix_visibility_label(self):
+        suggestion = TranscriptionEditSuggestion.objects.get(
+            document=self.public_ocr,
+            status=TranscriptionEditSuggestion.Status.PENDING,
+        )
+        run = TranskribusRun.objects.create(
+            document=self.public_ocr,
+            status=TranskribusRun.Status.SUCCEEDED,
+            mode=TranskribusRun.Mode.UPLOAD_CREATED,
+            collection_id="col",
+            model_id="42",
+            remote_doc_id="777",
+            pages_query="1",
+            recognition_job_id="job-vis-ui",
+            page_index_to_page_nr={1: 1},
+        )
+        attempt = TranskribusCorrectedCurrentSyncAttempt.objects.create(
+            document=self.public_ocr,
+            transkribus_run=run,
+            status=TranskribusCorrectedCurrentSyncAttempt.Status.STARTED,
+        )
+
+        self.client.force_login(self.staff)
+        suggestion_resp = self.client.get(
+            reverse(
+                "transcription-suggestion-detail",
+                kwargs={"suggestion_id": suggestion.pk},
+            )
+        )
+        self.assertEqual(suggestion_resp.status_code, 200)
+        suggestion_lead = _page_lead_html(suggestion_resp.content.decode())
+        self.assertIn(VISIBILITY_LEAD_PUBLIC, suggestion_lead)
+        self.assertNotContains(suggestion_resp, RESTRICTED_CHOICE_LABEL)
+
+        attempts_resp = self.client.get(
+            reverse(
+                "corrected-current-sync-attempts",
+                kwargs={"doc_id": self.public_ocr.pk},
+            )
+        )
+        self.assertEqual(attempts_resp.status_code, 200)
+        attempts_lead = _page_lead_html(attempts_resp.content.decode())
+        self.assertIn(VISIBILITY_LEAD_PUBLIC, attempts_lead)
+        self.assertNotContains(attempts_resp, RESTRICTED_CHOICE_LABEL)
+
+        attempt_resp = self.client.get(
+            reverse(
+                "corrected-current-sync-attempt-detail",
+                kwargs={
+                    "doc_id": self.public_ocr.pk,
+                    "attempt_id": attempt.pk,
+                },
+            )
+        )
+        self.assertEqual(attempt_resp.status_code, 200)
+        attempt_lead = _page_lead_html(attempt_resp.content.decode())
+        self.assertIn(VISIBILITY_LEAD_PUBLIC, attempt_lead)
+        self.assertNotContains(attempt_resp, RESTRICTED_CHOICE_LABEL)

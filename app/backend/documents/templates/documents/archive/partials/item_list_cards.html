@@ -1,3 +1,4 @@
+{% load archive_labels %}
 <ul class="archive-browse-list">
   {% for card in browse_cards %}
     <li class="archive-browse-card{% if card.type_marker == "photo" and card.thumbnail_url %} archive-browse-card--photo-preview{% elif card.type_marker == "ocr" and card.thumbnail_url %} archive-browse-card--document-preview{% elif card.fallback_preview %} archive-browse-card--fallback-preview{% endif %}">
@@ -81,6 +82,13 @@
                   <span class="archive-browse-card__meta-sep"> · </span>
                 {% endif %}
                 <span class="archive-browse-card__date">{{ card.date_display }}</span>
+                {% if is_admin %}
+                  <span class="archive-browse-card__meta-sep"> · </span>
+                  <span class="archive-browse-card__visibility">
+                    <span class="archive-browse-card__meta-label">נראות:</span>
+                    {{ card.item.visibility|archive_visibility_display_label }}
+                  </span>
+                {% endif %}
               </div>
             </header>
 

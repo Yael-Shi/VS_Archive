@@ -10,7 +10,7 @@
           <h1 class="page-title archive-detail-title">{{ item.title }}</h1>
           <div class="page-lead archive-detail-lead">
             {% if is_admin %}
-              פריט ארכיון #{{ item.id }} · {{ item|document_date_display }} · {{ item.visibility|archive_visibility_display_label }}
+              פריט ארכיון #{{ item.id }} · {{ item|document_date_display }} · נראות: {{ item.visibility|archive_visibility_display_label }}
             {% else %}
               {{ item|document_date_display }}
             {% endif %}
@@ -58,7 +58,7 @@
           <h1 class="page-title archive-detail-title">{{ item.title }}</h1>
           <div class="page-lead archive-detail-lead">
             {% if is_admin %}
-              פריט ארכיון #{{ item.id }} · {{ item|document_date_display }} · {{ item.visibility|archive_visibility_display_label }}
+              פריט ארכיון #{{ item.id }} · {{ item|document_date_display }} · נראות: {{ item.visibility|archive_visibility_display_label }}
             {% else %}
               {{ item|document_date_display }}
             {% endif %}
@@ -119,7 +119,7 @@
         <h1 class="page-title archive-detail-title">{{ item.title }}</h1>
         <div class="page-lead archive-detail-lead">
           {% if is_admin %}
-            פריט ארכיון #{{ item.id }} · {{ item|document_date_display }} · {{ item.visibility|archive_visibility_display_label }}
+            פריט ארכיון #{{ item.id }} · {{ item|document_date_display }} · נראות: {{ item.visibility|archive_visibility_display_label }}
           {% else %}
             {{ item|document_date_display }}
           {% endif %}

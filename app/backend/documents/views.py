@@ -4134,11 +4134,12 @@ def _archive_browse_cards_for_items(items, *, search_query: str = ""):
     )
 
 
-def _archive_browse_page_context(*, page_title: str, items) -> dict:
+def _archive_browse_page_context(*, page_title: str, items, user) -> dict:
     return {
         "page_title": page_title,
         "items": items,
         "browse_cards": _archive_browse_cards_for_items(items),
+        "is_admin": _is_admin(user),
     }
 
 
@@ -4155,6 +4156,7 @@ def archive_category_browse_page(request, category_id: int):
         context=_archive_browse_page_context(
             page_title=f"קטגוריה: {category.name}",
             items=items,
+            user=request.user,
         ),
     )
 
@@ -4172,6 +4174,7 @@ def archive_event_browse_page(request, event_id: int):
         context=_archive_browse_page_context(
             page_title=f"אירוע: {event.name}",
             items=items,
+            user=request.user,
         ),
     )
 
@@ -4189,6 +4192,7 @@ def archive_tag_browse_page(request, tag_id: int):
         context=_archive_browse_page_context(
             page_title=f"תגית: {tag.name}",
             items=items,
+            user=request.user,
         ),
     )
 

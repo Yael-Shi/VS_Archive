@@ -23,7 +23,7 @@
               מסמך #{{ doc.id }}
               {% if doc.file_original_name %} · {{ doc.file_original_name }}{% endif %}
               · {{ doc.archive_item|document_date_display }}
-              · {{ doc.archive_item.visibility|archive_visibility_display_label }}
+              · נראות: {{ doc.archive_item.visibility|archive_visibility_display_label }}
             {% else %}
               {{ doc.archive_item|document_date_display }}
             {% endif %}
