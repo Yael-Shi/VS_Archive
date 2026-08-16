@@ -483,7 +483,7 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         "documents.views.create_presigned_get",
         return_value=PRESIGNED_URL,
     )
-    def test_staff_photo_detail_moves_tags_to_technical_details(
+    def test_staff_photo_detail_keeps_discovery_metadata_and_moves_admin_badges_to_technical_details(
         self, _mock_presigned_get
     ):
         category = ArchiveCategory.objects.create(
@@ -507,26 +507,43 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode("utf-8")
 
-        discovery_start = html.index("archive-detail-meta-block--discovery")
-        technical_start = html.index("archive-detail-photo-technical")
-        technical_end = html.index("</details>", technical_start)
-        technical_section = html[technical_start:technical_end]
+        header_start = html.index("archive-detail-photo-header")
+        header_end = html.index("</header>", header_start)
+        header = html[header_start:header_end]
+
+        main_start = header.index("archive-detail-photo-header-main")
+        metadata_start = header.index("archive-detail-photo-meta")
+        toolbar_start = header.index("archive-detail-photo-top")
+
+        self.assertLess(main_start, metadata_start)
+        self.assertLess(metadata_start, toolbar_start)
+
+        # Public/archive metadata stays together in header-main,
+        # exactly like document detail.
+        self.assertIn("Photo detail category", header)
+        self.assertIn("Photo detail event", header)
+        self.assertIn("photo-detail-tag", header)
+
+        discovery_start = header.index("archive-detail-meta-block--discovery")
+
+        # Admin-only badges move to technical details instead.
+        technical_start = header.index("archive-detail-photo-technical")
 
         self.assertLess(discovery_start, technical_start)
+        self.assertIn("Photo detail category", header)
+        self.assertIn("Photo detail event", header)
+        self.assertIn("photo-detail-tag", header)
+        technical_end = header.index("</details>", technical_start)
+        technical_section = header[technical_start:technical_end]
 
-        # Categories/events remain in the regular discovery metadata.
-        self.assertContains(resp, "Photo detail category")
-        self.assertContains(resp, "Photo detail event")
-
-        # Tags move out of regular discovery metadata for staff.
-        discovery_end = html.index("</div>", discovery_start)
-        discovery_section = html[discovery_start:discovery_end]
-        self.assertNotIn("photo-detail-tag", discovery_section)
-
-        # Tags appear in the admin-only technical-details section.
         self.assertIn("<summary>פרטים טכניים</summary>", technical_section)
-        self.assertIn("תגיות:", technical_section)
-        self.assertIn("photo-detail-tag", technical_section)
+        self.assertIn('class="badge-row"', technical_section)
+        self.assertNotIn("Photo detail category", technical_section)
+        self.assertNotIn("Photo detail event", technical_section)
+        self.assertNotIn("photo-detail-tag", technical_section)
+
+        # The old standalone PHOTO badge area is gone.
+        self.assertNotContains(resp, "archive-detail-badges")
 
     @patch(
         "documents.views.create_presigned_get",
@@ -648,11 +665,16 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         self.assertNotIn("הוספת מידע על הפריט", staff_section)
         self.assertNotIn('href="/admin/', staff_section)
 
-        # Admin-only item/status badges remain below the header, unchanged.
-        badges_start = html.index("archive-detail-badges", header_end)
-        badges_section = html[badges_start : html.index("</div>", badges_start)]
-        self.assertIn("תמונה", badges_section)
-        self.assertNotIn("חזרה לארכיון", badges_section)
+        # Admin-only item/status badges live inside the compact
+        # technical-details control in the PHOTO toolbar.
+        technical_start = header.index("archive-detail-photo-technical")
+        technical_end = header.index("</details>", technical_start)
+        technical_section = header[technical_start:technical_end]
+
+        self.assertIn("<summary>פרטים טכניים</summary>", technical_section)
+        self.assertIn("תמונה", technical_section)
+        self.assertNotIn("חזרה לארכיון", technical_section)
+        self.assertNotIn("הוספת מידע על הפריט", technical_section)
 
         edit_tag_start = html.rfind("<a", 0, html.index(f'href="{edit_href}"'))
         edit_tag_end = html.find(">", html.index(f'href="{edit_href}"')) + 1
