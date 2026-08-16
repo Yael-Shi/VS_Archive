@@ -120,6 +120,14 @@ class PublicNavArchiveSearchTests(TestCase):
         ):
             self.assertNotIn(forbidden, form_html)
 
+        advanced_href = f"{self.ARCHIVE_LIST_URL}?advanced=1"
+        self.assertIn(f'href="{advanced_href}"', form_html)
+        self.assertIn("חיפוש מתקדם", form_html)
+        self.assertLess(
+            form_html.index("nav-archive-search__submit"),
+            form_html.index("nav-archive-search__advanced"),
+        )
+
         return html
 
     def test_shared_public_nav_renders_archive_search_form(self):
@@ -157,9 +165,7 @@ class PublicNavArchiveSearchTests(TestCase):
             body="detail body",
             visibility=ArchiveItem.Visibility.PUBLIC,
         )
-        resp = self.client.get(
-            reverse("archive-detail", kwargs={"item_id": item.pk})
-        )
+        resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.pk}))
         self._assert_nav_archive_search_contract(resp)
 
     def test_header_q_get_uses_existing_archive_search_contract(self):
@@ -250,6 +256,106 @@ class PublicNavArchiveSearchTests(TestCase):
         self.assertIn("התנתקות", auth_html)
         self.assertIn(user.username, auth_html)
         self.assertNotIn("הרשמה", auth_html)
+
+
+class HomepageArchiveShowcaseTests(TestCase):
+    def _create_manual_item(self, *, title, visibility):
+        from documents.services.archive_items import create_manual_text_archive_item
+
+        return create_manual_text_archive_item(
+            title=title,
+            body=f"תוכן עבור {title}",
+            visibility=visibility,
+        )
+
+    def test_homepage_showcase_uses_public_items_only_and_limits_to_three(self):
+        from documents.models import ArchiveItem
+
+        public_items = [
+            self._create_manual_item(
+                title=f"Homepage public {index}",
+                visibility=ArchiveItem.Visibility.PUBLIC,
+            )
+            for index in range(4)
+        ]
+        private_item = self._create_manual_item(
+            title="Homepage private must stay hidden",
+            visibility=ArchiveItem.Visibility.PRIVATE,
+        )
+        restricted_item = self._create_manual_item(
+            title="Homepage restricted must stay hidden",
+            visibility=ArchiveItem.Visibility.RESTRICTED,
+        )
+
+        resp = self.client.get(reverse("public-home"))
+
+        self.assertEqual(resp.status_code, 200)
+        cards = list(resp.context["homepage_archive_cards"])
+        self.assertEqual(len(cards), 3)
+        self.assertTrue(
+            all(card.item.visibility == ArchiveItem.Visibility.PUBLIC for card in cards)
+        )
+        self.assertNotContains(resp, private_item.title)
+        self.assertNotContains(resp, restricted_item.title)
+        self.assertContains(resp, "מהארכיון")
+        self.assertContains(resp, "לכל פריטי הארכיון")
+
+        public_ids = {item.pk for item in public_items}
+        self.assertTrue(all(card.item.pk in public_ids for card in cards))
+
+    def test_homepage_showcase_remains_public_only_for_authenticated_staff(self):
+        from documents.models import ArchiveItem
+
+        public_item = self._create_manual_item(
+            title="Homepage staff-visible public",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        private_item = self._create_manual_item(
+            title="Homepage staff-hidden private",
+            visibility=ArchiveItem.Visibility.PRIVATE,
+        )
+        staff = _create_test_user("homepage_showcase_staff", is_staff=True)
+        self.client.force_login(staff)
+
+        resp = self.client.get(reverse("public-home"))
+
+        self.assertEqual(resp.status_code, 200)
+        cards = list(resp.context["homepage_archive_cards"])
+        self.assertEqual([card.item.pk for card in cards], [public_item.pk])
+        self.assertNotContains(resp, private_item.title)
+
+    def test_homepage_showcase_displays_all_when_fewer_than_three_public_items(self):
+        from documents.models import ArchiveItem
+
+        titles = ["Homepage sample one", "Homepage sample two"]
+        for title in titles:
+            self._create_manual_item(
+                title=title,
+                visibility=ArchiveItem.Visibility.PUBLIC,
+            )
+
+        resp = self.client.get(reverse("public-home"))
+
+        self.assertEqual(resp.status_code, 200)
+        cards = list(resp.context["homepage_archive_cards"])
+        self.assertEqual(len(cards), 2)
+        self.assertEqual({card.title for card in cards}, set(titles))
+        for title in titles:
+            self.assertContains(resp, title)
+
+    def test_homepage_hides_showcase_when_no_public_items_exist(self):
+        from documents.models import ArchiveItem
+
+        self._create_manual_item(
+            title="Homepage private only",
+            visibility=ArchiveItem.Visibility.PRIVATE,
+        )
+
+        resp = self.client.get(reverse("public-home"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(list(resp.context["homepage_archive_cards"]), [])
+        self.assertNotContains(resp, "מהארכיון")
 
 
 class AboutPageCopyTests(TestCase):
