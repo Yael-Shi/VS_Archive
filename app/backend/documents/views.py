@@ -235,8 +235,10 @@ from documents.services.transkribus_paragraph_presentation import (
     build_transkribus_paragraph_presentation,
 )
 from documents.services.transkribus_paragraph_staff import (
+    MSG_ADOPTED,
     MSG_SAVED,
     ParagraphEditorError,
+    adopt_paragraph_editor_mapping,
     build_paragraph_editor_context,
     build_paragraph_mapping_staff_status,
     save_paragraph_editor_mapping,
@@ -3095,12 +3097,13 @@ def transkribus_paragraph_editor_page(request, doc_id: int):
     )
     logger.info(
         "transkribus_paragraph_editor_page user=%s doc_id=%s available=%s "
-        "lines=%s status=%s",
+        "lines=%s status=%s suggestions=%s",
         getattr(request.user, "username", None),
         doc.id,
         editor.available,
         len(editor.lines),
         editor.status.code,
+        len(editor.adoption_suggestions),
     )
     return render(
         request,
@@ -3119,8 +3122,47 @@ def transkribus_paragraph_editor_page(request, doc_id: int):
             "editor_lines": editor.lines,
             "paragraph_status": editor.status,
             "source_is_rtl": editor.source_is_rtl,
+            "adoption_suggestions": editor.adoption_suggestions,
+            "adoption_intro": editor.adoption_intro,
         },
     )
+
+
+@login_required
+@require_POST
+def transkribus_paragraph_adopt(request, doc_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    doc = get_viewable_document(
+        request.user,
+        doc_id,
+        queryset=Document.objects.select_related("archive_item").prefetch_related(
+            text_presentation_results_prefetch(),
+            "source_files",
+        ),
+    )
+    editor_url = _paragraph_editor_url(doc_id=doc.id)
+
+    try:
+        adopt_paragraph_editor_mapping(doc, request.POST, actor=request.user)
+    except ParagraphEditorError as exc:
+        messages.error(request, exc.staff_message)
+        logger.info(
+            "transkribus_paragraph_adopt refused user=%s doc_id=%s message=%s",
+            getattr(request.user, "username", None),
+            doc.id,
+            exc.staff_message,
+        )
+        return redirect(editor_url)
+    messages.success(request, MSG_ADOPTED)
+    logger.info(
+        "transkribus_paragraph_adopt saved user=%s doc_id=%s",
+        getattr(request.user, "username", None),
+        doc.id,
+    )
+    return redirect(editor_url)
 
 
 def document_detail_page(request, doc_id: int):

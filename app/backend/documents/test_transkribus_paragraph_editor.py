@@ -486,9 +486,14 @@ class ParagraphEditorMappingStatusTests(TestCase):
         self.assertContains(versions, STATUS_HISTORICAL_NOTE)
         self.assertNotContains(versions, status_n_paragraphs(2))
         self.assertNotContains(versions, "אימוץ")
+        self.assertNotIn(
+            reverse("transkribus-paragraphs-adopt", kwargs={"doc_id": self.doc.id}),
+            versions.content.decode(),
+        )
         detail = self.client.get(self.detail_url)
         self.assertContains(detail, STATUS_NEVER_SAVED)
         self.assertNotContains(detail, status_n_paragraphs(2))
+        self.assertNotContains(detail, "אימוץ")
 
 
 @override_settings(UPLOADS_BUCKET_NAME="")

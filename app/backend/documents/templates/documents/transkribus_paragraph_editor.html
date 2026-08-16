@@ -32,6 +32,37 @@
       {% include "documents/partials/transkribus_paragraph_status.html" with doc=doc paragraph_status=paragraph_status show_editor_link=False %}
     </div>
 
+    {% if editor_available and adoption_suggestions %}
+      <div class="spacer-sm"></div>
+      <div class="card card--pad-lg paragraph-adoption">
+        <div class="section-title">חלוקה מגרסה קודמת</div>
+        <p class="page-lead">{{ adoption_intro }}</p>
+        <ul class="paragraph-adoption-list">
+          {% for suggestion in adoption_suggestions %}
+            <li class="paragraph-adoption-item">
+              <form
+                method="post"
+                action="{% url 'transkribus-paragraphs-adopt' doc_id=doc.id %}"
+                class="paragraph-adoption-form"
+              >
+                {% csrf_token %}
+                <input type="hidden" name="expected_document_id" value="{{ freshness.document_id }}">
+                <input type="hidden" name="expected_text_result_id" value="{{ freshness.text_result_id }}">
+                <input type="hidden" name="expected_snapshot_id" value="{{ freshness.snapshot_id }}">
+                <input type="hidden" name="expected_source_mapping_id" value="{{ suggestion.mapping_id }}">
+                <input type="hidden" name="expected_source_snapshot_id" value="{{ suggestion.source_snapshot_id }}">
+                <div class="paragraph-adoption-item__copy">
+                  <div class="paragraph-adoption-item__label">{{ suggestion.label }}</div>
+                  <div class="muted text-sm">אפשר לבחור אם לאמץ את החלוקה. החלוקה תיווצר לגרסה הנוכחית בלבד.</div>
+                </div>
+                <button type="submit" class="btn">אימוץ חלוקה זו לגרסה הנוכחית</button>
+              </form>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
     <div class="spacer-sm"></div>
 
     {% if not editor_available %}

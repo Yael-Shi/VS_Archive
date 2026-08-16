@@ -1,16 +1,19 @@
-"""Staff Transkribus paragraph editor and status helpers (PR3).
+"""Staff Transkribus paragraph editor and status helpers (PR3 + PR4).
 
 Presentation metadata only: does not mutate transcription text, snapshot
-lines, geometry, char offsets, hover IDs, or bindings. Saving delegates to
-``save_paragraph_mapping``. Historical suggestion/adoption UI is not
-implemented here.
+lines, geometry, char offsets, hover IDs, or bindings. Ordinary saves
+delegate to ``save_paragraph_mapping``. Historical adoption is an explicit
+create-only write through ``adopt_historical_paragraph_mapping``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from django.http import QueryDict
+from django.utils.dateformat import format as format_datetime
+from django.utils.timezone import localtime
 
 from documents.models import (
     Document,
@@ -20,6 +23,15 @@ from documents.models import (
     TranskribusTranscriptSnapshot,
 )
 from documents.services.text_presentation import source_text_is_rtl
+from documents.services.transkribus_paragraph_adoption import (
+    ParagraphMappingAdoptionError,
+    ParagraphMappingAdoptionRefusal,
+    adopt_historical_paragraph_mapping,
+)
+from documents.services.transkribus_paragraph_correspondence import (
+    HistoricalParagraphMappingCandidate,
+    discover_transferable_historical_mappings,
+)
 from documents.services.transkribus_paragraph_mapping import (
     ParagraphMappingCurrentness,
     TranskribusParagraphMappingError,
@@ -35,6 +47,7 @@ STATUS_ONE_PARAGRAPH = "נשמרה חלוקה: פסקה אחת"
 STATUS_HISTORICAL_NOTE = "קיימת חלוקת פסקאות שמורה לתעתוק ישן יותר."
 
 MSG_SAVED = "חלוקת הפסקאות נשמרה."
+MSG_ADOPTED = "חלוקת הפסקאות מגרסה קודמת אומצה."
 MSG_STALE_SUBMIT = "התעתוק המוצג השתנה מאז שנפתח העורך. רעננו את הדף ונסו שוב."
 MSG_STALE_BINDING = (
     "לא ניתן לשמור חלוקת פסקאות כי התעתוק המוצג אינו תואם עוד לגרסת Transkribus."
@@ -46,11 +59,27 @@ MSG_OTHER_SNAPSHOT = "לא ניתן לשמור: אחת השורות אינה ש�
 MSG_NON_CONTRIBUTING = "לא ניתן לשמור גבול אחרי שורה שאינה חלק מהתעתוק."
 MSG_FINAL_LINE = "אין משמעות לגבול פסקה אחרי השורה האחרונה."
 MSG_GENERIC = "לא ניתן לשמור את חלוקת הפסקאות. רעננו את הדף ונסו שוב."
+MSG_ADOPT_ALREADY_EXISTS = (
+    "לחלוקת הפסקאות הנוכחית כבר נשמרה חלוקה. לא בוצע אימוץ מגרסה קודמת."
+)
+MSG_ADOPT_UNAVAILABLE = "לא ניתן לאמץ את החלוקה מגרסה קודמת. רעננו את הדף ונסו שוב."
+
+ADOPTION_INTRO_SINGLE = (
+    "נמצאה חלוקת פסקאות מגרסת Transkribus קודמת. זו הצעה בלבד. "
+    "אימוץ יוצר את החלוקה לגרסה הנוכחית; אפשר גם להתעלם ולהגדיר חלוקה ידנית."
+)
+ADOPTION_INTRO_MULTIPLE = (
+    "נמצאו חלוקות פסקאות מגרסאות Transkribus קודמות. זו הצעה בלבד. "
+    "בחרו איזו חלוקה לאמץ לגרסה הנוכחית, או הגדירו חלוקה ידנית."
+)
+ADOPTION_ACTION_LABEL = "אימוץ חלוקה זו לגרסה הנוכחית"
 
 EDITOR_BREAK_FIELD = "break_after"
 EDITOR_EXPECTED_DOCUMENT_FIELD = "expected_document_id"
 EDITOR_EXPECTED_RESULT_FIELD = "expected_text_result_id"
 EDITOR_EXPECTED_SNAPSHOT_FIELD = "expected_snapshot_id"
+ADOPT_EXPECTED_SOURCE_MAPPING_FIELD = "expected_source_mapping_id"
+ADOPT_EXPECTED_SOURCE_SNAPSHOT_FIELD = "expected_source_snapshot_id"
 
 
 class ParagraphEditorError(ValueError):
@@ -101,6 +130,20 @@ class ParagraphEditorLine:
 
 
 @dataclass(frozen=True)
+class HistoricalParagraphAdoptionSuggestion:
+    """Staff-facing historical mapping choice. IDs are POST tokens only."""
+
+    mapping_id: int
+    source_snapshot_id: int
+    created_at: datetime
+    break_count: int
+    paragraph_count: int
+    version_label: str
+    paragraph_label: str
+    label: str
+
+
+@dataclass(frozen=True)
 class ParagraphEditorContext:
     """Bounded editor payload for the current displayed Transkribus snapshot."""
 
@@ -111,10 +154,68 @@ class ParagraphEditorContext:
     lines: tuple[ParagraphEditorLine, ...]
     status: ParagraphMappingStaffStatus
     source_is_rtl: bool
+    adoption_suggestions: tuple[HistoricalParagraphAdoptionSuggestion, ...] = ()
+    adoption_intro: str | None = None
 
 
 def status_n_paragraphs(count: int) -> str:
     return f"נשמרה חלוקה: {count} פסקאות"
+
+
+def paragraph_count_phrase(paragraph_count: int) -> str:
+    if paragraph_count == 1:
+        return "פסקה אחת"
+    return f"{paragraph_count} פסקאות"
+
+
+def _format_version_datetimes(created_ats: tuple[datetime, ...]) -> tuple[str, ...]:
+    minute_labels = tuple(
+        format_datetime(localtime(created_at), "d.m.Y H:i")
+        for created_at in created_ats
+    )
+    if len(set(minute_labels)) == len(minute_labels):
+        return minute_labels
+    return tuple(
+        format_datetime(localtime(created_at), "d.m.Y H:i:s")
+        for created_at in created_ats
+    )
+
+
+def _suggestions_from_candidates(
+    candidates: tuple[HistoricalParagraphMappingCandidate, ...],
+) -> tuple[HistoricalParagraphAdoptionSuggestion, ...]:
+    version_labels = _format_version_datetimes(
+        tuple(candidate.source_snapshot_created_at for candidate in candidates)
+    )
+    suggestions: list[HistoricalParagraphAdoptionSuggestion] = []
+    for candidate, version_label in zip(candidates, version_labels, strict=True):
+        break_count = len(candidate.break_after_source_line_ids)
+        paragraph_count = break_count + 1
+        paragraph_label = paragraph_count_phrase(paragraph_count)
+        suggestions.append(
+            HistoricalParagraphAdoptionSuggestion(
+                mapping_id=candidate.mapping_id,
+                source_snapshot_id=candidate.source_snapshot_id,
+                created_at=candidate.source_snapshot_created_at,
+                break_count=break_count,
+                paragraph_count=paragraph_count,
+                version_label=version_label,
+                paragraph_label=paragraph_label,
+                label=(
+                    f"חלוקה מגרסת Transkribus מ־{version_label} · {paragraph_label}"
+                ),
+            )
+        )
+    return tuple(suggestions)
+
+
+def build_historical_paragraph_adoption_suggestions(
+    snapshot: TranskribusTranscriptSnapshot,
+) -> tuple[HistoricalParagraphAdoptionSuggestion, ...]:
+    """Eligible historical mappings for the editor, newest-first, none selected."""
+    return _suggestions_from_candidates(
+        discover_transferable_historical_mappings(snapshot)
+    )
 
 
 def _hover_line_id_for_source_line(line: TranskribusSnapshotLine) -> str:
@@ -265,6 +366,8 @@ def build_paragraph_editor_context(
             lines=(),
             status=status,
             source_is_rtl=rtl,
+            adoption_suggestions=(),
+            adoption_intro=None,
         )
 
     if not assessment.is_structurally_fresh:
@@ -276,6 +379,8 @@ def build_paragraph_editor_context(
             lines=(),
             status=status,
             source_is_rtl=rtl,
+            adoption_suggestions=(),
+            adoption_intro=None,
         )
 
     snapshot = TranskribusTranscriptSnapshot.objects.filter(
@@ -290,6 +395,8 @@ def build_paragraph_editor_context(
             lines=(),
             status=status,
             source_is_rtl=rtl,
+            adoption_suggestions=(),
+            adoption_intro=None,
         )
 
     contributing = contributing_lines_for_snapshot(snapshot)
@@ -323,6 +430,14 @@ def build_paragraph_editor_context(
         text_result_id=int(assessment.displayed_text_result_id),
         snapshot_id=int(snapshot.pk),
     )
+    adoption_suggestions: tuple[HistoricalParagraphAdoptionSuggestion, ...] = ()
+    adoption_intro: str | None = None
+    if not assessment.has_mapping:
+        adoption_suggestions = build_historical_paragraph_adoption_suggestions(snapshot)
+        if len(adoption_suggestions) == 1:
+            adoption_intro = ADOPTION_INTRO_SINGLE
+        elif len(adoption_suggestions) > 1:
+            adoption_intro = ADOPTION_INTRO_MULTIPLE
     return ParagraphEditorContext(
         available=True,
         unavailable_message=None,
@@ -331,6 +446,8 @@ def build_paragraph_editor_context(
         lines=tuple(lines),
         status=status,
         source_is_rtl=rtl,
+        adoption_suggestions=adoption_suggestions,
+        adoption_intro=adoption_intro,
     )
 
 
@@ -433,17 +550,94 @@ def save_paragraph_editor_mapping(
         raise ParagraphEditorError(staff_message_for_mapping_error(exc)) from exc
 
 
+def parse_adoption_source_ids(post: QueryDict) -> tuple[int, int]:
+    try:
+        mapping_id = int(
+            str(post.get(ADOPT_EXPECTED_SOURCE_MAPPING_FIELD) or "").strip()
+        )
+        snapshot_id = int(
+            str(post.get(ADOPT_EXPECTED_SOURCE_SNAPSHOT_FIELD) or "").strip()
+        )
+    except (TypeError, ValueError) as exc:
+        raise ParagraphEditorError(MSG_ADOPT_UNAVAILABLE) from exc
+    return mapping_id, snapshot_id
+
+
+def _staff_message_for_adoption_error(exc: ParagraphMappingAdoptionError) -> str:
+    if exc.code == ParagraphMappingAdoptionRefusal.TARGET_MAPPING_EXISTS:
+        return MSG_ADOPT_ALREADY_EXISTS
+    return MSG_ADOPT_UNAVAILABLE
+
+
+def adopt_paragraph_editor_mapping(
+    document: Document,
+    post: QueryDict,
+    *,
+    actor,
+) -> TranskribusParagraphMapping:
+    """Revalidate editor freshness and source choice, then adopt create-only."""
+    assessment = assess_paragraph_mapping_currentness(document)
+    if (
+        assessment.bound_snapshot_id is None
+        or assessment.displayed_text_result_id is None
+    ):
+        raise ParagraphEditorError(MSG_UNAVAILABLE)
+    if not assessment.is_structurally_fresh:
+        raise ParagraphEditorError(MSG_STALE_BINDING)
+
+    expected = parse_editor_freshness(post)
+    if not editor_freshness_matches(document, expected, assessment=assessment):
+        raise ParagraphEditorError(MSG_STALE_SUBMIT)
+
+    snapshot = TranskribusTranscriptSnapshot.objects.filter(
+        pk=assessment.bound_snapshot_id
+    ).first()
+    if snapshot is None:
+        raise ParagraphEditorError(MSG_UNAVAILABLE)
+
+    source_mapping_id, source_snapshot_id = parse_adoption_source_ids(post)
+    source_mapping = (
+        TranskribusParagraphMapping.objects.filter(
+            pk=source_mapping_id,
+            document_id=document.pk,
+            snapshot_id=source_snapshot_id,
+        )
+        .select_related("snapshot")
+        .first()
+    )
+    if source_mapping is None:
+        raise ParagraphEditorError(MSG_ADOPT_UNAVAILABLE)
+
+    try:
+        return adopt_historical_paragraph_mapping(
+            source_mapping,
+            snapshot,
+            actor=actor,
+        )
+    except ParagraphMappingAdoptionError as exc:
+        raise ParagraphEditorError(_staff_message_for_adoption_error(exc)) from exc
+
+
 __all__ = [
+    "ADOPTION_ACTION_LABEL",
+    "ADOPTION_INTRO_MULTIPLE",
+    "ADOPTION_INTRO_SINGLE",
+    "ADOPT_EXPECTED_SOURCE_MAPPING_FIELD",
+    "ADOPT_EXPECTED_SOURCE_SNAPSHOT_FIELD",
     "EDITOR_BREAK_FIELD",
     "EDITOR_EXPECTED_DOCUMENT_FIELD",
     "EDITOR_EXPECTED_RESULT_FIELD",
     "EDITOR_EXPECTED_SNAPSHOT_FIELD",
+    "MSG_ADOPTED",
+    "MSG_ADOPT_ALREADY_EXISTS",
+    "MSG_ADOPT_UNAVAILABLE",
     "MSG_GENERIC",
     "MSG_MALFORMED",
     "MSG_SAVED",
     "MSG_STALE_BINDING",
     "MSG_STALE_SUBMIT",
     "MSG_UNAVAILABLE",
+    "HistoricalParagraphAdoptionSuggestion",
     "ParagraphEditorContext",
     "ParagraphEditorError",
     "ParagraphEditorFreshness",
@@ -454,11 +648,15 @@ __all__ = [
     "STATUS_ONE_PARAGRAPH",
     "STATUS_STALE_BINDING",
     "STATUS_UNAVAILABLE",
+    "adopt_paragraph_editor_mapping",
+    "build_historical_paragraph_adoption_suggestions",
     "build_paragraph_editor_context",
     "build_paragraph_mapping_staff_status",
     "editor_freshness_matches",
+    "parse_adoption_source_ids",
     "parse_break_after_line_ids",
     "parse_editor_freshness",
+    "paragraph_count_phrase",
     "save_paragraph_editor_mapping",
     "staff_message_for_mapping_error",
     "status_n_paragraphs",

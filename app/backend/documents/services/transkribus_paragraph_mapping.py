@@ -136,6 +136,7 @@ def save_paragraph_mapping(
     *,
     actor: User | None = None,
     copied_from: TranskribusParagraphMapping | None = None,
+    create_only: bool = False,
 ) -> TranskribusParagraphMapping:
     """Create or replace the mapping for ``snapshot`` transactionally.
 
@@ -146,10 +147,13 @@ def save_paragraph_mapping(
     ``updated_by``; ``actor=None`` leaves the existing editor unchanged.
 
     ``copied_from`` is the source of the *current* saved paragraph division,
-    not permanent ancestry. Pass a historical mapping for an explicit future
-    adoption write. Omit it on an ordinary/manual save: create then stores
-    null, and resave clears any previous ``copied_from``. This service does
-    not perform adoption; there is no adoption UI in PR1.
+    not permanent ancestry. Pass a historical mapping for an explicit adoption
+    write. Omit it on an ordinary/manual save: create then stores null, and
+    resave clears any previous ``copied_from``.
+
+    Default behavior remains create-or-replace. ``create_only=True`` refuses if
+    this snapshot already has a mapping and does not replace breaks. Ordinary
+    manual saves must omit ``create_only``.
     """
     if snapshot.pk is None:
         raise TranskribusParagraphMappingError(
@@ -179,6 +183,10 @@ def save_paragraph_mapping(
             )
             mapping.save()
         else:
+            if create_only:
+                raise TranskribusParagraphMappingError(
+                    "Target snapshot already has a paragraph mapping."
+                )
             mapping.copied_from = copied_from
             if actor is not None:
                 mapping.updated_by = actor
