@@ -3525,7 +3525,7 @@ JavaScript hover behavior, scrolling, image overlays, or schema changes.
 
 **Must not change (this PR and later paragraph work unless explicitly approved):** `DocumentTextResult.text`, `TranskribusTranscriptSnapshot.canonical_text`, `TranskribusSnapshotLine.text`, source geometry, canonical char offsets, hover IDs, search offsets.
 
-**Not implemented (later PRs, do not treat as done):** staff paragraph editor UI; copy/adopt POST; automatic adoption; Gemini/general-provider paragraph mappings; AI/fuzzy matching; dehyphenation; same-snapshot local typo remapper. Public paragraph rendering is implemented in the PR2 entry below.
+**Not implemented (later PRs, do not treat as done):** copy/adopt POST; automatic adoption; Gemini/general-provider paragraph mappings; AI/fuzzy matching; dehyphenation; same-snapshot local typo remapper. Staff paragraph editor/status is implemented in the PR3 entry below. Public paragraph rendering is implemented in the PR2 entry below.
 
 ## Transkribus paragraph public rendering (PR2 — presentation overlay only)
 
@@ -3541,7 +3541,24 @@ JavaScript hover behavior, scrolling, image overlays, or schema changes.
 - Source-line hover IDs, overlay bbox calculation, and `pointer-events: none` overlays are unchanged. Search match indexes, click-sync attributes, previous/next navigation, and sticky source behavior keep the existing identities/order.
 - Gemini, other non-Transkribus OCR, manual text, photo, and video public paths are unchanged. No new public paragraph endpoint.
 
-**Not implemented (later PRs):** staff paragraph editor UI; staff status UI; historical suggestion UI; copy/adopt POST; automatic inheritance; paragraph inference; Gemini/general-provider paragraph support; transcription editing; dehyphenation; canonical-text rewriting.
-
+**Not implemented (later PRs):** historical suggestion UI; copy/adopt POST; automatic inheritance; paragraph inference; Gemini/general-provider paragraph support; transcription editing; dehyphenation; canonical-text rewriting. Staff paragraph editor/status is implemented in the PR3 entry below.
 
 **Explicit non-goals for correspondence:** canonical-text equality, char offsets, fuzzy text, geometry epsilon, `provider_region_id`, provider page identity alone, raw XML equality, or matching line counts alone.
+
+## Transkribus paragraph staff editor and status (PR3 — editor UI only)
+
+**Decision / implemented:** v1 staff paragraph editing is Transkribus-only and is not a transcription editor. Workflow remains: correct text in Transkribus, pull/activate in VS-Archive, then define paragraph boundaries in VS-Archive. The editor operates on original Transkribus source-line structure (not flowed prose). Every source line is not a paragraph; absence of a mapping means grouping was never saved; a saved mapping with zero breaks is an explicit one-paragraph save.
+
+**Current behavior:**
+
+- Route: `ui/admin/documents/<id>/transkribus-paragraphs/` (`transkribus-paragraphs`). Belongs to the existing Transkribus versions/management family. No new top-level staff nav item. Review-detail is unchanged (text review only).
+- Authorization reuses Transkribus versions: `login_required` + `_require_admin_page` + `get_viewable_document` + CSRF. Restricted items still require `documents.view_restricted_archiveitem`.
+- Editor layout reuses document-detail two-column source/text CSS. Source lines stay in page/order sequence. Page transitions are labeled and are **not** preselected as paragraph breaks. A paragraph may cross pages. There is no break control after the final contributing line. Source text is not editable.
+- Save delegates to PR1 `save_paragraph_mapping(...)` (ordinary/manual save, no `copied_from`). POST/PRG. Staff actor is `request.user`. Zero selected breaks is a valid explicit save. Canonical text, snapshot lines, geometry, offsets, and bindings are not mutated.
+- Freshness: POST carries `expected_document_id`, `expected_text_result_id`, and `expected_snapshot_id`. If the displayed result, bound snapshot, or structural freshness no longer matches, the write is refused with a staff-facing Hebrew message that does not expose raw IDs.
+- Status (current displayed/bound snapshot only): never saved; saved one paragraph; saved N paragraphs. An old-snapshot mapping alone does not count as the current division; versions/detail may note that a historical mapping exists, without adopt/copy controls.
+- Status locations: Transkribus versions card “תעתוק Transkribus המוצג כעת”; compact staff-only note on document detail. Entry point: “עריכת חלוקת פסקאות”.
+- Existing source-line hover JS is reused in the editor when hover overlays already exist; hover is not required for editing.
+- No live public preview in this PR.
+
+**Not implemented (later PRs, do not treat as done):** historical suggestion/adoption UI; copy/adopt POST; overwrite confirmation for historical suggestions; AI paragraph inference; Gemini/general-provider paragraph support; transcription editing; dehyphenation.

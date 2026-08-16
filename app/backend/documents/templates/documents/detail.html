@@ -49,6 +49,10 @@
             <div class="document-detail-staff-management-actions">
               {% include "documents/partials/staff_document_nav.html" with doc=doc current_section="document" staff_nav_variant="stack" show_transkribus_corrected_current_sync_action=show_transkribus_corrected_current_sync_action %}
 
+              {% if paragraph_status %}
+                {% include "documents/partials/transkribus_paragraph_status.html" with doc=doc paragraph_status=paragraph_status show_editor_link=True variant="compact" %}
+              {% endif %}
+
               {% if show_ocr_reprocess_action or show_hebrew_translation_retry_action %}
                 <details class="review-details review-details--secondary document-detail-staff-actions">
                   <summary>פעולות נוספות</summary>

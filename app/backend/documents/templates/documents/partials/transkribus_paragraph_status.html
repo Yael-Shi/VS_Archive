@@ -1,0 +1,17 @@
+{% comment %}
+Staff-only Transkribus paragraph-mapping status.
+Expects: paragraph_status, show_editor_link (bool).
+Optional variant: "compact" (document detail) or default card body.
+{% endcomment %}
+<div class="transkribus-paragraph-status{% if variant == 'compact' %} transkribus-paragraph-status--compact{% endif %}">
+  <div class="transkribus-paragraph-status__label">{{ paragraph_status.label }}</div>
+  {% if paragraph_status.historical_note %}
+    <div class="muted text-sm transkribus-paragraph-status__note">{{ paragraph_status.historical_note }}</div>
+  {% endif %}
+  {% if show_editor_link and paragraph_status.editor_available %}
+    <a
+      class="btn{% if variant == 'compact' %} btn-primary{% endif %} transkribus-paragraph-status__edit"
+      href="{% url 'transkribus-paragraphs' doc_id=doc.id %}"
+    >עריכת חלוקת פסקאות</a>
+  {% endif %}
+</div>
