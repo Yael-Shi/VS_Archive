@@ -3475,6 +3475,18 @@ pre {
   overflow-wrap: anywhere;
 }
 
+.archive-detail-photo-technical {
+  margin-top: var(--space-2);
+}
+
+.archive-detail-photo-technical > summary {
+  font-size: var(--font-sm);
+}
+
+.archive-detail-photo-technical .review-details-body {
+  min-width: 0;
+}
+
 .archive-detail-photo-description {
   margin-bottom: var(--space-2);
   font-size: var(--font-base);

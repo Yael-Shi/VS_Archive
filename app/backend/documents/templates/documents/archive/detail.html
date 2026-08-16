@@ -48,9 +48,6 @@
           <span class="badge">{{ item.item_type|archive_item_type_label }}</span>
           <span class="badge">{{ item.metadata_status|archive_metadata_status_label }}</span>
         </div>
-        <div class="spacer-sm"></div>
-      {% else %}
-        <div class="spacer-sm"></div>
       {% endif %}
     {% elif item.item_type == "MANUAL_TEXT" %}
       <header class="archive-detail-manual-text-header">
@@ -144,9 +141,33 @@
       {% if item.item_type == "PHOTO" %}
         {% include "documents/archive/partials/photo_metadata_display.html" with photo_content=photo_content %}
       {% endif %}
-      {% include "documents/archive/partials/discovery_metadata.html" with item=item %}
+      {% if item.item_type == "PHOTO" and is_admin %}
+        {% include "documents/archive/partials/discovery_metadata.html" with item=item hide_tags=True %}
+      {% else %}
+        {% include "documents/archive/partials/discovery_metadata.html" with item=item %}
+      {% endif %}
       {% include "documents/archive/partials/public_note_display.html" with item=item %}
     </div>
+
+    {% if item.item_type == "PHOTO" and is_admin %}
+      <details class="review-details review-details--secondary archive-detail-photo-technical">
+        <summary>פרטים טכניים</summary>
+        <div class="review-details-body">
+          {% if item.tags.all %}
+            <div class="archive-detail-meta-row">
+              <strong class="archive-detail-meta-label">תגיות:</strong>
+              <span class="archive-detail-meta-value">
+                {% for t in item.tags.all %}
+                  <a href="{% url 'archive-tag-browse' tag_id=t.id %}">{{ t.name }}</a>{% if not forloop.last %}, {% endif %}
+                {% endfor %}
+              </span>
+            </div>
+          {% else %}
+            <div class="muted">אין תגיות.</div>
+          {% endif %}
+        </div>
+      </details>
+    {% endif %}
 
     {% if item.item_type != "PHOTO" and item.item_type != "MANUAL_TEXT" %}
       <div class="spacer-sm"></div>
