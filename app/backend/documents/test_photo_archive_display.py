@@ -483,6 +483,87 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         "documents.views.create_presigned_get",
         return_value=PRESIGNED_URL,
     )
+    def test_staff_photo_detail_moves_tags_to_technical_details(
+        self, _mock_presigned_get
+    ):
+        category = ArchiveCategory.objects.create(
+            name="Photo detail category",
+            slug="photo-detail-category",
+        )
+        event = ArchiveEvent.objects.create(
+            name="Photo detail event",
+            slug="photo-detail-event",
+        )
+        tag = Tag.objects.create(name="photo-detail-tag")
+        self.public_uploaded.categories.add(category)
+        self.public_uploaded.events.add(event)
+        self.public_uploaded.tags.add(tag)
+
+        self.client.force_login(self.staff)
+        resp = self.client.get(
+            reverse("archive-detail", kwargs={"item_id": self.public_uploaded.id})
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        discovery_start = html.index("archive-detail-meta-block--discovery")
+        technical_start = html.index("archive-detail-photo-technical")
+        technical_end = html.index("</details>", technical_start)
+        technical_section = html[technical_start:technical_end]
+
+        self.assertLess(discovery_start, technical_start)
+
+        # Categories/events remain in the regular discovery metadata.
+        self.assertContains(resp, "Photo detail category")
+        self.assertContains(resp, "Photo detail event")
+
+        # Tags move out of regular discovery metadata for staff.
+        discovery_end = html.index("</div>", discovery_start)
+        discovery_section = html[discovery_start:discovery_end]
+        self.assertNotIn("photo-detail-tag", discovery_section)
+
+        # Tags appear in the admin-only technical-details section.
+        self.assertIn("<summary>פרטים טכניים</summary>", technical_section)
+        self.assertIn("תגיות:", technical_section)
+        self.assertIn("photo-detail-tag", technical_section)
+
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value=PRESIGNED_URL,
+    )
+    def test_public_photo_detail_still_renders_discovery_metadata(
+        self, _mock_presigned_get
+    ):
+        category = ArchiveCategory.objects.create(
+            name="Public photo category",
+            slug="public-photo-category",
+        )
+        event = ArchiveEvent.objects.create(
+            name="Public photo event",
+            slug="public-photo-event",
+        )
+        tag = Tag.objects.create(name="public-photo-tag")
+        self.public_uploaded.categories.add(category)
+        self.public_uploaded.events.add(event)
+        self.public_uploaded.tags.add(tag)
+
+        resp = self.client.get(
+            reverse("archive-detail", kwargs={"item_id": self.public_uploaded.id})
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "archive-detail-meta-block--discovery")
+        self.assertContains(resp, "Public photo category")
+        self.assertContains(resp, "Public photo event")
+        self.assertContains(resp, "public-photo-tag")
+        self.assertNotContains(resp, "archive-detail-photo-technical")
+
+
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value=PRESIGNED_URL,
+    )
     def test_staff_photo_detail_separates_public_nav_from_staff_management(
         self, _mock_presigned_get
     ):
