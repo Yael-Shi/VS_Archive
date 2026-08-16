@@ -600,6 +600,14 @@ class RestrictedVisibilitySurfaceTests(TestCase):
         )
         self.assertEqual(sync_detail.status_code, 404)
 
+        paragraph_editor = self.client.get(
+            reverse(
+                "transkribus-paragraphs",
+                kwargs={"doc_id": self.restricted_ocr.pk},
+            )
+        )
+        self.assertEqual(paragraph_editor.status_code, 404)
+
         self.client.force_login(self.staff_with_perm)
         t_detail_ok = self.client.get(
             reverse(
@@ -616,6 +624,13 @@ class RestrictedVisibilitySurfaceTests(TestCase):
             )
         )
         self.assertEqual(sync_ok.status_code, 200)
+        paragraph_ok = self.client.get(
+            reverse(
+                "transkribus-paragraphs",
+                kwargs={"doc_id": self.restricted_ocr.pk},
+            )
+        )
+        self.assertEqual(paragraph_ok.status_code, 200)
 
     def test_public_suggestion_form_404_for_restricted_without_perm(self):
         self.assertEqual(
@@ -978,6 +993,23 @@ class RestrictedVisibilityMutationGateTests(TestCase):
             document_id=self.restricted_ocr.pk,
             initiated_by=self.staff_with_perm,
         )
+
+    @patch("documents.views.save_paragraph_editor_mapping")
+    def test_paragraph_editor_post_404_without_perm_before_service(self, mock_save):
+        resp = self._post_as(
+            self.staff,
+            reverse(
+                "transkribus-paragraphs",
+                kwargs={"doc_id": self.restricted_ocr.pk},
+            ),
+            data={
+                "expected_document_id": str(self.restricted_ocr.pk),
+                "expected_text_result_id": "1",
+                "expected_snapshot_id": "1",
+            },
+        )
+        self.assertEqual(resp.status_code, 404)
+        mock_save.assert_not_called()
 
     @patch("documents.views.validate_required_env")
     @patch("documents.views.apply_ocr_reprocess")

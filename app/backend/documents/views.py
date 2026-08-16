@@ -234,6 +234,13 @@ from documents.services.archive_search_transcription_presentation import (
 from documents.services.transkribus_paragraph_presentation import (
     build_transkribus_paragraph_presentation,
 )
+from documents.services.transkribus_paragraph_staff import (
+    MSG_SAVED,
+    ParagraphEditorError,
+    build_paragraph_editor_context,
+    build_paragraph_mapping_staff_status,
+    save_paragraph_editor_mapping,
+)
 from documents.services.text_line_hover_presentation import (
     apply_text_line_hover_overlay_to_source_previews,
     build_text_line_hover_overlay_pages,
@@ -2473,13 +2480,15 @@ def corrected_current_sync_attempts_page(request, doc_id: int):
     ]
 
     show_enqueue_action = _is_transkribus_corrected_current_sync_ui_eligible(doc)
+    paragraph_status = build_paragraph_mapping_staff_status(doc)
     logger.info(
         "corrected_current_sync_attempts_page user=%s doc_id=%s attempts=%s "
-        "show_enqueue=%s",
+        "show_enqueue=%s paragraph_status=%s",
         getattr(request.user, "username", None),
         doc.id,
         len(attempt_rows),
         show_enqueue_action,
+        paragraph_status.code,
     )
     return render(
         request,
@@ -2490,6 +2499,7 @@ def corrected_current_sync_attempts_page(request, doc_id: int):
             "show_transkribus_corrected_current_sync_enqueue_action": (
                 show_enqueue_action
             ),
+            "paragraph_status": paragraph_status,
         },
     )
 
@@ -3004,6 +3014,115 @@ def _is_transkribus_corrected_current_sync_ui_eligible(
     return True
 
 
+def _paragraph_editor_url(*, doc_id: int) -> str:
+    return reverse("transkribus-paragraphs", kwargs={"doc_id": doc_id})
+
+
+def _paragraph_editor_hover_source_context(doc: Document, source_context: dict) -> dict:
+    text_line_hover = build_text_line_hover_presentation(
+        doc,
+        source_preview_items=source_context["source_preview_items"],
+        content_url=source_context["content_url"],
+    )
+    text_line_hover_overlay_pages = build_text_line_hover_overlay_pages(
+        doc,
+        source_preview_items=source_context["source_preview_items"],
+        content_url=source_context["content_url"],
+        overlay_targets=text_line_hover.overlay_targets,
+    )
+    editor_source_preview_items = apply_text_line_hover_overlay_to_source_previews(
+        source_context["source_preview_items"],
+        text_line_hover_overlay_pages,
+    )
+    text_line_hover_single_image_overlay = build_text_line_hover_single_image_overlay(
+        doc,
+        content_url=source_context["content_url"],
+        overlay_pages=text_line_hover_overlay_pages,
+    )
+    hover_line_ids = {
+        target.hover_line_id for target in text_line_hover.overlay_targets
+    }
+    return {
+        "text_line_hover": text_line_hover,
+        "text_line_hover_single_image_overlay": text_line_hover_single_image_overlay,
+        "editor_source_preview_items": editor_source_preview_items,
+        "hover_line_ids": hover_line_ids,
+    }
+
+
+@login_required
+def transkribus_paragraph_editor_page(request, doc_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    doc = get_viewable_document(
+        request.user,
+        doc_id,
+        queryset=Document.objects.select_related("archive_item").prefetch_related(
+            text_presentation_results_prefetch(),
+            "source_files",
+        ),
+    )
+    editor_url = _paragraph_editor_url(doc_id=doc.id)
+
+    if request.method == "POST":
+        try:
+            save_paragraph_editor_mapping(doc, request.POST, actor=request.user)
+        except ParagraphEditorError as exc:
+            messages.error(request, exc.staff_message)
+            logger.info(
+                "transkribus_paragraph_editor_page save refused user=%s doc_id=%s "
+                "message=%s",
+                getattr(request.user, "username", None),
+                doc.id,
+                exc.staff_message,
+            )
+            return redirect(editor_url)
+        messages.success(request, MSG_SAVED)
+        logger.info(
+            "transkribus_paragraph_editor_page saved user=%s doc_id=%s",
+            getattr(request.user, "username", None),
+            doc.id,
+        )
+        return redirect(editor_url)
+
+    source_context = _document_source_preview_context(doc)
+    hover_context = _paragraph_editor_hover_source_context(doc, source_context)
+    editor = build_paragraph_editor_context(
+        doc,
+        hover_line_ids=hover_context["hover_line_ids"],
+    )
+    logger.info(
+        "transkribus_paragraph_editor_page user=%s doc_id=%s available=%s "
+        "lines=%s status=%s",
+        getattr(request.user, "username", None),
+        doc.id,
+        editor.available,
+        len(editor.lines),
+        editor.status.code,
+    )
+    return render(
+        request,
+        "documents/transkribus_paragraph_editor.html",
+        {
+            "doc": doc,
+            **source_context,
+            "text_line_hover": hover_context["text_line_hover"],
+            "text_line_hover_single_image_overlay": hover_context[
+                "text_line_hover_single_image_overlay"
+            ],
+            "editor_source_preview_items": hover_context["editor_source_preview_items"],
+            "editor_available": editor.available,
+            "unavailable_message": editor.unavailable_message,
+            "freshness": editor.freshness,
+            "editor_lines": editor.lines,
+            "paragraph_status": editor.status,
+            "source_is_rtl": editor.source_is_rtl,
+        },
+    )
+
+
 def document_detail_page(request, doc_id: int):
     is_admin = _is_admin(request.user)
     detail_qs = Document.objects.select_related(
@@ -3116,6 +3235,9 @@ def document_detail_page(request, doc_id: int):
         ),
     )
 
+    show_transkribus_action = (
+        is_admin and _is_transkribus_corrected_current_sync_ui_eligible(doc)
+    )
     context = {
         "doc": doc,
         **source_context,
@@ -3135,11 +3257,15 @@ def document_detail_page(request, doc_id: int):
         "archive_search_transcription": archive_search_transcription,
         "transkribus_paragraph_presentation": transkribus_paragraph_presentation,
         "is_admin": is_admin,
-        "show_transkribus_corrected_current_sync_action": is_admin
-        and _is_transkribus_corrected_current_sync_ui_eligible(doc),
+        "show_transkribus_corrected_current_sync_action": show_transkribus_action,
         "show_ocr_reprocess_action": is_admin and is_ocr_reprocess_ui_eligible(doc),
         "show_hebrew_translation_retry_action": is_admin
         and is_hebrew_translation_retry_ui_eligible(doc),
+        "paragraph_status": (
+            build_paragraph_mapping_staff_status(doc)
+            if show_transkribus_action
+            else None
+        ),
     }
 
     logger.info(

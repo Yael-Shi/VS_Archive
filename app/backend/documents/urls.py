@@ -141,4 +141,9 @@ urlpatterns = [
         views.corrected_current_sync_attempt_activate,
         name="corrected-current-sync-attempt-activate",
     ),
+    path(
+        "ui/admin/documents/<int:doc_id>/transkribus-paragraphs/",
+        views.transkribus_paragraph_editor_page,
+        name="transkribus-paragraphs",
+    ),
 ]
