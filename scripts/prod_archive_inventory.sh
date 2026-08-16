@@ -411,7 +411,7 @@ for item in items:
     document_pages_total += item_pages
     document_pages_by_visibility[visibility] += item_pages
 
-known_types = ["OCR_DOCUMENT", "MANUAL_TEXT", "PHOTO"]
+known_types = ["OCR_DOCUMENT", "MANUAL_TEXT", "PHOTO", "VIDEO"]
 all_types = sorted(set(type_counts) | set(known_types))
 all_visibilities = sorted(visibility_counts)
 
@@ -433,6 +433,8 @@ report = {
         "ocr_documents": type_counts["OCR_DOCUMENT"],
         "manual_texts": type_counts["MANUAL_TEXT"],
         "photos": type_counts["PHOTO"],
+        "videos": type_counts["VIDEO"],
+        "private_items": visibility_counts["private"],
         "document_pages_total": document_pages_total,
         "image_document_pages": image_pages,
         "pdf_document_pages": pdf_pages,
@@ -447,6 +449,7 @@ report = {
             "ocr_documents": matrix[visibility]["OCR_DOCUMENT"],
             "manual_texts": matrix[visibility]["MANUAL_TEXT"],
             "photos": matrix[visibility]["PHOTO"],
+            "videos": matrix[visibility]["VIDEO"],
             "document_pages_total": document_pages_by_visibility[visibility],
             "physical_images_and_document_pages_total": (
                 matrix[visibility]["PHOTO"]
@@ -482,6 +485,8 @@ print(f"All archival items:  {report['summary']['archive_items_total']}")
 print(f"OCR documents:       {report['summary']['ocr_documents']}")
 print(f"Manual texts:        {report['summary']['manual_texts']}")
 print(f"Photos:              {report['summary']['photos']}")
+print(f"Videos:              {report['summary']['videos']}")
+print(f"Private items:       {report['summary']['private_items']}")
 print()
 print(f"All document pages:  {report['summary']['document_pages_total']}")
 print(f"  Image pages:       {report['summary']['image_document_pages']}")
@@ -501,6 +506,7 @@ for visibility, row in report["by_visibility"].items():
         f"{row['ocr_documents']} documents | "
         f"{row['manual_texts']} manual texts | "
         f"{row['photos']} photos | "
+        f"{row['videos']} videos | "
         f"{row['document_pages_total']} document pages | "
         f"{row['physical_images_and_document_pages_total']} photos+pages"
     )
