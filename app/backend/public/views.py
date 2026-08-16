@@ -5,15 +5,16 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect, render
 from django.urls import reverse
 
-from public.services.registration import (
-    RegistrationFieldValues,
-    process_registration,
-    user_has_family_access,
-)
+from public.services.homepage_archive import homepage_archive_cards
 from public.services.public_content import (
     EDITABLE_PUBLIC_BLOCKS,
     get_all_public_content,
     save_public_content_from_post,
+)
+from public.services.registration import (
+    RegistrationFieldValues,
+    process_registration,
+    user_has_family_access,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,13 @@ def _empty_registration_field_values() -> dict[str, str]:
 
 
 def home(request):
-    return render(request, "public/home.html")
+    return render(
+        request,
+        "public/home.html",
+        {
+            "homepage_archive_cards": homepage_archive_cards(),
+        },
+    )
 
 
 def register(request):

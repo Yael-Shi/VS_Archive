@@ -7,7 +7,7 @@
     <div class="public-hero__content">
       <h1 class="page-title">ארכיון ד״ר חיים (ויקטור) סעדיה ז״ל</h1>
       <p class="page-subtitle">
-        שימור, ארגון והנגשה של מסמכים, תמונות וזיכרונות הקשורים לד״ר חיים (ויקטור) סעדיה ז״ל ולסיפור המשפחתי וההיסטורי שסביבו.
+        שימור, ארגון והנגשה של אוסף החומרים שד״ר חיים (ויקטור) סעדיה ז״ל אסף, העתיק, צילם ושמר לאורך השנים.
       </p>
       <div class="form-actions page-header-note">
         <a class="btn btn-primary" href="{% url 'archive-list' %}">עיון בארכיון</a>
@@ -24,7 +24,7 @@
       <p class="muted text-sm public-life-dates">1923–2005 | תרפ״ג–תשס״ו</p>
       <p>
         ד״ר חיים (ויקטור) סעדיה ז״ל הקדיש את חייו לציונות, לרפואה ולמשפחתו.
-        הארכיון הזה מבקש לשמר ולהנגיש את החומרים, הזיכרונות והעדויות הקשורים לחייו ולמורשתו.
+        לאורך השנים אסף, העתיק, צילם ושמר מסמכים וחומרים רבים, המהווים כיום את עיקרו של הארכיון.
       </p>
       <p class="page-header-note">
         <a class="btn" href="{% url 'public-about' %}">קראו עוד על ד״ר סעדיה והארכיון</a>
@@ -32,7 +32,7 @@
     </div>
     <img
       class="public-hero__image public-portrait"
-      src="{% static 'public/images/vs-general-pic.jpg' %}"
+      src="{% static 'public/images/vs-general-pic-home.jpg' %}"
       alt="ד״ר חיים (ויקטור) סעדיה ז״ל"
       width="200"
       height="auto"
@@ -45,36 +45,93 @@
   <section class="card public-section">
     <h2 class="section-title">למה VS?</h2>
     <p>
-      ויקטור סעדיה נהג לחתום על דברים רבים בראשי התיבות VS. הארכיון נושא את הסימן האישי הזה — חתימה קטנה שהפכה לשם — כדי לשמר ולהנגיש את המסמכים, הסיפורים והזיכרונות הקשורים בו ובמשפחה.
+      VS הייתה חתימתו של ד״ר חיים (ויקטור) סעדיה. הארכיון נושא את הסימן האישי הזה - חתימה קטנה שהפכה לשם - כדי לשמר ולהנגיש את החומרים שאסף ושמר לאורך השנים, לצד הסיפורים והזיכרונות שהצטברו אודותיו.
     </p>
   </section>
 
   <div class="spacer"></div>
 
-  <section class="card public-section">
-    <h2 class="section-title">מה הארכיון עושה</h2>
-    <div class="public-feature-grid">
-      <div class="card feature-card">
-        <h3 class="section-title">שימור חומרים</h3>
+  {% if homepage_archive_cards %}
+    <section class="card public-section homepage-archive-showcase">
+      <div class="homepage-archive-showcase__header">
+        <h2 class="section-title">מהארכיון</h2>
+        <a class="btn btn-link" href="{% url 'archive-list' %}">לכל פריטי הארכיון</a>
+      </div>
+
+      {% include "documents/archive/partials/item_list_cards.html" with browse_cards=homepage_archive_cards is_admin=False %}
+    </section>
+
+    <div class="spacer"></div>
+  {% endif %}
+
+  <section class="card public-section homepage-found-in-archive">
+    <h2 class="section-title">מה תמצאו בארכיון</h2>
+
+    <div class="public-feature-grid homepage-found-grid">
+      <div class="card feature-card homepage-found-card">
+        <div class="homepage-found-icon" aria-hidden="true">
+          <svg viewBox="0 0 64 64" role="img">
+            <path d="M18 8h20l10 10v38H18z" />
+            <path d="M38 8v12h12" />
+            <path d="M25 30h16M25 38h16M25 46h12" />
+          </svg>
+        </div>
+
+        <h3 class="section-title">מסמכים וטקסטים</h3>
+
         <p class="muted">
-          הארכיון שומר פריטים מסוגים שונים — מסמכים סרוקים, טקסטים מוקלדים, תמונות וקבצי PDF:
-          מכתבים, רשומות, תמונות משפחתיות וחומרים היסטוריים שנאספו לאורך השנים.
+          רוב החומרים בארכיון נאספו, הועתקו או צולמו בידי ד״ר חיים סעדיה עצמו:
+          מסמכים, מכתבים, רשימות וחומרים כתובים שאסף ושמר לאורך השנים.
         </p>
       </div>
-      <div class="card feature-card">
-        <h3 class="section-title">תעתוק, תרגום ובדיקה</h3>
+
+      <div class="card feature-card homepage-found-card">
+        <div class="homepage-found-icon homepage-found-icon--media" aria-hidden="true">
+          <svg viewBox="0 0 72 64" role="img">
+            <rect x="6" y="12" width="38" height="34" rx="3" />
+            <circle cx="34" cy="21" r="4" />
+            <path d="M11 41l10-11 8 8 5-6 8 9" />
+            <rect x="49" y="23" width="14" height="18" rx="3" />
+            <path d="M63 28l7-4v16l-7-4" />
+          </svg>
+        </div>
+
+        <h3 class="section-title">תמונות וקטעי וידאו</h3>
+
         <p class="muted">
-          המערכת מסייעת לחלץ, לתעתק, לתרגם ולארגן טקסט מן החומרים השמורים —
-          כדי להקל על קריאה, חיפוש והבנה.
+          תצלומים, העתקים ותיעוד חזותי שנאספו ונשמרו כחלק מהאוסף.
         </p>
       </div>
-      <div class="card feature-card">
-        <h3 class="section-title">בינה מלאכותית ובדיקה אנושית</h3>
+
+      <div class="card feature-card homepage-found-card">
+        <div class="homepage-found-icon" aria-hidden="true">
+          <svg viewBox="0 0 64 64" role="img">
+            <circle cx="32" cy="32" r="22" />
+            <path d="M10 32h44M32 10c7 7 10 14 10 22S39 47 32 54M32 10c-7 7-10 14-10 22s3 15 10 22" />
+          </svg>
+        </div>
+
+        <h3 class="section-title">תעתוקים ותרגומים</h3>
+
         <p class="muted">
-          כלים מבוססי בינה מלאכותית מסייעים בתהליך, אך הטקסט האוטומטי עלול להכיל טעויות.
-          בדיקה ועריכה אנושית נשארות חשובות לפני הסתמכות על התוצאה.
+          תעתוקים ותרגומים שמאפשרים לקרוא ולהכיר גם חומרים שקשה לקרוא במקור
+          או שנכתבו בשפות שונות.
         </p>
       </div>
+    </div>
+
+    <div class="homepage-ai-note muted">
+      <span class="homepage-ai-note__icon" aria-hidden="true">
+        <svg viewBox="0 0 40 40" role="img">
+          <path d="M25 3l2.7 8.3L36 14l-8.3 2.7L25 25l-2.7-8.3L14 14l8.3-2.7z" />
+          <path d="M10 20l1.8 5.2L17 27l-5.2 1.8L10 34l-1.8-5.2L3 27l5.2-1.8z" />
+        </svg>
+      </span>
+
+      <span>
+        חלק מהתעתוקים והתרגומים נוצרו בסיוע כלי בינה מלאכותית וטרם עברו בדיקה אנושית,
+        ולכן ייתכנו טעויות.
+      </span>
     </div>
   </section>
 {% endblock %}

@@ -4821,3 +4821,139 @@ pre {
   font-weight: 600;
   margin-bottom: var(--space-1);
 }
+
+/* Homepage: "מה תמצאו בארכיון" */
+
+.homepage-found-in-archive > .section-title {
+  margin-bottom: var(--space-4);
+}
+
+.homepage-found-grid {
+  align-items: stretch;
+}
+
+.homepage-found-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 15rem;
+  padding: var(--space-5) var(--space-4);
+  text-align: center;
+}
+
+.homepage-found-card .section-title {
+  margin-bottom: var(--space-3);
+  color: var(--primary);
+}
+
+.homepage-found-card p {
+  max-width: 24rem;
+  margin: 0;
+  line-height: var(--line-relaxed);
+}
+
+.homepage-found-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 4.5rem;
+  height: 4.5rem;
+  margin-bottom: var(--space-3);
+  color: var(--primary);
+}
+
+.homepage-found-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.homepage-found-icon--media {
+  width: 5rem;
+}
+
+.homepage-ai-note {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-2);
+  margin: var(--space-4) 0 0;
+  padding: var(--space-3) 0 0;
+  border-top: 0;
+  line-height: var(--line-relaxed);
+}
+
+.homepage-ai-note__icon {
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  color: var(--primary);
+}
+
+.homepage-ai-note__icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+  stroke: none;
+}
+
+@media (max-width: 900px) {
+  .homepage-found-card {
+    min-height: 0;
+  }
+
+  .homepage-ai-note {
+    align-items: flex-start;
+  }
+}
+
+/* Homepage color alignment */
+
+/* Main section headings stay dark. */
+body:has(.homepage-found-in-archive) .page-title,
+body:has(.homepage-found-in-archive) .public-section > .section-title,
+body:has(.homepage-found-in-archive) .homepage-archive-showcase__header .section-title {
+  color: var(--text-heading);
+}
+
+/* Descriptive homepage copy uses the softer gray from the new design. */
+body:has(.homepage-found-in-archive) .page-subtitle,
+body:has(.homepage-found-in-archive) .public-section > p,
+body:has(.homepage-found-in-archive) .public-hero__content > p,
+body:has(.homepage-found-in-archive) .homepage-found-card p,
+body:has(.homepage-found-in-archive) .homepage-ai-note {
+  color: var(--muted);
+}
+
+/* Feature-card headings and icons keep the blue accent. */
+.homepage-found-card .section-title,
+.homepage-found-icon,
+.homepage-ai-note__icon {
+  color: var(--primary);
+}
+
+/* Homepage archive showcase card titles */
+.homepage-archive-showcase .archive-browse-card__title a {
+  color: var(--primary);
+}
+
+/* Homepage archive showcase text */
+.homepage-archive-showcase .archive-browse-card__meta,
+.homepage-archive-showcase .archive-browse-card__author,
+.homepage-archive-showcase .archive-browse-card__date,
+.homepage-archive-showcase .archive-browse-card__meta-label,
+.homepage-archive-showcase .archive-browse-card__meta-sep,
+.homepage-archive-showcase .archive-browse-card__preview,
+.homepage-archive-showcase .archive-browse-card__match-source,
+.homepage-archive-showcase .archive-browse-card__discovery-line,
+.homepage-archive-showcase .archive-browse-card__discovery-label,
+.homepage-archive-showcase .archive-browse-card__discovery-sep {
+  color: var(--muted);
+}
