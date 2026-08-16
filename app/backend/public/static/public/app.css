@@ -3475,15 +3475,71 @@ pre {
   overflow-wrap: anywhere;
 }
 
-.archive-detail-photo-technical {
-  margin-top: var(--space-2);
+/*
+ * PHOTO detail mirrors the document-detail header structure.
+ * Metadata belongs in header-main; actions stay in the toolbar.
+ */
+.archive-detail-photo-meta {
+  margin-top: var(--space-1);
 }
 
-.archive-detail-photo-technical > summary {
+.archive-detail-staff-management-actions .archive-detail-photo-technical {
+  align-self: flex-end;
+  width: max-content;
+  max-width: 100%;
+}
+
+.archive-detail-staff-management-actions
+  .archive-detail-photo-technical.review-details--secondary {
+  padding: 0;
+  border: none;
+  background: transparent;
+  opacity: 1;
+}
+
+.archive-detail-staff-management-actions
+  .archive-detail-photo-technical > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: max-content;
+  max-width: 100%;
+  margin-inline-start: auto;
+  margin-inline-end: 0;
+  padding: 2px 0;
   font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--accent);
 }
 
-.archive-detail-photo-technical .review-details-body {
+.archive-detail-staff-management-actions
+  .archive-detail-photo-technical > summary::before {
+  content: none;
+  display: none;
+}
+
+.archive-detail-staff-management-actions
+  .archive-detail-photo-technical > summary::after {
+  content: "▾";
+  display: inline-block;
+  color: var(--accent-muted);
+  transition: transform 0.15s ease;
+}
+
+.archive-detail-staff-management-actions
+  .archive-detail-photo-technical[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+.archive-detail-staff-management-actions
+  .archive-detail-photo-technical[open] {
+  align-self: stretch;
+  width: auto;
+  max-width: 100%;
+}
+
+.archive-detail-staff-management-actions
+  .archive-detail-photo-technical .review-details-body {
   min-width: 0;
 }
 

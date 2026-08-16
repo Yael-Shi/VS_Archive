@@ -1,4 +1,4 @@
-{% if item.categories.all or item.events.all or item.tags.all and not hide_tags %}
+{% if item.categories.all or item.events.all or item.tags.all %}
   <div class="archive-discovery-meta archive-detail-meta-block archive-detail-meta-block--discovery">
     {% if item.categories.all %}
       <div class="archive-detail-meta-row">
@@ -16,7 +16,7 @@
         </span>
       </div>
     {% endif %}
-    {% if item.tags.all and not hide_tags %}
+    {% if item.tags.all %}
       <div class="archive-detail-meta-row">
         <strong class="archive-detail-meta-label">תגיות:</strong>
         <span class="archive-detail-meta-value">
