@@ -3525,7 +3525,7 @@ JavaScript hover behavior, scrolling, image overlays, or schema changes.
 
 **Must not change (this PR and later paragraph work unless explicitly approved):** `DocumentTextResult.text`, `TranskribusTranscriptSnapshot.canonical_text`, `TranskribusSnapshotLine.text`, source geometry, canonical char offsets, hover IDs, search offsets.
 
-**Not implemented (later PRs, do not treat as done):** copy/adopt POST; automatic adoption; Gemini/general-provider paragraph mappings; AI/fuzzy matching; dehyphenation; same-snapshot local typo remapper. Staff paragraph editor/status is implemented in the PR3 entry below. Public paragraph rendering is implemented in the PR2 entry below.
+**Not implemented (later PRs, do not treat as done):** automatic adoption; Gemini/general-provider paragraph mappings; AI/fuzzy matching; dehyphenation; same-snapshot local typo remapper. Staff paragraph editor/status is implemented in the PR3 entry below. Public paragraph rendering is implemented in the PR2 entry below. Historical suggestion/adoption is implemented in the PR4 entry below.
 
 ## Transkribus paragraph public rendering (PR2 — presentation overlay only)
 
@@ -3541,7 +3541,7 @@ JavaScript hover behavior, scrolling, image overlays, or schema changes.
 - Source-line hover IDs, overlay bbox calculation, and `pointer-events: none` overlays are unchanged. Search match indexes, click-sync attributes, previous/next navigation, and sticky source behavior keep the existing identities/order.
 - Gemini, other non-Transkribus OCR, manual text, photo, and video public paths are unchanged. No new public paragraph endpoint.
 
-**Not implemented (later PRs):** historical suggestion UI; copy/adopt POST; automatic inheritance; paragraph inference; Gemini/general-provider paragraph support; transcription editing; dehyphenation; canonical-text rewriting. Staff paragraph editor/status is implemented in the PR3 entry below.
+**Not implemented (later PRs):** automatic inheritance; paragraph inference; Gemini/general-provider paragraph support; transcription editing; dehyphenation; canonical-text rewriting. Staff paragraph editor/status is implemented in the PR3 entry below. Historical suggestion/adoption is implemented in the PR4 entry below.
 
 **Explicit non-goals for correspondence:** canonical-text equality, char offsets, fuzzy text, geometry epsilon, `provider_region_id`, provider page identity alone, raw XML equality, or matching line counts alone.
 
@@ -3556,9 +3556,29 @@ JavaScript hover behavior, scrolling, image overlays, or schema changes.
 - Editor layout reuses document-detail two-column source/text CSS. Source lines stay in page/order sequence. Page transitions are labeled and are **not** preselected as paragraph breaks. A paragraph may cross pages. There is no break control after the final contributing line. Source text is not editable.
 - Save delegates to PR1 `save_paragraph_mapping(...)` (ordinary/manual save, no `copied_from`). POST/PRG. Staff actor is `request.user`. Zero selected breaks is a valid explicit save. Canonical text, snapshot lines, geometry, offsets, and bindings are not mutated.
 - Freshness: POST carries `expected_document_id`, `expected_text_result_id`, and `expected_snapshot_id`. If the displayed result, bound snapshot, or structural freshness no longer matches, the write is refused with a staff-facing Hebrew message that does not expose raw IDs.
-- Status (current displayed/bound snapshot only): never saved; saved one paragraph; saved N paragraphs. An old-snapshot mapping alone does not count as the current division; versions/detail may note that a historical mapping exists, without adopt/copy controls.
+- Status (current displayed/bound snapshot only): never saved; saved one paragraph; saved N paragraphs. An old-snapshot mapping alone does not count as the current division; versions/detail may note that a historical mapping exists, without adopt/copy controls. Historical suggestion/adoption UI is implemented in the PR4 entry below.
 - Status locations: Transkribus versions card “תעתוק Transkribus המוצג כעת”; compact staff-only note on document detail. Entry point: “עריכת חלוקת פסקאות”.
 - Existing source-line hover JS is reused in the editor when hover overlays already exist; hover is not required for editing.
 - No live public preview in this PR.
 
-**Not implemented (later PRs, do not treat as done):** historical suggestion/adoption UI; copy/adopt POST; overwrite confirmation for historical suggestions; AI paragraph inference; Gemini/general-provider paragraph support; transcription editing; dehyphenation.
+**Not implemented (later PRs, do not treat as done):** overwrite confirmation for historical suggestions; AI paragraph inference; Gemini/general-provider paragraph support; transcription editing; dehyphenation.
+
+## Transkribus paragraph historical suggestion/adoption (PR4 — explicit create-only)
+
+**Decision / implemented:** A historical Transkribus paragraph mapping may be **offered** as a staff suggestion. The manager decides whether to adopt it. Nothing is copied automatically. Adoption creates a **new** mapping for the current displayed/bound snapshot. The historical mapping never becomes current merely because correspondence exists.
+
+**Current behavior:**
+
+- Eligibility reuses PR1 `prove_contributing_line_correspondence` / `discover_transferable_historical_mappings`. Fail-closed `(page_index, provider_line_id)` identity proof. No fuzzy matching, canonical-text comparison, geometry, AI, or inferred paragraph boundaries.
+- GET discovery runs only on the paragraph editor, and only when the current bound snapshot is structurally fresh and has **no** mapping. Versions and document detail keep the cheap existence note and do **not** run correspondence discovery or show adopt actions.
+- Multiple eligible historical mappings are all shown, newest-first (discovery order). None is auto-selected. Staff must choose explicitly. Labels use snapshot `created_at` (`d.m.Y H:i`, seconds if needed to disambiguate) plus paragraph count (`פסקה אחת` / `N פסקאות`). Zero-break historical mappings are labeled as one saved paragraph. Raw snapshot/mapping/line/binding IDs, hashes, and provider IDs are hidden form tokens only.
+- Dedicated POST: `ui/admin/documents/<id>/transkribus-paragraphs/adopt/` (`transkribus-paragraphs-adopt`). Not multiplexed into the ordinary editor save (a PR3 POST with zero `break_after` remains an explicit one-paragraph manual save).
+- POST revalidates authorization, expected document/displayed result/target snapshot, structural freshness, selected source mapping identity (same document, still historical, still the chosen mapping/snapshot), absence of a target mapping, and correspondence. Then remaps source break PKs onto target contributing lines.
+- `adopt_historical_paragraph_mapping` is create-only: `transaction.atomic()` + `select_for_update` on the target snapshot/mapping, then `save_paragraph_mapping(..., copied_from=source, create_only=True)`. OneToOne uniqueness / `IntegrityError` is treated as refuse-overwrite. Source mapping is not mutated. Ordinary PR1 save remains create-or-replace; `create_only` defaults false.
+- If a current target mapping already exists, including a GET→POST race: refuse, leave it unchanged, no overwrite confirmation, no silent conversion to a manual resave. Manual edit remains the PR3 editor.
+- Successful adopt: PRG to the editor, Hebrew success message, status reflects the new current mapping, editor remains available. `copied_from` records the adopted source. A later ordinary resave clears `copied_from` (existing PR1 semantics).
+- Authorization matches PR3: `login_required` + `_require_admin_page` + `get_viewable_document` + CSRF. Restricted POST 404s before the adoption service.
+
+**Must not change:** `DocumentTextResult.text`, snapshot canonical text, snapshot lines, geometry, char offsets, hover IDs, search offsets, bindings, public currentness/rendering, ordinary manual-save behavior.
+
+**Explicit non-goals:** automatic inheritance/adoption; fuzzy matching; AI paragraph inference; Gemini/general-provider paragraph mappings; transcription editing; dehyphenation; canonical-text rewriting; overwrite-via-adoption / overwrite confirmation.

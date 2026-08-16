@@ -1011,6 +1011,25 @@ class RestrictedVisibilityMutationGateTests(TestCase):
         self.assertEqual(resp.status_code, 404)
         mock_save.assert_not_called()
 
+    @patch("documents.views.adopt_paragraph_editor_mapping")
+    def test_paragraph_adopt_post_404_without_perm_before_service(self, mock_adopt):
+        resp = self._post_as(
+            self.staff,
+            reverse(
+                "transkribus-paragraphs-adopt",
+                kwargs={"doc_id": self.restricted_ocr.pk},
+            ),
+            data={
+                "expected_document_id": str(self.restricted_ocr.pk),
+                "expected_text_result_id": "1",
+                "expected_snapshot_id": "1",
+                "expected_source_mapping_id": "1",
+                "expected_source_snapshot_id": "1",
+            },
+        )
+        self.assertEqual(resp.status_code, 404)
+        mock_adopt.assert_not_called()
+
     @patch("documents.views.validate_required_env")
     @patch("documents.views.apply_ocr_reprocess")
     def test_ocr_reprocess_404_without_perm_before_env_or_apply(

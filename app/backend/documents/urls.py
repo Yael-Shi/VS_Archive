@@ -146,4 +146,9 @@ urlpatterns = [
         views.transkribus_paragraph_editor_page,
         name="transkribus-paragraphs",
     ),
+    path(
+        "ui/admin/documents/<int:doc_id>/transkribus-paragraphs/adopt/",
+        views.transkribus_paragraph_adopt,
+        name="transkribus-paragraphs-adopt",
+    ),
 ]

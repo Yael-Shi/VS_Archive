@@ -486,6 +486,22 @@ class ParagraphMappingModelTests(TestCase):
             [self.alpha.pk],
         )
 
+    def test_create_only_refuses_existing_mapping_without_replace(self):
+        mapping = save_paragraph_mapping(self.snapshot, [self.alpha.pk])
+        with self.assertRaises(TranskribusParagraphMappingError) as raised:
+            save_paragraph_mapping(
+                self.snapshot,
+                [self.beta.pk],
+                create_only=True,
+            )
+        self.assertIn("already has a paragraph mapping", str(raised.exception))
+        mapping.refresh_from_db()
+        self.assertEqual(
+            list(mapping.breaks.values_list("after_line_id", flat=True)),
+            [self.alpha.pk],
+        )
+        self.assertIsNone(mapping.copied_from_id)
+
 
 class ParagraphMappingCurrentnessTests(TestCase):
     def setUp(self) -> None:
