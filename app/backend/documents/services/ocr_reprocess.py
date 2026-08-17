@@ -98,12 +98,18 @@ def _has_failed_source_ocr(doc: Document) -> bool:
     ).exists()
 
 
-def _is_gemini_recoverable_partial_ocr_failure(doc: Document) -> bool:
-    """Gemini OCR failed with no usable source text; missing translation keeps PARTIAL."""
+def _is_recoverable_partial_ocr_failure(doc: Document) -> bool:
+    """Source OCR failed with no usable text on a supported recoverable PARTIAL route."""
     if doc.processing_state_user != Document.ProcessingState.PARTIAL:
         return False
-    if not _document_routes_to_gemini(doc):
+
+    route = _select_document_ocr_route(doc)
+    if route.engine_key not in (
+        DocumentTextResult.OcrEngineKey.GEMINI,
+        DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+    ):
         return False
+
     if _has_usable_source_text(doc):
         return False
     if not _has_failed_source_ocr(doc):
@@ -114,7 +120,7 @@ def _is_gemini_recoverable_partial_ocr_failure(doc: Document) -> bool:
 def _processing_state_allows_ocr_reprocess(doc: Document) -> bool:
     if doc.processing_state_user == Document.ProcessingState.FAILED:
         return True
-    return _is_gemini_recoverable_partial_ocr_failure(doc)
+    return _is_recoverable_partial_ocr_failure(doc)
 
 
 def validate_document_for_ocr_reprocess(doc: Document) -> None:

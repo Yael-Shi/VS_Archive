@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import requests
+
 from django.test import SimpleTestCase
 
 from documents.services.antigravity_defaults import DEFAULT_ANTIGRAVITY_AGENT_ID
@@ -219,6 +221,36 @@ class AntigravityEngineTests(SimpleTestCase):
                 monotonic_fn=monotonic,
                 sleep_fn=lambda _seconds: None,
             )
+
+    @patch("documents.services.antigravity_engine._get_interaction")
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_poll_read_timeout_retries_same_interaction_then_succeeds(
+        self, mock_post, mock_get
+    ):
+        mock_post.return_value = MagicMock(
+            ok=True,
+            json=lambda: {"id": "ix-progress", "status": "in_progress"},
+        )
+        mock_get.side_effect = [
+            requests.ReadTimeout("temporary poll timeout"),
+            _completed_interaction("[IMAGE 1: page-1.png]\nArabic text here"),
+        ]
+
+        pages = [PageImage(page_index=1, image_bytes=b"x", mime_type="image/png")]
+        monotonic = iter([0.0, 1.0, 2.0]).__next__
+
+        result = transcribe_pages_with_antigravity(
+            pages,
+            api_key="key",
+            timeout_seconds=300.0,
+            poll_seconds=0.0,
+            monotonic_fn=monotonic,
+            sleep_fn=lambda _seconds: None,
+        )
+
+        self.assertEqual(result.text, "Arabic text here")
+        self.assertEqual(mock_get.call_count, 2)
+        mock_get.assert_called_with("key", "ix-progress")
 
     @patch("documents.services.antigravity_engine.requests.post")
     def test_success_returns_transcription(self, mock_post):

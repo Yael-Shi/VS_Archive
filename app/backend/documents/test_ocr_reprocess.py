@@ -461,6 +461,78 @@ def _gemini_partial_failed_source_document(**kwargs) -> Document:
     return doc
 
 
+@patch.dict(
+    "os.environ",
+    {"ENABLE_ANTIGRAVITY_ARABIC_PRINTED": "true"},
+    clear=False,
+)
+class AntigravityPartialOcrReprocessTests(TransactionTestCase):
+    def _partial_failed_source_document(self) -> Document:
+        doc = create_ocr_document(
+            title="Arabic printed Antigravity partial OCR failure",
+            doc_type=Document.DocType.PDF,
+            language=Document.Language.ARABIC,
+            text_input_type=Document.TextInputType.PRINTED,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.PARTIAL,
+            file_s3_key="documents/320/source/0.jpeg",
+            mime_type="image/jpeg",
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="antigravity",
+            engine_key=DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            status=DocumentTextResult.Status.FAILED,
+            error_code="OCR_FAILED",
+            error_details="temporary Antigravity read timeout",
+            text=None,
+        )
+        return doc
+
+    def test_partial_failed_source_ocr_is_eligible_for_normal_reenqueue(self):
+        doc = self._partial_failed_source_document()
+
+        self.assertTrue(is_ocr_reprocess_ui_eligible(doc))
+
+        assessment = assess_ocr_reprocess(
+            doc.id,
+            collection_id=COLLECTION_ID,
+            model_id=MODEL_ID,
+        )
+
+        self.assertEqual(assessment.retry_mode, OcrRetryMode.NORMAL_REENQUEUE)
+        self.assertIsNone(assessment.source_transkribus_run_id)
+
+    @patch(
+        "documents.services.process_document_request_enqueue."
+        "send_process_document_request_message"
+    )
+    def test_apply_enqueues_normal_antigravity_flow(self, mock_enqueue):
+        doc = self._partial_failed_source_document()
+
+        apply_result = apply_ocr_reprocess(
+            doc.id,
+            collection_id=COLLECTION_ID,
+            model_id=MODEL_ID,
+        )
+
+        self.assertEqual(
+            apply_result.assessment.retry_mode,
+            OcrRetryMode.NORMAL_REENQUEUE,
+        )
+        doc.refresh_from_db()
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.PROCESSING)
+
+        request = ProcessDocumentRequest.objects.get(document=doc)
+        self.assertEqual(
+            request.ocr_retry_mode,
+            ProcessDocumentRequest.OcrRetryMode.NORMAL_REENQUEUE,
+        )
+        mock_enqueue.assert_called_once_with(request.pk)
+
+
 class GeminiPartialOcrReprocessTests(TransactionTestCase):
     def _checkpoint_failed_document(self) -> Document:
         doc = create_ocr_document(

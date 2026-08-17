@@ -166,6 +166,41 @@ class OcrReprocessUiTests(TestCase):
         self.assertContains(resp, self._reprocess_url(doc.id))
         self.assertContains(resp, "נסה עיבוד מחדש")
 
+    @patch.dict(
+        "os.environ",
+        {"ENABLE_ANTIGRAVITY_ARABIC_PRINTED": "true"},
+        clear=False,
+    )
+    def test_staff_sees_retry_button_for_antigravity_partial_failed_source_ocr(self):
+        doc = create_ocr_document(
+            title="Arabic printed Antigravity partial OCR failure",
+            doc_type=Document.DocType.PDF,
+            language=Document.Language.ARABIC,
+            text_input_type=Document.TextInputType.PRINTED,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.PARTIAL,
+            file_s3_key="documents/320/source/0.jpeg",
+            mime_type="image/jpeg",
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="antigravity",
+            engine_key=DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            status=DocumentTextResult.Status.FAILED,
+            error_code="OCR_FAILED",
+            error_details="temporary Antigravity read timeout",
+            text=None,
+        )
+
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, self._reprocess_url(doc.id))
+        self.assertContains(resp, "נסה עיבוד מחדש")
+
     def test_ineligible_translation_only_partial_hides_retry_button(self):
         doc = create_ocr_document(
             title="Translation-only partial",
