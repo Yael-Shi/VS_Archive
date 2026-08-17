@@ -297,7 +297,7 @@ class PhotoContent(models.Model):
 
 
 class Person(models.Model):
-    """One identified person in the archive (canonical display name only)."""
+    """One identified person in the archive (canonical display name)."""
 
     name = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -305,6 +305,31 @@ class Person(models.Model):
 
     class Meta:
         ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class PersonAlias(models.Model):
+    """Alternate lookup/search name for one Person. Does not replace Person.name."""
+
+    person = models.ForeignKey(
+        Person,
+        on_delete=models.CASCADE,
+        related_name="aliases",
+    )
+    name = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["person", "name"],
+                name="uniq_person_alias_person_name",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.name

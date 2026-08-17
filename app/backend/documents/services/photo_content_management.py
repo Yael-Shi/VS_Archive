@@ -9,7 +9,7 @@ from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Max
 
-from documents.models import ArchiveItem, Person, PhotoContent
+from documents.models import ArchiveItem, Person, PersonAlias, PhotoContent
 from documents.s3 import create_presigned_get
 from documents.services.photo_s3_cleanup import schedule_photo_s3_cleanup_after_commit
 
@@ -22,6 +22,10 @@ PHOTO_POSITION_CONFLICT_ERROR = "מיקום התמונה כבר תפוס. נסו
 PERSON_NOT_FOUND_ERROR = "אדם מזוהה לא נמצא."
 PERSON_NAME_REQUIRED_ERROR = "שם האדם המזוהה נדרש."
 PERSON_NAME_TOO_LONG_ERROR = "שם האדם המזוהה חייב להיות עד 255 תווים."
+PERSON_ALIAS_REQUIRED_ERROR = "שם חלופי נדרש."
+PERSON_ALIAS_TOO_LONG_ERROR = "השם החלופי חייב להיות עד 255 תווים."
+PERSON_ALIAS_MATCHES_CANONICAL_ERROR = "השם החלופי אינו יכול להיות זהה לשם התצוגה."
+PERSON_ALIAS_DUPLICATE_ERROR = "שם חלופי זה כבר קיים עבור אדם זה."
 ARCHIVE_ITEM_NOT_PHOTO_ERROR = "archive item is not PHOTO"
 
 
@@ -135,13 +139,36 @@ def create_identified_person(*, name: str) -> Person:
     return Person.objects.create(name=normalized)
 
 
+def _sync_person_photo_search_indexes(person_id: int) -> None:
+    from documents.services.archive_search_index import (
+        archive_item_ids_for_person_photo_appearances,
+        sync_archive_item_search_indexes,
+    )
+
+    sync_archive_item_search_indexes(
+        archive_item_ids_for_person_photo_appearances(person_id)
+    )
+
+
+def _normalize_person_alias_name(name: str, *, person: Person) -> str:
+    normalized = (name or "").strip()
+    if not normalized:
+        raise PhotoContentManagementError(PERSON_ALIAS_REQUIRED_ERROR)
+    if len(normalized) > 255:
+        raise PhotoContentManagementError(PERSON_ALIAS_TOO_LONG_ERROR)
+    if normalized == (person.name or "").strip():
+        raise PhotoContentManagementError(PERSON_ALIAS_MATCHES_CANONICAL_ERROR)
+    return normalized
+
+
 @transaction.atomic
 def update_person_name(person: Person, *, name: str) -> Person:
     """Rename a Person and refresh PHOTO search indexes reached via PhotoPerson.
 
     Does not update ArchiveItemPerson-driven search (that relation is not
-    indexed here). Raw ``Person.save()`` / ``QuerySet.update()`` are not
-    hooked; callers that change ``name`` must use this service.
+    indexed here). Does not rewrite, delete, or promote PersonAlias rows.
+    Raw ``Person.save()`` / ``QuerySet.update()`` are not hooked; callers
+    that change ``name`` must use this service.
     """
     normalized = (name or "").strip()
     if not normalized:
@@ -152,16 +179,49 @@ def update_person_name(person: Person, *, name: str) -> Person:
         return person
     person.name = normalized
     person.save(update_fields=["name", "updated_at"])
-
-    from documents.services.archive_search_index import (
-        archive_item_ids_for_person_photo_appearances,
-        sync_archive_item_search_indexes,
-    )
-
-    sync_archive_item_search_indexes(
-        archive_item_ids_for_person_photo_appearances(person.pk)
-    )
+    _sync_person_photo_search_indexes(person.pk)
     return person
+
+
+@transaction.atomic
+def create_person_alias(person: Person, *, name: str) -> PersonAlias:
+    """Create an alias and refresh PHOTO search indexes via PhotoPerson.
+
+    Strips surrounding whitespace only. Does not rewrite ``Person.name`` or
+    touch PhotoPerson / ArchiveItemPerson / Tag rows. Duplicate
+    ``(person, name)`` is a uniqueness error, not a merge.
+    """
+    normalized = _normalize_person_alias_name(name, person=person)
+    try:
+        alias = PersonAlias.objects.create(person=person, name=normalized)
+    except IntegrityError as exc:
+        raise PhotoContentManagementError(PERSON_ALIAS_DUPLICATE_ERROR) from exc
+    _sync_person_photo_search_indexes(person.pk)
+    return alias
+
+
+@transaction.atomic
+def update_person_alias(alias: PersonAlias, *, name: str) -> PersonAlias:
+    """Rename an alias and refresh PHOTO search indexes via PhotoPerson."""
+    person = alias.person
+    normalized = _normalize_person_alias_name(name, person=person)
+    if alias.name == normalized:
+        return alias
+    alias.name = normalized
+    try:
+        alias.save(update_fields=["name", "updated_at"])
+    except IntegrityError as exc:
+        raise PhotoContentManagementError(PERSON_ALIAS_DUPLICATE_ERROR) from exc
+    _sync_person_photo_search_indexes(person.pk)
+    return alias
+
+
+@transaction.atomic
+def delete_person_alias(alias: PersonAlias) -> None:
+    """Delete an alias and refresh PHOTO search indexes via PhotoPerson."""
+    person_id = alias.person_id
+    alias.delete()
+    _sync_person_photo_search_indexes(person_id)
 
 
 def set_photo_people(photo_content: PhotoContent, person_ids: list[int]) -> None:

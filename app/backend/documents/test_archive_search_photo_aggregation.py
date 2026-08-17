@@ -20,6 +20,7 @@ from documents.models import (
     Document,
     DocumentTextResult,
     Person,
+    PersonAlias,
     PhotoContent,
     PhotoPerson,
 )
@@ -441,6 +442,24 @@ class PhotoSearchAggregationQueryTests(TestCase):
             )
         )
         self.assertEqual(ids, [item.pk])
+
+    def test_finds_item_by_person_alias_without_deeplink(self):
+        item = _create_photo_item(title="Alias photo")
+        photo = _add_photo(item, position=1)
+        person = Person.objects.create(name="יעקב כהן")
+        PhotoPerson.objects.create(photo_content=photo, person=person)
+        PersonAlias.objects.create(person=person, name="JacobCohenAliasToken")
+        _rebuild(item.pk)
+
+        ids = _ids(
+            filter_archive_items_by_search_query(
+                ArchiveItem.objects.all(), "JacobCohenAliasToken"
+            )
+        )
+        self.assertEqual(ids, [item.pk])
+        content = build_archive_item_search_content(_load_item(item.pk))
+        self.assertIn("יעקב כהן", content.metadata_text)
+        self.assertIn("JacobCohenAliasToken", content.metadata_text)
 
     def test_item_level_title_and_note_still_match(self):
         item = _create_photo_item(

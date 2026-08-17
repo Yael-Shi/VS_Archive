@@ -1,8 +1,8 @@
 # Archive full-text search — design
 
-**Status:** Architecture contract. **PR1**, **PR2a**, **PR2b-1**, **PR2b-2**, **PR3**, and **PR4** are implemented in application code; **post-PR4 translation search coverage** is implemented (`hebrew_translation_text`). **PHOTO search aggregation (multi-photo PR5)** is implemented (public-renderable `PhotoContent` text + `PhotoPerson` names on the owning ArchiveItem index row). Later hover/page-line mapping remains deferred.
+**Status:** Architecture contract. **PR1**, **PR2a**, **PR2b-1**, **PR2b-2**, **PR3**, and **PR4** are implemented in application code; **post-PR4 translation search coverage** is implemented (`hebrew_translation_text`). **PHOTO search aggregation (multi-photo PR5)** is implemented (public-renderable `PhotoContent` text + `PhotoPerson` names on the owning ArchiveItem index row). **Person aliases (PR6a)** are implemented as searchable `PersonAlias` names on that same renderable-PhotoPerson path. Later hover/page-line mapping remains deferred.
 
-**Companion decision-log entries:** `docs/ai-context/decision-log.md` — “Archive full-text search — architecture (docs-only)”, “PR1 search-index foundation (implemented)”, “PR2a discovery/manual/taxonomy sync (implemented)”, “PR2b-1 human-controlled displayed-text sync (implemented)”, “PR2b-2 automated displayed-text sync (implemented)”, “PR3 backend search cutover (implemented)”, “PR4 snippets/match-source/help text (implemented)”, “Post-PR4 Hebrew translation search coverage (implemented)”, “PHOTO search aggregation (PR5)”.
+**Companion decision-log entries:** `docs/ai-context/decision-log.md` — “Archive full-text search — architecture (docs-only)”, “PR1 search-index foundation (implemented)”, “PR2a discovery/manual/taxonomy sync (implemented)”, “PR2b-1 human-controlled displayed-text sync (implemented)”, “PR2b-2 automated displayed-text sync (implemented)”, “PR3 backend search cutover (implemented)”, “PR4 snippets/match-source/help text (implemented)”, “Post-PR4 Hebrew translation search coverage (implemented)”, “PHOTO search aggregation (PR5)”, “Person aliases (PR6a)”.
 
 This document is the detailed contract for the implementation PR sequence. It records verified current behavior, target decisions, risks, and per-PR scope. Do not treat unimplemented later hover-mapping behavior as live.
 
@@ -35,7 +35,7 @@ Via denormalized `ArchiveItemSearchIndex` (content from the PR1 builder contract
 | Index field | Weight / match |
 |-------------|----------------|
 | `title_text` | A — FTS and short-field `icontains` |
-| `metadata_text` | B — author, source_title, categories/events/tags names, `public_note`; **PHOTO:** public-renderable `PhotoContent` description/location/context/`people_present`/notes plus distinct `PhotoPerson` `Person.name` values from those rows — FTS and short-field `icontains` |
+| `metadata_text` | B — author, source_title, categories/events/tags names, `public_note`; **PHOTO:** public-renderable `PhotoContent` description/location/context/`people_present`/notes plus distinct `PhotoPerson` `Person.name` values and `PersonAlias.name` values from those rows — FTS and short-field `icontains` |
 | `body_text` | C — ManualText body or displayed OCR transcription (source/original) — **FTS only** (no body substring) |
 | `hebrew_translation_text` | C — displayed Hebrew translation for **non-Hebrew OCR only** — **FTS only**; never concatenated into `body_text` |
 
@@ -43,7 +43,7 @@ Via denormalized `ArchiveItemSearchIndex` (content from the PR1 builder contract
 
 - Per-photo or ArchiveItem dates (`date_start` / `date_end` / `date_precision`) as FTS text; structured `year` / `year_to` remain ArchiveItem-level overlap only
 - `ArchiveItemPerson` names (item-level relation is not photo-appearance search)
-- Person aliases (deferred)
+- Person aliases for Persons attached only through non-renderable photos or `ArchiveItemPerson`
 - `DocumentMetadata` and legacy OCR discovery fields on `Document`
 - Non-displayed `DocumentTextResult` rows (only display-helper text is indexed)
 - PHOTO technical fields (S3 keys, filenames, MIME, upload status, ids)
@@ -102,7 +102,7 @@ Public and family search must work with **no** Transkribus transcript snapshot, 
 1. **Denormalized index:** one search-index row per `ArchiveItem` (1:1). Working name in this doc: `ArchiveItemSearchIndex` (final model name may vary in PR1).
 2. **Indexed content:** title, author_name, source_title, category/event/tag **names**, `public_note`, `ManualTextContent.body`, and the OCR transcription returned by existing display helpers.
 3. **Never indexed:** `DocumentMetadata`, technical/provider identifiers, Transkribus snapshots / PAGE XML / bindings / geometry, engine keys, review-internal fields, or other private implementation metadata.
-4. **Initial non-goals for content (PR1–PR4):** detailed `PhotoContent` descriptive fields; date overlap/search. Help-text correction for date/place claims lands in PR4 only. **Current behavior (multi-photo PR5):** public-renderable PHOTO descriptive fields and PhotoPerson names are indexed on the ArchiveItem row; `PENDING` / `FAILED` / empty-key photos are omitted; dates remain out of FTS and out of photo-level year filters.
+4. **Initial non-goals for content (PR1–PR4):** detailed `PhotoContent` descriptive fields; date overlap/search. Help-text correction for date/place claims lands in PR4 only. **Current behavior (multi-photo PR5 + PR6a):** public-renderable PHOTO descriptive fields, PhotoPerson canonical names, and PersonAlias names are indexed on the ArchiveItem row; `PENDING` / `FAILED` / empty-key photos are omitted; dates remain out of FTS and out of photo-level year filters.
 5. **REJECTED:** follow current display behavior — displayable ⇒ searchable. Changing that is a separate decision.
 6. **Result model:** one `ArchiveItem` per hit; keep existing public type filters (`documents_and_texts` / `photo` / all), pagination (`page` / `per_page`), and visibility/family/private behavior.
 7. **FTS:** PostgreSQL full-text search with text-search configuration **`simple`** for language-independent body tokenization and ranking. Do **not** treat `simple` FTS as sufficient Hebrew substring/prefix handling.
@@ -343,7 +343,16 @@ Required order (short form): **PR1 migrate/backfill → PR2a sync → PR2b-1 syn
 | **Scope** | Index public-renderable `PhotoContent` descriptive fields + distinct `PhotoPerson` names from those rows onto the owning ArchiveItem `metadata_text` (same `photo_is_archive_renderable` / gallery contract); keep one result per item; explicit in-transaction sync on child writers, successful upload finalize, and Person rename; pending/failed/empty-key rows stay absent; thumbnail writes do not sync; no schema migration |
 | **Files** | `archive_search_index.py`; `photo_content_management.py`; `photo_upload.py`; `archive_search_snippets.py`; tests; design + decision-log |
 | **Migrations** | None (`ArchiveItemSearchIndex` remains derived; run `backfill_archive_search_index` after deploy) |
-| **Non-goals** | Per-photo result rows; `?photo=` deep-link; photo-level year filters; indexing `ArchiveItemPerson`; Person aliases; Tag → Person; browse-card preview selection |
+| **Non-goals** | Per-photo result rows; `?photo=` deep-link; photo-level year filters; indexing `ArchiveItemPerson`; Tag → Person; browse-card preview selection. Person aliases were later implemented in PR6a. |
+
+### PR6a — Person aliases on PHOTO search — **implemented**
+
+| | |
+|--|--|
+| **Scope** | Additive `PersonAlias` schema; explicit alias create/edit/delete services; index public-renderable PhotoPerson aliases onto the owning ArchiveItem `metadata_text`; search-only alias prefetch; no staff alias UI; no public alias display |
+| **Files** | `models.py`; migration `0054_personalias`; `photo_content_management.py`; `archive_search_index.py`; tests; design + decision-log |
+| **Migrations** | Additive `CreateModel` + `unique(person, name)` only (no data migration; existing Persons need no backfill) |
+| **Non-goals** | Staff alias-management UI; alias display in Person picker; public alias display; public Person pages; alias kind/type; language/script metadata; Tag → Person; identity merge; Person catalog/Admin; fuzzy/AI matching |
 
 ### Later — Search ↔ hover mapping (optional)
 
