@@ -1,5 +1,70 @@
 # VS-Archive Decision Log
 
+## Person aliases (PR6a)
+
+**Decision / implemented:** Add `PersonAlias` as alternate lookup/search names
+for an existing `Person`. `Person.name` remains the canonical display name.
+Aliases do not replace that name, do not merge Person rows, and are not shown
+on public PHOTO pages.
+
+**Current behavior:**
+
+- **`PersonAlias`** belongs to **`Person`** (`FK`, `related_name="aliases"`,
+  `on_delete=CASCADE`). Fields: `name` (`CharField(max_length=255)`),
+  `created_at`, `updated_at`. Ordering: `["name", "id"]`. Unique on
+  **`(person, name)`** only — two identities may share the same alias string;
+  the same Person may not store the exact same alias twice. Alias `name` is
+  **not** globally unique. No backfill; existing Person rows with zero aliases
+  remain valid.
+- Stored alias text preserves case and Unicode exactly after
+  **leading/trailing `.strip()` only**. No casefold, transliteration, Unicode
+  normalization, fuzzy matching, AI, or interior-whitespace collapsing at
+  write time.
+- Write services in `photo_content_management.py`: `create_person_alias`,
+  `update_person_alias`, `delete_person_alias`. They strip, reject empty,
+  reject `>255`, and reject an alias that is exactly equal to that Person's
+  canonical `name` after strip. Duplicate `(person, name)` is left to the DB
+  uniqueness constraint and converted to `PhotoContentManagementError`.
+  Services run in `transaction.atomic`, do not rewrite `Person.name`, and do
+  not touch `PhotoPerson` / `ArchiveItemPerson` / Tags.
+- Search: for each distinct Person attached to at least one
+  **public-renderable** `PhotoContent` via `PhotoPerson`, canonical
+  `Person.name` remains searchable, then all `PersonAlias.name` values for
+  those Persons. Order: distinct Persons `(name, id)`; canonical names in that
+  order; then aliases in that same person order, aliases by `(name, id)`.
+  Outer segment dedupe still drops repeated fragments. `ArchiveItemPerson`-only
+  relationships do not contribute. Result remains one ArchiveItem at
+  `/archive/<id>/` (no Person result, no `?photo=` deep-link).
+- Index refresh uses the existing explicit in-transaction contract: alias
+  create/edit/delete fans out through
+  `archive_item_ids_for_person_photo_appearances` (distinct ArchiveItem ids via
+  PhotoPerson; one rebuild per item) then `sync_archive_item_search_indexes`.
+  No Django signals and no `on_commit`. Search-index prefetch of aliases is
+  confined to `archive_items_for_search_index_build`; public gallery/access
+  prefetch stays canonical-only.
+- `update_person_name` still renames only `Person.name` and rebuilds affected
+  PHOTO indexes. It does **not** rewrite, delete, or promote aliases. If the
+  new canonical name equals an existing alias, both rows may coexist; search
+  dedupes the identical fragment. Alias-write validation still rejects
+  creating/updating an alias to the current canonical name.
+- There is **no production Person delete path**. Any future delete service
+  must fan out search-index rebuilds **before** CASCADE removes `PhotoPerson`
+  links (and aliases).
+- **`Person`** and **`PersonAlias`** remain unregistered in Django Admin.
+
+**Migration:** `0054_personalias` — additive `CreateModel` + uniqueness
+constraint; depends on `0053_photocontent_multi_photo_foundation`; no data
+migration.
+
+**Deferred (PR6b+):** staff alias-management UI; alias display in the Person
+picker; public alias display; public Person pages; alias kind/type;
+language/script metadata; Tag → Person migration; identity merge/deduplication;
+Person catalog/Admin; fuzzy matching; AI identity matching.
+
+**Tests:** `documents/test_person_alias.py` (plus admin/public/search
+regressions in `test_person.py`, `test_photo_public_gallery.py`,
+`test_archive_search_photo_aggregation.py`).
+
 ## PHOTO search aggregation (PR5)
 
 **Decision / implemented:** A PHOTO `ArchiveItem` is findable through descriptive
@@ -25,7 +90,8 @@ standalone hit.
   photos. Distinct by Person id; order `(name, id)`. A Person attached to both
   a renderable and a non-renderable photo still appears once. A Person attached
   only to non-renderable photos for that item does not appear.
-  `ArchiveItemPerson` is **not** indexed here.
+  `ArchiveItemPerson` is **not** indexed here. **Person aliases** are indexed
+  on that same renderable-PhotoPerson path; see **Person aliases (PR6a)**.
 - Aggregation walks PhotoContent rows that pass `photo_is_archive_renderable`
   (same public-gallery helper: `UPLOADED` + non-empty `original_file_key`;
   used by `public_renderable_photo_contents`) in `(position, id)` order.
@@ -63,10 +129,10 @@ standalone hit.
 - Full `backfill_archive_search_index` rebuilds PHOTO rows with these rules.
   No schema migration (`ArchiveItemSearchIndex` remains derived).
 
-**Deferred:** Person aliases; Tag → Person migration; public Person pages;
+**Deferred:** Tag → Person migration; public Person pages;
 automatic `ArchiveItemPerson` from `PhotoPerson`; matched-photo deep-linking;
 browse-card alternate preview; structured year filters from photo dates; AI
-identification.
+identification. Person aliases are implemented in **Person aliases (PR6a)**.
 
 **Tests:** `documents/test_archive_search_photo_aggregation.py` (plus updated
 builder isolation in `test_archive_search_index.py`).
@@ -76,8 +142,9 @@ builder isolation in `test_archive_search_index.py`).
 
 **Decision / implemented:** Public PHOTO detail presents **all publicly
 renderable** `PhotoContent` rows for one PHOTO `ArchiveItem`. Browse cards,
-browse eligibility, search aggregation, Person aliases, Tag → Person
-migration, and staff management are **unchanged**.
+browse eligibility, search aggregation, Tag → Person
+migration, and staff management are **unchanged**. Person aliases are
+searchable (PR6a) but still not shown on this public gallery.
 
 **Current behavior:**
 
@@ -115,9 +182,11 @@ migration, and staff management are **unchanged**.
 
 **Deferred (PR5+ at the time of PR4):** search aggregation across photos
 (**implemented in PHOTO search aggregation (PR5)**); browse-card
-aggregation / choosing a non-primary preview; Person aliases / public Person
-pages; Tag → Person migration; automatic `ArchiveItemPerson` from
-`PhotoPerson`; re-upload/retry of `FAILED` photos; AI identification.
+aggregation / choosing a non-primary preview; Person alias **display** /
+public Person pages (alias schema + PHOTO search are implemented in
+**Person aliases (PR6a)**); Tag → Person migration; automatic
+`ArchiveItemPerson` from `PhotoPerson`; re-upload/retry of `FAILED` photos;
+AI identification.
 
 **Tests:** `documents/test_photo_public_gallery.py` (plus existing PHOTO
 display/browse regressions).
@@ -249,6 +318,8 @@ This PR is schema-only. It does not change search, advanced search, public UI,
   display **`name`** (`CharField(max_length=255)`), **`created_at`**,
   **`updated_at`**. **`name` is not unique** — two identities may share a
   display name. No aliases, biography, dates, confidence, or roles.
+  Aliases were added later in **Person aliases (PR6a)**; this PR remained
+  schema-only for Person / join tables.
 - **`ArchiveItemPerson`** is the explicit through row for
   **`ArchiveItem.people`**. Meaning: this person is generally related to this
   archival item. It does **not** mean the person appears in a photo or has a

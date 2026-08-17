@@ -17,6 +17,7 @@ from documents.models import (
     ArchiveItem,
     ArchiveItemPerson,
     Person,
+    PersonAlias,
     PhotoContent,
     PhotoPerson,
     Tag,
@@ -28,6 +29,7 @@ from documents.services.archive_item_access import (
 from documents.services.photo_gallery import (
     PUBLIC_PHOTO_QUERY_PARAM,
     build_public_photo_gallery,
+    identified_people_display_names,
     parse_public_photo_selector,
     public_photo_alt_text,
     public_photo_detail_url,
@@ -348,6 +350,29 @@ class PhotoPublicGalleryTests(TestCase):
         self.assertNotIn("Second outing", header)
         self.assertIn("Second outing", html)
 
+    def test_public_detail_shows_canonical_person_names_not_aliases(self):
+        PersonAlias.objects.create(person=self.ada, name="Ada Lovelace")
+        PersonAlias.objects.create(person=self.rivka, name="Rivka Cohen")
+        resp = self._detail()
+        self.assertContains(resp, "Ada, Rivka")
+        self.assertNotContains(resp, "Ada Lovelace")
+        self.assertNotContains(resp, "Rivka Cohen")
+        self.assertEqual(
+            identified_people_display_names(self.p1),
+            ["Ada", "Rivka"],
+        )
+
+        url = reverse("archive-detail", kwargs={"item_id": self.item.id})
+        with CaptureQueriesContext(connection) as ctx:
+            detail = self.client.get(url)
+        self.assertEqual(detail.status_code, 200)
+        alias_sql = [
+            query["sql"]
+            for query in ctx.captured_queries
+            if "documents_personalias" in query["sql"].lower()
+        ]
+        self.assertEqual(alias_sql, [])
+
     def test_identified_people_and_people_present_stay_separate(self):
         resp = self._detail()
         self.assertContains(resp, "אנשים מזוהים:")
@@ -502,6 +527,12 @@ class PhotoPublicGalleryTests(TestCase):
 
         people_before, total_before = _detail_query_counts()
         self.assertLessEqual(people_before, 2)
+
+        PersonAlias.objects.create(person=self.ada, name="Ada Lovelace")
+        PersonAlias.objects.create(person=self.rivka, name="Rivka Cohen")
+        people_with_aliases, total_with_aliases = _detail_query_counts()
+        self.assertEqual(people_before, people_with_aliases)
+        self.assertEqual(total_before, total_with_aliases)
 
         for offset in range(4, 8):
             extra = _add_photo(

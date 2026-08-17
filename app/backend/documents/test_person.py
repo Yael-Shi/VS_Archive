@@ -13,6 +13,7 @@ from documents.models import (
     ArchiveItem,
     ArchiveItemPerson,
     Person,
+    PersonAlias,
     PhotoContent,
     PhotoPerson,
 )
@@ -231,5 +232,6 @@ class PersonAdminExposureTests(TestCase):
 
     def test_person_models_are_not_registered_in_django_admin(self):
         self.assertFalse(django_admin.site.is_registered(Person))
+        self.assertFalse(django_admin.site.is_registered(PersonAlias))
         self.assertFalse(django_admin.site.is_registered(ArchiveItemPerson))
         self.assertFalse(django_admin.site.is_registered(PhotoPerson))

@@ -2,7 +2,7 @@
 
 Design and implementation scope for **`PHOTO`** archive items: private S3 storage, presigned display, browse-card thumbnails, and no OCR/HTR pipeline. The data model now allows **1..N** **`PhotoContent`** rows per PHOTO **`ArchiveItem`**. Staff can manage those rows. Public detail presents all renderable photos; browse cards still use the **first** photo.
 
-**Status:** Design (PR1) through staff manage status clarity (PR6) are **implemented**. **Browse-card thumbnail generation**, **upload-time thumbnail persistence**, and **idempotent backfill commands** are **implemented**. The **multi-photo data model**, **staff multi-photo management (PR3)**, the **public multi-photo gallery (PR4)**, and **search aggregation across PhotoContent / PhotoPerson (multi-photo PR5)** are **implemented**. Re-upload/retry after **`FAILED`** and browse-card aggregation remain **not implemented**.
+**Status:** Design (PR1) through staff manage status clarity (PR6) are **implemented**. **Browse-card thumbnail generation**, **upload-time thumbnail persistence**, and **idempotent backfill commands** are **implemented**. The **multi-photo data model**, **staff multi-photo management (PR3)**, the **public multi-photo gallery (PR4)**, **search aggregation across PhotoContent / PhotoPerson (multi-photo PR5)**, and **Person aliases schema + PHOTO search (PR6a)** are **implemented**. Staff alias-management UI, public alias display, re-upload/retry after **`FAILED`**, and browse-card aggregation remain **not implemented**.
 
 **Related docs:**
 
@@ -13,7 +13,8 @@ Design and implementation scope for **`PHOTO`** archive items: private S3 storag
 
 **Key code references (current behavior):**
 
-- `documents/models.py` — **`ArchiveItem`**, **`ManualTextContent`**, **`PhotoContent`**
+- `documents/models.py` — **`ArchiveItem`**, **`ManualTextContent`**, **`PhotoContent`**, **`Person`**, **`PersonAlias`**
+- `documents/services/photo_content_management.py` — staff PHOTO child writes, Person rename, PersonAlias writes
 - `documents/services/archive_item_access.py` — visibility and browse renderability
 - `documents/services/archive_item_presentation.py` — **`ArchiveBrowseCard`**, text preview, type markers
 - `documents/services/photo_archive_urls.py` — presigned browse thumbnails for PHOTO
@@ -118,7 +119,7 @@ If the **first** photo is **`PENDING`** / **`FAILED`** / empty-key, the item is 
 
 ### Public search (multi-photo PR5)
 
-`ArchiveItemSearchIndex` remains one row per ArchiveItem. PHOTO `q` search concatenates, in `(position, id)` order, each **public-renderable** PhotoContent's `description` / `location` / `context` / `people_present` / `notes`, then distinct `PhotoPerson` `Person.name` values from those rows ordered by `(name, id)`, into `metadata_text`. Renderable means the same public-gallery contract (`photo_is_archive_renderable` / `public_renderable_photo_contents`): `UPLOADED` and a non-empty `original_file_key`. Pending, failed, and empty-key photos are omitted; thumbnail presence does not matter. Access is still applied at query time. Result URL is `/archive/<id>/` with no matched `?photo=` deep-link. Per-photo dates are not searchable and do not affect `year` / `year_to`. Child-row writes refresh the owning index in the same transaction as the staff service (`update_photo_content_metadata`, add/delete/reorder, `update_person_name`). Successful upload finalize (`PENDING` → `UPLOADED`) also refreshes the owning index so that photo's metadata becomes searchable; failed finalize leaves it absent.
+`ArchiveItemSearchIndex` remains one row per ArchiveItem. PHOTO `q` search concatenates, in `(position, id)` order, each **public-renderable** PhotoContent's `description` / `location` / `context` / `people_present` / `notes`, then distinct `PhotoPerson` `Person.name` values from those rows ordered by `(name, id)`, then `PersonAlias.name` values for those same Persons (same person order, aliases by `(name, id)`), into `metadata_text`. Renderable means the same public-gallery contract (`photo_is_archive_renderable` / `public_renderable_photo_contents`): `UPLOADED` and a non-empty `original_file_key`. Pending, failed, and empty-key photos are omitted; thumbnail presence does not matter. Access is still applied at query time. Result URL is `/archive/<id>/` with no matched `?photo=` deep-link. Per-photo dates are not searchable and do not affect `year` / `year_to`. Child-row writes refresh the owning index in the same transaction as the staff service (`update_photo_content_metadata`, add/delete/reorder, `update_person_name`, `create_person_alias` / `update_person_alias` / `delete_person_alias`). Successful upload finalize (`PENDING` → `UPLOADED`) also refreshes the owning index so that photo's metadata becomes searchable; failed finalize leaves it absent. Aliases are searchable but not shown on public PHOTO detail.
 
 ---
 
@@ -339,7 +340,7 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 - OCR/HTR on photos
 - Worker / SQS processing for PHOTO
 - Face recognition, AI identification, comments
-- Person aliases / full Person administration
+- Staff alias-management UI; alias display in the Person picker; public alias display; Person catalog/Admin
 - Tag → Person migration; automatic ArchiveItemPerson from PhotoPerson
 - Public Person pages
 - Public (unauthenticated) upload
@@ -364,6 +365,7 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 | **Multi-photo PR3** | Staff add/edit/reorder/delete photos + Person selection | **Implemented** |
 | **Multi-photo PR4** | Public gallery / per-selected-photo metadata / identified Person names | **Implemented** |
 | **Multi-photo PR5** | Search aggregation across public-renderable PhotoContent text + PhotoPerson names; child-row and successful-finalize index refresh | **Implemented** |
+| **PR6a** | `PersonAlias` schema + alias write services + PHOTO search integration (no staff alias UI, no public alias display) | **Implemented** |
 
 ---
 
