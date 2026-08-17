@@ -210,7 +210,16 @@ def _poll_until_done(
                 f"Timed out after {timeout_seconds}s waiting for interaction {interaction_id}"
             )
         sleep_fn(poll_seconds)
-        current = _get_interaction(api_key, interaction_id)
+        try:
+            current = _get_interaction(api_key, interaction_id)
+        except requests.Timeout as exc:
+            logger.warning(
+                "Antigravity interaction poll timed out; retrying within overall deadline "
+                "interaction_id=%s exception_class=%s",
+                interaction_id,
+                type(exc).__name__,
+            )
+            continue
     return current
 
 
