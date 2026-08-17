@@ -1,6 +1,78 @@
 # VS-Archive Decision Log
 
+## PHOTO search aggregation (PR5)
+
+**Decision / implemented:** A PHOTO `ArchiveItem` is findable through descriptive
+metadata on **public-renderable** `PhotoContent` rows, plus identified
+`Person.name` values linked through `PhotoPerson` on those same rows. The
+search result remains **one `ArchiveItem` row**. `PhotoContent` is never a
+standalone hit.
+
+**Current behavior:**
+
+- Indexed PHOTO sources are appended to `ArchiveItemSearchIndex.metadata_text`
+  (weight B, FTS + short-field `icontains`), after existing ArchiveItem
+  discovery fields (author, source_title, categories, events, tags,
+  `public_note`). PHOTO `body_text` and `hebrew_translation_text` stay empty.
+- Per-photo text fields: `description`, `location`, `context`,
+  `people_present`, `notes`. Empty/whitespace-only values are dropped with the
+  existing `_normalize_segment` / `_join_segments` rules (no extra placeholder
+  stripping).
+- `people_present` stays free-text and is indexed separately from structured
+  `Person.name`. The builder does not infer identities from `people_present`,
+  create `ArchiveItemPerson` from `PhotoPerson`, or migrate person-name Tags.
+- Identified names come only from `PhotoPerson → Person` on **renderable**
+  photos. Distinct by Person id; order `(name, id)`. A Person attached to both
+  a renderable and a non-renderable photo still appears once. A Person attached
+  only to non-renderable photos for that item does not appear.
+  `ArchiveItemPerson` is **not** indexed here.
+- Aggregation walks PhotoContent rows that pass `photo_is_archive_renderable`
+  (same public-gallery helper: `UPLOADED` + non-empty `original_file_key`;
+  used by `public_renderable_photo_contents`) in `(position, id)` order.
+  `PENDING` / `FAILED` / empty-key rows do **not** contribute. Thumbnail
+  presence is irrelevant. Repeated normalized fragments are kept once (first
+  occurrence). Visibility stays query-time (`archive_browse_queryset_for_user`).
+- Technical fields are not indexed: S3 keys, filenames, MIME, sizes, upload
+  status/error, thumbnail keys, ids.
+- **Per-photo dates are not indexed** (not as FTS text and not in `year` /
+  `year_to` filters). ArchiveItem dates are also absent from FTS; structured
+  year filters still use ArchiveItem `date_start` / `date_end` /
+  `date_precision` only. Mixing photo-level dates into those filters would be
+  ambiguous (umbrella vs component) and is deferred.
+- Result URL remains `/archive/<id>/`. No matched-photo `?photo=` deep-link.
+  Snippets stay item-level: photo-metadata hits use **`נמצא בפרטי הפריט`**
+  when no more specific ArchiveItem metadata field matches; no per-photo
+  excerpt UI.
+- Refresh is the existing **in-transaction** `sync_archive_item_search_index`
+  pattern (not Django signals, not `on_commit`). Child writers that change
+  searchable PHOTO text call it once per logical ArchiveItem save:
+  `update_photo_content_metadata`, `delete_one_photo_content`,
+  `reorder_photo_contents` (order is part of the derived text),
+  `create_additional_photo_upload_plan` (pending row may exist; builder omits
+  it), and create-new-item via the existing discovery sync after `PhotoContent`
+  is inserted. Successful `finalize_photo_upload` (`PENDING` → `UPLOADED`)
+  rebuilds the owning index in the same transaction as the status change so
+  newly renderable metadata becomes searchable; failed / retryable finalize
+  does not. `update_person_name` fans out through
+  `archive_item_ids_for_person_photo_appearances` (distinct ArchiveItem ids via
+  PhotoPerson; one rebuild per item); the builder decides whether the renamed
+  Person actually contributes. Raw `Person.save()` / `QuerySet.update()` are
+  not hooked. Thumbnail generation runs after finalize commit and does not
+  rebuild. There is no supported write path that transitions a renderable photo
+  back to non-renderable.
+- Full `backfill_archive_search_index` rebuilds PHOTO rows with these rules.
+  No schema migration (`ArchiveItemSearchIndex` remains derived).
+
+**Deferred:** Person aliases; Tag → Person migration; public Person pages;
+automatic `ArchiveItemPerson` from `PhotoPerson`; matched-photo deep-linking;
+browse-card alternate preview; structured year filters from photo dates; AI
+identification.
+
+**Tests:** `documents/test_archive_search_photo_aggregation.py` (plus updated
+builder isolation in `test_archive_search_index.py`).
+
 ## PHOTO public multi-photo gallery (PR4)
+
 
 **Decision / implemented:** Public PHOTO detail presents **all publicly
 renderable** `PhotoContent` rows for one PHOTO `ArchiveItem`. Browse cards,
@@ -41,7 +113,8 @@ migration, and staff management are **unchanged**.
   contract. The gallery builder reads that cache and does not start a second
   ORM prefetch. No per-photo/per-person N+1.
 
-**Deferred (PR5+):** search aggregation across photos; browse-card
+**Deferred (PR5+ at the time of PR4):** search aggregation across photos
+(**implemented in PHOTO search aggregation (PR5)**); browse-card
 aggregation / choosing a non-primary preview; Person aliases / public Person
 pages; Tag → Person migration; automatic `ArchiveItemPerson` from
 `PhotoPerson`; re-upload/retry of `FAILED` photos; AI identification.
@@ -93,7 +166,8 @@ automatic `ArchiveItemPerson` derivation.
   gallery is implemented in **PHOTO public multi-photo gallery (PR4)**;
   browse-card eligibility remains the first photo.
 
-**Deferred (remaining after PR4):** search aggregation across photo rows;
+**Deferred (remaining after PR4):** search aggregation across photo rows
+(**implemented in PHOTO search aggregation (PR5)**);
 using non-primary photos for browse thumbnails; Person aliases / Person
 administration beyond this minimal create; Tag → Person migration;
 automatic ArchiveItemPerson from PhotoPerson; OCR/HTR or AI identification
@@ -154,11 +228,11 @@ unique `(archive_item, position)`; `position >= 1` check. No S3 key rewrite,
 no tag/person backfill, no search-index rebuild.
 
 **Deferred (later PRs):** Public gallery of N photos is implemented in
-**PHOTO public multi-photo gallery (PR4)**. Still deferred: search
-aggregation across photo rows; using non-primary photos for browse
-thumbnails. Staff add/edit/reorder/delete of individual photos and
-per-image date forms are implemented in **PHOTO staff multi-photo management
-(PR3)**.
+**PHOTO public multi-photo gallery (PR4)**. Search aggregation across photo
+rows is implemented in **PHOTO search aggregation (PR5)**. Still deferred:
+using non-primary photos for browse thumbnails. Staff add/edit/reorder/delete
+of individual photos and per-image date forms are implemented in **PHOTO
+staff multi-photo management (PR3)**.
 
 **Tests:** `documents/test_photo_content.py` (plus existing PHOTO /
 Person regression tests).

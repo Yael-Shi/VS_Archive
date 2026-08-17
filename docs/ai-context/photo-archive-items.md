@@ -2,7 +2,7 @@
 
 Design and implementation scope for **`PHOTO`** archive items: private S3 storage, presigned display, browse-card thumbnails, and no OCR/HTR pipeline. The data model now allows **1..N** **`PhotoContent`** rows per PHOTO **`ArchiveItem`**. Staff can manage those rows. Public detail presents all renderable photos; browse cards still use the **first** photo.
 
-**Status:** Design (PR1) through staff manage status clarity (PR6) are **implemented**. **Browse-card thumbnail generation**, **upload-time thumbnail persistence**, and **idempotent backfill commands** are **implemented**. The **multi-photo data model**, **staff multi-photo management (PR3)**, and **public multi-photo gallery (PR4)** are **implemented**. Re-upload/retry after **`FAILED`**, search aggregation across photos, and browse-card aggregation remain **not implemented**.
+**Status:** Design (PR1) through staff manage status clarity (PR6) are **implemented**. **Browse-card thumbnail generation**, **upload-time thumbnail persistence**, and **idempotent backfill commands** are **implemented**. The **multi-photo data model**, **staff multi-photo management (PR3)**, the **public multi-photo gallery (PR4)**, and **search aggregation across PhotoContent / PhotoPerson (multi-photo PR5)** are **implemented**. Re-upload/retry after **`FAILED`** and browse-card aggregation remain **not implemented**.
 
 **Related docs:**
 
@@ -38,7 +38,7 @@ This section describes **implemented runtime behavior**. Historical PR notes bel
 ### ArchiveItem and item types
 
 - **`ArchiveItem`** is the source of truth for shared archival metadata (title, visibility, dates, metadata status, author/source display, discovery M2M, public note) across **`PHOTO`**, **`OCR_DOCUMENT`**, and **`MANUAL_TEXT`**.
-- **`PHOTO`** — backed by **1..N** **`PhotoContent`** rows (`ForeignKey`, `related_name="photo_contents"`); no **`Document`**, worker, or **`DocumentTextResult`**. Staff manage all rows. Public detail presents every renderable `PhotoContent` on `/archive/<id>/`. Browse cards still use **`ArchiveItem.primary_photo_content`** (first by `position`, then `id`). Each photo may store its own `date_start` / `date_end` / `date_precision`; those dates are **not** aggregated onto **`ArchiveItem`**.
+- **`PHOTO`** — backed by **1..N** **`PhotoContent`** rows (`ForeignKey`, `related_name="photo_contents"`); no **`Document`**, worker, or **`DocumentTextResult`**. Staff manage all rows. Public detail presents every renderable `PhotoContent` on `/archive/<id>/`. Browse cards still use **`ArchiveItem.primary_photo_content`** (first by `position`, then `id`). Each photo may store its own `date_start` / `date_end` / `date_precision`; those dates are **not** aggregated onto **`ArchiveItem`** and are **not** used by structured year filters or FTS. Public `q` search aggregates descriptive text and identified Person names from **public-renderable** `PhotoContent` rows onto the one ArchiveItem index row.
 - **`OCR_DOCUMENT`** — backed by **`Document`** (+ **`DocumentSourceFile`** where applicable); OCR/HTR via worker. Shared display metadata is read from **`ArchiveItem`**; OCR-specific fields remain on **`Document`**.
 - **`MANUAL_TEXT`** — backed by **`ManualTextContent.body`**; no file upload.
 
@@ -116,6 +116,10 @@ Thumbnail keys are **always** `thumb_400.jpg` (not `thumb_400.{ext}`).
 
 If the **first** photo is **`PENDING`** / **`FAILED`** / empty-key, the item is omitted from public browse and **`/archive/<id>/`** returns **404**. Additional non-renderable rows on an otherwise accessible item are omitted from the public gallery only. Staff **`/archive/manage/`** lists all PHOTO items regardless of upload status.
 
+### Public search (multi-photo PR5)
+
+`ArchiveItemSearchIndex` remains one row per ArchiveItem. PHOTO `q` search concatenates, in `(position, id)` order, each **public-renderable** PhotoContent's `description` / `location` / `context` / `people_present` / `notes`, then distinct `PhotoPerson` `Person.name` values from those rows ordered by `(name, id)`, into `metadata_text`. Renderable means the same public-gallery contract (`photo_is_archive_renderable` / `public_renderable_photo_contents`): `UPLOADED` and a non-empty `original_file_key`. Pending, failed, and empty-key photos are omitted; thumbnail presence does not matter. Access is still applied at query time. Result URL is `/archive/<id>/` with no matched `?photo=` deep-link. Per-photo dates are not searchable and do not affect `year` / `year_to`. Child-row writes refresh the owning index in the same transaction as the staff service (`update_photo_content_metadata`, add/delete/reorder, `update_person_name`). Successful upload finalize (`PENDING` → `UPLOADED`) also refreshes the owning index so that photo's metadata becomes searchable; failed finalize leaves it absent.
+
 ---
 
 ## 1. Product definition
@@ -124,7 +128,7 @@ If the **first** photo is **`PENDING`** / **`FAILED`** / empty-key, the item is 
 
 A **`PHOTO`** archive item is a historical/family photograph (or a set of related photograph components) cataloged in the unified archive. It is a first-class **`ArchiveItem`** with **`item_type=PHOTO`**, visible in the normal archive list and detail flow, with shared archival metadata (title, dates, visibility, discovery fields) on **`ArchiveItem`** and image bytes stored separately in private S3.
 
-**Current product/UI rule:** staff can attach **multiple image files** to one PHOTO item. Public detail presents **all renderable photos** as a server-rendered gallery on the ArchiveItem URL. Browse cards still use **the first image** (`primary_photo_content`). Search aggregation across photos is **not** implemented. No OCR text extraction.
+**Current product/UI rule:** staff can attach **multiple image files** to one PHOTO item. Public detail presents **all renderable photos** as a server-rendered gallery on the ArchiveItem URL. Browse cards still use **the first image** (`primary_photo_content`). Public `q` search aggregates text from **public-renderable photos** onto that one ArchiveItem. No OCR text extraction.
 
 ### How PHOTO differs from OCR_DOCUMENT
 
@@ -330,7 +334,6 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 
 ## 8. Explicit out of scope
 
-- Search aggregation across photo rows
 - Browse-card aggregation / choosing a non-primary preview image
 - Image transformations beyond thumbnail resize (watermark, CDN, etc.)
 - OCR/HTR on photos
@@ -360,6 +363,7 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 | **Multi-photo PR2** | 1:N `PhotoContent` FK, `position`, per-image dates | **Implemented** |
 | **Multi-photo PR3** | Staff add/edit/reorder/delete photos + Person selection | **Implemented** |
 | **Multi-photo PR4** | Public gallery / per-selected-photo metadata / identified Person names | **Implemented** |
+| **Multi-photo PR5** | Search aggregation across public-renderable PhotoContent text + PhotoPerson names; child-row and successful-finalize index refresh | **Implemented** |
 
 ---
 

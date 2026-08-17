@@ -362,7 +362,9 @@ def build_archive_search_match_presentation(
     match, chooses the field whose best window covers the most distinct query
     terms; ties keep the existing source/body preference. Title-only hits add
     no extras (title is already visible). Metadata-only hits add a label
-    without fabricating a body excerpt.
+    without fabricating a body excerpt. PHOTO component text lives in
+    ``metadata_text``; when it matches and no ArchiveItem scalar/M2M field
+    does, the generic item-details label is used (no per-photo snippet).
     """
     if not terms:
         return None
@@ -411,6 +413,19 @@ def build_archive_search_match_presentation(
     if metadata_label:
         return ArchiveSearchMatchPresentation(
             match_source_label=metadata_label,
+            snippet_segments=(),
+            replaces_preview=False,
+        )
+
+    index_metadata = ""
+    if search_index is not None:
+        index_metadata = search_index.metadata_text or ""
+    if short_field_contains_any_term(index_metadata, terms):
+        # PhotoContent / PhotoPerson text lives in metadata_text, not on
+        # ArchiveItem scalar/M2M fields. Label as item details; do not invent
+        # a per-photo snippet or ``?photo=`` deep-link.
+        return ArchiveSearchMatchPresentation(
+            match_source_label=MATCH_SOURCE_ITEM_DETAILS,
             snippet_segments=(),
             replaces_preview=False,
         )

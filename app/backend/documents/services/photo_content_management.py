@@ -135,6 +135,35 @@ def create_identified_person(*, name: str) -> Person:
     return Person.objects.create(name=normalized)
 
 
+@transaction.atomic
+def update_person_name(person: Person, *, name: str) -> Person:
+    """Rename a Person and refresh PHOTO search indexes reached via PhotoPerson.
+
+    Does not update ArchiveItemPerson-driven search (that relation is not
+    indexed here). Raw ``Person.save()`` / ``QuerySet.update()`` are not
+    hooked; callers that change ``name`` must use this service.
+    """
+    normalized = (name or "").strip()
+    if not normalized:
+        raise PhotoContentManagementError(PERSON_NAME_REQUIRED_ERROR)
+    if len(normalized) > 255:
+        raise PhotoContentManagementError(PERSON_NAME_TOO_LONG_ERROR)
+    if person.name == normalized:
+        return person
+    person.name = normalized
+    person.save(update_fields=["name", "updated_at"])
+
+    from documents.services.archive_search_index import (
+        archive_item_ids_for_person_photo_appearances,
+        sync_archive_item_search_indexes,
+    )
+
+    sync_archive_item_search_indexes(
+        archive_item_ids_for_person_photo_appearances(person.pk)
+    )
+    return person
+
+
 def set_photo_people(photo_content: PhotoContent, person_ids: list[int]) -> None:
     """Replace PhotoPerson links only. Does not create ArchiveItemPerson rows."""
     unique_ids = list(dict.fromkeys(person_ids))
@@ -198,6 +227,10 @@ def update_photo_content_metadata(
         created = create_identified_person(name=new_person_name)
         resolved_person_ids.append(created.pk)
     set_photo_people(locked, resolved_person_ids)
+
+    from documents.services.archive_search_index import sync_archive_item_search_index
+
+    sync_archive_item_search_index(locked_item.pk)
     return locked
 
 
@@ -221,6 +254,11 @@ def reorder_photo_contents(
     by_id = {photo.pk: photo for photo in photos}
     ordered = [by_id[photo_id] for photo_id in requested_ids]
     _renumber_photos(ordered)
+
+    from documents.services.archive_search_index import sync_archive_item_search_index
+
+    # Aggregation order is ``(position, id)``; keep the derived index aligned.
+    sync_archive_item_search_index(locked_item.pk)
     return ordered
 
 
@@ -252,6 +290,10 @@ def delete_one_photo_content(
         thumbnail_file_key=thumbnail_file_key,
         photo_content_id=photo_content_id,
     )
+
+    from documents.services.archive_search_index import sync_archive_item_search_index
+
+    sync_archive_item_search_index(locked_item.pk)
     return locked_item
 
 
