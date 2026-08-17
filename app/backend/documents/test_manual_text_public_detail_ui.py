@@ -347,32 +347,32 @@ class ManualTextPublicDetailLayoutStyleTests(SimpleTestCase):
     def test_manual_text_signature_watermark_is_desktop_only(self):
         css = self._css()
 
-        desktop_start = css.index("@media (min-width: 980px)")
-        desktop_end = css.index("@media (max-width: 979px)", desktop_start)
+        desktop_start = css.index("@media (min-width: 1180px)")
+        desktop_end = css.index("@media (max-width: 1179px)", desktop_start)
         desktop_rule = css[desktop_start:desktop_end]
 
         self.assertIn(
-            ".archive-detail-page--manual-text::before",
+            ".archive-detail-page--manual-text .archive-detail-manual-text-body::before",
             desktop_rule,
         )
         self.assertIn(
-            ".archive-detail-page--manual-text-signature-1::before",
+            ".archive-detail-page--manual-text-signature-1\n"            "    .archive-detail-manual-text-body::before",
             desktop_rule,
         )
         self.assertIn(
-            ".archive-detail-page--manual-text-signature-2::before",
+            ".archive-detail-page--manual-text-signature-2\n"            "    .archive-detail-manual-text-body::before",
             desktop_rule,
         )
         self.assertIn(
-            ".archive-detail-page--manual-text-signature-3::before",
+            ".archive-detail-page--manual-text-signature-3\n"            "    .archive-detail-manual-text-body::before",
             desktop_rule,
         )
 
-        mobile_start = css.index("@media (max-width: 979px)", desktop_end)
+        mobile_start = css.index("@media (max-width: 1179px)", desktop_end)
         mobile_rule = css[mobile_start : css.index("}", mobile_start) + 1]
 
         self.assertIn(
-            ".archive-detail-page--manual-text::before",
+            ".archive-detail-page--manual-text .archive-detail-manual-text-body::before",
             mobile_rule,
         )
         self.assertIn("display: none;", mobile_rule)

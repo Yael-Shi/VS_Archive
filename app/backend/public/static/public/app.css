@@ -5155,18 +5155,19 @@ body:has(.homepage-found-in-archive) .homepage-ai-note {
 
 /* MANUAL_TEXT desktop-only archival signature watermark.
    Decorative only; does not participate in layout. */
-@media (min-width: 980px) {
-  .archive-detail-page--manual-text {
+@media (min-width: 1180px) {
+  .archive-detail-page--manual-text .archive-detail-manual-text-body {
     position: relative;
   }
 
-  .archive-detail-page--manual-text::before {
+  .archive-detail-page--manual-text .archive-detail-manual-text-body::before {
     content: "";
     position: absolute;
     z-index: 0;
-    left: 4%;
-    top: 17rem;
-    width: min(30vw, 430px);
+    right: calc(100% + var(--space-5));
+    top: 50%;
+    transform: translateY(-50%);
+    width: min(27vw, 410px);
     aspect-ratio: 16 / 9;
     background-repeat: no-repeat;
     background-position: center;
@@ -5175,26 +5176,29 @@ body:has(.homepage-found-in-archive) .homepage-ai-note {
     pointer-events: none;
   }
 
-  .archive-detail-page--manual-text-signature-1::before {
+  .archive-detail-page--manual-text-signature-1
+    .archive-detail-manual-text-body::before {
     background-image: url("/static/public/images/manual-text-signatures/saadia-signature-1.png");
   }
 
-  .archive-detail-page--manual-text-signature-2::before {
+  .archive-detail-page--manual-text-signature-2
+    .archive-detail-manual-text-body::before {
     background-image: url("/static/public/images/manual-text-signatures/saadia-signature-2.png");
   }
 
-  .archive-detail-page--manual-text-signature-3::before {
+  .archive-detail-page--manual-text-signature-3
+    .archive-detail-manual-text-body::before {
     background-image: url("/static/public/images/manual-text-signatures/saadia-signature-3.png");
   }
 
-  .archive-detail-page--manual-text > * {
+  .archive-detail-manual-text-body > * {
     position: relative;
     z-index: 1;
   }
 }
 
-@media (max-width: 979px) {
-  .archive-detail-page--manual-text::before {
+@media (max-width: 1179px) {
+  .archive-detail-page--manual-text .archive-detail-manual-text-body::before {
     display: none;
   }
 }
