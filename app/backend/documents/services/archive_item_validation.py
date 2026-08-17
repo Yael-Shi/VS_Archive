@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import date
+
+from django.core.exceptions import ValidationError
+
 from documents.models import ArchiveItem, Document
 
 DATE_PRECISION_UI_CHOICES = (
@@ -32,3 +36,17 @@ def parse_date_precision(raw_value: str | None) -> str:
     if value not in valid:
         raise ValueError("date_precision is invalid")
     return value
+
+
+def validate_stored_archive_date_fields(
+    *,
+    date_start: date | None,
+    date_end: date | None,
+    date_precision: str,
+) -> None:
+    """Validate persisted date fields using ArchiveItem precision choices/rules."""
+    valid = {choice.value for choice in ArchiveItem.DatePrecision}
+    if date_precision not in valid:
+        raise ValidationError({"date_precision": "date_precision is invalid"})
+    if date_start is not None and date_end is not None and date_end < date_start:
+        raise ValidationError({"date_end": "date_end must not be before date_start"})

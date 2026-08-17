@@ -985,7 +985,7 @@ def _manual_text_preview(archive_item: ArchiveItem) -> str:
 
 
 def _photo_preview(archive_item: ArchiveItem) -> str:
-    photo_content = getattr(archive_item, "photo_content", None)
+    photo_content = archive_item.primary_photo_content
     if photo_content is None:
         return ""
     for value in (

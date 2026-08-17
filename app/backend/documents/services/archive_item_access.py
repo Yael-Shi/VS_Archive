@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from django.db.models import Q, QuerySet
+from django.db.models import Exists, OuterRef, Q, QuerySet, Subquery
 from django.http import Http404
 
 from documents.models import ArchiveItem, Document, PhotoContent, VideoContent
@@ -78,17 +78,28 @@ def filter_browse_renderable_archive_items(
     """
     Restrict ``/archive/`` browse/detail to items with completed uploads where required.
 
-    PHOTO is renderable only when linked ``PhotoContent`` is uploaded with a key.
+    PHOTO is renderable only when the first ``PhotoContent`` (by position, then
+    id) is uploaded with a non-empty original key. Additional photo rows are
+    ignored for browse eligibility in this transitional PR.
     OCR_DOCUMENT is renderable only when linked ``Document.upload_status`` is UPLOADED.
     VIDEO is renderable only when linked ``VideoContent`` matches the DB-enforceable
     provider/mode/id/source_url shape (missing content fails closed). Semantic
     source_url↔provider consistency is enforced at write time via ``full_clean()``.
     Other item types (e.g. MANUAL_TEXT) are unchanged.
     """
-    uploaded_photo = Q(
-        item_type=ArchiveItem.ItemType.PHOTO,
-        photo_content__upload_status=PhotoContent.UploadStatus.UPLOADED,
-        photo_content__original_file_key__gt="",
+    uploaded_photo = Q(item_type=ArchiveItem.ItemType.PHOTO) & Exists(
+        PhotoContent.objects.filter(
+            archive_item_id=OuterRef("pk"),
+            upload_status=PhotoContent.UploadStatus.UPLOADED,
+            original_file_key__gt="",
+            pk=Subquery(
+                PhotoContent.objects.filter(
+                    archive_item_id=OuterRef("archive_item_id"),
+                )
+                .order_by("position", "id")
+                .values("pk")[:1]
+            ),
+        )
     )
     uploaded_ocr = Q(
         item_type=ArchiveItem.ItemType.OCR_DOCUMENT,
@@ -160,12 +171,15 @@ def get_accessible_archive_item(
     base = queryset if queryset is not None else ArchiveItem.objects.all()
     qs = filter_archive_items_for_user(user, base)
     try:
-        return qs.select_related(
-            "manual_text_content",
-            "ocr_document",
-            "photo_content",
-            "video_content",
-        ).get(id=item_id)
+        return (
+            qs.select_related(
+                "manual_text_content",
+                "ocr_document",
+                "video_content",
+            )
+            .prefetch_related("photo_contents")
+            .get(id=item_id)
+        )
     except ArchiveItem.DoesNotExist:
         raise Http404() from None
 
@@ -187,11 +201,14 @@ def get_viewable_archive_item(
         filter_archive_items_for_user(user, base)
     )
     try:
-        return qs.select_related(
-            "manual_text_content",
-            "ocr_document",
-            "photo_content",
-            "video_content",
-        ).get(id=item_id)
+        return (
+            qs.select_related(
+                "manual_text_content",
+                "ocr_document",
+                "video_content",
+            )
+            .prefetch_related("photo_contents")
+            .get(id=item_id)
+        )
     except ArchiveItem.DoesNotExist:
         raise Http404() from None

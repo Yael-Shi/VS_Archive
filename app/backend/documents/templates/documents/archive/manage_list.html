@@ -39,18 +39,22 @@
                 <td>{{ item.visibility|archive_visibility_display_label }}</td>
                 <td>{{ item.metadata_status|archive_metadata_status_label }}</td>
                 <td>
-                  {% if item.item_type == "PHOTO" and item.photo_content %}
-                    <span class="badge{% if item.photo_content|photo_upload_status_tone %} {{ item.photo_content|photo_upload_status_tone }}{% endif %}">{{ item.photo_content|photo_upload_status_label }}</span>
-                  {% else %}
-                    —
-                  {% endif %}
+                  {% with photo=item.primary_photo_content %}
+                    {% if item.item_type == "PHOTO" and photo %}
+                      <span class="badge{% if photo|photo_upload_status_tone %} {{ photo|photo_upload_status_tone }}{% endif %}">{{ photo|photo_upload_status_label }}</span>
+                    {% else %}
+                      —
+                    {% endif %}
+                  {% endwith %}
                 </td>
                 <td>
-                  {% if item.item_type == "PHOTO" and item.photo_content %}
-                    <span class="badge{% if item.photo_content|photo_archive_renderability_tone %} {{ item.photo_content|photo_archive_renderability_tone }}{% endif %}">{{ item.photo_content|photo_archive_renderability_label }}</span>
-                  {% else %}
-                    —
-                  {% endif %}
+                  {% with photo=item.primary_photo_content %}
+                    {% if item.item_type == "PHOTO" and photo %}
+                      <span class="badge{% if photo|photo_archive_renderability_tone %} {{ photo|photo_archive_renderability_tone }}{% endif %}">{{ photo|photo_archive_renderability_label }}</span>
+                    {% else %}
+                      —
+                    {% endif %}
+                  {% endwith %}
                 </td>
                 <td>
                   {% if item.item_type == "MANUAL_TEXT" or item.item_type == "PHOTO" or item.item_type == "VIDEO" %}

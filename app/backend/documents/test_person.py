@@ -165,11 +165,12 @@ class PhotoContentCompatibilityTests(TestCase):
         self.assertEqual(photo.people_present, "someone in the back, unidentified")
         self.assertEqual(list(photo.people.all()), [identified])
 
-    def test_photo_content_one_to_one_and_metadata_defaults_remain(self):
+    def test_photo_content_fk_and_metadata_defaults_remain(self):
         photo = _create_photo_content()
         archive_item = photo.archive_item
 
-        self.assertEqual(archive_item.photo_content.id, photo.id)
+        self.assertEqual(archive_item.primary_photo_content.id, photo.id)
+        self.assertEqual(photo.position, 1)
         self.assertEqual(photo.description, "")
         self.assertEqual(photo.location, "")
         self.assertEqual(photo.context, "")
@@ -178,15 +179,17 @@ class PhotoContentCompatibilityTests(TestCase):
         self.assertEqual(photo.people.count(), 0)
         self.assertEqual(archive_item.people.count(), 0)
 
-        with self.assertRaises(IntegrityError):
-            with transaction.atomic():
-                PhotoContent.objects.create(
-                    archive_item=archive_item,
-                    original_file_key="photos/dup/original.jpg",
-                    original_filename="dup.jpg",
-                    original_mime_type="image/jpeg",
-                    original_size_bytes=1024,
-                )
+        second = PhotoContent.objects.create(
+            archive_item=archive_item,
+            position=2,
+            original_file_key="photos/dup/original.jpg",
+            original_filename="dup.jpg",
+            original_mime_type="image/jpeg",
+            original_size_bytes=1024,
+        )
+        self.assertEqual(archive_item.photo_contents.count(), 2)
+        self.assertEqual(archive_item.primary_photo_content.id, photo.id)
+        self.assertEqual(second.position, 2)
 
 
 class PersonAdminExposureTests(TestCase):

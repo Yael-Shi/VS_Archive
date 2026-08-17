@@ -30,10 +30,10 @@ def homepage_archive_cards():
         .select_related(
             "manual_text_content",
             "ocr_document",
-            "photo_content",
             "video_content",
         )
         .prefetch_related(
+            "photo_contents",
             "categories",
             "events",
             "tags",

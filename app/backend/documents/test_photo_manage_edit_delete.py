@@ -165,8 +165,8 @@ class PhotoManageEditTests(TestCase):
             ),
         )
         self.assertEqual(resp.status_code, 302)
-        self.photo_item.photo_content.refresh_from_db()
-        photo = self.photo_item.photo_content
+        self.photo_item.primary_photo_content.refresh_from_db()
+        photo = self.photo_item.primary_photo_content
         self.assertEqual(photo.description, "Wedding day caption")
         self.assertEqual(photo.location, "Cairo")
         self.assertEqual(photo.context, "Family gathering\nafter ceremony")
@@ -285,7 +285,7 @@ class PhotoManageEditTests(TestCase):
             ArchiveItem.MetadataStatus.COMPLETED,
         )
         self.assertEqual(
-            pending_item.photo_content.upload_status,
+            pending_item.primary_photo_content.upload_status,
             PhotoContent.UploadStatus.PENDING,
         )
 
@@ -304,14 +304,16 @@ class PhotoManageEditTests(TestCase):
         self.assertEqual(detail_resp.status_code, 404)
 
     def test_photo_edit_does_not_change_original_file_key(self):
-        original_key = self.photo_item.photo_content.original_file_key
+        original_key = self.photo_item.primary_photo_content.original_file_key
         self.client.force_login(self.staff)
         self.client.post(
             self.EDIT_URL_TEMPLATE.format(item_id=self.photo_item.id),
             data=self._photo_edit_payload(title="Key unchanged photo"),
         )
-        self.photo_item.photo_content.refresh_from_db()
-        self.assertEqual(self.photo_item.photo_content.original_file_key, original_key)
+        self.photo_item.primary_photo_content.refresh_from_db()
+        self.assertEqual(
+            self.photo_item.primary_photo_content.original_file_key, original_key
+        )
 
     @patch("documents.services.sqs.send_process_document_message")
     def test_photo_edit_does_not_create_document_or_enqueue_sqs(self, mock_enqueue):
@@ -378,7 +380,7 @@ class PhotoManageDeleteTests(TestCase):
             name=ARCHIVE_FAMILY_GROUP_NAME
         )
         self.photo_item = _create_photo_archive_item(title="Deletable photo")
-        self.photo_content_id = self.photo_item.photo_content.id
+        self.photo_content_id = self.photo_item.primary_photo_content.id
 
     def _delete_url(self, item_id: int) -> str:
         return self.DELETE_URL_TEMPLATE.format(item_id=item_id)
@@ -423,10 +425,9 @@ class PhotoManageDeleteTests(TestCase):
         self, mock_delete_s3_object
     ):
         item_id = self.photo_item.id
-        self.photo_item.photo_content.thumbnail_file_key = "photos/55/thumbnail_400.jpg"
-        self.photo_item.photo_content.save(
-            update_fields=["thumbnail_file_key", "updated_at"]
-        )
+        photo = self.photo_item.primary_photo_content
+        photo.thumbnail_file_key = "photos/55/thumbnail_400.jpg"
+        photo.save(update_fields=["thumbnail_file_key", "updated_at"])
 
         self.client.force_login(self.staff)
         with self.captureOnCommitCallbacks(execute=True) as callbacks:

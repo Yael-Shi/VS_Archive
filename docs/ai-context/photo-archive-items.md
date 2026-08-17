@@ -1,8 +1,8 @@
 # PHOTO Archive Items — Design / Scope
 
-Design and implementation scope for **`PHOTO`** archive items: one photo per **`ArchiveItem`**, private S3 storage, presigned display, browse-card thumbnails, and no OCR/HTR pipeline.
+Design and implementation scope for **`PHOTO`** archive items: private S3 storage, presigned display, browse-card thumbnails, and no OCR/HTR pipeline. The data model now allows **1..N** **`PhotoContent`** rows per PHOTO **`ArchiveItem`**; public/staff UI still presents the **first** photo only.
 
-**Status:** Design (PR1) through staff manage status clarity (PR6) are **implemented**. **Browse-card thumbnail generation**, **upload-time thumbnail persistence**, and **idempotent backfill commands** are **implemented**. Re-upload/retry after **`FAILED`**, S3 delete on PHOTO delete, and multi-photo albums remain **not implemented**.
+**Status:** Design (PR1) through staff manage status clarity (PR6) are **implemented**. **Browse-card thumbnail generation**, **upload-time thumbnail persistence**, and **idempotent backfill commands** are **implemented**. The **multi-photo data model** (FK + `position` + per-image dates) is **implemented**. Re-upload/retry after **`FAILED`**, multi-photo upload/gallery UI, and search aggregation across photos remain **not implemented**.
 
 **Related docs:**
 
@@ -37,7 +37,7 @@ This section describes **implemented runtime behavior**. Historical PR notes bel
 ### ArchiveItem and item types
 
 - **`ArchiveItem`** is the source of truth for shared archival metadata (title, visibility, dates, metadata status, author/source display, discovery M2M, public note) across **`PHOTO`**, **`OCR_DOCUMENT`**, and **`MANUAL_TEXT`**.
-- **`PHOTO`** — backed by **`PhotoContent`**; no **`Document`**, worker, or **`DocumentTextResult`**.
+- **`PHOTO`** — backed by **1..N** **`PhotoContent`** rows (`ForeignKey`, `related_name="photo_contents"`); no **`Document`**, worker, or **`DocumentTextResult`**. Existing items have exactly one row. Transitional presentation uses **`ArchiveItem.primary_photo_content`** (first by `position`, then `id`). Each photo may store its own `date_start` / `date_end` / `date_precision`; those dates are **not** aggregated onto **`ArchiveItem`**.
 - **`OCR_DOCUMENT`** — backed by **`Document`** (+ **`DocumentSourceFile`** where applicable); OCR/HTR via worker. Shared display metadata is read from **`ArchiveItem`**; OCR-specific fields remain on **`Document`**.
 - **`MANUAL_TEXT`** — backed by **`ManualTextContent.body`**; no file upload.
 
@@ -50,7 +50,7 @@ Browse cards are server-rendered in **`item_list_cards.html`**. Each card has:
 
 | Item type | Visual when thumbnail available | Visual fallback | Presign key for browse |
 |-----------|--------------------------------|-----------------|------------------------|
-| **PHOTO** | `<img>` from **`PhotoContent.thumbnail_file_key`** | CSS marker `--photo` | `photos/{id}/thumb_400.jpg` only |
+| **PHOTO** | `<img>` from the **primary** **`PhotoContent.thumbnail_file_key`** | CSS marker `--photo` | `photos/{id}/thumb_400.jpg` only |
 | **OCR_DOCUMENT (IMAGE)** | `<img>` from **`Document.thumbnail_file_key`** | CSS marker `--ocr` | `documents/{id}/thumb_400.jpg` only |
 | **OCR_DOCUMENT (PDF)** | Never (generation skipped) | CSS marker `--ocr` | N/A |
 | **MANUAL_TEXT** | Never (no thumbnail enrichment) | CSS marker `--manual` | N/A |
@@ -64,7 +64,7 @@ Browse cards are server-rendered in **`item_list_cards.html`**. Each card has:
 
 **Detail pages (unchanged from PR4 intent):**
 
-- **PHOTO detail** (`/archive/<id>/`) — presigned GET for **`original_file_key`** (full original), not the browse thumbnail.
+- **PHOTO detail** (`/archive/<id>/`) — presigned GET for the **primary** photo’s **`original_file_key`** (full original), not the browse thumbnail. Additional `PhotoContent` rows are not shown yet.
 - **OCR detail** — `/archive/<id>/` redirects to the OCR document detail page.
 
 ### Thumbnail generation (forward path)
@@ -109,7 +109,7 @@ Thumbnail keys are **always** `thumb_400.jpg` (not `thumb_400.{ext}`).
 
 **`archive_browse_queryset_for_user`** applies visibility via **`archive_item_queryset_for_user`**, then **`filter_browse_renderable_archive_items`**:
 
-- **PHOTO** — linked **`PhotoContent`**, **`upload_status=UPLOADED`**, non-empty **`original_file_key`**
+- **PHOTO** — the **first** **`PhotoContent`** (by `position`, then `id`) has **`upload_status=UPLOADED`** and a non-empty **`original_file_key`**. Extra photos are ignored for browse eligibility until multi-photo UI lands.
 - **OCR_DOCUMENT** — **`ocr_document.upload_status=UPLOADED`**
 - **MANUAL_TEXT** — no upload gate
 
@@ -121,9 +121,9 @@ Thumbnail keys are **always** `thumb_400.jpg` (not `thumb_400.{ext}`).
 
 ### What is a PHOTO archive item?
 
-A **`PHOTO`** archive item is a **single historical/family photograph** cataloged in the unified archive. It is a first-class **`ArchiveItem`** with **`item_type=PHOTO`**, visible in the normal archive list and detail flow, with shared archival metadata (title, dates, visibility, discovery fields) on **`ArchiveItem`** and the image bytes stored separately in private S3.
+A **`PHOTO`** archive item is a historical/family photograph (or a set of related photograph components) cataloged in the unified archive. It is a first-class **`ArchiveItem`** with **`item_type=PHOTO`**, visible in the normal archive list and detail flow, with shared archival metadata (title, dates, visibility, discovery fields) on **`ArchiveItem`** and image bytes stored separately in private S3.
 
-**V1 product rule:** exactly **one image file per PHOTO item**. No albums, no multi-page bundles, no OCR text extraction.
+**Current product/UI rule (transitional):** create/upload/display still use **one image file per PHOTO item**. The schema allows multiple **`PhotoContent`** rows; gallery/album UI is **not** implemented. No OCR text extraction.
 
 ### How PHOTO differs from OCR_DOCUMENT
 
@@ -158,36 +158,39 @@ Both types share the same **`ArchiveItem`** shell: title, visibility, dates, met
 
 ```
 ArchiveItem (item_type=PHOTO)
-    └── OneToOne ── PhotoContent
-                      └── S3 keys + file metadata + thumbnail metadata
+    └── ForeignKey 1..N ── PhotoContent  (related_name="photo_contents")
+                             └── S3 keys + file metadata + thumbnail metadata
+                             └── per-image dates + descriptive fields
 ```
 
 **Rationale:**
 
 - **`Document`** carries OCR-specific fields (`language`, `text_input_type`, processing state, **`DocumentTextResult`**, worker semantics) that do not apply to photos.
-- **`ManualTextContent`** established the pattern: non-OCR item types get a small dedicated backing model linked **`OneToOne`** to **`ArchiveItem`**.
+- **`ManualTextContent`** remains OneToOne. PHOTO now allows multiple image components under one umbrella item.
 - Keeps PHOTO implementation isolated from OCR bridge/cutover work and from accidental worker enqueue.
 
 **Runtime source of truth (PHOTO):**
 
-- **`ArchiveItem`** — shared archival and discovery metadata, visibility.
-- **`PhotoContent`** — image storage identity, file metadata, and browse thumbnail metadata.
+- **`ArchiveItem`** — shared archival and discovery metadata, visibility, umbrella dates.
+- **`PhotoContent`** — one image/component: storage identity, file metadata, browse thumbnail metadata, per-image dates, descriptive fields.
 
 ---
 
 ## 3. PhotoContent fields
 
-**Status:** Model foundation (PR2) through staff manage clarity (PR6) and browse thumbnail generation are **implemented**.
+**Status:** Model foundation through staff manage clarity, browse thumbnail generation, and the **1:N multi-photo schema** are **implemented**. Multi-photo UI is not.
 
 | Field | Type | Notes |
 |-------|------|-------|
-| **`archive_item`** | **`OneToOneField(ArchiveItem)`** | `related_name="photo_content"`, `on_delete=CASCADE` |
+| **`archive_item`** | **`ForeignKey(ArchiveItem)`** | `related_name="photo_contents"`, `on_delete=CASCADE` |
+| **`position`** | **`PositiveIntegerField`**, default `1` | Stable order within one item; unique with `archive_item`; existing rows backfilled to `1` |
 | **`original_file_key`** | **`CharField`** | Private S3 object key for the uploaded original |
 | **`original_filename`** | **`CharField`** | Client/original filename for display/audit |
 | **`original_mime_type`** | **`CharField`** | Validated MIME type (e.g. `image/jpeg`) |
 | **`original_size_bytes`** | **`PositiveBigIntegerField`** | Size from S3 HeadObject **`ContentLength`** after finalize |
 | **`upload_status`** | **`CharField`** | **`PENDING`** / **`UPLOADED`** / **`FAILED`** |
 | **`upload_error`** | **`CharField`** | Safe error text when **`upload_status=FAILED`** |
+| **`date_start`** / **`date_end`** / **`date_precision`** | same types as **`ArchiveItem`** | Per-image archival date; not aggregated onto the umbrella item |
 | **`width`** | **`PositiveIntegerField`, nullable** | Populated on successful thumbnail generation (transposed dimensions) |
 | **`height`** | **`PositiveIntegerField`, nullable** | Populated on successful thumbnail generation |
 | **`thumbnail_file_key`** | **`CharField`, nullable** | Deterministic S3 key `photos/{id}/thumb_400.jpg` when generation succeeds |
@@ -196,7 +199,7 @@ ArchiveItem (item_type=PHOTO)
 | **`created_at`** | **`DateTimeField(auto_now_add=True)`** | |
 | **`updated_at`** | **`DateTimeField(auto_now=True)`** | |
 
-**Validation invariant:** **`ArchiveItem.item_type`** must be **`PHOTO`** when a **`PhotoContent`** row exists. **`PhotoContent.clean()`** enforces this on **`full_clean()`**.
+**Validation invariant:** **`ArchiveItem.item_type`** must be **`PHOTO`** when a **`PhotoContent`** row exists. **`PhotoContent.clean()`** enforces this on **`full_clean()`**, plus stored date-bound checks aligned with **`ArchiveItem`**.
 
 ---
 
@@ -319,7 +322,7 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 
 ## 8. Explicit out of scope
 
-- Multi-photo albums / galleries per item
+- Multi-photo upload / gallery / staff management UI (schema allows 1..N; presentation still uses the first photo)
 - Image transformations beyond thumbnail resize (watermark, CDN, etc.)
 - OCR/HTR on photos
 - Worker / SQS processing for PHOTO
@@ -343,6 +346,7 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 | **PR5** | Staff metadata edit/delete | Done |
 | **PR6** | Staff manage status clarity | Done |
 | **Post-PR6** | Browse-card thumbnails + upload-time generation + backfill commands | **Implemented** — see decision log |
+| **Multi-photo PR2** | 1:N `PhotoContent` FK, `position`, per-image dates | **Implemented** (UI still one-photo) |
 
 ---
 

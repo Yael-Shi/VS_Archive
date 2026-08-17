@@ -63,11 +63,10 @@ def _load_item(pk: int) -> ArchiveItem:
         ArchiveItem.objects.select_related(
             "manual_text_content",
             "ocr_document",
-            "photo_content",
             "video_content",
             "search_index",
         )
-        .prefetch_related("categories", "events", "tags")
+        .prefetch_related("photo_contents", "categories", "events", "tags")
         .get(pk=pk)
     )
 
