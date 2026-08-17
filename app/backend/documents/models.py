@@ -75,6 +75,12 @@ class ArchiveItem(models.Model):
         blank=True,
         related_name="archive_items",
     )
+    people: models.ManyToManyField[Person, ArchiveItemPerson] = models.ManyToManyField(
+        "Person",
+        through="ArchiveItemPerson",
+        blank=True,
+        related_name="archive_items",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -205,6 +211,12 @@ class PhotoContent(models.Model):
     context = models.TextField(blank=True, default="")
     people_present = models.TextField(blank=True, default="")
     notes = models.TextField(blank=True, default="")
+    people: models.ManyToManyField[Person, PhotoPerson] = models.ManyToManyField(
+        "Person",
+        through="PhotoPerson",
+        blank=True,
+        related_name="photo_contents",
+    )
     width = models.PositiveIntegerField(null=True, blank=True)
     height = models.PositiveIntegerField(null=True, blank=True)
     thumbnail_file_key = models.CharField(max_length=1024, blank=True, default="")
@@ -229,6 +241,80 @@ class PhotoContent(models.Model):
 
     def __str__(self) -> str:
         return f"PhotoContent(archive_item_id={self.archive_item_id})"
+
+
+class Person(models.Model):
+    """One identified person in the archive (canonical display name only)."""
+
+    name = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class ArchiveItemPerson(models.Model):
+    """Person generally related to an archival item (not a photo appearance or role)."""
+
+    archive_item = models.ForeignKey(
+        ArchiveItem,
+        on_delete=models.CASCADE,
+        related_name="person_links",
+    )
+    person = models.ForeignKey(
+        Person,
+        on_delete=models.CASCADE,
+        related_name="archive_item_links",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["archive_item", "person"],
+                name="uniq_archive_item_person",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return (
+            f"ArchiveItemPerson(archive_item_id={self.archive_item_id}, "
+            f"person_id={self.person_id})"
+        )
+
+
+class PhotoPerson(models.Model):
+    """Identified person who appears in a specific photo."""
+
+    photo_content = models.ForeignKey(
+        PhotoContent,
+        on_delete=models.CASCADE,
+        related_name="person_links",
+    )
+    person = models.ForeignKey(
+        Person,
+        on_delete=models.CASCADE,
+        related_name="photo_links",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["photo_content", "person"],
+                name="uniq_photo_person",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return (
+            f"PhotoPerson(photo_content_id={self.photo_content_id}, "
+            f"person_id={self.person_id})"
+        )
 
 
 class VideoContent(models.Model):

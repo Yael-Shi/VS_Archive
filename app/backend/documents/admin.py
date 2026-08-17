@@ -134,6 +134,7 @@ class ArchiveItemAdmin(_VisibilityScopedAdminMixin, admin.ModelAdmin):
     search_fields = ("title",)
     ordering = ("-created_at",)
     readonly_fields = ("created_at", "updated_at")
+    exclude = ("people",)
 
     def get_queryset(self, request):
         return filter_archive_items_for_user(
@@ -200,6 +201,7 @@ class PhotoContentAdmin(_VisibilityScopedAdminMixin, admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
+    exclude = ("people",)
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)

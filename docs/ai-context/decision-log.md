@@ -1,5 +1,56 @@
 # VS-Archive Decision Log
 
+## Person identity foundation (data model only)
+
+**Decision / implemented:** Add a minimal structured person-identity schema.
+This PR is schema-only. It does not change search, advanced search, public UI,
+`קשור ל־` presentation, tags, or `author_name`.
+
+**Current behavior:**
+
+- **`Person`** is one identified person in the archive. Fields: canonical
+  display **`name`** (`CharField(max_length=255)`), **`created_at`**,
+  **`updated_at`**. **`name` is not unique** — two identities may share a
+  display name. No aliases, biography, dates, confidence, or roles.
+- **`ArchiveItemPerson`** is the explicit through row for
+  **`ArchiveItem.people`**. Meaning: this person is generally related to this
+  archival item. It does **not** mean the person appears in a photo or has a
+  role. Unique on **`(archive_item, person)`**.
+- **`PhotoPerson`** is the explicit through row for **`PhotoContent.people`**.
+  Meaning: this identified person appears in this specific photo. Unique on
+  **`(photo_content, person)`**. No identification confidence/status.
+- The two relations are independent: a photo appearance does not imply an
+  item-level relation, and vice versa.
+- **`PhotoContent.people_present`** remains a free-text **`TextField`** for
+  unidentified, partially identified, or uncertain descriptions. It is not
+  migrated, parsed, or replaced.
+- **`ArchiveItem.author_name`** and **`Tag`** are unchanged. Existing tags that
+  contain person names are not migrated, deleted, classified, or rewritten.
+- Join FKs use **`CASCADE`**. Through rows store **`created_at`** only (no
+  mutable join payload yet).
+- Existing **`ArchiveItemAdmin`** and **`PhotoContentAdmin`** explicitly
+  **`exclude = ("people",)`** so the new M2M is not a field/widget on those
+  pages. **`Person`**, **`ArchiveItemPerson`**, and **`PhotoPerson`** are not
+  registered. This is admin-safety only, not Person management UI.
+
+**Related names:**
+
+- `ArchiveItem.people` / `Person.archive_items` (M2M through `ArchiveItemPerson`)
+- `ArchiveItem.person_links` / `Person.archive_item_links` (through rows)
+- `PhotoContent.people` / `Person.photo_contents` (M2M through `PhotoPerson`)
+- `PhotoContent.person_links` / `Person.photo_links` (through rows)
+
+**Unchanged / out of scope:** multi-photo (`PhotoContent` remains OneToOne),
+search index, advanced-search people filter, public UI, Person management UI,
+Author model, tag-to-person classification.
+
+**Migration:** `0052_person_identity_foundation` — additive `Person`,
+`ArchiveItemPerson`, `PhotoPerson` tables and uniqueness constraints; no
+backfill.
+
+**Tests:** `documents/test_person.py` (plus existing `test_photo_content.py`
+regression).
+
 ## Public global nav/header archive search (PR3)
 
 **Decision / implemented (this branch):** Add a compact global archive search form
