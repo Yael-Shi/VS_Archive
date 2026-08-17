@@ -1,5 +1,66 @@
 # VS-Archive Decision Log
 
+## Historical person-name Tags → Person + ArchiveItemPerson backfill
+
+**Decision / implemented:** One-time, fail-closed Django data migration
+`0055_backfill_person_from_person_name_tags` copies 29 approved historical
+person-name **Tags** into **`Person`** rows and item-level
+**`ArchiveItemPerson`** links. A person-name Tag is an **ArchiveItem-level**
+association, not proof that the person appears in a specific photo.
+
+**Current behavior:**
+
+- Frozen source identity is the **approved Tag id**, not `Person.name`.
+  Canonical `Person.name` is the exact stored `Tag.name` string. Comparison
+  is exact stored-string equality only (no strip, casefold, transliteration,
+  fuzzy matching, or alias inference).
+- Approved Tag ids: 2, 4, 5, 7, 8, 10, 11, 14, 15, 16, 19, 20, 23–39
+  (29 Tags). `ArchiveItemPerson` is created only from current
+  `ArchiveItem.tags` relations for those ids (audited production: 124
+  links). Production at audit time had 0 Person / PersonAlias / PhotoPerson /
+  ArchiveItemPerson rows and 0 reuse/ambiguous Person matches.
+- If **none** of the 29 Tag ids exist (empty test DB / new environment),
+  the migration is a no-op so `migrate` can succeed. If **any** of those
+  ids exist, missing ids, Tag-name mismatches, or more than one
+  already-linked same-name Person on currently tagged items fail
+  **before writes**.
+- Intended Person identity on retry is the unique Person already linked via
+  `ArchiveItemPerson` to those tagged items with the exact Tag name. A
+  same-name Person that is **not** linked through those items is a different
+  identity and is not reused (`Person.name` is not unique; do not
+  `get_or_create(name=...)`). Existing intended `(archive_item, person)`
+  rows are left in place (`get_or_create` on that unique pair).
+- **Not written:** `PhotoPerson`, `PersonAlias`, Tag rows, `ArchiveItem.tags`,
+  `Document.tags_m2m`, search-index rebuilds. `people_present` is untouched.
+  Private/restricted/public items all receive item-level links; visibility
+  does not change the association.
+- Old person-name Tags **remain**. Public `q` still indexes `ArchiveItem.tags`;
+  `/archive/tags/<id>/` and advanced tag filters still use Tag ids.
+  `ArchiveItemPerson` is **not** public-search indexed. Do not run
+  `backfill_archive_search_index` merely because this backfill added
+  `ArchiveItemPerson` rows.
+- Reverse is **`RunPython.noop`**. There is no persistent Tag→Person mapping
+  table, and `Person.name` is not unique, so reverse cannot safely delete
+  Person rows that may have gained later PhotoPerson / alias / extra
+  ArchiveItemPerson links. An irreversible data migration is safer than a
+  destructive reverse. Django applies the migration once; the write phase is
+  atomic so a failed attempt does not commit a partial set.
+
+**Why a data migration, not a management command:** This is a one-time
+historical copy with a frozen Tag-id mapping, matching existing `RunPython`
+backfills (`0020`, `0014`, `0031`). Repeatable operational repair belongs in
+commands (`backfill_archive_search_index`, thumbnail backfills). No permanent
+mapping model was added.
+
+**Deferred:** public `q` indexing of `ArchiveItemPerson`; people
+browse/filter UX; eventual person-Tag removal (blocked on search/browse
+still depending on Tag); legacy `Document.tags_m2m` cleanup (8 of these
+person Tags also exist there; out of scope here); staff PHOTO appearance
+review / `PhotoPerson` creation (including cases such as PHOTO ArchiveItem
+224 / `people_present`); alias/identity cleanup. No Gemini→Tag inference.
+
+**Tests:** `documents/test_person_name_tag_backfill.py`.
+
 ## Web process must not import the Gemini SDK
 
 **Decision / implemented:** Importing the normal Django URL/view stack must
