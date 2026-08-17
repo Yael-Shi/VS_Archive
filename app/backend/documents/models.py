@@ -97,11 +97,11 @@ class ArchiveItem(models.Model):
 
     @property
     def primary_photo_content(self) -> PhotoContent | None:
-        """First PhotoContent by ``(position, id)`` for transitional one-photo call sites.
+        """First PhotoContent by ``(position, id)`` for browse/preview call sites.
 
         This is not a compatibility alias for the former OneToOne reverse
-        relation ``photo_content``. Multi-photo UI still uses the first row
-        only; later PRs should present the full ``photo_contents`` set.
+        relation ``photo_content``. Public detail may present all renderable
+        photos; browse cards and item eligibility still use this first row.
         """
         cached = getattr(self, "_prefetched_objects_cache", None)
         if cached is not None and "photo_contents" in cached:

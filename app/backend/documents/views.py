@@ -198,6 +198,7 @@ from documents.services.document_archive_urls import (
 from documents.services.photo_archive_urls import (
     apply_photo_thumbnail_urls_to_browse_cards,
 )
+from documents.services.photo_gallery import build_public_photo_gallery
 from documents.services.archive_advanced_search import (
     EMPTY_ARCHIVE_ADVANCED_FILTER_CHOICE_CONTEXT,
     archive_advanced_filter_choice_context,
@@ -4653,16 +4654,18 @@ def archive_detail_page(request, item_id: int):
         )
 
     if item.item_type == ArchiveItem.ItemType.PHOTO:
-        photo_content = item.primary_photo_content
-        if (
-            photo_content is None
-            or photo_content.upload_status != PhotoContent.UploadStatus.UPLOADED
-            or not (photo_content.original_file_key or "").strip()
-        ):
+        bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
+        photo_gallery = build_public_photo_gallery(
+            item,
+            selected_photo_param=request.GET.get("photo"),
+            bucket=bucket,
+            expires_in=PRESIGNED_GET_EXPIRY_SECONDS,
+        )
+        if photo_gallery is None:
             raise Http404()
 
+        photo_content = photo_gallery.selected
         photo_url = None
-        bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
         if bucket:
             photo_url = create_presigned_get(
                 bucket=bucket,
@@ -4678,6 +4681,7 @@ def archive_detail_page(request, item_id: int):
                 "body": None,
                 "photo_url": photo_url,
                 "photo_content": photo_content,
+                "photo_gallery": photo_gallery,
                 "is_admin": _is_admin(request.user),
             },
         )

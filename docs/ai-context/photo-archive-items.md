@@ -1,8 +1,8 @@
 # PHOTO Archive Items — Design / Scope
 
-Design and implementation scope for **`PHOTO`** archive items: private S3 storage, presigned display, browse-card thumbnails, and no OCR/HTR pipeline. The data model now allows **1..N** **`PhotoContent`** rows per PHOTO **`ArchiveItem`**. Staff can manage those rows; public/staff browse still presents the **first** photo only.
+Design and implementation scope for **`PHOTO`** archive items: private S3 storage, presigned display, browse-card thumbnails, and no OCR/HTR pipeline. The data model now allows **1..N** **`PhotoContent`** rows per PHOTO **`ArchiveItem`**. Staff can manage those rows. Public detail presents all renderable photos; browse cards still use the **first** photo.
 
-**Status:** Design (PR1) through staff manage status clarity (PR6) are **implemented**. **Browse-card thumbnail generation**, **upload-time thumbnail persistence**, and **idempotent backfill commands** are **implemented**. The **multi-photo data model** and **staff multi-photo management (PR3)** are **implemented**. Re-upload/retry after **`FAILED`**, public multi-photo gallery, and search aggregation across photos remain **not implemented**.
+**Status:** Design (PR1) through staff manage status clarity (PR6) are **implemented**. **Browse-card thumbnail generation**, **upload-time thumbnail persistence**, and **idempotent backfill commands** are **implemented**. The **multi-photo data model**, **staff multi-photo management (PR3)**, and **public multi-photo gallery (PR4)** are **implemented**. Re-upload/retry after **`FAILED`**, search aggregation across photos, and browse-card aggregation remain **not implemented**.
 
 **Related docs:**
 
@@ -17,6 +17,7 @@ Design and implementation scope for **`PHOTO`** archive items: private S3 storag
 - `documents/services/archive_item_access.py` — visibility and browse renderability
 - `documents/services/archive_item_presentation.py` — **`ArchiveBrowseCard`**, text preview, type markers
 - `documents/services/photo_archive_urls.py` — presigned browse thumbnails for PHOTO
+- `documents/services/photo_gallery.py` — public detail gallery selection/presentation
 - `documents/services/document_archive_urls.py` — presigned browse thumbnails for image OCR documents
 - `documents/services/photo_thumbnail.py` — upload-time PHOTO thumbnail generation
 - `documents/services/document_thumbnail.py` — upload-time OCR image-document thumbnail generation
@@ -37,7 +38,7 @@ This section describes **implemented runtime behavior**. Historical PR notes bel
 ### ArchiveItem and item types
 
 - **`ArchiveItem`** is the source of truth for shared archival metadata (title, visibility, dates, metadata status, author/source display, discovery M2M, public note) across **`PHOTO`**, **`OCR_DOCUMENT`**, and **`MANUAL_TEXT`**.
-- **`PHOTO`** — backed by **1..N** **`PhotoContent`** rows (`ForeignKey`, `related_name="photo_contents"`); no **`Document`**, worker, or **`DocumentTextResult`**. Staff manage all rows; public presentation uses **`ArchiveItem.primary_photo_content`** (first by `position`, then `id`). Each photo may store its own `date_start` / `date_end` / `date_precision`; those dates are **not** aggregated onto **`ArchiveItem`**.
+- **`PHOTO`** — backed by **1..N** **`PhotoContent`** rows (`ForeignKey`, `related_name="photo_contents"`); no **`Document`**, worker, or **`DocumentTextResult`**. Staff manage all rows. Public detail presents every renderable `PhotoContent` on `/archive/<id>/`. Browse cards still use **`ArchiveItem.primary_photo_content`** (first by `position`, then `id`). Each photo may store its own `date_start` / `date_end` / `date_precision`; those dates are **not** aggregated onto **`ArchiveItem`**.
 - **`OCR_DOCUMENT`** — backed by **`Document`** (+ **`DocumentSourceFile`** where applicable); OCR/HTR via worker. Shared display metadata is read from **`ArchiveItem`**; OCR-specific fields remain on **`Document`**.
 - **`MANUAL_TEXT`** — backed by **`ManualTextContent.body`**; no file upload.
 
@@ -62,9 +63,9 @@ Browse cards are server-rendered in **`item_list_cards.html`**. Each card has:
 - Missing **`thumbnail_file_key`**, empty bucket config, or presign failure leaves **`thumbnail_url=None`** → CSS marker fallback.
 - PDF OCR documents are excluded from document thumbnail presigning even if **`thumbnail_file_key`** is populated.
 
-**Detail pages (unchanged from PR4 intent):**
+**Detail pages:**
 
-- **PHOTO detail** (`/archive/<id>/`) — presigned GET for the **primary** photo’s **`original_file_key`** (full original), not the browse thumbnail. Additional `PhotoContent` rows are not shown on the public detail page.
+- **PHOTO detail** (`/archive/<id>/`) — presigned GET for the **selected** photo’s **`original_file_key`** (full original), not the browse thumbnail. `?photo=<photo_content_id>` selects a renderable photo on this item; omitted/invalid/foreign values fall back to the first renderable photo. One renderable photo keeps the simple detail layout. Multiple renderable photos show Previous/Next, thumbnail selectors (stored thumbs or numbered fallback), and per-selected-photo metadata. Shared ArchiveItem metadata is shown once.
 - **OCR detail** — `/archive/<id>/` redirects to the OCR document detail page.
 
 ### Thumbnail generation (forward path)
@@ -109,11 +110,11 @@ Thumbnail keys are **always** `thumb_400.jpg` (not `thumb_400.{ext}`).
 
 **`archive_browse_queryset_for_user`** applies visibility via **`archive_item_queryset_for_user`**, then **`filter_browse_renderable_archive_items`**:
 
-- **PHOTO** — the **first** **`PhotoContent`** (by `position`, then `id`) has **`upload_status=UPLOADED`** and a non-empty **`original_file_key`**. Extra photos are ignored for browse eligibility until public multi-photo UI lands.
+- **PHOTO** — the **first** **`PhotoContent`** (by `position`, then `id`) has **`upload_status=UPLOADED`** and a non-empty **`original_file_key`**. Extra photos are ignored for **browse-card eligibility**; public detail may still show additional renderable photos after the item is accessible.
 - **OCR_DOCUMENT** — **`ocr_document.upload_status=UPLOADED`**
 - **MANUAL_TEXT** — no upload gate
 
-**`PENDING`** / **`FAILED`** PHOTO rows are omitted from public browse and return **404** on detail. Staff **`/archive/manage/`** lists all PHOTO rows regardless of upload status.
+If the **first** photo is **`PENDING`** / **`FAILED`** / empty-key, the item is omitted from public browse and **`/archive/<id>/`** returns **404**. Additional non-renderable rows on an otherwise accessible item are omitted from the public gallery only. Staff **`/archive/manage/`** lists all PHOTO items regardless of upload status.
 
 ---
 
@@ -123,7 +124,7 @@ Thumbnail keys are **always** `thumb_400.jpg` (not `thumb_400.{ext}`).
 
 A **`PHOTO`** archive item is a historical/family photograph (or a set of related photograph components) cataloged in the unified archive. It is a first-class **`ArchiveItem`** with **`item_type=PHOTO`**, visible in the normal archive list and detail flow, with shared archival metadata (title, dates, visibility, discovery fields) on **`ArchiveItem`** and image bytes stored separately in private S3.
 
-**Current product/UI rule:** staff can attach **multiple image files** to one PHOTO item. Public create/display still uses **the first image** (`primary_photo_content`). Gallery/album UI is **not** implemented. No OCR text extraction.
+**Current product/UI rule:** staff can attach **multiple image files** to one PHOTO item. Public detail presents **all renderable photos** as a server-rendered gallery on the ArchiveItem URL. Browse cards still use **the first image** (`primary_photo_content`). Search aggregation across photos is **not** implemented. No OCR text extraction.
 
 ### How PHOTO differs from OCR_DOCUMENT
 
@@ -178,7 +179,7 @@ ArchiveItem (item_type=PHOTO)
 
 ## 3. PhotoContent fields
 
-**Status:** Model foundation through staff manage clarity, browse thumbnail generation, the **1:N multi-photo schema**, and **staff multi-photo management** are **implemented**. Public multi-photo UI is not.
+**Status:** Model foundation through staff manage clarity, browse thumbnail generation, the **1:N multi-photo schema**, **staff multi-photo management**, and the **public multi-photo gallery** are **implemented**.
 
 | Field | Type | Notes |
 |-------|------|-------|
@@ -248,11 +249,11 @@ Non-viewable items return **404**.
 
 ### Presigned GET flow (detail)
 
-1. Viewer requests **`/archive/<archive_item_id>/`**.
-2. View loads **`ArchiveItem`** + **`PhotoContent`** with **`select_related`**.
-3. Access check runs **before** any S3 URL is built.
-4. On success, backend calls **`create_presigned_get`** for **`original_file_key`** (full original).
-5. Template renders the image. TTL is 1 hour (`PRESIGNED_GET_EXPIRY_SECONDS=3600`), consistent with other presigned GET usage.
+1. Viewer requests **`/archive/<archive_item_id>/`** (optional **`?photo=<photo_content_id>`**).
+2. View loads **`ArchiveItem`** + **`PhotoContent`** via **`get_viewable_archive_item()`**, which prefetches ``photo_contents`` and each photo’s identified ``people``.
+3. Access check runs **before** any S3 URL is built. Item-level PHOTO access still requires the first photo to be renderable.
+4. On success, backend calls **`create_presigned_get`** for the **selected** photo’s **`original_file_key`** (full original). Gallery selectors may also presign stored thumbnail keys.
+5. Template renders the selected image. TTL is 1 hour (`PRESIGNED_GET_EXPIRY_SECONDS=3600`), consistent with other presigned GET usage.
 
 **Public items, private objects:** S3 objects stay private; public browsing uses backend-issued presigned GET after access checks.
 
@@ -277,8 +278,8 @@ Non-viewable items return **404**.
 
 | Surface | Current behavior |
 |---------|------------------|
-| **`/archive/`** and discovery browse | PHOTO rows show title, dates, text preview, and **stored thumbnail** when available; **CSS photo marker** when not |
-| **`/archive/<id>/`** | Detail shows **full original** via presigned GET after permission check |
+| **`/archive/`** and discovery browse | PHOTO rows show title, dates, text preview, and **stored thumbnail** of the **primary** photo when available; **CSS photo marker** when not |
+| **`/archive/<id>/`** | Detail shows **all renderable photos**; selected **full original** via presigned GET after permission check (`?photo=` selects) |
 | Visibility | Same rules as other item types |
 
 ### Reuse ArchiveItem fields
@@ -329,14 +330,15 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 
 ## 8. Explicit out of scope
 
-- Public multi-photo gallery / using non-primary photos on browse/detail
 - Search aggregation across photo rows
+- Browse-card aggregation / choosing a non-primary preview image
 - Image transformations beyond thumbnail resize (watermark, CDN, etc.)
 - OCR/HTR on photos
 - Worker / SQS processing for PHOTO
 - Face recognition, AI identification, comments
 - Person aliases / full Person administration
 - Tag → Person migration; automatic ArchiveItemPerson from PhotoPerson
+- Public Person pages
 - Public (unauthenticated) upload
 - Rich text captions
 - Re-upload/retry after **`upload_status=FAILED`**
@@ -356,7 +358,8 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 | **PR6** | Staff manage status clarity | Done |
 | **Post-PR6** | Browse-card thumbnails + upload-time generation + backfill commands | **Implemented** — see decision log |
 | **Multi-photo PR2** | 1:N `PhotoContent` FK, `position`, per-image dates | **Implemented** |
-| **Multi-photo PR3** | Staff add/edit/reorder/delete photos + Person selection | **Implemented** (public gallery deferred) |
+| **Multi-photo PR3** | Staff add/edit/reorder/delete photos + Person selection | **Implemented** |
+| **Multi-photo PR4** | Public gallery / per-selected-photo metadata / identified Person names | **Implemented** |
 
 ---
 
@@ -378,4 +381,4 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 |-------------|---------|------------|---------------------|
 | **`OCR_DOCUMENT`** | **`Document`** | Worker + OCR/HTR | Browse card: image thumbnail or `--ocr` marker; detail via OCR document page |
 | **`MANUAL_TEXT`** | **`ManualTextContent`** | None | Browse card: `--manual` marker; **`/archive/<id>/`** body text |
-| **`PHOTO`** | **`PhotoContent`** | None | Browse card: photo thumbnail or `--photo` marker; detail shows full original |
+| **`PHOTO`** | **`PhotoContent`** | None | Browse card: primary photo thumbnail or `--photo` marker; detail shows all renderable originals |

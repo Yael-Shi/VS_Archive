@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from django.db.models import Exists, OuterRef, Q, QuerySet, Subquery
+from django.db.models import Exists, OuterRef, Prefetch, Q, QuerySet, Subquery
 from django.http import Http404
 
 from documents.models import ArchiveItem, Document, PhotoContent, VideoContent
@@ -80,7 +80,8 @@ def filter_browse_renderable_archive_items(
 
     PHOTO is renderable only when the first ``PhotoContent`` (by position, then
     id) is uploaded with a non-empty original key. Additional photo rows are
-    ignored for browse eligibility in this transitional PR.
+    ignored for this item-level browse/detail eligibility gate. Public detail
+    may still present other renderable photos after the item is accessible.
     OCR_DOCUMENT is renderable only when linked ``Document.upload_status`` is UPLOADED.
     VIDEO is renderable only when linked ``VideoContent`` matches the DB-enforceable
     provider/mode/id/source_url shape (missing content fails closed). Semantic
@@ -156,6 +157,20 @@ def archive_browse_queryset_for_user(user) -> QuerySet[ArchiveItem]:
     return filter_browse_renderable_archive_items(archive_item_queryset_for_user(user))
 
 
+def _photo_contents_with_people_prefetch() -> Prefetch:
+    """Prefetch PHOTO rows and identified people for public detail.
+
+    Cached as ``photo_contents`` so ``ArchiveItem.primary_photo_content`` still
+    uses the prefetched set. Nested ``people`` avoids a second gallery prefetch.
+    """
+    return Prefetch(
+        "photo_contents",
+        queryset=PhotoContent.objects.order_by("position", "id").prefetch_related(
+            "people"
+        ),
+    )
+
+
 def get_accessible_archive_item(
     user,
     item_id: int,
@@ -195,6 +210,8 @@ def get_viewable_archive_item(
 
     Applies visibility/access rules and upload-completion eligibility for PHOTO/OCR.
     Uses 404 for missing ids, unauthorized items, and non-renderable rows.
+    Prefetches ``photo_contents`` (ordered by position, id) and each photo's
+    ``people`` so public PHOTO detail can read identified names from cache.
     """
     base = queryset if queryset is not None else ArchiveItem.objects.all()
     qs = filter_browse_renderable_archive_items(
@@ -207,7 +224,7 @@ def get_viewable_archive_item(
                 "ocr_document",
                 "video_content",
             )
-            .prefetch_related("photo_contents")
+            .prefetch_related(_photo_contents_with_people_prefetch())
             .get(id=item_id)
         )
     except ArchiveItem.DoesNotExist:

@@ -1,5 +1,54 @@
 # VS-Archive Decision Log
 
+## PHOTO public multi-photo gallery (PR4)
+
+**Decision / implemented:** Public PHOTO detail presents **all publicly
+renderable** `PhotoContent` rows for one PHOTO `ArchiveItem`. Browse cards,
+browse eligibility, search aggregation, Person aliases, Tag → Person
+migration, and staff management are **unchanged**.
+
+**Current behavior:**
+
+- The PHOTO `ArchiveItem` remains the umbrella public record. Canonical URL
+  stays `/archive/<id>/`.
+- Photo selection uses `?photo=<photo_content_id>` on that same route.
+  Missing `photo` shows the first renderable photo. Invalid, non-integer,
+  non-renderable, or **foreign** (another item’s) ids fall back to the first
+  renderable photo (**200**, not 404) and never load another item’s bytes.
+- Renderable means `photo_is_archive_renderable`: `upload_status=UPLOADED`
+  and a non-empty `original_file_key`. `PENDING` / `FAILED` / empty-key rows
+  are omitted from the gallery. Item-level access still requires the **first**
+  photo (`position`, then `id`) to be renderable; that gate is unchanged.
+- **N = 1** renderable photo keeps the previous simple detail layout: no
+  Previous/Next, no “1 מתוך 1”, metadata in the header, full original via
+  presigned GET.
+- **N > 1:** selected original is shown prominently; Previous/Next are real
+  links; compact thumbnail selectors use stored `thumbnail_file_key` when
+  present (numbered fallback otherwise); status is “2 מתוך 5” among
+  **visible** photos. Per-photo metadata sits with the gallery; shared
+  ArchiveItem metadata (title, umbrella dates, visibility, public_note,
+  categories, events, tags) remains once in the header.
+- Identified people are `PhotoPerson → Person` names for the **selected**
+  photo only, ordered by `(name, id)`, not clickable. `people_present` stays
+  separate free text. No `ArchiveItemPerson` derivation. Person ids are not
+  shown as metadata.
+- Per-photo dates use `format_document_date` and are omitted when unknown.
+- Main display presigns the selected **original**. Selectors presign
+  thumbnails only. No raw private S3 URLs. Missing thumbnails are not
+  generated on page load.
+- Detail prefetch: ``get_viewable_archive_item()`` loads ``photo_contents``
+  (ordered by ``position``, ``id``) and nested ``people`` in one queryset
+  contract. The gallery builder reads that cache and does not start a second
+  ORM prefetch. No per-photo/per-person N+1.
+
+**Deferred (PR5+):** search aggregation across photos; browse-card
+aggregation / choosing a non-primary preview; Person aliases / public Person
+pages; Tag → Person migration; automatic `ArchiveItemPerson` from
+`PhotoPerson`; re-upload/retry of `FAILED` photos; AI identification.
+
+**Tests:** `documents/test_photo_public_gallery.py` (plus existing PHOTO
+display/browse regressions).
+
 ## PHOTO staff multi-photo management (PR3)
 
 **Decision / implemented:** Staff can manage **1..N** `PhotoContent` rows under
@@ -39,15 +88,16 @@ automatic `ArchiveItemPerson` derivation.
   thumbnail `on_commit`. Deleting the last photo is rejected with a staff
   error; whole-item delete remains the way to remove a PHOTO item and still
   cleans **all** related S3 objects (PR2).
-- Public browse/detail and search are **unchanged**: they still use
-  `primary_photo_content` / first-photo browse eligibility.
+- Public browse/detail and search were **unchanged in PR3**: they still used
+  `primary_photo_content` / first-photo browse eligibility. Public detail
+  gallery is implemented in **PHOTO public multi-photo gallery (PR4)**;
+  browse-card eligibility remains the first photo.
 
-**Deferred (PR4+):** public multi-photo gallery; search aggregation across
-photo rows; using non-primary photos for browse thumbnails/detail;
-Person aliases / Person administration beyond this minimal create;
-Tag → Person migration; automatic ArchiveItemPerson from PhotoPerson;
-OCR/HTR or AI identification on photos; drag-and-drop reorder;
-re-upload/retry after `FAILED`.
+**Deferred (remaining after PR4):** search aggregation across photo rows;
+using non-primary photos for browse thumbnails; Person aliases / Person
+administration beyond this minimal create; Tag → Person migration;
+automatic ArchiveItemPerson from PhotoPerson; OCR/HTR or AI identification
+on photos; drag-and-drop reorder; re-upload/retry after `FAILED`.
 
 **Tests:** `documents/test_photo_multi_manage.py` (plus updated
 `test_photo_manage_edit_delete.py` / `test_photo_manage_status_clarity.py`).
@@ -103,9 +153,10 @@ fields; `position` default 1 (backfills existing rows); OneToOne→FK;
 unique `(archive_item, position)`; `position >= 1` check. No S3 key rewrite,
 no tag/person backfill, no search-index rebuild.
 
-**Deferred (later PRs):** gallery / public presentation of N photos; search
+**Deferred (later PRs):** Public gallery of N photos is implemented in
+**PHOTO public multi-photo gallery (PR4)**. Still deferred: search
 aggregation across photo rows; using non-primary photos for browse
-thumbnails/detail. Staff add/edit/reorder/delete of individual photos and
+thumbnails. Staff add/edit/reorder/delete of individual photos and
 per-image date forms are implemented in **PHOTO staff multi-photo management
 (PR3)**.
 

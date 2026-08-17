@@ -8,11 +8,45 @@ from dataclasses import replace
 
 from botocore.exceptions import BotoCoreError, ClientError
 
-from documents.models import ArchiveItem
+from documents.models import ArchiveItem, PhotoContent
 from documents.services.archive_item_presentation import ArchiveBrowseCard
 from documents.s3 import create_presigned_get
 
 logger = logging.getLogger(__name__)
+
+
+def presign_photo_thumbnail_url(
+    photo_content: PhotoContent,
+    *,
+    bucket: str,
+    expires_in: int = 3600,
+) -> str | None:
+    """Presign ``thumbnail_file_key`` for public PHOTO display.
+
+    Never uses ``original_file_key``. Returns ``None`` when the bucket or
+    thumbnail key is missing, or when presigning fails.
+    """
+    normalized_bucket = (bucket or "").strip()
+    thumbnail_key = (photo_content.thumbnail_file_key or "").strip()
+    if not normalized_bucket or not thumbnail_key:
+        return None
+    try:
+        return create_presigned_get(
+            bucket=normalized_bucket,
+            key=thumbnail_key,
+            expires_in=expires_in,
+        )
+    except (BotoCoreError, ClientError):
+        logger.warning(
+            "photo thumbnail presign failed",
+            exc_info=True,
+            extra={
+                "archive_item_id": photo_content.archive_item_id,
+                "photo_content_id": photo_content.pk,
+                "thumbnail_file_key": thumbnail_key,
+            },
+        )
+        return None
 
 
 def apply_photo_thumbnail_urls_to_browse_cards(

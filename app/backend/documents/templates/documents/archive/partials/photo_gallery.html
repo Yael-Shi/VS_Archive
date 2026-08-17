@@ -1,0 +1,60 @@
+{% if photo_url %}
+  <figure class="photo-detail archive-detail-photo">
+    <img
+      class="photo-detail__image"
+      src="{{ photo_url }}"
+      alt="{{ photo_gallery.selected_alt_text }}"
+    >
+  </figure>
+{% else %}
+  <p class="muted">התמונה אינה זמינה כרגע.</p>
+{% endif %}
+
+<nav class="photo-gallery__nav" aria-label="מעבר בין תמונות">
+  <div class="photo-gallery__nav-prev">
+    {% if photo_gallery.previous_url %}
+      <a
+        class="btn"
+        href="{{ photo_gallery.previous_url }}"
+        aria-label="התמונה הקודמת, {{ photo_gallery.selected_index|add:"-1" }} מתוך {{ photo_gallery.photo_count }}"
+      >הקודמת</a>
+    {% endif %}
+  </div>
+  <p class="photo-gallery__status" aria-live="polite">{{ photo_gallery.status_label }}</p>
+  <div class="photo-gallery__nav-next">
+    {% if photo_gallery.next_url %}
+      <a
+        class="btn"
+        href="{{ photo_gallery.next_url }}"
+        aria-label="התמונה הבאה, {{ photo_gallery.selected_index|add:"1" }} מתוך {{ photo_gallery.photo_count }}"
+      >הבאה</a>
+    {% endif %}
+  </div>
+</nav>
+
+<nav class="photo-gallery__selector" aria-label="בחירת תמונה">
+  <ul class="photo-gallery__thumbs">
+    {% for row in photo_gallery.selector_items %}
+      <li>
+        <a
+          class="photo-gallery__thumb{% if row.is_selected %} photo-gallery__thumb--selected{% endif %}"
+          href="{{ row.selection_url }}"
+          {% if row.is_selected %}aria-current="true"{% endif %}
+          aria-label="{{ row.selector_label }}"
+        >
+          {% if row.thumbnail_url %}
+            <img
+              class="photo-gallery__thumb-image"
+              src="{{ row.thumbnail_url }}"
+              alt=""
+            >
+          {% else %}
+            <span class="photo-gallery__thumb-fallback" aria-hidden="true">{{ row.display_index }}</span>
+          {% endif %}
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+</nav>
+
+{% include "documents/archive/partials/photo_metadata_display.html" with photo_content=photo_content identified_people=photo_gallery.identified_people_names photo_date_label=photo_gallery.photo_date_label %}

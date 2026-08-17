@@ -1,10 +1,16 @@
 {% load archive_labels %}
 {% if photo_content %}
   {% with description=photo_content.description|meaningful_archive_metadata location=photo_content.location|meaningful_archive_metadata photo_context=photo_content.context|meaningful_archive_metadata people_present=photo_content.people_present|meaningful_archive_metadata notes=photo_content.notes|meaningful_archive_metadata %}
-    {% if description or location or photo_context or people_present or notes %}
+    {% if description or location or photo_context or identified_people or people_present or notes or photo_date_label %}
       <div class="archive-detail-meta-block archive-detail-meta-block--photo">
         {% if description %}
           <div class="archive-detail-photo-description">{{ description|linebreaksbr }}</div>
+        {% endif %}
+        {% if photo_date_label %}
+          <div class="archive-detail-meta-row">
+            <strong class="archive-detail-meta-label">תאריך התמונה:</strong>
+            <span class="archive-detail-meta-value">{{ photo_date_label }}</span>
+          </div>
         {% endif %}
         {% if location %}
           <div class="archive-detail-meta-row">
@@ -16,6 +22,12 @@
           <div class="archive-detail-meta-row">
             <strong class="archive-detail-meta-label">הקשר / נסיבות:</strong>
             <span class="archive-detail-meta-value">{{ photo_context|linebreaksbr }}</span>
+          </div>
+        {% endif %}
+        {% if identified_people %}
+          <div class="archive-detail-meta-row">
+            <strong class="archive-detail-meta-label">אנשים מזוהים:</strong>
+            <span class="archive-detail-meta-value">{% for name in identified_people %}{{ name }}{% if not forloop.last %}, {% endif %}{% endfor %}</span>
           </div>
         {% endif %}
         {% if people_present %}
