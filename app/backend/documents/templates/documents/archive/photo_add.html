@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - {{ page_title }}{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-manage-edit' item_id=item.id %}">חזרה לפריט</a>
+    </div>
+
+    <h1 class="page-title">{{ page_title }}</h1>
+    <p class="page-subtitle">
+      הוספת תמונה לפריט ״{{ item.title }}״. מטא־דאטה משותף של הפריט לא משתנה כאן.
+    </p>
+  </div>
+
+  <div class="spacer"></div>
+  <div id="msg" class="msg" role="status" aria-live="polite"></div>
+
+  <div class="card card--pad-lg">
+    <div class="section-title">קובץ תמונה + מטא־דאטה לתמונה זו</div>
+    <form
+      id="photoUploadForm"
+      data-mode="add"
+      data-create-url="{% url 'photo-uploads-add' %}"
+      data-complete-url-template="/api/photo-uploads/__ID__/complete/"
+      data-redirect-url="{% url 'archive-manage-edit' item_id=item.id %}"
+      data-archive-item-id="{{ item.id }}"
+    >
+      {% csrf_token %}
+      <div class="field">
+        <label for="file">קובץ תמונה *</label>
+        <input id="file" name="file" type="file" accept="image/jpeg,image/png,image/tiff,image/webp,.jpg,.jpeg,.png,.tif,.tiff,.webp" required />
+        <div class="field-hint">תמונה אחת (JPEG, PNG, TIFF, WebP).</div>
+      </div>
+      {% include "documents/archive/photo_content_form_fields.html" %}
+      {% include "documents/archive/archive_date_form_fields.html" %}
+      <div class="form-actions form-actions--spaced">
+        <button id="submitBtn" class="btn btn-primary" type="submit">העלאת תמונה</button>
+      </div>
+    </form>
+  </div>
+  {% include "documents/archive/_photo_upload_script.html" %}
+  {% include "documents/archive/archive_date_form_script.html" %}
+{% endblock %}

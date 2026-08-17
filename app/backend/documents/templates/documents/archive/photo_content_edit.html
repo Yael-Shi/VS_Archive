@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - {{ page_title }}{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-manage-edit' item_id=item.id %}">חזרה לפריט</a>
+    </div>
+
+    <h1 class="page-title">{{ page_title }}</h1>
+    <p class="page-subtitle">
+      עריכת מטא־דאטה לתמונה אחת בפריט ״{{ item.title }}״.
+      שדות משותפים לפריט (כותרת, נראות, קטגוריות, אירועים ותגיות) לא נערכים כאן.
+    </p>
+    <p class="muted">{{ photo_content.original_filename }}</p>
+
+    {% if form_errors %}
+      <div class="spacer"></div>
+      <div class="alert alert-danger">
+        <div class="alert-title">שגיאה בטופס</div>
+        <ul>
+          {% for error in form_errors %}
+            <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    <div class="spacer"></div>
+    <form method="post">
+      {% csrf_token %}
+      {% include "documents/archive/photo_content_form_fields.html" %}
+      {% include "documents/archive/archive_date_form_fields.html" %}
+
+      <div class="field">
+        <label for="person_ids">אנשים מזוהים בתמונה</label>
+        <select id="person_ids" name="person_ids" multiple size="8">
+          {% for person in person_choices %}
+            <option value="{{ person.id }}" {% if person.id in selected_person_ids %}selected{% endif %}>
+              {{ person.name }}
+            </option>
+          {% endfor %}
+        </select>
+        <div class="field-hint">בחירה מרשומות אדם קיימות. לא יוצר קשר ברמת פריט הארכיון.</div>
+      </div>
+
+      <div class="field">
+        <label for="new_person_name">הוספת אדם מזוהה חדש</label>
+        <input id="new_person_name" name="new_person_name" type="text" value="{{ form_data.new_person_name }}" maxlength="255" />
+        <div class="field-hint">שם תצוגה בלבד. נוצרת רשומת אדם חדשה ומקושרת לתמונה זו.</div>
+      </div>
+
+      <div class="spacer"></div>
+      <button type="submit" class="btn btn-primary">{{ submit_label }}</button>
+    </form>
+  </div>
+  {% include "documents/archive/archive_date_form_script.html" %}
+{% endblock %}

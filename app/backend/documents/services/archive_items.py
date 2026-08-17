@@ -416,20 +416,16 @@ def update_photo_archive_item_metadata(
     date_end=None,
     date_precision: str,
     metadata_status: str,
-    description: str = "",
-    location: str = "",
-    context: str = "",
-    people_present: str = "",
-    notes: str = "",
     public_note: str = "",
 ):
     """
     Update shared ArchiveItem metadata for a PHOTO item.
 
-    Does not modify PhotoContent file fields, create Document rows, or enqueue
-    processing.
+    Does not modify PhotoContent rows, file fields, Person relations, create
+    Document rows, or enqueue processing. Per-photo fields are edited through
+    ``update_photo_content_metadata``.
     """
-    from documents.models import ArchiveItem, PhotoContent
+    from documents.models import ArchiveItem
 
     if archive_item.item_type != ArchiveItem.ItemType.PHOTO:
         raise ValueError("archive item is not PHOTO")
@@ -445,28 +441,6 @@ def update_photo_archive_item_metadata(
         update_fields=[
             *ARCHIVE_ITEM_SHARED_FIELD_NAMES,
             "public_note",
-            "updated_at",
-        ]
-    )
-
-    photo_content = archive_item.primary_photo_content
-    if photo_content is None:
-        raise PhotoContent.DoesNotExist(
-            "PHOTO archive item is missing PhotoContent; "
-            "transitional metadata update uses the first photo row."
-        )
-    photo_content.description = description
-    photo_content.location = location
-    photo_content.context = context
-    photo_content.people_present = people_present
-    photo_content.notes = notes
-    photo_content.save(
-        update_fields=[
-            "description",
-            "location",
-            "context",
-            "people_present",
-            "notes",
             "updated_at",
         ]
     )

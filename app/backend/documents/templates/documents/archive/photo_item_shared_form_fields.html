@@ -1,0 +1,33 @@
+<div class="field">
+  <label for="title">תיאור קצר *</label>
+  <input id="title" name="title" type="text" value="{{ form_data.title }}" />
+</div>
+
+<div class="field">
+  <label for="public_note">הערת הארכיון</label>
+  <textarea id="public_note" name="public_note" rows="3">{{ form_data.public_note }}</textarea>
+</div>
+
+<div class="field">
+  <label for="visibility">נראות / גישה</label>
+  <select id="visibility" name="visibility">
+    {% for value, label in visibility_choices %}
+      <option value="{{ value }}" {% if form_data.visibility == value %}selected{% endif %}>
+        {{ label }}
+      </option>
+    {% endfor %}
+  </select>
+</div>
+
+{% include "documents/archive/archive_date_form_fields.html" %}
+
+<div class="field">
+  <label for="metadata_status">השלמת פרטים</label>
+  <select id="metadata_status" name="metadata_status">
+    {% for value, label in metadata_status_choices %}
+      <option value="{{ value }}" {% if form_data.metadata_status == value %}selected{% endif %}>
+        {{ label }}
+      </option>
+    {% endfor %}
+  </select>
+</div>

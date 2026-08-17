@@ -42,6 +42,7 @@ from .models import (
     DocumentMetadata,
     DocumentSourceFile,
     DocumentTextResult,
+    Person,
     PhotoContent,
     Tag,
     TranscriptionEditSuggestion,
@@ -169,14 +170,27 @@ from documents.services.video_validation import (
     video_presentation_mode_explanation,
 )
 from documents.services.photo_upload import (
+    create_additional_photo_upload_plan,
     create_photo_upload_plan,
     finalize_photo_upload,
+    parse_add_photo_upload_metadata,
     parse_create_photo_upload_metadata,
 )
 from documents.services.photo_metadata_validation import (
     empty_photo_metadata_form_data,
-    photo_metadata_form_data_from_content,
-    parse_photo_staff_metadata_form,
+    parse_photo_content_staff_form,
+    photo_content_staff_form_data,
+)
+from documents.services.photo_content_management import (
+    ARCHIVE_ITEM_NOT_PHOTO_ERROR,
+    LAST_PHOTO_DELETE_ERROR,
+    PHOTO_NOT_IN_ITEM_ERROR,
+    PhotoContentManagementError,
+    build_staff_photo_manage_rows,
+    delete_one_photo_content,
+    reorder_photo_contents,
+    staff_photo_contents_queryset,
+    update_photo_content_metadata,
 )
 from documents.services.document_archive_urls import (
     apply_document_thumbnail_urls_to_browse_cards,
@@ -1736,6 +1750,72 @@ def create_photo_upload(request):
         {
             "archive_item_id": archive_item.id,
             "photo_content_id": photo_content.id,
+            "s3_key": photo_content.original_file_key,
+            "upload_url": upload_url,
+            "upload_status": photo_content.upload_status,
+        },
+        status=201,
+    )
+
+
+@login_required
+def add_photo_upload(request):
+    deny = _require_admin(request)
+    if deny:
+        return deny
+
+    if request.method != "POST":
+        return JsonResponse({"error": "POST only"}, status=405)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return JsonResponse({"error": "invalid json"}, status=400)
+
+    parsed, err = parse_add_photo_upload_metadata(payload)
+    if err is not None:
+        return JsonResponse({"error": err}, status=400)
+    assert parsed is not None
+
+    bucket_or_response = _uploads_bucket_or_error()
+    if isinstance(bucket_or_response, JsonResponse):
+        return bucket_or_response
+    bucket = bucket_or_response
+
+    try:
+        archive_item = ArchiveItem.objects.get(pk=parsed["archive_item_id"])
+    except ArchiveItem.DoesNotExist:
+        return JsonResponse({"error": "not found"}, status=404)
+
+    if archive_item.item_type != ArchiveItem.ItemType.PHOTO:
+        return JsonResponse({"error": "not a photo archive item"}, status=400)
+
+    try:
+        archive_item, photo_content, upload_url = create_additional_photo_upload_plan(
+            archive_item=archive_item,
+            bucket=bucket,
+            original_name=parsed["original_name"],
+            mime_type=parsed["mime_type"],
+            description=parsed["description"],
+            location=parsed["location"],
+            context=parsed["context"],
+            people_present=parsed["people_present"],
+            notes=parsed["notes"],
+            date_start=parsed["date_start"],
+            date_end=parsed["date_end"],
+            date_precision=parsed["date_precision"],
+        )
+    except PhotoContentManagementError as exc:
+        status = 409
+        if exc.message == ARCHIVE_ITEM_NOT_PHOTO_ERROR:
+            status = 400
+        return JsonResponse({"error": exc.message}, status=status)
+
+    return JsonResponse(
+        {
+            "archive_item_id": archive_item.id,
+            "photo_content_id": photo_content.id,
+            "position": photo_content.position,
             "s3_key": photo_content.original_file_key,
             "upload_url": upload_url,
             "upload_status": photo_content.upload_status,
@@ -4115,7 +4195,6 @@ def _manual_text_form_data_from_item(item: ArchiveItem) -> dict:
 
 
 def _photo_form_data_from_item(item: ArchiveItem) -> dict:
-    photo_content = item.primary_photo_content
     return {
         **_archive_metadata_form_data(
             title=item.title,
@@ -4126,8 +4205,64 @@ def _photo_form_data_from_item(item: ArchiveItem) -> dict:
             metadata_status=item.metadata_status,
             public_note=item.public_note,
         ),
-        **photo_metadata_form_data_from_content(photo_content),
         **discovery_metadata_form_data_from_item(item),
+    }
+
+
+def _staff_photo_manage_rows(item: ArchiveItem) -> list:
+    photos = list(staff_photo_contents_queryset(item))
+    return build_staff_photo_manage_rows(
+        item,
+        photos=photos,
+        bucket=getattr(settings, "UPLOADS_BUCKET_NAME", ""),
+        expires_in=PRESIGNED_GET_EXPIRY_SECONDS,
+    )
+
+
+def _get_staff_photo_archive_item(request, item_id: int) -> ArchiveItem:
+    item = get_accessible_archive_item(
+        request.user,
+        item_id,
+        queryset=ArchiveItem.objects.prefetch_related("categories", "events", "tags"),
+    )
+    if item.item_type != ArchiveItem.ItemType.PHOTO:
+        raise Http404()
+    return item
+
+
+def _get_staff_photo_content(
+    request, item_id: int, photo_id: int
+) -> tuple[ArchiveItem, PhotoContent]:
+    item = _get_staff_photo_archive_item(request, item_id)
+    photo_content = (
+        PhotoContent.objects.filter(pk=photo_id, archive_item_id=item.pk)
+        .prefetch_related("people")
+        .first()
+    )
+    if photo_content is None:
+        raise Http404()
+    return item, photo_content
+
+
+def _photo_content_edit_form_context(
+    *,
+    item: ArchiveItem,
+    photo_content: PhotoContent,
+    form_data: dict,
+    form_errors: list[str],
+) -> dict:
+    return {
+        "item": item,
+        "photo_content": photo_content,
+        "form_data": form_data,
+        "form_errors": form_errors,
+        "page_title": "עריכת תמונה בפריט",
+        "submit_label": "עדכון",
+        "date_precision_choices": DATE_PRECISION_UI_CHOICES,
+        "person_choices": Person.objects.order_by("name", "id"),
+        "selected_person_ids": {
+            int(person_id) for person_id in form_data.get("person_ids") or []
+        },
     }
 
 
@@ -4767,7 +4902,7 @@ def _archive_manage_edit_photo(request, item: ArchiveItem):
     form_data = _photo_form_data_from_item(item)
 
     if request.method == "POST":
-        parsed, form_errors = parse_photo_staff_metadata_form(
+        parsed, form_errors = parse_archive_metadata_form(
             request.POST, user=request.user
         )
         parsed_discovery, discovery_errors = parse_archive_item_discovery_metadata_form(
@@ -4786,11 +4921,6 @@ def _archive_manage_edit_photo(request, item: ArchiveItem):
                     date_end=parsed["date_end_value"],
                     date_precision=parsed["date_precision"],
                     metadata_status=parsed["metadata_status"],
-                    description=parsed["description"],
-                    location=parsed["location"],
-                    context=parsed["context"],
-                    people_present=parsed["people_present"],
-                    notes=parsed["notes"],
                     public_note=parsed["public_note"],
                 )
                 update_archive_item_discovery_metadata(
@@ -4806,6 +4936,7 @@ def _archive_manage_edit_photo(request, item: ArchiveItem):
         "documents/archive/photo_form.html",
         context={
             "item": item,
+            "photo_rows": _staff_photo_manage_rows(item),
             **_archive_metadata_form_context(
                 form_data=form_data,
                 form_errors=form_errors,
@@ -4814,6 +4945,139 @@ def _archive_manage_edit_photo(request, item: ArchiveItem):
                 user=request.user,
             ),
             **_manual_text_discovery_metadata_form_context(),
+        },
+    )
+
+
+@login_required
+def archive_manage_photo_add_page(request, item_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    item = _get_staff_photo_archive_item(request, item_id)
+    form_data = {
+        **empty_photo_metadata_form_data(),
+        **archive_date_form_data(
+            date_start=None,
+            date_end=None,
+            date_precision=ArchiveItem.DatePrecision.UNKNOWN,
+        ),
+    }
+    return render(
+        request,
+        "documents/archive/photo_add.html",
+        context={
+            "item": item,
+            "form_data": form_data,
+            "form_errors": [],
+            "page_title": "הוספת תמונה לפריט",
+            "date_precision_choices": DATE_PRECISION_UI_CHOICES,
+        },
+    )
+
+
+@login_required
+def archive_manage_photo_edit_page(request, item_id: int, photo_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    item, photo_content = _get_staff_photo_content(request, item_id, photo_id)
+    form_errors: list[str] = []
+    form_data = photo_content_staff_form_data(photo_content)
+
+    if request.method == "POST":
+        parsed, form_errors = parse_photo_content_staff_form(request.POST)
+        form_data = parsed
+        if not form_errors:
+            try:
+                update_photo_content_metadata(
+                    photo_content,
+                    description=parsed["description"],
+                    location=parsed["location"],
+                    context=parsed["context"],
+                    people_present=parsed["people_present"],
+                    notes=parsed["notes"],
+                    date_start=parsed["date_start_value"],
+                    date_end=parsed["date_end_value"],
+                    date_precision=parsed["date_precision"],
+                    person_ids=parsed["person_ids"],
+                    new_person_name=parsed["new_person_name"],
+                )
+            except PhotoContentManagementError as exc:
+                form_errors = [exc.message]
+            else:
+                return redirect("archive-manage-edit", item_id=item.id)
+
+    return render(
+        request,
+        "documents/archive/photo_content_edit.html",
+        context=_photo_content_edit_form_context(
+            item=item,
+            photo_content=photo_content,
+            form_data=form_data,
+            form_errors=form_errors,
+        ),
+    )
+
+
+@login_required
+def archive_manage_photo_reorder(request, item_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    if request.method != "POST":
+        return HttpResponseBadRequest("POST only")
+
+    item = _get_staff_photo_archive_item(request, item_id)
+    raw_ids = request.POST.getlist("photo_ids")
+    ordered_ids: list[int] = []
+    try:
+        for raw in raw_ids:
+            ordered_ids.append(int(raw))
+    except (TypeError, ValueError):
+        messages.error(request, PHOTO_NOT_IN_ITEM_ERROR)
+        return redirect("archive-manage-edit", item_id=item.id)
+
+    try:
+        reorder_photo_contents(item, ordered_ids)
+    except PhotoContentManagementError as exc:
+        messages.error(request, exc.message)
+    return redirect("archive-manage-edit", item_id=item.id)
+
+
+@login_required
+def archive_manage_photo_delete_page(request, item_id: int, photo_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    item, photo_content = _get_staff_photo_content(request, item_id, photo_id)
+    form_errors: list[str] = []
+
+    if request.method == "POST":
+        try:
+            delete_one_photo_content(
+                photo_content,
+                bucket=settings.UPLOADS_BUCKET_NAME,
+            )
+        except PhotoContentManagementError as exc:
+            form_errors = [exc.message]
+        else:
+            return redirect("archive-manage-edit", item_id=item.id)
+
+    photo_count = item.photo_contents.count()
+    return render(
+        request,
+        "documents/archive/photo_content_delete_confirm.html",
+        context={
+            "item": item,
+            "photo_content": photo_content,
+            "form_errors": form_errors,
+            "is_last_photo": photo_count <= 1,
+            "last_photo_error": LAST_PHOTO_DELETE_ERROR,
         },
     )
 

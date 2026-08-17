@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - מחיקת תמונה מפריט{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-manage-edit' item_id=item.id %}">חזרה לפריט</a>
+    </div>
+
+    <h1 class="page-title">מחיקת תמונה מפריט</h1>
+    <p><strong>{{ item.title }}</strong></p>
+    <p class="muted">{{ photo_content.original_filename }}</p>
+
+    {% if form_errors %}
+      <div class="spacer"></div>
+      <div class="alert alert-danger">
+        <div class="alert-title">לא ניתן למחוק</div>
+        <ul>
+          {% for error in form_errors %}
+            <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    <div class="spacer"></div>
+    {% if is_last_photo %}
+      <p class="page-subtitle">{{ last_photo_error }}</p>
+      <div class="page-toolbar">
+        <a class="btn" href="{% url 'archive-manage-edit' item_id=item.id %}">חזרה לפריט</a>
+        <a class="btn" href="{% url 'archive-manage-delete' item_id=item.id %}">מחיקת פריט הארכיון כולו</a>
+      </div>
+    {% else %}
+      <p class="page-subtitle">
+        פעולה זו תמחק תמונה זו בלבד, כולל קישורי האנשים המזוהים שלה,
+        ותסדר מחדש את התמונות הנותרות. פריט הארכיון לא יימחק.
+      </p>
+      <p class="muted">
+        לאחר המחיקה ייעשה ניסיון לנקות את קובץ המקור ואת התמונה הממוזערת מ-S3.
+      </p>
+      <form method="post">
+        {% csrf_token %}
+        <div class="page-toolbar">
+          <button type="submit" class="btn btn-danger">מחיקת תמונה זו</button>
+          <a class="btn" href="{% url 'archive-manage-edit' item_id=item.id %}">ביטול</a>
+        </div>
+      </form>
+    {% endif %}
+  </div>
+{% endblock %}

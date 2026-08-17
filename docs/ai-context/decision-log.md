@@ -1,5 +1,57 @@
 # VS-Archive Decision Log
 
+## PHOTO staff multi-photo management (PR3)
+
+**Decision / implemented:** Staff can manage **1..N** `PhotoContent` rows under
+one PHOTO `ArchiveItem`. This PR does **not** add a public gallery, search
+aggregation across photos, Person aliases, tag-to-Person migration, or
+automatic `ArchiveItemPerson` derivation.
+
+**Current behavior:**
+
+- `/archive/manage/<id>/edit/` for PHOTO now edits **shared ArchiveItem
+  metadata only** (title, visibility, umbrella dates, metadata_status,
+  public_note, categories, events, tags). Per-photo descriptive fields are no
+  longer written from this form.
+- The same page lists all `PhotoContent` rows ordered by `(position, id)`,
+  with compact filename/thumbnail/status, Edit, Delete, and (when N>1)
+  Up/Down reorder. One-photo items stay compact (no reorder controls).
+- **Add photo:** `/archive/manage/<id>/photos/add/` reuses the existing
+  presigned PUT + complete pipeline. `POST /api/photo-uploads/add/` creates a
+  pending `PhotoContent` on the existing item, allocates
+  `max(position)+1` under an `ArchiveItem` `select_for_update` lock (does not
+  use the model default `position=1`), then keys S3 as
+  `photos/{photo_content_id}/original.{ext}`. Finalize remains
+  `POST /api/photo-uploads/<id>/complete/`. No Document/SQS.
+- **Edit photo:** `/archive/manage/<id>/photos/<photo_id>/edit/` updates one
+  `PhotoContent` (description, location, context, people_present, notes,
+  per-photo dates with the same parsing/precision helpers as ArchiveItem
+  dates, and `PhotoPerson` links). `people_present` stays independent free
+  text. Person selection is existing `Person` rows plus a **minimal**
+  name-only create on that form. Changing `PhotoPerson` does **not** create
+  `ArchiveItemPerson`.
+- **Reorder:** POST of a full `photo_ids` permutation. Transaction locks the
+  item + photo rows, shifts positions through a high temporary range, then
+  writes contiguous `1..N`. Foreign/missing/duplicate ids are rejected.
+- **Delete one photo:** allowed only when at least two photos remain. Deletes
+  that `PhotoContent` (cascading `PhotoPerson`), renumbers remaining rows
+  contiguously, and schedules existing best-effort S3 cleanup for original +
+  thumbnail `on_commit`. Deleting the last photo is rejected with a staff
+  error; whole-item delete remains the way to remove a PHOTO item and still
+  cleans **all** related S3 objects (PR2).
+- Public browse/detail and search are **unchanged**: they still use
+  `primary_photo_content` / first-photo browse eligibility.
+
+**Deferred (PR4+):** public multi-photo gallery; search aggregation across
+photo rows; using non-primary photos for browse thumbnails/detail;
+Person aliases / Person administration beyond this minimal create;
+Tag → Person migration; automatic ArchiveItemPerson from PhotoPerson;
+OCR/HTR or AI identification on photos; drag-and-drop reorder;
+re-upload/retry after `FAILED`.
+
+**Tests:** `documents/test_photo_multi_manage.py` (plus updated
+`test_photo_manage_edit_delete.py` / `test_photo_manage_status_clarity.py`).
+
 ## PHOTO multi-photo data model (PR2)
 
 **Decision / implemented:** Change `PhotoContent` from a 1:1 backing row to a
@@ -51,10 +103,11 @@ fields; `position` default 1 (backfills existing rows); OneToOne→FK;
 unique `(archive_item, position)`; `position >= 1` check. No S3 key rewrite,
 no tag/person backfill, no search-index rebuild.
 
-**Deferred (PR3/PR4 and later):** multi-photo upload sequencing; gallery /
-public presentation of N photos; staff UI to edit/reorder/delete individual
-photos; per-image date forms; search aggregation across photo rows; using
-non-primary photos for browse thumbnails/detail.
+**Deferred (later PRs):** gallery / public presentation of N photos; search
+aggregation across photo rows; using non-primary photos for browse
+thumbnails/detail. Staff add/edit/reorder/delete of individual photos and
+per-image date forms are implemented in **PHOTO staff multi-photo management
+(PR3)**.
 
 **Tests:** `documents/test_photo_content.py` (plus existing PHOTO /
 Person regression tests).
