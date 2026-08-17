@@ -46,6 +46,13 @@ Keep responsibilities separated:
 
 Do not add provider-specific `if/else` logic to `run_worker.py`.
 
+Normal Django URL/view imports (web/Gunicorn) must not import
+`documents.services.gemini_engine` or `google.genai`. Web code may check
+Hebrew-translation retry eligibility, validate, and enqueue. Actual Gemini
+execution belongs in the worker path and must be loaded lazily from that
+path only. Importing `htr_adapters.base` types must not load the Gemini
+adapter registry.
+
 ## OCR/HTR routing contract
 
 Routing is based on:

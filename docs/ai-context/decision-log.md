@@ -1,5 +1,58 @@
 # VS-Archive Decision Log
 
+## Web process must not import the Gemini SDK
+
+**Decision / implemented:** Importing the normal Django URL/view stack must
+not import `documents.services.gemini_engine` or `google.genai` merely
+because Hebrew translation retry exists.
+
+**Why:** After deploying `origin/main`
+(`82c296ef607ca7d420efa15dd3dada400081c7ca`), public requests intermittently
+returned HTTP 502. Gunicorn web workers timed out / were SIGKILL'd while
+resolving `/api/ui/documents/<id>/`. The import chain was:
+
+`documents.views` → `hebrew_translation_retry` → `gemini_engine` →
+`google.genai` (plus a second eager path:
+`hebrew_translation_retry` → `non_hebrew_hebrew_translation` →
+`GeminiResult` from `gemini_engine`).
+
+A separate views import also reached Gemini:
+
+`views` → `transkribus_corrected_current_activation` →
+`transkribus_corrected_current_sync` → `transkribus_engine` →
+`htr_adapters.base.HtrResult` → `htr_adapters/__init__.py` → registry →
+`GeminiAdapter` → `gemini_engine`. Package import of `HtrResult` must not
+load the Gemini adapter.
+
+Web ECS tasks are 256 CPU / 512 MiB with no swap. Loading the Gemini SDK
+during ordinary page rendering is the architectural bug; raising memory or
+Gunicorn timeout is not the first fix.
+
+**Current behavior:**
+
+- Staff UI eligibility (`is_hebrew_translation_retry_ui_eligible`),
+  validation, and `enqueue_hebrew_translation_retry` remain importable from
+  views without loading `gemini_engine`.
+- `translate_text_to_hebrew_with_gemini` is a lazy wrapper in
+  `hebrew_translation_retry` so the worker execution path still calls Gemini
+  and existing tests can patch
+  `documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini`.
+- `non_hebrew_hebrew_translation` imports `GeminiResult` only under
+  `TYPE_CHECKING`. Persistence remains duck-typed at runtime.
+- Worker `run_worker.py` still eagerly imports `gemini_engine` for ordinary
+  non-Hebrew OCR→Hebrew translation. The HTR adapter registry still eagerly
+  imports `GeminiAdapter` → `gemini_engine` when OCR dispatch actually
+  resolves an adapter. `htr_adapters/__init__.py` no longer imports the
+  registry at package import time, so `from htr_adapters.base import
+  HtrResult` (used by Transkribus web/staff sync) does not load Gemini.
+
+**Deferred:** ECS web memory / Gunicorn `--timeout` / worker-count changes.
+This import fix should be redeployed and observed in production before
+concluding whether a resource change is still needed. The 502 incident is
+not claimed solved until that validation.
+
+**Tests:** `documents/test_web_gemini_import_isolation.py`.
+
 ## Person staff alias UI (PR6b)
 
 **Decision / implemented:** Staff-only UX for managing one existing Person's

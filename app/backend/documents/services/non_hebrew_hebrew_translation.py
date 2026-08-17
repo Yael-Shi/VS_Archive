@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import json
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from documents.models import Document, DocumentTextResult
-from documents.services.gemini_engine import GeminiResult
 from documents.services.review_reasons import (
     AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW,
     HAS_UNCLEAR,
     MIN_TEXT_LENGTH,
     NEEDS_REVIEW_FLAG,
 )
+
+if TYPE_CHECKING:
+    from documents.services.gemini_engine import GeminiResult
 
 
 def _dedupe_strings_preserve_order(items: List[str]) -> List[str]:

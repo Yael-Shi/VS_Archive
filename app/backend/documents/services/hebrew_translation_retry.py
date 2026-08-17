@@ -10,7 +10,6 @@ from django.utils import timezone
 
 from documents.models import ArchiveItem, Document, DocumentTextResult
 from documents.services.env_validation import WorkerEnvConfig
-from documents.services.gemini_engine import translate_text_to_hebrew_with_gemini
 from documents.services.gemini_models import DEFAULT_GEMINI_MODEL
 from documents.services.non_hebrew_hebrew_translation import (
     persist_hebrew_translation_result,
@@ -266,6 +265,22 @@ def is_hebrew_translation_retry_ui_eligible(doc: Document) -> bool:
     except HebrewTranslationRetryError:
         return False
     return True
+
+
+def translate_text_to_hebrew_with_gemini(*args, **kwargs):
+    """Lazy wrapper so web URL/view imports do not load the Gemini SDK.
+
+    Eligibility, validation, and enqueue stay in this module. Actual Gemini
+    translation runs only when the worker calls
+    ``execute_hebrew_translation_retry``. Keeping this name at module scope
+    preserves the existing test patch point
+    ``documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini``.
+    """
+    from documents.services.gemini_engine import (
+        translate_text_to_hebrew_with_gemini as _translate_text_to_hebrew_with_gemini,
+    )
+
+    return _translate_text_to_hebrew_with_gemini(*args, **kwargs)
 
 
 def execute_hebrew_translation_retry(
