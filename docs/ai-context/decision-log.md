@@ -1,5 +1,54 @@
 # VS-Archive Decision Log
 
+## Person staff alias UI (PR6b)
+
+**Decision / implemented:** Staff-only UX for managing one existing Person's
+canonical name and aliases, plus alias-aware labels on the PHOTO per-photo
+Person picker. No catalog, no Admin registration, no public Person pages, and
+no public alias display.
+
+**Current behavior:**
+
+- Per-photo staff edit picker labels use canonical `Person.name` first, then
+  aliases in `(name, id)` order: `Canonical Name (Alias 1, Alias 2)`. People
+  with no aliases show the canonical name only. Option values remain Person
+  ids. Person ids are not shown in the visible label. The picker queryset
+  prefetches aliases so loading does not N+1.
+- Selected identified Persons (the current form selection) get an explicit
+  **עריכת אדם** link to the focused Person page. Unselected Persons in the
+  picker do not. Native `<select>` options are not turned into links.
+- Focused staff route: `/archive/manage/people/<person_id>/edit/`
+  (`archive-manage-person-edit`). Alias edit/delete:
+  `/archive/manage/people/<person_id>/aliases/<alias_id>/edit/` and
+  `.../delete/`. Access matches other archive-manage pages:
+  `@login_required` + `_require_admin_page` (staff/superuser). Anonymous users
+  are redirected to login; other authenticated users get 403; missing Person
+  or mismatched alias is 404. There is no `/archive/manage/people/` list.
+- The Person page edits canonical `Person.name` and can add/edit/delete
+  aliases through the existing PR6a services (`update_person_name`,
+  `create_person_alias`, `update_person_alias`, `delete_person_alias`). Views
+  parse the request and show service errors; they do not duplicate
+  validation. Success uses PRG + Django messages. Delete is POST-only after a
+  confirmation page. Alias CRUD is global to the Person, not scoped to the
+  current photo.
+- `new_person_name` on photo edit remains name-only Person create with no
+  automatic aliases. The Person edit link appears on the next photo-edit
+  visit after that Person is selected.
+- Canonical rename may equal an existing alias (PR6a). The UI does not
+  delete or promote the matching alias; both can appear.
+- Public PHOTO detail still shows canonical `Person.name` only. Search
+  semantics are unchanged; index refresh still happens inside the PR6a
+  write services.
+
+**Migration:** none.
+
+**Deferred:** general Person catalog/list; Person Admin; identity
+merge/deduplication; Tag → Person migration; public Person pages; public
+alias display; alias kind/type; language/script metadata; fuzzy matching; AI
+identification.
+
+**Tests:** `documents/test_person_staff_ui.py`.
+
 ## Person aliases (PR6a)
 
 **Decision / implemented:** Add `PersonAlias` as alternate lookup/search names
@@ -56,10 +105,11 @@ on public PHOTO pages.
 constraint; depends on `0053_photocontent_multi_photo_foundation`; no data
 migration.
 
-**Deferred (PR6b+):** staff alias-management UI; alias display in the Person
-picker; public alias display; public Person pages; alias kind/type;
-language/script metadata; Tag → Person migration; identity merge/deduplication;
-Person catalog/Admin; fuzzy matching; AI identity matching.
+**Deferred (after PR6b):** public alias display; public Person pages; alias
+kind/type; language/script metadata; Tag → Person migration; identity
+merge/deduplication; Person catalog/Admin; fuzzy matching; AI identity
+matching. Staff alias-management UI and alias-aware Person picker labels were
+implemented in **Person staff alias UI (PR6b)**.
 
 **Tests:** `documents/test_person_alias.py` (plus admin/public/search
 regressions in `test_person.py`, `test_photo_public_gallery.py`,

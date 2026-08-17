@@ -2,7 +2,7 @@
 
 Design and implementation scope for **`PHOTO`** archive items: private S3 storage, presigned display, browse-card thumbnails, and no OCR/HTR pipeline. The data model now allows **1..N** **`PhotoContent`** rows per PHOTO **`ArchiveItem`**. Staff can manage those rows. Public detail presents all renderable photos; browse cards still use the **first** photo.
 
-**Status:** Design (PR1) through staff manage status clarity (PR6) are **implemented**. **Browse-card thumbnail generation**, **upload-time thumbnail persistence**, and **idempotent backfill commands** are **implemented**. The **multi-photo data model**, **staff multi-photo management (PR3)**, the **public multi-photo gallery (PR4)**, **search aggregation across PhotoContent / PhotoPerson (multi-photo PR5)**, and **Person aliases schema + PHOTO search (PR6a)** are **implemented**. Staff alias-management UI, public alias display, re-upload/retry after **`FAILED`**, and browse-card aggregation remain **not implemented**.
+**Status:** Design (PR1) through staff manage status clarity (PR6) are **implemented**. **Browse-card thumbnail generation**, **upload-time thumbnail persistence**, and **idempotent backfill commands** are **implemented**. The **multi-photo data model**, **staff multi-photo management (PR3)**, the **public multi-photo gallery (PR4)**, **search aggregation across PhotoContent / PhotoPerson (multi-photo PR5)**, **Person aliases schema + PHOTO search (PR6a)**, and **staff Person/alias management UI (PR6b)** are **implemented**. Public alias display, re-upload/retry after **`FAILED`**, and browse-card aggregation remain **not implemented**.
 
 **Related docs:**
 
@@ -28,7 +28,7 @@ Design and implementation scope for **`PHOTO`** archive items: private S3 storag
 - `documents/management/commands/backfill_document_thumbnails.py` — operational OCR image thumbnail backfill
 - `documents/templates/documents/archive/partials/item_list_cards.html` — public browse cards
 - `documents/s3.py` — presigned PUT/GET helpers, deterministic thumbnail key builders
-- `documents/views.py` — **`/archive/`** list/detail, unified create at **`/archive/manage/new/`**
+- `documents/views.py` — **`/archive/`** list/detail, unified create at **`/archive/manage/new/`**, staff Person edit at **`/archive/manage/people/<id>/edit/`**
 
 ---
 
@@ -278,6 +278,11 @@ Non-viewable items return **404**.
 - **`/archive/manage/`** lists PHOTO items with upload-status and archive-renderability badges (primary photo).
 - Edit shared metadata at **`/archive/manage/<id>/edit/`**, which also lists all photos. Add/edit/reorder/delete individual photos from nested `/photos/` routes. Shared metadata is not duplicated on the per-photo form. A PHOTO item must keep at least one `PhotoContent`.
 - Per-photo file replace is not implemented.
+- Per-photo identified-person picker labels include aliases for staff
+  (`Canonical (Alias 1, Alias 2)`). Selected people link to
+  **`/archive/manage/people/<person_id>/edit/`** for canonical rename and
+  alias add/edit/delete. Aliases belong to the Person globally. There is no
+  Person catalog. Public pages still show canonical names only.
 
 ### Public / family archive surfaces
 
@@ -340,7 +345,7 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 - OCR/HTR on photos
 - Worker / SQS processing for PHOTO
 - Face recognition, AI identification, comments
-- Staff alias-management UI; alias display in the Person picker; public alias display; Person catalog/Admin
+- Public alias display; Person catalog/Admin
 - Tag → Person migration; automatic ArchiveItemPerson from PhotoPerson
 - Public Person pages
 - Public (unauthenticated) upload
@@ -366,6 +371,7 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 | **Multi-photo PR4** | Public gallery / per-selected-photo metadata / identified Person names | **Implemented** |
 | **Multi-photo PR5** | Search aggregation across public-renderable PhotoContent text + PhotoPerson names; child-row and successful-finalize index refresh | **Implemented** |
 | **PR6a** | `PersonAlias` schema + alias write services + PHOTO search integration (no staff alias UI, no public alias display) | **Implemented** |
+| **PR6b** | Staff Person edit page + alias CRUD UI + alias-aware picker labels + selected-person edit links (no catalog, no public alias display) | **Implemented** |
 
 ---
 

@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - {{ page_title }}{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-manage-list' %}">חזרה לניהול</a>
+    </div>
+
+    <h1 class="page-title">{{ page_title }}</h1>
+    <p class="page-subtitle">{{ person.name }}</p>
+    <p class="muted">
+      שם התצוגה מוצג בארכיון הציבורי. שמות חלופיים משמשים לחיפוש בלבד ואינם מוצגים לציבור.
+      שינוי שם או שם חלופי משפיע על החיפוש בכל התמונות שבהן אדם זה מזוהה.
+    </p>
+
+    {% if messages %}
+      <div class="spacer"></div>
+      {% for message in messages %}
+        <div class="alert{% if message.tags == 'error' %} alert-danger{% elif message.tags == 'success' %} alert-ok{% endif %}">
+          {{ message }}
+        </div>
+      {% endfor %}
+    {% endif %}
+
+    {% if form_errors %}
+      <div class="spacer"></div>
+      <div class="alert alert-danger">
+        <div class="alert-title">שגיאה בטופס</div>
+        <ul>
+          {% for error in form_errors %}
+            <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    <div class="spacer"></div>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="update_name" />
+      <div class="field">
+        <label for="canonical_name">שם תצוגה</label>
+        <input id="canonical_name" name="name" type="text" value="{{ canonical_name }}" maxlength="255" />
+        <div class="field-hint">השם הקנוני שמוצג בארכיון הציבורי. שינוי השם אינו מוחק או מקדם שמות חלופיים.</div>
+      </div>
+      <button type="submit" class="btn btn-primary">עדכון שם תצוגה</button>
+    </form>
+
+    <div class="spacer"></div>
+    <h2>שמות חלופיים</h2>
+    {% if aliases %}
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>שם חלופי</th>
+              <th>פעולות</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for alias in aliases %}
+              <tr>
+                <td>{{ alias.name }}</td>
+                <td>
+                  <a class="btn" href="{% url 'archive-manage-person-alias-edit' person_id=person.id alias_id=alias.id %}">עריכה</a>
+                  <a class="btn" href="{% url 'archive-manage-person-alias-delete' person_id=person.id alias_id=alias.id %}">מחיקה</a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">אין שמות חלופיים.</p>
+    {% endif %}
+
+    <div class="spacer"></div>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="add_alias" />
+      <div class="field">
+        <label for="alias_name">הוספת שם חלופי</label>
+        <input id="alias_name" name="alias_name" type="text" value="{{ alias_name }}" maxlength="255" />
+        <div class="field-hint">שם חיפוש נוסף לאדם זה. לא מחליף את שם התצוגה ולא מוצג בארכיון הציבורי.</div>
+      </div>
+      <button type="submit" class="btn btn-primary">הוספת שם חלופי</button>
+    </form>
+  </div>
+{% endblock %}

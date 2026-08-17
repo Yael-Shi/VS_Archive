@@ -36,13 +36,29 @@
         <label for="person_ids">אנשים מזוהים בתמונה</label>
         <select id="person_ids" name="person_ids" multiple size="8">
           {% for person in person_choices %}
-            <option value="{{ person.id }}" {% if person.id in selected_person_ids %}selected{% endif %}>
-              {{ person.name }}
+            <option value="{{ person.id }}" {% if person.selected %}selected{% endif %}>
+              {{ person.label }}
             </option>
           {% endfor %}
         </select>
-        <div class="field-hint">בחירה מרשומות אדם קיימות. לא יוצר קשר ברמת פריט הארכיון.</div>
+        <div class="field-hint">בחירה מרשומות אדם קיימות. לא יוצר קשר ברמת פריט הארכיון. שמות חלופיים מוצגים בסוגריים.</div>
       </div>
+
+      {% if selected_people %}
+        <div class="field">
+          <p>אנשים שנבחרו בתמונה זו</p>
+          <ul>
+            {% for person in selected_people %}
+              <li>
+                {{ person.label }}
+                —
+                <a href="{% url 'archive-manage-person-edit' person_id=person.id %}">עריכת אדם</a>
+              </li>
+            {% endfor %}
+          </ul>
+          <div class="field-hint">שמות חלופיים שייכים לאדם בכל הארכיון, לא לתמונה זו בלבד.</div>
+        </div>
+      {% endif %}
 
       <div class="field">
         <label for="new_person_name">הוספת אדם מזוהה חדש</label>
