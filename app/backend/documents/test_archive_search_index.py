@@ -177,7 +177,7 @@ class ArchiveItemSearchIndexBuilderTests(TestCase):
         second = build_archive_item_search_content(_load_item(item.pk))
         self.assertEqual(first, second)
 
-    def test_excludes_document_metadata_dates_photo_details_and_technical_fields(self):
+    def test_excludes_document_metadata_dates_and_technical_fields(self):
         doc = create_viewable_ocr_document(
             title="OCR isolation",
             doc_type=Document.DocType.PDF,
@@ -217,6 +217,9 @@ class ArchiveItemSearchIndexBuilderTests(TestCase):
             original_mime_type="image/jpeg",
             original_size_bytes=10,
             upload_status=PhotoContent.UploadStatus.UPLOADED,
+            date_start=date(1977, 1, 1),
+            date_end=date(1977, 12, 31),
+            date_precision=ArchiveItem.DatePrecision.YEAR,
             description="photo-description-secret",
             location="photo-location-secret",
             context="photo-context-secret",
@@ -252,12 +255,20 @@ class ArchiveItemSearchIndexBuilderTests(TestCase):
             f"{photo_content.body_text}\n"
             f"{photo_content.hebrew_translation_text}"
         )
-        for forbidden in (
+        for expected in (
             "photo-description-secret",
             "photo-location-secret",
             "photo-context-secret",
             "photo-people-secret",
             "photo-notes-secret",
+        ):
+            self.assertIn(expected, photo_blob)
+        for forbidden in (
+            "photos/x/original.jpg",
+            "photo.jpg",
+            "image/jpeg",
+            "UPLOADED",
+            "1977",
         ):
             self.assertNotIn(forbidden, photo_blob)
         self.assertEqual(photo_content.body_text, "")

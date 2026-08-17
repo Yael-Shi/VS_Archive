@@ -181,6 +181,11 @@ def create_additional_photo_upload_plan(
 
     Allocates the next position under an ArchiveItem row lock. Does not create a
     Document, enqueue SQS, or modify shared ArchiveItem metadata.
+
+    The new row is ``PENDING`` and is not public-renderable, so its descriptive
+    metadata is omitted from search even though this path still syncs the
+    owning ArchiveItem index. Successful ``finalize_photo_upload`` later
+    refreshes the index once the row is ``UPLOADED``.
     """
     normalized_mime = normalize_upload_mime_type(mime_type)
     locked_item = lock_photo_archive_item(archive_item.pk)
@@ -212,6 +217,10 @@ def create_additional_photo_upload_plan(
     photo_content.original_file_key = s3_key
     photo_content.save(update_fields=["original_file_key", "updated_at"])
 
+    from documents.services.archive_search_index import sync_archive_item_search_index
+
+    sync_archive_item_search_index(locked_item.pk)
+
     upload_url = create_presigned_put(
         bucket=bucket,
         key=s3_key,
@@ -236,6 +245,9 @@ def _finalize_photo_upload_in_transaction(
     Thumbnail generation is intentionally deferred until after this transaction
     commits successfully.
     """
+    # Lock ArchiveItem first so later search-index sync matches other PHOTO
+    # writers (item then PhotoContent) and cannot invert lock order.
+    lock_photo_archive_item(photo_content.archive_item_id)
     photo_content = (
         PhotoContent.objects.select_for_update()
         .select_related("archive_item")
@@ -293,6 +305,11 @@ def _finalize_photo_upload_in_transaction(
             "updated_at",
         ]
     )
+    from documents.services.archive_search_index import sync_archive_item_search_index
+
+    # Renderable metadata enters the index only after UPLOADED+key. Thumbnail
+    # generation runs after this transaction and does not refresh search.
+    sync_archive_item_search_index(photo_content.archive_item_id)
     return photo_content, None, True
 
 
@@ -316,8 +333,11 @@ def finalize_photo_upload(
     Validation/verification/client failures set ``upload_status=FAILED``.
     Re-upload/retry after ``FAILED`` is deferred (not implemented in PR3).
 
-    Best-effort thumbnail generation runs only after the upload finalize
-    transaction commits successfully.
+    A successful ``PENDING`` → ``UPLOADED`` transition rebuilds the owning
+    ``ArchiveItemSearchIndex`` in this same transaction so newly renderable
+    photo metadata becomes searchable. Failed / retryable outcomes do not
+    sync. Best-effort thumbnail generation runs only after this transaction
+    commits successfully and does not refresh search.
     """
     photo_content, verify_err, should_generate_thumbnail = (
         _finalize_photo_upload_in_transaction(
