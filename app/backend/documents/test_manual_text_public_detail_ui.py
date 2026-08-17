@@ -165,6 +165,47 @@ class ManualTextPublicDetailUiTests(TestCase):
         self.assertNotContains(resp, "archive-detail-toolbar")
         self.assertNotContains(resp, "archive-detail-page--photo")
 
+    def test_manual_text_signature_choice_is_deterministic_from_item_id(self):
+        items = [
+            self.item,
+            create_manual_text_archive_item(
+                title="Signature deterministic second item",
+                body="Second body",
+                visibility=ArchiveItem.Visibility.PUBLIC,
+            ),
+            create_manual_text_archive_item(
+                title="Signature deterministic third item",
+                body="Third body",
+                visibility=ArchiveItem.Visibility.PUBLIC,
+            ),
+        ]
+
+        for item in items:
+            if item.id % 3 == 0:
+                expected = 3
+            elif item.id % 2 == 0:
+                expected = 2
+            else:
+                expected = 1
+
+            resp = self.client.get(
+                reverse("archive-detail", kwargs={"item_id": item.id})
+            )
+            self.assertEqual(resp.status_code, 200)
+
+            expected_class = (
+                f"archive-detail-page--manual-text-signature-{expected}"
+            )
+            self.assertContains(resp, expected_class)
+
+            for number in (1, 2, 3):
+                if number != expected:
+                    self.assertNotContains(
+                        resp,
+                        f"archive-detail-page--manual-text-signature-{number}",
+                    )
+
+
     def test_public_body_remains_html_safe_and_preserves_newlines(self):
         item = create_manual_text_archive_item(
             title="Unsafe manual body",
@@ -289,7 +330,7 @@ class ManualTextPublicDetailLayoutStyleTests(SimpleTestCase):
             ".archive-detail-page--manual-text .archive-detail-manual-text-body {"
         )
         body_rule = css[body_start : css.index("}", body_start)]
-        self.assertIn("max-width: min(66ch, 100%);", body_rule)
+        self.assertIn("max-width: min(82ch, 100%);", body_rule)
         self.assertIn("margin-inline-end: auto;", body_rule)
         self.assertNotIn("margin: 0 auto", body_rule)
         self.assertNotIn("margin-inline-start: auto", body_rule)
@@ -302,6 +343,50 @@ class ManualTextPublicDetailLayoutStyleTests(SimpleTestCase):
         self.assertIn("line-height: var(--line-relaxed);", text_rule)
         self.assertNotIn("white-space: pre-wrap;", text_rule)
         self.assertNotIn("line-height: var(--line-ocr);", text_rule)
+
+    def test_manual_text_signature_watermark_is_desktop_only(self):
+        css = self._css()
+
+        desktop_start = css.index("@media (min-width: 980px)")
+        desktop_end = css.index("@media (max-width: 979px)", desktop_start)
+        desktop_rule = css[desktop_start:desktop_end]
+
+        self.assertIn(
+            ".archive-detail-page--manual-text::before",
+            desktop_rule,
+        )
+        self.assertIn(
+            ".archive-detail-page--manual-text-signature-1::before",
+            desktop_rule,
+        )
+        self.assertIn(
+            ".archive-detail-page--manual-text-signature-2::before",
+            desktop_rule,
+        )
+        self.assertIn(
+            ".archive-detail-page--manual-text-signature-3::before",
+            desktop_rule,
+        )
+
+        mobile_start = css.index("@media (max-width: 979px)", desktop_end)
+        mobile_rule = css[mobile_start : css.index("}", mobile_start) + 1]
+
+        self.assertIn(
+            ".archive-detail-page--manual-text::before",
+            mobile_rule,
+        )
+        self.assertIn("display: none;", mobile_rule)
+
+    def test_manual_text_signature_assets_are_referenced(self):
+        css = self._css()
+
+        for number in (1, 2, 3):
+            self.assertIn(
+                f'/static/public/images/manual-text-signatures/'
+                f'saadia-signature-{number}.png',
+                css,
+            )
+
 
     def test_photo_header_selectors_remain_distinct(self):
         css = self._css()

@@ -3,7 +3,7 @@
 {% block title %}VSArchive - {{ item.title }}{% endblock %}
 
 {% block content %}
-  <div class="card card--pad-lg archive-detail-page{% if item.item_type == 'PHOTO' %} archive-detail-page--photo{% elif item.item_type == 'MANUAL_TEXT' %} archive-detail-page--manual-text{% endif %}">
+  <div class="card card--pad-lg archive-detail-page{% if item.item_type == 'PHOTO' %} archive-detail-page--photo{% elif item.item_type == 'MANUAL_TEXT' %} archive-detail-page--manual-text{% if item.id|divisibleby:'3' %} archive-detail-page--manual-text-signature-3{% elif item.id|divisibleby:'2' %} archive-detail-page--manual-text-signature-2{% else %} archive-detail-page--manual-text-signature-1{% endif %}{% endif %}">
     {% if item.item_type == "PHOTO" %}
       <header class="document-detail-header archive-detail-photo-header">
         <div class="document-detail-header-main archive-detail-photo-header-main">
