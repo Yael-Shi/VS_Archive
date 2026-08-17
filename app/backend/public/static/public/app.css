@@ -3859,11 +3859,16 @@ pre {
 }
 
 .archive-detail-page--manual-text .archive-detail-manual-text-body {
-  max-width: min(66ch, 100%);
+  max-width: min(82ch, 100%);
   width: 100%;
   min-width: 0;
+  margin-block-start: var(--space-5);
   margin-inline-start: 0;
   margin-inline-end: auto;
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--card-input);
 }
 
 .archive-detail-page--manual-text .archive-detail-manual-text-body .text-block {
@@ -5146,4 +5151,50 @@ body:has(.homepage-found-in-archive) .homepage-ai-note {
 .homepage-archive-showcase .archive-browse-card__discovery-label,
 .homepage-archive-showcase .archive-browse-card__discovery-sep {
   color: var(--muted);
+}
+
+/* MANUAL_TEXT desktop-only archival signature watermark.
+   Decorative only; does not participate in layout. */
+@media (min-width: 980px) {
+  .archive-detail-page--manual-text {
+    position: relative;
+  }
+
+  .archive-detail-page--manual-text::before {
+    content: "";
+    position: absolute;
+    z-index: 0;
+    left: 4%;
+    top: 17rem;
+    width: min(30vw, 430px);
+    aspect-ratio: 16 / 9;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+    opacity: 0.22;
+    pointer-events: none;
+  }
+
+  .archive-detail-page--manual-text-signature-1::before {
+    background-image: url("/static/public/images/manual-text-signatures/saadia-signature-1.png");
+  }
+
+  .archive-detail-page--manual-text-signature-2::before {
+    background-image: url("/static/public/images/manual-text-signatures/saadia-signature-2.png");
+  }
+
+  .archive-detail-page--manual-text-signature-3::before {
+    background-image: url("/static/public/images/manual-text-signatures/saadia-signature-3.png");
+  }
+
+  .archive-detail-page--manual-text > * {
+    position: relative;
+    z-index: 1;
+  }
+}
+
+@media (max-width: 979px) {
+  .archive-detail-page--manual-text::before {
+    display: none;
+  }
 }
