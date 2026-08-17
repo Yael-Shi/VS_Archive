@@ -180,19 +180,25 @@ class PhotoContentAdmin(_VisibilityScopedAdminMixin, admin.ModelAdmin):
     list_display = (
         "id",
         "archive_item",
+        "position",
         "original_filename",
         "original_mime_type",
+        "date_precision",
         "created_at",
         "updated_at",
     )
     search_fields = ("archive_item__title", "original_filename", "original_file_key")
-    ordering = ("-created_at",)
+    ordering = ("archive_item_id", "position", "id")
     readonly_fields = (
         "archive_item",
+        "position",
         "original_file_key",
         "original_filename",
         "original_mime_type",
         "original_size_bytes",
+        "date_start",
+        "date_end",
+        "date_precision",
         "width",
         "height",
         "thumbnail_file_key",

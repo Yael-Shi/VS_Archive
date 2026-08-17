@@ -38,7 +38,7 @@ def apply_photo_thumbnail_urls_to_browse_cards(
             enriched.append(card)
             continue
 
-        photo_content = getattr(card.item, "photo_content", None)
+        photo_content = card.item.primary_photo_content
         thumbnail_key = (
             (photo_content.thumbnail_file_key or "").strip()
             if photo_content is not None

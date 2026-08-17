@@ -429,7 +429,7 @@ def update_photo_archive_item_metadata(
     Does not modify PhotoContent file fields, create Document rows, or enqueue
     processing.
     """
-    from documents.models import ArchiveItem
+    from documents.models import ArchiveItem, PhotoContent
 
     if archive_item.item_type != ArchiveItem.ItemType.PHOTO:
         raise ValueError("archive item is not PHOTO")
@@ -449,7 +449,12 @@ def update_photo_archive_item_metadata(
         ]
     )
 
-    photo_content = archive_item.photo_content
+    photo_content = archive_item.primary_photo_content
+    if photo_content is None:
+        raise PhotoContent.DoesNotExist(
+            "PHOTO archive item is missing PhotoContent; "
+            "transitional metadata update uses the first photo row."
+        )
     photo_content.description = description
     photo_content.location = location
     photo_content.context = context

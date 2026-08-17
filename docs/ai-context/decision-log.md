@@ -1,5 +1,64 @@
 # VS-Archive Decision Log
 
+## PHOTO multi-photo data model (PR2)
+
+**Decision / implemented:** Change `PhotoContent` from a 1:1 backing row to a
+1:N component of a PHOTO `ArchiveItem`. This PR is schema/data-model only.
+It does not add multi-photo upload UI, gallery/public presentation, staff
+management UI, search aggregation, Person UI, or tag-to-person migration.
+
+**Current behavior:**
+
+- `ArchiveItem` remains the archival umbrella record. A PHOTO item may own
+  **1..N** `PhotoContent` rows.
+- `PhotoContent.archive_item` is a **`ForeignKey`** (`on_delete=CASCADE`,
+  `related_name="photo_contents"`). The former OneToOne reverse
+  `archive_item.photo_content` is **removed** (no compatibility property of
+  that name). Transitional one-photo call sites use
+  `ArchiveItem.primary_photo_content`, which returns the first row by
+  `(position, id)` or `None`.
+- `PhotoContent.position` is a 1-based integer. Existing rows are backfilled
+  to **`position=1`**. New rows default to `1` for migration/create safety.
+  Duplicate `(archive_item, position)` is rejected. Model ordering is
+  `(archive_item, position, id)`. Upload sequencing for additional photos is
+  **not** implemented here.
+- Each `PhotoContent` has its own `date_start` / `date_end` /
+  `date_precision`, reusing `ArchiveItem.DatePrecision` choices and the same
+  stored-date validation (`date_end` must not precede `date_start`; invalid
+  precision is rejected). Existing rows default to `UNKNOWN` with null
+  bounds. This PR does **not** copy, aggregate, or overwrite `ArchiveItem`
+  dates.
+- Per-image descriptive fields stay on `PhotoContent` (`description`,
+  `location`, `context`, `people_present`, `notes`, `PhotoPerson`).
+  Item-level metadata stays on `ArchiveItem` (title, visibility,
+  metadata_status, public_note, categories, events, tags, author_name,
+  source_title).
+- `PhotoPerson` still points at a specific `PhotoContent`.
+  `ArchiveItemPerson` remains independent. No automatic sync.
+- Existing one-photo presentation/upload/edit/delete paths keep working by
+  using the primary (first) photo. Staff PHOTO delete schedules S3 cleanup
+  for **every** related `PhotoContent` before cascade-deleting the
+  `ArchiveItem`. Browse eligibility uses the **first** photo’s upload/key
+  state, not “any photo uploaded.”
+
+**Compatibility decision:** A `photo_content` property was **not** added.
+It could not support `select_related("photo_content")` or
+`photo_content__…` lookups, and would hide the 1:N relation. Call sites were
+updated to `photo_contents` / `primary_photo_content`.
+
+**Migration:** `0053_photocontent_multi_photo_foundation` — additive date
+fields; `position` default 1 (backfills existing rows); OneToOne→FK;
+unique `(archive_item, position)`; `position >= 1` check. No S3 key rewrite,
+no tag/person backfill, no search-index rebuild.
+
+**Deferred (PR3/PR4 and later):** multi-photo upload sequencing; gallery /
+public presentation of N photos; staff UI to edit/reorder/delete individual
+photos; per-image date forms; search aggregation across photo rows; using
+non-primary photos for browse thumbnails/detail.
+
+**Tests:** `documents/test_photo_content.py` (plus existing PHOTO /
+Person regression tests).
+
 ## Person identity foundation (data model only)
 
 **Decision / implemented:** Add a minimal structured person-identity schema.
@@ -40,9 +99,10 @@ This PR is schema-only. It does not change search, advanced search, public UI,
 - `PhotoContent.people` / `Person.photo_contents` (M2M through `PhotoPerson`)
 - `PhotoContent.person_links` / `Person.photo_links` (through rows)
 
-**Unchanged / out of scope:** multi-photo (`PhotoContent` remains OneToOne),
-search index, advanced-search people filter, public UI, Person management UI,
-Author model, tag-to-person classification.
+**Unchanged / out of scope:** search index, advanced-search people filter,
+public UI, Person management UI, Author model, tag-to-person classification.
+Multi-photo was later implemented as a schema change in
+**PHOTO multi-photo data model (PR2)** (`PhotoContent` is no longer OneToOne).
 
 **Migration:** `0052_person_identity_foundation` — additive `Person`,
 `ArchiveItemPerson`, `PhotoPerson` tables and uniqueness constraints; no

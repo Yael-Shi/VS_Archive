@@ -95,6 +95,22 @@ class ArchiveItem(models.Model):
     def __str__(self) -> str:
         return f"{self.title} ({self.item_type})"
 
+    @property
+    def primary_photo_content(self) -> PhotoContent | None:
+        """First PhotoContent by ``(position, id)`` for transitional one-photo call sites.
+
+        This is not a compatibility alias for the former OneToOne reverse
+        relation ``photo_content``. Multi-photo UI still uses the first row
+        only; later PRs should present the full ``photo_contents`` set.
+        """
+        cached = getattr(self, "_prefetched_objects_cache", None)
+        if cached is not None and "photo_contents" in cached:
+            photos = list(cached["photo_contents"])
+            if not photos:
+                return None
+            return min(photos, key=lambda photo: (photo.position, photo.pk))
+        return self.photo_contents.order_by("position", "id").first()
+
 
 class ArchiveCategory(models.Model):
     """Cross-item archival topic for public discovery (linked via ArchiveItem M2M)."""
@@ -184,18 +200,19 @@ class ArchiveItemSearchIndex(models.Model):
 
 
 class PhotoContent(models.Model):
-    """Image file metadata for PHOTO archive items (not OCR/Document-backed)."""
+    """One image/component belonging to a PHOTO archive item (not OCR/Document-backed)."""
 
     class UploadStatus(models.TextChoices):
         PENDING = "PENDING", "Pending"
         UPLOADED = "UPLOADED", "Uploaded"
         FAILED = "FAILED", "Failed"
 
-    archive_item = models.OneToOneField(
+    archive_item = models.ForeignKey(
         ArchiveItem,
         on_delete=models.CASCADE,
-        related_name="photo_content",
+        related_name="photo_contents",
     )
+    position = models.PositiveIntegerField(default=1)
     original_file_key = models.CharField(max_length=1024)
     original_filename = models.CharField(max_length=512)
     original_mime_type = models.CharField(max_length=128)
@@ -206,6 +223,13 @@ class PhotoContent(models.Model):
         default=UploadStatus.PENDING,
     )
     upload_error = models.CharField(max_length=512, blank=True, default="")
+    date_start = models.DateField(null=True, blank=True)
+    date_end = models.DateField(null=True, blank=True)
+    date_precision = models.CharField(
+        max_length=16,
+        choices=ArchiveItem.DatePrecision.choices,
+        default=ArchiveItem.DatePrecision.UNKNOWN,
+    )
     description = models.TextField(blank=True, default="")
     location = models.TextField(blank=True, default="")
     context = models.TextField(blank=True, default="")
@@ -225,6 +249,19 @@ class PhotoContent(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        ordering = ["archive_item", "position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["archive_item", "position"],
+                name="uniq_photocontent_archive_item_position",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(position__gte=1),
+                name="photocontent_position_gte_1",
+            ),
+        ]
+
     def clean(self) -> None:
         super().clean()
         if (
@@ -238,9 +275,23 @@ class PhotoContent(models.Model):
                     )
                 }
             )
+        if self.position is not None and self.position < 1:
+            raise ValidationError({"position": "position must be at least 1."})
+        from documents.services.archive_item_validation import (
+            validate_stored_archive_date_fields,
+        )
+
+        validate_stored_archive_date_fields(
+            date_start=self.date_start,
+            date_end=self.date_end,
+            date_precision=self.date_precision,
+        )
 
     def __str__(self) -> str:
-        return f"PhotoContent(archive_item_id={self.archive_item_id})"
+        return (
+            f"PhotoContent(archive_item_id={self.archive_item_id}, "
+            f"position={self.position})"
+        )
 
 
 class Person(models.Model):

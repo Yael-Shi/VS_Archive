@@ -4115,7 +4115,7 @@ def _manual_text_form_data_from_item(item: ArchiveItem) -> dict:
 
 
 def _photo_form_data_from_item(item: ArchiveItem) -> dict:
-    photo_content = getattr(item, "photo_content", None)
+    photo_content = item.primary_photo_content
     return {
         **_archive_metadata_form_data(
             title=item.title,
@@ -4280,9 +4280,9 @@ def _archive_browse_select_related(queryset):
     return queryset.select_related(
         "manual_text_content",
         "ocr_document",
-        "photo_content",
         "video_content",
     ).prefetch_related(
+        "photo_contents",
         "categories",
         "events",
         "tags",
@@ -4518,7 +4518,7 @@ def archive_detail_page(request, item_id: int):
         )
 
     if item.item_type == ArchiveItem.ItemType.PHOTO:
-        photo_content = getattr(item, "photo_content", None)
+        photo_content = item.primary_photo_content
         if (
             photo_content is None
             or photo_content.upload_status != PhotoContent.UploadStatus.UPLOADED
@@ -4577,9 +4577,9 @@ def archive_manage_list_page(request):
         .select_related(
             "manual_text_content",
             "ocr_document",
-            "photo_content",
             "video_content",
         )
+        .prefetch_related("photo_contents")
         .order_by("-created_at")
     )
     return render(
@@ -4696,9 +4696,8 @@ def archive_manage_edit_page(request, item_id: int):
         queryset=ArchiveItem.objects.select_related(
             "manual_text_content",
             "ocr_document",
-            "photo_content",
             "video_content",
-        ).prefetch_related("categories", "events", "tags"),
+        ).prefetch_related("photo_contents", "categories", "events", "tags"),
     )
 
     if item.item_type == ArchiveItem.ItemType.MANUAL_TEXT:
@@ -5042,9 +5041,10 @@ def archive_manage_delete_page(request, item_id: int):
         item_id,
         queryset=ArchiveItem.objects.select_related(
             "manual_text_content",
-            "photo_content",
             "video_content",
-        ).filter(
+        )
+        .prefetch_related("photo_contents")
+        .filter(
             item_type__in=(
                 ArchiveItem.ItemType.MANUAL_TEXT,
                 ArchiveItem.ItemType.PHOTO,
@@ -5054,23 +5054,24 @@ def archive_manage_delete_page(request, item_id: int):
     )
 
     if request.method == "POST":
-        photo_cleanup: tuple[str, str, int | None] | None = None
+        photo_cleanups: list[tuple[str, str, int | None]] = []
         if item.item_type == ArchiveItem.ItemType.PHOTO:
-            photo_content = item.photo_content
-            photo_cleanup = (
-                photo_content.original_file_key,
-                photo_content.thumbnail_file_key,
-                photo_content.pk,
-            )
+            photo_cleanups = [
+                (
+                    photo_content.original_file_key,
+                    photo_content.thumbnail_file_key,
+                    photo_content.pk,
+                )
+                for photo_content in item.photo_contents.all()
+            ]
 
         with transaction.atomic():
             item.delete()
-            if photo_cleanup is not None:
-                (
-                    original_file_key,
-                    thumbnail_file_key,
-                    photo_content_id,
-                ) = photo_cleanup
+            for (
+                original_file_key,
+                thumbnail_file_key,
+                photo_content_id,
+            ) in photo_cleanups:
                 schedule_photo_s3_cleanup_after_commit(
                     bucket=settings.UPLOADS_BUCKET_NAME,
                     original_file_key=original_file_key,

@@ -46,7 +46,7 @@ This design document records **target architecture and product decisions** befor
 |-------------|---------------|--------|
 | **`OCR_DOCUMENT`** | **`Document`** (`OneToOneField` via **`Document.archive_item`**) | Implemented |
 | **`MANUAL_TEXT`** | **`ManualTextContent`** (`OneToOneField` to **`ArchiveItem`**) | Implemented |
-| **`PHOTO`** | **`PhotoContent`** (`OneToOneField` to **`ArchiveItem`**) | Implemented (V1 — see **`docs/ai-context/photo-archive-items.md`**) |
+| **`PHOTO`** | **`PhotoContent`** (`ForeignKey` to **`ArchiveItem`**, `related_name="photo_contents"`; 1..N rows) | Implemented (data model allows multiple photos; V1 UI remains one photo — see **`docs/ai-context/photo-archive-items.md`**) |
 
 ### ArchiveItem-owned shared archival fields
 

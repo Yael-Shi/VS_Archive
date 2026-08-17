@@ -4242,9 +4242,9 @@ class ArchiveBrowseCardPresentationTests(TestCase):
             ArchiveItem.objects.select_related(
                 "manual_text_content",
                 "ocr_document",
-                "photo_content",
             )
             .prefetch_related(
+                "photo_contents",
                 "categories",
                 "events",
                 "tags",

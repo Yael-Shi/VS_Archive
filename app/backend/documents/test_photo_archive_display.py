@@ -276,7 +276,7 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         return_value=PRESIGNED_URL,
     )
     def test_photo_detail_renders_context_metadata_row(self, _mock_presigned_get):
-        photo = self.public_uploaded.photo_content
+        photo = self.public_uploaded.primary_photo_content
         photo.context = "חתונה בירושלים"
         photo.save(update_fields=["context", "updated_at"])
 
@@ -292,7 +292,7 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         return_value=PRESIGNED_URL,
     )
     def test_photo_detail_displays_non_empty_metadata(self, _mock_presigned_get):
-        photo = self.public_uploaded.photo_content
+        photo = self.public_uploaded.primary_photo_content
         photo.description = "Family picnic"
         photo.location = "Jerusalem"
         photo.context = "Summer outing"
@@ -323,7 +323,7 @@ class PhotoArchiveDisplayDetailTests(TestCase):
     def test_photo_detail_does_not_render_empty_metadata_labels(
         self, _mock_presigned_get
     ):
-        photo = self.public_uploaded.photo_content
+        photo = self.public_uploaded.primary_photo_content
         photo.description = "Only caption filled"
         photo.save()
 
@@ -575,7 +575,6 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         self.assertContains(resp, "Public photo event")
         self.assertContains(resp, "public-photo-tag")
         self.assertNotContains(resp, "archive-detail-photo-technical")
-
 
     @patch(
         "documents.views.create_presigned_get",

@@ -48,15 +48,15 @@ class PhotoPresentationHelperTests(TestCase):
         uploaded = _create_photo_archive_item(
             title="Uploaded",
             upload_status=PhotoContent.UploadStatus.UPLOADED,
-        ).photo_content
+        ).primary_photo_content
         pending = _create_photo_archive_item(
             title="Pending",
             upload_status=PhotoContent.UploadStatus.PENDING,
-        ).photo_content
+        ).primary_photo_content
         failed = _create_photo_archive_item(
             title="Failed",
             upload_status=PhotoContent.UploadStatus.FAILED,
-        ).photo_content
+        ).primary_photo_content
         self.assertEqual(photo_upload_status_label(uploaded), "הועלה")
         self.assertEqual(photo_upload_status_label(pending), "ממתין להעלאה")
         self.assertEqual(photo_upload_status_label(failed), "העלאה נכשלה")
@@ -66,16 +66,16 @@ class PhotoPresentationHelperTests(TestCase):
             title="Renderable",
             upload_status=PhotoContent.UploadStatus.UPLOADED,
             original_file_key="photos/1/original.jpg",
-        ).photo_content
+        ).primary_photo_content
         empty_key = _create_photo_archive_item(
             title="Empty key",
             upload_status=PhotoContent.UploadStatus.UPLOADED,
             original_file_key="",
-        ).photo_content
+        ).primary_photo_content
         pending = _create_photo_archive_item(
             title="Pending",
             upload_status=PhotoContent.UploadStatus.PENDING,
-        ).photo_content
+        ).primary_photo_content
         self.assertTrue(photo_is_archive_renderable(uploaded))
         self.assertEqual(photo_archive_renderability_label(uploaded), "מוצג בארכיון")
         self.assertFalse(photo_is_archive_renderable(empty_key))
@@ -96,7 +96,7 @@ class PhotoPresentationHelperTests(TestCase):
         photo_content = _create_photo_archive_item(
             title="Unknown status",
             upload_status=PhotoContent.UploadStatus.UPLOADED,
-        ).photo_content
+        ).primary_photo_content
         PhotoContent.objects.filter(pk=photo_content.pk).update(upload_status="UNKNOWN")
         photo_content.refresh_from_db()
 
