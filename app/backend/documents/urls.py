@@ -27,6 +27,11 @@ urlpatterns = [
         name="photo-uploads-create",
     ),
     path(
+        "photo-uploads/add/",
+        views.add_photo_upload,
+        name="photo-uploads-add",
+    ),
+    path(
         "photo-uploads/<int:photo_content_id>/complete/",
         views.photo_upload_complete,
         name="photo-uploads-complete",

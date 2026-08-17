@@ -787,6 +787,24 @@ textarea {
   margin-top: 5px;
 }
 
+.staff-photo-thumb {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  background: var(--card-muted);
+  display: block;
+}
+
+.staff-photo-thumb--missing {
+  border: 1px dashed var(--border-strong);
+}
+
+.staff-photo-list .page-toolbar {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .badge-row {
   display: flex;
   gap: var(--space-2);

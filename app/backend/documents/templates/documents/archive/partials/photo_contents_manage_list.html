@@ -1,0 +1,79 @@
+{% load archive_labels %}
+{% if photo_rows %}
+  <div class="table-wrap staff-photo-list">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>תצוגה</th>
+          <th>קובץ / תיאור</th>
+          <th>סטטוס</th>
+          <th>פעולות</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in photo_rows %}
+          {% with photo=row.photo %}
+            <tr>
+              <td>{{ photo.position }}</td>
+              <td>
+                {% if row.thumbnail_url %}
+                  <img
+                    class="staff-photo-thumb"
+                    src="{{ row.thumbnail_url }}"
+                    alt=""
+                    width="64"
+                    height="64"
+                  />
+                {% else %}
+                  <div class="staff-photo-thumb staff-photo-thumb--missing" aria-hidden="true"></div>
+                {% endif %}
+              </td>
+              <td>
+                <div class="cell-title">{{ photo.original_filename|default:"(ללא שם קובץ)" }}</div>
+                {% if photo.description %}
+                  <div class="muted">{{ photo.description|truncatechars:80 }}</div>
+                {% endif %}
+                {% if photo.location %}
+                  <div class="muted">{{ photo.location }}</div>
+                {% endif %}
+                {% if row.identified_people_summary %}
+                  <div class="muted">{{ row.identified_people_summary }}</div>
+                {% endif %}
+              </td>
+              <td>
+                <span class="badge{% if photo|photo_upload_status_tone %} {{ photo|photo_upload_status_tone }}{% endif %}">{{ photo|photo_upload_status_label }}</span>
+              </td>
+              <td>
+                <div class="page-toolbar">
+                  <a class="btn" href="{% url 'archive-manage-photo-edit' item_id=item.id photo_id=photo.id %}">עריכה</a>
+                  <a class="btn" href="{% url 'archive-manage-photo-delete' item_id=item.id photo_id=photo.id %}">מחיקה</a>
+                  {% if row.move_up_ids %}
+                    <form method="post" action="{% url 'archive-manage-photo-reorder' item_id=item.id %}">
+                      {% csrf_token %}
+                      {% for photo_id in row.move_up_ids %}
+                        <input type="hidden" name="photo_ids" value="{{ photo_id }}" />
+                      {% endfor %}
+                      <button type="submit" class="btn">למעלה</button>
+                    </form>
+                  {% endif %}
+                  {% if row.move_down_ids %}
+                    <form method="post" action="{% url 'archive-manage-photo-reorder' item_id=item.id %}">
+                      {% csrf_token %}
+                      {% for photo_id in row.move_down_ids %}
+                        <input type="hidden" name="photo_ids" value="{{ photo_id }}" />
+                      {% endfor %}
+                      <button type="submit" class="btn">למטה</button>
+                    </form>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% endwith %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p class="muted">אין תמונות בפריט זה.</p>
+{% endif %}

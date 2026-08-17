@@ -240,7 +240,7 @@ class PhotoManageCopyClarityTests(TestCase):
         self.assertContains(resp, "תופיע בארכיון הציבורי רק לאחר שההעלאה הושלמה")
         self.assertNotContains(resp, 'type="file"')
 
-    def test_photo_delete_confirmation_contains_db_delete_and_s3_deferred_guidance(
+    def test_photo_delete_confirmation_contains_db_delete_and_s3_cleanup_guidance(
         self,
     ):
         self.client.force_login(self.staff)
@@ -249,8 +249,8 @@ class PhotoManageCopyClarityTests(TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "תמחק את פריט הארכיון (תמונה) ממסד הנתונים")
-        self.assertContains(resp, "ניקוי הקובץ השמור ב-S3 נדחה")
-        self.assertContains(resp, "אינה מוחקת את אובייקט התמונה מהאחסון")
+        self.assertContains(resp, "ייעשה ניסיון לנקות את קובצי המקור")
+        self.assertNotContains(resp, "ניקוי הקובץ השמור ב-S3 נדחה")
 
     @patch("boto3.client")
     def test_photo_delete_still_does_not_attempt_s3_cleanup(self, mock_boto_client):

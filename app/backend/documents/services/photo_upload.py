@@ -6,9 +6,15 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from botocore.exceptions import BotoCoreError, ClientError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 
 from documents.models import ArchiveItem, PhotoContent
+from documents.services.photo_content_management import (
+    lock_photo_archive_item,
+    lock_photo_contents_for_item,
+    next_photo_position,
+    wrap_integrity_position_conflict,
+)
 from documents.s3 import (
     S3HeadObjectResult,
     build_photo_original_s3_key,
@@ -122,6 +128,7 @@ def create_photo_upload_plan(
     )
     photo_content = PhotoContent.objects.create(
         archive_item=archive_item,
+        position=1,
         original_file_key="",
         original_filename=original_name,
         original_mime_type=normalized_mime,
@@ -151,6 +158,66 @@ def create_photo_upload_plan(
         content_type=normalized_mime,
     )
     return archive_item, photo_content, upload_url
+
+
+@transaction.atomic
+def create_additional_photo_upload_plan(
+    *,
+    archive_item: ArchiveItem,
+    bucket: str,
+    original_name: str,
+    mime_type: str,
+    description: str = "",
+    location: str = "",
+    context: str = "",
+    people_present: str = "",
+    notes: str = "",
+    date_start=None,
+    date_end=None,
+    date_precision: str = ArchiveItem.DatePrecision.UNKNOWN,
+) -> tuple[ArchiveItem, PhotoContent, str]:
+    """
+    Add a pending PhotoContent to an existing PHOTO item and return a presigned PUT.
+
+    Allocates the next position under an ArchiveItem row lock. Does not create a
+    Document, enqueue SQS, or modify shared ArchiveItem metadata.
+    """
+    normalized_mime = normalize_upload_mime_type(mime_type)
+    locked_item = lock_photo_archive_item(archive_item.pk)
+    lock_photo_contents_for_item(locked_item)
+    position = next_photo_position(locked_item)
+    try:
+        photo_content = PhotoContent.objects.create(
+            archive_item=locked_item,
+            position=position,
+            original_file_key="",
+            original_filename=original_name,
+            original_mime_type=normalized_mime,
+            original_size_bytes=0,
+            upload_status=PhotoContent.UploadStatus.PENDING,
+            upload_error="",
+            description=description,
+            location=location,
+            context=context,
+            people_present=people_present,
+            notes=notes,
+            date_start=date_start,
+            date_end=date_end,
+            date_precision=date_precision,
+        )
+    except IntegrityError as exc:
+        raise wrap_integrity_position_conflict(exc) from exc
+
+    s3_key = build_photo_original_s3_key(photo_content.id, normalized_mime)
+    photo_content.original_file_key = s3_key
+    photo_content.save(update_fields=["original_file_key", "updated_at"])
+
+    upload_url = create_presigned_put(
+        bucket=bucket,
+        key=s3_key,
+        content_type=normalized_mime,
+    )
+    return locked_item, photo_content, upload_url
 
 
 @transaction.atomic
@@ -369,5 +436,70 @@ def parse_create_photo_upload_metadata(
         "mime_type": normalize_upload_mime_type(mime_type),
         "discovery_metadata": parsed_discovery,
         "public_note": public_note,
+        **photo_metadata,
+    }, None
+
+
+def parse_add_photo_upload_metadata(
+    payload: dict[str, Any],
+) -> tuple[dict | None, str | None]:
+    """Parse JSON body for adding a PhotoContent to an existing PHOTO item."""
+    from documents.services.archive_item_validation import parse_date_precision
+    from documents.services.archive_date_input import parse_archive_date_bounds
+    from documents.services.photo_metadata_validation import (
+        parse_photo_content_date_fields,
+        photo_metadata_from_mapping,
+    )
+
+    raw_item_id = payload.get("archive_item_id")
+    try:
+        archive_item_id = int(raw_item_id)
+    except (TypeError, ValueError):
+        return None, "archive_item_id required"
+    if archive_item_id < 1:
+        return None, "archive_item_id required"
+
+    original_name = (payload.get("original_name") or "").strip()
+    mime_type = (payload.get("mime_type") or "").strip()
+    if not original_name:
+        return None, "original_name required"
+    if not mime_type:
+        return None, "mime_type required"
+
+    metadata_err = validate_image_upload_metadata(
+        mime_type=mime_type,
+        original_name=original_name,
+    )
+    if metadata_err:
+        return None, metadata_err
+
+    try:
+        date_precision = parse_date_precision(payload.get("date_precision"))
+    except ValueError as exc:
+        return None, str(exc)
+
+    date_start, date_end, _, date_errors = parse_archive_date_bounds(
+        date_precision=date_precision,
+        post_data=payload,
+    )
+    if date_errors:
+        return None, date_errors[0]
+
+    date_error = parse_photo_content_date_fields(
+        date_start=date_start,
+        date_end=date_end,
+        date_precision=date_precision,
+    )
+    if date_error:
+        return None, date_error
+
+    photo_metadata = photo_metadata_from_mapping(payload)
+    return {
+        "archive_item_id": archive_item_id,
+        "original_name": original_name,
+        "mime_type": normalize_upload_mime_type(mime_type),
+        "date_start": date_start,
+        "date_end": date_end,
+        "date_precision": date_precision,
         **photo_metadata,
     }, None

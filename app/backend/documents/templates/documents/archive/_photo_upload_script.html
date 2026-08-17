@@ -1,9 +1,13 @@
-{# Presigned S3 upload JS for PHOTO create (no OCR/Document pipeline). #}
+{# Presigned S3 upload JS for PHOTO create/add (no OCR/Document pipeline). #}
 <script>
   const form = document.getElementById("photoUploadForm");
   const msgEl = document.getElementById("msg");
   const submitBtn = document.getElementById("submitBtn");
   const fileEl = document.getElementById("file");
+  const uploadMode = (form && form.dataset.mode) || "create";
+  const createUrl = (form && form.dataset.createUrl) || "/api/photo-uploads/create/";
+  const completeUrlTemplate = (form && form.dataset.completeUrlTemplate) || "/api/photo-uploads/__ID__/complete/";
+  const redirectUrl = (form && form.dataset.redirectUrl) || "/archive/manage/";
 
   function setMessage(kind, text) {
     msgEl.className = "msg";
@@ -61,6 +65,20 @@
       const el = document.getElementById(id);
       return el ? (el.value || "") : "";
     };
+    if (uploadMode === "add") {
+      const meta = {
+        archive_item_id: parseInt(form.dataset.archiveItemId || "", 10),
+        description: get("description"),
+        location: get("location"),
+        context: getMultiline("context"),
+        people_present: get("people_present"),
+        notes: getMultiline("notes"),
+      };
+      if (window.vsArchiveDateEntry && window.vsArchiveDateEntry.collectMeta) {
+        window.vsArchiveDateEntry.collectMeta(meta);
+      }
+      return meta;
+    }
     const meta = {
       title: get("title"),
       description: get("description"),
@@ -105,8 +123,8 @@
         mime_type,
       });
 
-      setMessage("ok", "יוצרת פריט תמונה…");
-      const created = await jsonFetch("/api/photo-uploads/create/", {
+      setMessage("ok", uploadMode === "add" ? "מוסיפה תמונה לפריט…" : "יוצרת פריט תמונה…");
+      const created = await jsonFetch(createUrl, {
         method: "POST",
         body: JSON.stringify(createPayload),
       });
@@ -123,10 +141,11 @@
         headers: {"Content-Type": mime_type},
         body: file,
       });
+      const completeUrl = completeUrlTemplate.replace("__ID__", String(photoContentId));
       if (!putRes.ok) {
         const putText = await putRes.text().catch(() => "");
         try {
-          await jsonFetch(`/api/photo-uploads/${photoContentId}/complete/`, {
+          await jsonFetch(completeUrl, {
             method: "POST",
             body: JSON.stringify({ success: false, error: `S3 PUT failed: HTTP ${putRes.status}` }),
           });
@@ -135,7 +154,7 @@
       }
 
       setMessage("ok", "מאמתת העלאה…");
-      const completed = await jsonFetch(`/api/photo-uploads/${photoContentId}/complete/`, {
+      const completed = await jsonFetch(completeUrl, {
         method: "POST",
         body: JSON.stringify({
           success: true,
@@ -147,8 +166,8 @@
         throw new Error(completed.error || "העלאה לא הושלמה");
       }
 
-      setMessage("ok", "בוצע. מעבירה לניהול ארכיון…");
-      window.location.href = "/archive/manage/";
+      setMessage("ok", "בוצע. מעבירה…");
+      window.location.href = redirectUrl;
     } catch (err) {
       setMessage("error", err && err.message ? err.message : String(err));
       submitBtn.disabled = false;

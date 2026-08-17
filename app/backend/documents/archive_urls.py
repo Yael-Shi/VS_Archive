@@ -36,6 +36,26 @@ urlpatterns = [
         name="archive-manage-edit",
     ),
     path(
+        "manage/<int:item_id>/photos/add/",
+        views.archive_manage_photo_add_page,
+        name="archive-manage-photo-add",
+    ),
+    path(
+        "manage/<int:item_id>/photos/reorder/",
+        views.archive_manage_photo_reorder,
+        name="archive-manage-photo-reorder",
+    ),
+    path(
+        "manage/<int:item_id>/photos/<int:photo_id>/edit/",
+        views.archive_manage_photo_edit_page,
+        name="archive-manage-photo-edit",
+    ),
+    path(
+        "manage/<int:item_id>/photos/<int:photo_id>/delete/",
+        views.archive_manage_photo_delete_page,
+        name="archive-manage-photo-delete",
+    ),
+    path(
         "manage/<int:item_id>/delete/",
         views.archive_manage_delete_page,
         name="archive-manage-delete",

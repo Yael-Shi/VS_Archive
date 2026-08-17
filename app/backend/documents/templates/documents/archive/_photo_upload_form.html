@@ -4,7 +4,13 @@
 <div class="card card--pad-lg">
   <div class="section-title">תמונה + פרטי ארכיון</div>
 
-  <form id="photoUploadForm">
+  <form
+    id="photoUploadForm"
+    data-mode="create"
+    data-create-url="{% url 'photo-uploads-create' %}"
+    data-complete-url-template="/api/photo-uploads/__ID__/complete/"
+    data-redirect-url="{% url 'archive-manage-list' %}"
+  >
     {% csrf_token %}
     <div class="field">
       <label for="file">קובץ תמונה *</label>

@@ -90,11 +90,25 @@ class PhotoManageEditTests(TestCase):
         self.assertContains(resp, "עריכת תמונה")
         self.assertContains(resp, "ללא החלפת קובץ התמונה")
         self.assertContains(resp, "תיאור קצר")
-        self.assertContains(resp, 'name="description"')
-        self.assertContains(resp, 'name="location"')
+        self.assertContains(resp, "מטא־דאטה משותף לפריט")
+        self.assertContains(resp, "תמונות בפריט זה")
+        self.assertContains(resp, 'name="title"')
+        self.assertNotContains(resp, 'name="description"')
         self.assertNotContains(resp, 'name="author_name"')
         self.assertNotContains(resp, 'name="source_title"')
         self.assertNotContains(resp, 'name="body"')
+        photo = self.photo_item.primary_photo_content
+        self.assertContains(
+            resp,
+            reverse(
+                "archive-manage-photo-edit",
+                kwargs={"item_id": self.photo_item.id, "photo_id": photo.id},
+            ),
+        )
+        self.assertContains(
+            resp,
+            reverse("archive-manage-photo-add", kwargs={"item_id": self.photo_item.id}),
+        )
 
     def test_anonymous_cannot_open_photo_edit_page(self):
         resp = self.client.get(
@@ -152,26 +166,51 @@ class PhotoManageEditTests(TestCase):
             self.photo_item.date_precision, ArchiveItem.DatePrecision.RANGE
         )
 
-    def test_staff_can_update_photo_metadata(self):
+    def test_staff_can_update_photo_metadata_on_photo_component_page(self):
+        photo = self.photo_item.primary_photo_content
         self.client.force_login(self.staff)
         resp = self.client.post(
-            self.EDIT_URL_TEMPLATE.format(item_id=self.photo_item.id),
-            data=self._photo_edit_payload(
-                description="  Wedding day caption  ",
-                location=" Cairo ",
-                context="Family gathering\nafter ceremony",
-                people_present=" Uncle Moshe, Aunt Rivka ",
-                notes="Scanned from album page 3",
+            reverse(
+                "archive-manage-photo-edit",
+                kwargs={"item_id": self.photo_item.id, "photo_id": photo.id},
             ),
+            data={
+                "description": "  Wedding day caption  ",
+                "location": " Cairo ",
+                "context": "Family gathering\nafter ceremony",
+                "people_present": " Uncle Moshe, Aunt Rivka ",
+                "notes": "Scanned from album page 3",
+                "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
+            },
         )
         self.assertEqual(resp.status_code, 302)
-        self.photo_item.primary_photo_content.refresh_from_db()
-        photo = self.photo_item.primary_photo_content
+        photo.refresh_from_db()
         self.assertEqual(photo.description, "Wedding day caption")
         self.assertEqual(photo.location, "Cairo")
         self.assertEqual(photo.context, "Family gathering\nafter ceremony")
         self.assertEqual(photo.people_present, "Uncle Moshe, Aunt Rivka")
         self.assertEqual(photo.notes, "Scanned from album page 3")
+
+    def test_item_edit_does_not_overwrite_photo_component_metadata(self):
+        photo = self.photo_item.primary_photo_content
+        photo.description = "Keep me"
+        photo.location = "Keep location"
+        photo.save(update_fields=["description", "location", "updated_at"])
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self.EDIT_URL_TEMPLATE.format(item_id=self.photo_item.id),
+            data=self._photo_edit_payload(
+                title="Shared title only",
+                description="Should be ignored",
+                location="Should also be ignored",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.photo_item.refresh_from_db()
+        photo.refresh_from_db()
+        self.assertEqual(self.photo_item.title, "Shared title only")
+        self.assertEqual(photo.description, "Keep me")
+        self.assertEqual(photo.location, "Keep location")
 
     def test_staff_can_update_photo_public_note(self):
         self.client.force_login(self.staff)
