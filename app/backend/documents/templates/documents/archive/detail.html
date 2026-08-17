@@ -18,7 +18,9 @@
           </div>
 
           <div class="archive-detail-meta document-detail-meta archive-detail-photo-meta">
-            {% include "documents/archive/partials/photo_metadata_display.html" with photo_content=photo_content %}
+            {% if not photo_gallery.show_gallery %}
+              {% include "documents/archive/partials/photo_metadata_display.html" with photo_content=photo_content identified_people=photo_gallery.identified_people_names photo_date_label=photo_gallery.photo_date_label %}
+            {% endif %}
             {% include "documents/archive/partials/discovery_metadata.html" with item=item %}
             {% include "documents/archive/partials/public_note_display.html" with item=item %}
           </div>
@@ -169,12 +171,16 @@
       </div>
     {% endif %}
     {% if item.item_type == "PHOTO" %}
-      {% if photo_url %}
+      {% if photo_gallery.show_gallery %}
+        <section class="photo-gallery" aria-label="גלריית תמונות">
+          {% include "documents/archive/partials/photo_gallery.html" %}
+        </section>
+      {% elif photo_url %}
         <figure class="photo-detail archive-detail-photo">
           <img
             class="photo-detail__image"
             src="{{ photo_url }}"
-            alt="{{ item.title }}"
+            alt="{{ photo_gallery.selected_alt_text }}"
           >
         </figure>
       {% else %}

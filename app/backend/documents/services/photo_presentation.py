@@ -40,10 +40,11 @@ def photo_upload_status_tone(photo_content: PhotoContent | None) -> str:
 
 def photo_is_archive_renderable(photo_content: PhotoContent | None) -> bool:
     """
-    Whether PHOTO bytes are eligible for ``/archive/`` browse/detail surfaces.
+    Whether PHOTO bytes are eligible for public ``/archive/`` image display.
 
     Matches ``filter_browse_renderable_photo_items`` upload/key checks only.
-    Visibility and access rules are evaluated separately.
+    Item-level browse eligibility still uses the first photo; public detail
+    uses this check per ``PhotoContent`` row. Visibility is separate.
     """
     if photo_content is None:
         return False
