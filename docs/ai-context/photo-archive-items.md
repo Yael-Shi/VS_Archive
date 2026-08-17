@@ -346,7 +346,7 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 - Worker / SQS processing for PHOTO
 - Face recognition, AI identification, comments
 - Public alias display; Person catalog/Admin
-- Tag → Person migration; automatic ArchiveItemPerson from PhotoPerson
+- Eventual person-Tag removal (Tags still power public search/browse/filter); automatic ArchiveItemPerson from PhotoPerson; staff PHOTO appearance review / PhotoPerson backfill from `people_present`
 - Public Person pages
 - Public (unauthenticated) upload
 - Rich text captions

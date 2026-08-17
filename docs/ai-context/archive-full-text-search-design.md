@@ -343,7 +343,7 @@ Required order (short form): **PR1 migrate/backfill → PR2a sync → PR2b-1 syn
 | **Scope** | Index public-renderable `PhotoContent` descriptive fields + distinct `PhotoPerson` names from those rows onto the owning ArchiveItem `metadata_text` (same `photo_is_archive_renderable` / gallery contract); keep one result per item; explicit in-transaction sync on child writers, successful upload finalize, and Person rename; pending/failed/empty-key rows stay absent; thumbnail writes do not sync; no schema migration |
 | **Files** | `archive_search_index.py`; `photo_content_management.py`; `photo_upload.py`; `archive_search_snippets.py`; tests; design + decision-log |
 | **Migrations** | None (`ArchiveItemSearchIndex` remains derived; run `backfill_archive_search_index` after deploy) |
-| **Non-goals** | Per-photo result rows; `?photo=` deep-link; photo-level year filters; indexing `ArchiveItemPerson`; Tag → Person; browse-card preview selection. Person aliases were later implemented in PR6a. |
+| **Non-goals** | Per-photo result rows; `?photo=` deep-link; photo-level year filters; indexing `ArchiveItemPerson`; browse-card preview selection. Person aliases were later implemented in PR6a. Historical person-name Tags were later copied to `Person` + `ArchiveItemPerson` by migration `0055` without changing this search contract (Tags remain indexed; `ArchiveItemPerson` is still not indexed). |
 
 ### PR6a — Person aliases on PHOTO search — **implemented**
 
