@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import Max
+from django.db.models import Max, Prefetch
 
 from documents.models import ArchiveItem, Person, PersonAlias, PhotoContent
 from documents.s3 import create_presigned_get
@@ -44,6 +44,63 @@ class StaffPhotoManageRow:
     move_up_ids: list[int] | None
     move_down_ids: list[int] | None
     identified_people_summary: str
+
+
+@dataclass(frozen=True)
+class StaffPersonChoice:
+    id: int
+    name: str
+    label: str
+    selected: bool = False
+
+
+def staff_person_aliases_prefetch() -> Prefetch:
+    """Prefetch aliases in the same deterministic ``(name, id)`` order as the model."""
+    return Prefetch(
+        "aliases",
+        queryset=PersonAlias.objects.order_by("name", "id"),
+    )
+
+
+def staff_person_picker_queryset():
+    return Person.objects.order_by("name", "id").prefetch_related(
+        staff_person_aliases_prefetch()
+    )
+
+
+def person_staff_picker_label(person: Person) -> str:
+    """Canonical name, plus aliases in ``(name, id)`` order when present.
+
+    Does not include Person ids. Empty/whitespace-only alias names are omitted.
+    Callers must prefetch ``aliases`` when rendering many people.
+    """
+    alias_names = [
+        alias.name for alias in person.aliases.all() if (alias.name or "").strip()
+    ]
+    if not alias_names:
+        return person.name
+    return f"{person.name} ({', '.join(alias_names)})"
+
+
+def build_staff_person_choices(
+    *,
+    selected_person_ids: list[int] | tuple[int, ...] | set[int],
+) -> tuple[list[StaffPersonChoice], list[StaffPersonChoice]]:
+    """Return picker choices and the selected subset, both ordered by ``(name, id)``."""
+    selected_set = {int(person_id) for person_id in selected_person_ids}
+    choices: list[StaffPersonChoice] = []
+    selected: list[StaffPersonChoice] = []
+    for person in staff_person_picker_queryset():
+        choice = StaffPersonChoice(
+            id=person.pk,
+            name=person.name,
+            label=person_staff_picker_label(person),
+            selected=person.pk in selected_set,
+        )
+        choices.append(choice)
+        if choice.selected:
+            selected.append(choice)
+    return choices, selected
 
 
 def lock_photo_archive_item(archive_item_id: int) -> ArchiveItem:

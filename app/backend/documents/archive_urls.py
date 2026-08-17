@@ -66,6 +66,21 @@ urlpatterns = [
         name="archive-manage-family-access",
     ),
     path(
+        "manage/people/<int:person_id>/edit/",
+        views.archive_manage_person_edit_page,
+        name="archive-manage-person-edit",
+    ),
+    path(
+        "manage/people/<int:person_id>/aliases/<int:alias_id>/edit/",
+        views.archive_manage_person_alias_edit_page,
+        name="archive-manage-person-alias-edit",
+    ),
+    path(
+        "manage/people/<int:person_id>/aliases/<int:alias_id>/delete/",
+        views.archive_manage_person_alias_delete_page,
+        name="archive-manage-person-alias-delete",
+    ),
+    path(
         "<int:item_id>/metadata-suggestions/new/",
         views.archive_metadata_suggestion_form,
         name="archive-metadata-suggestion-new",

@@ -43,6 +43,7 @@ from .models import (
     DocumentSourceFile,
     DocumentTextResult,
     Person,
+    PersonAlias,
     PhotoContent,
     Tag,
     TranscriptionEditSuggestion,
@@ -186,10 +187,16 @@ from documents.services.photo_content_management import (
     LAST_PHOTO_DELETE_ERROR,
     PHOTO_NOT_IN_ITEM_ERROR,
     PhotoContentManagementError,
+    build_staff_person_choices,
     build_staff_photo_manage_rows,
+    create_person_alias,
     delete_one_photo_content,
+    delete_person_alias,
     reorder_photo_contents,
+    staff_person_aliases_prefetch,
     staff_photo_contents_queryset,
+    update_person_alias,
+    update_person_name,
     update_photo_content_metadata,
 )
 from documents.services.document_archive_urls import (
@@ -4245,6 +4252,12 @@ def _get_staff_photo_content(
     return item, photo_content
 
 
+PERSON_NAME_UPDATED_MSG = "שם התצוגה עודכן."
+PERSON_ALIAS_ADDED_MSG = "השם החלופי נוסף."
+PERSON_ALIAS_UPDATED_MSG = "השם החלופי עודכן."
+PERSON_ALIAS_DELETED_MSG = "השם החלופי נמחק."
+
+
 def _photo_content_edit_form_context(
     *,
     item: ArchiveItem,
@@ -4252,6 +4265,12 @@ def _photo_content_edit_form_context(
     form_data: dict,
     form_errors: list[str],
 ) -> dict:
+    selected_person_ids = [
+        int(person_id) for person_id in form_data.get("person_ids") or []
+    ]
+    person_choices, selected_people = build_staff_person_choices(
+        selected_person_ids=selected_person_ids
+    )
     return {
         "item": item,
         "photo_content": photo_content,
@@ -4260,10 +4279,9 @@ def _photo_content_edit_form_context(
         "page_title": "עריכת תמונה בפריט",
         "submit_label": "עדכון",
         "date_precision_choices": DATE_PRECISION_UI_CHOICES,
-        "person_choices": Person.objects.order_by("name", "id"),
-        "selected_person_ids": {
-            int(person_id) for person_id in form_data.get("person_ids") or []
-        },
+        "person_choices": person_choices,
+        "selected_people": selected_people,
+        "selected_person_ids": set(selected_person_ids),
     }
 
 
@@ -5082,6 +5100,152 @@ def archive_manage_photo_delete_page(request, item_id: int, photo_id: int):
             "form_errors": form_errors,
             "is_last_photo": photo_count <= 1,
             "last_photo_error": LAST_PHOTO_DELETE_ERROR,
+        },
+    )
+
+
+def _get_staff_person(person_id: int) -> Person:
+    return get_object_or_404(
+        Person.objects.prefetch_related(staff_person_aliases_prefetch()),
+        pk=person_id,
+    )
+
+
+def _get_staff_person_alias(
+    person_id: int, alias_id: int
+) -> tuple[Person, PersonAlias]:
+    person = _get_staff_person(person_id)
+    alias = get_object_or_404(PersonAlias, pk=alias_id, person_id=person.pk)
+    return person, alias
+
+
+def _person_edit_form_context(
+    *,
+    person: Person,
+    form_errors: list[str],
+    canonical_name: str | None = None,
+    alias_name: str = "",
+) -> dict:
+    return {
+        "person": person,
+        "aliases": list(person.aliases.all()),
+        "canonical_name": person.name if canonical_name is None else canonical_name,
+        "alias_name": alias_name,
+        "form_errors": form_errors,
+        "page_title": "עריכת אדם",
+    }
+
+
+@login_required
+def archive_manage_person_edit_page(request, person_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    person = _get_staff_person(person_id)
+    form_errors: list[str] = []
+    canonical_name = person.name
+    alias_name = ""
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        if action == "update_name":
+            submitted_name = request.POST.get("name") or ""
+            try:
+                person = update_person_name(person, name=submitted_name)
+            except PhotoContentManagementError as exc:
+                form_errors = [exc.message]
+                canonical_name = submitted_name
+            else:
+                messages.success(request, PERSON_NAME_UPDATED_MSG)
+                return redirect("archive-manage-person-edit", person_id=person.id)
+        elif action == "add_alias":
+            submitted_alias = request.POST.get("alias_name") or ""
+            try:
+                create_person_alias(person, name=submitted_alias)
+            except PhotoContentManagementError as exc:
+                form_errors = [exc.message]
+                alias_name = submitted_alias
+            else:
+                messages.success(request, PERSON_ALIAS_ADDED_MSG)
+                return redirect("archive-manage-person-edit", person_id=person.id)
+        else:
+            return HttpResponseBadRequest("פעולה לא תקינה.")
+
+        person = _get_staff_person(person.id)
+
+    return render(
+        request,
+        "documents/archive/person_edit.html",
+        context=_person_edit_form_context(
+            person=person,
+            form_errors=form_errors,
+            canonical_name=canonical_name,
+            alias_name=alias_name,
+        ),
+    )
+
+
+@login_required
+def archive_manage_person_alias_edit_page(request, person_id: int, alias_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    person, alias = _get_staff_person_alias(person_id, alias_id)
+    form_errors: list[str] = []
+    alias_name = alias.name
+
+    if request.method == "POST":
+        submitted_name = request.POST.get("name") or ""
+        try:
+            update_person_alias(alias, name=submitted_name)
+        except PhotoContentManagementError as exc:
+            form_errors = [exc.message]
+            alias_name = submitted_name
+        else:
+            messages.success(request, PERSON_ALIAS_UPDATED_MSG)
+            return redirect("archive-manage-person-edit", person_id=person.id)
+
+    return render(
+        request,
+        "documents/archive/person_alias_edit.html",
+        context={
+            "person": person,
+            "alias": alias,
+            "alias_name": alias_name,
+            "form_errors": form_errors,
+            "page_title": "עריכת שם חלופי",
+        },
+    )
+
+
+@login_required
+def archive_manage_person_alias_delete_page(request, person_id: int, alias_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    person, alias = _get_staff_person_alias(person_id, alias_id)
+    form_errors: list[str] = []
+
+    if request.method == "POST":
+        try:
+            delete_person_alias(alias)
+        except PhotoContentManagementError as exc:
+            form_errors = [exc.message]
+        else:
+            messages.success(request, PERSON_ALIAS_DELETED_MSG)
+            return redirect("archive-manage-person-edit", person_id=person.id)
+
+    return render(
+        request,
+        "documents/archive/person_alias_delete_confirm.html",
+        context={
+            "person": person,
+            "alias": alias,
+            "form_errors": form_errors,
+            "page_title": "מחיקת שם חלופי",
         },
     )
 
