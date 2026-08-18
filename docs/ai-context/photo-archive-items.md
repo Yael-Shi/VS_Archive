@@ -121,6 +121,8 @@ If the **first** photo is **`PENDING`** / **`FAILED`** / empty-key, the item is 
 
 `ArchiveItemSearchIndex` remains one row per ArchiveItem. PHOTO `q` search concatenates, in `(position, id)` order, each **public-renderable** PhotoContent's `description` / `location` / `context` / `people_present` / `notes`, then distinct `PhotoPerson` `Person.name` values from those rows ordered by `(name, id)`, then `PersonAlias.name` values for those same Persons (same person order, aliases by `(name, id)`), into `metadata_text`. Renderable means the same public-gallery contract (`photo_is_archive_renderable` / `public_renderable_photo_contents`): `UPLOADED` and a non-empty `original_file_key`. Pending, failed, and empty-key photos are omitted; thumbnail presence does not matter. Access is still applied at query time. Result URL is `/archive/<id>/` with no matched `?photo=` deep-link. Per-photo dates are not searchable and do not affect `year` / `year_to`. Child-row writes refresh the owning index in the same transaction as the staff service (`update_photo_content_metadata`, add/delete/reorder, `update_person_name`, `create_person_alias` / `update_person_alias` / `delete_person_alias`). Successful upload finalize (`PENDING` → `UPLOADED`) also refreshes the owning index so that photo's metadata becomes searchable; failed finalize leaves it absent. Aliases are searchable but not shown on public PHOTO detail.
 
+**`ArchiveItemPerson` is not a photo appearance.** Item-level person links are indexed as ArchiveItem metadata (canonical name + aliases, all item types) and do not select a photo, generate `?photo=`, or depend on photo renderability. `PhotoPerson` remains the only “this person appears in this photo” relation. Historical person-name Tags still power tag browse/filter.
+
 ---
 
 ## 1. Product definition
@@ -346,7 +348,7 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 - Worker / SQS processing for PHOTO
 - Face recognition, AI identification, comments
 - Public alias display; Person catalog/Admin
-- Eventual person-Tag removal (Tags still power public search/browse/filter); automatic ArchiveItemPerson from PhotoPerson; staff PHOTO appearance review / PhotoPerson backfill from `people_present`
+- Eventual person-Tag removal (Tags still power public tag browse/filter); automatic ArchiveItemPerson from PhotoPerson; staff PHOTO appearance review / PhotoPerson backfill from `people_present`; public Person filter/browse UX
 - Public Person pages
 - Public (unauthenticated) upload
 - Rich text captions

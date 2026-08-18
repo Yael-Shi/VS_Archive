@@ -1,5 +1,63 @@
 # VS-Archive Decision Log
 
+## ArchiveItemPerson public q search
+
+**Decision / implemented:** Public `/archive/?q=` indexes item-level
+**`ArchiveItemPerson`** identities onto the owning
+**`ArchiveItemSearchIndex.metadata_text`**. A Person linked through
+`ArchiveItemPerson` is discoverable by canonical **`Person.name`** and
+**`PersonAlias.name`**. This is **not** photo-appearance search.
+
+**Current behavior:**
+
+- Indexed sources are **`Person.name`** then **`PersonAlias.name`** for
+  distinct Persons on `archive_item.people`, ordered like PhotoPerson
+  identities: Persons by `(name, id)`; canonical names in that order; then
+  aliases in that same person order, aliases by `(name, id)`.
+- Applies to **every item type** (VIDEO / OCR_DOCUMENT / MANUAL_TEXT /
+  PHOTO). It does **not** depend on PhotoContent renderability, does **not**
+  attach to selected-photo metadata, and does **not** create `?photo=`
+  deep-links or public Person pages.
+- One ArchiveItem result. Outer first-occurrence segment dedupe drops
+  repeated normalized fragments across tags, `ArchiveItemPerson`,
+  PhotoPerson, and aliases.
+- Visibility stays query-time (`archive_browse_queryset_for_user`). The
+  builder does not special-case private/restricted items.
+- Snippets: an `ArchiveItemPerson`-only hit with no matching ArchiveItem
+  scalar/M2M field uses the existing generic **`נמצא בפרטי הפריט`** label
+  (same as PhotoContent/PhotoPerson metadata-only hits). No Person-specific
+  public UI.
+- Historical person-name **Tags remain**. Tag `q` indexing,
+  `/archive/tags/<id>/`, and advanced tag-id filters are unchanged.
+- Refresh is the existing explicit in-transaction contract (no signals, no
+  `on_commit`). `create_archive_item_person` /
+  `delete_archive_item_person` rebuild that one item.
+  `update_person_name` and alias create/edit/delete fan out through
+  `archive_item_ids_for_person_search_refresh` (union of ArchiveItemPerson
+  item links and PhotoPerson appearances; one rebuild per ArchiveItem even
+  when both relations exist).
+- Raw `ArchiveItemPerson.objects.create()` / `.delete()` are **not** hooked.
+- **No schema migration.** Migration **`0055`** already created production
+  `ArchiveItemPerson` rows **before** this index change, so deploy **must**
+  run **`backfill_archive_search_index`**. Do not modify `0055`.
+
+**Structured Person filter/browse:** deferred. Adding a public Person facet
+would be a new GET param, choice-context load, and UI/API surface. Keep this
+PR to `q` indexing.
+
+**Why:** Production now has 29 Person rows and 124 ArchiveItemPerson links
+copied from historical person-name Tags. Those identities were not in `q`
+until this change. PhotoPerson remains the only “appears in this photo”
+relation.
+
+**Deferred:** people filter/browse UX; eventual person-Tag removal (blocked
+on tag browse/filter still depending on Tag); legacy `Document.tags_m2m`
+cleanup; staff PHOTO appearance review / PhotoPerson backfill; public Person
+pages; identity cleanup/aliases where needed.
+
+**Tests:** `documents/test_archive_search_archive_item_person.py` (plus
+updated PhotoPerson/alias/backfill regressions).
+
 ## Historical person-name Tags → Person + ArchiveItemPerson backfill
 
 **Decision / implemented:** One-time, fail-closed Django data migration
@@ -36,9 +94,12 @@ association, not proof that the person appears in a specific photo.
   does not change the association.
 - Old person-name Tags **remain**. Public `q` still indexes `ArchiveItem.tags`;
   `/archive/tags/<id>/` and advanced tag filters still use Tag ids.
-  `ArchiveItemPerson` is **not** public-search indexed. Do not run
-  `backfill_archive_search_index` merely because this backfill added
-  `ArchiveItemPerson` rows.
+  At the time of this backfill, `ArchiveItemPerson` was **not** public-search
+  indexed and `backfill_archive_search_index` was **not** required merely
+  because these rows were added. That search gap is superseded by
+  **ArchiveItemPerson public q search**; deploy of that later change **does**
+  require `backfill_archive_search_index` because `0055` predated the index
+  contract.
 - Reverse is **`RunPython.noop`**. There is no persistent Tag→Person mapping
   table, and `Person.name` is not unique, so reverse cannot safely delete
   Person rows that may have gained later PhotoPerson / alias / extra
@@ -52,12 +113,13 @@ backfills (`0020`, `0014`, `0031`). Repeatable operational repair belongs in
 commands (`backfill_archive_search_index`, thumbnail backfills). No permanent
 mapping model was added.
 
-**Deferred:** public `q` indexing of `ArchiveItemPerson`; people
-browse/filter UX; eventual person-Tag removal (blocked on search/browse
-still depending on Tag); legacy `Document.tags_m2m` cleanup (8 of these
-person Tags also exist there; out of scope here); staff PHOTO appearance
-review / `PhotoPerson` creation (including cases such as PHOTO ArchiveItem
-224 / `people_present`); alias/identity cleanup. No Gemini→Tag inference.
+**Deferred:** people browse/filter UX; eventual person-Tag removal (blocked on
+search/browse still depending on Tag); legacy `Document.tags_m2m` cleanup (8
+of these person Tags also exist there; out of scope here); staff PHOTO
+appearance review / `PhotoPerson` creation (including cases such as PHOTO
+ArchiveItem 224 / `people_present`); alias/identity cleanup. No Gemini→Tag
+inference. Public `q` indexing of `ArchiveItemPerson` is implemented in
+**ArchiveItemPerson public q search**.
 
 **Tests:** `documents/test_person_name_tag_backfill.py`.
 
@@ -195,24 +257,28 @@ on public PHOTO pages.
   `Person.name` remains searchable, then all `PersonAlias.name` values for
   those Persons. Order: distinct Persons `(name, id)`; canonical names in that
   order; then aliases in that same person order, aliases by `(name, id)`.
-  Outer segment dedupe still drops repeated fragments. `ArchiveItemPerson`-only
-  relationships do not contribute. Result remains one ArchiveItem at
+  Outer segment dedupe still drops repeated fragments. `ArchiveItemPerson`
+  identities were later added to the same `metadata_text` contract; see
+  **ArchiveItemPerson public q search**. Result remains one ArchiveItem at
   `/archive/<id>/` (no Person result, no `?photo=` deep-link).
 - Index refresh uses the existing explicit in-transaction contract: alias
   create/edit/delete fans out through
-  `archive_item_ids_for_person_photo_appearances` (distinct ArchiveItem ids via
-  PhotoPerson; one rebuild per item) then `sync_archive_item_search_indexes`.
+  `archive_item_ids_for_person_search_refresh` (distinct ArchiveItem ids via
+  ArchiveItemPerson **and** PhotoPerson; one rebuild per item) then
+  `sync_archive_item_search_indexes`. The original PR6a helper
+  `archive_item_ids_for_person_photo_appearances` remains PhotoPerson-only.
   No Django signals and no `on_commit`. Search-index prefetch of aliases is
   confined to `archive_items_for_search_index_build`; public gallery/access
   prefetch stays canonical-only.
 - `update_person_name` still renames only `Person.name` and rebuilds affected
-  PHOTO indexes. It does **not** rewrite, delete, or promote aliases. If the
+  indexes (ArchiveItemPerson and PhotoPerson). It does **not** rewrite,
+  delete, or promote aliases. If the
   new canonical name equals an existing alias, both rows may coexist; search
   dedupes the identical fragment. Alias-write validation still rejects
   creating/updating an alias to the current canonical name.
 - There is **no production Person delete path**. Any future delete service
   must fan out search-index rebuilds **before** CASCADE removes `PhotoPerson`
-  links (and aliases).
+  / `ArchiveItemPerson` links (and aliases).
 - **`Person`** and **`PersonAlias`** remain unregistered in Django Admin.
 
 **Migration:** `0054_personalias` — additive `CreateModel` + uniqueness
@@ -253,9 +319,10 @@ standalone hit.
 - Identified names come only from `PhotoPerson → Person` on **renderable**
   photos. Distinct by Person id; order `(name, id)`. A Person attached to both
   a renderable and a non-renderable photo still appears once. A Person attached
-  only to non-renderable photos for that item does not appear.
-  `ArchiveItemPerson` is **not** indexed here. **Person aliases** are indexed
-  on that same renderable-PhotoPerson path; see **Person aliases (PR6a)**.
+  only to non-renderable photos for that item does not appear via PhotoPerson.
+  Item-level `ArchiveItemPerson` search is a later, separate contract; see
+  **ArchiveItemPerson public q search**. **Person aliases** on the
+  renderable-PhotoPerson path are in **Person aliases (PR6a)**.
 - Aggregation walks PhotoContent rows that pass `photo_is_archive_renderable`
   (same public-gallery helper: `UPLOADED` + non-empty `original_file_key`;
   used by `public_renderable_photo_contents`) in `(position, id)` order.

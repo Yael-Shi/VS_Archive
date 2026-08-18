@@ -8,6 +8,8 @@ Displayed OCR mutation hooks are deferred to PR2b.
 PHOTO search aggregation indexes public-renderable PhotoContent descriptive
 text, PhotoPerson canonical names, and PersonAlias names onto the owning
 ArchiveItem (one result per item).
+``ArchiveItemPerson`` canonical names and aliases are item-level metadata for
+every item type; they are not photo-appearance search.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from django.db.models.expressions import CombinedExpression
 
 from documents.models import (
     ArchiveItem,
+    ArchiveItemPerson,
     ArchiveItemSearchIndex,
     Person,
     PersonAlias,
@@ -40,6 +43,27 @@ from documents.services.text_presentation import (
 SEARCH_SEGMENT_SEPARATOR = "\n"
 
 SEARCH_VECTOR_CONFIG = "simple"
+
+
+def _search_person_aliases_prefetch() -> Prefetch:
+    return Prefetch(
+        "aliases",
+        queryset=PersonAlias.objects.order_by("name", "id"),
+    )
+
+
+def _search_people_prefetch() -> Prefetch:
+    """Person rows plus aliases in deterministic ``(name, id)`` order.
+
+    Used for both item-level ``ArchiveItem.people`` and PHOTO
+    ``PhotoContent.people``. Search-index only.
+    """
+    return Prefetch(
+        "people",
+        queryset=Person.objects.order_by("name", "id").prefetch_related(
+            _search_person_aliases_prefetch()
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -65,10 +89,12 @@ def archive_items_for_search_index_build(
     prefetch contract as browse cards / ``get_displayed_transcription_text``.
     PHOTO items prefetch every ``PhotoContent`` plus identified ``people``
     and each person's ``aliases``, ordered by ``(position, id)`` then
-    Person ``(name, id)``. This alias prefetch is search-index only; public
-    gallery/access querysets must not load aliases. The builder then keeps
-    only rows that pass ``photo_is_archive_renderable`` (same public-gallery
-    contract).
+    Person ``(name, id)``. Item-level ``ArchiveItem.people`` (ArchiveItemPerson)
+    is prefetched the same way for every item type. This alias prefetch is
+    search-index only; public gallery/access querysets must not load aliases.
+    The builder then keeps only PhotoContent rows that pass
+    ``photo_is_archive_renderable`` (same public-gallery contract).
+    ``ArchiveItemPerson`` does not use that renderability gate.
     """
     qs = ArchiveItem.objects.select_related(
         "manual_text_content",
@@ -77,19 +103,12 @@ def archive_items_for_search_index_build(
         "categories",
         "events",
         "tags",
+        _search_people_prefetch(),
         archive_item_displayable_text_results_prefetch(),
         Prefetch(
             "photo_contents",
             queryset=PhotoContent.objects.order_by("position", "id").prefetch_related(
-                Prefetch(
-                    "people",
-                    queryset=Person.objects.order_by("name", "id").prefetch_related(
-                        Prefetch(
-                            "aliases",
-                            queryset=PersonAlias.objects.order_by("name", "id"),
-                        )
-                    ),
-                )
+                _search_people_prefetch(),
             ),
         ),
     )
@@ -110,13 +129,28 @@ def _join_segments(segments: Iterable[str]) -> str:
     return SEARCH_SEGMENT_SEPARATOR.join(segment for segment in segments if segment)
 
 
-def _sorted_relation_names(archive_item: ArchiveItem, relation: str) -> list[str]:
+def _unique_normalized_segments(values: Iterable[str]) -> list[str]:
+    """First-occurrence segment list after empty values are dropped."""
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in values:
+        if value and value not in seen:
+            seen.add(value)
+            unique.append(value)
+    return unique
+
+
+def _related_rows(archive_item: ArchiveItem, relation: str) -> list:
     cache = getattr(archive_item, "_prefetched_objects_cache", None)
     if cache is not None and relation in cache:
-        rows = list(cache[relation])
-    else:
-        rows = list(getattr(archive_item, relation).all())
-    names = [_normalize_segment(row.name) for row in rows]
+        return list(cache[relation])
+    return list(getattr(archive_item, relation).all())
+
+
+def _sorted_relation_names(archive_item: ArchiveItem, relation: str) -> list[str]:
+    names = [
+        _normalize_segment(row.name) for row in _related_rows(archive_item, relation)
+    ]
     return sorted(name for name in names if name)
 
 
@@ -163,19 +197,17 @@ def _photo_contents_for_search(archive_item: ArchiveItem) -> list[PhotoContent]:
     return [photo for photo in rows if photo_is_archive_renderable(photo)]
 
 
-def _photo_person_name_segments(photos: list[PhotoContent]) -> list[str]:
-    """Canonical PhotoPerson names then aliases, deterministic.
+def _person_identity_name_segments(persons: Iterable[Person]) -> list[str]:
+    """Canonical Person.name values then aliases, deterministic.
 
-    Distinct Persons attached to the given (already renderable) photos,
-    ordered by ``(name, id)``. Canonical ``Person.name`` values come first
+    Distinct Persons ordered by ``(name, id)``. Canonical names come first
     in that order, then ``PersonAlias.name`` values for those same persons
     (same person order, aliases by ``(name, id)``). Outer segment dedupe
-    is applied by the caller. Does not read ArchiveItemPerson.
+    is applied by the caller.
     """
     by_id: dict[int, Person] = {}
-    for photo in photos:
-        for person in photo.people.all():
-            by_id[person.pk] = person
+    for person in persons:
+        by_id[person.pk] = person
     ordered = sorted(by_id.values(), key=lambda person: (person.name, person.pk))
     segments: list[str] = []
     for person in ordered:
@@ -192,6 +224,27 @@ def _photo_person_name_segments(photos: list[PhotoContent]) -> list[str]:
     return segments
 
 
+def _archive_item_person_name_segments(archive_item: ArchiveItem) -> list[str]:
+    """Item-level ArchiveItemPerson identities for every item type.
+
+    Does not depend on PhotoContent renderability and is not a photo
+    appearance. Distinct Persons from ``archive_item.people``.
+    """
+    return _person_identity_name_segments(_related_rows(archive_item, "people"))
+
+
+def _photo_person_name_segments(photos: list[PhotoContent]) -> list[str]:
+    """Canonical PhotoPerson names then aliases, deterministic.
+
+    Distinct Persons attached to the given (already renderable) photos.
+    Does not read ArchiveItemPerson.
+    """
+    persons: list[Person] = []
+    for photo in photos:
+        persons.extend(photo.people.all())
+    return _person_identity_name_segments(persons)
+
+
 def _photo_search_metadata_segments(archive_item: ArchiveItem) -> list[str]:
     """PHOTO component text for ``metadata_text``; empty for other item types.
 
@@ -202,7 +255,9 @@ def _photo_search_metadata_segments(archive_item: ArchiveItem) -> list[str]:
     technical fields are omitted (ArchiveItem dates are also not in FTS).
     Repeated normalized fragments across photos are kept once (first
     occurrence in ``(position, id)`` then Person ``(name, id)`` order).
-    Item visibility remains query-time on the browse queryset.
+    Item-level ``ArchiveItemPerson`` names are assembled separately and are
+    not photo-appearance text. Item visibility remains query-time on the
+    browse queryset.
     """
     if archive_item.item_type != ArchiveItem.ItemType.PHOTO:
         return []
@@ -238,23 +293,28 @@ def build_archive_item_search_content(
     Hebrew-language documents so mirrored HEBREW/SOURCE is not duplicated).
     PHOTO descriptive fields, PhotoPerson canonical names, and PersonAlias
     names from public-renderable photos are appended to ``metadata_text``
-    (weight B, substring) after ArchiveItem discovery fields. PHOTO
-    ``body_text`` stays empty.
+    (weight B, substring) after ArchiveItem discovery fields and
+    ``ArchiveItemPerson`` identities. PHOTO ``body_text`` stays empty.
+    ``ArchiveItemPerson`` canonical names and aliases apply to every item
+    type and do not depend on photo renderability.
     """
     if archive_item.pk is None:
         raise ValueError("archive_item must be saved before building search content")
 
     title_text = _normalize_segment(archive_item.title)
     metadata_text = _join_segments(
-        [
-            _normalize_segment(archive_item.author_name),
-            _normalize_segment(archive_item.source_title),
-            *_sorted_relation_names(archive_item, "categories"),
-            *_sorted_relation_names(archive_item, "events"),
-            *_sorted_relation_names(archive_item, "tags"),
-            _normalize_segment(archive_item.public_note),
-            *_photo_search_metadata_segments(archive_item),
-        ]
+        _unique_normalized_segments(
+            [
+                _normalize_segment(archive_item.author_name),
+                _normalize_segment(archive_item.source_title),
+                *_sorted_relation_names(archive_item, "categories"),
+                *_sorted_relation_names(archive_item, "events"),
+                *_sorted_relation_names(archive_item, "tags"),
+                _normalize_segment(archive_item.public_note),
+                *_archive_item_person_name_segments(archive_item),
+                *_photo_search_metadata_segments(archive_item),
+            ]
+        )
     )
     body_text = _body_text_for_archive_item(archive_item)
     hebrew_translation_text = _hebrew_translation_text_for_archive_item(archive_item)
@@ -377,4 +437,30 @@ def archive_item_ids_for_person_photo_appearances(person_id: int) -> list[int]:
         .values_list("photo_content__archive_item_id", flat=True)
         .distinct()
         .order_by("photo_content__archive_item_id")
+    )
+
+
+def archive_item_ids_for_person_item_links(person_id: int) -> list[int]:
+    """Distinct ArchiveItem ids reached through this Person's ArchiveItemPerson links.
+
+    Does not include PhotoPerson-only relations. One query. Order is
+    deterministic ascending id.
+    """
+    return list(
+        ArchiveItemPerson.objects.filter(person_id=person_id)
+        .values_list("archive_item_id", flat=True)
+        .distinct()
+        .order_by("archive_item_id")
+    )
+
+
+def archive_item_ids_for_person_search_refresh(person_id: int) -> list[int]:
+    """ArchiveItem ids whose derived search text can include this Person.
+
+    Union of ``ArchiveItemPerson`` item links and ``PhotoPerson`` appearances.
+    An item linked both ways is returned once. Order is ascending id.
+    """
+    return sorted(
+        set(archive_item_ids_for_person_item_links(person_id))
+        | set(archive_item_ids_for_person_photo_appearances(person_id))
     )

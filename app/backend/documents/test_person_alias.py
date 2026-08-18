@@ -376,15 +376,15 @@ class PersonAliasSearchTests(TestCase):
         self.assertNotIn("HiddenAliasToken", content.metadata_text)
         self.assertNotIn("HiddenPerson", content.metadata_text)
 
-    def test_archive_item_person_only_alias_is_excluded(self):
+    def test_archive_item_person_only_alias_is_indexed_as_item_metadata(self):
         item = _create_photo_item(title="Item person only")
         _add_photo(item, position=1)
         related = Person.objects.create(name="ItemOnlyPerson")
         ArchiveItemPerson.objects.create(archive_item=item, person=related)
         PersonAlias.objects.create(person=related, name="ItemOnlyAliasToken")
         content = build_archive_item_search_content(_load_item(item.pk))
-        self.assertNotIn("ItemOnlyAliasToken", content.metadata_text)
-        self.assertNotIn("ItemOnlyPerson", content.metadata_text)
+        self.assertIn("ItemOnlyAliasToken", content.metadata_text)
+        self.assertIn("ItemOnlyPerson", content.metadata_text)
 
     def test_removing_photo_person_removes_alias_search_text(self):
         item = _create_photo_item(title="Unlink person")
@@ -402,7 +402,8 @@ class PersonAliasSearchTests(TestCase):
     def test_alias_create_edit_delete_refreshes_all_affected_archive_items(self):
         first = _create_photo_item(title="First linked")
         second = _create_photo_item(title="Second linked")
-        unrelated = _create_photo_item(title="Unrelated")
+        other_photo = _create_photo_item(title="Other person photo")
+        item_link_only = _create_photo_item(title="Item person only")
         person = Person.objects.create(name="יעקב כהן")
         other = Person.objects.create(name="OtherPerson")
         PhotoPerson.objects.create(
@@ -415,10 +416,10 @@ class PersonAliasSearchTests(TestCase):
             photo_content=_add_photo(second, position=1), person=person
         )
         PhotoPerson.objects.create(
-            photo_content=_add_photo(unrelated, position=1), person=other
+            photo_content=_add_photo(other_photo, position=1), person=other
         )
-        ArchiveItemPerson.objects.create(archive_item=unrelated, person=person)
-        for archive_item in (first, second, unrelated):
+        ArchiveItemPerson.objects.create(archive_item=item_link_only, person=person)
+        for archive_item in (first, second, other_photo, item_link_only):
             _rebuild(archive_item.pk)
 
         self.assertEqual(
@@ -431,32 +432,35 @@ class PersonAliasSearchTests(TestCase):
             wraps=sync_archive_item_search_index,
         ) as wrapped:
             alias = create_person_alias(person, name="Jacob Cohen")
-        self.assertEqual(wrapped.call_count, 2)
+        self.assertEqual(wrapped.call_count, 3)
         self.assertEqual(
             [call.args[0] for call in wrapped.call_args_list],
-            [first.pk, second.pk],
+            [first.pk, second.pk, item_link_only.pk],
         )
         self.assertIn("Jacob Cohen", _index_for(first.pk).metadata_text)
         self.assertIn("Jacob Cohen", _index_for(second.pk).metadata_text)
-        self.assertNotIn("Jacob Cohen", _index_for(unrelated.pk).metadata_text)
+        self.assertIn("Jacob Cohen", _index_for(item_link_only.pk).metadata_text)
+        self.assertNotIn("Jacob Cohen", _index_for(other_photo.pk).metadata_text)
 
         with patch(
             "documents.services.archive_search_index.sync_archive_item_search_index",
             wraps=sync_archive_item_search_index,
         ) as wrapped:
             update_person_alias(alias, name="Yaakov Cohen")
-        self.assertEqual(wrapped.call_count, 2)
+        self.assertEqual(wrapped.call_count, 3)
         self.assertIn("Yaakov Cohen", _index_for(first.pk).metadata_text)
         self.assertNotIn("Jacob Cohen", _index_for(first.pk).metadata_text)
+        self.assertIn("Yaakov Cohen", _index_for(item_link_only.pk).metadata_text)
 
         with patch(
             "documents.services.archive_search_index.sync_archive_item_search_index",
             wraps=sync_archive_item_search_index,
         ) as wrapped:
             delete_person_alias(alias)
-        self.assertEqual(wrapped.call_count, 2)
+        self.assertEqual(wrapped.call_count, 3)
         self.assertNotIn("Yaakov Cohen", _index_for(first.pk).metadata_text)
         self.assertIn("יעקב כהן", _index_for(first.pk).metadata_text)
+        self.assertNotIn("Yaakov Cohen", _index_for(item_link_only.pk).metadata_text)
 
     def test_multiple_photo_person_links_on_one_item_rebuild_once(self):
         item = _create_photo_item(title="One album")

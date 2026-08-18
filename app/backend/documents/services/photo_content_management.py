@@ -196,14 +196,14 @@ def create_identified_person(*, name: str) -> Person:
     return Person.objects.create(name=normalized)
 
 
-def _sync_person_photo_search_indexes(person_id: int) -> None:
+def _sync_person_search_indexes(person_id: int) -> None:
     from documents.services.archive_search_index import (
-        archive_item_ids_for_person_photo_appearances,
+        archive_item_ids_for_person_search_refresh,
         sync_archive_item_search_indexes,
     )
 
     sync_archive_item_search_indexes(
-        archive_item_ids_for_person_photo_appearances(person_id)
+        archive_item_ids_for_person_search_refresh(person_id)
     )
 
 
@@ -220,10 +220,11 @@ def _normalize_person_alias_name(name: str, *, person: Person) -> str:
 
 @transaction.atomic
 def update_person_name(person: Person, *, name: str) -> Person:
-    """Rename a Person and refresh PHOTO search indexes reached via PhotoPerson.
+    """Rename a Person and refresh search indexes for linked ArchiveItems.
 
-    Does not update ArchiveItemPerson-driven search (that relation is not
-    indexed here). Does not rewrite, delete, or promote PersonAlias rows.
+    Fans out to items reached through ArchiveItemPerson and through
+    PhotoPerson. One rebuild per ArchiveItem even when both relations
+    exist. Does not rewrite, delete, or promote PersonAlias rows.
     Raw ``Person.save()`` / ``QuerySet.update()`` are not hooked; callers
     that change ``name`` must use this service.
     """
@@ -236,30 +237,31 @@ def update_person_name(person: Person, *, name: str) -> Person:
         return person
     person.name = normalized
     person.save(update_fields=["name", "updated_at"])
-    _sync_person_photo_search_indexes(person.pk)
+    _sync_person_search_indexes(person.pk)
     return person
 
 
 @transaction.atomic
 def create_person_alias(person: Person, *, name: str) -> PersonAlias:
-    """Create an alias and refresh PHOTO search indexes via PhotoPerson.
+    """Create an alias and refresh search indexes for linked ArchiveItems.
 
     Strips surrounding whitespace only. Does not rewrite ``Person.name`` or
     touch PhotoPerson / ArchiveItemPerson / Tag rows. Duplicate
-    ``(person, name)`` is a uniqueness error, not a merge.
+    ``(person, name)`` is a uniqueness error, not a merge. Fan-out covers
+    ArchiveItemPerson and PhotoPerson; one rebuild per ArchiveItem.
     """
     normalized = _normalize_person_alias_name(name, person=person)
     try:
         alias = PersonAlias.objects.create(person=person, name=normalized)
     except IntegrityError as exc:
         raise PhotoContentManagementError(PERSON_ALIAS_DUPLICATE_ERROR) from exc
-    _sync_person_photo_search_indexes(person.pk)
+    _sync_person_search_indexes(person.pk)
     return alias
 
 
 @transaction.atomic
 def update_person_alias(alias: PersonAlias, *, name: str) -> PersonAlias:
-    """Rename an alias and refresh PHOTO search indexes via PhotoPerson."""
+    """Rename an alias and refresh search indexes for linked ArchiveItems."""
     person = alias.person
     normalized = _normalize_person_alias_name(name, person=person)
     if alias.name == normalized:
@@ -269,16 +271,16 @@ def update_person_alias(alias: PersonAlias, *, name: str) -> PersonAlias:
         alias.save(update_fields=["name", "updated_at"])
     except IntegrityError as exc:
         raise PhotoContentManagementError(PERSON_ALIAS_DUPLICATE_ERROR) from exc
-    _sync_person_photo_search_indexes(person.pk)
+    _sync_person_search_indexes(person.pk)
     return alias
 
 
 @transaction.atomic
 def delete_person_alias(alias: PersonAlias) -> None:
-    """Delete an alias and refresh PHOTO search indexes via PhotoPerson."""
+    """Delete an alias and refresh search indexes for linked ArchiveItems."""
     person_id = alias.person_id
     alias.delete()
-    _sync_person_photo_search_indexes(person_id)
+    _sync_person_search_indexes(person_id)
 
 
 def set_photo_people(photo_content: PhotoContent, person_ids: list[int]) -> None:
