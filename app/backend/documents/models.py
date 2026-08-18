@@ -178,8 +178,9 @@ class ArchiveItemSearchIndex(models.Model):
     # Weight A — title alone (not duplicated into metadata_text).
     title_text = models.TextField(blank=True, default="")
     # Weight B — author, source_title, categories, events, tags, public_note,
-    # plus public-renderable PHOTO PhotoContent descriptive fields and
-    # PhotoPerson names (same gallery renderability contract).
+    # ArchiveItemPerson canonical names and aliases (all item types), plus
+    # public-renderable PHOTO PhotoContent descriptive fields and PhotoPerson
+    # names/aliases (same gallery renderability contract).
     metadata_text = models.TextField(blank=True, default="")
     # Weight C — ManualText body or displayed OCR transcription (source/original).
     body_text = models.TextField(blank=True, default="")

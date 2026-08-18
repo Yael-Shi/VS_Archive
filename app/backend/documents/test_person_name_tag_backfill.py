@@ -459,9 +459,7 @@ class PersonNameTagBackfillSuccessTests(TestCase):
         self.assertEqual(PhotoPerson.objects.count(), 0)
         self.assertEqual(PersonAlias.objects.count(), 0)
 
-    def test_search_index_is_not_rebuilt_and_archive_item_person_is_not_indexed(
-        self,
-    ):
+    def test_backfill_does_not_rebuild_search_index(self):
         tags = _create_approved_tags()
         item = _create_archive_item(
             title="Search stays on tags",
@@ -493,7 +491,10 @@ class PersonNameTagBackfillSuccessTests(TestCase):
         built = archive_items_for_search_index_build().get(pk=item.pk)
         content = build_archive_item_search_content(built)
         self.assertIn("שלמה פלטנר", content.metadata_text)
-        self.assertNotIn("UniqueArchiveItemPersonToken", content.metadata_text)
+        # Builder now indexes ArchiveItemPerson; migration 0055 still does not
+        # rebuild stored rows, so deploy of that search change needs
+        # backfill_archive_search_index.
+        self.assertIn("UniqueArchiveItemPersonToken", content.metadata_text)
 
 
 class PersonNameTagBackfillMigrationTests(TestCase):

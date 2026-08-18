@@ -376,13 +376,16 @@ class PhotoSearchAggregationBuilderTests(TestCase):
         content = build_archive_item_search_content(_load_item(item.pk))
         self.assertEqual(content.metadata_text.count("SharedPersonToken"), 1)
 
-    def test_archive_item_person_alone_is_not_indexed_as_photo_appearance(self):
+    def test_archive_item_person_alone_is_indexed_but_not_as_photo_appearance(self):
         item = _create_photo_item(title="Item person only")
-        _add_photo(item, position=1, description="photo-caption")
+        photo = _add_photo(item, position=1, description="photo-caption")
         related = Person.objects.create(name="Charles-item-only-token")
         ArchiveItemPerson.objects.create(archive_item=item, person=related)
         content = build_archive_item_search_content(_load_item(item.pk))
-        self.assertNotIn("Charles-item-only-token", content.metadata_text)
+        self.assertIn("Charles-item-only-token", content.metadata_text)
+        self.assertEqual(content.metadata_text.count("Charles-item-only-token"), 1)
+        self.assertFalse(photo.people.filter(pk=related.pk).exists())
+        self.assertEqual(PhotoPerson.objects.filter(person=related).count(), 0)
 
     def test_repeated_photo_text_is_not_duplicated(self):
         item = _create_photo_item(title="Duplicate fragments")
@@ -738,7 +741,8 @@ class PhotoSearchIndexRefreshTests(TestCase):
     def test_renaming_person_refreshes_all_linked_photo_items_once_each(self):
         first = _create_photo_item(title="First linked")
         second = _create_photo_item(title="Second linked")
-        unrelated = _create_photo_item(title="Unrelated")
+        other_photo = _create_photo_item(title="Other person photo")
+        item_link_only = _create_photo_item(title="Item person only")
         person = Person.objects.create(name="OldPersonName")
         other = Person.objects.create(name="OtherPerson")
         PhotoPerson.objects.create(
@@ -751,10 +755,10 @@ class PhotoSearchIndexRefreshTests(TestCase):
             photo_content=_add_photo(second, position=1), person=person
         )
         PhotoPerson.objects.create(
-            photo_content=_add_photo(unrelated, position=1), person=other
+            photo_content=_add_photo(other_photo, position=1), person=other
         )
-        ArchiveItemPerson.objects.create(archive_item=unrelated, person=person)
-        for archive_item in (first, second, unrelated):
+        ArchiveItemPerson.objects.create(archive_item=item_link_only, person=person)
+        for archive_item in (first, second, other_photo, item_link_only):
             _rebuild(archive_item.pk)
 
         self.assertEqual(
@@ -767,15 +771,16 @@ class PhotoSearchIndexRefreshTests(TestCase):
             wraps=sync_archive_item_search_index,
         ) as wrapped:
             update_person_name(person, name="NewPersonNameToken")
-        self.assertEqual(wrapped.call_count, 2)
+        self.assertEqual(wrapped.call_count, 3)
         self.assertEqual(
             [call.args[0] for call in wrapped.call_args_list],
-            [first.pk, second.pk],
+            [first.pk, second.pk, item_link_only.pk],
         )
         self.assertIn("NewPersonNameToken", _index_for(first.pk).metadata_text)
         self.assertIn("NewPersonNameToken", _index_for(second.pk).metadata_text)
+        self.assertIn("NewPersonNameToken", _index_for(item_link_only.pk).metadata_text)
         self.assertNotIn("OldPersonName", _index_for(first.pk).metadata_text)
-        self.assertNotIn("NewPersonNameToken", _index_for(unrelated.pk).metadata_text)
+        self.assertNotIn("NewPersonNameToken", _index_for(other_photo.pk).metadata_text)
 
     def test_sync_failure_rolls_back_photo_metadata_write(self):
         item = _create_photo_item(title="Rollback album")
@@ -1153,4 +1158,4 @@ class PhotoSearchIndexPerformanceTests(TestCase):
             with CaptureQueriesContext(connection) as ctx:
                 sync_archive_item_search_index(item.pk)
         self.assertEqual(wrapped.call_count, 1)
-        self.assertLessEqual(len(ctx), 20)
+        self.assertLessEqual(len(ctx), 22)
