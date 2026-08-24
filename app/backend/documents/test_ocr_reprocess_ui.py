@@ -130,12 +130,43 @@ class OcrReprocessUiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, "נסה עיבוד מחדש")
 
-    def test_ineligible_not_failed_hides_retry_button(self):
+    def test_staff_sees_retry_button_for_ready_unverified_ocr_document(self):
         doc = _failed_ocr_document(
             processing_state_user=Document.ProcessingState.READY,
         )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="gemini-test",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="usable unverified text",
+        )
         self.client.force_login(self.staff)
         resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, self._reprocess_url(doc.id))
+        self.assertContains(resp, "נסה עיבוד מחדש")
+
+    def test_ineligible_ready_verified_text_hides_retry_button(self):
+        doc = _failed_ocr_document(
+            processing_state_user=Document.ProcessingState.READY,
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="gemini-test",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+            text="verified text",
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, "נסה עיבוד מחדש")
 
     def test_staff_sees_retry_button_for_gemini_partial_failed_source_ocr(self):
@@ -192,6 +223,42 @@ class OcrReprocessUiTests(TestCase):
             error_code="OCR_FAILED",
             error_details="temporary Antigravity read timeout",
             text=None,
+        )
+
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, self._reprocess_url(doc.id))
+        self.assertContains(resp, "נסה עיבוד מחדש")
+
+    @patch.dict(
+        "os.environ",
+        {"ENABLE_ANTIGRAVITY_ARABIC_PRINTED": "true"},
+        clear=False,
+    )
+    def test_staff_sees_retry_button_for_ready_unverified_antigravity_arabic_printed(
+        self,
+    ):
+        doc = create_ocr_document(
+            title="Arabic printed READY unverified Antigravity OCR",
+            doc_type=Document.DocType.PDF,
+            language=Document.Language.ARABIC,
+            text_input_type=Document.TextInputType.PRINTED,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.READY,
+            file_s3_key="documents/ready-unverified-arabic-printed/source/0.jpeg",
+            mime_type="image/jpeg",
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="antigravity",
+            engine_key=DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="usable unverified Arabic printed source text",
         )
 
         self.client.force_login(self.staff)

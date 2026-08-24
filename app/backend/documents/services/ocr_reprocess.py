@@ -1,4 +1,4 @@
-"""Staff/admin OCR reprocess planning for failed OCR-backed documents."""
+"""Staff/admin OCR reprocess planning for OCR-backed documents."""
 
 from __future__ import annotations
 
@@ -119,6 +119,10 @@ def _is_recoverable_partial_ocr_failure(doc: Document) -> bool:
 
 def _processing_state_allows_ocr_reprocess(doc: Document) -> bool:
     if doc.processing_state_user == Document.ProcessingState.FAILED:
+        return True
+    # READY means expected outputs are usable/displayable, not human-verified.
+    # Intentional staff reprocess may continue; VERIFIED remains the overwrite guard.
+    if doc.processing_state_user == Document.ProcessingState.READY:
         return True
     return _is_recoverable_partial_ocr_failure(doc)
 

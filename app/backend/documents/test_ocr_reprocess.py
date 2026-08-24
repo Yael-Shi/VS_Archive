@@ -420,7 +420,7 @@ class OcrReprocessServiceTests(TransactionTestCase):
             )
         self.assertIn("UPLOADED", str(ctx.exception))
 
-    def test_non_failed_document_blocks(self):
+    def test_generic_partial_without_failure_evidence_blocks(self):
         doc = _failed_ocr_document(
             processing_state_user=Document.ProcessingState.PARTIAL
         )
@@ -459,6 +459,73 @@ def _gemini_partial_failed_source_document(**kwargs) -> Document:
         text=None,
     )
     return doc
+
+
+@patch.dict(
+    "os.environ",
+    {"ENABLE_ANTIGRAVITY_ARABIC_PRINTED": "true"},
+    clear=False,
+)
+class ReadyUnverifiedOcrReprocessTests(TransactionTestCase):
+    def _ready_unverified_antigravity_document(self) -> Document:
+        doc = create_ocr_document(
+            title="Arabic printed READY unverified OCR",
+            doc_type=Document.DocType.PDF,
+            language=Document.Language.ARABIC,
+            text_input_type=Document.TextInputType.PRINTED,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.READY,
+            file_s3_key="documents/ready-unverified/source/0.jpeg",
+            mime_type="image/jpeg",
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="antigravity",
+            engine_key=DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="usable unverified source text",
+        )
+        return doc
+
+    def test_ready_unverified_is_eligible_for_normal_reenqueue(self):
+        doc = self._ready_unverified_antigravity_document()
+
+        self.assertTrue(is_ocr_reprocess_ui_eligible(doc))
+
+        assessment = assess_ocr_reprocess(
+            doc.id,
+            collection_id=COLLECTION_ID,
+            model_id=MODEL_ID,
+        )
+
+        self.assertEqual(assessment.retry_mode, OcrRetryMode.NORMAL_REENQUEUE)
+        self.assertIsNone(assessment.source_transkribus_run_id)
+
+    def test_ready_verified_text_blocks_reprocess(self):
+        doc = self._ready_unverified_antigravity_document()
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="antigravity",
+            engine_key=DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+            text="verified ground truth",
+        )
+
+        self.assertFalse(is_ocr_reprocess_ui_eligible(doc))
+
+        with self.assertRaises(OcrReprocessError) as ctx:
+            assess_ocr_reprocess(
+                doc.id,
+                collection_id=COLLECTION_ID,
+                model_id=MODEL_ID,
+            )
+        self.assertIn("VERIFIED", str(ctx.exception))
 
 
 @patch.dict(

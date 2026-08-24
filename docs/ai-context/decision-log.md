@@ -1,5 +1,36 @@
 # VS-Archive Decision Log
 
+## READY unverified OCR documents may be intentionally reprocessed
+
+**Decision / implemented:** Staff/command OCR reprocess may include documents
+whose `processing_state_user` is **`READY`**, provided every other existing
+safety guard still passes.
+
+**Current behavior:** `_processing_state_allows_ocr_reprocess` accepts
+**`FAILED`**, recoverable **`PARTIAL`** (unchanged), and **`READY`**. READY
+then continues through the existing validation chain: **`UPLOADED`**,
+**`OCR_DOCUMENT`**, and the authoritative **`VERIFIED`**
+`DocumentTextResult` guard. If any text result is **`VERIFIED`**, reprocess
+is still blocked.
+
+**Why:** `READY` means expected outputs are usable/displayable, not
+human-verified ground truth. Automatic OCR can leave a document READY with
+only `NEEDS_REVIEW` / `UNVERIFIED` rows. Blocking READY categorically
+prevented an intentional staff rerun through the normal
+`PROCESS_DOCUMENT` path.
+
+**Unchanged:** FAILED eligibility; recoverable PARTIAL eligibility;
+ineligible PARTIAL cases (including usable source text / translation-only
+PARTIAL); non-`UPLOADED`; non-`OCR_DOCUMENT`; Transkribus retry
+classification; worker / routing / Request semantics. Non-Transkribus
+routes remain `NORMAL_REENQUEUE`.
+
+**Not implied:** READY is not “always safe to overwrite.” VERIFIED remains
+the overwrite protection.
+
+**Tests:** `documents/test_ocr_reprocess.py`,
+`documents/test_ocr_reprocess_ui.py`. No migration.
+
 ## Public `/archive/` Person advanced filter
 
 **Decision / implemented:** Public advanced search on `/archive/` gains a
