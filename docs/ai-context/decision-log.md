@@ -1,5 +1,57 @@
 # VS-Archive Decision Log
 
+## Public `/archive/` Person advanced filter
+
+**Decision / implemented:** Public advanced search on `/archive/` gains a
+repeatable **`person=<person_id>`** structured filter. It means **show
+ArchiveItems generally related to this Person** via **`ArchiveItemPerson`**
+(`ArchiveItem.people`). It does **not** mean “show photos where this Person
+appears.”
+
+**Current behavior:**
+
+- GET param: repeatable **`person`** (Person primary key). Same naming family
+  as `category` / `event` / `tag`. Never `Person.name` or alias text as URL
+  identity.
+- Normalization matches other relation ids: positive integers; malformed /
+  non-integer / `0` / negative values skipped; first-occurrence order
+  preserved; duplicates dropped. Names and aliases are not reinterpreted as
+  ids. Unknown-but-well-formed ids stay in the filter tuple and match nothing
+  (same as unknown category/event/tag ids).
+- ORM: `pk__in` subquery on **`ArchiveItemPerson.person_id`** (through table
+  only, not a copy of the authorized browse queryset). **`PhotoPerson` is not
+  consulted.** A PHOTO item with only `PhotoPerson(person=X)` does not match
+  `person=X`. A PHOTO item with `ArchiveItemPerson(person=X)` does.
+- OR within the Person group; AND with author / category / event / tag / year
+  groups. Visibility remains `archive_browse_queryset_for_user` before filters.
+- Applies to VIDEO / OCR_DOCUMENT / MANUAL_TEXT / PHOTO. Results remain
+  ArchiveItems. No Person cards, Person page, or matched-Person deep-link.
+- Choices: one `Person.objects.filter(archive_items__pk__in=authorized pks).distinct().order_by("name", "id")`
+  query when advanced choice context is needed (panel open or any advanced
+  filter active). Canonical **`Person.name`** is the visible label; option
+  value is the id. Aliases are not separate options and are not prefetched.
+  Ordinary `/archive/` and q-only requests still skip all choice-context
+  queries (now 5 when loaded: author + category + event + tag + person).
+- Active chips use canonical `Person.name` (grouped like category/event/tag).
+  Clearing the Person chip removes all selected Person ids and preserves
+  `q` / other filters / item type / per-page.
+- Historical person-name **Tags remain** and still power tag filter,
+  `/archive/tags/<id>/`, tag chips, and tag `q` indexing. An item may match
+  both a person Tag and the new Person filter during transition.
+
+**Why:** Production has live `Person` / `ArchiveItemPerson` rows and `q`
+already indexes those identities. Structured filtering was the remaining
+public discovery gap. PhotoPerson stays the photo-appearance relation.
+
+**Deferred:** public Person browse/detail (`/archive/people/<id>/`);
+alias-assisted picker search (client filter matches canonical option text
+only); PhotoPerson-specific “appears in this photo” filter; eventual
+person-Tag removal; legacy `Document.tags_m2m` cleanup; identity
+merge/dedupe; fuzzy matching; AI identification.
+
+**Tests:** `documents/test_archive_advanced_search_person.py` plus updated
+advanced-search backend/UI regressions. No schema migration.
+
 ## ArchiveItemPerson public q search
 
 **Decision / implemented:** Public `/archive/?q=` indexes item-level
@@ -41,19 +93,20 @@
   `ArchiveItemPerson` rows **before** this index change, so deploy **must**
   run **`backfill_archive_search_index`**. Do not modify `0055`.
 
-**Structured Person filter/browse:** deferred. Adding a public Person facet
-would be a new GET param, choice-context load, and UI/API surface. Keep this
-PR to `q` indexing.
+**Structured Person filter:** implemented in **Public `/archive/` Person
+advanced filter** (`person=<id>`, ArchiveItemPerson only). Public Person
+browse/detail remains deferred.
 
 **Why:** Production now has 29 Person rows and 124 ArchiveItemPerson links
 copied from historical person-name Tags. Those identities were not in `q`
 until this change. PhotoPerson remains the only “appears in this photo”
 relation.
 
-**Deferred:** people filter/browse UX; eventual person-Tag removal (blocked
+**Deferred:** public Person browse/detail; eventual person-Tag removal (blocked
 on tag browse/filter still depending on Tag); legacy `Document.tags_m2m`
-cleanup; staff PHOTO appearance review / PhotoPerson backfill; public Person
-pages; identity cleanup/aliases where needed.
+cleanup; staff PHOTO appearance review / PhotoPerson backfill; identity
+cleanup/aliases where needed. Structured Person **filter** is implemented
+separately (see **Public `/archive/` Person advanced filter**).
 
 **Tests:** `documents/test_archive_search_archive_item_person.py` (plus
 updated PhotoPerson/alias/backfill regressions).
@@ -113,13 +166,14 @@ backfills (`0020`, `0014`, `0031`). Repeatable operational repair belongs in
 commands (`backfill_archive_search_index`, thumbnail backfills). No permanent
 mapping model was added.
 
-**Deferred:** people browse/filter UX; eventual person-Tag removal (blocked on
+**Deferred:** public Person browse/detail; eventual person-Tag removal (blocked on
 search/browse still depending on Tag); legacy `Document.tags_m2m` cleanup (8
 of these person Tags also exist there; out of scope here); staff PHOTO
 appearance review / `PhotoPerson` creation (including cases such as PHOTO
 ArchiveItem 224 / `people_present`); alias/identity cleanup. No Gemini→Tag
 inference. Public `q` indexing of `ArchiveItemPerson` is implemented in
-**ArchiveItemPerson public q search**.
+**ArchiveItemPerson public q search**. Structured Person **filter** is
+implemented in **Public `/archive/` Person advanced filter**.
 
 **Tests:** `documents/test_person_name_tag_backfill.py`.
 
