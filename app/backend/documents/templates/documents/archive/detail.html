@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load document_date_display archive_labels text_presentation %}
+{% load document_date_display archive_labels text_presentation static %}
 {% block title %}VSArchive - {{ item.title }}{% endblock %}
 
 {% block content %}
@@ -169,6 +169,7 @@
       <div class="archive-detail-text archive-detail-manual-text-body">
         <div class="text-block text-block--pre">{{ body|manual_text_body_display }}</div>
       </div>
+      <div class="archive-detail-manual-text-signature" aria-hidden="true"></div>
     {% endif %}
     {% if item.item_type == "PHOTO" %}
       {% if photo_gallery.show_gallery %}
@@ -192,4 +193,7 @@
       {% include "documents/archive/partials/video_detail.html" with video_presentation=video_presentation %}
     {% endif %}
   </div>
+  {% if item.item_type == "MANUAL_TEXT" %}
+    <script src="{% static 'public/manual_text_signature.js' %}"></script>
+  {% endif %}
 {% endblock %}
