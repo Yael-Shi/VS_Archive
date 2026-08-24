@@ -11,6 +11,15 @@
       <a class="btn" href="{% url 'archive-list' %}">חזרה לארכיון</a>
     </div>
 
+    {% if messages %}
+      <div class="spacer"></div>
+      {% for message in messages %}
+        <div class="alert{% if message.tags == 'error' %} alert-danger{% elif message.tags == 'success' %} alert-ok{% endif %}">
+          {{ message }}
+        </div>
+      {% endfor %}
+    {% endif %}
+
     <div class="spacer"></div>
 
     {% if items %}

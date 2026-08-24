@@ -47,6 +47,10 @@
           <div class="spacer"></div>
           {% include "documents/archive/discovery_metadata_form_fields.html" %}
         {% endif %}
+        {% if show_archive_item_people %}
+          <div class="spacer"></div>
+          {% include "documents/archive/archive_item_people_form_fields.html" %}
+        {% endif %}
         <div class="spacer"></div>
         <button type="submit" class="btn btn-primary">{{ submit_label }}</button>
       </form>
@@ -93,6 +97,10 @@
         {% if show_discovery_metadata %}
           <div class="spacer"></div>
           {% include "documents/archive/discovery_metadata_form_fields.html" %}
+        {% endif %}
+        {% if show_archive_item_people %}
+          <div class="spacer"></div>
+          {% include "documents/archive/archive_item_people_form_fields.html" %}
         {% endif %}
         <div class="spacer"></div>
         <button type="submit" class="btn btn-primary">{{ submit_label }}</button>

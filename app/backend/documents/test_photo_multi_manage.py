@@ -135,9 +135,8 @@ class PhotoMultiManagePageTests(TestCase):
             query["sql"]
             for query in ctx.captured_queries
             if "documents_photoperson" in query["sql"].lower()
-            or "documents_person" in query["sql"].lower()
         ]
-        self.assertLessEqual(len(photo_people_queries), 2)
+        self.assertLessEqual(len(photo_people_queries), 1)
 
 
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")

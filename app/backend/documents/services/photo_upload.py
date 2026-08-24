@@ -108,6 +108,8 @@ def create_photo_upload_plan(
     people_present: str = "",
     notes: str = "",
     public_note: str = "",
+    person_ids: list[int] | None = None,
+    new_person_name: str = "",
 ) -> tuple[ArchiveItem, PhotoContent, str]:
     """
     Create PHOTO ArchiveItem + pending PhotoContent and return a presigned PUT URL.
@@ -144,6 +146,15 @@ def create_photo_upload_plan(
     s3_key = build_photo_original_s3_key(photo_content.id, normalized_mime)
     photo_content.original_file_key = s3_key
     photo_content.save(update_fields=["original_file_key", "updated_at"])
+
+    from documents.services.archive_item_people import set_archive_item_people
+
+    set_archive_item_people(
+        archive_item=archive_item,
+        person_ids=list(person_ids or []),
+        new_person_name=new_person_name or "",
+        refresh_search_index=False,
+    )
 
     update_archive_item_discovery_metadata(
         archive_item,
@@ -428,6 +439,12 @@ def parse_create_photo_upload_metadata(
     if discovery_errors:
         return None, discovery_errors[0]
 
+    from documents.services.archive_item_people import parse_archive_item_people_form
+
+    parsed_people, people_errors = parse_archive_item_people_form(payload)
+    if people_errors:
+        return None, people_errors[0]
+
     original_name = (payload.get("original_name") or "").strip()
     mime_type = (payload.get("mime_type") or "").strip()
     if not original_name:
@@ -456,6 +473,8 @@ def parse_create_photo_upload_metadata(
         "mime_type": normalize_upload_mime_type(mime_type),
         "discovery_metadata": parsed_discovery,
         "public_note": public_note,
+        "archive_item_person_ids": parsed_people["archive_item_person_ids"],
+        "new_archive_item_person_name": parsed_people["new_archive_item_person_name"],
         **photo_metadata,
     }, None
 
