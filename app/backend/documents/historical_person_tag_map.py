@@ -1,10 +1,12 @@
 """Frozen production Tag.id → Person.id map from migration 0055.
 
-This module is a versioned evidence artifact only. It has no runtime
-consumer yet (no redirects, hide, reuse blocking, or cleanup).
-
 Identity is Tag.id → Person.id. Person.name is not unique and is never
 used as a lookup key. Names in comments are display/provenance-only.
+
+Runtime consumers may derive the blocked Tag-id set from this map and
+look up Person ids by Tag id. They must not look up by name. Redirects,
+public presentation cutover, and destructive Tag cleanup are still out
+of scope for this module.
 """
 
 from __future__ import annotations
@@ -56,3 +58,13 @@ def person_id_for_historical_person_name_tag(tag_id: int) -> int | None:
     Unknown Tag ids return None. There is no name parameter.
     """
     return PERSON_ID_BY_HISTORICAL_PERSON_NAME_TAG_ID.get(tag_id)
+
+
+def historical_person_name_tag_ids() -> frozenset[int]:
+    """Return the frozen historical person Tag.id set. ID membership only."""
+    return frozenset(PERSON_ID_BY_HISTORICAL_PERSON_NAME_TAG_ID)
+
+
+def is_historical_person_name_tag(tag_id: int) -> bool:
+    """True when ``tag_id`` is a frozen historical person Tag.id. ID only."""
+    return tag_id in PERSON_ID_BY_HISTORICAL_PERSON_NAME_TAG_ID

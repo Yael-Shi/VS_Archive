@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
+from documents.historical_person_tag_map import (
+    historical_person_name_tag_ids,
+    is_historical_person_name_tag,
+)
 from documents.services.archive_tags_validation import (
     normalize_tag_names_from_list,
     parse_comma_separated_tag_names,
@@ -13,6 +18,7 @@ _MAX_DISCOVERY_NAME_LENGTH = 255
 
 _CATEGORY_MAX_LENGTH_ERROR = "קטגוריה חייבת להיות עד 255 תווים"
 _EVENT_MAX_LENGTH_ERROR = "אירוע חייב להיות עד 255 תווים"
+HISTORICAL_PERSON_TAG_REUSE_ERROR = "לא ניתן להשתמש בתגיות היסטוריות של שמות אנשים."
 
 
 def empty_discovery_metadata_form_fields() -> dict[str, Any]:
@@ -34,8 +40,32 @@ def discovery_metadata_option_querysets() -> dict[str, Any]:
     return {
         "discovery_all_categories": ArchiveCategory.objects.order_by("name"),
         "discovery_all_events": ArchiveEvent.objects.order_by("name"),
-        "discovery_all_tags": Tag.objects.order_by("name"),
+        "discovery_all_tags": Tag.objects.exclude(
+            pk__in=historical_person_name_tag_ids()
+        ).order_by("name"),
     }
+
+
+def selected_tag_ids_from_post(post_data: dict[str, Any]) -> list[int]:
+    """Parse posted ``selected_tags`` values as integer Tag ids."""
+    return _parse_selected_ids(post_data, "selected_tags")
+
+
+def historical_person_tag_reuse_errors(tag_ids: Iterable[int]) -> list[str]:
+    """Reject any frozen historical person Tag.id. ID membership only."""
+    if any(is_historical_person_name_tag(int(tag_id)) for tag_id in tag_ids):
+        return [HISTORICAL_PERSON_TAG_REUSE_ERROR]
+    return []
+
+
+def existing_tag_name_reuse_errors(tag_names: list[str]) -> list[str]:
+    """Reject names that resolve to an existing frozen historical person Tag.id."""
+    if not tag_names:
+        return []
+    from documents.models import Tag
+
+    existing_ids = Tag.objects.filter(name__in=tag_names).values_list("pk", flat=True)
+    return historical_person_tag_reuse_errors(existing_ids)
 
 
 def parse_comma_separated_discovery_names(
@@ -123,7 +153,7 @@ def parse_archive_item_discovery_metadata_form(
 
     selected_category_ids = _parse_selected_ids(post_data, "selected_categories")
     selected_event_ids = _parse_selected_ids(post_data, "selected_events")
-    selected_tag_ids = _parse_selected_ids(post_data, "selected_tags")
+    selected_tag_ids = selected_tag_ids_from_post(post_data)
 
     selected_category_names = _resolve_names_by_ids(
         ArchiveCategory, selected_category_ids
@@ -150,6 +180,12 @@ def parse_archive_item_discovery_metadata_form(
         if len(name) > 64:
             errors.append("תגית חייבת להיות עד 64 תווים")
             break
+    reuse_errors = historical_person_tag_reuse_errors(
+        selected_tag_ids
+    ) or existing_tag_name_reuse_errors(tag_names)
+    for error in reuse_errors:
+        if error not in errors:
+            errors.append(error)
 
     parsed = {
         "categories": categories_display,

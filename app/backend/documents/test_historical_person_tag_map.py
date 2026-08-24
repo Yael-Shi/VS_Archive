@@ -9,6 +9,8 @@ from unittest import TestCase
 from documents.historical_person_tag_map import (
     HISTORICAL_PERSON_NAME_TAG_TO_PERSON_ID,
     PERSON_ID_BY_HISTORICAL_PERSON_NAME_TAG_ID,
+    historical_person_name_tag_ids,
+    is_historical_person_name_tag,
     person_id_for_historical_person_name_tag,
 )
 
@@ -100,6 +102,23 @@ class HistoricalPersonTagMapTests(TestCase):
         self.assertIsNone(person_id_for_historical_person_name_tag(3))
         self.assertIsNone(person_id_for_historical_person_name_tag(40))
         self.assertIsNone(person_id_for_historical_person_name_tag(-2))
+
+    def test_blocked_id_set_is_derived_from_the_frozen_map_only(self):
+        self.assertEqual(
+            historical_person_name_tag_ids(),
+            frozenset(PERSON_ID_BY_HISTORICAL_PERSON_NAME_TAG_ID),
+        )
+        self.assertEqual(len(historical_person_name_tag_ids()), 29)
+        signature = inspect.signature(historical_person_name_tag_ids)
+        self.assertEqual(list(signature.parameters), [])
+        membership = inspect.signature(is_historical_person_name_tag)
+        self.assertEqual(list(membership.parameters), ["tag_id"])
+        self.assertNotIn("name", membership.parameters)
+        for tag_id, _person_id in EXPECTED_PAIRS:
+            self.assertTrue(is_historical_person_name_tag(tag_id))
+        self.assertFalse(is_historical_person_name_tag(1))
+        self.assertFalse(is_historical_person_name_tag(3))
+        self.assertFalse(is_historical_person_name_tag(40))
 
     def test_module_has_no_name_based_lookup(self):
         module = importlib.import_module("documents.historical_person_tag_map")

@@ -618,6 +618,7 @@ def _get_or_create_tag_by_name(name: str):
 
 def discovery_metadata_form_data_from_item(archive_item) -> dict:
     """Build discovery metadata form values from an ArchiveItem (selected IDs, empty new-text)."""
+    from documents.historical_person_tag_map import historical_person_name_tag_ids
     from documents.services.archive_discovery_metadata_validation import (
         empty_discovery_metadata_form_fields,
     )
@@ -631,7 +632,9 @@ def discovery_metadata_form_data_from_item(archive_item) -> dict:
             archive_item.events.order_by("name").values_list("id", flat=True)
         ),
         "selected_tag_ids": list(
-            archive_item.tags.order_by("name").values_list("id", flat=True)
+            archive_item.tags.exclude(pk__in=historical_person_name_tag_ids())
+            .order_by("name")
+            .values_list("id", flat=True)
         ),
     }
 
@@ -644,7 +647,21 @@ def update_archive_item_discovery_metadata(
     event_names: list[str],
     tag_names: list[str],
 ):
-    """Replace ArchiveItem discovery categories, events, and tags (replace-all per relation)."""
+    """Replace ArchiveItem discovery categories, events, and tags (replace-all per relation).
+
+    Historical person-name Tags are not part of the desired-set contract.
+    Existing blocked Tag relations are merged back before ``tags.set`` so
+    ordinary edits cannot drop them. New blocked Tag ids fail closed before
+    any relation write.
+    """
+    from documents.historical_person_tag_map import (
+        historical_person_name_tag_ids,
+        is_historical_person_name_tag,
+    )
+    from documents.services.archive_discovery_metadata_validation import (
+        HISTORICAL_PERSON_TAG_REUSE_ERROR,
+    )
+
     category_objs = []
     for name in category_names:
         category_obj, _ = get_or_create_archive_category_by_name(name)
@@ -659,6 +676,21 @@ def update_archive_item_discovery_metadata(
     for name in tag_names:
         tag_obj, _ = _get_or_create_tag_by_name(name)
         tag_objs.append(tag_obj)
+
+    existing_blocked = list(
+        archive_item.tags.filter(pk__in=historical_person_name_tag_ids())
+    )
+    existing_blocked_ids = {tag.pk for tag in existing_blocked}
+    if any(
+        is_historical_person_name_tag(tag.pk) and tag.pk not in existing_blocked_ids
+        for tag in tag_objs
+    ):
+        raise ValueError(HISTORICAL_PERSON_TAG_REUSE_ERROR)
+
+    allowed_tags = [
+        tag for tag in tag_objs if not is_historical_person_name_tag(tag.pk)
+    ]
+    tag_objs = allowed_tags + existing_blocked
 
     archive_item.categories.set(category_objs)
     archive_item.events.set(event_objs)

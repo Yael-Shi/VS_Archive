@@ -8,6 +8,9 @@ from django.db import transaction
 from django.utils import timezone
 
 from documents.models import ArchiveMetadataSuggestion
+from documents.services.archive_discovery_metadata_validation import (
+    existing_tag_name_reuse_errors,
+)
 from documents.services.archive_items import (
     _get_or_create_archive_event_by_name,
     _get_or_create_tag_by_name,
@@ -57,6 +60,9 @@ def approve_suggestion(
         )
         event_names = parse_suggested_metadata_values(suggestion.suggested_events)
         tag_names = parse_suggested_metadata_values(suggestion.suggested_tags)
+        reuse_errors = existing_tag_name_reuse_errors(tag_names)
+        if reuse_errors:
+            raise ArchiveMetadataSuggestionReviewError(reuse_errors[0])
 
         if category_names:
             categories = [
