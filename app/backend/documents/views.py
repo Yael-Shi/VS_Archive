@@ -58,6 +58,13 @@ from documents.services.archive_discovery_metadata_validation import (
     empty_discovery_metadata_form_fields,
     parse_archive_item_discovery_metadata_form,
 )
+from documents.services.archive_item_people import (
+    ArchiveItemPersonError,
+    archive_item_people_form_data_from_item,
+    empty_archive_item_people_form_fields,
+    parse_archive_item_people_form,
+    set_archive_item_people,
+)
 from documents.services.archive_items import (
     create_manual_text_archive_item,
     create_ocr_document,
@@ -383,6 +390,7 @@ class _CreateUploadCommon(TypedDict):
     source_title: str
     public_note: str
     discovery_metadata: dict
+    people: dict
 
 
 def _parse_int(value, default, min_value=None, max_value=None):
@@ -786,6 +794,10 @@ def _parse_create_upload_common(
     if discovery_errors:
         return None, _bad(discovery_errors[0])
 
+    parsed_people, people_errors = parse_archive_item_people_form(payload)
+    if people_errors:
+        return None, _bad(people_errors[0])
+
     return {
         "title": title,
         "date_start": ds,
@@ -800,6 +812,7 @@ def _parse_create_upload_common(
         "source_title": source_title,
         "public_note": public_note,
         "discovery_metadata": parsed_discovery,
+        "people": parsed_people,
     }, None
 
 
@@ -820,6 +833,12 @@ def _apply_upload_discovery_metadata(doc: Document, discovery_metadata: dict) ->
         event_names=discovery_metadata["event_names"],
         tag_names=discovery_metadata["tag_names"],
     )
+
+
+def _apply_created_ocr_relations(doc: Document, common: _CreateUploadCommon) -> None:
+    _attach_document_admin_metadata(doc, common["admin_meta"])
+    _save_archive_item_people(doc.archive_item, common["people"])
+    _apply_upload_discovery_metadata(doc, common["discovery_metadata"])
 
 
 def _parse_image_file_entry(
@@ -916,24 +935,24 @@ def _create_incremental_multi_image_upload(
     if isinstance(bucket_or_response, JsonResponse):
         return bucket_or_response
 
-    doc = create_ocr_document(
-        title=common["title"],
-        doc_type=Document.DocType.IMAGE,
-        date_start=common["date_start"],
-        date_end=common["date_end"],
-        date_precision=common["date_precision"],
-        language=common["language"],
-        text_input_type=common["text_input_type"],
-        handwriting_type=common["handwriting_type"],
-        visibility=common["visibility"],
-        author_name=common["author_name"],
-        source_title=common["source_title"],
-        public_note=common["public_note"],
-        upload_status=Document.UploadStatus.UPLOADING,
-        expected_source_file_count=None,
-    )
-    _attach_document_admin_metadata(doc, common["admin_meta"])
-    _apply_upload_discovery_metadata(doc, common["discovery_metadata"])
+    with transaction.atomic():
+        doc = create_ocr_document(
+            title=common["title"],
+            doc_type=Document.DocType.IMAGE,
+            date_start=common["date_start"],
+            date_end=common["date_end"],
+            date_precision=common["date_precision"],
+            language=common["language"],
+            text_input_type=common["text_input_type"],
+            handwriting_type=common["handwriting_type"],
+            visibility=common["visibility"],
+            author_name=common["author_name"],
+            source_title=common["source_title"],
+            public_note=common["public_note"],
+            upload_status=Document.UploadStatus.UPLOADING,
+            expected_source_file_count=None,
+        )
+        _apply_created_ocr_relations(doc, common)
 
     return JsonResponse(
         {
@@ -1000,24 +1019,24 @@ def _create_multi_image_upload(request, payload: dict, common: _CreateUploadComm
         return bucket_or_response
     bucket = bucket_or_response
 
-    doc = create_ocr_document(
-        title=common["title"],
-        doc_type=Document.DocType.IMAGE,
-        date_start=common["date_start"],
-        date_end=common["date_end"],
-        date_precision=common["date_precision"],
-        language=common["language"],
-        text_input_type=common["text_input_type"],
-        handwriting_type=common["handwriting_type"],
-        visibility=common["visibility"],
-        author_name=common["author_name"],
-        source_title=common["source_title"],
-        public_note=common["public_note"],
-        upload_status=Document.UploadStatus.UPLOADING,
-        expected_source_file_count=file_count,
-    )
-    _attach_document_admin_metadata(doc, common["admin_meta"])
-    _apply_upload_discovery_metadata(doc, common["discovery_metadata"])
+    with transaction.atomic():
+        doc = create_ocr_document(
+            title=common["title"],
+            doc_type=Document.DocType.IMAGE,
+            date_start=common["date_start"],
+            date_end=common["date_end"],
+            date_precision=common["date_precision"],
+            language=common["language"],
+            text_input_type=common["text_input_type"],
+            handwriting_type=common["handwriting_type"],
+            visibility=common["visibility"],
+            author_name=common["author_name"],
+            source_title=common["source_title"],
+            public_note=common["public_note"],
+            upload_status=Document.UploadStatus.UPLOADING,
+            expected_source_file_count=file_count,
+        )
+        _apply_created_ocr_relations(doc, common)
 
     uploads = []
     for order_index, file_meta in enumerate(parsed_files):
@@ -1068,31 +1087,31 @@ def _create_single_file_upload(request, payload: dict, common: _CreateUploadComm
         return bucket_or_response
     bucket = bucket_or_response
 
-    doc = create_ocr_document(
-        title=common["title"],
-        doc_type=doc_type,
-        date_start=common["date_start"],
-        date_end=common["date_end"],
-        date_precision=common["date_precision"],
-        language=common["language"],
-        text_input_type=common["text_input_type"],
-        handwriting_type=common["handwriting_type"],
-        visibility=common["visibility"],
-        author_name=common["author_name"],
-        source_title=common["source_title"],
-        public_note=common["public_note"],
-        upload_status=Document.UploadStatus.UPLOADING,
-        file_original_name=original_name,
-        mime_type=mime_type,
-        size_bytes=size_bytes if isinstance(size_bytes, int) else None,
-    )
-    _attach_document_admin_metadata(doc, common["admin_meta"])
-    _apply_upload_discovery_metadata(doc, common["discovery_metadata"])
+    with transaction.atomic():
+        doc = create_ocr_document(
+            title=common["title"],
+            doc_type=doc_type,
+            date_start=common["date_start"],
+            date_end=common["date_end"],
+            date_precision=common["date_precision"],
+            language=common["language"],
+            text_input_type=common["text_input_type"],
+            handwriting_type=common["handwriting_type"],
+            visibility=common["visibility"],
+            author_name=common["author_name"],
+            source_title=common["source_title"],
+            public_note=common["public_note"],
+            upload_status=Document.UploadStatus.UPLOADING,
+            file_original_name=original_name,
+            mime_type=mime_type,
+            size_bytes=size_bytes if isinstance(size_bytes, int) else None,
+        )
+        _apply_created_ocr_relations(doc, common)
 
-    ext = mime_type_to_extension(mime_type)
-    key = f"documents/{doc.id}/original.{ext}"
-    doc.file_s3_key = key
-    doc.save(update_fields=["file_s3_key"])
+        ext = mime_type_to_extension(mime_type)
+        key = f"documents/{doc.id}/original.{ext}"
+        doc.file_s3_key = key
+        doc.save(update_fields=["file_s3_key"])
 
     upload_url = create_presigned_put(bucket=bucket, key=key, content_type=mime_type)
 
@@ -1752,6 +1771,8 @@ def create_photo_upload(request):
         people_present=parsed["people_present"],
         notes=parsed["notes"],
         public_note=parsed["public_note"],
+        person_ids=parsed["archive_item_person_ids"],
+        new_person_name=parsed["new_archive_item_person_name"],
     )
 
     return JsonResponse(
@@ -4003,6 +4024,10 @@ UPLOAD_UI_REVISION = "2026-08-05.1"
 
 
 def _upload_form_context(*, user=None) -> dict:
+    form_data = {
+        **empty_discovery_metadata_form_fields(),
+        **empty_archive_item_people_form_fields(),
+    }
     return {
         "doc_type_choices": Document.DocType.choices,
         "text_input_type_choices": TEXT_INPUT_TYPE_UI_CHOICES,
@@ -4017,27 +4042,37 @@ def _upload_form_context(*, user=None) -> dict:
             date_end=None,
             date_precision=ArchiveItem.DatePrecision.UNKNOWN,
         ),
-        "form_data": empty_discovery_metadata_form_fields(),
+        "form_data": form_data,
         "discovery_tags_input_name": "discovery_tags",
         "discovery_tags_input_id": "discovery_tags",
         "upload_ui_revision": UPLOAD_UI_REVISION,
         **discovery_metadata_option_querysets(),
+        **_archive_item_people_staff_form_context(
+            item_type=ArchiveItem.ItemType.OCR_DOCUMENT,
+            form_data=form_data,
+        ),
     }
 
 
 def _photo_upload_form_context(*, user=None) -> dict:
+    form_data = {
+        **_empty_archive_metadata_form_data(),
+        **empty_photo_metadata_form_data(),
+        **empty_discovery_metadata_form_fields(),
+        **empty_archive_item_people_form_fields(),
+    }
     return {
         "date_precision_choices": DATE_PRECISION_UI_CHOICES,
         "visibility_choices": archive_visibility_ui_choices(user),
         "metadata_status_choices": archive_metadata_status_ui_choices(),
-        "form_data": {
-            **_empty_archive_metadata_form_data(),
-            **empty_photo_metadata_form_data(),
-            **empty_discovery_metadata_form_fields(),
-        },
+        "form_data": form_data,
         "discovery_tags_input_name": "discovery_tags",
         "discovery_tags_input_id": "discovery_tags",
         **discovery_metadata_option_querysets(),
+        **_archive_item_people_staff_form_context(
+            item_type=ArchiveItem.ItemType.PHOTO,
+            form_data=form_data,
+        ),
     }
 
 
@@ -4141,10 +4176,12 @@ def _ocr_catalog_form_data_from_document(document: Document) -> dict:
 
 
 def _ocr_document_edit_form_data_from_document(document: Document) -> dict:
+    item = document.archive_item
     return {
         **_archive_metadata_form_data_from_document(document),
         **_ocr_catalog_form_data_from_document(document),
-        **discovery_metadata_form_data_from_item(document.archive_item),
+        **discovery_metadata_form_data_from_item(item),
+        **archive_item_people_form_data_from_item(item),
     }
 
 
@@ -4164,6 +4201,7 @@ def _empty_manual_text_form_data() -> dict:
         **_empty_archive_metadata_form_data(),
         "body": "",
         **empty_discovery_metadata_form_fields(),
+        **empty_archive_item_people_form_fields(),
     }
 
 
@@ -4199,6 +4237,7 @@ def _manual_text_form_data_from_item(item: ArchiveItem) -> dict:
         ),
         "body": item.manual_text_content.body,
         **discovery_metadata_form_data_from_item(item),
+        **archive_item_people_form_data_from_item(item),
     }
 
 
@@ -4214,6 +4253,7 @@ def _photo_form_data_from_item(item: ArchiveItem) -> dict:
             public_note=item.public_note,
         ),
         **discovery_metadata_form_data_from_item(item),
+        **archive_item_people_form_data_from_item(item),
     }
 
 
@@ -4256,6 +4296,61 @@ PERSON_NAME_UPDATED_MSG = "שם התצוגה עודכן."
 PERSON_ALIAS_ADDED_MSG = "השם החלופי נוסף."
 PERSON_ALIAS_UPDATED_MSG = "השם החלופי עודכן."
 PERSON_ALIAS_DELETED_MSG = "השם החלופי נמחק."
+ARCHIVE_ITEM_UPDATED_MSG = "הפריט עודכן."
+ARCHIVE_ITEM_PEOPLE_HEADING = "אנשים קשורים"
+PHOTO_ARCHIVE_ITEM_PEOPLE_HEADING = "אנשים קשורים לפריט"
+ARCHIVE_ITEM_PEOPLE_CURRENT_HEADING = "אנשים קשורים לפריט זה"
+ARCHIVE_ITEM_PEOPLE_HINT = (
+    "בחירה מרשומות אדם קיימות. שמות חלופיים מוצגים בסוגריים לזיהוי בלבד, "
+    "ואינם זהויות נפרדות."
+)
+PHOTO_ARCHIVE_ITEM_PEOPLE_HINT = (
+    "קשר ברמת פריט הארכיון, לא הופעה בתמונה. "
+    "אנשים מזוהים בתמונה נערכים בדף התמונה עצמו."
+)
+
+
+def _archive_item_people_staff_form_context(*, item_type: str, form_data: dict) -> dict:
+    selected_person_ids = [
+        int(person_id) for person_id in form_data.get("archive_item_person_ids") or []
+    ]
+    person_choices, selected_people = build_staff_person_choices(
+        selected_person_ids=selected_person_ids
+    )
+    is_photo = item_type == ArchiveItem.ItemType.PHOTO
+    return {
+        "show_archive_item_people": True,
+        "archive_item_person_choices": person_choices,
+        "archive_item_selected_people": selected_people,
+        "archive_item_people_heading": (
+            PHOTO_ARCHIVE_ITEM_PEOPLE_HEADING
+            if is_photo
+            else ARCHIVE_ITEM_PEOPLE_HEADING
+        ),
+        "archive_item_people_current_heading": ARCHIVE_ITEM_PEOPLE_CURRENT_HEADING,
+        "archive_item_people_hint": (
+            PHOTO_ARCHIVE_ITEM_PEOPLE_HINT if is_photo else ARCHIVE_ITEM_PEOPLE_HINT
+        ),
+    }
+
+
+def _parse_archive_item_people_post(request, form_data: dict, form_errors: list[str]):
+    parsed_people, people_errors = parse_archive_item_people_form(request.POST)
+    return {**form_data, **parsed_people}, form_errors + people_errors, parsed_people
+
+
+def _save_archive_item_people(
+    item: ArchiveItem,
+    parsed_people: dict,
+    *,
+    refresh_search_index: bool = False,
+) -> None:
+    set_archive_item_people(
+        archive_item=item,
+        person_ids=list(parsed_people.get("archive_item_person_ids") or []),
+        new_person_name=parsed_people.get("new_archive_item_person_name") or "",
+        refresh_search_index=refresh_search_index,
+    )
 
 
 def _photo_content_edit_form_context(
@@ -4299,6 +4394,7 @@ def _empty_video_form_data() -> dict:
         "presentation_mode_explanation": "",
         "provider_display_label": "",
         **empty_discovery_metadata_form_fields(),
+        **empty_archive_item_people_form_fields(),
     }
 
 
@@ -4330,6 +4426,7 @@ def _video_form_data_from_item(item: ArchiveItem) -> dict:
         ),
         "provider_display_label": video_provider_display_label(content.provider),
         **discovery_metadata_form_data_from_item(item),
+        **archive_item_people_form_data_from_item(item),
     }
 
 
@@ -4365,25 +4462,30 @@ def _video_service_time_kwargs(parsed: dict) -> dict:
 def _submit_video_create(request):
     parsed, form_errors = parse_video_archive_item_form(request.POST, user=request.user)
     form_data = parsed
+    form_data, form_errors, parsed_people = _parse_archive_item_people_post(
+        request, form_data, form_errors
+    )
     if form_errors:
         return None, form_data, form_errors
-    create_video_archive_item(
-        title=parsed["title"],
-        source_url=parsed["source_url"],
-        visibility=parsed["visibility"],
-        date_start=parsed["date_start_value"],
-        date_end=parsed["date_end_value"],
-        date_precision=parsed["date_precision"],
-        metadata_status=parsed["metadata_status"],
-        author_name=parsed["author_name"],
-        source_title=parsed["source_title"],
-        public_note=parsed["public_note"],
-        category_names=parsed["category_names"],
-        event_names=parsed["event_names"],
-        tag_names=parsed["tag_names"],
-        user=request.user,
-        **_video_service_time_kwargs(parsed),
-    )
+    with transaction.atomic():
+        item = create_video_archive_item(
+            title=parsed["title"],
+            source_url=parsed["source_url"],
+            visibility=parsed["visibility"],
+            date_start=parsed["date_start_value"],
+            date_end=parsed["date_end_value"],
+            date_precision=parsed["date_precision"],
+            metadata_status=parsed["metadata_status"],
+            author_name=parsed["author_name"],
+            source_title=parsed["source_title"],
+            public_note=parsed["public_note"],
+            category_names=parsed["category_names"],
+            event_names=parsed["event_names"],
+            tag_names=parsed["tag_names"],
+            user=request.user,
+            **_video_service_time_kwargs(parsed),
+        )
+        _save_archive_item_people(item, parsed_people, refresh_search_index=True)
     return redirect("archive-manage-list"), form_data, form_errors
 
 
@@ -4406,6 +4508,9 @@ def _submit_manual_text_create(request):
     )
     form_errors = form_errors + discovery_errors
     form_data = {**parsed, **parsed_discovery}
+    form_data, form_errors, parsed_people = _parse_archive_item_people_post(
+        request, form_data, form_errors
+    )
     if form_errors:
         return None, form_data, form_errors
     with transaction.atomic():
@@ -4421,6 +4526,7 @@ def _submit_manual_text_create(request):
             source_title=parsed["source_title"],
             public_note=parsed["public_note"],
         )
+        _save_archive_item_people(item, parsed_people)
         update_archive_item_discovery_metadata(
             item,
             category_names=parsed_discovery["category_names"],
@@ -4783,6 +4889,10 @@ def archive_manage_new_page(request):
                 user=request.user,
             ),
             **_manual_text_discovery_metadata_form_context(),
+            **_archive_item_people_staff_form_context(
+                item_type=ArchiveItem.ItemType.VIDEO,
+                form_data=form_data,
+            ),
         }
     else:
         context = {
@@ -4798,6 +4908,12 @@ def archive_manage_new_page(request):
         }
         if item_type == ARCHIVE_ITEM_TYPE_MANUAL_TEXT:
             context.update(_manual_text_discovery_metadata_form_context())
+            context.update(
+                _archive_item_people_staff_form_context(
+                    item_type=ArchiveItem.ItemType.MANUAL_TEXT,
+                    form_data=form_data,
+                )
+            )
         elif item_type == ARCHIVE_ITEM_TYPE_OCR_DOCUMENT:
             context.update(_upload_form_context(user=request.user))
         elif item_type == ARCHIVE_ITEM_TYPE_PHOTO:
@@ -4838,6 +4954,10 @@ def archive_manage_manual_text_create_page(request):
                 user=request.user,
             ),
             **_manual_text_discovery_metadata_form_context(),
+            **_archive_item_people_staff_form_context(
+                item_type=ArchiveItem.ItemType.MANUAL_TEXT,
+                form_data=form_data,
+            ),
         },
     )
 
@@ -4881,28 +5001,37 @@ def _archive_manage_edit_manual_text(request, item: ArchiveItem):
         )
         form_errors = form_errors + discovery_errors
         form_data = {**parsed, **parsed_discovery}
+        form_data, form_errors, parsed_people = _parse_archive_item_people_post(
+            request, form_data, form_errors
+        )
         if not form_errors:
-            with transaction.atomic():
-                update_manual_text_archive_item(
-                    item,
-                    title=parsed["title"],
-                    body=parsed["body"],
-                    visibility=parsed["visibility"],
-                    date_start=parsed["date_start_value"],
-                    date_end=parsed["date_end_value"],
-                    date_precision=parsed["date_precision"],
-                    metadata_status=parsed["metadata_status"],
-                    author_name=parsed["author_name"],
-                    source_title=parsed["source_title"],
-                    public_note=parsed["public_note"],
-                )
-                update_archive_item_discovery_metadata(
-                    item,
-                    category_names=parsed_discovery["category_names"],
-                    event_names=parsed_discovery["event_names"],
-                    tag_names=parsed_discovery["tag_names"],
-                )
-            return redirect("archive-detail", item_id=item.id)
+            try:
+                with transaction.atomic():
+                    _save_archive_item_people(item, parsed_people)
+                    update_manual_text_archive_item(
+                        item,
+                        title=parsed["title"],
+                        body=parsed["body"],
+                        visibility=parsed["visibility"],
+                        date_start=parsed["date_start_value"],
+                        date_end=parsed["date_end_value"],
+                        date_precision=parsed["date_precision"],
+                        metadata_status=parsed["metadata_status"],
+                        author_name=parsed["author_name"],
+                        source_title=parsed["source_title"],
+                        public_note=parsed["public_note"],
+                    )
+                    update_archive_item_discovery_metadata(
+                        item,
+                        category_names=parsed_discovery["category_names"],
+                        event_names=parsed_discovery["event_names"],
+                        tag_names=parsed_discovery["tag_names"],
+                    )
+            except ArchiveItemPersonError as exc:
+                form_errors = [exc.message]
+            else:
+                messages.success(request, ARCHIVE_ITEM_UPDATED_MSG)
+                return redirect("archive-detail", item_id=item.id)
 
     return render(
         request,
@@ -4916,6 +5045,9 @@ def _archive_manage_edit_manual_text(request, item: ArchiveItem):
                 user=request.user,
             ),
             **_manual_text_discovery_metadata_form_context(),
+            **_archive_item_people_staff_form_context(
+                item_type=item.item_type, form_data=form_data
+            ),
         },
     )
 
@@ -4934,25 +5066,34 @@ def _archive_manage_edit_photo(request, item: ArchiveItem):
         )
         form_errors = form_errors + discovery_errors
         form_data = {**parsed, **parsed_discovery}
+        form_data, form_errors, parsed_people = _parse_archive_item_people_post(
+            request, form_data, form_errors
+        )
         if not form_errors:
-            with transaction.atomic():
-                update_photo_archive_item_metadata(
-                    item,
-                    title=parsed["title"],
-                    visibility=parsed["visibility"],
-                    date_start=parsed["date_start_value"],
-                    date_end=parsed["date_end_value"],
-                    date_precision=parsed["date_precision"],
-                    metadata_status=parsed["metadata_status"],
-                    public_note=parsed["public_note"],
-                )
-                update_archive_item_discovery_metadata(
-                    item,
-                    category_names=parsed_discovery["category_names"],
-                    event_names=parsed_discovery["event_names"],
-                    tag_names=parsed_discovery["tag_names"],
-                )
-            return redirect("archive-manage-list")
+            try:
+                with transaction.atomic():
+                    _save_archive_item_people(item, parsed_people)
+                    update_photo_archive_item_metadata(
+                        item,
+                        title=parsed["title"],
+                        visibility=parsed["visibility"],
+                        date_start=parsed["date_start_value"],
+                        date_end=parsed["date_end_value"],
+                        date_precision=parsed["date_precision"],
+                        metadata_status=parsed["metadata_status"],
+                        public_note=parsed["public_note"],
+                    )
+                    update_archive_item_discovery_metadata(
+                        item,
+                        category_names=parsed_discovery["category_names"],
+                        event_names=parsed_discovery["event_names"],
+                        tag_names=parsed_discovery["tag_names"],
+                    )
+            except ArchiveItemPersonError as exc:
+                form_errors = [exc.message]
+            else:
+                messages.success(request, ARCHIVE_ITEM_UPDATED_MSG)
+                return redirect("archive-manage-list")
 
     return render(
         request,
@@ -4968,6 +5109,9 @@ def _archive_manage_edit_photo(request, item: ArchiveItem):
                 user=request.user,
             ),
             **_manual_text_discovery_metadata_form_context(),
+            **_archive_item_people_staff_form_context(
+                item_type=item.item_type, form_data=form_data
+            ),
         },
     )
 
@@ -5260,26 +5404,36 @@ def _archive_manage_edit_video(request, item: ArchiveItem):
             request.POST, user=request.user
         )
         form_data = parsed
+        form_data, form_errors, parsed_people = _parse_archive_item_people_post(
+            request, form_data, form_errors
+        )
         if not form_errors:
-            update_video_archive_item(
-                item,
-                title=parsed["title"],
-                source_url=parsed["source_url"],
-                visibility=parsed["visibility"],
-                date_start=parsed["date_start_value"],
-                date_end=parsed["date_end_value"],
-                date_precision=parsed["date_precision"],
-                metadata_status=parsed["metadata_status"],
-                author_name=parsed["author_name"],
-                source_title=parsed["source_title"],
-                public_note=parsed["public_note"],
-                category_names=parsed["category_names"],
-                event_names=parsed["event_names"],
-                tag_names=parsed["tag_names"],
-                user=request.user,
-                **_video_service_time_kwargs(parsed),
-            )
-            return redirect("archive-manage-list")
+            try:
+                with transaction.atomic():
+                    _save_archive_item_people(item, parsed_people)
+                    update_video_archive_item(
+                        item,
+                        title=parsed["title"],
+                        source_url=parsed["source_url"],
+                        visibility=parsed["visibility"],
+                        date_start=parsed["date_start_value"],
+                        date_end=parsed["date_end_value"],
+                        date_precision=parsed["date_precision"],
+                        metadata_status=parsed["metadata_status"],
+                        author_name=parsed["author_name"],
+                        source_title=parsed["source_title"],
+                        public_note=parsed["public_note"],
+                        category_names=parsed["category_names"],
+                        event_names=parsed["event_names"],
+                        tag_names=parsed["tag_names"],
+                        user=request.user,
+                        **_video_service_time_kwargs(parsed),
+                    )
+            except ArchiveItemPersonError as exc:
+                form_errors = [exc.message]
+            else:
+                messages.success(request, ARCHIVE_ITEM_UPDATED_MSG)
+                return redirect("archive-manage-list")
 
     return render(
         request,
@@ -5294,6 +5448,9 @@ def _archive_manage_edit_video(request, item: ArchiveItem):
                 user=request.user,
             ),
             **_manual_text_discovery_metadata_form_context(),
+            **_archive_item_people_staff_form_context(
+                item_type=item.item_type, form_data=form_data
+            ),
         },
     )
 
@@ -5325,34 +5482,43 @@ def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
             **parsed_catalog,
             **parsed_discovery,
         }
+        form_data, form_errors, parsed_people = _parse_archive_item_people_post(
+            request, form_data, form_errors
+        )
         if not form_errors:
-            with transaction.atomic():
-                update_ocr_document_metadata(
-                    doc,
-                    title=parsed_shared["title"],
-                    visibility=parsed_shared["visibility"],
-                    date_start=parsed_shared["date_start_value"],
-                    date_end=parsed_shared["date_end_value"],
-                    date_precision=parsed_shared["date_precision"],
-                    metadata_status=parsed_shared["metadata_status"],
-                    author_name=parsed_shared["author_name"],
-                    source_title=parsed_shared["source_title"],
-                    public_note=parsed_shared["public_note"],
-                )
-                update_ocr_document_catalog_metadata(
-                    doc,
-                    donor=parsed_catalog["donor"],
-                    collection=parsed_catalog["collection"],
-                    original_location=parsed_catalog["original_location"],
-                    notes=parsed_catalog["notes"],
-                )
-                update_archive_item_discovery_metadata(
-                    item,
-                    category_names=parsed_discovery["category_names"],
-                    event_names=parsed_discovery["event_names"],
-                    tag_names=parsed_discovery["tag_names"],
-                )
-            return redirect("documents-detail-page", doc_id=doc.id)
+            try:
+                with transaction.atomic():
+                    _save_archive_item_people(item, parsed_people)
+                    update_ocr_document_metadata(
+                        doc,
+                        title=parsed_shared["title"],
+                        visibility=parsed_shared["visibility"],
+                        date_start=parsed_shared["date_start_value"],
+                        date_end=parsed_shared["date_end_value"],
+                        date_precision=parsed_shared["date_precision"],
+                        metadata_status=parsed_shared["metadata_status"],
+                        author_name=parsed_shared["author_name"],
+                        source_title=parsed_shared["source_title"],
+                        public_note=parsed_shared["public_note"],
+                    )
+                    update_ocr_document_catalog_metadata(
+                        doc,
+                        donor=parsed_catalog["donor"],
+                        collection=parsed_catalog["collection"],
+                        original_location=parsed_catalog["original_location"],
+                        notes=parsed_catalog["notes"],
+                    )
+                    update_archive_item_discovery_metadata(
+                        item,
+                        category_names=parsed_discovery["category_names"],
+                        event_names=parsed_discovery["event_names"],
+                        tag_names=parsed_discovery["tag_names"],
+                    )
+            except ArchiveItemPersonError as exc:
+                form_errors = [exc.message]
+            else:
+                messages.success(request, ARCHIVE_ITEM_UPDATED_MSG)
+                return redirect("documents-detail-page", doc_id=doc.id)
 
     return render(
         request,
@@ -5367,6 +5533,9 @@ def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
             ),
             "show_discovery_metadata": True,
             **_ocr_discovery_metadata_form_context(),
+            **_archive_item_people_staff_form_context(
+                item_type=item.item_type, form_data=form_data
+            ),
         },
     )
 

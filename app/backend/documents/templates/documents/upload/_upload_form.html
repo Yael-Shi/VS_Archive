@@ -144,6 +144,10 @@
 
           <div class="spacer"></div>
           {% include "documents/archive/discovery_metadata_form_fields.html" %}
+          {% if show_archive_item_people %}
+            <div class="spacer"></div>
+            {% include "documents/archive/archive_item_people_form_fields.html" %}
+          {% endif %}
 
           <div class="form-actions form-actions--spaced">
             <button id="submitBtn" class="btn btn-primary" type="submit">העלאה</button>

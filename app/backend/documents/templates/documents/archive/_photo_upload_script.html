@@ -102,6 +102,14 @@
     if (selected_categories.length) meta.selected_categories = selected_categories;
     if (selected_events.length) meta.selected_events = selected_events;
     if (selected_tags.length) meta.selected_tags = selected_tags;
+    meta.archive_item_person_ids = readSelectedIds("archive_item_person_ids");
+    const newPersonNameEl = document.getElementById("new_archive_item_person_name");
+    const new_archive_item_person_name = newPersonNameEl
+      ? (newPersonNameEl.value || "").trim()
+      : "";
+    if (new_archive_item_person_name) {
+      meta.new_archive_item_person_name = new_archive_item_person_name;
+    }
     return meta;
   }
 

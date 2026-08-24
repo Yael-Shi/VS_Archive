@@ -1,0 +1,43 @@
+{% if show_archive_item_people %}
+<div class="section-title">{{ archive_item_people_heading }}</div>
+<p class="page-subtitle">{{ archive_item_people_hint }}</p>
+
+<div class="field">
+  <label for="archive_item_person_ids">{{ archive_item_people_heading }}</label>
+  <select id="archive_item_person_ids" name="archive_item_person_ids" multiple size="8">
+    {% for person in archive_item_person_choices %}
+      <option value="{{ person.id }}" {% if person.selected %}selected{% endif %}>
+        {{ person.label }}
+      </option>
+    {% endfor %}
+  </select>
+  <div class="field-hint">בחירה מרשומות אדם קיימות. שמות חלופיים מוצגים בסוגריים לזיהוי, ואינם זהויות נפרדות.</div>
+</div>
+
+{% if archive_item_selected_people %}
+  <div class="field">
+    <p>{{ archive_item_people_current_heading }}</p>
+    <ul>
+      {% for person in archive_item_selected_people %}
+        <li>
+          {{ person.label }}
+          —
+          <a href="{% url 'archive-manage-person-edit' person_id=person.id %}">עריכת אדם</a>
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endif %}
+
+<div class="field">
+  <label for="new_archive_item_person_name">הוספת אדם חדש</label>
+  <input
+    id="new_archive_item_person_name"
+    name="new_archive_item_person_name"
+    type="text"
+    value="{{ form_data.new_archive_item_person_name }}"
+    maxlength="255"
+  />
+  <div class="field-hint">שם תצוגה בלבד. נוצרת רשומת אדם חדשה ומקושרת לפריט זה. לא נוצרים שמות חלופיים, ואין מיזוג לפי שם.</div>
+</div>
+{% endif %}

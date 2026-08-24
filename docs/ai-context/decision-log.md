@@ -1,5 +1,82 @@
 # VS-Archive Decision Log
 
+## ArchiveItemPerson staff UI (C1)
+
+**Decision / implemented:** Production staff ArchiveItem **create and edit**
+can create and delete item-level **`ArchiveItemPerson`** links for every
+item type (OCR_DOCUMENT / MANUAL_TEXT / VIDEO / PHOTO). This is the
+missing write path for the identity model that public `q` and advanced
+`person=<id>` already read.
+
+**Current behavior:**
+
+- Shared people section on the existing type-specific ArchiveItem
+  **create** and **edit** forms. No Person catalog page. No user-submitted
+  Person suggestions (C2).
+- Create surfaces:
+  - MANUAL_TEXT: `/archive/manage/new/?item_type=manual_text` and legacy
+    `/archive/manage/new/manual-text/`
+  - VIDEO: `/archive/manage/new/?item_type=video`
+  - OCR_DOCUMENT: `/archive/manage/new/?item_type=ocr_document` (and the
+    standalone upload page) via `/api/uploads/create/`
+  - PHOTO: `/archive/manage/new/?item_type=photo` via `/api/photo-uploads/create/`
+  Edit remains `/archive/manage/<id>/edit/`.
+- PHOTO uses heading **אנשים קשורים לפריט** plus a staff hint that this
+  is not photo appearance. Photo-level **`PhotoPerson`** remains on
+  `/archive/manage/<item_id>/photos/<photo_id>/edit/` (**אנשים מזוהים
+  בתמונה**). The two forms use distinct field names
+  (`archive_item_person_ids` vs `person_ids`). PHOTO create writes
+  **`ArchiveItemPerson` only**; it does not write **`PhotoPerson`**.
+  Adding a photo to an existing item does not collect item-level people.
+- Picker: option value is **`Person.id`**; visible label is canonical
+  **`Person.name`**, plus aliases in `(name, id)` order when present.
+  Aliases are not selectable entities. Person ids are not display labels.
+  Persons ordered by `(name, id)` with alias prefetch (no N+1).
+- New Person: canonical **`Person.name`** only via
+  **`create_identified_person`** (always creates; trim; no aliases; no
+  `get_or_create`; duplicate names remain distinct identities).
+- Writes go through **`set_archive_item_people`** in
+  `documents/services/archive_item_people.py` (diff current vs submitted
+  ids, create/delete through rows, one in-transaction search-index
+  refresh). Create and edit share the same parse helpers and people
+  partial. Staff form save applies people first with
+  `refresh_search_index=False`, then existing metadata/discovery updates
+  refresh the same item so one submit does not rebuild once per
+  add/remove. Create applies people inside the successful create
+  transaction before the last existing item-level search sync (VIDEO
+  uses one extra item sync after `create_video_archive_item` because
+  that service already synced). Single-row
+  **`create_archive_item_person`** / **`delete_archive_item_person`**
+  remain. No signals, no `on_commit`. No per-Person rebuilds.
+- Does not create/delete **`PhotoPerson`**, aliases, Tags, or
+  **`Document.tags_m2m`**. Same person may exist in both
+  ArchiveItemPerson and PhotoPerson; neither is inferred from the other.
+- Permissions match existing archive-manage create/edit: anonymous → login
+  redirect; authenticated non-admin → 403; staff → allowed. Invalid Person
+  ids are rejected in Hebrew and preserve submitted people/new-name state
+  on HTML create/edit; JSON OCR/PHOTO create returns 400 and does not
+  create the item.
+
+**Why:** Live Person / ArchiveItemPerson rows and public `q` / `person=`
+filter already exist, but nothing in production staff UI wrote
+ArchiveItemPerson. Historical person-name Tags cannot be hidden until
+that write path exists. Create and edit are both required staff
+workflows for the Person-vs-Tag migration.
+
+**Deferred:** **C2 — user suggestion support for ArchiveItemPerson** is
+the immediate next required PR. Users must eventually be able to propose
+adding/removing an item-level Person relationship through the existing
+suggestion/review workflow, with **no direct ArchiveItemPerson write
+before staff acceptance**. C2 is not designed or implemented here; the
+existing suggestion architecture will be audited separately after C1.
+Also still deferred: public presentation of ArchiveItemPerson;
+hide/remove person-name Tags; redirect old Tag browse URLs; prevent
+person-Tag reuse; destructive Tag cleanup; public Person page; identity
+merge.
+
+**Tests:** `documents/test_archive_item_person_staff_ui.py`. No schema
+migration.
+
 ## READY unverified OCR documents may be intentionally reprocessed
 
 **Decision / implemented:** Staff/command OCR reprocess may include documents

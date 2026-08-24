@@ -123,6 +123,8 @@ If the **first** photo is **`PENDING`** / **`FAILED`** / empty-key, the item is 
 
 **`ArchiveItemPerson` is not a photo appearance.** Item-level person links are indexed as ArchiveItem metadata (canonical name + aliases, all item types) and do not select a photo, generate `?photo=`, or depend on photo renderability. `PhotoPerson` remains the only “this person appears in this photo” relation. Historical person-name Tags still power tag browse/filter.
 
+**Staff write path (C1):** ArchiveItem-level people are managed on ArchiveItem **create and edit** for all types, including PHOTO create (`/archive/manage/new/?item_type=photo`) and the PHOTO shared-metadata edit page (`/archive/manage/<id>/edit/`) under **אנשים קשורים לפריט**. PHOTO create writes **`ArchiveItemPerson`** (related to the archival item) and does **not** write **`PhotoPerson`**. Photo-level identified people remain **אנשים מזוהים בתמונה** on the per-photo edit page. Neither relation is inferred from the other. User-submitted ArchiveItemPerson suggestions (C2) and public presentation of ArchiveItemPerson / person-Tag hiding remain deferred.
+
 ---
 
 ## 1. Product definition
@@ -142,7 +144,7 @@ A **`PHOTO`** archive item is a historical/family photograph (or a set of relate
 | Processing | S3 upload → SQS → worker → OCR/HTR → **`DocumentTextResult`** | Direct create/upload → store in S3 → display via presigned GET |
 | Text results | **`DocumentTextResult`** rows, review/verification lifecycle | **None** — no OCR/HTR, no worker, no Gemini/Transkribus |
 | Runtime source of truth | **`ArchiveItem`** for shared metadata; **`Document`** for OCR/processing | **`ArchiveItem`** + **`PhotoContent`** |
-| Staff workflows | Upload, transcription review, metadata edit, processing state | Create/upload photo, edit shared metadata, view in archive |
+| Staff workflows | Upload, transcription review, metadata edit, processing state | Create/upload photo (including item-level **ArchiveItemPerson**), edit shared metadata (including item-level **ArchiveItemPerson**), manage individual photos / PhotoPerson |
 
 **Non-negotiable:** PHOTO must **not** be routed through **`Document`**, the OCR upload pipeline, worker, SQS, or any OCR/HTR provider.
 
@@ -348,7 +350,7 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 - Worker / SQS processing for PHOTO
 - Face recognition, AI identification, comments
 - Public alias display; Person catalog/Admin
-- Eventual person-Tag removal (Tags still power public tag browse/filter); automatic ArchiveItemPerson from PhotoPerson; staff PHOTO appearance review / PhotoPerson backfill from `people_present`; public Person filter/browse UX
+- Eventual person-Tag removal (Tags still power public tag browse/filter); automatic ArchiveItemPerson from PhotoPerson; staff PHOTO appearance review / PhotoPerson backfill from `people_present`; public Person filter/browse UX; **C2 user suggestion support for ArchiveItemPerson** (propose add/remove through existing suggestion/review; no direct write before staff acceptance)
 - Public Person pages
 - Public (unauthenticated) upload
 - Rich text captions
@@ -374,6 +376,7 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 | **Multi-photo PR5** | Search aggregation across public-renderable PhotoContent text + PhotoPerson names; child-row and successful-finalize index refresh | **Implemented** |
 | **PR6a** | `PersonAlias` schema + alias write services + PHOTO search integration (no staff alias UI, no public alias display) | **Implemented** |
 | **PR6b** | Staff Person edit page + alias CRUD UI + alias-aware picker labels + selected-person edit links (no catalog, no public alias display) | **Implemented** |
+| **C1 ArchiveItemPerson staff UI** | Item-level people manager on ArchiveItem **create and edit** for all types; PHOTO heading distinguished from PhotoPerson; PHOTO create does not write PhotoPerson; no public cutover; C2 user suggestions deferred | **Implemented** |
 
 ---
 
