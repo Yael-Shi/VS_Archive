@@ -123,7 +123,7 @@ If the **first** photo is **`PENDING`** / **`FAILED`** / empty-key, the item is 
 
 **`ArchiveItemPerson` is not a photo appearance.** Item-level person links are indexed as ArchiveItem metadata (canonical name + aliases, all item types) and do not select a photo, generate `?photo=`, or depend on photo renderability. `PhotoPerson` remains the only “this person appears in this photo” relation. Historical person-name Tags still power tag browse/filter.
 
-**Staff write path (C1):** ArchiveItem-level people are managed on ArchiveItem **create and edit** for all types, including PHOTO create (`/archive/manage/new/?item_type=photo`) and the PHOTO shared-metadata edit page (`/archive/manage/<id>/edit/`) under **אנשים קשורים לפריט**. PHOTO create writes **`ArchiveItemPerson`** (related to the archival item) and does **not** write **`PhotoPerson`**. Photo-level identified people remain **אנשים מזוהים בתמונה** on the per-photo edit page. Neither relation is inferred from the other. User-submitted ArchiveItemPerson suggestions (C2) and public presentation of ArchiveItemPerson / person-Tag hiding remain deferred.
+**Staff write path (C1):** ArchiveItem-level people are managed on ArchiveItem **create and edit** for all types, including PHOTO create (`/archive/manage/new/?item_type=photo`) and the PHOTO shared-metadata edit page (`/archive/manage/<id>/edit/`) under **אנשים קשורים לפריט**. PHOTO create writes **`ArchiveItemPerson`** (related to the archival item) and does **not** write **`PhotoPerson`**. Photo-level identified people remain **אנשים מזוהים בתמונה** on the per-photo edit page. Neither relation is inferred from the other. **C2a** stores user-submitted ArchiveItemPerson ADD/REMOVE deltas (`ArchiveItemPersonSuggestion`) and applies them through `create_archive_item_person` / `delete_archive_item_person` only; it never infers PhotoPerson. Public/staff HTML is **C2b**. Public presentation of ArchiveItemPerson / person-Tag hiding remain deferred.
 
 ---
 
@@ -350,7 +350,7 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 - Worker / SQS processing for PHOTO
 - Face recognition, AI identification, comments
 - Public alias display; Person catalog/Admin
-- Eventual person-Tag removal (Tags still power public tag browse/filter); automatic ArchiveItemPerson from PhotoPerson; staff PHOTO appearance review / PhotoPerson backfill from `people_present`; public Person filter/browse UX; **C2 user suggestion support for ArchiveItemPerson** (propose add/remove through existing suggestion/review; no direct write before staff acceptance)
+- Eventual person-Tag removal (Tags still power public tag browse/filter); automatic ArchiveItemPerson from PhotoPerson; staff PHOTO appearance review / PhotoPerson backfill from `people_present`; public Person filter/browse UX; **C2b public/staff HTML** for ArchiveItemPerson suggestions (C2a model + services are implemented; still no public/staff HTML; no new-Person proposals)
 - Public Person pages
 - Public (unauthenticated) upload
 - Rich text captions
@@ -376,7 +376,8 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 | **Multi-photo PR5** | Search aggregation across public-renderable PhotoContent text + PhotoPerson names; child-row and successful-finalize index refresh | **Implemented** |
 | **PR6a** | `PersonAlias` schema + alias write services + PHOTO search integration (no staff alias UI, no public alias display) | **Implemented** |
 | **PR6b** | Staff Person edit page + alias CRUD UI + alias-aware picker labels + selected-person edit links (no catalog, no public alias display) | **Implemented** |
-| **C1 ArchiveItemPerson staff UI** | Item-level people manager on ArchiveItem **create and edit** for all types; PHOTO heading distinguished from PhotoPerson; PHOTO create does not write PhotoPerson; no public cutover; C2 user suggestions deferred | **Implemented** |
+| **C1 ArchiveItemPerson staff UI** | Item-level people manager on ArchiveItem **create and edit** for all types; PHOTO heading distinguished from PhotoPerson; PHOTO create does not write PhotoPerson; no public cutover | **Implemented** |
+| **C2a ArchiveItemPerson suggestions foundation** | `ArchiveItemPersonSuggestion` ADD/REMOVE deltas; Person.id identity; pending unique constraint; submit/apply services; stale approve = APPROVED no-op; no PhotoPerson inference; no public/staff HTML | **Implemented** |
 
 ---
 

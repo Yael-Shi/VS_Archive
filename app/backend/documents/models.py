@@ -1116,6 +1116,77 @@ class ArchiveMetadataSuggestion(models.Model):
         )
 
 
+class ArchiveItemPersonSuggestion(models.Model):
+    """One proposed ADD or REMOVE of a Person relationship on an ArchiveItem.
+
+    Identity is Person.id. This is an explicit relationship delta, not a
+    desired set of Person ids. New-Person / alias / merge proposals are out
+    of scope. Approval must not reconstruct a Person set or write PhotoPerson.
+    """
+
+    class Action(models.TextChoices):
+        ADD = "ADD", "Add"
+        REMOVE = "REMOVE", "Remove"
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        APPROVED = "APPROVED", "Approved"
+        REJECTED = "REJECTED", "Rejected"
+
+    archive_item = models.ForeignKey(
+        ArchiveItem,
+        on_delete=models.CASCADE,
+        related_name="person_suggestions",
+    )
+    person = models.ForeignKey(
+        Person,
+        on_delete=models.PROTECT,
+        related_name="archive_item_person_suggestions",
+    )
+    action = models.CharField(max_length=16, choices=Action.choices)
+    submitter_name = models.CharField(max_length=255)
+    submitter_email = models.EmailField(blank=True, default="")
+    submitter_note = models.TextField(blank=True, default="")
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_archive_item_person_suggestions",
+    )
+    submitter_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="submitted_archive_item_person_suggestions",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["archive_item", "person", "action"],
+                condition=models.Q(status="PENDING"),
+                name="uniq_pending_archive_item_person_suggestion",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return (
+            f"ArchiveItemPersonSuggestion(id={self.id}, "
+            f"archive_item_id={self.archive_item_id}, person_id={self.person_id}, "
+            f"action={self.action}, status={self.status})"
+        )
+
+
 class CorrectionRequest(models.Model):
     class Status(models.TextChoices):
         OPEN = "OPEN", "Open"
