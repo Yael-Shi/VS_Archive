@@ -228,6 +228,7 @@ def transcribe_pages_with_antigravity(
     *,
     api_key: str,
     agent_id: str = DEFAULT_ANTIGRAVITY_AGENT_ID,
+    document_id: int | None = None,
     poll_seconds: float = DEFAULT_POLL_SECONDS,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     background: bool = True,
@@ -244,12 +245,30 @@ def transcribe_pages_with_antigravity(
     image_labels = [_page_label(page) for page in ordered_pages]
     prompt = build_antigravity_ocr_prompt(image_labels)
     create_timeout = max(120.0, 30.0 * len(ordered_pages))
+    multimodal_input = build_multimodal_input(prompt, ordered_pages)
+
+    block_types = [
+        block.get("type")
+        for block in multimodal_input
+        if isinstance(block, dict)
+    ]
+
+    logger.info(
+        "Antigravity request payload document_id=%s agent=%s pages=%s "
+        "input_blocks=%s image_blocks=%s block_types=%s",
+        document_id,
+        agent_id,
+        len(ordered_pages),
+        len(multimodal_input),
+        block_types.count("image"),
+        block_types,
+    )
 
     interaction = _create_interaction(
         api_key,
         payload={
             "agent": agent_id,
-            "input": build_multimodal_input(prompt, ordered_pages),
+            "input": multimodal_input,
             "environment": "remote",
             "background": background,
         },
