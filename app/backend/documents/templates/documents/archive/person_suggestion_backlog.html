@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% load archive_labels %}
+{% block title %}VSArchive - הצעות שיוך אנשים{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <h1 class="page-title">הצעות שיוך אנשים</h1>
+    <p class="page-subtitle">הצעות להוספה או הסרה של שיוך אדם לפריט ארכיון. כל שורה היא פעולה אחת.</p>
+
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-manage-list' %}">חזרה לניהול ארכיון</a>
+    </div>
+
+    {% if messages %}
+      <div class="spacer"></div>
+      {% for message in messages %}
+        <div class="alert{% if message.tags == 'error' %} alert-danger{% elif message.tags == 'success' %} alert-ok{% endif %}">
+          {{ message }}
+        </div>
+      {% endfor %}
+    {% endif %}
+
+    <div class="spacer"></div>
+
+    {% if suggestions %}
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>פריט</th>
+              <th>נראות</th>
+              <th>שם המציע/ה</th>
+              <th>דוא״ל</th>
+              <th>אדם</th>
+              <th>פעולה</th>
+              <th>הערה</th>
+              <th>תאריך</th>
+              <th>סטטוס</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in suggestions %}
+              <tr>
+                <td>
+                  <a href="{% url 'archive-detail' item_id=row.archive_item_id %}">
+                    {{ row.archive_item.title }}
+                  </a>
+                </td>
+                <td>{{ row.archive_item.visibility|archive_visibility_display_label }}</td>
+                <td>{{ row.submitter_name }}</td>
+                <td>
+                  {% if row.submitter_email %}
+                    {{ row.submitter_email }}
+                  {% else %}
+                    <span class="muted">—</span>
+                  {% endif %}
+                </td>
+                <td>{{ row.person_label }}</td>
+                <td>{{ row.action_label }}</td>
+                <td>
+                  {% if row.submitter_note %}
+                    {{ row.submitter_note }}
+                  {% else %}
+                    <span class="muted">—</span>
+                  {% endif %}
+                </td>
+                <td>{{ row.created_at|date:"Y-m-d H:i" }}</td>
+                <td>
+                  {% if row.status == "PENDING" %}
+                    <span class="badge badge-warn">ממתין לבדיקה</span>
+                  {% elif row.status == "APPROVED" %}
+                    <span class="badge badge-ok">אושר</span>
+                  {% elif row.status == "REJECTED" %}
+                    <span class="badge badge-bad">נדחה</span>
+                  {% else %}
+                    <span class="badge">{{ row.status }}</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if row.status == "PENDING" %}
+                    <form
+                      method="post"
+                      action="{% url 'archive-item-person-suggestion-approve' suggestion_id=row.id %}"
+                      class="inline-form"
+                    >
+                      {% csrf_token %}
+                      <button type="submit" class="btn btn-primary">אישור</button>
+                    </form>
+                    <form
+                      method="post"
+                      action="{% url 'archive-item-person-suggestion-reject' suggestion_id=row.id %}"
+                      class="inline-form"
+                    >
+                      {% csrf_token %}
+                      <button type="submit" class="btn">דחייה</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">אין הצעות שיוך אנשים כרגע.</p>
+    {% endif %}
+  </div>
+{% endblock %}

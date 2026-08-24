@@ -1,5 +1,56 @@
 # VS-Archive Decision Log
 
+## ArchiveItemPerson suggestion UI (C2b)
+
+**Decision / implemented:** C2 is complete only when this C2b UI lands
+on top of C2a. The existing public metadata-suggestion page
+(`/archive/<item_id>/metadata-suggestions/new/`) can submit Person
+relationship deltas (ADD/REMOVE existing `Person.id` values). Staff have
+a dedicated Person-suggestion backlog (`הצעות שיוך אנשים`), not an
+overload of the taxonomy metadata-suggestion table. Identity remains
+`Person.id`. There is no new-Person proposal field. PhotoPerson remains
+a separate appearance relation. Historical person-name Tags are
+unchanged on this form.
+
+**Current behavior:**
+
+- Public ADD picker universe = Persons linked via ArchiveItemPerson to
+  at least one ArchiveItem the current user may view. PhotoPerson-only
+  identities are excluded. Inaccessible names are not leaked.
+  Unauthorized/invalid Person ids fail with the generic not-found error.
+- Current people / REMOVE lists ArchiveItemPerson rows on this item
+  only. Public submit never mutates ArchiveItemPerson, PhotoPerson,
+  Person, aliases, or Tags.
+- One POST may include taxonomy fields plus zero or more Person ADD and
+  REMOVE actions. People-only is valid. At most one
+  `ArchiveMetadataSuggestion` is created when taxonomy/note payload
+  requires it; one `ArchiveItemPersonSuggestion` row per Person action.
+  Independently reviewable. Honeypot still yields the thanks page with
+  no rows of either type. Person-action validation failures roll back
+  the whole submit grouping.
+- Staff backlog is visibility-scoped via
+  `archive_item_person_suggestions_queryset_for_user`. Pending first,
+  then newest first. Approve/reject load through that queryset before
+  calling C2a `approve_suggestion` / `reject_suggestion`. Unauthorized
+  restricted items 404 with no service mutation. Stale ADD/REMOVE
+  approval surfaces the Hebrew no-op messages; already-reviewed uses
+  the existing C2a error. PRG back to the backlog.
+- PHOTO form copy is item-level related-to, not photo appearance.
+  Approve ADD/REMOVE writes ArchiveItemPerson only.
+
+**Why:** C2a defined the delta contract; C2b is the public/staff HTML
+for that contract without a public presentation cutover.
+
+**Deferred:** public presentation cutover (cards, detail discovery,
+Person pages); hide historical person Tags; Tag-id → Person-id cleanup
+mapping; tag redirects; prevent reuse of person-name Tags; destructive
+cleanup; new-Person / alias / merge proposals.
+
+**Tests:** `documents/test_archive_item_person_suggestion_ui.py` plus
+restricted-visibility and visibility-metadata UI extensions. No new
+schema migration.
+
+
 ## ArchiveItemPerson suggestions foundation (C2a)
 
 **Decision / implemented:** C2 suggestions are **explicit relationship
@@ -8,8 +59,8 @@ deltas**, not a desired set of Person ids. One
 **ADD** Person X to ArchiveItem Y, or **REMOVE** Person X from
 ArchiveItem Y. Identity is **`Person.id`**. Approval is idempotent:
 stale ADD/REMOVE still becomes **APPROVED** as a no-op. New-Person /
-alias / merge proposals are out of scope. C2a has **no public HTML and
-no staff backlog HTML**.
+alias / merge proposals are out of scope. C2a is the model + services
+foundation; public/staff HTML is C2b.
 
 **Current behavior:**
 
@@ -45,19 +96,21 @@ no staff backlog HTML**.
   reads/writes/infers PhotoPerson. The same Person may keep a
   PhotoPerson row after item-level REMOVE. Person is not deleted.
 - Authorization is layered: domain submit/apply services do not bake
-  public request visibility into the apply path. C2b will supply the
-  authorized Person universe and authorize the suggestion/item before
-  mutate. Helper: `archive_item_person_suggestions_queryset_for_user`.
+  public request visibility into the apply path. C2b supplies the
+  authorized Person universe on submit and authorizes the suggestion/item
+  before mutate. Helper: `archive_item_person_suggestions_queryset_for_user`.
 - Historical person-name Tags are unchanged.
 
 **Why:** A desired-set replacement on approve would delete unrelated
 people added after submit time. Person.name is not identity. Extending
 `suggested_tags` would mix free-text taxonomy with Person ids.
 
-**Deferred:** **C2b — public suggestion form + staff backlog HTML**
-follows immediately. Also still deferred: new-Person / alias / merge
-proposals; public presentation of ArchiveItemPerson; hide/remove
-person-name Tags; public Person page.
+**Deferred:** C2b public/staff HTML landed (see **ArchiveItemPerson
+suggestion UI (C2b)**). C2 is complete only when C2b has landed. Still
+deferred: new-Person / alias / merge proposals; public presentation of
+ArchiveItemPerson; hide/remove person-name Tags; public Person page;
+Tag-id → Person-id cleanup mapping; tag redirects; prevent reuse;
+destructive cleanup.
 
 **Tests:** `documents/test_archive_item_person_suggestions.py`.
 Schema migration for `ArchiveItemPersonSuggestion` (after 0055).
@@ -126,9 +179,8 @@ that write path exists. Create and edit are both required staff
 workflows for the Person-vs-Tag migration.
 
 **Deferred:** **C2 — user suggestion support for ArchiveItemPerson.**
-C2a (model + submit/apply services, no HTML) is implemented separately;
-see **ArchiveItemPerson suggestions foundation (C2a)**. C2b public form
-+ staff backlog HTML remains the immediate next PR. C1 itself does not
+C2a (model + submit/apply services) and C2b (public form + staff backlog
+HTML) are implemented separately; see those entries. C1 itself does not
 include user suggestions.
 Also still deferred: public presentation of ArchiveItemPerson;
 hide/remove person-name Tags; redirect old Tag browse URLs; prevent
