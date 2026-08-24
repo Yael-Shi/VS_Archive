@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from documents.services.archive_discovery_metadata_validation import (
+    historical_person_tag_reuse_errors,
+    selected_tag_ids_from_post,
+)
 from public.services.registration import HONEYPOT_FIELD_NAME
 
 NAME_REQUIRED_ERROR = "יש למלא שם."
@@ -42,6 +46,11 @@ def has_suggestion_content(
 
 def suggestion_status_label(status: str) -> str:
     return SUGGESTION_STATUS_LABELS.get(status, status)
+
+
+def blocked_historical_tag_id_submission_errors(post_data) -> list[str]:
+    """Reject tampered POSTs that include frozen historical person Tag ids."""
+    return historical_person_tag_reuse_errors(selected_tag_ids_from_post(post_data))
 
 
 def format_current_metadata_labels(archive_item) -> dict[str, str]:

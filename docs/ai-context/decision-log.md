@@ -1,5 +1,55 @@
 # VS-Archive Decision Log
 
+## Block reuse of historical person-name Tags; post-deploy reconciliation
+
+**Decision / implemented:** The 29 frozen historical person-name Tag ids
+must not be reused. Runtime helpers
+`historical_person_name_tag_ids()` and
+`is_historical_person_name_tag(tag_id)` derive the blocked set only from
+`documents/historical_person_tag_map.py`. Membership is **Tag.id only**.
+Names remain display/provenance and are never lookup keys.
+
+**Observed post-0055 production drift:** Migration 0055 created 124
+`ArchiveItemPerson` rows matching Tag relations at backfill time.
+Production later has **125** historical Tag relations and still **124**
+`ArchiveItemPerson` rows. Concrete drift: Tag **29** is on items **194**
+and **300**; mapped Person **19** is only on item **194**. Hiding person
+Tags before reconciliation would drop the person association on item
+**300**.
+
+**Current behavior:**
+
+- Staff discovery Tag selectors omit blocked Tag ids.
+- Staff create/edit and upload discovery parse reject posted blocked Tag
+  ids (and free-text names that resolve to an existing blocked Tag.id).
+  Ordinary ArchiveItem edits preserve existing blocked Tag relations by
+  merging them back before replace-all `tags.set`. Unrelated valid
+  taxonomy in the same tampered POST is not applied (fail closed).
+- Public metadata-suggestion POST rejects tampered `selected_tags`
+  containing blocked Tag ids. Suggestion approval/application never adds
+  or removes blocked Tag relations; a suggestion whose suggested tag
+  names resolve to a blocked Tag.id fails closed and writes no taxonomy.
+- Explicit management command
+  `reconcile_historical_person_tag_relations` is read-only dry-run by
+  default. `--apply` creates missing `ArchiveItemPerson` rows only,
+  through `create_archive_item_person` (search-index refresh preserved).
+  Create-only, atomic, idempotent. No Tag/relation deletion, no
+  PhotoPerson, no name/`get_or_create(name=...)` identity. No data
+  migration.
+
+**Revised safe order:** block reuse → deploy → dry-run/apply
+reconciliation → public presentation cutover.
+
+**Deferred:** public presentation cutover; Tag browse/filter changes and
+redirects; hide/remove historical person Tags from public display;
+destructive Tag/relation cleanup. Do not hide public person Tags until
+reconciliation has been applied.
+
+**Tests:** `documents/test_historical_person_tag_reuse.py`,
+`documents/test_reconcile_historical_person_tag_relations.py`, plus map
+helper coverage in `documents/test_historical_person_tag_map.py`. No
+schema or data migration.
+
 ## Frozen historical person-name Tag.id → Person.id map
 
 **Decision / implemented:** Versioned code artifact
@@ -7,8 +57,11 @@
 **Tag.id → Person.id** pairs created by migration
 `0055_backfill_person_from_person_name_tags`. Lookup is
 `person_id_for_historical_person_name_tag(tag_id)`; unknown Tag ids
-return `None`. There is **no runtime consumer** yet (no redirects,
-hide, reuse blocking, public presentation, or Tag cleanup).
+return `None`. Runtime consumers now include reuse blocking and the
+post-deploy reconciliation command (see **Block reuse of historical
+person-name Tags; post-deploy reconciliation**). Redirects, public
+presentation cutover, and destructive Tag cleanup are still out of
+scope for this module.
 
 **Evidence (production):** 0055 started from 0 Person rows and created
 all 29 Persons sequentially in `APPROVED_PERSON_NAME_TAGS` order.
@@ -20,16 +73,19 @@ Person ids are **1–29** in that creation order. Person and
 - Tags **2** and **34** share item set `[264]`, so item-sets alone are
   not a bijection. Creation order proves **2→1** and **34→24**.
 - Tag **29** later gained a leftover Tag relation to item **300**; its
-  0055 Person remains **29→19**.
+  0055 Person remains **29→19**. Production now has 125 historical Tag
+  relations vs 124 `ArchiveItemPerson` rows (Person **19** on item **194**
+  only).
 
 **Current behavior:** Names in comments are display/provenance-only.
 `Person.name` is not unique and is **not** identity. Do not
 `get_or_create(name=...)`. Do not join or break ties on names. Do not
 use PhotoPerson.
 
-**Deferred:** tag redirects; hide historical person Tags; prevent reuse;
-destructive cleanup; schema mapping table; any runtime import of this
-map. C1/C2 public/staff Person writes remain separate.
+**Deferred:** tag redirects; public presentation cutover; hide historical
+person Tags from public display; destructive cleanup; schema mapping
+table. Reuse blocking and the reconciliation command are implemented;
+do not hide public person Tags until reconciliation has been applied.
 
 **Tests:** `documents/test_historical_person_tag_map.py`. No schema
 migration.
@@ -76,9 +132,11 @@ unchanged on this form.
 for that contract without a public presentation cutover.
 
 **Deferred:** public presentation cutover (cards, detail discovery,
-Person pages); hide historical person Tags; Tag-id → Person-id cleanup
-mapping; tag redirects; prevent reuse of person-name Tags; destructive
-cleanup; new-Person / alias / merge proposals.
+Person pages); hide historical person Tags from public display; tag
+redirects; destructive cleanup; new-Person / alias / merge proposals.
+Reuse of the 29 historical person-name Tags is blocked separately (see
+**Block reuse of historical person-name Tags; post-deploy
+reconciliation**).
 
 **Tests:** `documents/test_archive_item_person_suggestion_ui.py` plus
 restricted-visibility and visibility-metadata UI extensions. No new

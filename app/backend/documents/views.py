@@ -158,6 +158,7 @@ from documents.services.archive_item_access import (
 )
 from documents.services.archive_metadata_suggestions import (
     SUGGESTION_CONTENT_REQUIRED_ERROR,
+    blocked_historical_tag_id_submission_errors,
     format_current_metadata_labels,
     has_suggestion_content,
     normalize_suggestion_text,
@@ -3846,6 +3847,7 @@ def archive_metadata_suggestion_form(request, item_id: int):
         has_person_actions = bool(add_person_ids or remove_person_ids)
         if not has_taxonomy_content and not has_person_actions:
             form_errors.append(SUGGESTION_CONTENT_REQUIRED_ERROR)
+        form_errors.extend(blocked_historical_tag_id_submission_errors(request.POST))
 
         if not form_errors:
             submitter_user = (
