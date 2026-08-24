@@ -13,7 +13,14 @@ from typing import Any, Mapping, Sequence
 
 from django.db.models import QuerySet
 
-from documents.models import ArchiveCategory, ArchiveEvent, ArchiveItem, Tag
+from documents.models import (
+    ArchiveCategory,
+    ArchiveEvent,
+    ArchiveItem,
+    ArchiveItemPerson,
+    Person,
+    Tag,
+)
 
 # Match archive date-component year bounds (``archive_date_input``).
 _MIN_YEAR = 1
@@ -23,6 +30,7 @@ ARCHIVE_ADVANCED_FILTER_PARAM_AUTHOR = "author"
 ARCHIVE_ADVANCED_FILTER_PARAM_CATEGORY = "category"
 ARCHIVE_ADVANCED_FILTER_PARAM_EVENT = "event"
 ARCHIVE_ADVANCED_FILTER_PARAM_TAG = "tag"
+ARCHIVE_ADVANCED_FILTER_PARAM_PERSON = "person"
 ARCHIVE_ADVANCED_FILTER_PARAM_YEAR = "year"
 ARCHIVE_ADVANCED_FILTER_PARAM_YEAR_TO = "year_to"
 
@@ -46,6 +54,7 @@ EMPTY_ARCHIVE_ADVANCED_FILTER_CHOICE_CONTEXT: dict[str, object] = {
     "advanced_filter_category_choices": (),
     "advanced_filter_event_choices": (),
     "advanced_filter_tag_choices": (),
+    "advanced_filter_person_choices": (),
 }
 
 
@@ -57,6 +66,7 @@ class ArchiveAdvancedFilters:
     category_ids: tuple[int, ...] = ()
     event_ids: tuple[int, ...] = ()
     tag_ids: tuple[int, ...] = ()
+    person_ids: tuple[int, ...] = ()
     year: int | None = None
     year_to: int | None = None
 
@@ -66,6 +76,7 @@ class ArchiveAdvancedFilters:
             or self.category_ids
             or self.event_ids
             or self.tag_ids
+            or self.person_ids
             or self.year is not None
         )
 
@@ -80,6 +91,8 @@ class ArchiveAdvancedFilters:
             params.append((ARCHIVE_ADVANCED_FILTER_PARAM_EVENT, str(event_id)))
         for tag_id in self.tag_ids:
             params.append((ARCHIVE_ADVANCED_FILTER_PARAM_TAG, str(tag_id)))
+        for person_id in self.person_ids:
+            params.append((ARCHIVE_ADVANCED_FILTER_PARAM_PERSON, str(person_id)))
         if self.year is not None:
             params.append((ARCHIVE_ADVANCED_FILTER_PARAM_YEAR, str(self.year)))
             if self.year_to is not None and self.year_to != self.year:
@@ -161,8 +174,9 @@ def normalize_archive_advanced_filters(
     Parse public archive advanced-filter GET parameters.
 
     - ``author``: single trimmed exact value (empty → inactive).
-    - ``category`` / ``event`` / ``tag``: repeatable positive integer ids;
-      malformed values skipped; order of first occurrence preserved.
+    - ``category`` / ``event`` / ``tag`` / ``person``: repeatable positive
+      integer ids; malformed values skipped; order of first occurrence
+      preserved. ``person`` is a Person primary key, never a name or alias.
     - ``year`` / ``year_to``: optional inclusive year range. ``year_to`` without
       ``year`` is ignored. Malformed ``year`` drops the date filter. Malformed
       ``year_to`` with a valid ``year`` falls back to a single-year window.
@@ -189,6 +203,9 @@ def normalize_archive_advanced_filters(
     tag_ids = _parse_positive_int_ids(
         _raw_values(params, ARCHIVE_ADVANCED_FILTER_PARAM_TAG)
     )
+    person_ids = _parse_positive_int_ids(
+        _raw_values(params, ARCHIVE_ADVANCED_FILTER_PARAM_PERSON)
+    )
 
     year_values = _raw_values(params, ARCHIVE_ADVANCED_FILTER_PARAM_YEAR)
     year_to_values = _raw_values(params, ARCHIVE_ADVANCED_FILTER_PARAM_YEAR_TO)
@@ -211,6 +228,7 @@ def normalize_archive_advanced_filters(
         category_ids=category_ids,
         event_ids=event_ids,
         tag_ids=tag_ids,
+        person_ids=person_ids,
         year=year,
         year_to=year_to,
     )
@@ -253,6 +271,17 @@ def filter_archive_items_by_advanced_filters(
     if filters.tag_ids:
         filtered = filtered.filter(
             pk__in=filtered.filter(tags__id__in=filters.tag_ids).values("pk")
+        )
+
+    if filters.person_ids:
+        # ArchiveItemPerson only. Query the through table directly so the
+        # authorized browse queryset (EXISTS/JOINs) is not copied into the
+        # inner subquery. PhotoPerson is a PhotoContent relation and must not
+        # match this filter.
+        filtered = filtered.filter(
+            pk__in=ArchiveItemPerson.objects.filter(
+                person_id__in=filters.person_ids
+            ).values("archive_item_id")
         )
 
     if filters.year is not None:
@@ -299,11 +328,17 @@ def archive_advanced_filter_choice_context(
     tags = tuple(
         Tag.objects.filter(archive_items__pk__in=item_pks).distinct().order_by("name")
     )
+    persons = tuple(
+        Person.objects.filter(archive_items__pk__in=item_pks)
+        .distinct()
+        .order_by("name", "id")
+    )
     return {
         "advanced_filter_author_choices": author_names,
         "advanced_filter_category_choices": categories,
         "advanced_filter_event_choices": events,
         "advanced_filter_tag_choices": tags,
+        "advanced_filter_person_choices": persons,
     }
 
 
@@ -317,6 +352,7 @@ def archive_advanced_filter_template_context(
         "advanced_filter_category_ids": filters.category_ids,
         "advanced_filter_event_ids": filters.event_ids,
         "advanced_filter_tag_ids": filters.tag_ids,
+        "advanced_filter_person_ids": filters.person_ids,
         "advanced_filter_year": filters.year,
         "advanced_filter_year_to": (
             filters.year_to
@@ -483,6 +519,16 @@ def archive_advanced_filters_without_tag(
     )
 
 
+def archive_advanced_filters_without_person(
+    filters: ArchiveAdvancedFilters,
+    person_id: int,
+) -> ArchiveAdvancedFilters:
+    return replace(
+        filters,
+        person_ids=tuple(value for value in filters.person_ids if value != person_id),
+    )
+
+
 def archive_advanced_filters_without_year(
     filters: ArchiveAdvancedFilters,
 ) -> ArchiveAdvancedFilters:
@@ -503,6 +549,7 @@ def build_archive_advanced_filter_summary_items(
     category_choices: Sequence[Any] = (),
     event_choices: Sequence[Any] = (),
     tag_choices: Sequence[Any] = (),
+    person_choices: Sequence[Any] = (),
 ) -> list[dict[str, object]]:
     """
     Compact active-filter summary descriptors (labels/values only).
@@ -560,6 +607,19 @@ def build_archive_advanced_filter_summary_items(
                 "label": "תגית" if len(names) == 1 else "תגיות",
                 "value": ", ".join(names),
                 "ids": filters.tag_ids,
+            }
+        )
+    if filters.person_ids:
+        names = [
+            _choice_name_by_id(person_choices, person_id)
+            for person_id in filters.person_ids
+        ]
+        items.append(
+            {
+                "kind": "person",
+                "label": "אדם" if len(names) == 1 else "אנשים",
+                "value": ", ".join(names),
+                "ids": filters.person_ids,
             }
         )
     if filters.year is not None:

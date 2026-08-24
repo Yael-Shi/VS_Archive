@@ -26,6 +26,9 @@
           {% for tag_id in advanced_filter_tag_ids %}
             <input type="hidden" name="tag" value="{{ tag_id }}">
           {% endfor %}
+          {% for person_id in advanced_filter_person_ids %}
+            <input type="hidden" name="person" value="{{ person_id }}">
+          {% endfor %}
           {% if advanced_filter_year_input %}
             <input type="hidden" name="year" value="{{ advanced_filter_year_input }}">
           {% endif %}
@@ -203,6 +206,39 @@
                 </select>
                 <div class="field-hint" data-archive-choice-filter-empty hidden>
                   לא נמצאו תגיות תואמות.
+                </div>
+              </div>
+
+              <div
+                class="archive-advanced-search__field"
+                data-archive-choice-filter-field
+              >
+                <label for="archive-filter-person">אנשים</label>
+                <input
+                  type="search"
+                  class="archive-advanced-search__choice-filter"
+                  data-archive-choice-filter-search
+                  autocomplete="off"
+                  placeholder="סינון אנשים…"
+                  aria-label="סינון אנשים ברשימה"
+                >
+                <select
+                  id="archive-filter-person"
+                  class="archive-advanced-search__choice-list"
+                  name="person"
+                  multiple
+                  size="5"
+                  data-archive-choice-filter-select
+                >
+                  {% for person in advanced_filter_person_choices %}
+                    <option
+                      value="{{ person.id }}"
+                      {% if person.id in advanced_filter_person_ids %}selected{% endif %}
+                    >{{ person.name }}</option>
+                  {% endfor %}
+                </select>
+                <div class="field-hint" data-archive-choice-filter-empty hidden>
+                  לא נמצאו אנשים תואמים.
                 </div>
               </div>
 

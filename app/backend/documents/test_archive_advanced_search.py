@@ -14,6 +14,9 @@ from documents.models import (
     ArchiveCategory,
     ArchiveEvent,
     ArchiveItem,
+    ArchiveItemPerson,
+    Person,
+    PersonAlias,
     Tag,
 )
 from documents.services.archive_advanced_search import (
@@ -120,11 +123,17 @@ class ArchiveAdvancedFilterNormalizationTests(SimpleTestCase):
                 ("event", "9"),
                 ("event", "9"),
                 ("tag", "5"),
+                ("person", "10"),
+                ("person", "13"),
+                ("person", "10"),
+                ("person", "abc"),
+                ("person", "0"),
             ]
         )
         self.assertEqual(filters.category_ids, (3, 1))
         self.assertEqual(filters.event_ids, (9,))
         self.assertEqual(filters.tag_ids, (5,))
+        self.assertEqual(filters.person_ids, (10, 13))
 
     def test_year_to_without_year_is_ignored(self):
         filters = normalize_archive_advanced_filters({"year_to": "1960"})
@@ -161,6 +170,7 @@ class ArchiveAdvancedFilterNormalizationTests(SimpleTestCase):
             category_ids=(2, 7),
             event_ids=(4,),
             tag_ids=(8, 9),
+            person_ids=(10, 13),
             year=1950,
             year_to=1955,
         )
@@ -178,6 +188,7 @@ class ArchiveAdvancedFilterNormalizationTests(SimpleTestCase):
         self.assertEqual(parsed["category"], ["2", "7"])
         self.assertEqual(parsed["event"], ["4"])
         self.assertEqual(parsed["tag"], ["8", "9"])
+        self.assertEqual(parsed["person"], ["10", "13"])
         self.assertEqual(parsed["year"], ["1950"])
         self.assertEqual(parsed["year_to"], ["1955"])
         self.assertEqual(parsed["page"], ["2"])
@@ -491,6 +502,9 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
         )
         public_tag = Tag.objects.create(name="Public Choice Tag")
         private_tag = Tag.objects.create(name="Private Choice Tag")
+        public_person = Person.objects.create(name="Public Choice Person")
+        private_person = Person.objects.create(name="Private Choice Person")
+        PersonAlias.objects.create(person=public_person, name="Public Alias")
         public_event = ArchiveEvent.objects.create(
             name="Public Choice Event", slug="public-choice-event"
         )
@@ -505,6 +519,7 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
             event_names=["Public Choice Event"],
             tag_names=["Public Choice Tag"],
         )
+        ArchiveItemPerson.objects.create(archive_item=public_item, person=public_person)
         private_item = create_manual_text_archive_item(
             title="Private choice item",
             body="secret",
@@ -516,6 +531,9 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
             category_names=["Private Choice Cat"],
             event_names=["Private Choice Event"],
             tag_names=["Private Choice Tag"],
+        )
+        ArchiveItemPerson.objects.create(
+            archive_item=private_item, person=private_person
         )
 
         anon_qs = archive_browse_queryset_for_user(None)
@@ -534,6 +552,14 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
         self.assertEqual(
             [t.pk for t in anon_choices["advanced_filter_tag_choices"]],
             [public_tag.pk],
+        )
+        self.assertEqual(
+            [p.pk for p in anon_choices["advanced_filter_person_choices"]],
+            [public_person.pk],
+        )
+        self.assertEqual(
+            [p.name for p in anon_choices["advanced_filter_person_choices"]],
+            ["Public Choice Person"],
         )
         self.assertNotIn(private_item.pk, _ids(anon_qs))
         self.assertIn(public_item.pk, _ids(anon_qs))
@@ -555,6 +581,10 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
         self.assertEqual(
             {t.pk for t in family_choices["advanced_filter_tag_choices"]},
             {public_tag.pk, private_tag.pk},
+        )
+        self.assertEqual(
+            {p.pk for p in family_choices["advanced_filter_person_choices"]},
+            {public_person.pk, private_person.pk},
         )
 
     def test_unauthorized_items_cannot_surface_via_advanced_filters(self):
@@ -619,6 +649,7 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
             category_ids=(cat.id,),
             event_ids=(event.id,),
             tag_ids=(tag.id,),
+            person_ids=(10,),
             year=1950,
             year_to=1955,
         )
@@ -650,6 +681,7 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
             self.assertEqual(parsed["category"], [str(cat.id)])
             self.assertEqual(parsed["event"], [str(event.id)])
             self.assertEqual(parsed["tag"], [str(tag.id)])
+            self.assertEqual(parsed["person"], ["10"])
             self.assertEqual(parsed["year"], ["1950"])
             self.assertEqual(parsed["year_to"], ["1955"])
             self.assertEqual(parsed["q"], ["ADVPAGE"])
@@ -671,6 +703,7 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
         self.assertEqual(photo_parsed["category"], [str(cat.id)])
         self.assertEqual(photo_parsed["event"], [str(event.id)])
         self.assertEqual(photo_parsed["tag"], [str(tag.id)])
+        self.assertEqual(photo_parsed["person"], ["10"])
         self.assertNotIn("page", photo_parsed)
 
         resp = self.client.get(
@@ -682,6 +715,7 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
                 ("category", str(cat.id)),
                 ("event", str(event.id)),
                 ("tag", str(tag.id)),
+                ("person", "10"),
                 ("year", "1950"),
                 ("year_to", "1955"),
                 ("per_page", "24"),
@@ -694,6 +728,7 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
         self.assertIn(f'name="category" value="{cat.id}"', html)
         self.assertIn(f'name="event" value="{event.id}"', html)
         self.assertIn(f'name="tag" value="{tag.id}"', html)
+        self.assertIn('name="person" value="10"', html)
         self.assertIn('name="year" value="1950"', html)
         self.assertIn('name="year_to" value="1955"', html)
         self.assertNotIn('name="page"', html)
@@ -705,6 +740,7 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
         self.assertIn(f"category={cat.id}", html)
         self.assertIn(f"event={event.id}", html)
         self.assertIn(f"tag={tag.id}", html)
+        self.assertIn("person=10", html)
 
     def test_view_applies_filters_before_pagination(self):
         cat = ArchiveCategory.objects.create(name="View Cat", slug="view-cat")

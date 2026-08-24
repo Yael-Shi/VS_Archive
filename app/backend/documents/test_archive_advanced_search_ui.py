@@ -19,6 +19,8 @@ from documents.models import (
     ArchiveCategory,
     ArchiveEvent,
     ArchiveItem,
+    ArchiveItemPerson,
+    Person,
     Tag,
 )
 from documents.services.archive_advanced_search import (
@@ -100,6 +102,11 @@ def _choice_context_query_count(captured_queries) -> int:
         if sql.lstrip().startswith("select") and " from documents_tag" in sql:
             if "archiveitem_tags" in sql or "archive_items" in sql:
                 count += 1
+                continue
+        if sql.lstrip().startswith("select") and "documents_person" in sql:
+            if "documents_archiveitemperson" in sql or "archive_items" in sql:
+                if "documents_photoperson" not in sql:
+                    count += 1
     return count
 
 
@@ -178,19 +185,22 @@ class ArchiveAdvancedSearchUiTests(TestCase):
         )
         public_tag = Tag.objects.create(name="UI Public Tag")
         private_tag = Tag.objects.create(name="UI Private Tag")
+        public_person = Person.objects.create(name="UI Public Person")
+        private_person = Person.objects.create(name="UI Private Person")
         public_event = ArchiveEvent.objects.create(
             name="UI Public Event", slug="ui-public-event"
         )
         private_event = ArchiveEvent.objects.create(
             name="UI Private Event", slug="ui-private-event"
         )
-        _public_item(
+        public_item = _public_item(
             title="UI public item",
             author_name="UI Public Author",
             category_names=["UI Public Cat"],
             event_names=["UI Public Event"],
             tag_names=["UI Public Tag"],
         )
+        ArchiveItemPerson.objects.create(archive_item=public_item, person=public_person)
         private_item = create_manual_text_archive_item(
             title="UI private item",
             body="secret",
@@ -202,6 +212,9 @@ class ArchiveAdvancedSearchUiTests(TestCase):
             category_names=["UI Private Cat"],
             event_names=["UI Private Event"],
             tag_names=["UI Private Tag"],
+        )
+        ArchiveItemPerson.objects.create(
+            archive_item=private_item, person=private_person
         )
 
         anon = self.client.get(self.url, {"advanced": "1"})
@@ -223,13 +236,19 @@ class ArchiveAdvancedSearchUiTests(TestCase):
             [t.pk for t in anon.context["advanced_filter_tag_choices"]],
             [public_tag.pk],
         )
+        self.assertEqual(
+            [p.pk for p in anon.context["advanced_filter_person_choices"]],
+            [public_person.pk],
+        )
         html = anon.content.decode("utf-8")
         self.assertIn("UI Public Author", html)
         self.assertIn("UI Public Cat", html)
+        self.assertIn("UI Public Person", html)
         self.assertNotIn("UI Private Author", html)
         self.assertNotIn("UI Private Cat", html)
         self.assertNotIn("UI Private Tag", html)
         self.assertNotIn("UI Private Event", html)
+        self.assertNotIn("UI Private Person", html)
 
         self.client.force_login(self.family)
         family = self.client.get(self.url, {"advanced": "1"})
@@ -249,6 +268,10 @@ class ArchiveAdvancedSearchUiTests(TestCase):
             {t.pk for t in family.context["advanced_filter_tag_choices"]},
             {public_tag.pk, private_tag.pk},
         )
+        self.assertEqual(
+            {p.pk for p in family.context["advanced_filter_person_choices"]},
+            {public_person.pk, private_person.pk},
+        )
 
     def test_ordinary_and_q_only_skip_choice_context_queries(self):
         _public_item(
@@ -265,7 +288,7 @@ class ArchiveAdvancedSearchUiTests(TestCase):
         authorized = archive_browse_queryset_for_user(None)
         # Baseline cost of the choice-context helper itself (PR1-era every-request cost).
         baseline_choice_queries = _measure_choice_context_queries(authorized)
-        self.assertGreaterEqual(baseline_choice_queries, 4)
+        self.assertGreaterEqual(baseline_choice_queries, 5)
 
         # Warm caches / auth queries.
         self.client.get(self.url)
@@ -279,6 +302,7 @@ class ArchiveAdvancedSearchUiTests(TestCase):
             self.assertFalse(plain.context["load_advanced_choices"])
             self.assertEqual(plain.context["advanced_filter_author_choices"], ())
             self.assertEqual(plain.context["advanced_filter_category_choices"], ())
+            self.assertEqual(plain.context["advanced_filter_person_choices"], ())
             mock_choices.assert_not_called()
 
             q_only = self.client.get(self.url, {"q": "ChoiceCost"})
@@ -331,13 +355,17 @@ class ArchiveAdvancedSearchUiTests(TestCase):
         event = ArchiveEvent.objects.create(name="UI Event A", slug="ui-event-a")
         tag_a = Tag.objects.create(name="UI Tag A")
         tag_b = Tag.objects.create(name="UI Tag B")
-        _public_item(
+        person_a = Person.objects.create(name="UI Person A")
+        person_b = Person.objects.create(name="UI Person B")
+        item = _public_item(
             title="Preserve multi",
             author_name="Preserve Author",
             category_names=["UI Cat A", "UI Cat B"],
             event_names=["UI Event A"],
             tag_names=["UI Tag A", "UI Tag B"],
         )
+        ArchiveItemPerson.objects.create(archive_item=item, person=person_a)
+        ArchiveItemPerson.objects.create(archive_item=item, person=person_b)
         resp = self.client.get(
             self.url,
             [
@@ -348,6 +376,8 @@ class ArchiveAdvancedSearchUiTests(TestCase):
                 ("event", str(event.id)),
                 ("tag", str(tag_a.id)),
                 ("tag", str(tag_b.id)),
+                ("person", str(person_a.id)),
+                ("person", str(person_b.id)),
             ],
         )
         self.assertEqual(resp.status_code, 200)
@@ -357,12 +387,17 @@ class ArchiveAdvancedSearchUiTests(TestCase):
         )
         self.assertEqual(resp.context["advanced_filter_event_ids"], (event.id,))
         self.assertEqual(resp.context["advanced_filter_tag_ids"], (tag_a.id, tag_b.id))
+        self.assertEqual(
+            resp.context["advanced_filter_person_ids"], (person_a.id, person_b.id)
+        )
         html = resp.content.decode("utf-8")
         self.assertIn('id="archive-filter-author"', html)
         self.assertIn(f'value="{cat_a.id}"', html)
         self.assertIn(f'value="{cat_b.id}"', html)
         self.assertIn(f'value="{tag_a.id}"', html)
         self.assertIn(f'value="{tag_b.id}"', html)
+        self.assertIn(f'value="{person_a.id}"', html)
+        self.assertIn(f'value="{person_b.id}"', html)
 
     def test_author_control_matches_taxonomy_choice_list_pattern_as_single_select(self):
         _public_item(title="Author UI A", author_name="Author Alpha")
@@ -575,7 +610,8 @@ class ArchiveAdvancedSearchUiTests(TestCase):
     def test_active_filter_summary_chips_and_clear_all(self):
         cat = ArchiveCategory.objects.create(name="Chip Cat", slug="chip-cat")
         tag = Tag.objects.create(name="Chip Tag")
-        _public_item(
+        person = Person.objects.create(name="Chip Person")
+        item = _public_item(
             title="Chip Item",
             author_name="Chip Author",
             category_names=["Chip Cat"],
@@ -584,6 +620,7 @@ class ArchiveAdvancedSearchUiTests(TestCase):
             date_end=date(1955, 12, 31),
             date_precision=ArchiveItem.DatePrecision.RANGE_YEAR,
         )
+        ArchiveItemPerson.objects.create(archive_item=item, person=person)
         resp = self.client.get(
             self.url,
             [
@@ -591,6 +628,7 @@ class ArchiveAdvancedSearchUiTests(TestCase):
                 ("author", "Chip Author"),
                 ("category", str(cat.id)),
                 ("tag", str(tag.id)),
+                ("person", str(person.id)),
                 ("year", "1950"),
                 ("year_to", "1955"),
             ],
@@ -605,6 +643,7 @@ class ArchiveAdvancedSearchUiTests(TestCase):
         self.assertIn("Chip Author", html)
         self.assertIn("Chip Cat", html)
         self.assertIn("Chip Tag", html)
+        self.assertIn("Chip Person", html)
         self.assertIn("1950–1955", html)
         self.assertIn("נמצאו 1 תוצאות", html)
         self.assertIn('עבור "Chip"', html)

@@ -705,6 +705,7 @@ def archive_public_list_active_filter_summary_context(
     category_choices: Sequence[object] = (),
     event_choices: Sequence[object] = (),
     tag_choices: Sequence[object] = (),
+    person_choices: Sequence[object] = (),
 ) -> dict[str, object]:
     """Compact active-filter chips with canonical remove/edit/clear links."""
     from dataclasses import replace
@@ -716,6 +717,7 @@ def archive_public_list_active_filter_summary_context(
         category_choices=category_choices,
         event_choices=event_choices,
         tag_choices=tag_choices,
+        person_choices=person_choices,
     )
     chips: list[dict[str, object]] = []
     for item in summary_items:
@@ -732,6 +734,8 @@ def archive_public_list_active_filter_summary_context(
             remove_filters = replace(filters, event_ids=())
         elif kind == "tag":
             remove_filters = replace(filters, tag_ids=())
+        elif kind == "person":
+            remove_filters = replace(filters, person_ids=())
         elif kind == "year":
             remove_filters = archive_advanced_filters_without_year(filters)
         remove_query = build_archive_public_list_query(

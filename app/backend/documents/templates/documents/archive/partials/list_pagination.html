@@ -18,6 +18,9 @@
     {% for tag_id in advanced_filter_tag_ids %}
       <input type="hidden" name="tag" value="{{ tag_id }}">
     {% endfor %}
+    {% for person_id in advanced_filter_person_ids %}
+      <input type="hidden" name="person" value="{{ person_id }}">
+    {% endfor %}
     {% if advanced_filter_year %}
       <input type="hidden" name="year" value="{{ advanced_filter_year }}">
     {% endif %}
