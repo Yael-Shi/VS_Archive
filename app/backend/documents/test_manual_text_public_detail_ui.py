@@ -161,6 +161,12 @@ class ManualTextPublicDetailUiTests(TestCase):
         self.assertContains(resp, "archive-detail-manual-text-navigation-actions")
         self.assertContains(resp, "archive-detail-manual-text-body")
         self.assertContains(resp, "archive-detail-text")
+        self.assertContains(
+            resp,
+            '<div class="archive-detail-manual-text-signature" aria-hidden="true"></div>',
+            html=True,
+        )
+        self.assertContains(resp, "manual_text_signature.js")
         self.assertNotContains(resp, "archive-detail-photo-header")
         self.assertNotContains(resp, "archive-detail-toolbar")
         self.assertNotContains(resp, "archive-detail-page--photo")
@@ -193,9 +199,7 @@ class ManualTextPublicDetailUiTests(TestCase):
             )
             self.assertEqual(resp.status_code, 200)
 
-            expected_class = (
-                f"archive-detail-page--manual-text-signature-{expected}"
-            )
+            expected_class = f"archive-detail-page--manual-text-signature-{expected}"
             self.assertContains(resp, expected_class)
 
             for number in (1, 2, 3):
@@ -204,7 +208,6 @@ class ManualTextPublicDetailUiTests(TestCase):
                         resp,
                         f"archive-detail-page--manual-text-signature-{number}",
                     )
-
 
     def test_public_body_remains_html_safe_and_preserves_newlines(self):
         item = create_manual_text_archive_item(
@@ -274,6 +277,8 @@ class ManualTextDetailDoesNotChangeOtherTypesTests(TestCase):
         self.assertNotContains(resp, "archive-detail-page--manual-text")
         self.assertNotContains(resp, "archive-detail-manual-text-header")
         self.assertNotContains(resp, "archive-detail-manual-text-body")
+        self.assertNotContains(resp, "archive-detail-manual-text-signature")
+        self.assertNotContains(resp, "manual_text_signature.js")
 
     def test_video_detail_keeps_shared_toolbar_and_type_badge(self):
         resp = self.client.get(
@@ -286,6 +291,8 @@ class ManualTextDetailDoesNotChangeOtherTypesTests(TestCase):
         self.assertNotContains(resp, "archive-detail-page--manual-text")
         self.assertNotContains(resp, "archive-detail-manual-text-header")
         self.assertNotContains(resp, "archive-detail-manual-text-body")
+        self.assertNotContains(resp, "archive-detail-manual-text-signature")
+        self.assertNotContains(resp, "manual_text_signature.js")
 
 
 class ManualTextPublicDetailLayoutStyleTests(SimpleTestCase):
@@ -346,47 +353,184 @@ class ManualTextPublicDetailLayoutStyleTests(SimpleTestCase):
 
     def test_manual_text_signature_watermark_is_desktop_only(self):
         css = self._css()
+        signature_css = css[css.index(".archive-detail-manual-text-signature {") :]
 
-        desktop_start = css.index("@media (min-width: 1180px)")
-        desktop_end = css.index("@media (max-width: 1179px)", desktop_start)
-        desktop_rule = css[desktop_start:desktop_end]
-
-        self.assertIn(
+        self.assertNotIn(
             ".archive-detail-page--manual-text .archive-detail-manual-text-body::before",
-            desktop_rule,
+            css,
         )
-        self.assertIn(
-            ".archive-detail-page--manual-text-signature-1\n"            "    .archive-detail-manual-text-body::before",
-            desktop_rule,
+        self.assertNotIn(
+            ".archive-detail-manual-text-body::before",
+            signature_css,
         )
-        self.assertIn(
-            ".archive-detail-page--manual-text-signature-2\n"            "    .archive-detail-manual-text-body::before",
-            desktop_rule,
-        )
-        self.assertIn(
-            ".archive-detail-page--manual-text-signature-3\n"            "    .archive-detail-manual-text-body::before",
-            desktop_rule,
-        )
+        self.assertNotIn("left: calc(", signature_css)
+        self.assertNotIn("right: calc(", signature_css)
+        self.assertNotIn("min(1320px", signature_css)
+        self.assertNotIn("* 3 / 8", signature_css)
+        self.assertNotIn("27vw", signature_css)
+        self.assertNotIn("7vw", signature_css)
+        self.assertNotIn("width: min(", signature_css)
+        self.assertNotIn("position: fixed;", signature_css)
+        self.assertNotIn("::before", signature_css)
 
-        mobile_start = css.index("@media (max-width: 1179px)", desktop_end)
-        mobile_rule = css[mobile_start : css.index("}", mobile_start) + 1]
-
+        desktop_start = signature_css.index("@media (min-width: 1180px)")
+        desktop_end = signature_css.index("@media (max-width: 1179px)", desktop_start)
+        desktop_rule = signature_css[desktop_start:desktop_end]
         self.assertIn(
-            ".archive-detail-page--manual-text .archive-detail-manual-text-body::before",
-            mobile_rule,
+            ".archive-detail-page--manual-text .archive-detail-manual-text-signature",
+            desktop_rule,
         )
+        self.assertIn("display: block;", desktop_rule)
+
+        mobile_start = signature_css.index("@media (max-width: 1179px)", desktop_end)
+        mobile_rule = signature_css[
+            mobile_start : signature_css.index("}", mobile_start) + 1
+        ]
+        self.assertIn(".archive-detail-manual-text-signature", mobile_rule)
         self.assertIn("display: none;", mobile_rule)
+
+        signature_rule = signature_css[
+            : signature_css.index(
+                "}", signature_css.index(".archive-detail-manual-text-signature {")
+            )
+        ]
+        self.assertIn("position: absolute;", signature_rule)
+        self.assertNotIn("position: fixed;", signature_rule)
+        self.assertIn("max-width: 410px;", signature_rule)
+        self.assertNotIn("width: min(27vw, 410px);", signature_rule)
+        self.assertNotIn("27vw", signature_rule)
+        self.assertIn("aspect-ratio: 16 / 9;", signature_rule)
+        self.assertIn("opacity: 0.22;", signature_rule)
+        self.assertIn("pointer-events: none;", signature_rule)
+        self.assertNotIn("left:", signature_rule)
+
+        card_start = css.index(".archive-detail-page--manual-text {")
+        card_rule = css[card_start : css.index("}", card_start)]
+        self.assertIn("position: relative;", card_rule)
 
     def test_manual_text_signature_assets_are_referenced(self):
         css = self._css()
 
         for number in (1, 2, 3):
             self.assertIn(
-                f'/static/public/images/manual-text-signatures/'
-                f'saadia-signature-{number}.png',
+                ".archive-detail-page--manual-text-signature-"
+                f"{number}\n"
+                "  .archive-detail-manual-text-signature {",
+                css,
+            )
+            self.assertIn(
+                f"/static/public/images/manual-text-signatures/"
+                f"saadia-signature-{number}.png",
                 css,
             )
 
+    def test_manual_text_signature_script_positions_from_measured_layout(self):
+        js_path = (
+            settings.BASE_DIR
+            / "public"
+            / "static"
+            / "public"
+            / "manual_text_signature.js"
+        )
+        js = js_path.read_text(encoding="utf-8")
+
+        self.assertIn(".archive-detail-page--manual-text", js)
+        self.assertIn(".archive-detail-manual-text-body", js)
+        self.assertIn(".archive-detail-manual-text-navigation-actions", js)
+        self.assertIn(".archive-detail-manual-text-staff-management-actions", js)
+        self.assertIn(".archive-detail-manual-text-signature", js)
+        self.assertIn("getBoundingClientRect()", js)
+        self.assertIn("sideLeft + sideWidth / 2", js)
+        self.assertIn("sideCenterInCard", js)
+        self.assertIn("var MAX_SIGNATURE_WIDTH_PX = 410;", js)
+        self.assertIn("var MIN_SIGNATURE_WIDTH_PX = 160;", js)
+        self.assertIn("availableWidth = sideWidth - 2 * spacing", js)
+        self.assertIn("availableHeight = maxBottomInCard - safeTopInCard", js)
+        self.assertIn("availableHeight * 16 / 9", js)
+        self.assertIn("MAX_SIGNATURE_WIDTH_PX,", js)
+        self.assertIn("availableWidth,", js)
+        self.assertIn('signature.style.width = fittingWidth + "px"', js)
+        self.assertIn("safeTopInCard", js)
+        self.assertIn(
+            "cardHeight = cardRect.height - borders.top - borders.bottom", js
+        )
+        self.assertIn("signatureHeight = fittingWidth * 9 / 16", js)
+        self.assertIn(
+            "cardHeight - signatureHeight - spacing", js
+        )
+        self.assertNotIn("page.clientHeight", js)
+        self.assertNotIn("signature.offsetHeight", js)
+        self.assertIn("desiredTopInCard", js)
+        self.assertIn("finalTopInCard", js)
+        self.assertIn("translateX(-50%)", js)
+        self.assertIn("(min-width: 1180px)", js)
+        self.assertIn("ResizeObserver", js)
+        self.assertIn('addEventListener("resize"', js)
+        self.assertIn('addEventListener("scroll"', js)
+        self.assertIn("{ passive: true }", js)
+        self.assertIn("requestAnimationFrame", js)
+        self.assertNotIn("position: fixed", js)
+        self.assertNotIn("viewportMaxBottom", js)
+        self.assertNotIn("viewportMaxTop", js)
+        self.assertNotIn("cardMaxBottom", js)
+        self.assertNotIn("console.debug", js)
+        self.assertNotIn("[manual-text-signature]", js)
+        self.assertNotIn("devicePixelRatio", js)
+        self.assertNotIn("27vw", js)
+        self.assertNotIn("7vw", js)
+        self.assertNotIn("1320px", js)
+        self.assertNotIn("82ch", js)
+        self.assertNotIn("left: calc", js)
+        self.assertNotIn("right: calc", js)
+        self.assertNotIn("signature-1", js)
+        self.assertNotIn("signature-2", js)
+        self.assertNotIn("signature-3", js)
+
+    def _template(self) -> str:
+        path = (
+            settings.BASE_DIR
+            / "documents"
+            / "templates"
+            / "documents"
+            / "archive"
+            / "detail.html"
+        )
+        return path.read_text(encoding="utf-8")
+
+    def test_manual_text_template_scopes_signature_markup_and_script(self):
+        template = self._template()
+
+        self.assertEqual(template.count("archive-detail-manual-text-signature"), 1)
+        self.assertEqual(template.count("manual_text_signature.js"), 1)
+        self.assertIn(
+            '<div class="archive-detail-manual-text-signature" aria-hidden="true"></div>',
+            template,
+        )
+        self.assertIn("{% static 'public/manual_text_signature.js' %}", template)
+
+        signature_idx = template.index("archive-detail-manual-text-signature")
+        signature_if = template.rfind(
+            '{% if item.item_type == "MANUAL_TEXT" %}', 0, signature_idx
+        )
+        signature_endif = template.find("{% endif %}", signature_idx)
+        self.assertGreater(signature_if, -1)
+        self.assertGreater(signature_endif, signature_idx)
+
+        script_idx = template.index("manual_text_signature.js")
+        script_if = template.rfind(
+            '{% if item.item_type == "MANUAL_TEXT" %}', 0, script_idx
+        )
+        script_endif = template.find("{% endif %}", script_idx)
+        self.assertGreater(script_if, -1)
+        self.assertGreater(script_endif, script_idx)
+
+        photo_start = template.index('{% if item.item_type == "PHOTO" %}')
+        photo_header_end = template.index(
+            '{% elif item.item_type == "MANUAL_TEXT" %}', photo_start
+        )
+        photo_header = template[photo_start:photo_header_end]
+        self.assertNotIn("archive-detail-manual-text-signature", photo_header)
+        self.assertNotIn("manual_text_signature.js", photo_header)
 
     def test_photo_header_selectors_remain_distinct(self):
         css = self._css()

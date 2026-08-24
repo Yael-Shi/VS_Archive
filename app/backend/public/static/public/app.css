@@ -5154,51 +5154,49 @@ body:has(.homepage-found-in-archive) .homepage-ai-note {
 }
 
 /* MANUAL_TEXT desktop-only archival signature watermark.
-   Decorative only; does not participate in layout. */
+   Decorative only; does not participate in layout.
+   Absolutely positioned inside the blue card; JS assigns card-relative
+   left/top/width from measured side-space and action-control geometry. */
+.archive-detail-page--manual-text {
+  position: relative;
+}
+
+.archive-detail-manual-text-signature {
+  display: none;
+  position: absolute;
+  z-index: 0;
+  max-width: 410px;
+  aspect-ratio: 16 / 9;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  opacity: 0.22;
+  pointer-events: none;
+}
+
+.archive-detail-page--manual-text-signature-1
+  .archive-detail-manual-text-signature {
+  background-image: url("/static/public/images/manual-text-signatures/saadia-signature-1.png");
+}
+
+.archive-detail-page--manual-text-signature-2
+  .archive-detail-manual-text-signature {
+  background-image: url("/static/public/images/manual-text-signatures/saadia-signature-2.png");
+}
+
+.archive-detail-page--manual-text-signature-3
+  .archive-detail-manual-text-signature {
+  background-image: url("/static/public/images/manual-text-signatures/saadia-signature-3.png");
+}
+
 @media (min-width: 1180px) {
-  .archive-detail-page--manual-text .archive-detail-manual-text-body {
-    position: relative;
-  }
-
-  .archive-detail-page--manual-text .archive-detail-manual-text-body::before {
-    content: "";
-    position: absolute;
-    z-index: 0;
-    right: calc(100% + var(--space-5));
-    top: 50%;
-    transform: translateY(-50%);
-    width: min(27vw, 410px);
-    aspect-ratio: 16 / 9;
-    background-repeat: no-repeat;
-    background-position: center;
-    background-size: contain;
-    opacity: 0.22;
-    pointer-events: none;
-  }
-
-  .archive-detail-page--manual-text-signature-1
-    .archive-detail-manual-text-body::before {
-    background-image: url("/static/public/images/manual-text-signatures/saadia-signature-1.png");
-  }
-
-  .archive-detail-page--manual-text-signature-2
-    .archive-detail-manual-text-body::before {
-    background-image: url("/static/public/images/manual-text-signatures/saadia-signature-2.png");
-  }
-
-  .archive-detail-page--manual-text-signature-3
-    .archive-detail-manual-text-body::before {
-    background-image: url("/static/public/images/manual-text-signatures/saadia-signature-3.png");
-  }
-
-  .archive-detail-manual-text-body > * {
-    position: relative;
-    z-index: 1;
+  .archive-detail-page--manual-text .archive-detail-manual-text-signature {
+    display: block;
   }
 }
 
 @media (max-width: 1179px) {
-  .archive-detail-page--manual-text .archive-detail-manual-text-body::before {
+  .archive-detail-manual-text-signature {
     display: none;
   }
 }
