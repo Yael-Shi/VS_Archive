@@ -1,5 +1,39 @@
 # VS-Archive Decision Log
 
+## Frozen historical person-name Tag.id → Person.id map
+
+**Decision / implemented:** Versioned code artifact
+`documents/historical_person_tag_map.py` freezes the production
+**Tag.id → Person.id** pairs created by migration
+`0055_backfill_person_from_person_name_tags`. Lookup is
+`person_id_for_historical_person_name_tag(tag_id)`; unknown Tag ids
+return `None`. There is **no runtime consumer** yet (no redirects,
+hide, reuse blocking, public presentation, or Tag cleanup).
+
+**Evidence (production):** 0055 started from 0 Person rows and created
+all 29 Persons sequentially in `APPROVED_PERSON_NAME_TAGS` order.
+Person ids are **1–29** in that creation order. Person and
+`ArchiveItemPerson` timestamps are one uninterrupted 0055 sequence.
+
+- 26 pairs also have exact current `ArchiveItem.tags` ↔
+  `ArchiveItemPerson` item-set correspondence.
+- Tags **2** and **34** share item set `[264]`, so item-sets alone are
+  not a bijection. Creation order proves **2→1** and **34→24**.
+- Tag **29** later gained a leftover Tag relation to item **300**; its
+  0055 Person remains **29→19**.
+
+**Current behavior:** Names in comments are display/provenance-only.
+`Person.name` is not unique and is **not** identity. Do not
+`get_or_create(name=...)`. Do not join or break ties on names. Do not
+use PhotoPerson.
+
+**Deferred:** tag redirects; hide historical person Tags; prevent reuse;
+destructive cleanup; schema mapping table; any runtime import of this
+map. C1/C2 public/staff Person writes remain separate.
+
+**Tests:** `documents/test_historical_person_tag_map.py`. No schema
+migration.
+
 ## ArchiveItemPerson suggestion UI (C2b)
 
 **Decision / implemented:** C2 is complete only when this C2b UI lands
