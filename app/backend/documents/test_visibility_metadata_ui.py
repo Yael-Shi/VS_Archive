@@ -13,9 +13,11 @@ from django.urls import reverse
 from documents.models import (
     ArchiveCategory,
     ArchiveItem,
+    ArchiveItemPersonSuggestion,
     ArchiveMetadataSuggestion,
     Document,
     DocumentTextResult,
+    Person,
     TranscriptionEditSuggestion,
     TranskribusCorrectedCurrentSyncAttempt,
     TranskribusRun,
@@ -280,6 +282,22 @@ class VisibilityMetadataUiSurfaceTests(TestCase):
             suggested_categories="secret-cat",
             status=ArchiveMetadataSuggestion.Status.PENDING,
         )
+        public_person = Person.objects.create(name="Vis-UI Public Person")
+        restricted_person = Person.objects.create(name="Vis-UI Restricted Person")
+        ArchiveItemPersonSuggestion.objects.create(
+            archive_item=self.public_item,
+            person=public_person,
+            action=ArchiveItemPersonSuggestion.Action.ADD,
+            submitter_name="Suggestor",
+            status=ArchiveItemPersonSuggestion.Status.PENDING,
+        )
+        ArchiveItemPersonSuggestion.objects.create(
+            archive_item=self.restricted_item,
+            person=restricted_person,
+            action=ArchiveItemPersonSuggestion.Action.ADD,
+            submitter_name="Suggestor Restricted",
+            status=ArchiveItemPersonSuggestion.Status.PENDING,
+        )
         TranscriptionEditSuggestion.objects.create(
             document=self.public_ocr,
             current_text_snapshot="visibility-ui-review-text",
@@ -460,6 +478,15 @@ class VisibilityMetadataUiSurfaceTests(TestCase):
         self.assertNotIn(self.restricted_ocr.archive_item.title, trans_html)
         self.assertNotIn(RESTRICTED_CHOICE_LABEL, trans_html)
 
+        people = self.client.get(reverse("archive-item-person-suggestion-backlog"))
+        self.assertEqual(people.status_code, 200)
+        people_html = people.content.decode()
+        self.assertIn(self.public_item.title, people_html)
+        self.assertIn("ציבורי", people_html)
+        self.assertNotIn(self.restricted_item.title, people_html)
+        self.assertNotIn("Vis-UI Restricted Person", people_html)
+        self.assertNotIn(RESTRICTED_CHOICE_LABEL, people_html)
+
         self.client.force_login(self.staff_with_perm)
         meta_ok = self.client.get(reverse("archive-metadata-suggestion-backlog"))
         self.assertContains(meta_ok, self.restricted_item.title)
@@ -470,6 +497,12 @@ class VisibilityMetadataUiSurfaceTests(TestCase):
         self.assertContains(trans_ok, self.restricted_ocr.archive_item.title)
         self.assertContains(trans_ok, RESTRICTED_DISPLAY_LABEL)
         self.assertNotContains(trans_ok, RESTRICTED_CHOICE_LABEL)
+
+        people_ok = self.client.get(reverse("archive-item-person-suggestion-backlog"))
+        self.assertContains(people_ok, self.restricted_item.title)
+        self.assertContains(people_ok, "Vis-UI Restricted Person")
+        self.assertContains(people_ok, RESTRICTED_DISPLAY_LABEL)
+        self.assertNotContains(people_ok, RESTRICTED_CHOICE_LABEL)
 
     def test_document_detail_lead_shows_short_visibility_for_staff_only(self):
         self.client.force_login(self.staff)

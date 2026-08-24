@@ -19,13 +19,21 @@ from documents.models import (
     Person,
 )
 from documents.services.archive_metadata_suggestions import NAME_REQUIRED_ERROR
-from documents.services.photo_content_management import PERSON_NOT_FOUND_ERROR
+from documents.services.photo_content_management import (
+    PERSON_NOT_FOUND_ERROR,
+    staff_person_aliases_prefetch,
+)
 
 
 PERSON_ALREADY_LINKED_ERROR = "אדם זה כבר מקושר לפריט הארכיון."
 PERSON_NOT_LINKED_ERROR = "אדם זה אינו מקושר לפריט הארכיון."
 DUPLICATE_PENDING_SUGGESTION_ERROR = "הצעה זהה כבר ממתינה לבדיקה."
 INVALID_SUGGESTION_ACTION_ERROR = "פעולת ההצעה אינה תקינה."
+CONTRADICTORY_PERSON_ACTIONS_ERROR = (
+    "לא ניתן להציע הוספה והסרה של אותו אדם באותה שליחה."
+)
+ADD_PERSON_IDS_FIELD = "add_person_ids"
+REMOVE_PERSON_IDS_FIELD = "remove_person_ids"
 
 
 class ArchiveItemPersonSuggestionError(Exception):
@@ -152,3 +160,78 @@ def submit_archive_item_person_suggestion(
         raise ArchiveItemPersonSuggestionError(
             DUPLICATE_PENDING_SUGGESTION_ERROR
         ) from exc
+
+
+def authorized_person_universe_ids_for_user(user) -> frozenset[int]:
+    """Person ids linked via ArchiveItemPerson to items the user may view.
+
+    PhotoPerson-only identities are excluded. Private/restricted names are
+    included only when the user may view the linked ArchiveItem.
+    """
+    from documents.services.archive_item_access import archive_item_queryset_for_user
+
+    return frozenset(
+        Person.objects.filter(
+            archive_items__in=archive_item_queryset_for_user(user)
+        ).values_list("pk", flat=True)
+    )
+
+
+def authorized_person_queryset_for_user(user):
+    """Authorized Person rows for the public ADD picker, with aliases prefetched."""
+    from documents.services.archive_item_access import archive_item_queryset_for_user
+
+    return (
+        Person.objects.filter(archive_items__in=archive_item_queryset_for_user(user))
+        .distinct()
+        .order_by("name", "id")
+        .prefetch_related(staff_person_aliases_prefetch())
+    )
+
+
+def current_archive_item_people_queryset(archive_item: ArchiveItem):
+    """Item-level ArchiveItemPerson people for REMOVE context (not PhotoPerson)."""
+    return archive_item.people.order_by("name", "id").prefetch_related(
+        staff_person_aliases_prefetch()
+    )
+
+
+def parse_posted_person_ids(post_data, field_name: str) -> tuple[list[int], list[str]]:
+    """Parse unique positive Person ids from a POST list field.
+
+    Invalid tokens yield the generic not-found error and do not reveal whether
+    a Person row exists.
+    """
+    if hasattr(post_data, "getlist"):
+        raw_values = post_data.getlist(field_name)
+    else:
+        raw = post_data.get(field_name) if post_data is not None else None
+        if raw is None:
+            raw_values = []
+        elif isinstance(raw, (list, tuple)):
+            raw_values = list(raw)
+        else:
+            raw_values = [raw]
+
+    person_ids: list[int] = []
+    seen: set[int] = set()
+    errors: list[str] = []
+    for raw in raw_values:
+        token = str(raw).strip()
+        if not token:
+            continue
+        try:
+            person_id = int(token)
+        except (TypeError, ValueError):
+            if PERSON_NOT_FOUND_ERROR not in errors:
+                errors.append(PERSON_NOT_FOUND_ERROR)
+            continue
+        if person_id <= 0:
+            if PERSON_NOT_FOUND_ERROR not in errors:
+                errors.append(PERSON_NOT_FOUND_ERROR)
+            continue
+        if person_id in seen:
+            continue
+        seen.add(person_id)
+        person_ids.append(person_id)
+    return person_ids, errors

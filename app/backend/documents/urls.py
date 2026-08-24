@@ -127,6 +127,21 @@ urlpatterns = [
         name="archive-metadata-suggestion-reject",
     ),
     path(
+        "ui/admin/archive-item-person-suggestions/",
+        views.archive_item_person_suggestion_backlog_page,
+        name="archive-item-person-suggestion-backlog",
+    ),
+    path(
+        "ui/admin/archive-item-person-suggestions/<int:suggestion_id>/approve/",
+        views.archive_item_person_suggestion_approve,
+        name="archive-item-person-suggestion-approve",
+    ),
+    path(
+        "ui/admin/archive-item-person-suggestions/<int:suggestion_id>/reject/",
+        views.archive_item_person_suggestion_reject,
+        name="archive-item-person-suggestion-reject",
+    ),
+    path(
         "ui/admin/documents/<int:doc_id>/transkribus-corrected-current-sync/",
         views.corrected_current_sync_attempts_page,
         name="corrected-current-sync-attempts",

@@ -14,9 +14,11 @@ from django.urls import reverse
 
 from documents.models import (
     ArchiveItem,
+    ArchiveItemPersonSuggestion,
     ArchiveMetadataSuggestion,
     Document,
     DocumentTextResult,
+    Person,
     PhotoContent,
     TranscriptionEditSuggestion,
     TranskribusCorrectedCurrentSyncAttempt,
@@ -361,6 +363,16 @@ class RestrictedVisibilitySurfaceTests(TestCase):
             suggested_tags="",
             submitter_name="Submitter",
         )
+
+        self.person_suggestion_person = Person.objects.create(
+            name="Restricted-Person-Suggestion-Secret"
+        )
+        self.person_suggestion = ArchiveItemPersonSuggestion.objects.create(
+            archive_item=self.restricted_manual,
+            person=self.person_suggestion_person,
+            action=ArchiveItemPersonSuggestion.Action.ADD,
+            submitter_name="Submitter",
+        )
         self.sync_run = TranskribusRun.objects.create(
             document=self.restricted_ocr,
             status=TranskribusRun.Status.SUCCEEDED,
@@ -582,6 +594,11 @@ class RestrictedVisibilitySurfaceTests(TestCase):
         self.assertEqual(m_backlog.status_code, 200)
         self.assertNotContains(m_backlog, RESTRICTED_MANUAL_TITLE)
 
+        p_backlog = self.client.get(reverse("archive-item-person-suggestion-backlog"))
+        self.assertEqual(p_backlog.status_code, 200)
+        self.assertNotContains(p_backlog, RESTRICTED_MANUAL_TITLE)
+        self.assertNotContains(p_backlog, "Restricted-Person-Suggestion-Secret")
+
         sync_list = self.client.get(
             reverse(
                 "corrected-current-sync-attempts",
@@ -631,6 +648,9 @@ class RestrictedVisibilitySurfaceTests(TestCase):
             )
         )
         self.assertEqual(paragraph_ok.status_code, 200)
+        p_ok = self.client.get(reverse("archive-item-person-suggestion-backlog"))
+        self.assertContains(p_ok, RESTRICTED_MANUAL_TITLE)
+        self.assertContains(p_ok, "Restricted-Person-Suggestion-Secret")
 
     def test_public_suggestion_form_404_for_restricted_without_perm(self):
         self.assertEqual(
@@ -710,6 +730,16 @@ class RestrictedVisibilityMutationGateTests(TestCase):
             suggested_categories="cat",
             suggested_events="",
             suggested_tags="",
+            submitter_name="Submitter",
+        )
+
+        self.person_suggestion_person = Person.objects.create(
+            name="Restricted-Person-Suggestion-Secret"
+        )
+        self.person_suggestion = ArchiveItemPersonSuggestion.objects.create(
+            archive_item=self.restricted_manual,
+            person=self.person_suggestion_person,
+            action=ArchiveItemPersonSuggestion.Action.ADD,
             submitter_name="Submitter",
         )
         self.sync_run = TranskribusRun.objects.create(
@@ -884,6 +914,48 @@ class RestrictedVisibilityMutationGateTests(TestCase):
             reverse(
                 "archive-metadata-suggestion-approve",
                 kwargs={"suggestion_id": self.metadata_suggestion.pk},
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        mock_approve.assert_called_once()
+
+    @patch("documents.views.approve_archive_item_person_suggestion")
+    def test_person_suggestion_approve_404_without_perm_before_mutation(
+        self, mock_approve
+    ):
+        resp = self._post_as(
+            self.staff,
+            reverse(
+                "archive-item-person-suggestion-approve",
+                kwargs={"suggestion_id": self.person_suggestion.pk},
+            ),
+        )
+        self.assertEqual(resp.status_code, 404)
+        mock_approve.assert_not_called()
+
+    @patch("documents.views.reject_archive_item_person_suggestion")
+    def test_person_suggestion_reject_404_without_perm_before_mutation(
+        self, mock_reject
+    ):
+        resp = self._post_as(
+            self.staff,
+            reverse(
+                "archive-item-person-suggestion-reject",
+                kwargs={"suggestion_id": self.person_suggestion.pk},
+            ),
+        )
+        self.assertEqual(resp.status_code, 404)
+        mock_reject.assert_not_called()
+
+    @patch("documents.views.approve_archive_item_person_suggestion")
+    def test_person_suggestion_approve_calls_service_with_permission(
+        self, mock_approve
+    ):
+        resp = self._post_as(
+            self.staff_with_perm,
+            reverse(
+                "archive-item-person-suggestion-approve",
+                kwargs={"suggestion_id": self.person_suggestion.pk},
             ),
         )
         self.assertEqual(resp.status_code, 302)

@@ -122,6 +122,59 @@
             >{{ field_values.suggested_tags }}</textarea>
           </div>
 
+          <div class="archive-item-person-suggestion-section">
+            <div class="section-title">אנשים קשורים לפריט</div>
+            <p class="muted text-sm">ההצעה תיבדק לפני שינוי באתר.</p>
+            {% if is_photo_archive_item %}
+              <p class="field-hint">
+                קשר כללי לפריט הארכיון, לא הופעה בתמונה.
+                אנשים שמופיעים בתמונה מוצגים בנפרד כ״אנשים מזוהים״.
+              </p>
+            {% endif %}
+
+            <div class="field">
+              <p>אנשים הקשורים כעת לפריט</p>
+              {% if current_item_people %}
+                <ul class="archive-item-person-current-list">
+                  {% for person in current_item_people %}
+                    <li>
+                      {{ person.label }}
+                      <label>
+                        <input
+                          type="checkbox"
+                          name="{{ remove_person_ids_field }}"
+                          value="{{ person.id }}"
+                          {% if person.selected %}checked{% endif %}
+                        />
+                        הצע הסרת שיוך
+                      </label>
+                    </li>
+                  {% endfor %}
+                </ul>
+                <div class="field-hint">הסרת השיוך לפריט זה אינה מוחקת את רשומת האדם.</div>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </div>
+
+            <div class="field">
+              <label for="metadata-suggestion-add-person-ids">הצעת הוספת אדם קיים</label>
+              <select
+                id="metadata-suggestion-add-person-ids"
+                name="{{ add_person_ids_field }}"
+                multiple
+                size="6"
+              >
+                {% for person in add_person_choices %}
+                  <option value="{{ person.id }}" {% if person.selected %}selected{% endif %}>
+                    {{ person.label }}
+                  </option>
+                {% endfor %}
+              </select>
+              <div class="field-hint">אם האדם אינו מופיע ברשימה, אפשר לציין זאת בהערה.</div>
+            </div>
+          </div>
+
           <div class="field">
             <label for="metadata-suggestion-submitter-note">מידע נוסף על הפריט</label>
             <textarea

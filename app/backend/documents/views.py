@@ -15,6 +15,7 @@ from django.db.models import (
     Exists,
     IntegerField,
     OuterRef,
+    Prefetch,
     Q,
     Value,
     When,
@@ -38,6 +39,7 @@ from .models import (
     ArchiveEvent,
     ArchiveItem,
     ArchiveMetadataSuggestion,
+    ArchiveItemPersonSuggestion,
     Document,
     DocumentMetadata,
     DocumentSourceFile,
@@ -199,6 +201,7 @@ from documents.services.photo_content_management import (
     create_person_alias,
     delete_one_photo_content,
     delete_person_alias,
+    person_staff_picker_label,
     reorder_photo_contents,
     staff_person_aliases_prefetch,
     staff_photo_contents_queryset,
@@ -332,6 +335,23 @@ from documents.services.archive_metadata_suggestion_review import (
     ArchiveMetadataSuggestionReviewError,
     approve_suggestion as approve_archive_metadata_suggestion,
     reject_suggestion as reject_archive_metadata_suggestion,
+)
+from documents.services.archive_item_person_suggestions import (
+    ADD_PERSON_IDS_FIELD,
+    CONTRADICTORY_PERSON_ACTIONS_ERROR,
+    REMOVE_PERSON_IDS_FIELD,
+    ArchiveItemPersonSuggestionError,
+    authorized_person_queryset_for_user,
+    authorized_person_universe_ids_for_user,
+    current_archive_item_people_queryset,
+    parse_posted_person_ids,
+    submit_archive_item_person_suggestion,
+)
+from documents.services.archive_item_person_suggestion_review import (
+    ArchiveItemPersonSuggestionReviewError,
+    archive_item_person_suggestions_queryset_for_user,
+    approve_suggestion as approve_archive_item_person_suggestion,
+    reject_suggestion as reject_archive_item_person_suggestion,
 )
 from documents.services.transcription_suggestion_review import (
     TranscriptionSuggestionReviewError,
@@ -3701,7 +3721,15 @@ def transcription_suggestion_reject(request, suggestion_id: int):
     return redirect(detail_url)
 
 
-def _empty_archive_metadata_suggestion_field_values() -> dict[str, str]:
+PERSON_SUGGESTION_ADD_SUCCESS_MSG = "השיוך נוסף."
+PERSON_SUGGESTION_REMOVE_SUCCESS_MSG = "השיוך הוסר."
+PERSON_SUGGESTION_STALE_ADD_MSG = "האדם כבר משויך לפריט; לא בוצע שינוי."
+PERSON_SUGGESTION_STALE_REMOVE_MSG = "השיוך כבר אינו קיים; לא בוצע שינוי."
+PERSON_SUGGESTION_ACTION_ADD_LABEL = "הוספת שיוך"
+PERSON_SUGGESTION_ACTION_REMOVE_LABEL = "הסרת שיוך"
+
+
+def _empty_archive_metadata_suggestion_field_values() -> dict:
     return {
         "submitter_name": "",
         "submitter_email": "",
@@ -3709,6 +3737,8 @@ def _empty_archive_metadata_suggestion_field_values() -> dict[str, str]:
         "suggested_categories": "",
         "suggested_events": "",
         "suggested_tags": "",
+        ADD_PERSON_IDS_FIELD: [],
+        REMOVE_PERSON_IDS_FIELD: [],
     }
 
 
@@ -3720,6 +3750,49 @@ def _load_archive_metadata_suggestion_item(
     return get_viewable_archive_item(request.user, item_id, queryset=detail_qs)
 
 
+def _person_choice_payloads(
+    persons,
+    *,
+    selected_ids: set[int],
+) -> list[dict]:
+    return [
+        {
+            "id": person.pk,
+            "name": person.name,
+            "label": person_staff_picker_label(person),
+            "selected": person.pk in selected_ids,
+        }
+        for person in persons
+    ]
+
+
+def _archive_metadata_suggestion_people_context(
+    request,
+    item: ArchiveItem,
+    field_values: dict,
+) -> dict:
+    selected_add_ids = {int(pk) for pk in field_values.get(ADD_PERSON_IDS_FIELD) or []}
+    selected_remove_ids = {
+        int(pk) for pk in field_values.get(REMOVE_PERSON_IDS_FIELD) or []
+    }
+    current_people = _person_choice_payloads(
+        current_archive_item_people_queryset(item),
+        selected_ids=selected_remove_ids,
+    )
+    current_ids = {row["id"] for row in current_people}
+    add_choices = _person_choice_payloads(
+        authorized_person_queryset_for_user(request.user).exclude(pk__in=current_ids),
+        selected_ids=selected_add_ids,
+    )
+    return {
+        "current_item_people": current_people,
+        "add_person_choices": add_choices,
+        "is_photo_archive_item": item.item_type == ArchiveItem.ItemType.PHOTO,
+        "add_person_ids_field": ADD_PERSON_IDS_FIELD,
+        "remove_person_ids_field": REMOVE_PERSON_IDS_FIELD,
+    }
+
+
 def archive_metadata_suggestion_form(request, item_id: int):
     item = _load_archive_metadata_suggestion_item(request, item_id)
 
@@ -3728,6 +3801,12 @@ def archive_metadata_suggestion_form(request, item_id: int):
     current_metadata = format_current_metadata_labels(item)
 
     if request.method == "POST":
+        add_person_ids, add_parse_errors = parse_posted_person_ids(
+            request.POST, ADD_PERSON_IDS_FIELD
+        )
+        remove_person_ids, remove_parse_errors = parse_posted_person_ids(
+            request.POST, REMOVE_PERSON_IDS_FIELD
+        )
         field_values = {
             "submitter_name": (request.POST.get("submitter_name") or "").strip(),
             "submitter_email": (request.POST.get("submitter_email") or "").strip(),
@@ -3735,6 +3814,8 @@ def archive_metadata_suggestion_form(request, item_id: int):
             "suggested_categories": request.POST.get("suggested_categories") or "",
             "suggested_events": request.POST.get("suggested_events") or "",
             "suggested_tags": request.POST.get("suggested_tags") or "",
+            ADD_PERSON_IDS_FIELD: add_person_ids,
+            REMOVE_PERSON_IDS_FIELD: remove_person_ids,
         }
 
         if is_honeypot_triggered(request.POST):
@@ -3747,12 +3828,23 @@ def archive_metadata_suggestion_form(request, item_id: int):
 
         if not field_values["submitter_name"]:
             form_errors.append(NAME_REQUIRED_ERROR)
-        if not has_suggestion_content(
+        form_errors.extend(add_parse_errors)
+        for error in remove_parse_errors:
+            if error not in form_errors:
+                form_errors.append(error)
+
+        contradictory_ids = set(add_person_ids) & set(remove_person_ids)
+        if contradictory_ids:
+            form_errors.append(CONTRADICTORY_PERSON_ACTIONS_ERROR)
+
+        has_taxonomy_content = has_suggestion_content(
             suggested_categories=field_values["suggested_categories"],
             suggested_events=field_values["suggested_events"],
             suggested_tags=field_values["suggested_tags"],
             submitter_note=field_values["submitter_note"],
-        ):
+        )
+        has_person_actions = bool(add_person_ids or remove_person_ids)
+        if not has_taxonomy_content and not has_person_actions:
             form_errors.append(SUGGESTION_CONTENT_REQUIRED_ERROR)
 
         if not form_errors:
@@ -3761,34 +3853,66 @@ def archive_metadata_suggestion_form(request, item_id: int):
                 if getattr(request.user, "is_authenticated", False)
                 else None
             )
-            ArchiveMetadataSuggestion.objects.create(
-                archive_item=item,
-                suggested_categories=normalize_suggestion_text(
-                    field_values["suggested_categories"]
-                ),
-                suggested_events=normalize_suggestion_text(
-                    field_values["suggested_events"]
-                ),
-                suggested_tags=normalize_suggestion_text(
-                    field_values["suggested_tags"]
-                ),
-                submitter_name=field_values["submitter_name"],
-                submitter_email=field_values["submitter_email"],
-                submitter_note=field_values["submitter_note"],
-                submitter_user=submitter_user,
+            authorized_person_ids = authorized_person_universe_ids_for_user(
+                request.user
             )
-            return redirect(
-                reverse(
-                    "archive-metadata-suggestion-thanks",
-                    kwargs={"item_id": item.id},
+            try:
+                with transaction.atomic():
+                    if has_taxonomy_content:
+                        ArchiveMetadataSuggestion.objects.create(
+                            archive_item=item,
+                            suggested_categories=normalize_suggestion_text(
+                                field_values["suggested_categories"]
+                            ),
+                            suggested_events=normalize_suggestion_text(
+                                field_values["suggested_events"]
+                            ),
+                            suggested_tags=normalize_suggestion_text(
+                                field_values["suggested_tags"]
+                            ),
+                            submitter_name=field_values["submitter_name"],
+                            submitter_email=field_values["submitter_email"],
+                            submitter_note=field_values["submitter_note"],
+                            submitter_user=submitter_user,
+                        )
+                    for person_id in add_person_ids:
+                        submit_archive_item_person_suggestion(
+                            archive_item=item,
+                            person_id=person_id,
+                            action=ArchiveItemPersonSuggestion.Action.ADD,
+                            submitter_name=field_values["submitter_name"],
+                            authorized_person_ids=authorized_person_ids,
+                            submitter_email=field_values["submitter_email"],
+                            submitter_note=field_values["submitter_note"],
+                            submitter_user=submitter_user,
+                        )
+                    for person_id in remove_person_ids:
+                        submit_archive_item_person_suggestion(
+                            archive_item=item,
+                            person_id=person_id,
+                            action=ArchiveItemPersonSuggestion.Action.REMOVE,
+                            submitter_name=field_values["submitter_name"],
+                            authorized_person_ids=authorized_person_ids,
+                            submitter_email=field_values["submitter_email"],
+                            submitter_note=field_values["submitter_note"],
+                            submitter_user=submitter_user,
+                        )
+            except ArchiveItemPersonSuggestionError as exc:
+                form_errors.append(exc.message)
+            else:
+                return redirect(
+                    reverse(
+                        "archive-metadata-suggestion-thanks",
+                        kwargs={"item_id": item.id},
+                    )
                 )
-            )
 
     context = {
         "item": item,
         "current_metadata": current_metadata,
         "form_errors": form_errors,
         "field_values": field_values,
+        **_archive_metadata_suggestion_people_context(request, item, field_values),
     }
     return render(
         request,
@@ -3900,6 +4024,117 @@ def archive_metadata_suggestion_reject(request, suggestion_id: int):
     except ArchiveMetadataSuggestion.DoesNotExist:
         raise Http404()
     except ArchiveMetadataSuggestionReviewError as exc:
+        messages.error(request, str(exc))
+
+    return redirect(backlog_url)
+
+
+@login_required
+def archive_item_person_suggestion_backlog_page(request):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    suggestions = list(
+        archive_item_person_suggestions_queryset_for_user(request.user)
+        .prefetch_related(
+            Prefetch(
+                "person__aliases",
+                queryset=PersonAlias.objects.order_by("name", "id"),
+            )
+        )
+        .annotate(
+            pending_first=Case(
+                When(
+                    status=ArchiveItemPersonSuggestion.Status.PENDING,
+                    then=Value(0),
+                ),
+                default=Value(1),
+                output_field=IntegerField(),
+            )
+        )
+        .order_by("pending_first", "-created_at")
+    )
+    for suggestion in suggestions:
+        suggestion.person_label = person_staff_picker_label(suggestion.person)
+        suggestion.action_label = (
+            PERSON_SUGGESTION_ACTION_ADD_LABEL
+            if suggestion.action == ArchiveItemPersonSuggestion.Action.ADD
+            else PERSON_SUGGESTION_ACTION_REMOVE_LABEL
+        )
+
+    logger.info(
+        "archive_item_person_suggestion_backlog_page user=%s returned=%s",
+        getattr(request.user, "username", None),
+        len(suggestions),
+    )
+    return render(
+        request,
+        "documents/archive/person_suggestion_backlog.html",
+        {"suggestions": suggestions},
+    )
+
+
+@login_required
+@require_POST
+def archive_item_person_suggestion_approve(request, suggestion_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    suggestion = get_object_or_404(
+        archive_item_person_suggestions_queryset_for_user(request.user),
+        id=suggestion_id,
+    )
+
+    backlog_url = reverse("archive-item-person-suggestion-backlog")
+
+    try:
+        result = approve_archive_item_person_suggestion(
+            suggestion_id,
+            reviewer=request.user,
+        )
+    except ArchiveItemPersonSuggestion.DoesNotExist:
+        raise Http404()
+    except ArchiveItemPersonSuggestionReviewError as exc:
+        messages.error(request, str(exc))
+        return redirect(backlog_url)
+
+    if result.relationship_changed:
+        if result.suggestion.action == ArchiveItemPersonSuggestion.Action.ADD:
+            messages.success(request, PERSON_SUGGESTION_ADD_SUCCESS_MSG)
+        else:
+            messages.success(request, PERSON_SUGGESTION_REMOVE_SUCCESS_MSG)
+    elif suggestion.action == ArchiveItemPersonSuggestion.Action.ADD:
+        messages.success(request, PERSON_SUGGESTION_STALE_ADD_MSG)
+    else:
+        messages.success(request, PERSON_SUGGESTION_STALE_REMOVE_MSG)
+
+    return redirect(backlog_url)
+
+
+@login_required
+@require_POST
+def archive_item_person_suggestion_reject(request, suggestion_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    get_object_or_404(
+        archive_item_person_suggestions_queryset_for_user(request.user),
+        id=suggestion_id,
+    )
+
+    backlog_url = reverse("archive-item-person-suggestion-backlog")
+
+    try:
+        reject_archive_item_person_suggestion(
+            suggestion_id,
+            reviewer=request.user,
+        )
+    except ArchiveItemPersonSuggestion.DoesNotExist:
+        raise Http404()
+    except ArchiveItemPersonSuggestionReviewError as exc:
         messages.error(request, str(exc))
 
     return redirect(backlog_url)
