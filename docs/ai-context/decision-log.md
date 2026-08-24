@@ -1,5 +1,67 @@
 # VS-Archive Decision Log
 
+## ArchiveItemPerson suggestions foundation (C2a)
+
+**Decision / implemented:** C2 suggestions are **explicit relationship
+deltas**, not a desired set of Person ids. One
+**`ArchiveItemPersonSuggestion`** row is exactly one proposed action:
+**ADD** Person X to ArchiveItem Y, or **REMOVE** Person X from
+ArchiveItem Y. Identity is **`Person.id`**. Approval is idempotent:
+stale ADD/REMOVE still becomes **APPROVED** as a no-op. New-Person /
+alias / merge proposals are out of scope. C2a has **no public HTML and
+no staff backlog HTML**.
+
+**Current behavior:**
+
+- Model fields follow `ArchiveMetadataSuggestion` lifecycle naming
+  (`submitter_name` / `submitter_email` / `submitter_note` /
+  `submitter_user`, `status` PENDING/APPROVED/REJECTED, `created_at`,
+  `reviewed_at`, `reviewed_by`). Ordering is newest first.
+- Global pending uniqueness: unique `(archive_item, person, action)`
+  **WHERE status=PENDING**. Historical APPROVED/REJECTED rows do not
+  block a later pending row. No STALE status.
+- Submission (`submit_archive_item_person_suggestion`) creates one
+  PENDING row only. It does not write ArchiveItemPerson, PhotoPerson,
+  Person, PersonAlias, Tag, `Document.tags_m2m`, or the search index.
+  Person must be in the caller-supplied authorized Person universe.
+  ADD requires the person is not already linked; REMOVE requires a
+  current ArchiveItemPerson link. Duplicate pending is a domain error.
+  A racing `IntegrityError` on the pending unique constraint is
+  translated to that same domain error.
+- Review (`approve_suggestion` / `reject_suggestion`) uses
+  `transaction.atomic` + `select_for_update`. Already-reviewed rows
+  raise the Hebrew “already reviewed” error. Reject never mutates
+  ArchiveItemPerson. Approve applies **one delta**:
+  - ADD: `create_archive_item_person` if absent; otherwise APPROVED no-op
+  - REMOVE: load the exact ArchiveItemPerson and
+    `delete_archive_item_person` if present; otherwise APPROVED no-op
+  Unrelated ArchiveItemPerson rows are untouched. Review never calls
+  `set_archive_item_people` and never reconstructs a Person set.
+  Example: live `[A, B]`, pending REMOVE B, staff later adds D →
+  approve yields `[A, D]`.
+- Search index: real ADD/REMOVE go through the existing people writers
+  (they own q-index refresh). Stale no-op does not rebuild.
+- PHOTO: ArchiveItemPerson remains item-level related-to. C2a never
+  reads/writes/infers PhotoPerson. The same Person may keep a
+  PhotoPerson row after item-level REMOVE. Person is not deleted.
+- Authorization is layered: domain submit/apply services do not bake
+  public request visibility into the apply path. C2b will supply the
+  authorized Person universe and authorize the suggestion/item before
+  mutate. Helper: `archive_item_person_suggestions_queryset_for_user`.
+- Historical person-name Tags are unchanged.
+
+**Why:** A desired-set replacement on approve would delete unrelated
+people added after submit time. Person.name is not identity. Extending
+`suggested_tags` would mix free-text taxonomy with Person ids.
+
+**Deferred:** **C2b — public suggestion form + staff backlog HTML**
+follows immediately. Also still deferred: new-Person / alias / merge
+proposals; public presentation of ArchiveItemPerson; hide/remove
+person-name Tags; public Person page.
+
+**Tests:** `documents/test_archive_item_person_suggestions.py`.
+Schema migration for `ArchiveItemPersonSuggestion` (after 0055).
+
 ## ArchiveItemPerson staff UI (C1)
 
 **Decision / implemented:** Production staff ArchiveItem **create and edit**
@@ -63,12 +125,11 @@ ArchiveItemPerson. Historical person-name Tags cannot be hidden until
 that write path exists. Create and edit are both required staff
 workflows for the Person-vs-Tag migration.
 
-**Deferred:** **C2 — user suggestion support for ArchiveItemPerson** is
-the immediate next required PR. Users must eventually be able to propose
-adding/removing an item-level Person relationship through the existing
-suggestion/review workflow, with **no direct ArchiveItemPerson write
-before staff acceptance**. C2 is not designed or implemented here; the
-existing suggestion architecture will be audited separately after C1.
+**Deferred:** **C2 — user suggestion support for ArchiveItemPerson.**
+C2a (model + submit/apply services, no HTML) is implemented separately;
+see **ArchiveItemPerson suggestions foundation (C2a)**. C2b public form
++ staff backlog HTML remains the immediate next PR. C1 itself does not
+include user suggestions.
 Also still deferred: public presentation of ArchiveItemPerson;
 hide/remove person-name Tags; redirect old Tag browse URLs; prevent
 person-Tag reuse; destructive Tag cleanup; public Person page; identity
