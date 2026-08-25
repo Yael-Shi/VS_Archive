@@ -14,7 +14,6 @@ from documents.models import (
     ArchiveItem,
     Document,
     PhotoContent,
-    Tag,
 )
 from documents.services.archive_item_access import ARCHIVE_FAMILY_GROUP_NAME
 from documents.services.archive_items import create_manual_text_archive_item
@@ -703,7 +702,7 @@ class PhotoArchiveDiscoveryBrowseTests(TestCase):
             name="Photo display event",
             slug="photo-display-event",
         )
-        self.tag = Tag.objects.create(name="photo-display-tag")
+        self.tag = _create_tag(name="photo-display-tag")
 
         self.uploaded = _create_photo_archive_item(title="Uploaded discovery photo")
         self.pending = _create_photo_archive_item(

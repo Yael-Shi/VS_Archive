@@ -4794,7 +4794,7 @@ class ArchiveItemDiscoveryBrowseTests(TestCase):
             name="Browse event term",
             slug="browse-event-term",
         )
-        tag = Tag.objects.create(name="browse-tag-term")
+        tag = _create_tag(name="browse-tag-term")
         item.categories.add(category)
         item.events.add(event)
         item.tags.add(tag)
@@ -4950,7 +4950,7 @@ class ArchiveItemDiscoveryBrowseTests(TestCase):
             name="Empty browse event",
             slug="empty-browse-event",
         )
-        tag = Tag.objects.create(name="empty-browse-tag")
+        tag = _create_tag(name="empty-browse-tag")
 
         private_item = self._create_private_item(title="Only private empty browse")
         private_item.categories.add(category)
@@ -4979,7 +4979,7 @@ class ArchiveItemDiscoveryBrowseTests(TestCase):
             text_input_type=Document.TextInputType.PRINTED,
             visibility=Document.Visibility.PUBLIC,
         )
-        legacy_tag = Tag.objects.create(name="legacy-only-browse-tag")
+        legacy_tag = _create_tag(name="legacy-only-browse-tag")
         doc.tags_m2m.add(legacy_tag)
 
         resp = self.client.get(

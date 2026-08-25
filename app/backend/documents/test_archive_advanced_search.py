@@ -44,6 +44,7 @@ from documents.services.archive_search_index import (
     archive_items_for_search_index_build,
     rebuild_archive_item_search_index,
 )
+from documents.test_historical_person_tag_reuse import _create_tag
 
 User = get_user_model()
 
@@ -500,8 +501,8 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
         private_cat = ArchiveCategory.objects.create(
             name="Private Choice Cat", slug="private-choice-cat"
         )
-        public_tag = Tag.objects.create(name="Public Choice Tag")
-        private_tag = Tag.objects.create(name="Private Choice Tag")
+        public_tag = _create_tag(name="Public Choice Tag")
+        private_tag = _create_tag(name="Private Choice Tag")
         public_person = Person.objects.create(name="Public Choice Person")
         private_person = Person.objects.create(name="Private Choice Person")
         PersonAlias.objects.create(person=public_person, name="Public Alias")

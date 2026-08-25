@@ -1,5 +1,36 @@
 # VS-Archive Decision Log
 
+## Public Tag browse/filter cutover (Person vs Tag, Stage B)
+
+**Decision / implemented:** Mapped historical person-name Tag ids are no
+longer public Tag browse/filter *choices*. `/archive/tags/<mapped_tag_id>/`
+temporarily redirects (HTTP 302) to the canonical Person filter URL
+`/archive/?person=<mapped_person_id>&advanced=1`. Lookup is
+`person_id_for_historical_person_name_tag(tag_id)` only (map-first, before
+`Tag.objects.get`, so a future Tag-row delete still redirects). Ordinary
+Tag browse, visibility, and authorized item querysets are unchanged.
+
+**Current behavior:**
+
+- `archive_tag_browse_page` resolves mapped Tag ids to Person ids, then
+  `person_archive_filter_url`. Unmapped missing Tags remain 404.
+- `archive_advanced_filter_choice_context` excludes
+  `historical_person_name_tag_ids()` from authorized public Tag choices
+  only. Category/event/person choices are unchanged. Visibility scoping,
+  `distinct()`, and name ordering remain.
+- Direct legacy `?tag=` query strings are **not** rewritten, stripped,
+  rejected, or merged. Mapped-only Tag filter, mixed mapped+ordinary Tag
+  OR-within-tags, and Tag+Person AND-between-groups keep today’s
+  semantics (Option 0). Crafted `?tag=<mapped_id>` can still match leftover
+  Tag relations.
+
+**Deferred:** search-index cleanup of mapped Tag names; destructive
+Tag/relation cleanup; public Person pages; active Person filter-chip UX;
+query-string redirects (Option 1+). 302 is intentional because Person
+pages may replace the list-filter URL later.
+
+**Tests:** `documents/test_archive_person_tag_stage_b.py`.
+
 ## Public presentation cutover (Person vs Tag, Stage A)
 
 **Decision / implemented:** Public archive cards and detail present
@@ -27,9 +58,11 @@ public Person pages.
 - `people` is prefetched on the card queryset, homepage cards, archive
   detail, and OCR document detail.
 
-**Deferred (Stage B):** hide mapped Tags from tag browse/filter;
-redirects; search-index changes; Tag deletion; staff/suggestion UI;
-PhotoPerson changes; migrations or other database writes.
+**Deferred:** Stage B path redirect and public Tag-choice hiding are
+implemented (see **Public Tag browse/filter cutover (Person vs Tag,
+Stage B)**). Still deferred: search-index changes; Tag deletion;
+staff/suggestion UI; PhotoPerson changes; migrations or other database
+writes; public Person pages; Person filter-chip UX.
 
 **Tests:** `documents/test_archive_person_public_presentation.py`.
 
@@ -71,14 +104,15 @@ Tags before reconciliation would drop the person association on item
   migration.
 
 **Revised safe order:** block reuse → deploy → dry-run/apply
-reconciliation → Stage A public presentation cutover (implemented).
-Stage B (tag browse/filter hiding and redirects) remains later.
+reconciliation → Stage A public presentation cutover (implemented) →
+Stage B tag browse redirect / public Tag-choice hiding (implemented).
 
 **Deferred:** Stage A public cards/detail cutover is implemented (see
-**Public presentation cutover (Person vs Tag, Stage A)**). Still
-deferred: Tag browse/filter hiding and redirects; destructive
-Tag/relation cleanup. Do not hide mapped Tags from tag browse/filter
-until Stage B.
+**Public presentation cutover (Person vs Tag, Stage A)**). Stage B path
+redirect and public Tag-choice hiding are implemented (see **Public Tag
+browse/filter cutover (Person vs Tag, Stage B)**). Direct legacy `?tag=`
+semantics are intentionally unchanged. Still deferred: destructive
+Tag/relation cleanup.
 
 **Tests:** `documents/test_historical_person_tag_reuse.py`,
 `documents/test_reconcile_historical_person_tag_relations.py`, plus map
@@ -92,11 +126,10 @@ schema or data migration.
 **Tag.id → Person.id** pairs created by migration
 `0055_backfill_person_from_person_name_tags`. Lookup is
 `person_id_for_historical_person_name_tag(tag_id)`; unknown Tag ids
-return `None`. Runtime consumers now include reuse blocking and the
-post-deploy reconciliation command (see **Block reuse of historical
-person-name Tags; post-deploy reconciliation**). Redirects, public
-presentation cutover, and destructive Tag cleanup are still out of
-scope for this module.
+return `None`. Runtime consumers now include reuse blocking, the
+post-deploy reconciliation command, Stage A public presentation, and
+Stage B mapped-tag browse redirects / public Tag-choice hiding. Destructive
+Tag cleanup is still out of scope for this module.
 
 **Evidence (production):** 0055 started from 0 Person rows and created
 all 29 Persons sequentially in `APPROVED_PERSON_NAME_TAGS` order.
@@ -118,9 +151,11 @@ Person ids are **1–29** in that creation order. Person and
 use PhotoPerson.
 
 **Deferred:** Stage A public cards/detail cutover is implemented (see
-**Public presentation cutover (Person vs Tag, Stage A)**). Still
-deferred for this module: tag redirects; hide mapped Tags from tag
-browse/filter; destructive cleanup; schema mapping table.
+**Public presentation cutover (Person vs Tag, Stage A)**). Stage B path
+redirect and public Tag-choice hiding are implemented (see **Public Tag
+browse/filter cutover (Person vs Tag, Stage B)**). Still deferred for
+this module: destructive cleanup; schema mapping table. Direct legacy
+`?tag=` query application is intentionally unchanged.
 
 **Tests:** `documents/test_historical_person_tag_map.py`. No schema
 migration.
@@ -168,12 +203,14 @@ for that contract. Public cards/detail cutover is Stage A (implemented
 separately).
 
 **Deferred:** Stage A public cards/detail cutover is implemented (see
-**Public presentation cutover (Person vs Tag, Stage A)**). Still
-deferred: Person pages; hide mapped Tags from tag browse/filter; tag
-redirects; destructive cleanup; new-Person / alias / merge proposals.
-Reuse of the 29 historical person-name Tags is blocked separately (see
-**Block reuse of historical person-name Tags; post-deploy
-reconciliation**).
+**Public presentation cutover (Person vs Tag, Stage A)**). Stage B path
+redirect and public Tag-choice hiding are implemented (see **Public Tag
+browse/filter cutover (Person vs Tag, Stage B)**). Still deferred:
+Person pages; destructive cleanup; new-Person / alias / merge proposals;
+active Person filter-chip UX. Direct legacy `?tag=` semantics are
+intentionally unchanged. Reuse of the 29 historical person-name Tags is
+blocked separately (see **Block reuse of historical person-name Tags;
+post-deploy reconciliation**).
 
 **Tests:** `documents/test_archive_item_person_suggestion_ui.py` plus
 restricted-visibility and visibility-metadata UI extensions. No new
@@ -452,11 +489,13 @@ copied from historical person-name Tags. Those identities were not in `q`
 until this change. PhotoPerson remains the only “appears in this photo”
 relation.
 
-**Deferred:** public Person browse/detail; eventual person-Tag removal (blocked
-on tag browse/filter still depending on Tag); legacy `Document.tags_m2m`
-cleanup; staff PHOTO appearance review / PhotoPerson backfill; identity
-cleanup/aliases where needed. Structured Person **filter** is implemented
-separately (see **Public `/archive/` Person advanced filter**).
+**Deferred:** public Person browse/detail; eventual person-Tag removal
+(ordinary Tags still power unmapped tag browse/filter; mapped Tag path
+browse redirects, while raw `?tag=` is intentionally preserved); legacy
+`Document.tags_m2m` cleanup; staff PHOTO appearance review / PhotoPerson
+backfill; identity cleanup/aliases where needed. Structured Person
+**filter** is implemented separately (see **Public `/archive/` Person
+advanced filter**).
 
 **Tests:** `documents/test_archive_search_archive_item_person.py` (plus
 updated PhotoPerson/alias/backfill regressions).

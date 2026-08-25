@@ -4,9 +4,10 @@ Identity is Tag.id → Person.id. Person.name is not unique and is never
 used as a lookup key. Names in comments are display/provenance-only.
 
 Runtime consumers may derive the blocked Tag-id set from this map and
-look up Person ids by Tag id. They must not look up by name. Redirects,
-public presentation cutover, and destructive Tag cleanup are still out
-of scope for this module.
+look up Person ids by Tag id. They must not look up by name. Stage A
+public presentation and Stage B mapped-tag browse redirects / public
+Tag-choice hiding use this map. Destructive Tag cleanup remains out of
+scope for this module.
 """
 
 from __future__ import annotations

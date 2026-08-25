@@ -13,6 +13,7 @@ from typing import Any, Mapping, Sequence
 
 from django.db.models import QuerySet
 
+from documents.historical_person_tag_map import historical_person_name_tag_ids
 from documents.models import (
     ArchiveCategory,
     ArchiveEvent,
@@ -326,7 +327,10 @@ def archive_advanced_filter_choice_context(
         .order_by("name")
     )
     tags = tuple(
-        Tag.objects.filter(archive_items__pk__in=item_pks).distinct().order_by("name")
+        Tag.objects.filter(archive_items__pk__in=item_pks)
+        .exclude(pk__in=historical_person_name_tag_ids())
+        .distinct()
+        .order_by("name")
     )
     persons = tuple(
         Person.objects.filter(archive_items__pk__in=item_pks)

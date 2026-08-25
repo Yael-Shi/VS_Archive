@@ -21,7 +21,6 @@ from documents.models import (
     ArchiveItem,
     ArchiveItemPerson,
     Person,
-    Tag,
 )
 from documents.services.archive_advanced_search import (
     ARCHIVE_ADVANCED_YEAR_MALFORMED_ERROR,
@@ -40,6 +39,7 @@ from documents.services.archive_items import (
     create_manual_text_archive_item,
     update_archive_item_discovery_metadata,
 )
+from documents.test_historical_person_tag_reuse import _create_tag
 
 User = get_user_model()
 
@@ -183,8 +183,8 @@ class ArchiveAdvancedSearchUiTests(TestCase):
         private_cat = ArchiveCategory.objects.create(
             name="UI Private Cat", slug="ui-private-cat"
         )
-        public_tag = Tag.objects.create(name="UI Public Tag")
-        private_tag = Tag.objects.create(name="UI Private Tag")
+        public_tag = _create_tag(name="UI Public Tag")
+        private_tag = _create_tag(name="UI Private Tag")
         public_person = Person.objects.create(name="UI Public Person")
         private_person = Person.objects.create(name="UI Private Person")
         public_event = ArchiveEvent.objects.create(
@@ -353,8 +353,8 @@ class ArchiveAdvancedSearchUiTests(TestCase):
         cat_a = ArchiveCategory.objects.create(name="UI Cat A", slug="ui-cat-a")
         cat_b = ArchiveCategory.objects.create(name="UI Cat B", slug="ui-cat-b")
         event = ArchiveEvent.objects.create(name="UI Event A", slug="ui-event-a")
-        tag_a = Tag.objects.create(name="UI Tag A")
-        tag_b = Tag.objects.create(name="UI Tag B")
+        tag_a = _create_tag(name="UI Tag A")
+        tag_b = _create_tag(name="UI Tag B")
         person_a = Person.objects.create(name="UI Person A")
         person_b = Person.objects.create(name="UI Person B")
         item = _public_item(
@@ -609,7 +609,7 @@ class ArchiveAdvancedSearchUiTests(TestCase):
 
     def test_active_filter_summary_chips_and_clear_all(self):
         cat = ArchiveCategory.objects.create(name="Chip Cat", slug="chip-cat")
-        tag = Tag.objects.create(name="Chip Tag")
+        tag = _create_tag(name="Chip Tag")
         person = Person.objects.create(name="Chip Person")
         item = _public_item(
             title="Chip Item",

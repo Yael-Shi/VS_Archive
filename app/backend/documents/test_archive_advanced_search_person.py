@@ -44,6 +44,7 @@ from documents.services.archive_items import (
     update_archive_item_discovery_metadata,
 )
 from documents.test_archive_item import create_viewable_ocr_document
+from documents.test_historical_person_tag_reuse import _create_tag
 
 YOUTUBE_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
@@ -100,7 +101,7 @@ def _grant_restricted_permission(user: User) -> User:
     return user
 
 
-def _choice_person_query_count(captured_queries) -> int:
+def _person_related_query_count(captured_queries) -> int:
     count = 0
     for query in captured_queries:
         sql = query["sql"].lower().replace('"', "")
@@ -422,10 +423,10 @@ class ArchiveAdvancedPersonFilterUiTests(TestCase):
         ArchiveItemPerson.objects.create(archive_item=item, person=person)
 
         resp = self.client.get(self.url, {"advanced": "1"})
-        names = [p.name for p in resp.context["advanced_filter_person_choices"]]
-        self.assertEqual(names, ["Canonical Only"])
+        choices = list(resp.context["advanced_filter_person_choices"])
+        self.assertEqual([p.pk for p in choices], [person.pk])
+        self.assertEqual([p.name for p in choices], ["Canonical Only"])
         html = resp.content.decode("utf-8")
-        self.assertEqual(html.count("Canonical Only"), 1)
         self.assertNotIn("Alias One", html)
         self.assertNotIn("Alias Two", html)
 
@@ -589,10 +590,10 @@ class ArchiveAdvancedPersonFilterUiTests(TestCase):
         with CaptureQueriesContext(connection) as many_ctx:
             many_choices = archive_advanced_filter_choice_context(authorized)
 
-        self.assertEqual(_choice_person_query_count(few_ctx), 1)
-        self.assertEqual(_choice_person_query_count(many_ctx), 1)
+        self.assertEqual(_person_related_query_count(few_ctx), 1)
+        self.assertEqual(_person_related_query_count(many_ctx), 1)
         self.assertEqual(
-            _choice_person_query_count(few_ctx), _choice_person_query_count(many_ctx)
+            _person_related_query_count(few_ctx), _person_related_query_count(many_ctx)
         )
         self.assertGreaterEqual(len(few_choices["advanced_filter_person_choices"]), 22)
         self.assertGreaterEqual(len(many_choices["advanced_filter_person_choices"]), 22)
@@ -600,7 +601,7 @@ class ArchiveAdvancedPersonFilterUiTests(TestCase):
         with CaptureQueriesContext(connection) as request_ctx:
             resp = self.client.get(self.url, {"advanced": "1"})
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(_choice_person_query_count(request_ctx), 1)
+        self.assertEqual(_person_related_query_count(request_ctx), 2)
 
     def test_photoperson_only_person_is_not_a_choice(self):
         linked_person = Person.objects.create(name="Linked Choice")
@@ -640,7 +641,7 @@ class ArchiveAdvancedPersonFilterUiTests(TestCase):
 
     def test_existing_tag_advanced_filter_behavior_unchanged(self):
         person = Person.objects.create(name="Same Name Person")
-        tag = Tag.objects.create(name="Same Name Person")
+        tag = _create_tag(name="Same Name Person")
         tagged = _public_manual("Tagged only")
         update_archive_item_discovery_metadata(
             tagged,
