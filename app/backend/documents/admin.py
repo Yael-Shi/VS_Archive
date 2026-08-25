@@ -8,7 +8,9 @@ from documents.historical_person_tag_map import (
 )
 from documents.services.archive_discovery_metadata_validation import (
     HISTORICAL_PERSON_TAG_DELETE_ERROR,
+    HISTORICAL_PERSON_TAG_REUSE_ERROR,
     historical_person_tag_reuse_errors,
+    retired_historical_person_tag_name_errors,
 )
 from documents.services.archive_item_access import (
     archive_item_queryset_for_user,
@@ -68,8 +70,28 @@ class _VisibilityScopedAdminMixin:
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
+class TagAdminForm(forms.ModelForm):
+    class Meta:
+        model = Tag
+        fields = "__all__"
+
+    def clean_name(self):
+        name = self.cleaned_data.get("name")
+        if not name:
+            return name
+        if self.instance.pk and is_historical_person_name_tag(self.instance.pk):
+            if self.instance.name != name:
+                raise forms.ValidationError(HISTORICAL_PERSON_TAG_REUSE_ERROR)
+            return name
+        reuse_errors = retired_historical_person_tag_name_errors([name])
+        if reuse_errors:
+            raise forms.ValidationError(reuse_errors[0])
+        return name
+
+
 @admin.register(Tag)
 class TagAdmin(_DiscoveryTaxonomyNameSyncAdmin):
+    form = TagAdminForm
     list_display = ("id", "name", "created_at", "updated_at")
     search_fields = ("name",)
     ordering = ("name",)
@@ -301,6 +323,10 @@ class DocumentAdminForm(forms.ModelForm):
         if not tags:
             return tags
         reuse_errors = historical_person_tag_reuse_errors(tag.pk for tag in tags)
+        if not reuse_errors:
+            reuse_errors = retired_historical_person_tag_name_errors(
+                tag.name for tag in tags
+            )
         if reuse_errors:
             raise forms.ValidationError(reuse_errors[0])
         return tags

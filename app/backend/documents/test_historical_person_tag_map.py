@@ -7,17 +7,22 @@ import inspect
 from unittest import TestCase
 
 from documents.historical_person_tag_map import (
+    HISTORICAL_PERSON_NAME_TAG_RECORDS,
     HISTORICAL_PERSON_NAME_TAG_TO_PERSON_ID,
     PERSON_ID_BY_HISTORICAL_PERSON_NAME_TAG_ID,
     historical_person_name_tag_ids,
+    historical_person_tag_retired_names,
     is_historical_person_name_tag,
+    is_retired_historical_person_tag_name,
     person_id_for_historical_person_name_tag,
+    validate_historical_person_name_tag_records,
 )
 
 _migration_module = importlib.import_module(
     "documents.migrations.0055_backfill_person_from_person_name_tags"
 )
 APPROVED_PERSON_NAME_TAG_IDS = _migration_module.APPROVED_PERSON_NAME_TAG_IDS
+APPROVED_PERSON_NAME_TAGS = _migration_module.APPROVED_PERSON_NAME_TAGS
 
 EXPECTED_PAIRS: tuple[tuple[int, int], ...] = (
     (2, 1),
@@ -120,7 +125,7 @@ class HistoricalPersonTagMapTests(TestCase):
         self.assertFalse(is_historical_person_name_tag(3))
         self.assertFalse(is_historical_person_name_tag(40))
 
-    def test_module_has_no_name_based_lookup(self):
+    def test_module_has_no_person_lookup_by_name(self):
         module = importlib.import_module("documents.historical_person_tag_map")
         public_names = [name for name in dir(module) if not name.startswith("_")]
         self.assertNotIn("person_id_for_historical_person_name", public_names)
@@ -128,3 +133,63 @@ class HistoricalPersonTagMapTests(TestCase):
             self.assertNotIn("by_name", name.lower())
             self.assertNotIn("from_name", name.lower())
             self.assertNotIn("name_to", name.lower())
+        signature = inspect.signature(person_id_for_historical_person_name_tag)
+        self.assertNotIn("name", signature.parameters)
+
+    def test_runtime_map_does_not_import_migration_0055(self):
+        module = importlib.import_module("documents.historical_person_tag_map")
+        self.assertNotIn("0055_backfill_person_from_person_name_tags", module.__dict__)
+        self.assertFalse(hasattr(module, "APPROVED_PERSON_NAME_TAGS"))
+        self.assertFalse(hasattr(module, "APPROVED_PERSON_NAME_TAG_IDS"))
+        source = inspect.getsource(module)
+        self.assertNotIn("importlib", source)
+        self.assertNotIn("documents.migrations", source)
+
+    def test_records_cover_exactly_twenty_nine_unique_frozen_names_and_ids(self):
+        validate_historical_person_name_tag_records()
+        self.assertEqual(len(HISTORICAL_PERSON_NAME_TAG_RECORDS), 29)
+        self.assertEqual(
+            tuple(
+                (tag_id, person_id)
+                for tag_id, person_id, _name in HISTORICAL_PERSON_NAME_TAG_RECORDS
+            ),
+            EXPECTED_PAIRS,
+        )
+        names = [
+            name for _tag_id, _person_id, name in HISTORICAL_PERSON_NAME_TAG_RECORDS
+        ]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertEqual(
+            tuple(
+                (tag_id, name)
+                for tag_id, _person_id, name in HISTORICAL_PERSON_NAME_TAG_RECORDS
+            ),
+            APPROVED_PERSON_NAME_TAGS,
+        )
+        self.assertEqual(historical_person_tag_retired_names(), frozenset(names))
+        for name in names:
+            self.assertTrue(is_retired_historical_person_tag_name(name))
+            self.assertEqual(name, name.strip())
+            self.assertNotEqual(name, "")
+        self.assertFalse(is_retired_historical_person_tag_name(" " + names[0] + " "))
+        self.assertFalse(is_retired_historical_person_tag_name(names[0] + "x"))
+        self.assertFalse(is_retired_historical_person_tag_name("משפחה"))
+
+    def test_validate_rejects_incomplete_or_duplicate_records(self):
+        with self.assertRaises(ValueError):
+            validate_historical_person_name_tag_records(
+                HISTORICAL_PERSON_NAME_TAG_RECORDS[:-1]
+            )
+        duplicate_id = HISTORICAL_PERSON_NAME_TAG_RECORDS[:-1] + (
+            (HISTORICAL_PERSON_NAME_TAG_RECORDS[0][0], 99, "other"),
+        )
+        with self.assertRaises(ValueError):
+            validate_historical_person_name_tag_records(duplicate_id)
+        duplicate_name = HISTORICAL_PERSON_NAME_TAG_RECORDS[:-1] + (
+            (99, 99, HISTORICAL_PERSON_NAME_TAG_RECORDS[0][2]),
+        )
+        with self.assertRaises(ValueError):
+            validate_historical_person_name_tag_records(duplicate_name)
+        padded_name = HISTORICAL_PERSON_NAME_TAG_RECORDS[:-1] + ((99, 99, " padded "),)
+        with self.assertRaises(ValueError):
+            validate_historical_person_name_tag_records(padded_name)

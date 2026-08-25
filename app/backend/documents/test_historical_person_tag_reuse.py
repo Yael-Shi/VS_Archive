@@ -270,14 +270,14 @@ class HistoricalPersonTagWritePathTests(TestCase):
         self.assertEqual(item.tags.count(), 0)
         self.assertEqual(item.categories.count(), 0)
 
-    def test_unmapped_id_with_historical_display_name_is_not_blocked(self):
+    def test_unmapped_id_with_retired_historical_tag_name_is_blocked(self):
         unmapped = _create_tag(name="שלמה הלל")
         self.assertNotEqual(unmapped.pk, BLOCKED_TAG_ID)
         self.assertNotIn(unmapped.pk, historical_person_name_tag_ids())
         parsed, errors = parse_archive_item_discovery_metadata_form(
             {"selected_tags": [str(unmapped.pk)]}
         )
-        self.assertEqual(errors, [])
+        self.assertIn(HISTORICAL_PERSON_TAG_REUSE_ERROR, errors)
         self.assertEqual(parsed["selected_tag_ids"], [unmapped.pk])
 
 

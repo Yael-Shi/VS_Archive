@@ -552,26 +552,26 @@ def update_ocr_document_tags(
 
     Document remains OCR runtime source of truth. Does not sync ArchiveItem.
     Unused Tag rows are left in the database. Frozen historical person-name
-    Tag ids cannot be reused; names that resolve to those ids fail closed
-    before any relation write.
+    Tag ids cannot be reused; retired historical Tag names cannot be
+    recreated. Both fail closed before any relation write.
     """
-    from documents.models import ArchiveItem, Tag
+    from documents.models import ArchiveItem
     from documents.services.archive_discovery_metadata_validation import (
         HISTORICAL_PERSON_TAG_REUSE_ERROR,
-        existing_tag_name_reuse_errors,
+        historical_person_tag_name_write_errors,
         historical_person_tag_reuse_errors,
     )
 
     if document.archive_item.item_type != ArchiveItem.ItemType.OCR_DOCUMENT:
         raise ValueError("document is not linked to an OCR_DOCUMENT archive item")
 
-    reuse_errors = existing_tag_name_reuse_errors(tag_names)
+    reuse_errors = historical_person_tag_name_write_errors(tag_names)
     if reuse_errors:
         raise ValueError(reuse_errors[0])
 
     tag_objs = []
     for name in tag_names:
-        tag_obj, _ = Tag.objects.get_or_create(name=name)
+        tag_obj, _ = _get_or_create_tag_by_name(name)
         tag_objs.append(tag_obj)
     reuse_errors = historical_person_tag_reuse_errors(tag.pk for tag in tag_objs)
     if reuse_errors:
@@ -626,7 +626,13 @@ def _get_or_create_archive_event_by_name(name: str):
 
 def _get_or_create_tag_by_name(name: str):
     from documents.models import Tag
+    from documents.services.archive_discovery_metadata_validation import (
+        HISTORICAL_PERSON_TAG_REUSE_ERROR,
+        retired_historical_person_tag_name_errors,
+    )
 
+    if retired_historical_person_tag_name_errors([name]):
+        raise ValueError(HISTORICAL_PERSON_TAG_REUSE_ERROR)
     return Tag.objects.get_or_create(name=name)
 
 
@@ -665,8 +671,8 @@ def update_archive_item_discovery_metadata(
 
     Historical person-name Tags are not part of the desired-set contract.
     Existing blocked Tag relations are merged back before ``tags.set`` so
-    ordinary edits cannot drop them. New blocked Tag ids fail closed before
-    any relation write.
+    ordinary edits cannot drop them. New blocked Tag ids and retired
+    historical Tag names fail closed before any relation write.
     """
     from documents.historical_person_tag_map import (
         historical_person_name_tag_ids,
@@ -674,7 +680,12 @@ def update_archive_item_discovery_metadata(
     )
     from documents.services.archive_discovery_metadata_validation import (
         HISTORICAL_PERSON_TAG_REUSE_ERROR,
+        historical_person_tag_name_write_errors,
     )
+
+    reuse_errors = historical_person_tag_name_write_errors(tag_names)
+    if reuse_errors:
+        raise ValueError(reuse_errors[0])
 
     category_objs = []
     for name in category_names:

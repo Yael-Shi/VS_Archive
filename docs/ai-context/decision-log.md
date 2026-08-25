@@ -1,5 +1,48 @@
 # VS-Archive Decision Log
 
+## Retired historical Person-Tag names (D2a)
+
+**Decision / implemented:** The 29 frozen historical person-name Tag names
+are an immutable runtime retired-name policy in
+`documents/historical_person_tag_map.py`, stored alongside the frozen
+**Tag.id → Person.id** identities. Identity remains **Tag.id → Person.id**.
+`Person.name` is not identity. There are no automatic aliases and no
+broad person-name denylist.
+
+**Current behavior:**
+
+- Runtime consumers must not import migration `0055`. The artifact is
+  validated at import: 29 records; unique Tag ids, Person ids, and Tag
+  names; names already trimmed.
+- Matching runs only after the existing tag-name parse/trim
+  (`normalize_tag_names_from_list` / suggestion parse). No casefold,
+  fuzzy matching, or alias matching.
+- A retired name stays blocked even when the original mapped Tag row no
+  longer exists, so `get_or_create(name=…)` cannot resurrect it under a
+  new PK. Mapped-ID blocks remain while Tag rows still exist.
+- Shared helpers (`retired_historical_person_tag_name_errors`,
+  `historical_person_tag_name_write_errors`) are used on audited Tag
+  create/reuse paths: staff ArchiveItem metadata create/edit,
+  `update_ocr_document_tags`, public `ArchiveMetadataSuggestion`
+  submission, suggestion approval, Django Tag admin add/change, and
+  Document admin `tags_m2m`. A mapped Tag row may be saved unchanged in
+  Tag admin; it must not be renamed to any other name (including an
+  ordinary name). Ordinary Tag names stay creatable and reusable.
+- PENDING suggestions are not auto-rejected, mutated, or deleted.
+  Submitting a retired name fails clearly. Approval rechecks the policy
+  inside the existing `transaction.atomic()` and writes no partial
+  metadata.
+- `pending_archive_metadata_suggestions_with_retired_tag_names()` is a
+  read-only inventory for later D2b preflight.
+
+**Deferred (D2b):** deleting the 29 mapped Tag rows. D2b must refuse
+while that PENDING inventory is non-empty. No relation deletion, search
+rebuild, Person-page/chip changes, or D2b flag in this change.
+
+**Tests:** `documents/test_historical_person_tag_retired_names.py` plus
+updated map coverage in `documents/test_historical_person_tag_map.py`.
+No schema or data migration.
+
 ## Public Person active-filter chip UX
 
 **Decision / implemented:** Public `/archive/` active-filter summary renders
@@ -27,8 +70,9 @@ A separate visible **×** is a GET link that removes only that Person id.
   only. No extra Person queries per selected id.
 
 **Deferred:** public alias display on chips/picker; PhotoPerson appearance
-filter / name linking; Person catalog/Admin; public biography field; D2
-Tag-row deletion.
+filter / name linking; Person catalog/Admin; public biography field. D2a
+retired-name policy is implemented; D2b Tag-row deletion is still
+deferred.
 
 **Tests:** `documents/test_archive_advanced_search_person.py`. No schema
 migration.
@@ -73,8 +117,9 @@ cards. No biography field, no schema migration, no staff-form change.
   active-filter chip UX**).
 
 **Deferred:** public biography/summary field; public alias display;
-PhotoPerson name linking / appearance filter; Person catalog/Admin;
-D2 Tag-row deletion.
+PhotoPerson name linking / appearance filter; Person catalog/Admin.
+D2a retired-name policy is implemented; D2b Tag-row deletion is still
+deferred.
 
 **Tests:** `documents/test_archive_person_public_page.py` plus updated
 Stage A presentation, Stage B redirect, advanced-filter, and staff
@@ -110,9 +155,10 @@ removed by an explicit management command. Tag rows stay. Identity remains
   refuses delete of mapped Tag rows, including mixed bulk delete.
   Ordinary Tag delete is unchanged. No name denylist.
 
-**Deferred (D2):** deleting the 29 mapped Tag rows. Blocked on name
-resurrection (`get_or_create(name=…)` would create ordinary Tags with the
-old person names) and PENDING `ArchiveMetadataSuggestion` policy. Public
+**Deferred (D2b):** deleting the 29 mapped Tag rows. D2a retired-name
+policy is implemented (exact frozen Tag names stay blocked even after
+the original Tag row is gone). D2b must refuse while PENDING
+`ArchiveMetadataSuggestion` rows contain those retired names. Public
 Person pages and Person filter-chip UX are implemented and are not a D2
 prerequisite. Direct `?tag=<mapped_id>` stays Option 0 (matches nothing
 once relations are gone).
@@ -148,8 +194,9 @@ Tag browse, visibility, and authorized item querysets are unchanged.
   mapped Tag relations are removed by `cleanup_historical_person_tags
   --apply-relations`; Tag rows remain.
 
-**Deferred:** D2 Tag-row deletion (name resurrection + pending-suggestion
-policy); public alias display; PhotoPerson name linking; Person catalog;
+**Deferred:** D2a retired-name policy is implemented. D2b Tag-row deletion
+remains deferred (must refuse while PENDING suggestions contain retired
+names); public alias display; PhotoPerson name linking; Person catalog;
 query-string redirects (Option 1+). Public Person pages and Person
 filter-chip UX are implemented (see **Public Person page** and
 **Public Person active-filter chip UX**). Search-index cleanup of
@@ -185,11 +232,11 @@ unchanged. PhotoPerson / **אנשים מזוהים:** stay separate.
 **Deferred:** Stage B path redirect and public Tag-choice hiding are
 implemented (see **Public Tag browse/filter cutover (Person vs Tag,
 Stage B)**). D1 mapped relation cleanup is implemented (see
-**Historical person-Tag relation cleanup (D1)**). Still deferred: D2
-Tag-row deletion; staff/suggestion UI beyond mapped-id reuse blocks;
-PhotoPerson changes; migrations. Public Person pages and Person
-filter-chip UX are implemented (see **Public Person page** and
-**Public Person active-filter chip UX**).
+**Historical person-Tag relation cleanup (D1)**). Still deferred: D2b
+Tag-row deletion (D2a retired-name policy is implemented); staff/suggestion
+UI beyond current write-path blocks; PhotoPerson changes; migrations.
+Public Person pages and Person filter-chip UX are implemented (see
+**Public Person page** and **Public Person active-filter chip UX**).
 
 **Tests:** `documents/test_archive_person_public_presentation.py`.
 
@@ -240,9 +287,9 @@ D1 mapped relation cleanup (implemented).
 redirect and public Tag-choice hiding are implemented (see **Public Tag
 browse/filter cutover (Person vs Tag, Stage B)**). Direct legacy `?tag=`
 semantics are intentionally unchanged (Option 0). D1 relation cleanup is
-implemented (see **Historical person-Tag relation cleanup (D1)**). Still
-deferred: D2 Tag-row deletion (name resurrection + pending-suggestion
-policy).
+implemented (see **Historical person-Tag relation cleanup (D1)**). D2a
+retired-name policy is implemented. Still deferred: D2b Tag-row deletion
+(must refuse while PENDING suggestions contain retired names).
 
 **Tests:** `documents/test_historical_person_tag_reuse.py`,
 `documents/test_reconcile_historical_person_tag_relations.py`, plus map
@@ -254,13 +301,15 @@ schema or data migration.
 **Decision / implemented:** Versioned code artifact
 `documents/historical_person_tag_map.py` freezes the production
 **Tag.id → Person.id** pairs created by migration
-`0055_backfill_person_from_person_name_tags`. Lookup is
+`0055_backfill_person_from_person_name_tags`, plus the exact historical
+Tag names used by D2a retired-name policy. Lookup is
 `person_id_for_historical_person_name_tag(tag_id)`; unknown Tag ids
 return `None`. Runtime consumers now include reuse blocking, the
 post-deploy reconciliation command, Stage A public presentation,
 Stage B mapped-tag browse redirects / public Tag-choice hiding, D1
-relation cleanup, and mapped-Tag admin/OCR write-path blocks. D2 Tag-row
-deletion remains out of scope for this module.
+relation cleanup, mapped-Tag admin/OCR write-path blocks, and D2a
+retired-name write-path blocks. D2b Tag-row deletion remains out of
+scope for this module.
 
 **Evidence (production):** 0055 started from 0 Person rows and created
 all 29 Persons sequentially in `APPROVED_PERSON_NAME_TAGS` order.
@@ -276,17 +325,20 @@ Person ids are **1–29** in that creation order. Person and
   relations vs 124 `ArchiveItemPerson` rows (Person **19** on item **194**
   only).
 
-**Current behavior:** Names in comments are display/provenance-only.
-`Person.name` is not unique and is **not** identity. Do not
-`get_or_create(name=...)`. Do not join or break ties on names. Do not
-use PhotoPerson.
+**Current behavior:** Frozen Tag names are retired-name policy only (D2a);
+they are not Person lookup keys. `Person.name` is not unique and is
+**not** identity. Do not look up Person by name. Do not join or break
+ties on names. Do not use PhotoPerson. Do not import migration `0055`
+at runtime.
 
 **Deferred:** Stage A public cards/detail cutover is implemented (see
 **Public presentation cutover (Person vs Tag, Stage A)**). Stage B path
 redirect and public Tag-choice hiding are implemented (see **Public Tag
 browse/filter cutover (Person vs Tag, Stage B)**). D1 relation cleanup is
-implemented (see **Historical person-Tag relation cleanup (D1)**). Still
-deferred for this module: D2 Tag-row deletion; schema mapping table.
+implemented (see **Historical person-Tag relation cleanup (D1)**). D2a
+retired-name policy is implemented (see **Retired historical Person-Tag
+names (D2a)**). Still deferred for this module: D2b Tag-row deletion;
+schema mapping table.
 Direct legacy `?tag=` query application is intentionally unchanged.
 
 **Tests:** `documents/test_historical_person_tag_map.py`. No schema
@@ -570,7 +622,8 @@ public discovery gap. PhotoPerson stays the photo-appearance relation.
 
 **Deferred:** public alias display; alias-assisted picker search (client
 filter matches canonical option text only); PhotoPerson-specific
-“appears in this photo” filter; D2 Tag-row deletion; legacy
+“appears in this photo” filter; D2b Tag-row deletion (D2a retired-name
+policy is implemented); legacy
 `Document.tags_m2m` cleanup; identity merge/dedupe; fuzzy matching; AI
 identification. Public Person browse/detail and Person filter-chip UX
 are implemented (see **Public Person page** and **Public Person
