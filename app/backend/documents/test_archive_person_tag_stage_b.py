@@ -29,7 +29,10 @@ from documents.services.archive_item_access import (
     ARCHIVE_FAMILY_GROUP_NAME,
     archive_browse_queryset_for_user,
 )
-from documents.services.archive_item_presentation import person_archive_filter_url
+from documents.services.archive_item_presentation import (
+    person_archive_filter_url,
+    person_public_page_url,
+)
 from documents.services.archive_items import create_manual_text_archive_item
 from documents.test_historical_person_tag_reuse import _create_tag
 
@@ -83,17 +86,16 @@ def _ids(queryset) -> set[int]:
 
 
 class ArchivePersonTagStageBRedirectTests(TestCase):
-    def test_mapped_tag_browse_redirects_to_person_filter_url(self):
+    def test_mapped_tag_browse_redirects_to_person_page(self):
         person = _mapped_person()
         _mapped_historical_tag()
         resp = self.client.get(
             reverse("archive-tag-browse", kwargs={"tag_id": MAPPED_TAG_ID})
         )
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp["Location"], person_archive_filter_url(person.id))
-        self.assertEqual(resp["Location"], person_archive_filter_url(MAPPED_PERSON_ID))
-        self.assertIn(f"person={MAPPED_PERSON_ID}", resp["Location"])
-        self.assertIn("advanced=1", resp["Location"])
+        self.assertEqual(resp["Location"], person_public_page_url(person.id))
+        self.assertEqual(resp["Location"], person_public_page_url(MAPPED_PERSON_ID))
+        self.assertEqual(resp["Location"], f"/archive/people/{MAPPED_PERSON_ID}/")
 
     def test_mapped_tag_browse_redirects_when_tag_row_is_missing(self):
         person = _mapped_person()
@@ -102,7 +104,7 @@ class ArchivePersonTagStageBRedirectTests(TestCase):
             reverse("archive-tag-browse", kwargs={"tag_id": MAPPED_TAG_ID})
         )
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp["Location"], person_archive_filter_url(person.id))
+        self.assertEqual(resp["Location"], person_public_page_url(person.id))
 
     def test_redirect_uses_mapped_person_id_not_name(self):
         mapped = _mapped_person(name="Canonical Mapped")
@@ -112,9 +114,9 @@ class ArchivePersonTagStageBRedirectTests(TestCase):
             reverse("archive-tag-browse", kwargs={"tag_id": MAPPED_TAG_ID})
         )
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp["Location"], person_archive_filter_url(mapped.id))
-        self.assertNotEqual(resp["Location"], person_archive_filter_url(decoy.id))
-        self.assertNotIn(f"person={decoy.id}", resp["Location"])
+        self.assertEqual(resp["Location"], person_public_page_url(mapped.id))
+        self.assertNotEqual(resp["Location"], person_public_page_url(decoy.id))
+        self.assertNotIn(f"/archive/people/{decoy.id}/", resp["Location"])
 
     def test_ordinary_tag_browse_is_unchanged(self):
         item = _public_manual("Ordinary tag browse visible")
@@ -311,7 +313,7 @@ class ArchivePersonTagStageBAuthorizationAndPhotoPersonTests(TestCase):
             reverse("archive-tag-browse", kwargs={"tag_id": MAPPED_TAG_ID})
         )
         self.assertEqual(browse.status_code, 302)
-        self.assertEqual(browse["Location"], person_archive_filter_url(person.id))
+        self.assertEqual(browse["Location"], person_public_page_url(person.id))
 
         resp = self.client.get(browse["Location"])
         self.assertEqual(resp.status_code, 200)
@@ -338,6 +340,14 @@ class ArchivePersonTagStageBAuthorizationAndPhotoPersonTests(TestCase):
         photo.original_file_key = f"photos/{photo.id}/original.jpg"
         photo.save(update_fields=["original_file_key", "updated_at"])
         PhotoPerson.objects.create(photo_content=photo, person=person)
+
+        browse = self.client.get(
+            reverse("archive-tag-browse", kwargs={"tag_id": MAPPED_TAG_ID})
+        )
+        self.assertEqual(browse.status_code, 302)
+        self.assertEqual(browse["Location"], person_public_page_url(person.id))
+        person_page = self.client.get(browse["Location"])
+        self.assertEqual(person_page.status_code, 404)
 
         resp = self.client.get(person_archive_filter_url(person.id))
         self.assertEqual(resp.status_code, 200)

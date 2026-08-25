@@ -1,5 +1,50 @@
 # VS-Archive Decision Log
 
+## Public Person page
+
+**Decision / implemented:** Public Person detail exists at
+**`/archive/people/<person_id>/`** (`archive-person-detail`). It lists
+ArchiveItems generally related to that Person via **`ArchiveItemPerson`**,
+using the same authorized/renderable browse queryset as `/archive/`.
+This is Option A: canonical **`Person.name`** plus related public
+cards. No biography field, no schema migration, no staff-form change.
+
+**Current behavior:**
+
+- Route is registered before the `<int:item_id>/` catch-all. Missing
+  Person ids and Persons with **zero** authorized/renderable
+  `ArchiveItemPerson` items both **404** (same status; no private-count
+  leak). PhotoPerson-only identities 404. Non-renderable PHOTO/OCR-only
+  links 404.
+- Related items: `archive_browse_queryset_for_user(request.user)` filtered
+  by `ArchiveItemPerson.person_id`. Count is that queryset’s length.
+  Family/restricted-capable users may see a higher authorized count than
+  anonymous. Duplicate canonical names stay distinct by `Person.id`.
+- Pagination is fixed **48** per page (`page=`); invalid/out-of-range
+  `page` follows `normalize_archive_public_list_page` (clamp). No `q`,
+  type tabs, advanced filters, or `per_page` control. Order is
+  `-created_at`, `pk`.
+- Page shows canonical name, authorized total count, browse cards
+  (existing card partial), page nav when needed, and **חזרה לארכיון**.
+  Aliases are not displayed. No public staff-edit link.
+- Item-level **אנשים קשורים** links on archive cards, homepage cards,
+  archive detail, and OCR document detail go to the Person page
+  (`person_public_page_url`). PhotoPerson **אנשים מזוהים:** names stay
+  plain text.
+- Stage B mapped historical Tag browse
+  `/archive/tags/<mapped_tag_id>/` now **302**s to the Person page
+  (map-first). Following that URL still 404s when the Person has no
+  authorized related items. Ordinary Tag browse is unchanged. Advanced
+  `person=` list filtering and filter chips are unchanged.
+
+**Deferred:** public biography/summary field; public alias display;
+PhotoPerson name linking / appearance filter; Person catalog/Admin;
+Person filter-chip UX (name vs ×); D2 Tag-row deletion.
+
+**Tests:** `documents/test_archive_person_public_page.py` plus updated
+Stage A presentation, Stage B redirect, advanced-filter, and staff
+route tests. No schema migration.
+
 ## Historical person-Tag relation cleanup (D1)
 
 **Decision / implemented:** Mapped historical person-name Tag *relations* are
@@ -43,8 +88,8 @@ or data migration.
 
 **Decision / implemented:** Mapped historical person-name Tag ids are no
 longer public Tag browse/filter *choices*. `/archive/tags/<mapped_tag_id>/`
-temporarily redirects (HTTP 302) to the canonical Person filter URL
-`/archive/?person=<mapped_person_id>&advanced=1`. Lookup is
+redirects (HTTP 302) to the public Person page
+`/archive/people/<mapped_person_id>/`. Lookup is
 `person_id_for_historical_person_name_tag(tag_id)` only (map-first, before
 `Tag.objects.get`, so a future Tag-row delete still redirects). Ordinary
 Tag browse, visibility, and authorized item querysets are unchanged.
@@ -52,7 +97,9 @@ Tag browse, visibility, and authorized item querysets are unchanged.
 **Current behavior:**
 
 - `archive_tag_browse_page` resolves mapped Tag ids to Person ids, then
-  `person_archive_filter_url`. Unmapped missing Tags remain 404.
+  `person_public_page_url`. Unmapped missing Tags remain 404.
+  The Person page itself 404s when that Person has no authorized
+  renderable `ArchiveItemPerson` items.
 - `archive_advanced_filter_choice_context` excludes
   `historical_person_name_tag_ids()` from authorized public Tag choices
   only. Category/event/person choices are unchanged. Visibility scoping,
@@ -66,9 +113,9 @@ Tag browse, visibility, and authorized item querysets are unchanged.
   --apply-relations`; Tag rows remain.
 
 **Deferred:** D2 Tag-row deletion (name resurrection + pending-suggestion
-policy); public Person pages; active Person filter-chip UX;
-query-string redirects (Option 1+). 302 is intentional because Person
-pages may replace the list-filter URL later. Search-index cleanup of
+policy); public alias display; PhotoPerson name linking; Person catalog;
+active Person filter-chip UX; query-string redirects (Option 1+). Public
+Person pages are implemented (see **Public Person page**). Search-index cleanup of
 mapped Tag names is part of D1 apply (rebuild for affected ArchiveItems).
 
 **Tests:** `documents/test_archive_person_tag_stage_b.py`.
@@ -79,11 +126,9 @@ mapped Tag names is part of D1 apply (rebuild for affected ArchiveItems).
 item-level `ArchiveItemPerson` (`ArchiveItem.people`) under **אנשים
 קשורים**. The 29 frozen historical person-name Tag ids are hidden from
 public card `קשור ל־` and detail `תגיות:`. Identity is `Person.id`.
-Person links go to `/archive/?person=<Person.id>&advanced=1` through the
-existing canonical list query builder. Ordinary Tags, events,
+Person links go to `/archive/people/<Person.id>/`. Ordinary Tags, events,
 categories, current ordering, visibility, and existing URLs are
-unchanged. PhotoPerson / **אנשים מזוהים:** stay separate. There are no
-public Person pages.
+unchanged. PhotoPerson / **אנשים מזוהים:** stay separate.
 
 **Current behavior:**
 
@@ -105,7 +150,8 @@ implemented (see **Public Tag browse/filter cutover (Person vs Tag,
 Stage B)**). D1 mapped relation cleanup is implemented (see
 **Historical person-Tag relation cleanup (D1)**). Still deferred: D2
 Tag-row deletion; staff/suggestion UI beyond mapped-id reuse blocks;
-PhotoPerson changes; migrations; public Person pages; Person filter-chip UX.
+PhotoPerson changes; migrations; Person filter-chip UX. Public Person
+pages are implemented (see **Public Person page**).
 
 **Tests:** `documents/test_archive_person_public_presentation.py`.
 
@@ -460,7 +506,9 @@ appears.”
 - OR within the Person group; AND with author / category / event / tag / year
   groups. Visibility remains `archive_browse_queryset_for_user` before filters.
 - Applies to VIDEO / OCR_DOCUMENT / MANUAL_TEXT / PHOTO. Results remain
-  ArchiveItems. No Person cards, Person page, or matched-Person deep-link.
+  ArchiveItems. No Person cards on the list. Public Person detail is
+  `/archive/people/<id>/` (see **Public Person page**); this filter does
+  not deep-link to it.
 - Choices: one `Person.objects.filter(archive_items__pk__in=authorized pks).distinct().order_by("name", "id")`
   query when advanced choice context is needed (panel open or any advanced
   filter active). Canonical **`Person.name`** is the visible label; option
@@ -478,11 +526,12 @@ appears.”
 already indexes those identities. Structured filtering was the remaining
 public discovery gap. PhotoPerson stays the photo-appearance relation.
 
-**Deferred:** public Person browse/detail (`/archive/people/<id>/`);
-alias-assisted picker search (client filter matches canonical option text
-only); PhotoPerson-specific “appears in this photo” filter; eventual
-person-Tag removal; legacy `Document.tags_m2m` cleanup; identity
-merge/dedupe; fuzzy matching; AI identification.
+**Deferred:** public alias display; alias-assisted picker search (client
+filter matches canonical option text only); PhotoPerson-specific
+“appears in this photo” filter; Person filter-chip UX; D2 Tag-row
+deletion; legacy `Document.tags_m2m` cleanup; identity merge/dedupe;
+fuzzy matching; AI identification. Public Person browse/detail is
+implemented (see **Public Person page**).
 
 **Tests:** `documents/test_archive_advanced_search_person.py` plus updated
 advanced-search backend/UI regressions. No schema migration.
@@ -530,20 +579,21 @@ advanced-search backend/UI regressions. No schema migration.
 
 **Structured Person filter:** implemented in **Public `/archive/` Person
 advanced filter** (`person=<id>`, ArchiveItemPerson only). Public Person
-browse/detail remains deferred.
+browse/detail is implemented (see **Public Person page**).
 
 **Why:** Production now has 29 Person rows and 124 ArchiveItemPerson links
 copied from historical person-name Tags. Those identities were not in `q`
 until this change. PhotoPerson remains the only “appears in this photo”
 relation.
 
-**Deferred:** public Person browse/detail; eventual person-Tag removal
+**Deferred:** eventual person-Tag removal
 (ordinary Tags still power unmapped tag browse/filter; mapped Tag path
-browse redirects, while raw `?tag=` is intentionally preserved); legacy
+browse redirects to the Person page, while raw `?tag=` is intentionally preserved); legacy
 `Document.tags_m2m` cleanup; staff PHOTO appearance review / PhotoPerson
 backfill; identity cleanup/aliases where needed. Structured Person
 **filter** is implemented separately (see **Public `/archive/` Person
-advanced filter**).
+advanced filter**). Public Person pages are implemented separately (see
+**Public Person page**).
 
 **Tests:** `documents/test_archive_search_archive_item_person.py` (plus
 updated PhotoPerson/alias/backfill regressions).

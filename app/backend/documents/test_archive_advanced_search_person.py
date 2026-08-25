@@ -617,25 +617,26 @@ class ArchiveAdvancedPersonFilterUiTests(TestCase):
         self.assertEqual(names, ["Linked Choice"])
         self.assertNotIn("Appearance Only", names)
 
-    def test_no_public_person_route_or_page_is_added(self):
-        person = Person.objects.create(name="No Public Page")
-        item = _public_manual("No public page item")
+    def test_public_person_page_is_not_a_filter_deeplink(self):
+        person = Person.objects.create(name="Public Page Person")
+        item = _public_manual("Public page person item")
         ArchiveItemPerson.objects.create(archive_item=item, person=person)
 
         for name in (
             "archive-people-browse",
             "archive-person-browse",
-            "archive-person-detail",
         ):
             with self.assertRaises(NoReverseMatch):
                 reverse(name)
 
-        missing = self.client.get(f"/archive/people/{person.id}/")
-        self.assertEqual(missing.status_code, 404)
+        page = self.client.get(
+            reverse("archive-person-detail", kwargs={"person_id": person.id})
+        )
+        self.assertEqual(page.status_code, 200)
 
         resp = self.client.get(self.url, {"person": str(person.id)})
         html = resp.content.decode("utf-8")
-        self.assertNotIn(f"/archive/people/{person.id}/", html)
+        self.assertIn(f"/archive/people/{person.id}/", html)
         card = resp.context["browse_cards"][0]
         self.assertNotIn("person=", card.detail_url)
 

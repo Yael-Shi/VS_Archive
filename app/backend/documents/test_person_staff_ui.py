@@ -282,14 +282,15 @@ class PersonStaffEditAccessTests(TestCase):
         )
         self.assertEqual(resp.status_code, 404)
 
-    def test_no_public_person_route_or_catalog(self):
+    def test_no_public_person_catalog_or_alternate_routes(self):
         for path in (
-            "/archive/people/1/",
             "/archive/person/1/",
             "/archive/manage/people/",
         ):
             with self.assertRaises(Resolver404):
                 resolve(path)
+        match = resolve("/archive/people/1/")
+        self.assertEqual(match.url_name, "archive-person-detail")
         match = resolve("/archive/manage/people/1/edit/")
         self.assertEqual(match.url_name, "archive-manage-person-edit")
 

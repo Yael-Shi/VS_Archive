@@ -19,6 +19,11 @@ urlpatterns = [
         views.archive_tag_browse_page,
         name="archive-tag-browse",
     ),
+    path(
+        "people/<int:person_id>/",
+        views.archive_person_detail_page,
+        name="archive-person-detail",
+    ),
     path("manage/", views.archive_manage_list_page, name="archive-manage-list"),
     path(
         "manage/new/",
