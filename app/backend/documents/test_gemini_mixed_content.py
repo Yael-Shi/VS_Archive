@@ -461,8 +461,13 @@ class MixedNoPerPageClassificationTests(SimpleTestCase):
                 "mime_type",
                 "source_identity",
                 "source_content_fingerprint",
+                "original_image_bytes",
+                "original_mime_type",
             },
         )
+        self.assertNotIn("content_classification", PageImage.__dataclass_fields__)
+        self.assertNotIn("content_type", PageImage.__dataclass_fields__)
+        self.assertNotIn("is_mixed", PageImage.__dataclass_fields__)
 
     def test_page_checkpoint_has_no_mixed_specific_persistence(self):
         field_names = {

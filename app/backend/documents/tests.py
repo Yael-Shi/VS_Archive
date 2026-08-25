@@ -63,7 +63,11 @@ from documents.services.ocr_routing import (
     gemini_model_candidates,
     select_ocr_route,
 )
-from documents.services.page_extraction import PageImage
+from documents.services.page_extraction import (
+    PageImage,
+    extract_pages,
+    source_file_bytes_to_page,
+)
 from documents.services.transkribus_engine import (
     PylaiaTranscriptionOutcome,
     SelectedTranscriptPage,
@@ -125,6 +129,151 @@ def _htr_test_page(page_index: int = 1) -> PageImage:
         image_bytes=b"x",
         mime_type="image/png",
     )
+
+
+def _solid_image_bytes(fmt: str, color=(255, 0, 0), size=(12, 8)) -> bytes:
+    image = Image.new("RGB", size, color)
+    buf = BytesIO()
+    image.save(buf, format=fmt)
+    return buf.getvalue()
+
+
+class PageImageOriginalEncodingTests(SimpleTestCase):
+    def test_jpeg_source_keeps_normalized_png_and_retains_original(self):
+        jpeg = _solid_image_bytes("JPEG")
+        page = source_file_bytes_to_page(0, jpeg, "image/jpeg")
+
+        self.assertEqual(page.page_index, 1)
+        self.assertEqual(page.mime_type, "image/png")
+        self.assertTrue(page.image_bytes.startswith(b"\x89PNG"))
+        self.assertNotEqual(page.image_bytes, jpeg)
+        self.assertEqual(page.original_image_bytes, jpeg)
+        self.assertEqual(page.original_mime_type, "image/jpeg")
+
+        extracted = extract_pages(jpeg, "image/jpeg")
+        self.assertEqual(len(extracted), 1)
+        self.assertEqual(extracted[0].mime_type, "image/png")
+        self.assertTrue(extracted[0].image_bytes.startswith(b"\x89PNG"))
+        self.assertEqual(extracted[0].original_image_bytes, jpeg)
+        self.assertEqual(extracted[0].original_mime_type, "image/jpeg")
+
+    def test_image_jpg_alias_is_retained_as_original_mime(self):
+        jpeg = _solid_image_bytes("JPEG", color=(0, 128, 255))
+        page = source_file_bytes_to_page(1, jpeg, "image/jpg")
+        self.assertEqual(page.page_index, 2)
+        self.assertEqual(page.mime_type, "image/png")
+        self.assertEqual(page.original_image_bytes, jpeg)
+        self.assertEqual(page.original_mime_type, "image/jpg")
+
+    def test_png_and_gif_sources_retain_original_but_shared_bytes_stay_png(self):
+        png = _solid_image_bytes("PNG", color=(0, 255, 0))
+        gif = _solid_image_bytes("GIF", color=(0, 0, 255))
+        png_page = extract_pages(png, "image/png")[0]
+        gif_page = source_file_bytes_to_page(0, gif, "image/gif")
+
+        self.assertEqual(png_page.mime_type, "image/png")
+        self.assertTrue(png_page.image_bytes.startswith(b"\x89PNG"))
+        self.assertEqual(png_page.original_image_bytes, png)
+        self.assertEqual(png_page.original_mime_type, "image/png")
+
+        self.assertEqual(gif_page.mime_type, "image/png")
+        self.assertTrue(gif_page.image_bytes.startswith(b"\x89PNG"))
+        self.assertEqual(gif_page.original_image_bytes, gif)
+        self.assertEqual(gif_page.original_mime_type, "image/gif")
+
+    def test_pdf_pages_have_normalized_png_without_original_bytes(self):
+        import fitz
+
+        pdf = fitz.open()
+        pdf.new_page(width=40, height=40)
+        pdf_bytes = pdf.tobytes()
+        pages = extract_pages(pdf_bytes, "application/pdf")
+
+        self.assertGreaterEqual(len(pages), 1)
+        self.assertEqual(pages[0].page_index, 1)
+        self.assertEqual(pages[0].mime_type, "image/png")
+        self.assertTrue(pages[0].image_bytes.startswith(b"\x89PNG"))
+        self.assertIsNone(pages[0].original_image_bytes)
+        self.assertIsNone(pages[0].original_mime_type)
+
+    def test_gemini_fingerprint_ignores_original_jpeg_fields(self):
+        from documents.services.gemini_engine import gemini_transcription_contract
+        from documents.services.gemini_page_checkpoints import (
+            build_gemini_attempt_identity,
+        )
+
+        jpeg = _solid_image_bytes("JPEG")
+        other_jpeg = _solid_image_bytes("JPEG", color=(12, 34, 56))
+        page = source_file_bytes_to_page(
+            0,
+            jpeg,
+            "image/jpeg",
+            source_identity="doc.jpg",
+            source_content_fingerprint="a" * 64,
+        )
+        stripped = replace(page, original_image_bytes=None, original_mime_type=None)
+        tweaked_original = replace(page, original_image_bytes=other_jpeg)
+
+        def identity_for(pages):
+            contract = gemini_transcription_contract(
+                prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+                language_hint=Document.Language.ARABIC,
+                temperature=0.2,
+            )
+            return build_gemini_attempt_identity(
+                pages=pages,
+                language_hint=Document.Language.ARABIC,
+                text_input_type=Document.TextInputType.PRINTED,
+                handwriting_type=None,
+                engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+                prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+                model_candidates=("gemini-2.5-flash",),
+                contract=contract,
+                min_text_length=20,
+                double_pass=False,
+                consistency_min_ratio=0.85,
+                temperature=0.2,
+                top_k=40,
+                top_p=0.95,
+                max_output_tokens=8192,
+                max_output_tokens_hard_cap=32768,
+            )
+
+        original_identity = identity_for([page])
+        stripped_identity = identity_for([stripped])
+        tweaked_identity = identity_for([tweaked_original])
+        self.assertEqual(
+            original_identity.identity_fingerprint,
+            stripped_identity.identity_fingerprint,
+        )
+        self.assertEqual(
+            original_identity.source_fingerprint,
+            stripped_identity.source_fingerprint,
+        )
+        self.assertEqual(
+            original_identity.page_fingerprints[1],
+            stripped_identity.page_fingerprints[1],
+        )
+        self.assertEqual(
+            original_identity.identity_fingerprint,
+            tweaked_identity.identity_fingerprint,
+        )
+        self.assertEqual(page.mime_type, "image/png")
+        self.assertTrue(page.image_bytes.startswith(b"\x89PNG"))
+
+    def test_transkribus_upload_contract_still_uses_normalized_png(self):
+        from documents.services.transkribus_engine import trp_upload_png_file_name
+
+        jpeg = _solid_image_bytes("JPEG")
+        page = source_file_bytes_to_page(0, jpeg, "image/jpeg")
+        self.assertEqual(page.mime_type, "image/png")
+        self.assertTrue(page.image_bytes.startswith(b"\x89PNG"))
+        self.assertEqual(
+            trp_upload_png_file_name(page_index=page.page_index),
+            "vs_archive_p000001.png",
+        )
+        self.assertEqual(page.original_image_bytes, jpeg)
+        self.assertNotEqual(page.original_image_bytes, page.image_bytes)
 
 
 class HtrDispatcherTests(SimpleTestCase):

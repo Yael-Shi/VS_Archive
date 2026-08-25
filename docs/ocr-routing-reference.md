@@ -184,6 +184,12 @@ If neither is enabled, the adapter fails before HTTP. Additional execution contr
 
 After routing to Antigravity, the adapter requires `worker_env` and `worker_env.enable_antigravity_arabic_printed=true`. It calls the Gemini Interactions API with `agent_id` from `ANTIGRAVITY_AGENT_ID` (default `antigravity-preview-05-2026`). Antigravity ignores Gemini OCR prompt variants; `prompt_variant=printed` on Antigravity routes is observability metadata only.
 
+**Image payload:** Shared `PageImage` remains normalized PNG (`image_bytes` / `mime_type`) for Gemini, Transkribus, checkpoints, and fingerprints. Image sources also retain original encoded bytes/MIME. At the **Antigravity boundary only**, original JPEG (`image/jpeg` or `image/jpg`) is sent as the exact original bytes with outbound MIME `image/jpeg`. PDF-rendered pages and non-JPEG originals use the normalized PNG. This is not a claimed Antigravity 20 MB limit.
+
+**Polling (unary background create + GET):** overall in_progress deadline **1200s**, per-GET timeout **120s**, poll interval **5s**. Create timeout is unchanged (`max(120, 30 * page_count)`). Transport timeouts retry the same interaction ID. These defaults stay below the worker 45-minute lease.
+
+**Still unary.** Streaming, durable recovery, cancellation, per-page interactions, and `include_input=false` are deferred.
+
 ## Translation behavior (high level)
 
 Separate from OCR route selection.

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import binascii
+import hashlib
 import logging
 import re
 import time
@@ -11,15 +13,15 @@ import requests
 
 from documents.services.antigravity_defaults import (
     DEFAULT_ANTIGRAVITY_AGENT_ID,
+    DEFAULT_POLL_GET_TIMEOUT_SECONDS,
+    DEFAULT_POLL_SECONDS,
+    DEFAULT_TIMEOUT_SECONDS,
     INTERACTIONS_API_REVISION,
     INTERACTIONS_BASE_URL,
 )
 from documents.services.page_extraction import PageImage
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_POLL_SECONDS = 5.0
-DEFAULT_TIMEOUT_SECONDS = 300.0
 COMPLETED_STATUS = "completed"
 IN_PROGRESS_STATUS = "in_progress"
 USER_INPUT_STEP_TYPE = "user_input"
@@ -29,6 +31,9 @@ RESPONSE_SOURCE_POLL_GET = "poll_get"
 UNEXPECTED_TOKEN = "other"
 INVALID_LOG_VALUE = "invalid"
 _DATA_URL_PREFIX = "data:"
+_JPEG_SOURCE_MIMES = frozenset({"image/jpeg", "image/jpg"})
+OUTBOUND_JPEG_MIME = "image/jpeg"
+_OUTBOUND_SHA256_PREFIX_LEN = 16
 _MAX_SANITIZED_STRING = 128
 _MAX_LOG_LIST_ITEMS = 32
 _USAGE_TOTAL_FIELDS = (
@@ -38,18 +43,10 @@ _USAGE_TOTAL_FIELDS = (
     "total_tool_use_tokens",
     "total_tokens",
 )
-_KNOWN_STATUSES = frozenset(
-    {"completed", "in_progress", "failed", "cancelled"}
-)
-_KNOWN_STEP_TYPES = frozenset(
-    {"user_input", "model_output", "tool_call", "thought"}
-)
-_KNOWN_CONTENT_TYPES = frozenset(
-    {"text", "image", "audio", "video", "document"}
-)
-_KNOWN_MODALITIES = frozenset(
-    {"text", "image", "audio", "video", "document"}
-)
+_KNOWN_STATUSES = frozenset({"completed", "in_progress", "failed", "cancelled"})
+_KNOWN_STEP_TYPES = frozenset({"user_input", "model_output", "tool_call", "thought"})
+_KNOWN_CONTENT_TYPES = frozenset({"text", "image", "audio", "video", "document"})
+_KNOWN_MODALITIES = frozenset({"text", "image", "audio", "video", "document"})
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 _INTERACTION_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,512}$")
 
@@ -70,8 +67,27 @@ class AntigravityResult:
     needs_review: bool = True
 
 
+def antigravity_outbound_image(page: PageImage) -> tuple[bytes, str]:
+    """
+    Bytes and MIME actually sent to Antigravity.
+
+    Original JPEG/JPG is forwarded unchanged with canonical ``image/jpeg``.
+    PDF-rendered pages, PNG, and other non-JPEG originals use normalized PNG.
+    """
+    original_bytes = page.original_image_bytes
+    original_mime = (page.original_mime_type or "").strip().lower()
+    if original_bytes and original_mime in _JPEG_SOURCE_MIMES:
+        return original_bytes, OUTBOUND_JPEG_MIME
+    return page.image_bytes, page.mime_type or "image/png"
+
+
+def _outbound_sha256_prefix(image_bytes: bytes) -> str:
+    return hashlib.sha256(image_bytes).hexdigest()[:_OUTBOUND_SHA256_PREFIX_LEN]
+
+
 def _page_label(page: PageImage) -> str:
-    mime = (page.mime_type or "").lower()
+    _, mime = antigravity_outbound_image(page)
+    mime = (mime or "").lower()
     if mime == "image/jpeg" or mime == "image/jpg":
         ext = "jpg"
     elif mime == "image/webp":
@@ -177,11 +193,12 @@ def build_antigravity_ocr_prompt(image_labels: list[str]) -> str:
 def build_multimodal_input(prompt: str, pages: list[PageImage]) -> list[dict[str, Any]]:
     input_blocks: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
     for page in pages:
+        image_bytes, mime_type = antigravity_outbound_image(page)
         input_blocks.append(
             {
                 "type": "image",
-                "data": base64.b64encode(page.image_bytes).decode("ascii"),
-                "mime_type": page.mime_type or "image/png",
+                "data": base64.b64encode(image_bytes).decode("ascii"),
+                "mime_type": mime_type,
             }
         )
     return input_blocks
@@ -221,9 +238,7 @@ def _bounded_token_list(
     known: frozenset[str],
 ) -> tuple[list[str], int, bool]:
     total = len(values)
-    bounded = [
-        _known_or_other(value, known) for value in values[:_MAX_LOG_LIST_ITEMS]
-    ]
+    bounded = [_known_or_other(value, known) for value in values[:_MAX_LOG_LIST_ITEMS]]
     return bounded, total, total > _MAX_LOG_LIST_ITEMS
 
 
@@ -361,6 +376,16 @@ def summarize_antigravity_interaction(interaction: Any) -> dict[str, Any]:
         return empty
 
 
+def _decode_outbound_image_bytes(data: str) -> bytes | None:
+    try:
+        return base64.b64decode(data, validate=True)
+    except (ValueError, binascii.Error):
+        try:
+            return base64.b64decode(data)
+        except (ValueError, binascii.Error):
+            return None
+
+
 def _log_encoded_image_blocks(
     *,
     document_id: int | None,
@@ -376,12 +401,23 @@ def _log_encoded_image_blocks(
             page_offset += 1
             data = block.get("data")
             data_is_str = isinstance(data, str)
+            outbound_bytes = None
+            if data_is_str and data and not data.startswith(_DATA_URL_PREFIX):
+                outbound_bytes = _decode_outbound_image_bytes(data)
             logger.info(
                 "Antigravity image block document_id=%s page_index=%s "
+                "outbound_mime_type=%s outbound_byte_length=%s outbound_sha256=%s "
                 "base64_character_length=%s data_is_str=%s data_nonempty=%s "
                 "starts_with_data_url_prefix=%s",
                 document_id,
                 page.page_index if page is not None else None,
+                block.get("mime_type"),
+                len(outbound_bytes) if outbound_bytes is not None else None,
+                (
+                    _outbound_sha256_prefix(outbound_bytes)
+                    if outbound_bytes is not None
+                    else None
+                ),
                 len(data) if data_is_str else None,
                 data_is_str,
                 data_is_str and bool(data),
@@ -457,7 +493,7 @@ def _get_interaction(api_key: str, interaction_id: str) -> dict[str, Any]:
     response = requests.get(
         f"{INTERACTIONS_BASE_URL}/{interaction_id}",
         headers=_request_headers(api_key),
-        timeout=60,
+        timeout=DEFAULT_POLL_GET_TIMEOUT_SECONDS,
     )
     _raise_for_api_error(response)
     body = response.json()
@@ -572,9 +608,7 @@ def transcribe_pages_with_antigravity(
     multimodal_input = build_multimodal_input(prompt, ordered_pages)
 
     block_types = [
-        block.get("type")
-        for block in multimodal_input
-        if isinstance(block, dict)
+        block.get("type") for block in multimodal_input if isinstance(block, dict)
     ]
     image_block_count = block_types.count("image")
 

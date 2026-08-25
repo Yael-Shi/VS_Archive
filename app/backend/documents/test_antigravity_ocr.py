@@ -1,15 +1,26 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import math
+from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 import requests
+from PIL import Image
 
 from django.test import SimpleTestCase
 
-from documents.services.antigravity_defaults import DEFAULT_ANTIGRAVITY_AGENT_ID
+from documents.services.antigravity_defaults import (
+    DEFAULT_ANTIGRAVITY_AGENT_ID,
+    DEFAULT_POLL_GET_TIMEOUT_SECONDS,
+    DEFAULT_POLL_SECONDS,
+    DEFAULT_TIMEOUT_SECONDS,
+)
 from documents.services.antigravity_engine import (
     AntigravityError,
+    OUTBOUND_JPEG_MIME,
+    antigravity_outbound_image,
     build_antigravity_ocr_prompt,
     build_multimodal_input,
     normalize_antigravity_image_headings,
@@ -19,10 +30,15 @@ from documents.services.antigravity_engine import (
 )
 from documents.services.htr_adapters.antigravity_adapter import AntigravityAdapter
 from documents.services.htr_adapters.base import EnginePermanentError
-from documents.services.page_extraction import PageImage
+from documents.services.page_extraction import (
+    PageImage,
+    extract_pages,
+    source_file_bytes_to_page,
+)
 
 
 _ENGINE_LOGGER = "documents.services.antigravity_engine"
+_ADAPTER_LOGGER = "documents.services.htr_adapters.antigravity_adapter"
 _ALLOWLISTED_SUMMARY_KEYS = {
     "interaction_id",
     "status",
@@ -110,6 +126,13 @@ def _ok_json_response(payload: dict) -> MagicMock:
     response.ok = True
     response.json.return_value = payload
     return response
+
+
+def _solid_image_bytes(fmt: str, color=(255, 0, 0), size=(10, 6)) -> bytes:
+    image = Image.new("RGB", size, color)
+    buf = BytesIO()
+    image.save(buf, format=fmt)
+    return buf.getvalue()
 
 
 def _one_page() -> list[PageImage]:
@@ -642,15 +665,18 @@ class AntigravityMultimodalPayloadTests(SimpleTestCase):
         self.assertEqual(len(image_block_logs), 5)
         for page, message in zip(ordered, image_block_logs):
             encoded = base64.b64encode(page.image_bytes).decode("ascii")
+            outbound_sha = hashlib.sha256(page.image_bytes).hexdigest()[:16]
             self.assertIn("document_id=320", message)
             self.assertIn(f"page_index={page.page_index}", message)
+            self.assertIn("outbound_mime_type=image/png", message)
+            self.assertIn(f"outbound_byte_length={len(page.image_bytes)}", message)
+            self.assertIn(f"outbound_sha256={outbound_sha}", message)
             self.assertIn(f"base64_character_length={len(encoded)}", message)
             self.assertIn("data_is_str=True", message)
             self.assertIn("data_nonempty=True", message)
             self.assertIn("starts_with_data_url_prefix=False", message)
             self.assertNotIn(encoded, message)
             self.assertNotIn("raw_byte_length=", message)
-            self.assertNotIn("mime_type=", message)
 
 
 class AntigravityInteractionSummaryTests(SimpleTestCase):
@@ -899,9 +925,7 @@ class AntigravityLifecycleObservabilityTests(SimpleTestCase):
     def test_create_read_timeout_is_identified_as_phase_create(
         self, mock_post, mock_get
     ):
-        mock_post.side_effect = requests.ReadTimeout(
-            "create timeout body MUST-NOT-LOG"
-        )
+        mock_post.side_effect = requests.ReadTimeout("create timeout body MUST-NOT-LOG")
         clock = _MonotonicClock(start=0.0, step=2.5)
 
         with self.assertLogs(_ENGINE_LOGGER, level="WARNING") as captured:
@@ -949,9 +973,10 @@ class AntigravityLifecycleObservabilityTests(SimpleTestCase):
         ]
         self.assertEqual(len(summaries), 1)
         self.assertIn("response_source=create", summaries[0])
-        self.assertNotIn("phase=final_get", "\n".join(
-            record.getMessage() for record in captured.records
-        ))
+        self.assertNotIn(
+            "phase=final_get",
+            "\n".join(record.getMessage() for record in captured.records),
+        )
 
 
 class AntigravityObservabilityPrivacyTests(SimpleTestCase):
@@ -1011,3 +1036,255 @@ class AntigravityObservabilityPrivacyTests(SimpleTestCase):
         ]
         for sentinel in forbidden:
             self.assertNotIn(sentinel, logs)
+
+
+class AntigravityOutboundJpegPayloadTests(SimpleTestCase):
+    def test_original_jpeg_is_sent_exactly_and_png_stays_on_pageimage(self):
+        jpeg = _solid_image_bytes("JPEG")
+        page = source_file_bytes_to_page(0, jpeg, "image/jpeg")
+        self.assertEqual(page.mime_type, "image/png")
+        self.assertTrue(page.image_bytes.startswith(b"\x89PNG"))
+        self.assertEqual(page.original_image_bytes, jpeg)
+        self.assertNotEqual(page.image_bytes, jpeg)
+
+        outbound_bytes, outbound_mime = antigravity_outbound_image(page)
+        self.assertEqual(outbound_bytes, jpeg)
+        self.assertEqual(outbound_mime, OUTBOUND_JPEG_MIME)
+
+        blocks = build_multimodal_input("prompt", [page])
+        self.assertEqual(blocks[0], {"type": "text", "text": "prompt"})
+        self.assertEqual(blocks[1]["type"], "image")
+        self.assertEqual(blocks[1]["mime_type"], OUTBOUND_JPEG_MIME)
+        self.assertIsInstance(blocks[1]["data"], str)
+        self.assertTrue(blocks[1]["data"])
+        self.assertFalse(blocks[1]["data"].startswith("data:"))
+        decoded = base64.b64decode(blocks[1]["data"])
+        self.assertEqual(decoded, jpeg)
+        self.assertNotEqual(decoded, page.image_bytes)
+        self.assertTrue(decoded.startswith(b"\xff\xd8"))
+
+    def test_image_jpg_alias_is_canonicalized_to_image_jpeg(self):
+        jpeg = _solid_image_bytes("JPEG", color=(10, 20, 30))
+        page = extract_pages(jpeg, "image/jpg")[0]
+        blocks = build_multimodal_input("prompt", [page])
+        self.assertEqual(blocks[1]["mime_type"], OUTBOUND_JPEG_MIME)
+        self.assertEqual(base64.b64decode(blocks[1]["data"]), jpeg)
+
+    def test_png_gif_and_pdf_fall_back_to_normalized_png(self):
+        import fitz
+
+        png = _solid_image_bytes("PNG", color=(0, 255, 0))
+        gif = _solid_image_bytes("GIF", color=(0, 0, 255))
+        pdf = fitz.open()
+        pdf.new_page(width=40, height=40)
+        pdf_bytes = pdf.tobytes()
+
+        png_page = extract_pages(png, "image/png")[0]
+        gif_page = source_file_bytes_to_page(0, gif, "image/gif")
+        pdf_page = extract_pages(pdf_bytes, "application/pdf")[0]
+
+        for page in (png_page, gif_page, pdf_page):
+            blocks = build_multimodal_input("prompt", [page])
+            self.assertEqual(blocks[1]["mime_type"], "image/png")
+            decoded = base64.b64decode(blocks[1]["data"])
+            self.assertEqual(decoded, page.image_bytes)
+            self.assertTrue(decoded.startswith(b"\x89PNG"))
+
+        gif_decoded = base64.b64decode(
+            build_multimodal_input("prompt", [gif_page])[1]["data"]
+        )
+        self.assertNotEqual(gif_decoded, gif)
+        self.assertIsNone(pdf_page.original_image_bytes)
+        self.assertIsNone(pdf_page.original_mime_type)
+
+    def test_mixed_pages_keep_order_and_per_page_outbound_choice(self):
+        jpeg_a = _solid_image_bytes("JPEG", color=(255, 0, 0))
+        jpeg_b = _solid_image_bytes("JPEG", color=(0, 255, 0))
+        png = _solid_image_bytes("PNG", color=(0, 0, 255))
+        pages = [
+            source_file_bytes_to_page(2, jpeg_b, "image/jpeg"),
+            source_file_bytes_to_page(0, png, "image/png"),
+            source_file_bytes_to_page(1, jpeg_a, "image/jpg"),
+        ]
+        ordered = sorted(pages, key=lambda page: page.page_index)
+        blocks = build_multimodal_input("prompt", ordered)
+
+        self.assertEqual([page.page_index for page in ordered], [1, 2, 3])
+        self.assertEqual(len(blocks), 4)
+        self.assertEqual(blocks[0]["type"], "text")
+        self.assertEqual([block["type"] for block in blocks[1:]], ["image"] * 3)
+
+        decoded = [base64.b64decode(block["data"]) for block in blocks[1:]]
+        self.assertEqual(blocks[1]["mime_type"], "image/png")
+        self.assertEqual(decoded[0], ordered[0].image_bytes)
+        self.assertTrue(decoded[0].startswith(b"\x89PNG"))
+
+        self.assertEqual(blocks[2]["mime_type"], OUTBOUND_JPEG_MIME)
+        self.assertEqual(decoded[1], jpeg_a)
+        self.assertNotEqual(decoded[1], ordered[1].image_bytes)
+
+        self.assertEqual(blocks[3]["mime_type"], OUTBOUND_JPEG_MIME)
+        self.assertEqual(decoded[2], jpeg_b)
+        self.assertFalse(any(block["data"].startswith("data:") for block in blocks[1:]))
+
+    @patch(
+        "documents.services.antigravity_engine._get_interaction",
+        side_effect=_unexpected_get,
+    )
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_transcribe_posts_original_jpeg_and_logs_outbound_bytes(
+        self, mock_post, mock_get
+    ):
+        jpeg = _solid_image_bytes("JPEG")
+        page = source_file_bytes_to_page(0, jpeg, "image/jpeg")
+        encoded_jpeg = base64.b64encode(jpeg).decode("ascii")
+        encoded_png = base64.b64encode(page.image_bytes).decode("ascii")
+        mock_post.return_value = _ok_json_response(
+            _completed_interaction(
+                "[IMAGE 1: page-1.jpg]\nArabic text here",
+                interaction_id="ix-jpeg",
+            )
+        )
+
+        with self.assertLogs(_ENGINE_LOGGER, level="INFO") as captured:
+            result = transcribe_pages_with_antigravity(
+                [page],
+                api_key="key",
+                document_id=321,
+                background=False,
+            )
+
+        self.assertEqual(result.text, "Arabic text here")
+        mock_get.assert_not_called()
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload["input"][1]["mime_type"], OUTBOUND_JPEG_MIME)
+        self.assertEqual(base64.b64decode(payload["input"][1]["data"]), jpeg)
+        self.assertIn("- IMAGE 1: page-1.jpg", payload["input"][0]["text"])
+
+        image_block_logs = [
+            record.getMessage()
+            for record in captured.records
+            if record.getMessage().startswith("Antigravity image block ")
+        ]
+        self.assertEqual(len(image_block_logs), 1)
+        message = image_block_logs[0]
+        outbound_sha = hashlib.sha256(jpeg).hexdigest()[:16]
+        self.assertIn("document_id=321", message)
+        self.assertIn("outbound_mime_type=image/jpeg", message)
+        self.assertIn(f"outbound_byte_length={len(jpeg)}", message)
+        self.assertIn(f"outbound_sha256={outbound_sha}", message)
+        self.assertIn(f"base64_character_length={len(encoded_jpeg)}", message)
+        self.assertNotIn(encoded_jpeg, message)
+        self.assertNotIn(encoded_png, message)
+        png_sha = hashlib.sha256(page.image_bytes).hexdigest()[:16]
+        self.assertNotEqual(outbound_sha, png_sha)
+
+
+class AntigravityAdapterOutboundLoggingTests(SimpleTestCase):
+    @patch(
+        "documents.services.htr_adapters.antigravity_adapter.transcribe_pages_with_antigravity"
+    )
+    def test_adapter_logs_outbound_jpeg_not_normalized_png(self, mock_transcribe):
+        from documents.services.antigravity_engine import AntigravityResult
+
+        jpeg = _solid_image_bytes("JPEG")
+        page = source_file_bytes_to_page(0, jpeg, "image/jpeg")
+        mock_transcribe.return_value = AntigravityResult(
+            text="transcript",
+            engine_name=DEFAULT_ANTIGRAVITY_AGENT_ID,
+            needs_review=True,
+        )
+        encoded_jpeg = base64.b64encode(jpeg).decode("ascii")
+
+        with self.assertLogs(_ADAPTER_LOGGER, level="INFO") as captured:
+            AntigravityAdapter().execute(
+                pages=[page],
+                language_hint="ar",
+                prompt_variant="printed",
+                worker_env=_make_worker_env(),
+                document_id=321,
+            )
+
+        page_logs = [
+            record.getMessage()
+            for record in captured.records
+            if record.getMessage().startswith("Antigravity input page ")
+        ]
+        self.assertEqual(len(page_logs), 1)
+        message = page_logs[0]
+        outbound_sha = hashlib.sha256(jpeg).hexdigest()[:16]
+        png_sha = hashlib.sha256(page.image_bytes).hexdigest()[:16]
+        self.assertIn("outbound_mime_type=image/jpeg", message)
+        self.assertIn(f"outbound_byte_length={len(jpeg)}", message)
+        self.assertIn(f"outbound_sha256={outbound_sha}", message)
+        self.assertNotIn(encoded_jpeg, message)
+        self.assertNotIn(f"outbound_sha256={png_sha}", message)
+        self.assertNotIn("mime_type=image/png", message)
+
+
+class AntigravityTimeoutDefaultTests(SimpleTestCase):
+    def test_defaults_are_1200s_and_120s_finite_and_below_lease(self):
+        self.assertEqual(DEFAULT_TIMEOUT_SECONDS, 1200.0)
+        self.assertEqual(DEFAULT_POLL_GET_TIMEOUT_SECONDS, 120.0)
+        self.assertEqual(DEFAULT_POLL_SECONDS, 5.0)
+        self.assertTrue(math.isfinite(DEFAULT_TIMEOUT_SECONDS))
+        self.assertTrue(math.isfinite(DEFAULT_POLL_GET_TIMEOUT_SECONDS))
+        self.assertGreater(DEFAULT_TIMEOUT_SECONDS, 0)
+        self.assertGreater(DEFAULT_POLL_GET_TIMEOUT_SECONDS, 0)
+        self.assertLess(DEFAULT_TIMEOUT_SECONDS, 45 * 60)
+        self.assertLess(DEFAULT_POLL_GET_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS)
+
+    @patch("documents.services.antigravity_engine._get_interaction")
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_default_poll_deadline_raises_after_1200s(self, mock_post, mock_get):
+        mock_post.return_value = _ok_json_response(
+            {"id": "ix-progress", "status": "in_progress"}
+        )
+        mock_get.return_value = {"id": "ix-progress", "status": "in_progress"}
+        clock = _MonotonicClock(values=[0.0, 0.1, 0.2, 1200.3])
+
+        with self.assertLogs(_ENGINE_LOGGER, level="WARNING") as captured:
+            with self.assertRaisesMessage(AntigravityError, "Timed out after 1200.0s"):
+                transcribe_pages_with_antigravity(
+                    _one_page(),
+                    api_key="key",
+                    poll_seconds=0.0,
+                    monotonic_fn=clock,
+                    sleep_fn=lambda _seconds: None,
+                )
+
+        mock_get.assert_not_called()
+        deadline_logs = _messages_for_phase(captured, "poll_deadline")
+        self.assertEqual(len(deadline_logs), 1)
+        self.assertIn("interaction_id=ix-progress", deadline_logs[0])
+        self.assertIn("last_status=in_progress", deadline_logs[0])
+        self.assertIn("elapsed_seconds=1200.100", deadline_logs[0])
+        self.assertIn("poll_attempts=0", deadline_logs[0])
+
+    @patch("documents.services.antigravity_engine.requests.get")
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_poll_get_uses_120_second_timeout(self, mock_post, mock_get):
+        mock_post.return_value = _ok_json_response(
+            {"id": "ix-timeout", "status": "in_progress"}
+        )
+        mock_get.return_value = _ok_json_response(
+            _completed_interaction(
+                "[IMAGE 1: page-1.png]\nArabic text here",
+                interaction_id="ix-timeout",
+            )
+        )
+
+        result = transcribe_pages_with_antigravity(
+            _one_page(),
+            api_key="key",
+            poll_seconds=0.0,
+            sleep_fn=lambda _seconds: None,
+        )
+
+        self.assertEqual(result.text, "Arabic text here")
+        self.assertEqual(mock_get.call_count, 1)
+        self.assertEqual(
+            mock_get.call_args.kwargs["timeout"],
+            DEFAULT_POLL_GET_TIMEOUT_SECONDS,
+        )
+        self.assertEqual(DEFAULT_POLL_GET_TIMEOUT_SECONDS, 120.0)
