@@ -350,7 +350,7 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 - Worker / SQS processing for PHOTO
 - Face recognition, AI identification, comments
 - Public alias display; Person catalog/Admin
-- Eventual D2 person-Tag *row* removal (ordinary Tags still power unmapped tag browse/filter; mapped Tag browse redirects to the Person page; raw `?tag=` preserved / matches nothing after D1); D1 relation cleanup is implemented; automatic ArchiveItemPerson from PhotoPerson; staff PHOTO appearance review / PhotoPerson backfill from `people_present`; public Person filter-chip UX; no new-Person proposals
+- Eventual D2 person-Tag *row* removal (ordinary Tags still power unmapped tag browse/filter; mapped Tag browse redirects to the Person page; raw `?tag=` preserved / matches nothing after D1); D1 relation cleanup is implemented; automatic ArchiveItemPerson from PhotoPerson; staff PHOTO appearance review / PhotoPerson backfill from `people_present`; no new-Person proposals
 - Public Person biography field; public alias display on Person pages; PhotoPerson name linking
 - Public (unauthenticated) upload
 - Rich text captions

@@ -1,5 +1,38 @@
 # VS-Archive Decision Log
 
+## Public Person active-filter chip UX
+
+**Decision / implemented:** Public `/archive/` active-filter summary renders
+**one chip per selected `person=` id**, not one grouped Person chip.
+Canonical **`Person.name`** is a GET link to **`archive-person-detail`**.
+A separate visible **×** is a GET link that removes only that Person id.
+
+**Current behavior:**
+
+- Non-Person chips (q / author / category / event / tag / year) stay
+  grouped whole-chip remove links. Category/event/tag still clear their
+  entire id group in one click.
+- Person remove uses `archive_advanced_filters_without_person` and
+  `build_archive_public_list_query(..., advanced_open=True)`. The remove
+  URL always includes **`advanced=1`**, including after the last Person,
+  so the advanced panel stays open instead of returning to the unfiltered
+  archive homepage.
+- Remove preserves `q`, remaining Person ids, author / category / event /
+  tag / year / year_to, `item_type`, and `per_page`. It drops `page`.
+- The × control’s `aria-label` includes the Person canonical name
+  (`הסרת {name}`). CSS uses logical properties, `:focus-visible`, and a
+  2.75rem minimum tap target.
+- Chip labels come from already-loaded `person_choices` (same conditional
+  choice-context load as the picker). `person_public_page_url` is reverse
+  only. No extra Person queries per selected id.
+
+**Deferred:** public alias display on chips/picker; PhotoPerson appearance
+filter / name linking; Person catalog/Admin; public biography field; D2
+Tag-row deletion.
+
+**Tests:** `documents/test_archive_advanced_search_person.py`. No schema
+migration.
+
 ## Public Person page
 
 **Decision / implemented:** Public Person detail exists at
@@ -35,11 +68,13 @@ cards. No biography field, no schema migration, no staff-form change.
   `/archive/tags/<mapped_tag_id>/` now **302**s to the Person page
   (map-first). Following that URL still 404s when the Person has no
   authorized related items. Ordinary Tag browse is unchanged. Advanced
-  `person=` list filtering and filter chips are unchanged.
+  `person=` list filtering is unchanged by this page PR. Active Person
+  filter chips are implemented separately (see **Public Person
+  active-filter chip UX**).
 
 **Deferred:** public biography/summary field; public alias display;
 PhotoPerson name linking / appearance filter; Person catalog/Admin;
-Person filter-chip UX (name vs ×); D2 Tag-row deletion.
+D2 Tag-row deletion.
 
 **Tests:** `documents/test_archive_person_public_page.py` plus updated
 Stage A presentation, Stage B redirect, advanced-filter, and staff
@@ -78,8 +113,9 @@ removed by an explicit management command. Tag rows stay. Identity remains
 **Deferred (D2):** deleting the 29 mapped Tag rows. Blocked on name
 resurrection (`get_or_create(name=…)` would create ordinary Tags with the
 old person names) and PENDING `ArchiveMetadataSuggestion` policy. Public
-Person pages / extra Person-chip UX are not a prerequisite. Direct
-`?tag=<mapped_id>` stays Option 0 (matches nothing once relations are gone).
+Person pages and Person filter-chip UX are implemented and are not a D2
+prerequisite. Direct `?tag=<mapped_id>` stays Option 0 (matches nothing
+once relations are gone).
 
 **Tests:** `documents/test_cleanup_historical_person_tags.py`. No schema
 or data migration.
@@ -114,8 +150,9 @@ Tag browse, visibility, and authorized item querysets are unchanged.
 
 **Deferred:** D2 Tag-row deletion (name resurrection + pending-suggestion
 policy); public alias display; PhotoPerson name linking; Person catalog;
-active Person filter-chip UX; query-string redirects (Option 1+). Public
-Person pages are implemented (see **Public Person page**). Search-index cleanup of
+query-string redirects (Option 1+). Public Person pages and Person
+filter-chip UX are implemented (see **Public Person page** and
+**Public Person active-filter chip UX**). Search-index cleanup of
 mapped Tag names is part of D1 apply (rebuild for affected ArchiveItems).
 
 **Tests:** `documents/test_archive_person_tag_stage_b.py`.
@@ -150,8 +187,9 @@ implemented (see **Public Tag browse/filter cutover (Person vs Tag,
 Stage B)**). D1 mapped relation cleanup is implemented (see
 **Historical person-Tag relation cleanup (D1)**). Still deferred: D2
 Tag-row deletion; staff/suggestion UI beyond mapped-id reuse blocks;
-PhotoPerson changes; migrations; Person filter-chip UX. Public Person
-pages are implemented (see **Public Person page**).
+PhotoPerson changes; migrations. Public Person pages and Person
+filter-chip UX are implemented (see **Public Person page** and
+**Public Person active-filter chip UX**).
 
 **Tests:** `documents/test_archive_person_public_presentation.py`.
 
@@ -300,11 +338,12 @@ separately).
 **Public presentation cutover (Person vs Tag, Stage A)**). Stage B path
 redirect and public Tag-choice hiding are implemented (see **Public Tag
 browse/filter cutover (Person vs Tag, Stage B)**). Still deferred:
-Person pages; destructive cleanup; new-Person / alias / merge proposals;
-active Person filter-chip UX. Direct legacy `?tag=` semantics are
-intentionally unchanged. Reuse of the 29 historical person-name Tags is
-blocked separately (see **Block reuse of historical person-name Tags;
-post-deploy reconciliation**).
+destructive cleanup; new-Person / alias / merge proposals. Person pages
+and Person filter-chip UX are implemented (see **Public Person page**
+and **Public Person active-filter chip UX**). Direct legacy `?tag=`
+semantics are intentionally unchanged. Reuse of the 29 historical
+person-name Tags is blocked separately (see **Block reuse of historical
+person-name Tags; post-deploy reconciliation**).
 
 **Tests:** `documents/test_archive_item_person_suggestion_ui.py` plus
 restricted-visibility and visibility-metadata UI extensions. No new
@@ -508,16 +547,19 @@ appears.”
 - Applies to VIDEO / OCR_DOCUMENT / MANUAL_TEXT / PHOTO. Results remain
   ArchiveItems. No Person cards on the list. Public Person detail is
   `/archive/people/<id>/` (see **Public Person page**); this filter does
-  not deep-link to it.
+  not deep-link to it. Active Person chips link the name to that page
+  without changing filter semantics.
 - Choices: one `Person.objects.filter(archive_items__pk__in=authorized pks).distinct().order_by("name", "id")`
   query when advanced choice context is needed (panel open or any advanced
   filter active). Canonical **`Person.name`** is the visible label; option
   value is the id. Aliases are not separate options and are not prefetched.
   Ordinary `/archive/` and q-only requests still skip all choice-context
   queries (now 5 when loaded: author + category + event + tag + person).
-- Active chips use canonical `Person.name` (grouped like category/event/tag).
-  Clearing the Person chip removes all selected Person ids and preserves
-  `q` / other filters / item type / per-page.
+- Active chips: **one chip per selected Person id** (canonical
+  `Person.name`). Name → Person page; × removes that id only via
+  `archive_advanced_filters_without_person` and always keeps
+  `advanced=1`. Other filter chips remain grouped. See **Public Person
+  active-filter chip UX**.
 - Historical person-name **Tags remain** and still power tag filter,
   `/archive/tags/<id>/`, tag chips, and tag `q` indexing. An item may match
   both a person Tag and the new Person filter during transition.
@@ -528,10 +570,11 @@ public discovery gap. PhotoPerson stays the photo-appearance relation.
 
 **Deferred:** public alias display; alias-assisted picker search (client
 filter matches canonical option text only); PhotoPerson-specific
-“appears in this photo” filter; Person filter-chip UX; D2 Tag-row
-deletion; legacy `Document.tags_m2m` cleanup; identity merge/dedupe;
-fuzzy matching; AI identification. Public Person browse/detail is
-implemented (see **Public Person page**).
+“appears in this photo” filter; D2 Tag-row deletion; legacy
+`Document.tags_m2m` cleanup; identity merge/dedupe; fuzzy matching; AI
+identification. Public Person browse/detail and Person filter-chip UX
+are implemented (see **Public Person page** and **Public Person
+active-filter chip UX**).
 
 **Tests:** `documents/test_archive_advanced_search_person.py` plus updated
 advanced-search backend/UI regressions. No schema migration.

@@ -33,6 +33,7 @@ from documents.services.archive_advanced_search import (
     EMPTY_ARCHIVE_ADVANCED_FILTERS,
     ArchiveAdvancedFilters,
     archive_advanced_filters_without_author,
+    archive_advanced_filters_without_person,
     archive_advanced_filters_without_year,
     build_archive_advanced_filter_summary_items,
 )
@@ -721,8 +722,40 @@ def archive_public_list_active_filter_summary_context(
         person_choices=person_choices,
     )
     chips: list[dict[str, object]] = []
+    person_name_by_id = {
+        getattr(choice, "pk"): str(getattr(choice, "name", getattr(choice, "pk")))
+        for choice in person_choices
+        if getattr(choice, "pk", None) is not None
+    }
     for item in summary_items:
         kind = str(item["kind"])
+        if kind == "person":
+            selected_person_ids = tuple(item.get("ids") or filters.person_ids)
+            for person_id in selected_person_ids:
+                person_name = person_name_by_id.get(person_id, str(person_id))
+                remove_query = build_archive_public_list_query(
+                    q=q,
+                    item_type_filter=item_type_filter,
+                    per_page=per_page,
+                    advanced_filters=archive_advanced_filters_without_person(
+                        filters, person_id
+                    ),
+                    advanced_open=True,
+                )
+                chips.append(
+                    {
+                        "kind": "person",
+                        "label": "אדם",
+                        "value": person_name,
+                        "person_id": person_id,
+                        "detail_href": person_public_page_url(person_id),
+                        "remove_href_suffix": (
+                            f"?{remove_query}" if remove_query else ""
+                        ),
+                        "remove_aria_label": f"הסרת {person_name}",
+                    }
+                )
+            continue
         remove_filters = filters
         remove_q = q
         if kind == "q":
@@ -735,8 +768,6 @@ def archive_public_list_active_filter_summary_context(
             remove_filters = replace(filters, event_ids=())
         elif kind == "tag":
             remove_filters = replace(filters, tag_ids=())
-        elif kind == "person":
-            remove_filters = replace(filters, person_ids=())
         elif kind == "year":
             remove_filters = archive_advanced_filters_without_year(filters)
         remove_query = build_archive_public_list_query(
