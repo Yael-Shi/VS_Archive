@@ -25,6 +25,7 @@ from django.db.models import (
 from django.db.models.functions import Coalesce
 from django.urls import reverse
 
+from documents.historical_person_tag_map import historical_person_name_tag_ids
 from documents.models import ArchiveItem, Document
 from documents.services.archive_advanced_search import (
     ARCHIVE_ADVANCED_PANEL_PARAM,
@@ -960,6 +961,7 @@ class ArchiveBrowseCard:
     preview_text: str
     category_links: tuple[ArchiveBrowseLink, ...]
     related_links: tuple[ArchiveBrowseLink, ...]
+    person_links: tuple[ArchiveBrowseLink, ...] = ()
     thumbnail_url: str | None = None
     # Local 160px visual when no image thumbnail: "pdf" | "manual" | "video" | "".
     fallback_preview: str = ""
@@ -1074,8 +1076,8 @@ def _prefetched_relation(archive_item: ArchiveItem, relation: str) -> Iterable:
     """Return a prefetched M2M relation when available.
 
     Falls back to ``relation.all()`` (one query per item). Archive browse views
-    should call ``prefetch_related("categories", "events", "tags")`` before
-    ``build_archive_browse_cards``.
+    should call ``prefetch_related("categories", "events", "tags", "people")``
+    before ``build_archive_browse_cards``.
     """
     cache = getattr(archive_item, "_prefetched_objects_cache", None)
     if cache is not None and relation in cache:
@@ -1114,6 +1116,61 @@ def _category_links_for_item(
     )
 
 
+def public_discovery_tags(archive_item: ArchiveItem):
+    """Return item Tags that may appear in public discovery, sorted by name.
+
+    Historical person-name Tags are excluded by frozen Tag.id membership only.
+    """
+    blocked_ids = historical_person_name_tag_ids()
+    return tuple(
+        tag
+        for tag in sorted(
+            _prefetched_relation(archive_item, "tags"),
+            key=lambda item: item.name,
+        )
+        if tag.id not in blocked_ids
+    )
+
+
+def person_archive_filter_url(person_id: int) -> str:
+    """Return ``/archive/?person=<id>&advanced=1`` via the canonical list query."""
+    query = build_archive_public_list_query(
+        advanced_filters=ArchiveAdvancedFilters(person_ids=(person_id,)),
+        advanced_open=True,
+    )
+    path = reverse("archive-list")
+    return f"{path}?{query}" if query else path
+
+
+def person_links_for_item(archive_item: ArchiveItem) -> tuple[ArchiveBrowseLink, ...]:
+    """Item-level ArchiveItemPerson links, ordered by ``(name, id)``.
+
+    Identity is ``Person.id``. Duplicate names stay distinct. PhotoPerson is
+    not read.
+    """
+    people = sorted(
+        _prefetched_relation(archive_item, "people"),
+        key=lambda person: (person.name, person.id),
+    )
+    return tuple(
+        ArchiveBrowseLink(
+            name=person.name,
+            href=person_archive_filter_url(person.id),
+        )
+        for person in people
+    )
+
+
+def public_discovery_context(archive_item: ArchiveItem | None) -> dict:
+    """Template context for public discovery Tags and Person links."""
+    if archive_item is None:
+        return {"public_tags": (), "person_links": ()}
+    return {
+        "public_tags": public_discovery_tags(archive_item),
+        "person_links": person_links_for_item(archive_item),
+    }
+
+
 def _related_links_for_item(archive_item: ArchiveItem) -> tuple[ArchiveBrowseLink, ...]:
     event_links = _browse_links_for_relation(
         archive_item,
@@ -1121,11 +1178,12 @@ def _related_links_for_item(archive_item: ArchiveItem) -> tuple[ArchiveBrowseLin
         url_name="archive-event-browse",
         id_kwarg="event_id",
     )
-    tag_links = _browse_links_for_relation(
-        archive_item,
-        "tags",
-        url_name="archive-tag-browse",
-        id_kwarg="tag_id",
+    tag_links = tuple(
+        ArchiveBrowseLink(
+            name=tag.name,
+            href=reverse("archive-tag-browse", kwargs={"tag_id": tag.id}),
+        )
+        for tag in public_discovery_tags(archive_item)
     )
     return event_links + tag_links
 
@@ -1155,6 +1213,7 @@ def build_archive_browse_card(
         preview_text=_preview_text_for_archive_item(archive_item),
         category_links=_category_links_for_item(archive_item),
         related_links=_related_links_for_item(archive_item),
+        person_links=person_links_for_item(archive_item),
         fallback_preview=_fallback_preview_for_item(archive_item),
     )
 
@@ -1167,8 +1226,8 @@ def build_archive_browse_cards(
     """Build public browse cards for archive list and discovery browse pages.
 
     Callers should pass items from ``_archive_browse_select_related`` (or
-    equivalent) so ``categories``, ``events``, ``tags``, and displayable OCR
-    ``DocumentTextResult`` rows are prefetched.
+    equivalent) so ``categories``, ``events``, ``tags``, ``people``, and
+    displayable OCR ``DocumentTextResult`` rows are prefetched.
     """
     return [
         build_archive_browse_card(item, search_query=search_query) for item in items

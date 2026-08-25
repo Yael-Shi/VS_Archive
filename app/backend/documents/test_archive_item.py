@@ -54,6 +54,7 @@ from documents.services.archive_tags_validation import (
     parse_ocr_tags_form,
 )
 from documents.services.archive_item_access import ARCHIVE_FAMILY_GROUP_NAME
+from documents.test_historical_person_tag_reuse import _create_tag
 from documents.services.archive_item_presentation import (
     ARCHIVE_BROWSE_OCR_PREVIEW,
     ARCHIVE_BROWSE_PREVIEW_EMPTY,
@@ -3686,7 +3687,9 @@ class ArchiveItemDiscoveryMetadataDisplayTests(TestCase):
             slug="khatunat-mishpacha",
             defaults={"name": "חתונת משפחה"},
         )
-        tag, _ = Tag.objects.get_or_create(name="משפחה")
+        tag = Tag.objects.filter(name="משפחה").first()
+        if tag is None:
+            tag = _create_tag(name="משפחה")
         item.categories.add(category)
         item.events.add(event)
         item.tags.add(tag)
@@ -4248,6 +4251,7 @@ class ArchiveBrowseCardPresentationTests(TestCase):
                 "categories",
                 "events",
                 "tags",
+                "people",
                 archive_browse_displayable_text_results_prefetch(),
             )
             .get(pk=item_id)
@@ -4442,7 +4446,7 @@ class ArchiveBrowseCardPresentationTests(TestCase):
             name="חופשה",
             slug="holiday-discovery",
         )
-        tag = Tag.objects.create(name="תגית א׳")
+        tag = _create_tag(name="תגית א׳")
         item.categories.add(category_a, category_b)
         item.events.add(event)
         item.tags.add(tag)
@@ -4487,7 +4491,7 @@ class ArchiveBrowseCardPresentationTests(TestCase):
             name="Visible event line",
             slug="visible-event-line",
         )
-        tag = Tag.objects.create(name="visible-tag-line")
+        tag = _create_tag(name="visible-tag-line")
         item.categories.add(category)
         item.events.add(event)
         item.tags.add(tag)

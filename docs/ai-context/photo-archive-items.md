@@ -123,7 +123,7 @@ If the **first** photo is **`PENDING`** / **`FAILED`** / empty-key, the item is 
 
 **`ArchiveItemPerson` is not a photo appearance.** Item-level person links are indexed as ArchiveItem metadata (canonical name + aliases, all item types) and do not select a photo, generate `?photo=`, or depend on photo renderability. `PhotoPerson` remains the only “this person appears in this photo” relation. Historical person-name Tags still power tag browse/filter.
 
-**Staff write path (C1):** ArchiveItem-level people are managed on ArchiveItem **create and edit** for all types, including PHOTO create (`/archive/manage/new/?item_type=photo`) and the PHOTO shared-metadata edit page (`/archive/manage/<id>/edit/`) under **אנשים קשורים לפריט**. PHOTO create writes **`ArchiveItemPerson`** (related to the archival item) and does **not** write **`PhotoPerson`**. Photo-level identified people remain **אנשים מזוהים בתמונה** on the per-photo edit page. Neither relation is inferred from the other. **C2a** stores user-submitted ArchiveItemPerson ADD/REMOVE deltas (`ArchiveItemPersonSuggestion`) and applies them through `create_archive_item_person` / `delete_archive_item_person` only; it never infers PhotoPerson. **C2b** is the public metadata-suggestion Person delta UI plus a dedicated staff Person-suggestion backlog; it does not infer or mutate PhotoPerson. Public presentation of ArchiveItemPerson / person-Tag hiding remain deferred.
+**Staff write path (C1):** ArchiveItem-level people are managed on ArchiveItem **create and edit** for all types, including PHOTO create (`/archive/manage/new/?item_type=photo`) and the PHOTO shared-metadata edit page (`/archive/manage/<id>/edit/`) under **אנשים קשורים לפריט**. PHOTO create writes **`ArchiveItemPerson`** (related to the archival item) and does **not** write **`PhotoPerson`**. Photo-level identified people remain **אנשים מזוהים בתמונה** on the per-photo edit page. Neither relation is inferred from the other. **C2a** stores user-submitted ArchiveItemPerson ADD/REMOVE deltas (`ArchiveItemPersonSuggestion`) and applies them through `create_archive_item_person` / `delete_archive_item_person` only; it never infers PhotoPerson. **C2b** is the public metadata-suggestion Person delta UI plus a dedicated staff Person-suggestion backlog; it does not infer or mutate PhotoPerson. Public cards/detail now show ArchiveItemPerson under **אנשים קשורים** and hide the 29 frozen historical person-name Tag ids from public discovery; PhotoPerson **אנשים מזוהים:** stays separate. Stage B tag browse/filter hiding remains deferred.
 
 ---
 
@@ -350,7 +350,7 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 - Worker / SQS processing for PHOTO
 - Face recognition, AI identification, comments
 - Public alias display; Person catalog/Admin
-- Eventual person-Tag removal (Tags still power public tag browse/filter); automatic ArchiveItemPerson from PhotoPerson; staff PHOTO appearance review / PhotoPerson backfill from `people_present`; public Person filter/browse UX; public presentation cutover for ArchiveItemPerson; hide historical person Tags; Tag-id → Person-id cleanup mapping; redirects; prevent reuse; destructive cleanup; no new-Person proposals
+- Eventual person-Tag removal (Tags still power public tag browse/filter); automatic ArchiveItemPerson from PhotoPerson; staff PHOTO appearance review / PhotoPerson backfill from `people_present`; public Person filter/browse UX; Stage B hide mapped historical person Tags from tag browse/filter; Tag-id → Person-id cleanup mapping; redirects; destructive cleanup; no new-Person proposals
 - Public Person pages
 - Public (unauthenticated) upload
 - Rich text captions
@@ -376,9 +376,9 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 | **Multi-photo PR5** | Search aggregation across public-renderable PhotoContent text + PhotoPerson names; child-row and successful-finalize index refresh | **Implemented** |
 | **PR6a** | `PersonAlias` schema + alias write services + PHOTO search integration (no staff alias UI, no public alias display) | **Implemented** |
 | **PR6b** | Staff Person edit page + alias CRUD UI + alias-aware picker labels + selected-person edit links (no catalog, no public alias display) | **Implemented** |
-| **C1 ArchiveItemPerson staff UI** | Item-level people manager on ArchiveItem **create and edit** for all types; PHOTO heading distinguished from PhotoPerson; PHOTO create does not write PhotoPerson; no public cutover | **Implemented** |
+| **C1 ArchiveItemPerson staff UI** | Item-level people manager on ArchiveItem **create and edit** for all types; PHOTO heading distinguished from PhotoPerson; PHOTO create does not write PhotoPerson; public cards/detail cutover is Stage A | **Implemented** |
 | **C2a ArchiveItemPerson suggestions foundation** | `ArchiveItemPersonSuggestion` ADD/REMOVE deltas; Person.id identity; pending unique constraint; submit/apply services; stale approve = APPROVED no-op; no PhotoPerson inference; no public/staff HTML | **Implemented** |
-| **C2b ArchiveItemPerson suggestion UI** | Public metadata-suggestion page submits Person ADD/REMOVE deltas; dedicated staff backlog + approve/reject; Person.id identity; no new-Person proposals; PhotoPerson remains separate; historical person Tags unchanged; public presentation cutover deferred | **Implemented** |
+| **C2b ArchiveItemPerson suggestion UI** | Public metadata-suggestion page submits Person ADD/REMOVE deltas; dedicated staff backlog + approve/reject; Person.id identity; no new-Person proposals; PhotoPerson remains separate; historical person Tags unchanged on that form; Stage A public cards/detail cutover implemented separately | **Implemented** |
 
 ---
 

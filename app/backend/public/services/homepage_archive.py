@@ -37,6 +37,7 @@ def homepage_archive_cards():
             "categories",
             "events",
             "tags",
+            "people",
             archive_browse_displayable_text_results_prefetch(),
         )
     )
