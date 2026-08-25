@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, List, Optional
 
 from documents.services.antigravity_engine import (
     AntigravityError,
+    antigravity_outbound_image,
     transcribe_pages_with_antigravity,
 )
 from documents.services.htr_adapters.base import EnginePermanentError, HtrResult
@@ -51,14 +52,15 @@ class AntigravityAdapter:
             raise EnginePermanentError(_DISABLED_MESSAGE)
 
         for page in pages:
+            outbound_bytes, outbound_mime = antigravity_outbound_image(page)
             logger.info(
                 "Antigravity input page document_id=%s page_index=%s "
-                "mime_type=%s bytes=%s sha256=%s",
+                "outbound_mime_type=%s outbound_byte_length=%s outbound_sha256=%s",
                 document_id,
                 page.page_index,
-                page.mime_type,
-                len(page.image_bytes),
-                hashlib.sha256(page.image_bytes).hexdigest()[:16],
+                outbound_mime,
+                len(outbound_bytes),
+                hashlib.sha256(outbound_bytes).hexdigest()[:16],
             )
 
         logger.info(

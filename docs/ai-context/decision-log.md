@@ -1,5 +1,45 @@
 # VS-Archive Decision Log
 
+## Antigravity Arabic OCR — original JPEG payload and longer unary polling (PR1)
+
+**Decision / implemented:** Fix the two confirmed contributors to the
+Document 321 Arabic Antigravity timeout: JPEG sources were expanded to PNG
+before the Interactions request, and unary background polling used a 300s
+overall deadline with 60s GET timeouts.
+
+**Current behavior:**
+
+- Shared ``PageImage.image_bytes`` / ``PageImage.mime_type`` remain
+  **normalized PNG** for Gemini, Transkribus, checkpoints, fingerprints,
+  PDF rendering, and ``source_content_fingerprint``. Those callers are
+  unchanged.
+- Image sources also retain optional ``original_image_bytes`` /
+  ``original_mime_type``. PDF-rendered pages have no original encoded image.
+- **Antigravity only:** if original JPEG is present (``image/jpeg`` or
+  ``image/jpg``), the engine sends those exact bytes with canonical
+  outbound MIME ``image/jpeg``. Otherwise it sends the existing normalized
+  PNG. No re-encode, resize, downscale, grayscale, or arbitrary non-JPEG
+  original formats.
+- Observability describes **bytes actually sent** (outbound MIME, byte
+  length, safe SHA-256 prefix). Logs do not include raw bytes, Base64, or
+  document text.
+- Production polling defaults: overall in_progress deadline **1200s**,
+  unary GET timeout **120s**, poll interval unchanged (**5s**). Create
+  timeout is unchanged (``max(120, 30 * page_count)``). Background create
+  plus unary GET polling is unchanged. ``requests.Timeout`` /
+  ``ReadTimeout`` still retry the same interaction ID. 1200s stays clearly
+  below the worker **45-minute** processing lease.
+- This does **not** claim an Antigravity 20 MB request limit. Payload
+  reduction is the JPEG-passthrough choice only.
+
+**Deferred / follow-up (not this PR):** streaming Interactions; durable
+recovery / cancellation / per-page interactions; recovery-state changes;
+``include_input=false``; persistence or migrations; UI.
+
+**Tests:** ``documents/test_antigravity_ocr.py``,
+``documents/tests.py`` (``PageImageOriginalEncodingTests``), mixed-content
+``PageImage`` field-set contract.
+
 ## Retired historical Person-Tag names (D2a)
 
 **Decision / implemented:** The 29 frozen historical person-name Tag names
