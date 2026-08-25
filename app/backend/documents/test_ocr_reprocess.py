@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from datetime import datetime, timezone as dt_timezone
 from io import StringIO
 from typing import TypedDict
 from unittest.mock import patch
@@ -534,8 +535,15 @@ class ReadyUnverifiedOcrReprocessTests(TransactionTestCase):
     clear=False,
 )
 class AntigravityPartialOcrReprocessTests(TransactionTestCase):
-    def _partial_failed_source_document(self) -> Document:
-        doc = create_ocr_document(
+    _OLDER_SOURCE_UPDATED_AT = datetime(
+        2026, 8, 17, 20, 33, 17, tzinfo=dt_timezone.utc
+    )
+    _LATEST_SOURCE_UPDATED_AT = datetime(
+        2026, 8, 24, 19, 40, 25, tzinfo=dt_timezone.utc
+    )
+
+    def _partial_arabic_printed_document(self) -> Document:
+        return create_ocr_document(
             title="Arabic printed Antigravity partial OCR failure",
             doc_type=Document.DocType.PDF,
             language=Document.Language.ARABIC,
@@ -545,6 +553,9 @@ class AntigravityPartialOcrReprocessTests(TransactionTestCase):
             file_s3_key="documents/320/source/0.jpeg",
             mime_type="image/jpeg",
         )
+
+    def _partial_failed_source_document(self) -> Document:
+        doc = self._partial_arabic_printed_document()
         DocumentTextResult.objects.create(
             document=doc,
             result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
@@ -556,6 +567,55 @@ class AntigravityPartialOcrReprocessTests(TransactionTestCase):
             error_details="temporary Antigravity read timeout",
             text=None,
         )
+        return doc
+
+    def _set_text_result_updated_at(
+        self, row: DocumentTextResult, updated_at: datetime
+    ) -> None:
+        DocumentTextResult.objects.filter(pk=row.pk).update(updated_at=updated_at)
+
+    def _hybrid_partial_later_failed_with_older_usable_source(self) -> Document:
+        """Document 320 shape: later FAILED/OCR_FAILED SOURCE_TEXT, older usable rows."""
+        doc = self._partial_arabic_printed_document()
+        # Create the effective/latest failure first so it has the lower pk,
+        # matching production ids (FAILED pk < older usable pk).
+        latest_failed = DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="ocr-dispatch",
+            engine_key=DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            status=DocumentTextResult.Status.FAILED,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            error_code="OCR_FAILED",
+            error_details="OCR dispatch failed",
+            text=None,
+        )
+        older_source = DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="antigravity-preview-05-2026",
+            engine_key=DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="older unverified source text",
+        )
+        older_hebrew = DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="antigravity-preview-05-2026",
+            engine_key=DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="older unverified hebrew text",
+        )
+        self._set_text_result_updated_at(
+            latest_failed, self._LATEST_SOURCE_UPDATED_AT
+        )
+        self._set_text_result_updated_at(older_source, self._OLDER_SOURCE_UPDATED_AT)
+        self._set_text_result_updated_at(older_hebrew, self._OLDER_SOURCE_UPDATED_AT)
         return doc
 
     def test_partial_failed_source_ocr_is_eligible_for_normal_reenqueue(self):
@@ -571,6 +631,100 @@ class AntigravityPartialOcrReprocessTests(TransactionTestCase):
 
         self.assertEqual(assessment.retry_mode, OcrRetryMode.NORMAL_REENQUEUE)
         self.assertIsNone(assessment.source_transkribus_run_id)
+
+    def test_partial_later_failed_source_with_older_usable_source_is_eligible(self):
+        doc = self._hybrid_partial_later_failed_with_older_usable_source()
+
+        self.assertTrue(is_ocr_reprocess_ui_eligible(doc))
+
+        assessment = assess_ocr_reprocess(
+            doc.id,
+            collection_id=COLLECTION_ID,
+            model_id=MODEL_ID,
+        )
+
+        self.assertEqual(assessment.retry_mode, OcrRetryMode.NORMAL_REENQUEUE)
+        self.assertIsNone(assessment.source_transkribus_run_id)
+
+    def test_partial_later_usable_source_after_older_failed_source_is_ineligible(self):
+        doc = self._partial_arabic_printed_document()
+        older_failed = DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="ocr-dispatch",
+            engine_key=DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            status=DocumentTextResult.Status.FAILED,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            error_code="OCR_FAILED",
+            error_details="older source OCR failure",
+            text=None,
+        )
+        latest_usable = DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="antigravity-preview-05-2026",
+            engine_key=DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="recovered on a later attempt",
+        )
+        self._set_text_result_updated_at(older_failed, self._OLDER_SOURCE_UPDATED_AT)
+        self._set_text_result_updated_at(
+            latest_usable, self._LATEST_SOURCE_UPDATED_AT
+        )
+
+        self.assertFalse(is_ocr_reprocess_ui_eligible(doc))
+
+        with self.assertRaises(OcrReprocessError) as ctx:
+            assess_ocr_reprocess(
+                doc.id,
+                collection_id=COLLECTION_ID,
+                model_id=MODEL_ID,
+            )
+        self.assertIn("not eligible for OCR reprocess", str(ctx.exception))
+
+    def test_partial_latest_source_neither_usable_nor_ocr_failed_is_ineligible(self):
+        doc = self._partial_arabic_printed_document()
+        older_failed = DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="ocr-dispatch",
+            engine_key=DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            status=DocumentTextResult.Status.FAILED,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            error_code="OCR_FAILED",
+            error_details="older source OCR failure",
+            text=None,
+        )
+        latest_other = DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="antigravity-preview-05-2026",
+            engine_key=DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            status=DocumentTextResult.Status.FAILED,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            error_code="OCR_ROUTING_INVALID",
+            error_details="latest source is not a qualifying OCR_FAILED row",
+            text=None,
+        )
+        self._set_text_result_updated_at(older_failed, self._OLDER_SOURCE_UPDATED_AT)
+        self._set_text_result_updated_at(
+            latest_other, self._LATEST_SOURCE_UPDATED_AT
+        )
+
+        self.assertFalse(is_ocr_reprocess_ui_eligible(doc))
+
+        with self.assertRaises(OcrReprocessError) as ctx:
+            assess_ocr_reprocess(
+                doc.id,
+                collection_id=COLLECTION_ID,
+                model_id=MODEL_ID,
+            )
+        self.assertIn("not eligible for OCR reprocess", str(ctx.exception))
 
     @patch(
         "documents.services.process_document_request_enqueue."

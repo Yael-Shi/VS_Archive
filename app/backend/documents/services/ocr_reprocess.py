@@ -72,34 +72,26 @@ def _source_text_row_is_usable(row: DocumentTextResult) -> bool:
     return bool((row.text or "").strip())
 
 
-def _has_usable_source_text(doc: Document) -> bool:
-    rows = DocumentTextResult.objects.filter(
-        document_id=doc.id,
-        result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+def _latest_source_text_row(doc: Document) -> DocumentTextResult | None:
+    return (
+        DocumentTextResult.objects.filter(
+            document_id=doc.id,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+        )
+        .order_by("-updated_at", "-pk")
+        .first()
     )
-    return any(_source_text_row_is_usable(row) for row in rows)
 
 
-def _has_failed_source_ocr(doc: Document) -> bool:
-    if DocumentTextResult.objects.filter(
-        document_id=doc.id,
-        result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
-        status=DocumentTextResult.Status.FAILED,
-        error_code="OCR_FAILED",
-    ).exists():
-        return True
-
-    # Checkpoint-backed Gemini OCR can fail before a DocumentTextResult exists.
-    # A failed page checkpoint is durable source-OCR failure evidence and must
-    # not leave a PARTIAL document without an intentional reprocess path.
-    return GeminiOcrPageCheckpoint.objects.filter(
-        attempt__document_id=doc.id,
-        status=GeminiOcrPageCheckpoint.Status.FAILED,
-    ).exists()
+def _source_text_row_is_failed_ocr(row: DocumentTextResult) -> bool:
+    return (
+        row.status == DocumentTextResult.Status.FAILED
+        and row.error_code == "OCR_FAILED"
+    )
 
 
 def _is_recoverable_partial_ocr_failure(doc: Document) -> bool:
-    """Source OCR failed with no usable text on a supported recoverable PARTIAL route."""
+    """Latest SOURCE_TEXT is a failed source OCR on a supported recoverable PARTIAL route."""
     if doc.processing_state_user != Document.ProcessingState.PARTIAL:
         return False
 
@@ -110,11 +102,19 @@ def _is_recoverable_partial_ocr_failure(doc: Document) -> bool:
     ):
         return False
 
-    if _has_usable_source_text(doc):
+    latest_source = _latest_source_text_row(doc)
+    if latest_source is None:
+        # Checkpoint-backed Gemini OCR can fail before a DocumentTextResult exists.
+        # A failed page checkpoint is durable source-OCR failure evidence and must
+        # not leave a PARTIAL document without an intentional reprocess path.
+        return GeminiOcrPageCheckpoint.objects.filter(
+            attempt__document_id=doc.id,
+            status=GeminiOcrPageCheckpoint.Status.FAILED,
+        ).exists()
+
+    if _source_text_row_is_usable(latest_source):
         return False
-    if not _has_failed_source_ocr(doc):
-        return False
-    return True
+    return _source_text_row_is_failed_ocr(latest_source)
 
 
 def _processing_state_allows_ocr_reprocess(doc: Document) -> bool:
