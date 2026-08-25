@@ -1,5 +1,38 @@
 # VS-Archive Decision Log
 
+## Public presentation cutover (Person vs Tag, Stage A)
+
+**Decision / implemented:** Public archive cards and detail present
+item-level `ArchiveItemPerson` (`ArchiveItem.people`) under **אנשים
+קשורים**. The 29 frozen historical person-name Tag ids are hidden from
+public card `קשור ל־` and detail `תגיות:`. Identity is `Person.id`.
+Person links go to `/archive/?person=<Person.id>&advanced=1` through the
+existing canonical list query builder. Ordinary Tags, events,
+categories, current ordering, visibility, and existing URLs are
+unchanged. PhotoPerson / **אנשים מזוהים:** stay separate. There are no
+public Person pages.
+
+**Current behavior:**
+
+- Shared helpers in `documents/services/archive_item_presentation.py`
+  filter public discovery Tags with `historical_person_name_tag_ids()`
+  only; build Person links from `ArchiveItem.people` ordered by
+  `(name, id)`; never match or dedupe by name; never read PhotoPerson.
+- Cards: mapped historical Tags are excluded from `related_links`; a
+  separate `person_links` row renders **אנשים קשורים**.
+- Detail: `archive_detail_page` and `document_detail_page` pass the
+  shared filtered Tags and Person links into
+  `discovery_metadata.html`. **תגיות:** renders only when ordinary Tags
+  remain. A people-only discovery block is allowed.
+- `people` is prefetched on the card queryset, homepage cards, archive
+  detail, and OCR document detail.
+
+**Deferred (Stage B):** hide mapped Tags from tag browse/filter;
+redirects; search-index changes; Tag deletion; staff/suggestion UI;
+PhotoPerson changes; migrations or other database writes.
+
+**Tests:** `documents/test_archive_person_public_presentation.py`.
+
 ## Block reuse of historical person-name Tags; post-deploy reconciliation
 
 **Decision / implemented:** The 29 frozen historical person-name Tag ids
@@ -38,12 +71,14 @@ Tags before reconciliation would drop the person association on item
   migration.
 
 **Revised safe order:** block reuse → deploy → dry-run/apply
-reconciliation → public presentation cutover.
+reconciliation → Stage A public presentation cutover (implemented).
+Stage B (tag browse/filter hiding and redirects) remains later.
 
-**Deferred:** public presentation cutover; Tag browse/filter changes and
-redirects; hide/remove historical person Tags from public display;
-destructive Tag/relation cleanup. Do not hide public person Tags until
-reconciliation has been applied.
+**Deferred:** Stage A public cards/detail cutover is implemented (see
+**Public presentation cutover (Person vs Tag, Stage A)**). Still
+deferred: Tag browse/filter hiding and redirects; destructive
+Tag/relation cleanup. Do not hide mapped Tags from tag browse/filter
+until Stage B.
 
 **Tests:** `documents/test_historical_person_tag_reuse.py`,
 `documents/test_reconcile_historical_person_tag_relations.py`, plus map
@@ -82,10 +117,10 @@ Person ids are **1–29** in that creation order. Person and
 `get_or_create(name=...)`. Do not join or break ties on names. Do not
 use PhotoPerson.
 
-**Deferred:** tag redirects; public presentation cutover; hide historical
-person Tags from public display; destructive cleanup; schema mapping
-table. Reuse blocking and the reconciliation command are implemented;
-do not hide public person Tags until reconciliation has been applied.
+**Deferred:** Stage A public cards/detail cutover is implemented (see
+**Public presentation cutover (Person vs Tag, Stage A)**). Still
+deferred for this module: tag redirects; hide mapped Tags from tag
+browse/filter; destructive cleanup; schema mapping table.
 
 **Tests:** `documents/test_historical_person_tag_map.py`. No schema
 migration.
@@ -129,10 +164,12 @@ unchanged on this form.
   Approve ADD/REMOVE writes ArchiveItemPerson only.
 
 **Why:** C2a defined the delta contract; C2b is the public/staff HTML
-for that contract without a public presentation cutover.
+for that contract. Public cards/detail cutover is Stage A (implemented
+separately).
 
-**Deferred:** public presentation cutover (cards, detail discovery,
-Person pages); hide historical person Tags from public display; tag
+**Deferred:** Stage A public cards/detail cutover is implemented (see
+**Public presentation cutover (Person vs Tag, Stage A)**). Still
+deferred: Person pages; hide mapped Tags from tag browse/filter; tag
 redirects; destructive cleanup; new-Person / alias / merge proposals.
 Reuse of the 29 historical person-name Tags is blocked separately (see
 **Block reuse of historical person-name Tags; post-deploy

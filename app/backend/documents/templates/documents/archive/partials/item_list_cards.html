@@ -102,7 +102,7 @@
               <p class="archive-browse-card__match-source">{{ card.search_match_source_label }}</p>
             {% endif %}
 
-            {% if card.category_links or card.related_links %}
+            {% if card.category_links or card.related_links or card.person_links %}
               <div class="archive-browse-card__discovery">
                 {% if card.category_links %}
                   <p class="archive-browse-card__discovery-line">
@@ -116,6 +116,15 @@
                   <p class="archive-browse-card__discovery-line">
                     <span class="archive-browse-card__discovery-label">קשור ל־</span>
                     {% for link in card.related_links %}
+                      {% if not forloop.first %}<span class="archive-browse-card__discovery-sep archive-browse-card__discovery-sep--dot"> · </span>{% endif %}
+                      <a class="archive-browse-card__discovery-link" href="{{ link.href }}">{{ link.name }}</a>
+                    {% endfor %}
+                  </p>
+                {% endif %}
+                {% if card.person_links %}
+                  <p class="archive-browse-card__discovery-line">
+                    <span class="archive-browse-card__discovery-label">אנשים קשורים</span>
+                    {% for link in card.person_links %}
                       {% if not forloop.first %}<span class="archive-browse-card__discovery-sep archive-browse-card__discovery-sep--dot"> · </span>{% endif %}
                       <a class="archive-browse-card__discovery-link" href="{{ link.href }}">{{ link.name }}</a>
                     {% endfor %}

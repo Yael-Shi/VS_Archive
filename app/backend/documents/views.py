@@ -244,6 +244,7 @@ from documents.services.archive_item_presentation import (
     normalize_archive_public_list_per_page,
     normalize_archive_public_list_type_filter,
     normalize_archive_list_search_query,
+    public_discovery_context,
 )
 from documents.services.archive_search_snippets import (
     apply_archive_search_match_presentation_to_cards,
@@ -3306,6 +3307,7 @@ def document_detail_page(request, doc_id: int):
         "archive_item__categories",
         "archive_item__events",
         "archive_item__tags",
+        "archive_item__people",
     )
     doc = get_viewable_document(
         request.user,
@@ -3438,6 +3440,7 @@ def document_detail_page(request, doc_id: int):
             if show_transkribus_action
             else None
         ),
+        **public_discovery_context(doc.archive_item),
     }
 
     logger.info(
@@ -4783,6 +4786,7 @@ def _archive_browse_select_related(queryset):
         "categories",
         "events",
         "tags",
+        "people",
         archive_browse_displayable_text_results_prefetch(),
     )
 
@@ -4989,8 +4993,11 @@ def archive_list_page(request):
 
 
 def archive_detail_page(request, item_id: int):
-    detail_qs = ArchiveItem.objects.prefetch_related("categories", "events", "tags")
+    detail_qs = ArchiveItem.objects.prefetch_related(
+        "categories", "events", "tags", "people"
+    )
     item = get_viewable_archive_item(request.user, item_id, queryset=detail_qs)
+    discovery_context = public_discovery_context(item)
 
     if item.item_type == ArchiveItem.ItemType.OCR_DOCUMENT:
         doc = Document.objects.filter(archive_item_id=item.id).first()
@@ -5012,6 +5019,7 @@ def archive_detail_page(request, item_id: int):
                 "body": item.manual_text_content.body,
                 "photo_url": None,
                 "is_admin": _is_admin(request.user),
+                **discovery_context,
             },
         )
 
@@ -5045,6 +5053,7 @@ def archive_detail_page(request, item_id: int):
                 "photo_content": photo_content,
                 "photo_gallery": photo_gallery,
                 "is_admin": _is_admin(request.user),
+                **discovery_context,
             },
         )
 
@@ -5061,6 +5070,7 @@ def archive_detail_page(request, item_id: int):
                 "photo_url": None,
                 "video_presentation": video_presentation,
                 "is_admin": _is_admin(request.user),
+                **discovery_context,
             },
         )
 

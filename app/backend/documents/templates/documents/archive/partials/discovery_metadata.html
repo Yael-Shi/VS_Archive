@@ -1,4 +1,4 @@
-{% if item.categories.all or item.events.all or item.tags.all %}
+{% if item.categories.all or item.events.all or public_tags or person_links %}
   <div class="archive-discovery-meta archive-detail-meta-block archive-detail-meta-block--discovery">
     {% if item.categories.all %}
       <div class="archive-detail-meta-row">
@@ -16,11 +16,19 @@
         </span>
       </div>
     {% endif %}
-    {% if item.tags.all %}
+    {% if public_tags %}
       <div class="archive-detail-meta-row">
         <strong class="archive-detail-meta-label">תגיות:</strong>
         <span class="archive-detail-meta-value">
-          {% for t in item.tags.all %}<a href="{% url 'archive-tag-browse' tag_id=t.id %}">{{ t.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
+          {% for t in public_tags %}<a href="{% url 'archive-tag-browse' tag_id=t.id %}">{{ t.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
+        </span>
+      </div>
+    {% endif %}
+    {% if person_links %}
+      <div class="archive-detail-meta-row">
+        <strong class="archive-detail-meta-label">אנשים קשורים</strong>
+        <span class="archive-detail-meta-value">
+          {% for link in person_links %}<a href="{{ link.href }}">{{ link.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
         </span>
       </div>
     {% endif %}

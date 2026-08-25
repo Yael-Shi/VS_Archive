@@ -18,6 +18,7 @@ from documents.models import (
 )
 from documents.services.archive_item_access import ARCHIVE_FAMILY_GROUP_NAME
 from documents.services.archive_items import create_manual_text_archive_item
+from documents.test_historical_person_tag_reuse import _create_tag
 
 
 def _create_photo_archive_item(
@@ -496,7 +497,7 @@ class PhotoArchiveDisplayDetailTests(TestCase):
             name="Photo detail event",
             slug="photo-detail-event",
         )
-        tag = Tag.objects.create(name="photo-detail-tag")
+        tag = _create_tag(name="photo-detail-tag")
         self.public_uploaded.categories.add(category)
         self.public_uploaded.events.add(event)
         self.public_uploaded.tags.add(tag)
@@ -562,7 +563,7 @@ class PhotoArchiveDisplayDetailTests(TestCase):
             name="Public photo event",
             slug="public-photo-event",
         )
-        tag = Tag.objects.create(name="public-photo-tag")
+        tag = _create_tag(name="public-photo-tag")
         self.public_uploaded.categories.add(category)
         self.public_uploaded.events.add(event)
         self.public_uploaded.tags.add(tag)
