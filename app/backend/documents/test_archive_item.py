@@ -54,7 +54,10 @@ from documents.services.archive_tags_validation import (
     parse_ocr_tags_form,
 )
 from documents.services.archive_item_access import ARCHIVE_FAMILY_GROUP_NAME
-from documents.test_historical_person_tag_reuse import _create_tag
+from documents.test_historical_person_tag_reuse import (
+    _advance_tag_pk_sequence_past_historical_ids,
+    _create_tag,
+)
 from documents.services.archive_item_presentation import (
     ARCHIVE_BROWSE_OCR_PREVIEW,
     ARCHIVE_BROWSE_PREVIEW_EMPTY,
@@ -2281,6 +2284,7 @@ class OcrDocumentTagsEditTests(TestCase):
         self.assertFalse(doc.tags_m2m.exists())
 
     def test_update_ocr_document_tags_service_sets_and_reuses_tags(self):
+        _advance_tag_pk_sequence_past_historical_ids()
         doc = create_ocr_document(
             title="Service tags",
             doc_type=Document.DocType.IMAGE,

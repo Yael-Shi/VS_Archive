@@ -1,5 +1,44 @@
 # VS-Archive Decision Log
 
+## Historical person-Tag relation cleanup (D1)
+
+**Decision / implemented:** Mapped historical person-name Tag *relations* are
+removed by an explicit management command. Tag rows stay. Identity remains
+**Tag.id → Person.id** from `documents/historical_person_tag_map.py`. Person,
+`ArchiveItemPerson`, `PhotoPerson`, and ordinary Tags are not written.
+
+**Current behavior:**
+
+- `cleanup_historical_person_tags` is read-only dry-run by default.
+  `--apply-relations` deletes mapped `ArchiveItem.tags` through rows and
+  mapped `Document.tags_m2m` through rows in one `transaction.atomic()`,
+  then `sync_archive_item_search_indexes` for ArchiveItems that lost a
+  mapped Tag relation.
+- Fail-closed before writes: map size must be 29; every mapped Tag.id and
+  Person.id must exist; every mapped `ArchiveItem.tags` relation must have
+  its mapped `ArchiveItemPerson`; planned through rows must use mapped
+  Tag ids only. Apply re-checks those invariants inside the same
+  `transaction.atomic()`, locks planned through rows (`select_for_update`),
+  and fail-closes if found through PKs or Django `.delete()` counts differ
+  from the plan, or if any mapped through rows remain after each table's
+  delete (unexpected PKs are not deleted or added to the plan).
+  `Document.tags_m2m` leftovers do not require `ArchiveItemPerson`.
+- Idempotent: after D1, dry-run and `--apply-relations` report `planned=0`
+  and succeed. Mapped Tag rows remain.
+- `update_ocr_document_tags` and Django Admin `Document.tags_m2m` reject
+  mapped Tag ids (choices omitted; form clean fail-closed). `TagAdmin`
+  refuses delete of mapped Tag rows, including mixed bulk delete.
+  Ordinary Tag delete is unchanged. No name denylist.
+
+**Deferred (D2):** deleting the 29 mapped Tag rows. Blocked on name
+resurrection (`get_or_create(name=…)` would create ordinary Tags with the
+old person names) and PENDING `ArchiveMetadataSuggestion` policy. Public
+Person pages / extra Person-chip UX are not a prerequisite. Direct
+`?tag=<mapped_id>` stays Option 0 (matches nothing once relations are gone).
+
+**Tests:** `documents/test_cleanup_historical_person_tags.py`. No schema
+or data migration.
+
 ## Public Tag browse/filter cutover (Person vs Tag, Stage B)
 
 **Decision / implemented:** Mapped historical person-name Tag ids are no
@@ -21,13 +60,16 @@ Tag browse, visibility, and authorized item querysets are unchanged.
 - Direct legacy `?tag=` query strings are **not** rewritten, stripped,
   rejected, or merged. Mapped-only Tag filter, mixed mapped+ordinary Tag
   OR-within-tags, and Tag+Person AND-between-groups keep today’s
-  semantics (Option 0). Crafted `?tag=<mapped_id>` can still match leftover
-  Tag relations.
+  semantics (Option 0). After D1 relation cleanup, crafted
+  `?tag=<mapped_id>` matches nothing (unknown-id semantics). Leftover
+  mapped Tag relations are removed by `cleanup_historical_person_tags
+  --apply-relations`; Tag rows remain.
 
-**Deferred:** search-index cleanup of mapped Tag names; destructive
-Tag/relation cleanup; public Person pages; active Person filter-chip UX;
+**Deferred:** D2 Tag-row deletion (name resurrection + pending-suggestion
+policy); public Person pages; active Person filter-chip UX;
 query-string redirects (Option 1+). 302 is intentional because Person
-pages may replace the list-filter URL later.
+pages may replace the list-filter URL later. Search-index cleanup of
+mapped Tag names is part of D1 apply (rebuild for affected ArchiveItems).
 
 **Tests:** `documents/test_archive_person_tag_stage_b.py`.
 
@@ -60,9 +102,10 @@ public Person pages.
 
 **Deferred:** Stage B path redirect and public Tag-choice hiding are
 implemented (see **Public Tag browse/filter cutover (Person vs Tag,
-Stage B)**). Still deferred: search-index changes; Tag deletion;
-staff/suggestion UI; PhotoPerson changes; migrations or other database
-writes; public Person pages; Person filter-chip UX.
+Stage B)**). D1 mapped relation cleanup is implemented (see
+**Historical person-Tag relation cleanup (D1)**). Still deferred: D2
+Tag-row deletion; staff/suggestion UI beyond mapped-id reuse blocks;
+PhotoPerson changes; migrations; public Person pages; Person filter-chip UX.
 
 **Tests:** `documents/test_archive_person_public_presentation.py`.
 
@@ -105,14 +148,17 @@ Tags before reconciliation would drop the person association on item
 
 **Revised safe order:** block reuse → deploy → dry-run/apply
 reconciliation → Stage A public presentation cutover (implemented) →
-Stage B tag browse redirect / public Tag-choice hiding (implemented).
+Stage B tag browse redirect / public Tag-choice hiding (implemented) →
+D1 mapped relation cleanup (implemented).
 
 **Deferred:** Stage A public cards/detail cutover is implemented (see
 **Public presentation cutover (Person vs Tag, Stage A)**). Stage B path
 redirect and public Tag-choice hiding are implemented (see **Public Tag
 browse/filter cutover (Person vs Tag, Stage B)**). Direct legacy `?tag=`
-semantics are intentionally unchanged. Still deferred: destructive
-Tag/relation cleanup.
+semantics are intentionally unchanged (Option 0). D1 relation cleanup is
+implemented (see **Historical person-Tag relation cleanup (D1)**). Still
+deferred: D2 Tag-row deletion (name resurrection + pending-suggestion
+policy).
 
 **Tests:** `documents/test_historical_person_tag_reuse.py`,
 `documents/test_reconcile_historical_person_tag_relations.py`, plus map
@@ -127,9 +173,10 @@ schema or data migration.
 `0055_backfill_person_from_person_name_tags`. Lookup is
 `person_id_for_historical_person_name_tag(tag_id)`; unknown Tag ids
 return `None`. Runtime consumers now include reuse blocking, the
-post-deploy reconciliation command, Stage A public presentation, and
-Stage B mapped-tag browse redirects / public Tag-choice hiding. Destructive
-Tag cleanup is still out of scope for this module.
+post-deploy reconciliation command, Stage A public presentation,
+Stage B mapped-tag browse redirects / public Tag-choice hiding, D1
+relation cleanup, and mapped-Tag admin/OCR write-path blocks. D2 Tag-row
+deletion remains out of scope for this module.
 
 **Evidence (production):** 0055 started from 0 Person rows and created
 all 29 Persons sequentially in `APPROVED_PERSON_NAME_TAGS` order.
@@ -153,9 +200,10 @@ use PhotoPerson.
 **Deferred:** Stage A public cards/detail cutover is implemented (see
 **Public presentation cutover (Person vs Tag, Stage A)**). Stage B path
 redirect and public Tag-choice hiding are implemented (see **Public Tag
-browse/filter cutover (Person vs Tag, Stage B)**). Still deferred for
-this module: destructive cleanup; schema mapping table. Direct legacy
-`?tag=` query application is intentionally unchanged.
+browse/filter cutover (Person vs Tag, Stage B)**). D1 relation cleanup is
+implemented (see **Historical person-Tag relation cleanup (D1)**). Still
+deferred for this module: D2 Tag-row deletion; schema mapping table.
+Direct legacy `?tag=` query application is intentionally unchanged.
 
 **Tests:** `documents/test_historical_person_tag_map.py`. No schema
 migration.

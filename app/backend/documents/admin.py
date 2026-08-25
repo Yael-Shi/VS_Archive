@@ -1,5 +1,15 @@
+from django import forms
 from django.contrib import admin
+from django.core.exceptions import PermissionDenied
 
+from documents.historical_person_tag_map import (
+    historical_person_name_tag_ids,
+    is_historical_person_name_tag,
+)
+from documents.services.archive_discovery_metadata_validation import (
+    HISTORICAL_PERSON_TAG_DELETE_ERROR,
+    historical_person_tag_reuse_errors,
+)
 from documents.services.archive_item_access import (
     archive_item_queryset_for_user,
     filter_archive_items_for_user,
@@ -63,6 +73,26 @@ class TagAdmin(_DiscoveryTaxonomyNameSyncAdmin):
     list_display = ("id", "name", "created_at", "updated_at")
     search_fields = ("name",)
     ordering = ("name",)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and is_historical_person_name_tag(obj.pk):
+            return False
+        return super().has_delete_permission(request, obj)
+
+    def delete_model(self, request, obj):
+        if is_historical_person_name_tag(obj.pk):
+            raise PermissionDenied(HISTORICAL_PERSON_TAG_DELETE_ERROR)
+        super().delete_model(request, obj)
+
+    def delete_queryset(self, request, queryset):
+        mapped_ids = [
+            pk
+            for pk in queryset.values_list("pk", flat=True)
+            if is_historical_person_name_tag(pk)
+        ]
+        if mapped_ids:
+            raise PermissionDenied(HISTORICAL_PERSON_TAG_DELETE_ERROR)
+        super().delete_queryset(request, queryset)
 
 
 @admin.register(ArchiveCategory)
@@ -261,8 +291,24 @@ class VideoContentAdmin(_VisibilityScopedAdminMixin, admin.ModelAdmin):
         return False
 
 
+class DocumentAdminForm(forms.ModelForm):
+    class Meta:
+        model = Document
+        fields = "__all__"
+
+    def clean_tags_m2m(self):
+        tags = self.cleaned_data.get("tags_m2m")
+        if not tags:
+            return tags
+        reuse_errors = historical_person_tag_reuse_errors(tag.pk for tag in tags)
+        if reuse_errors:
+            raise forms.ValidationError(reuse_errors[0])
+        return tags
+
+
 @admin.register(Document)
 class DocumentAdmin(_VisibilityScopedAdminMixin, admin.ModelAdmin):
+    form = DocumentAdminForm
     inlines = (DocumentMetadataInline, TranskribusRunInline)
 
     list_display = (
@@ -360,6 +406,13 @@ class DocumentAdmin(_VisibilityScopedAdminMixin, admin.ModelAdmin):
 
     def has_add_permission(self, request):
         return False
+
+    def formfield_for_manytomany(self, db_field, request, **kwargs):
+        if db_field.name == "tags_m2m":
+            kwargs["queryset"] = Tag.objects.exclude(
+                pk__in=historical_person_name_tag_ids()
+            ).order_by("name")
+        return super().formfield_for_manytomany(db_field, request, **kwargs)
 
 
 @admin.register(CorrectionRequest)
