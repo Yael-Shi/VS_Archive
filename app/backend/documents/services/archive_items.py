@@ -551,17 +551,31 @@ def update_ocr_document_tags(
     Replace all tags on an OCR-backed Document.
 
     Document remains OCR runtime source of truth. Does not sync ArchiveItem.
-    Unused Tag rows are left in the database.
+    Unused Tag rows are left in the database. Frozen historical person-name
+    Tag ids cannot be reused; names that resolve to those ids fail closed
+    before any relation write.
     """
     from documents.models import ArchiveItem, Tag
+    from documents.services.archive_discovery_metadata_validation import (
+        HISTORICAL_PERSON_TAG_REUSE_ERROR,
+        existing_tag_name_reuse_errors,
+        historical_person_tag_reuse_errors,
+    )
 
     if document.archive_item.item_type != ArchiveItem.ItemType.OCR_DOCUMENT:
         raise ValueError("document is not linked to an OCR_DOCUMENT archive item")
+
+    reuse_errors = existing_tag_name_reuse_errors(tag_names)
+    if reuse_errors:
+        raise ValueError(reuse_errors[0])
 
     tag_objs = []
     for name in tag_names:
         tag_obj, _ = Tag.objects.get_or_create(name=name)
         tag_objs.append(tag_obj)
+    reuse_errors = historical_person_tag_reuse_errors(tag.pk for tag in tag_objs)
+    if reuse_errors:
+        raise ValueError(HISTORICAL_PERSON_TAG_REUSE_ERROR)
     document.tags_m2m.set(tag_objs)
     return document
 

@@ -5,9 +5,9 @@ used as a lookup key. Names in comments are display/provenance-only.
 
 Runtime consumers may derive the blocked Tag-id set from this map and
 look up Person ids by Tag id. They must not look up by name. Stage A
-public presentation and Stage B mapped-tag browse redirects / public
-Tag-choice hiding use this map. Destructive Tag cleanup remains out of
-scope for this module.
+public presentation, Stage B mapped-tag browse redirects / public
+Tag-choice hiding, D1 relation cleanup, and mapped-Tag reuse/delete
+blocks use this map. D2 Tag-row deletion remains out of scope.
 """
 
 from __future__ import annotations

@@ -36,10 +36,48 @@ _SAFE_TAG_PK_START = 1000
 
 
 def _reset_pk_sequence(model):
+    """Reset PK sequence from existing rows via Django's backend SQL.
+
+    For Tag, also advance past frozen historical ids. Django's
+    ``sequence_reset_sql`` uses ``MAX(pk)+1``, so a mapped Tag such as
+    pk=29 would otherwise make the next auto PK 30, which is still mapped.
+    Inserting an explicit high PK does not advance PostgreSQL sequences.
+    """
+    if model is Tag:
+        _advance_tag_pk_sequence_past_historical_ids()
+        return
     sql_statements = connection.ops.sequence_reset_sql(no_style(), [model])
     with connection.cursor() as cursor:
         for sql in sql_statements:
             cursor.execute(sql)
+
+
+def _advance_tag_pk_sequence_past_historical_ids() -> None:
+    """Ensure the next auto Tag PK is above ``max(historical_person_name_tag_ids())``."""
+    min_next_pk = max(historical_person_name_tag_ids()) + 1
+    sql_statements = connection.ops.sequence_reset_sql(no_style(), [Tag])
+    with connection.cursor() as cursor:
+        for sql in sql_statements:
+            cursor.execute(sql)
+        max_pk = Tag.objects.order_by("-pk").values_list("pk", flat=True).first() or 0
+        if max_pk + 1 >= min_next_pk:
+            return
+        sequences = connection.introspection.get_sequences(cursor, Tag._meta.db_table)
+        pk_column = Tag._meta.pk.column
+        seq_name = next(
+            (
+                seq["name"]
+                for seq in sequences
+                if seq.get("column") == pk_column and seq.get("name")
+            ),
+            None,
+        )
+        if seq_name is None:
+            raise RuntimeError(
+                "cannot advance Tag PK sequence past historical ids on this "
+                "database backend"
+            )
+        cursor.execute("SELECT setval(%s, %s, false)", [seq_name, min_next_pk])
 
 
 def _next_safe_tag_pk() -> int:

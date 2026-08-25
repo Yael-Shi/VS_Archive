@@ -19,6 +19,7 @@ _MAX_DISCOVERY_NAME_LENGTH = 255
 _CATEGORY_MAX_LENGTH_ERROR = "קטגוריה חייבת להיות עד 255 תווים"
 _EVENT_MAX_LENGTH_ERROR = "אירוע חייב להיות עד 255 תווים"
 HISTORICAL_PERSON_TAG_REUSE_ERROR = "לא ניתן להשתמש בתגיות היסטוריות של שמות אנשים."
+HISTORICAL_PERSON_TAG_DELETE_ERROR = "לא ניתן למחוק תגיות היסטוריות של שמות אנשים."
 
 
 def empty_discovery_metadata_form_fields() -> dict[str, Any]:
