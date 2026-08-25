@@ -52,6 +52,9 @@ from .models import (
     TranskribusCorrectedCurrentSyncAttempt,
     TranskribusTranscriptSnapshot,
 )
+from documents.historical_person_tag_map import (
+    person_id_for_historical_person_name_tag,
+)
 from documents.services.archive_catalog_metadata_validation import (
     parse_ocr_catalog_metadata_form,
 )
@@ -244,6 +247,7 @@ from documents.services.archive_item_presentation import (
     normalize_archive_public_list_per_page,
     normalize_archive_public_list_type_filter,
     normalize_archive_list_search_query,
+    person_archive_filter_url,
     public_discovery_context,
 )
 from documents.services.archive_search_snippets import (
@@ -4858,6 +4862,10 @@ def archive_event_browse_page(request, event_id: int):
 
 
 def archive_tag_browse_page(request, tag_id: int):
+    person_id = person_id_for_historical_person_name_tag(tag_id)
+    if person_id is not None:
+        return redirect(person_archive_filter_url(person_id))
+
     try:
         tag = Tag.objects.get(id=tag_id)
     except Tag.DoesNotExist:
