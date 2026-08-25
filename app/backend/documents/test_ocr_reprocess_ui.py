@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone as dt_timezone
 from types import SimpleNamespace
 from typing import TypedDict
 from unittest.mock import patch
@@ -223,6 +224,73 @@ class OcrReprocessUiTests(TestCase):
             error_code="OCR_FAILED",
             error_details="temporary Antigravity read timeout",
             text=None,
+        )
+
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, self._reprocess_url(doc.id))
+        self.assertContains(resp, "נסה עיבוד מחדש")
+
+    @patch.dict(
+        "os.environ",
+        {"ENABLE_ANTIGRAVITY_ARABIC_PRINTED": "true"},
+        clear=False,
+    )
+    def test_staff_sees_retry_button_for_hybrid_partial_later_failed_source(self):
+        doc = create_ocr_document(
+            title="Arabic printed hybrid PARTIAL OCR failure",
+            doc_type=Document.DocType.PDF,
+            language=Document.Language.ARABIC,
+            text_input_type=Document.TextInputType.PRINTED,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.PARTIAL,
+            file_s3_key="documents/320/source/0.jpeg",
+            mime_type="image/jpeg",
+        )
+        latest_failed = DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="ocr-dispatch",
+            engine_key=DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            status=DocumentTextResult.Status.FAILED,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            error_code="OCR_FAILED",
+            error_details="OCR dispatch failed",
+            text=None,
+        )
+        older_source = DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="antigravity-preview-05-2026",
+            engine_key=DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="older unverified source text",
+        )
+        older_hebrew = DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="antigravity-preview-05-2026",
+            engine_key=DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="older unverified hebrew text",
+        )
+        older_at = datetime(2026, 8, 17, 20, 33, 17, tzinfo=dt_timezone.utc)
+        latest_at = datetime(2026, 8, 24, 19, 40, 25, tzinfo=dt_timezone.utc)
+        DocumentTextResult.objects.filter(pk=latest_failed.pk).update(
+            updated_at=latest_at
+        )
+        DocumentTextResult.objects.filter(pk=older_source.pk).update(
+            updated_at=older_at
+        )
+        DocumentTextResult.objects.filter(pk=older_hebrew.pk).update(
+            updated_at=older_at
         )
 
         self.client.force_login(self.staff)
