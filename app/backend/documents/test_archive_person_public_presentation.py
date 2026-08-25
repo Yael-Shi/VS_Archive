@@ -24,7 +24,7 @@ from documents.models import (
 )
 from documents.services.archive_item_presentation import (
     build_archive_browse_card,
-    person_archive_filter_url,
+    person_public_page_url,
 )
 from documents.services.archive_items import (
     create_manual_text_archive_item,
@@ -107,7 +107,7 @@ def _link_person(item: ArchiveItem, person: Person) -> None:
 
 
 def _person_href(person: Person) -> str:
-    return person_archive_filter_url(person.id)
+    return person_public_page_url(person.id)
 
 
 def _person_href_html(person: Person) -> str:
@@ -145,8 +145,7 @@ class ArchivePersonPublicCardTests(TestCase):
         self.assertContains(resp, "אנשים קשורים")
         self.assertContains(resp, _person_href_html(person), count=4)
         self.assertContains(resp, "Card Linked Person")
-        self.assertIn(f"person={person.id}", resp.content.decode())
-        self.assertIn("advanced=1", resp.content.decode())
+        self.assertIn(f"/archive/people/{person.id}/", resp.content.decode())
         for item in items:
             self.assertContains(resp, item.title)
 
@@ -249,7 +248,7 @@ class ArchivePersonPublicDetailTests(TestCase):
         self.assertContains(resp, "detail-ordinary-tag")
         self.assertContains(resp, "Detail Event")
         self.assertNotContains(resp, "detail-historical-tag")
-        self.assertIn(f"person={person.id}", resp.content.decode())
+        self.assertIn(f"/archive/people/{person.id}/", resp.content.decode())
 
     def test_ocr_document_detail_shows_people_and_hides_historical_tag(self):
         doc = _public_ocr("OCR person detail")

@@ -1142,6 +1142,11 @@ def person_archive_filter_url(person_id: int) -> str:
     return f"{path}?{query}" if query else path
 
 
+def person_public_page_url(person_id: int) -> str:
+    """Return ``/archive/people/<person_id>/``."""
+    return reverse("archive-person-detail", kwargs={"person_id": person_id})
+
+
 def person_links_for_item(archive_item: ArchiveItem) -> tuple[ArchiveBrowseLink, ...]:
     """Item-level ArchiveItemPerson links, ordered by ``(name, id)``.
 
@@ -1155,7 +1160,7 @@ def person_links_for_item(archive_item: ArchiveItem) -> tuple[ArchiveBrowseLink,
     return tuple(
         ArchiveBrowseLink(
             name=person.name,
-            href=person_archive_filter_url(person.id),
+            href=person_public_page_url(person.id),
         )
         for person in people
     )

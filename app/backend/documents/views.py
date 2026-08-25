@@ -38,8 +38,9 @@ from .models import (
     ArchiveCategory,
     ArchiveEvent,
     ArchiveItem,
-    ArchiveMetadataSuggestion,
+    ArchiveItemPerson,
     ArchiveItemPersonSuggestion,
+    ArchiveMetadataSuggestion,
     Document,
     DocumentMetadata,
     DocumentSourceFile,
@@ -232,6 +233,8 @@ from documents.services.archive_advanced_search import (
     validate_archive_advanced_year_fields,
 )
 from documents.services.archive_item_presentation import (
+    ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
+    aggregate_archive_public_list_type_counts,
     archive_browse_displayable_text_results_prefetch,
     archive_manage_item_type_ui_choices,
     archive_metadata_status_ui_choices,
@@ -239,15 +242,14 @@ from documents.services.archive_item_presentation import (
     archive_public_list_filter_context,
     archive_public_list_pagination_context,
     archive_visibility_ui_choices,
-    aggregate_archive_public_list_type_counts,
     build_archive_browse_cards,
     filter_archive_items_by_public_list_type,
     filter_archive_items_by_search_query,
+    normalize_archive_list_search_query,
     normalize_archive_public_list_page,
     normalize_archive_public_list_per_page,
     normalize_archive_public_list_type_filter,
-    normalize_archive_list_search_query,
-    person_archive_filter_url,
+    person_public_page_url,
     public_discovery_context,
 )
 from documents.services.archive_search_snippets import (
@@ -4864,7 +4866,7 @@ def archive_event_browse_page(request, event_id: int):
 def archive_tag_browse_page(request, tag_id: int):
     person_id = person_id_for_historical_person_name_tag(tag_id)
     if person_id is not None:
-        return redirect(person_archive_filter_url(person_id))
+        return redirect(person_public_page_url(person_id))
 
     try:
         tag = Tag.objects.get(id=tag_id)
@@ -4880,6 +4882,48 @@ def archive_tag_browse_page(request, tag_id: int):
             items=items,
             user=request.user,
         ),
+    )
+
+
+def archive_person_detail_page(request, person_id: int):
+    person = get_object_or_404(Person, pk=person_id)
+    items = _archive_browse_select_related(
+        archive_browse_queryset_for_user(request.user).filter(
+            pk__in=ArchiveItemPerson.objects.filter(person_id=person.pk).values(
+                "archive_item_id"
+            )
+        )
+    ).order_by("-created_at", "pk")
+    total_count = items.count()
+    if total_count == 0:
+        raise Http404() from None
+
+    per_page = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE
+    page = normalize_archive_public_list_page(
+        request.GET.get("page"),
+        total_count=total_count,
+        per_page=per_page,
+    )
+    offset = (page - 1) * per_page
+    page_items = list(items[offset : offset + per_page])
+    browse_cards = _archive_browse_cards_for_items(page_items)
+    return render(
+        request,
+        "documents/archive/person_detail.html",
+        context={
+            "person": person,
+            "items": page_items,
+            "browse_cards": browse_cards,
+            "is_admin": _is_admin(request.user),
+            "total_count": total_count,
+            **archive_public_list_pagination_context(
+                total_count=total_count,
+                page=page,
+                per_page=per_page,
+                q="",
+                item_type_filter="",
+            ),
+        },
     )
 
 
