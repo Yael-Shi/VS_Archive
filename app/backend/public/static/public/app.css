@@ -2652,6 +2652,56 @@ pre {
   margin-top: var(--space-2);
 }
 
+.filter-chip--person {
+  padding-block: 2px;
+  padding-inline: 10px 2px;
+  gap: var(--space-1);
+}
+
+.filter-chip__person-name {
+  color: var(--text-heading);
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+}
+
+.filter-chip__person-name:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.filter-chip__person-name:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+
+.filter-chip__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 2.75rem;
+  min-block-size: 2.75rem;
+  margin-inline-start: var(--space-1);
+  padding: 0;
+  border-radius: 999px;
+  color: var(--text-soft);
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.filter-chip__remove:hover {
+  background: var(--surface-muted);
+  color: var(--text-heading);
+}
+
+.filter-chip__remove:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+
 .archive-search-results-count {
   margin: 0 0 var(--space-3);
   font-size: var(--font-sm);

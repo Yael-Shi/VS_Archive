@@ -288,14 +288,26 @@
         <div class="filter-chips">
           <span class="filter-chips__label">סינון פעיל:</span>
           {% for chip in active_filter_chips %}
-            <a
-              class="filter-chip filter-chip--action"
-              href="{% url 'archive-list' %}{{ chip.remove_href_suffix }}"
-              title="הסרת {{ chip.label }}"
-            >
-              <span class="filter-chip__key">{{ chip.label }}:</span>
-              {{ chip.value }}
-            </a>
+            {% if chip.kind == "person" %}
+              <span class="filter-chip filter-chip--person">
+                <span class="filter-chip__key">{{ chip.label }}:</span>
+                <a class="filter-chip__person-name" href="{{ chip.detail_href }}">{{ chip.value }}</a>
+                <a
+                  class="filter-chip__remove"
+                  href="{% url 'archive-list' %}{{ chip.remove_href_suffix }}"
+                  aria-label="{{ chip.remove_aria_label }}"
+                >×</a>
+              </span>
+            {% else %}
+              <a
+                class="filter-chip filter-chip--action"
+                href="{% url 'archive-list' %}{{ chip.remove_href_suffix }}"
+                title="הסרת {{ chip.label }}"
+              >
+                <span class="filter-chip__key">{{ chip.label }}:</span>
+                {{ chip.value }}
+              </a>
+            {% endif %}
           {% endfor %}
         </div>
         {% if advanced_filters_active %}

@@ -1,8 +1,8 @@
 # Archive full-text search — design
 
-**Status:** Architecture contract. **PR1**, **PR2a**, **PR2b-1**, **PR2b-2**, **PR3**, and **PR4** are implemented in application code; **post-PR4 translation search coverage** is implemented (`hebrew_translation_text`). **PHOTO search aggregation (multi-photo PR5)** is implemented (public-renderable `PhotoContent` text + `PhotoPerson` names on the owning ArchiveItem index row). **Person aliases (PR6a)** are implemented as searchable `PersonAlias` names on that same renderable-PhotoPerson path. **ArchiveItemPerson public q search** is implemented (canonical `Person.name` + aliases on the owning ArchiveItem for every item type; not photo appearance). **Public Person advanced filter** is implemented (`person=<person_id>` via ArchiveItemPerson only; PhotoPerson-only does not match). **Public Person page** is implemented (`/archive/people/<person_id>/`; ArchiveItemPerson only; authorized/renderable items; aliases not displayed). Later hover/page-line mapping remains deferred.
+**Status:** Architecture contract. **PR1**, **PR2a**, **PR2b-1**, **PR2b-2**, **PR3**, and **PR4** are implemented in application code; **post-PR4 translation search coverage** is implemented (`hebrew_translation_text`). **PHOTO search aggregation (multi-photo PR5)** is implemented (public-renderable `PhotoContent` text + `PhotoPerson` names on the owning ArchiveItem index row). **Person aliases (PR6a)** are implemented as searchable `PersonAlias` names on that same renderable-PhotoPerson path. **ArchiveItemPerson public q search** is implemented (canonical `Person.name` + aliases on the owning ArchiveItem for every item type; not photo appearance). **Public Person advanced filter** is implemented (`person=<person_id>` via ArchiveItemPerson only; PhotoPerson-only does not match). **Public Person page** is implemented (`/archive/people/<person_id>/`; ArchiveItemPerson only; authorized/renderable items; aliases not displayed). **Person active-filter chip UX** is implemented (one chip per selected `person=` id; name → Person page; × removes that id and keeps `advanced=1`). Later hover/page-line mapping remains deferred.
 
-**Companion decision-log entries:** `docs/ai-context/decision-log.md` — “Archive full-text search — architecture (docs-only)”, “PR1 search-index foundation (implemented)”, “PR2a discovery/manual/taxonomy sync (implemented)”, “PR2b-1 human-controlled displayed-text sync (implemented)”, “PR2b-2 automated displayed-text sync (implemented)”, “PR3 backend search cutover (implemented)”, “PR4 snippets/match-source/help text (implemented)”, “Post-PR4 Hebrew translation search coverage (implemented)”, “PHOTO search aggregation (PR5)”, “Person aliases (PR6a)”, “ArchiveItemPerson public q search”, “Public `/archive/` Person advanced filter”.
+**Companion decision-log entries:** `docs/ai-context/decision-log.md` — “Archive full-text search — architecture (docs-only)”, “PR1 search-index foundation (implemented)”, “PR2a discovery/manual/taxonomy sync (implemented)”, “PR2b-1 human-controlled displayed-text sync (implemented)”, “PR2b-2 automated displayed-text sync (implemented)”, “PR3 backend search cutover (implemented)”, “PR4 snippets/match-source/help text (implemented)”, “Post-PR4 Hebrew translation search coverage (implemented)”, “PHOTO search aggregation (PR5)”, “Person aliases (PR6a)”, “ArchiveItemPerson public q search”, “Public `/archive/` Person advanced filter”, “Public Person active-filter chip UX”.
 
 This document is the detailed contract for the implementation PR sequence. It records verified current behavior, target decisions, risks, and per-PR scope. Do not treat unimplemented later hover-mapping behavior as live.
 
@@ -369,7 +369,16 @@ Required order (short form): **PR1 migrate/backfill → PR2a sync → PR2b-1 syn
 | **Scope** | Repeatable `person=<person_id>` on public `/archive/` advanced search; filter `ArchiveItem.people` / `ArchiveItemPerson` only; OR within Person, AND across other filter groups; canonical `Person.name` picker/chip labels; id form values; same conditional choice-context loading as category/event/tag |
 | **Files** | `archive_advanced_search.py`; `archive_item_presentation.py`; `views.py` archive list; `archive/list.html`; pagination partial; tests; design + decision-log + context |
 | **Migrations** | None |
-| **Non-goals** | PhotoPerson appearance filter; alias-assisted picker search; removing historical person-name Tags; `q` index changes; schema changes; Person filter-chip UX. Public Person browse/detail is implemented separately.
+| **Non-goals** | PhotoPerson appearance filter; alias-assisted picker search; removing historical person-name Tags; `q` index changes; schema changes. Person filter-chip UX and public Person browse/detail are implemented separately.
+
+### Public Person active-filter chip UX — **implemented**
+
+| | |
+|--|--|
+| **Scope** | One `/archive/` active chip per selected `person=` id; canonical name GET-links to `archive-person-detail`; visible × GET-link removes only that id; preserve `q` / other filters / `item_type` / `per_page`; drop `page`; always keep `advanced=1` |
+| **Files** | `archive_item_presentation.py`; `archive/list.html`; `app.css`; tests; decision-log + context |
+| **Migrations** | None |
+| **Non-goals** | Changing non-Person chips; PhotoPerson; aliases; Person pages; D2; filtering/pagination semantics elsewhere |
 
 ### Later — Search ↔ hover mapping (optional)
 

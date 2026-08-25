@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 from urllib.parse import parse_qs
 
 from django.contrib.auth.models import Group, Permission, User
 from django.contrib.contenttypes.models import ContentType
 from django.db import connection
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import NoReverseMatch, reverse
 
@@ -37,6 +38,7 @@ from documents.services.archive_item_access import (
 from documents.services.archive_item_presentation import (
     archive_public_list_active_filter_summary_context,
     build_archive_public_list_query,
+    person_public_page_url,
 )
 from documents.services.archive_items import (
     create_manual_text_archive_item,
@@ -462,19 +464,119 @@ class ArchiveAdvancedPersonFilterUiTests(TestCase):
         chips = resp.context["active_filter_chips"]
         person_chip = next(chip for chip in chips if chip["kind"] == "person")
         self.assertEqual(person_chip["value"], "Chip Canonical")
-        self.assertIn("Chip Canonical", resp.content.decode("utf-8"))
+        self.assertEqual(person_chip["person_id"], person.id)
+        self.assertEqual(person_chip["detail_href"], person_public_page_url(person.id))
+        self.assertEqual(person_chip["remove_aria_label"], "הסרת Chip Canonical")
+        html = resp.content.decode("utf-8")
+        self.assertIn("Chip Canonical", html)
         self.assertNotIn("Chip Alias", person_chip["value"])
+        self.assertNotIn("Chip Alias", person_chip["remove_aria_label"])
 
-    def test_removing_one_person_chip_preserves_other_state(self):
+    def test_multiple_selected_people_render_separate_chips(self):
         ada = Person.objects.create(name="Ada Chip")
         charles = Person.objects.create(name="Charles Chip")
+        item = _public_manual("Two person chips")
+        ArchiveItemPerson.objects.create(archive_item=item, person=ada)
+        ArchiveItemPerson.objects.create(archive_item=item, person=charles)
+
+        resp = self.client.get(
+            self.url,
+            [("person", str(ada.id)), ("person", str(charles.id))],
+        )
+        person_chips = [
+            chip
+            for chip in resp.context["active_filter_chips"]
+            if chip["kind"] == "person"
+        ]
+        self.assertEqual(
+            [chip["person_id"] for chip in person_chips], [ada.id, charles.id]
+        )
+        self.assertEqual(
+            [chip["value"] for chip in person_chips], ["Ada Chip", "Charles Chip"]
+        )
+        html = resp.content.decode("utf-8")
+        self.assertEqual(html.count('class="filter-chip filter-chip--person"'), 2)
+        self.assertNotIn("Ada Chip, Charles Chip", html)
+        self.assertNotIn('<span class="filter-chip__key">אנשים:</span>', html)
+
+    def test_each_person_chip_name_links_to_its_person_page(self):
+        ada = Person.objects.create(name="Ada Link")
+        charles = Person.objects.create(name="Charles Link")
+        item = _public_manual("Name link item")
+        ArchiveItemPerson.objects.create(archive_item=item, person=ada)
+        ArchiveItemPerson.objects.create(archive_item=item, person=charles)
+
+        resp = self.client.get(
+            self.url,
+            [("person", str(ada.id)), ("person", str(charles.id))],
+        )
+        person_chips = [
+            chip
+            for chip in resp.context["active_filter_chips"]
+            if chip["kind"] == "person"
+        ]
+        self.assertEqual(
+            [chip["detail_href"] for chip in person_chips],
+            [person_public_page_url(ada.id), person_public_page_url(charles.id)],
+        )
+        html = resp.content.decode("utf-8")
+        self.assertIn(
+            f'<a class="filter-chip__person-name" href="{person_public_page_url(ada.id)}">Ada Link</a>',
+            html,
+        )
+        self.assertIn(
+            f'<a class="filter-chip__person-name" href="{person_public_page_url(charles.id)}">Charles Link</a>',
+            html,
+        )
+
+    def test_each_person_chip_remove_drops_only_that_person(self):
+        ada = Person.objects.create(name="Ada Chip")
+        charles = Person.objects.create(name="Charles Chip")
+        item = _public_manual("Remove one person")
+        ArchiveItemPerson.objects.create(archive_item=item, person=ada)
+        ArchiveItemPerson.objects.create(archive_item=item, person=charles)
+
+        resp = self.client.get(
+            self.url,
+            [("person", str(ada.id)), ("person", str(charles.id))],
+        )
+        person_chips = [
+            chip
+            for chip in resp.context["active_filter_chips"]
+            if chip["kind"] == "person"
+        ]
+        ada_chip = next(chip for chip in person_chips if chip["person_id"] == ada.id)
+        charles_chip = next(
+            chip for chip in person_chips if chip["person_id"] == charles.id
+        )
+        ada_parsed = parse_qs(str(ada_chip["remove_href_suffix"]).lstrip("?"))
+        charles_parsed = parse_qs(str(charles_chip["remove_href_suffix"]).lstrip("?"))
+        self.assertEqual(ada_parsed["person"], [str(charles.id)])
+        self.assertEqual(charles_parsed["person"], [str(ada.id)])
+
+        removed_ada = self.client.get(f"{self.url}{ada_chip['remove_href_suffix']}")
+        self.assertEqual(
+            removed_ada.context["advanced_filter_person_ids"], (charles.id,)
+        )
+        remaining = [
+            chip
+            for chip in removed_ada.context["active_filter_chips"]
+            if chip["kind"] == "person"
+        ]
+        self.assertEqual([chip["person_id"] for chip in remaining], [charles.id])
+
+    def test_person_chip_remove_preserves_filters_drops_page_keeps_advanced(self):
+        ada = Person.objects.create(name="Ada Keep")
+        charles = Person.objects.create(name="Charles Keep")
         cat = ArchiveCategory.objects.create(name="Keep Cat", slug="keep-cat")
+        event = ArchiveEvent.objects.create(name="Keep Event", slug="keep-event")
+        tag = _create_tag(name="Keep Tag")
         item = _public_manual("Chip keep state", author_name="Keep Author")
         update_archive_item_discovery_metadata(
             item,
             category_names=["Keep Cat"],
-            event_names=[],
-            tag_names=[],
+            event_names=["Keep Event"],
+            tag_names=["Keep Tag"],
         )
         ArchiveItemPerson.objects.create(archive_item=item, person=ada)
         ArchiveItemPerson.objects.create(archive_item=item, person=charles)
@@ -483,36 +585,218 @@ class ArchiveAdvancedPersonFilterUiTests(TestCase):
             [
                 ("author", "Keep Author"),
                 ("category", str(cat.id)),
+                ("event", str(event.id)),
+                ("tag", str(tag.id)),
                 ("person", str(ada.id)),
                 ("person", str(charles.id)),
+                ("year", "1950"),
+                ("year_to", "1960"),
             ]
         )
         summary = archive_public_list_active_filter_summary_context(
             q="KeepQuery",
             item_type_filter="photo",
+            per_page=24,
             advanced_filters=filters,
             category_choices=[cat],
+            event_choices=[event],
+            tag_choices=[tag],
             person_choices=[ada, charles],
         )
-        person_chip = next(
-            chip for chip in summary["active_filter_chips"] if chip["kind"] == "person"
+        ada_chip = next(
+            chip
+            for chip in summary["active_filter_chips"]
+            if chip["kind"] == "person" and chip["person_id"] == ada.id
         )
-        parsed = parse_qs(str(person_chip["remove_href_suffix"]).lstrip("?"))
-        self.assertNotIn("person", parsed)
+        parsed = parse_qs(str(ada_chip["remove_href_suffix"]).lstrip("?"))
+        self.assertEqual(parsed["person"], [str(charles.id)])
         self.assertEqual(parsed["q"], ["KeepQuery"])
         self.assertEqual(parsed["author"], ["Keep Author"])
         self.assertEqual(parsed["category"], [str(cat.id)])
+        self.assertEqual(parsed["event"], [str(event.id)])
+        self.assertEqual(parsed["tag"], [str(tag.id)])
+        self.assertEqual(parsed["year"], ["1950"])
+        self.assertEqual(parsed["year_to"], ["1960"])
         self.assertEqual(parsed["item_type"], ["photo"])
+        self.assertEqual(parsed["per_page"], ["24"])
+        self.assertEqual(parsed["advanced"], ["1"])
+        self.assertNotIn("page", parsed)
 
-        resp = self.client.get(self.url, {"q": "KeepQuery", "person": str(ada.id)})
+        resp = self.client.get(
+            self.url,
+            [
+                ("q", "KeepQuery"),
+                ("author", "Keep Author"),
+                ("category", str(cat.id)),
+                ("event", str(event.id)),
+                ("tag", str(tag.id)),
+                ("person", str(ada.id)),
+                ("person", str(charles.id)),
+                ("year", "1950"),
+                ("year_to", "1960"),
+                ("item_type", "photo"),
+                ("per_page", "24"),
+                ("page", "2"),
+            ],
+        )
         live_chip = next(
+            chip
+            for chip in resp.context["active_filter_chips"]
+            if chip["kind"] == "person" and chip["person_id"] == ada.id
+        )
+        live_parsed = parse_qs(str(live_chip["remove_href_suffix"]).lstrip("?"))
+        self.assertEqual(live_parsed["person"], [str(charles.id)])
+        self.assertEqual(live_parsed["q"], ["KeepQuery"])
+        self.assertEqual(live_parsed["author"], ["Keep Author"])
+        self.assertEqual(live_parsed["category"], [str(cat.id)])
+        self.assertEqual(live_parsed["event"], [str(event.id)])
+        self.assertEqual(live_parsed["tag"], [str(tag.id)])
+        self.assertEqual(live_parsed["year"], ["1950"])
+        self.assertEqual(live_parsed["year_to"], ["1960"])
+        self.assertEqual(live_parsed["item_type"], ["photo"])
+        self.assertEqual(live_parsed["per_page"], ["24"])
+        self.assertEqual(live_parsed["advanced"], ["1"])
+        self.assertNotIn("page", live_parsed)
+
+    def test_removing_final_person_keeps_advanced_search_open(self):
+        person = Person.objects.create(name="Last Chip")
+        item = _public_manual("Last person chip")
+        ArchiveItemPerson.objects.create(archive_item=item, person=person)
+
+        resp = self.client.get(self.url, {"person": str(person.id), "page": "2"})
+        person_chip = next(
             chip
             for chip in resp.context["active_filter_chips"]
             if chip["kind"] == "person"
         )
-        live_parsed = parse_qs(str(live_chip["remove_href_suffix"]).lstrip("?"))
-        self.assertEqual(live_parsed["q"], ["KeepQuery"])
-        self.assertNotIn("person", live_parsed)
+        parsed = parse_qs(str(person_chip["remove_href_suffix"]).lstrip("?"))
+        self.assertNotIn("person", parsed)
+        self.assertEqual(parsed["advanced"], ["1"])
+        self.assertNotIn("page", parsed)
+
+        cleared = self.client.get(f"{self.url}{person_chip['remove_href_suffix']}")
+        self.assertEqual(cleared.status_code, 200)
+        self.assertEqual(cleared.context["advanced_filter_person_ids"], ())
+        self.assertTrue(cleared.context["advanced_panel_open"])
+        self.assertIn('id="archive-filter-person"', cleared.content.decode("utf-8"))
+
+    def test_person_chip_remove_aria_label_includes_name(self):
+        ada = Person.objects.create(name="Ada Accessible")
+        charles = Person.objects.create(name="Charles Accessible")
+        item = _public_manual("Accessible chips")
+        ArchiveItemPerson.objects.create(archive_item=item, person=ada)
+        ArchiveItemPerson.objects.create(archive_item=item, person=charles)
+
+        resp = self.client.get(
+            self.url,
+            [("person", str(ada.id)), ("person", str(charles.id))],
+        )
+        html = resp.content.decode("utf-8")
+        for person in (ada, charles):
+            chip = next(
+                item
+                for item in resp.context["active_filter_chips"]
+                if item["kind"] == "person" and item["person_id"] == person.id
+            )
+            self.assertEqual(chip["remove_aria_label"], f"הסרת {person.name}")
+            self.assertIn(f'aria-label="הסרת {person.name}"', html)
+            self.assertIn('class="filter-chip__remove"', html)
+            self.assertIn("×", html)
+
+    def test_non_person_chips_remain_grouped_action_links(self):
+        ada = Person.objects.create(name="Ada Other")
+        charles = Person.objects.create(name="Charles Other")
+        cat_a = ArchiveCategory.objects.create(name="Chip Cat A", slug="chip-cat-a")
+        cat_b = ArchiveCategory.objects.create(name="Chip Cat B", slug="chip-cat-b")
+        event = ArchiveEvent.objects.create(name="Chip Event", slug="chip-event")
+        tag_a = _create_tag(name="Chip Tag A")
+        tag_b = _create_tag(name="Chip Tag B")
+        item = _public_manual("Unrelated chips item", author_name="Chip Author")
+        update_archive_item_discovery_metadata(
+            item,
+            category_names=["Chip Cat A", "Chip Cat B"],
+            event_names=["Chip Event"],
+            tag_names=["Chip Tag A", "Chip Tag B"],
+        )
+        ArchiveItemPerson.objects.create(archive_item=item, person=ada)
+        ArchiveItemPerson.objects.create(archive_item=item, person=charles)
+
+        resp = self.client.get(
+            self.url,
+            [
+                ("q", "ChipQuery"),
+                ("author", "Chip Author"),
+                ("category", str(cat_a.id)),
+                ("category", str(cat_b.id)),
+                ("event", str(event.id)),
+                ("tag", str(tag_a.id)),
+                ("tag", str(tag_b.id)),
+                ("person", str(ada.id)),
+                ("person", str(charles.id)),
+            ],
+        )
+        chips = resp.context["active_filter_chips"]
+        category_chip = next(chip for chip in chips if chip["kind"] == "category")
+        event_chip = next(chip for chip in chips if chip["kind"] == "event")
+        tag_chip = next(chip for chip in chips if chip["kind"] == "tag")
+        author_chip = next(chip for chip in chips if chip["kind"] == "author")
+        q_chip = next(chip for chip in chips if chip["kind"] == "q")
+        person_chips = [chip for chip in chips if chip["kind"] == "person"]
+
+        self.assertEqual(len([chip for chip in chips if chip["kind"] == "category"]), 1)
+        self.assertEqual(category_chip["value"], "Chip Cat A, Chip Cat B")
+        self.assertNotIn("detail_href", category_chip)
+        self.assertNotIn("remove_aria_label", category_chip)
+        self.assertNotIn("person_id", category_chip)
+        self.assertEqual(event_chip["value"], "Chip Event")
+        self.assertEqual(tag_chip["value"], "Chip Tag A, Chip Tag B")
+        self.assertEqual(author_chip["value"], "Chip Author")
+        self.assertEqual(q_chip["value"], "ChipQuery")
+        self.assertEqual(len(person_chips), 2)
+
+        category_remove = parse_qs(str(category_chip["remove_href_suffix"]).lstrip("?"))
+        self.assertNotIn("category", category_remove)
+        self.assertEqual(category_remove["person"], [str(ada.id), str(charles.id)])
+        self.assertNotIn("advanced", category_remove)
+
+        html = resp.content.decode("utf-8")
+        self.assertIn('title="הסרת קטגוריות"', html)
+        self.assertIn('title="הסרת תגיות"', html)
+        self.assertIn('title="הסרת אירוע"', html)
+        self.assertIn('title="הסרת מחבר/ת"', html)
+        self.assertIn('title="הסרת חיפוש"', html)
+        self.assertEqual(html.count('class="filter-chip__remove"'), 2)
+        self.assertEqual(html.count('class="filter-chip filter-chip--person"'), 2)
+        self.assertNotIn("filter-chip--person", str(category_chip))
+
+    def test_person_chip_html_query_count_does_not_scale_with_selected_people(self):
+        few_item = _public_manual("Chip query few")
+        many_item = _public_manual("Chip query many")
+        few_people = []
+        many_people = []
+        for index in range(2):
+            person = Person.objects.create(name=f"ChipFew {index:02d}")
+            ArchiveItemPerson.objects.create(archive_item=few_item, person=person)
+            few_people.append(person)
+        for index in range(8):
+            person = Person.objects.create(name=f"ChipMany {index:02d}")
+            ArchiveItemPerson.objects.create(archive_item=many_item, person=person)
+            many_people.append(person)
+
+        few_params = [("person", str(person.id)) for person in few_people]
+        many_params = [("person", str(person.id)) for person in many_people]
+        with CaptureQueriesContext(connection) as few_ctx:
+            few_resp = self.client.get(self.url, few_params)
+        with CaptureQueriesContext(connection) as many_ctx:
+            many_resp = self.client.get(self.url, many_params)
+        self.assertEqual(few_resp.status_code, 200)
+        self.assertEqual(many_resp.status_code, 200)
+        self.assertEqual(len(few_resp.context["active_filter_chips"]), 2)
+        self.assertEqual(len(many_resp.context["active_filter_chips"]), 8)
+        self.assertEqual(
+            _person_related_query_count(few_ctx),
+            _person_related_query_count(many_ctx),
+        )
 
     def test_pagination_and_type_links_preserve_person_params(self):
         person = Person.objects.create(name="Page Person")
@@ -720,3 +1004,30 @@ class ArchiveAdvancedPersonFilterUiTests(TestCase):
         same_ids = [pk for name, pk in names_and_ids if name == "Same"]
         self.assertEqual(same_ids, sorted(same_ids))
         self.assertEqual(same_ids, [same_a.pk, same_b.pk])
+
+
+class ArchivePersonFilterChipCssTests(SimpleTestCase):
+    def test_person_chip_css_uses_logical_properties_and_focus(self):
+        css = (
+            Path(__file__).resolve().parents[1]
+            / "public"
+            / "static"
+            / "public"
+            / "app.css"
+        )
+        text = css.read_text(encoding="utf-8")
+        start = text.index(".filter-chip--person {")
+        end = text.index(".archive-search-results-count {")
+        person_chip_css = text[start:end]
+        self.assertIn("padding-inline:", person_chip_css)
+        self.assertIn("padding-block:", person_chip_css)
+        self.assertIn("min-inline-size: 2.75rem", person_chip_css)
+        self.assertIn("min-block-size: 2.75rem", person_chip_css)
+        self.assertIn("margin-inline-start:", person_chip_css)
+        self.assertIn(".filter-chip__person-name:focus-visible", person_chip_css)
+        self.assertIn(".filter-chip__remove:focus-visible", person_chip_css)
+        self.assertIn("var(--focus-ring)", person_chip_css)
+        self.assertNotIn("margin-left", person_chip_css)
+        self.assertNotIn("margin-right", person_chip_css)
+        self.assertNotIn("padding-left", person_chip_css)
+        self.assertNotIn("padding-right", person_chip_css)
