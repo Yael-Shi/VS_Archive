@@ -8,6 +8,7 @@ from typing import Any
 from documents.historical_person_tag_map import (
     historical_person_name_tag_ids,
     is_historical_person_name_tag,
+    is_retired_historical_person_tag_name,
 )
 from documents.services.archive_tags_validation import (
     normalize_tag_names_from_list,
@@ -67,6 +68,23 @@ def existing_tag_name_reuse_errors(tag_names: list[str]) -> list[str]:
 
     existing_ids = Tag.objects.filter(name__in=tag_names).values_list("pk", flat=True)
     return historical_person_tag_reuse_errors(existing_ids)
+
+
+def retired_historical_person_tag_name_errors(tag_names: Iterable[str]) -> list[str]:
+    """Reject exact frozen historical Tag names. Input must already be normalized.
+
+    Remains in force even when the original mapped Tag row no longer exists.
+    """
+    if any(is_retired_historical_person_tag_name(name) for name in tag_names):
+        return [HISTORICAL_PERSON_TAG_REUSE_ERROR]
+    return []
+
+
+def historical_person_tag_name_write_errors(tag_names: list[str]) -> list[str]:
+    """Reject mapped-ID name reuse while Tag rows exist, and retired names always."""
+    return existing_tag_name_reuse_errors(
+        tag_names
+    ) or retired_historical_person_tag_name_errors(tag_names)
 
 
 def parse_comma_separated_discovery_names(
@@ -183,7 +201,7 @@ def parse_archive_item_discovery_metadata_form(
             break
     reuse_errors = historical_person_tag_reuse_errors(
         selected_tag_ids
-    ) or existing_tag_name_reuse_errors(tag_names)
+    ) or historical_person_tag_name_write_errors(tag_names)
     for error in reuse_errors:
         if error not in errors:
             errors.append(error)

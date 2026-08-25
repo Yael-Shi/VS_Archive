@@ -343,6 +343,7 @@ from documents.services.archive_metadata_suggestion_review import (
     ArchiveMetadataSuggestionReviewError,
     approve_suggestion as approve_archive_metadata_suggestion,
     reject_suggestion as reject_archive_metadata_suggestion,
+    retired_historical_person_tag_suggested_tags_errors,
 )
 from documents.services.archive_item_person_suggestions import (
     ADD_PERSON_IDS_FIELD,
@@ -3856,7 +3857,14 @@ def archive_metadata_suggestion_form(request, item_id: int):
         has_person_actions = bool(add_person_ids or remove_person_ids)
         if not has_taxonomy_content and not has_person_actions:
             form_errors.append(SUGGESTION_CONTENT_REQUIRED_ERROR)
-        form_errors.extend(blocked_historical_tag_id_submission_errors(request.POST))
+        for error in blocked_historical_tag_id_submission_errors(request.POST):
+            if error not in form_errors:
+                form_errors.append(error)
+        for error in retired_historical_person_tag_suggested_tags_errors(
+            field_values["suggested_tags"]
+        ):
+            if error not in form_errors:
+                form_errors.append(error)
 
         if not form_errors:
             submitter_user = (
