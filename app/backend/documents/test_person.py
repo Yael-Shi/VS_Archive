@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from django.contrib import admin as django_admin
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth.models import User
@@ -17,6 +19,7 @@ from documents.models import (
     PhotoContent,
     PhotoPerson,
 )
+from documents.services.photo_content_management import update_person_biography
 
 
 def _create_archive_item(
@@ -50,9 +53,43 @@ class PersonModelTests(TestCase):
     def test_person_can_be_created(self):
         person = Person.objects.create(name="רחל כהן")
         self.assertEqual(person.name, "רחל כהן")
+        self.assertEqual(person.biography, "")
         self.assertIsNotNone(person.created_at)
         self.assertIsNotNone(person.updated_at)
         self.assertEqual(str(person), "רחל כהן")
+
+    def test_biography_defaults_to_empty_string(self):
+        person = Person.objects.create(name="Ada Lovelace")
+        person.refresh_from_db()
+        self.assertEqual(person.biography, "")
+        self.assertIsNotNone(person.biography)
+
+    def test_update_person_biography_strips_edges_and_preserves_newlines(self):
+        person = Person.objects.create(name="Ada Lovelace")
+        result = update_person_biography(
+            person, biography="  first line\nsecond line  "
+        )
+        person.refresh_from_db()
+        self.assertEqual(result.pk, person.pk)
+        self.assertEqual(person.biography, "first line\nsecond line")
+
+    def test_update_person_biography_none_and_whitespace_clear_the_field(self):
+        person = Person.objects.create(name="Ada Lovelace", biography="kept")
+        update_person_biography(person, biography=None)
+        person.refresh_from_db()
+        self.assertEqual(person.biography, "")
+
+        update_person_biography(person, biography="kept")
+        update_person_biography(person, biography="  \n\t  ")
+        person.refresh_from_db()
+        self.assertEqual(person.biography, "")
+
+    def test_update_person_biography_noop_does_not_write(self):
+        person = Person.objects.create(name="Ada Lovelace", biography="Keep me")
+        with patch.object(Person, "save") as mocked_save:
+            result = update_person_biography(person, biography="  Keep me  ")
+        mocked_save.assert_not_called()
+        self.assertEqual(result.biography, "Keep me")
 
     def test_same_display_name_may_identify_distinct_people(self):
         first = Person.objects.create(name="משה כהן")
@@ -235,3 +272,27 @@ class PersonAdminExposureTests(TestCase):
         self.assertFalse(django_admin.site.is_registered(PersonAlias))
         self.assertFalse(django_admin.site.is_registered(ArchiveItemPerson))
         self.assertFalse(django_admin.site.is_registered(PhotoPerson))
+
+
+class PersonBiographyMigrationTests(TestCase):
+    def test_migration_is_additive_textfield_on_person(self):
+        import importlib
+
+        from django.db.models import TextField
+
+        migration_module = importlib.import_module(
+            "documents.migrations.0057_person_biography"
+        )
+        Migration = migration_module.Migration
+        self.assertEqual(
+            Migration.dependencies,
+            [("documents", "0056_archive_item_person_suggestion")],
+        )
+        self.assertEqual(len(Migration.operations), 1)
+        add_op = Migration.operations[0]
+        self.assertEqual(add_op.name, "biography")
+        self.assertEqual(add_op.model_name, "person")
+        self.assertIsInstance(add_op.field, TextField)
+        self.assertTrue(add_op.field.blank)
+        self.assertEqual(add_op.field.default, "")
+        self.assertFalse(add_op.field.null)

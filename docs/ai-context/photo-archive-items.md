@@ -284,8 +284,9 @@ Non-viewable items return **404**.
 - Per-photo file replace is not implemented.
 - Per-photo identified-person picker labels include aliases for staff
   (`Canonical (Alias 1, Alias 2)`). Selected people link to
-  **`/archive/manage/people/<person_id>/edit/`** for canonical rename and
-  alias add/edit/delete. Aliases belong to the Person globally. There is no
+  **`/archive/manage/people/<person_id>/edit/`** for canonical rename,
+  optional public biography, and alias add/edit/delete. Aliases belong to
+  the Person globally. There is no
   Person catalog. Public pages still show canonical names only.
 
 ### Public / family archive surfaces
@@ -351,7 +352,7 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 - Face recognition, AI identification, comments
 - Public alias display; Person catalog/Admin
 - automatic ArchiveItemPerson from PhotoPerson; staff PHOTO appearance review / PhotoPerson backfill from `people_present`; no new-Person proposals
-- Public Person biography field; public alias display on Person pages; PhotoPerson name linking
+- Public alias display on Person pages; PhotoPerson name linking
 - Public (unauthenticated) upload
 - Rich text captions
 - Re-upload/retry after **`upload_status=FAILED`**

@@ -211,6 +211,7 @@ from documents.services.photo_content_management import (
     staff_person_aliases_prefetch,
     staff_photo_contents_queryset,
     update_person_alias,
+    update_person_biography,
     update_person_name,
     update_photo_content_metadata,
 )
@@ -4547,6 +4548,7 @@ def _get_staff_photo_content(
 
 
 PERSON_NAME_UPDATED_MSG = "שם התצוגה עודכן."
+PERSON_BIOGRAPHY_UPDATED_MSG = "התקציר עודכן."
 PERSON_ALIAS_ADDED_MSG = "השם החלופי נוסף."
 PERSON_ALIAS_UPDATED_MSG = "השם החלופי עודכן."
 PERSON_ALIAS_DELETED_MSG = "השם החלופי נמחק."
@@ -5577,12 +5579,14 @@ def _person_edit_form_context(
     form_errors: list[str],
     canonical_name: str | None = None,
     alias_name: str = "",
+    biography: str | None = None,
 ) -> dict:
     return {
         "person": person,
         "aliases": list(person.aliases.all()),
         "canonical_name": person.name if canonical_name is None else canonical_name,
         "alias_name": alias_name,
+        "biography": person.biography if biography is None else biography,
         "form_errors": form_errors,
         "page_title": "עריכת אדם",
     }
@@ -5598,6 +5602,7 @@ def archive_manage_person_edit_page(request, person_id: int):
     form_errors: list[str] = []
     canonical_name = person.name
     alias_name = ""
+    biography = person.biography
 
     if request.method == "POST":
         action = (request.POST.get("action") or "").strip()
@@ -5610,6 +5615,18 @@ def archive_manage_person_edit_page(request, person_id: int):
                 canonical_name = submitted_name
             else:
                 messages.success(request, PERSON_NAME_UPDATED_MSG)
+                return redirect("archive-manage-person-edit", person_id=person.id)
+        elif action == "update_biography":
+            submitted_biography = request.POST.get("biography")
+            try:
+                person = update_person_biography(person, biography=submitted_biography)
+            except PhotoContentManagementError as exc:
+                form_errors = [exc.message]
+                biography = (
+                    submitted_biography if submitted_biography is not None else ""
+                )
+            else:
+                messages.success(request, PERSON_BIOGRAPHY_UPDATED_MSG)
                 return redirect("archive-manage-person-edit", person_id=person.id)
         elif action == "add_alias":
             submitted_alias = request.POST.get("alias_name") or ""
@@ -5634,6 +5651,7 @@ def archive_manage_person_edit_page(request, person_id: int):
             form_errors=form_errors,
             canonical_name=canonical_name,
             alias_name=alias_name,
+            biography=biography,
         ),
     )
 

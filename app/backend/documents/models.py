@@ -301,6 +301,7 @@ class Person(models.Model):
     """One identified person in the archive (canonical display name)."""
 
     name = models.CharField(max_length=255)
+    biography = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

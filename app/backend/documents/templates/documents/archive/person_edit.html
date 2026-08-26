@@ -48,6 +48,18 @@
     </form>
 
     <div class="spacer"></div>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="update_biography" />
+      <div class="field">
+        <label for="person_biography">תקציר</label>
+        <textarea id="person_biography" name="biography" rows="4">{{ biography }}</textarea>
+        <div class="field-hint">טקסט חופשי קצר שיוצג בדף האדם בארכיון הציבורי. אופציונלי. שורות חדשות נשמרות. לא מוצג אם השדה ריק. לא נכלל בחיפוש. אין להדביק HTML.</div>
+      </div>
+      <button type="submit" class="btn btn-primary">עדכון תקציר</button>
+    </form>
+
+    <div class="spacer"></div>
     <h2>שמות חלופיים</h2>
     {% if aliases %}
       <div class="table-wrap">

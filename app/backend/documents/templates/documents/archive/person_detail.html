@@ -1,9 +1,19 @@
 {% extends "base.html" %}
+{% load archive_labels %}
 {% block title %}VSArchive - {{ person.name }}{% endblock %}
 
 {% block content %}
   <div class="card page-header" id="archive-top">
     <h1 class="page-title">{{ person.name }}</h1>
+    {% with biography=person.biography|meaningful_archive_metadata %}
+      {% if biography %}
+        <div class="archive-detail-meta-block archive-detail-meta-block--person-biography">
+          <div class="archive-detail-meta-row">
+            <span class="archive-detail-meta-value">{{ biography|linebreaksbr }}</span>
+          </div>
+        </div>
+      {% endif %}
+    {% endwith %}
 
     <div class="page-toolbar page-toolbar--archive-browse">
       <a class="btn" href="{% url 'archive-list' %}">חזרה לארכיון</a>

@@ -242,6 +242,21 @@ def update_person_name(person: Person, *, name: str) -> Person:
 
 
 @transaction.atomic
+def update_person_biography(person: Person, *, biography: str | None) -> Person:
+    """Set or clear a Person's staff-authored public biography.
+
+    Empty is valid and clears the field. Does not refresh search indexes
+    and does not touch aliases, ArchiveItemPerson, PhotoPerson, or Tags.
+    """
+    normalized = "" if biography is None else str(biography).strip()
+    if person.biography == normalized:
+        return person
+    person.biography = normalized
+    person.save(update_fields=["biography", "updated_at"])
+    return person
+
+
+@transaction.atomic
 def create_person_alias(person: Person, *, name: str) -> PersonAlias:
     """Create an alias and refresh search indexes for linked ArchiveItems.
 

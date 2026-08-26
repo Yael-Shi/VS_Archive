@@ -170,10 +170,74 @@ class PersonPublicPageAuthorizedTests(TestCase):
         html = resp.content.decode("utf-8")
         self.assertNotIn("SecretAliasToken", html)
         self.assertNotIn("עריכת אדם", html)
+        self.assertNotIn("archive-detail-meta-block--person-biography", html)
         self.assertNotIn(
             reverse("archive-manage-person-edit", kwargs={"person_id": person.id}),
             html,
         )
+
+    def test_empty_and_whitespace_biography_are_omitted(self):
+        person = Person.objects.create(name="Empty Bio Person")
+        _link(_public_manual("Empty bio letter"), person)
+        empty = self.client.get(_person_page(person))
+        self.assertEqual(empty.status_code, 200)
+        self.assertNotContains(empty, "archive-detail-meta-block--person-biography")
+        self.assertNotContains(empty, "תקציר")
+
+        person.biography = "  \n  "
+        person.save(update_fields=["biography", "updated_at"])
+        whitespace = self.client.get(_person_page(person))
+        self.assertEqual(whitespace.status_code, 200)
+        self.assertContains(whitespace, "Empty Bio Person")
+        self.assertNotContains(
+            whitespace, "archive-detail-meta-block--person-biography"
+        )
+
+    def test_nonempty_biography_renders_after_h1_with_breaks_and_escaping(self):
+        person = Person.objects.create(name="Bio Person")
+        PersonAlias.objects.create(person=person, name="HiddenBioAlias")
+        _link(_public_manual("Bio public letter"), person)
+        person.biography = "<script>alert(1)</script>\nsecond line"
+        person.save(update_fields=["biography", "updated_at"])
+
+        resp = self.client.get(_person_page(person))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+        name_idx = html.find("<h1")
+        bio_idx = html.find("archive-detail-meta-block--person-biography")
+        self.assertNotEqual(name_idx, -1)
+        self.assertNotEqual(bio_idx, -1)
+        self.assertLess(name_idx, bio_idx)
+        self.assertContains(
+            resp, "&lt;script&gt;alert(1)&lt;/script&gt;<br>second line", html=True
+        )
+        self.assertNotContains(resp, "<script>alert(1)</script>")
+        self.assertNotContains(resp, "HiddenBioAlias")
+        self.assertNotContains(resp, "תקציר")
+        self.assertNotContains(resp, "עריכת אדם")
+
+    def test_biography_does_not_open_inaccessible_person_pages(self):
+        unlinked = Person.objects.create(
+            name="Unlinked Bio Person",
+            biography="UnlinkedBioToken",
+        )
+        self.assertEqual(self.client.get(_person_page(unlinked)).status_code, 404)
+
+        appearance = Person.objects.create(
+            name="Appearance Bio Person",
+            biography="AppearanceBioToken",
+        )
+        item = _create_photo_item(title="PhotoPerson only album")
+        photo = _add_photo(item)
+        PhotoPerson.objects.create(photo_content=photo, person=appearance)
+        self.assertEqual(self.client.get(_person_page(appearance)).status_code, 404)
+
+        private_only = Person.objects.create(
+            name="Private Bio Person",
+            biography="PrivateBioToken",
+        )
+        _link(_private_manual("Hidden private letter"), private_only)
+        self.assertEqual(self.client.get(_person_page(private_only)).status_code, 404)
 
     def test_duplicate_names_use_distinct_id_urls(self):
         first = Person.objects.create(name="Same Name")
