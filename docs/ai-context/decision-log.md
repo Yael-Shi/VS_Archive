@@ -1,5 +1,76 @@
 # VS-Archive Decision Log
 
+## Antigravity supported request contract
+
+**Decision / implemented:** Antigravity Interactions create requests use the
+live-validated request envelope. The general Gemini Interactions schema is
+not the same as Antigravity-specific compatibility: fields that exist in
+the broader schema can still be unknown parameters for this agent.
+
+**Current behavior:**
+
+- Create POST body top-level keys are exactly `agent`, `input`,
+  `environment`, `background`, `tools`, and `agent_config`. Built by
+  `build_antigravity_create_payload` in `antigravity_engine.py`.
+- `agent` remains the configured/default agent ID
+  (`ANTIGRAVITY_AGENT_ID` / `DEFAULT_ANTIGRAVITY_AGENT_ID`).
+- `input` remains the existing multimodal OCR-contract prompt plus inline
+  images.
+- `background` remains the existing argument (production default `true`).
+- `environment` is `{"type": "remote", "network": "disabled"}`.
+- `tools` is the empty array `[]`: a live-validated empty tools
+  configuration, not a universal provider guarantee that the agent
+  cannot use tools. Unexpected-tool fail-closed validation remains
+  defense in depth.
+- `agent_config` is `{"type": "antigravity", "model": "gemini-3.7-flash"}`.
+  The model is the requested/pinned code constant
+  `ANTIGRAVITY_REQUESTED_MODEL`. There is no environment-variable override.
+- The provider response does **not** echo an effective underlying model.
+  Logs may record the requested/pinned model; they must not treat it as
+  provider-confirmed.
+- Create does **not** send `tool_choice`, `system_instruction`,
+  `response_format`, `generation_config`, or `store`.
+- Create POST remains a single attempt. There is no compatibility fallback
+  that retries create with alternate fields.
+- Application-level OCR output validation remains necessary and unchanged:
+  Antigravity structured output is unsupported. Unexpected tool steps still
+  fail closed. Prompt and response schema in `antigravity_ocr_contract.py`
+  are unchanged.
+
+**Live evidence (isolated probes, 2026-08-26):**
+
+- Production create with `tool_choice: "none"` returned HTTP 400
+  `Unknown parameter 'tool_choice'` before an interaction ID was created.
+- P0: canonical request without `tool_choice` → HTTP 200, completed.
+- P2: added `tools: []` → HTTP 200, completed, no tool steps, zero
+  tool-use tokens.
+- P3: added `agent_config: {"type": "antigravity", "model": "gemini-3.7-flash"}`
+  → HTTP 200, completed. Response did not expose a machine-readable
+  effective model.
+- P4: `environment: {"type": "remote", "network": "disabled"}` → HTTP 200,
+  completed.
+- P1 (`system_instruction`) was intentionally not run; it is unnecessary.
+- P5 made **no** provider call: the repository has no suitable
+  printed-Arabic image fixture.
+
+**Follow-up:** add a small, non-sensitive, repository-owned printed-Arabic
+fixture for future provider smoke validation. Do not generate that image
+in this change. Non-blocker.
+
+**Deferred:** Antigravity native structured outputs if/when the provider
+supports them; `system_instruction`; `response_format`; create-POST
+fallback/retry; environment-variable model override.
+
+`tool_choice` must not be reconsidered unless Antigravity-specific
+documentation explicitly supports it and a new isolated live probe
+confirms it. It is not an ordinary deferred implementation.
+
+**Supersedes:** the create-payload claim in **Antigravity inline-image OCR
+output contract** that sent `"tool_choice": "none"` and omitted an empty
+`tools` array. Output-validation rules in that entry remain current.
+
+**Tests:** `documents/test_antigravity_ocr.py`.
+
 ## Antigravity inline-image OCR output contract
 
 **Decision / implemented:** Antigravity provider status `completed` is
@@ -10,22 +81,25 @@ persisted as successful OCR. Validation is now structural and fail-closed.
 
 **Current behavior:**
 
-- Create payload sends `"tool_choice": "none"`. The prompt states the job
-  is transcription of the supplied inline images only. Tools are not
-  permitted. The payload does **not** send `response_format` (Antigravity
-  structured output is currently unsupported) and does **not** send an
-  empty `tools` array as a workaround.
+- **Create payload (superseded):** the previous `"tool_choice": "none"`
+  create field is **not** current supported behavior. Live production
+  create with `tool_choice` returned HTTP 400 `Unknown parameter
+  'tool_choice'` before an interaction ID was created. Current request
+  contract: **Antigravity supported request contract**. The prompt still
+  states the job is transcription of the supplied inline images only.
+  Tools are not permitted. The payload still does **not** send
+  `response_format` (Antigravity structured output is currently
+  unsupported).
 - Prompt-level JSON contract (`schema_version: 1`, one `pages` entry per
   inline image, outcomes `transcribed` / `blank` / `unavailable`) is
   validated with the standard library. No greeting denylist, no
   Arabic-character heuristic, no minimum-length guess.
 - Only the last `model_output` step is parsed. Thoughts, function results,
   code results, and tool output are never treated as OCR. For a new OCR
-  request sent with `tool_choice: "none"`, any tool-call or tool-result
-  step (`function_call`, `function_result`, `code_execution_call`,
-  `code_execution_result`, and the older `tool_call` / `tool_result`
-  names) is a contract violation even if a later model message looks
-  plausible.
+  request, any tool-call or tool-result step (`function_call`,
+  `function_result`, `code_execution_call`, `code_execution_result`, and
+  the older `tool_call` / `tool_result` names) is a contract violation
+  even if a later model message looks plausible.
 - `AntigravityOutputValidationError` (subclass of `AntigravityError`)
   carries a machine-readable `reason` (`missing_model_output`,
   `unexpected_tool_use`, `invalid_json`, `invalid_contract`,

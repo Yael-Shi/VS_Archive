@@ -16,6 +16,8 @@ from django.test import SimpleTestCase, TestCase
 from documents.management.commands.run_worker import Command
 from documents.models import Document, DocumentTextResult
 from documents.services.antigravity_defaults import (
+    ANTIGRAVITY_REMOTE_ENVIRONMENT,
+    ANTIGRAVITY_REQUESTED_MODEL,
     DEFAULT_ANTIGRAVITY_AGENT_ID,
     DEFAULT_POLL_GET_TIMEOUT_SECONDS,
     DEFAULT_POLL_SECONDS,
@@ -28,6 +30,7 @@ from documents.services.antigravity_engine import (
     AntigravityOutputValidationError,
     OUTBOUND_JPEG_MIME,
     antigravity_outbound_image,
+    build_antigravity_create_payload,
     build_antigravity_ocr_prompt,
     build_multimodal_input,
     output_text_from_steps,
@@ -97,6 +100,43 @@ _POST_OCR_TEXT = "POST_OCR_TEXT_MUST_SURVIVE"
 _POLL_HTTP_BODY_SENTINEL = "504_RESPONSE_BODY_MUST_NOT_LOG"
 _DOCUMENT_320_GREETING = "Hello! How can I help you today?"
 _NO_IMAGE_FILES_PROSE = "No image files were found to transcribe."
+_LIVE_VALIDATED_REQUESTED_MODEL = "gemini-3.7-flash"
+_LIVE_VALIDATED_ENVIRONMENT = {"type": "remote", "network": "disabled"}
+_EXPECTED_CREATE_PAYLOAD_KEYS = frozenset(
+    {"agent", "input", "environment", "background", "tools", "agent_config"}
+)
+_FORBIDDEN_CREATE_PAYLOAD_KEYS = frozenset(
+    {
+        "tool_choice",
+        "system_instruction",
+        "response_format",
+        "generation_config",
+        "store",
+    }
+)
+
+
+def _assert_supported_create_payload(
+    test_case,
+    payload: dict,
+    *,
+    agent_id: str,
+    background: bool,
+) -> None:
+    test_case.assertEqual(ANTIGRAVITY_REQUESTED_MODEL, _LIVE_VALIDATED_REQUESTED_MODEL)
+    test_case.assertEqual(ANTIGRAVITY_REMOTE_ENVIRONMENT, _LIVE_VALIDATED_ENVIRONMENT)
+    test_case.assertEqual(set(payload.keys()), _EXPECTED_CREATE_PAYLOAD_KEYS)
+    test_case.assertEqual(payload["agent"], agent_id)
+    test_case.assertEqual(payload["background"], background)
+    test_case.assertEqual(payload["tools"], [])
+    test_case.assertIsInstance(payload["tools"], list)
+    test_case.assertEqual(payload["environment"], _LIVE_VALIDATED_ENVIRONMENT)
+    test_case.assertEqual(
+        payload["agent_config"],
+        {"type": "antigravity", "model": _LIVE_VALIDATED_REQUESTED_MODEL},
+    )
+    for forbidden in _FORBIDDEN_CREATE_PAYLOAD_KEYS:
+        test_case.assertNotIn(forbidden, payload)
 
 
 def _make_worker_env(**overrides):
@@ -855,11 +895,12 @@ class AntigravityEngineTests(SimpleTestCase):
         mock_get.assert_not_called()
 
         payload = mock_post.call_args.kwargs["json"]
-        self.assertEqual(payload["agent"], DEFAULT_ANTIGRAVITY_AGENT_ID)
-        self.assertEqual(payload["environment"], "remote")
-        self.assertEqual(payload["tool_choice"], "none")
-        self.assertNotIn("response_format", payload)
-        self.assertNotIn("tools", payload)
+        _assert_supported_create_payload(
+            self,
+            payload,
+            agent_id=DEFAULT_ANTIGRAVITY_AGENT_ID,
+            background=False,
+        )
         prompt = payload["input"][0]["text"]
         self.assertIn("exactly 2 inline images", prompt)
         self.assertIn("JSON only", prompt)
@@ -1299,6 +1340,9 @@ class AntigravityLifecycleObservabilityTests(SimpleTestCase):
             if "create_timeout_seconds=120.0" in message
         ]
         self.assertEqual(len(request_logs), 1)
+        self.assertIn("requested_model=gemini-3.7-flash", request_logs[0])
+        self.assertIn("tools_config_empty=True", request_logs[0])
+        self.assertIn("requested_network_disabled=True", request_logs[0])
 
         summaries = [
             record.getMessage()
@@ -1682,14 +1726,27 @@ class AntigravityTimeoutDefaultTests(SimpleTestCase):
 
 
 class AntigravityCreatePayloadContractTests(SimpleTestCase):
+    def test_build_antigravity_create_payload_exact_contract(self):
+        multimodal_input = [{"type": "text", "text": "prompt"}]
+        payload = build_antigravity_create_payload(
+            agent_id="custom-agent-id",
+            multimodal_input=multimodal_input,
+            background=False,
+        )
+        _assert_supported_create_payload(
+            self,
+            payload,
+            agent_id="custom-agent-id",
+            background=False,
+        )
+        self.assertIs(payload["input"], multimodal_input)
+
     @patch(
         "documents.services.antigravity_engine._get_interaction",
         side_effect=_unexpected_get,
     )
     @patch("documents.services.antigravity_engine.requests.post")
-    def test_create_payload_disables_tools_without_structured_output(
-        self, mock_post, mock_get
-    ):
+    def test_create_payload_uses_supported_request_contract(self, mock_post, mock_get):
         mock_post.return_value = _ok_json_response(
             _completed_ocr_interaction("Arabic text here")
         )
@@ -1700,15 +1757,72 @@ class AntigravityCreatePayloadContractTests(SimpleTestCase):
             background=False,
         )
 
+        self.assertEqual(mock_post.call_count, 1)
         payload = mock_post.call_args.kwargs["json"]
-        self.assertEqual(payload["tool_choice"], "none")
-        self.assertNotIn("response_format", payload)
-        self.assertNotIn("tools", payload)
+        _assert_supported_create_payload(
+            self,
+            payload,
+            agent_id=DEFAULT_ANTIGRAVITY_AGENT_ID,
+            background=False,
+        )
         prompt = payload["input"][0]["text"]
         self.assertIn("exactly 1 inline image", prompt)
         self.assertIn("JSON only", prompt)
         self.assertIn("Tools are disabled", prompt)
         self.assertNotIn("unless strictly needed", prompt)
+        mock_get.assert_not_called()
+
+    @patch(
+        "documents.services.antigravity_engine._get_interaction",
+        side_effect=_unexpected_get,
+    )
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_create_payload_honors_custom_agent_id(self, mock_post, mock_get):
+        mock_post.return_value = _ok_json_response(
+            _completed_ocr_interaction("Arabic text here")
+        )
+
+        transcribe_pages_with_antigravity(
+            _one_page(),
+            api_key="key",
+            agent_id="custom-antigravity-agent",
+            background=False,
+        )
+
+        self.assertEqual(mock_post.call_count, 1)
+        payload = mock_post.call_args.kwargs["json"]
+        _assert_supported_create_payload(
+            self,
+            payload,
+            agent_id="custom-antigravity-agent",
+            background=False,
+        )
+        mock_get.assert_not_called()
+
+    @patch(
+        "documents.services.antigravity_engine._get_interaction",
+        side_effect=_unexpected_get,
+    )
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_create_payload_honors_background_true(self, mock_post, mock_get):
+        mock_post.return_value = _ok_json_response(
+            _completed_ocr_interaction("Arabic text here")
+        )
+
+        transcribe_pages_with_antigravity(
+            _one_page(),
+            api_key="key",
+            background=True,
+        )
+
+        self.assertEqual(mock_post.call_count, 1)
+        payload = mock_post.call_args.kwargs["json"]
+        _assert_supported_create_payload(
+            self,
+            payload,
+            agent_id=DEFAULT_ANTIGRAVITY_AGENT_ID,
+            background=True,
+        )
         mock_get.assert_not_called()
 
 

@@ -314,6 +314,12 @@ def _run_antigravity_ocr_smoke(
         f"[{label}] Creating multimodal interaction "
         f"(images={len(image_paths)}, bytes={total_bytes}, files=[{names}])"
     )
+    # Intentionally standalone mirror of the production/live-probed
+    # Antigravity OCR create envelope (build_antigravity_create_payload).
+    # Keep synchronized with ANTIGRAVITY_REQUESTED_MODEL and
+    # ANTIGRAVITY_REMOTE_ENVIRONMENT. This script does not import
+    # production modules (no Django init or sys.path changes).
+    # Prompt here remains this script's local OCR spike prompt.
     interaction = _create_interaction(
         api_key,
         payload={
@@ -322,8 +328,13 @@ def _run_antigravity_ocr_smoke(
                 _antigravity_ocr_prompt(image_paths),
                 image_paths,
             ),
-            "environment": "remote",
+            "environment": {"type": "remote", "network": "disabled"},
             "background": background,
+            "tools": [],
+            "agent_config": {
+                "type": "antigravity",
+                "model": "gemini-3.7-flash",
+            },
         },
         timeout_seconds=max(120.0, 30.0 * len(image_paths)),
     )
