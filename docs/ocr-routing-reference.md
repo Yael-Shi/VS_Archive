@@ -186,7 +186,7 @@ After routing to Antigravity, the adapter requires `worker_env` and `worker_env.
 
 **Image payload:** Shared `PageImage` remains normalized PNG (`image_bytes` / `mime_type`) for Gemini, Transkribus, checkpoints, and fingerprints. Image sources also retain original encoded bytes/MIME. At the **Antigravity boundary only**, original JPEG (`image/jpeg` or `image/jpg`) is sent as the exact original bytes with outbound MIME `image/jpeg`. PDF-rendered pages and non-JPEG originals use the normalized PNG. This is not a claimed Antigravity 20 MB limit.
 
-**Polling (unary background create + GET):** overall in_progress deadline **1200s**, per-GET timeout **120s**, poll interval **5s**. Create timeout is unchanged (`max(120, 30 * page_count)`). Transport timeouts retry the same interaction ID. These defaults stay below the worker 45-minute lease.
+**Polling (unary background create + GET):** overall in_progress deadline **1200s**, per-GET timeout **120s**, poll interval **5s**. Create timeout is unchanged (`max(120, 30 * page_count)`). Transport timeouts and transient polling GET HTTP statuses (`408`, `429`, `500`, `502`, `503`, `504`) retry the same interaction ID inside that 1200s deadline. Create POST is not retried. Non-retryable GET statuses such as `400` and `403` fail immediately. These defaults stay below the worker 45-minute lease.
 
 **Still unary.** Streaming, durable recovery, cancellation, per-page interactions, and `include_input=false` are deferred.
 

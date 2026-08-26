@@ -1,5 +1,33 @@
 # VS-Archive Decision Log
 
+## Antigravity polling GET transient HTTP retry
+
+**Decision / implemented:** After a successful Antigravity Interactions
+create POST, unary polling GET `/interactions/{id}` retries the **same**
+interaction ID on transient HTTP statuses. Create POST is not retried and
+does not create a replacement interaction.
+
+**Current behavior:**
+
+- `_raise_for_api_error` raises `AntigravityHttpError` (subclass of
+  `AntigravityError`) with a machine-readable `status_code`. The
+  human-readable message remains `HTTP {status}: {message}`.
+- Polling GET retries only `408`, `429`, `500`, `502`, `503`, and `504`.
+  Non-retryable GET statuses such as `400` and `403` fail immediately.
+- Retry delay is bounded exponential backoff with small jitter. Sleeps are
+  capped so retries stay inside the existing **1200s** overall
+  `in_progress` deadline. There is no independent max-attempt counter.
+- Ordinary successful `in_progress` polling still uses the **5s** interval.
+  `requests.Timeout` / `ReadTimeout` still retry the same interaction ID.
+- Retry logs include `document_id`, sanitized `interaction_id`, HTTP
+  status, retry count, selected delay, and elapsed time. They do not log
+  response bodies, OCR text, raw bytes, Base64, or API keys.
+
+**Deferred:** streaming; cancellation; per-page interactions; create-POST
+retry; worker lease/persistence changes.
+
+**Tests:** `documents/test_antigravity_ocr.py`.
+
 ## Historical person-Tag row deletion (D2b)
 
 **Decision / implemented:** The 29 frozen historical person-name Tag *rows*
@@ -75,6 +103,9 @@ overall deadline with 60s GET timeouts.
   plus unary GET polling is unchanged. ``requests.Timeout`` /
   ``ReadTimeout`` still retry the same interaction ID. 1200s stays clearly
   below the worker **45-minute** processing lease.
+- **Follow-up:** polling GET also retries transient HTTP statuses
+  (`408`/`429`/`500`/`502`/`503`/`504`) for the same interaction; see
+  **Antigravity polling GET transient HTTP retry**.
 - This does **not** claim an Antigravity 20 MB request limit. Payload
   reduction is the JPEG-passthrough choice only.
 
