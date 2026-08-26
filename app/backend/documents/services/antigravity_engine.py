@@ -13,6 +13,8 @@ from typing import Any, NoReturn
 import requests
 
 from documents.services.antigravity_defaults import (
+    ANTIGRAVITY_REMOTE_ENVIRONMENT,
+    ANTIGRAVITY_REQUESTED_MODEL,
     DEFAULT_ANTIGRAVITY_AGENT_ID,
     DEFAULT_POLL_GET_TIMEOUT_SECONDS,
     DEFAULT_POLL_SECONDS,
@@ -179,6 +181,34 @@ def build_multimodal_input(prompt: str, pages: list[PageImage]) -> list[dict[str
             }
         )
     return input_blocks
+
+
+def build_antigravity_create_payload(
+    *,
+    agent_id: str,
+    multimodal_input: list[dict[str, Any]],
+    background: bool,
+) -> dict[str, Any]:
+    """Return the live-validated Antigravity Interactions create payload.
+
+    Exact top-level keys: agent, input, environment, background, tools,
+    agent_config. Does not send tool_choice, system_instruction,
+    response_format, generation_config, or store.
+    """
+    return {
+        "agent": agent_id,
+        "input": multimodal_input,
+        "environment": {
+            "type": ANTIGRAVITY_REMOTE_ENVIRONMENT["type"],
+            "network": ANTIGRAVITY_REMOTE_ENVIRONMENT["network"],
+        },
+        "background": background,
+        "tools": [],
+        "agent_config": {
+            "type": "antigravity",
+            "model": ANTIGRAVITY_REQUESTED_MODEL,
+        },
+    }
 
 
 def _elapsed_seconds(started_at: float, now: float) -> float:
@@ -645,12 +675,36 @@ def transcribe_pages_with_antigravity(
     ]
     image_block_count = block_types.count("image")
 
+    create_payload = build_antigravity_create_payload(
+        agent_id=agent_id,
+        multimodal_input=multimodal_input,
+        background=background,
+    )
+    agent_config = create_payload.get("agent_config")
+    requested_model = None
+    if isinstance(agent_config, dict):
+        model = agent_config.get("model")
+        if isinstance(model, str):
+            requested_model = model
+    tools_config_empty = create_payload.get("tools") == []
+    environment = create_payload.get("environment")
+    requested_network_disabled = (
+        isinstance(environment, dict)
+        and environment.get("type") == "remote"
+        and environment.get("network") == "disabled"
+    )
+
     logger.info(
-        "Antigravity request payload document_id=%s agent=%s pages=%s "
+        "Antigravity request payload document_id=%s agent=%s "
+        "requested_model=%s tools_config_empty=%s "
+        "requested_network_disabled=%s pages=%s "
         "input_blocks=%s image_blocks=%s block_types=%s phase=create "
         "create_timeout_seconds=%s",
         document_id,
         agent_id,
+        requested_model,
+        tools_config_empty,
+        requested_network_disabled,
         len(ordered_pages),
         len(multimodal_input),
         image_block_count,
@@ -667,13 +721,7 @@ def transcribe_pages_with_antigravity(
     try:
         interaction = _create_interaction(
             api_key,
-            payload={
-                "agent": agent_id,
-                "input": multimodal_input,
-                "environment": "remote",
-                "background": background,
-                "tool_choice": "none",
-            },
+            payload=create_payload,
             timeout_seconds=create_timeout,
         )
     except requests.Timeout as exc:

@@ -46,17 +46,18 @@ Use the tag from that image in `-c image_tag=...`.
 
 Some OCR routes are activated by environment flags read in `select_ocr_route` (not by CDK defaults alone):
 
-| Flag | Default safe state | Route when enabled |
-|------|-------------------|-------------------|
-| `ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN` | `false` (SSM; see below) | `he` + `HANDWRITTEN` → Transkribus |
-| `ENABLE_ANTIGRAVITY_ARABIC_PRINTED` | `false` (unset in ECS is safe) | `ar` + `PRINTED` → Antigravity |
+| Flag | Routing-code default if unset | Current worker CDK | Route when enabled |
+|------|-------------------------------|--------------------|-------------------|
+| `ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN` | `false` (SSM; see below) | see SSM | `he` + `HANDWRITTEN` → Transkribus |
+| `ENABLE_ANTIGRAVITY_ARABIC_PRINTED` | `false` | `true` | `ar` + `PRINTED` → Antigravity |
 
 **Antigravity Arabic printed rollout**
 
-- **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED=false`** is the default safe state. When the variable is absent from ECS task definitions, routing code defaults to `false` and `ar` + `PRINTED` stays on the existing Gemini route.
+- **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED=false`** is the routing-code default when the variable is absent. Current `app_stack.py` worker environment sets **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED=true`** (live-preserving). This flag is route activation only; it is not an Interactions request-contract field.
 - **`ANTIGRAVITY_AGENT_ID`** defaults to `antigravity-preview-05-2026` when unset.
-- **Phase 1 — deploy with flag off:** ship code/migration only. **No CDK change is required** for this phase; current `app_stack.py` does not define Antigravity env vars, and that is intentional for safe rollout.
-- **Phase 2 — controlled test:** set `ENABLE_ANTIGRAVITY_ARABIC_PRINTED=true` on the **worker** task definition (and optionally `ANTIGRAVITY_AGENT_ID` if overriding the default). Uses existing `GEMINI_API_KEY`. A follow-up CDK/SSM wiring change (mirroring Transkribus) is optional but recommended before broader enablement.
+- The requested Antigravity model pin is the code constant **`ANTIGRAVITY_REQUESTED_MODEL`** (`gemini-3.7-flash`) in `antigravity_defaults.py`. There is no ECS/environment-variable override for that model.
+- **Phase 1 — deploy with flag off:** historical safe-rollout step. The earlier statement that `app_stack.py` does not define Antigravity env vars is **no longer current**.
+- **Phase 2 — controlled test:** worker routing uses **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED=true`** (and optionally `ANTIGRAVITY_AGENT_ID` if overriding the default). Uses existing `GEMINI_API_KEY`. A follow-up CDK/SSM wiring change (mirroring Transkribus) is optional but recommended before broader enablement.
 - **`ar` + `HANDWRITTEN`** is not routed to Antigravity regardless of the flag.
 - The adapter also validates `worker_env.enable_antigravity_arabic_printed` as a second safety check.
 
