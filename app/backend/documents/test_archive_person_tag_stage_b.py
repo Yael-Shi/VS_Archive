@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from django.contrib.auth.models import Group, User
-from django.core.management.color import no_style
-from django.db import connection
 from django.test import TestCase
 from django.urls import reverse
 
@@ -34,19 +32,13 @@ from documents.services.archive_item_presentation import (
     person_public_page_url,
 )
 from documents.services.archive_items import create_manual_text_archive_item
+from documents.tag_pk_sequence_support import reset_pk_sequence as _reset_pk_sequence
 from documents.test_historical_person_tag_reuse import _create_tag
 
 MAPPED_TAG_ID = next(iter(sorted(historical_person_name_tag_ids())))
 MAPPED_PERSON_ID = person_id_for_historical_person_name_tag(MAPPED_TAG_ID)
 assert MAPPED_PERSON_ID is not None
 MISSING_UNMAPPED_TAG_ID = 9_999_003
-
-
-def _reset_pk_sequence(model):
-    statements = connection.ops.sequence_reset_sql(no_style(), [model])
-    with connection.cursor() as cursor:
-        for sql in statements:
-            cursor.execute(sql)
 
 
 def _mapped_historical_tag(*, name: str = "mapped-historical-person-tag") -> Tag:

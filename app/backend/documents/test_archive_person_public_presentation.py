@@ -5,7 +5,6 @@ from __future__ import annotations
 from html import escape
 from unittest.mock import patch
 
-from django.core.management.color import no_style
 from django.db import connection
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
@@ -30,19 +29,15 @@ from documents.services.archive_items import (
     create_manual_text_archive_item,
     create_video_archive_item,
 )
+from documents.tag_pk_sequence_support import (
+    ensure_tag_pk_sequence_past_historical_ids as _reset_tag_pk_sequence,
+)
 from documents.test_archive_item import create_viewable_ocr_document
 from documents.test_historical_person_tag_reuse import _create_tag
 
 YOUTUBE_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 PRESIGNED_URL = "https://s3.example/presigned/photo"
 MAPPED_TAG_ID = next(iter(sorted(historical_person_name_tag_ids())))
-
-
-def _reset_tag_pk_sequence():
-    statements = connection.ops.sequence_reset_sql(no_style(), [Tag])
-    with connection.cursor() as cursor:
-        for sql in statements:
-            cursor.execute(sql)
 
 
 def _mapped_historical_tag(*, name: str = "mapped-historical-person-tag") -> Tag:

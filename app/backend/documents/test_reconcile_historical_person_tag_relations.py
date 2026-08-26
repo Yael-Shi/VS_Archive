@@ -6,8 +6,6 @@ from io import StringIO
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.core.management.color import no_style
-from django.db import connection
 from django.test import TestCase
 
 from documents.historical_person_tag_map import (
@@ -29,17 +27,11 @@ from documents.services.archive_items import create_manual_text_archive_item
 from documents.services.historical_person_tag_reconciliation import (
     build_historical_person_tag_reconciliation_plan,
 )
+from documents.tag_pk_sequence_support import reset_pk_sequence as _reset_pk_sequence
 
 BLOCKED_TAG_ID = 29
 BLOCKED_PERSON_ID = person_id_for_historical_person_name_tag(BLOCKED_TAG_ID)
 COMMAND_NAME = "reconcile_historical_person_tag_relations"
-
-
-def _reset_pk_sequence(model):
-    sql_statements = connection.ops.sequence_reset_sql(no_style(), [model])
-    with connection.cursor() as cursor:
-        for sql in sql_statements:
-            cursor.execute(sql)
 
 
 def _seed_frozen_map_rows() -> None:
