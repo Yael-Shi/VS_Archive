@@ -15,7 +15,10 @@ class Command(BaseCommand):
     help = (
         "Reconcile missing ArchiveItemPerson links for frozen historical "
         "person-name Tags. Default is dry-run (no writes). Pass --apply to "
-        "create missing item-level person links only."
+        "create missing item-level person links only. After D2b, all 29 "
+        "mapped Tag rows may be absent; that is a no-op and does not "
+        "create Tag rows or ArchiveItemPerson links from the map. Partial "
+        "mapped Tag presence fails closed."
     )
 
     def add_arguments(self, parser):

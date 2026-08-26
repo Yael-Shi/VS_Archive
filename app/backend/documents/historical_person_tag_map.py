@@ -11,8 +11,10 @@ look up Person by name and must not import migration modules.
 
 Stage A public presentation, Stage B mapped-tag browse redirects / public
 Tag-choice hiding, D1 relation cleanup, mapped-Tag reuse/delete blocks,
-and D2a retired-name write-path blocks use this map. D2b Tag-row deletion
-remains out of scope.
+D2a retired-name write-path blocks, and D2b Tag-row deletion
+(``delete_historical_person_tag_rows``) use this map. Mapped Tag rows may
+be absent after D2b; the map remains the identity and retired-name
+artifact.
 """
 
 from __future__ import annotations
