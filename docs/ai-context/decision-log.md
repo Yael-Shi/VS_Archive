@@ -1,5 +1,56 @@
 # VS-Archive Decision Log
 
+## Antigravity inline-image OCR output contract
+
+**Decision / implemented:** Antigravity provider status `completed` is
+necessary but not sufficient for OCR success. Document 320 showed a
+completed interaction that returned a generic assistant greeting instead
+of transcription; that output was previously accepted, translated, and
+persisted as successful OCR. Validation is now structural and fail-closed.
+
+**Current behavior:**
+
+- Create payload sends `"tool_choice": "none"`. The prompt states the job
+  is transcription of the supplied inline images only. Tools are not
+  permitted. The payload does **not** send `response_format` (Antigravity
+  structured output is currently unsupported) and does **not** send an
+  empty `tools` array as a workaround.
+- Prompt-level JSON contract (`schema_version: 1`, one `pages` entry per
+  inline image, outcomes `transcribed` / `blank` / `unavailable`) is
+  validated with the standard library. No greeting denylist, no
+  Arabic-character heuristic, no minimum-length guess.
+- Only the last `model_output` step is parsed. Thoughts, function results,
+  code results, and tool output are never treated as OCR. For a new OCR
+  request sent with `tool_choice: "none"`, any tool-call or tool-result
+  step (`function_call`, `function_result`, `code_execution_call`,
+  `code_execution_result`, and the older `tool_call` / `tool_result`
+  names) is a contract violation even if a later model message looks
+  plausible.
+- `AntigravityOutputValidationError` (subclass of `AntigravityError`)
+  carries a machine-readable `reason` (`missing_model_output`,
+  `unexpected_tool_use`, `invalid_json`, `invalid_contract`,
+  `page_count_mismatch`, `page_index_mismatch`, `empty_transcription`,
+  `input_unavailable`, `no_transcribed_text`). Messages and logs may
+  include expected/actual counts and page indexes. They must not include
+  provider text or document contents.
+- Validation runs before a successful `AntigravityResult` is constructed.
+  The existing adapter/worker path persists durable `SOURCE_TEXT` failure
+  with `OCR_FAILED`. There is no translation, no successful source-text
+  persistence, no transition to `READY`, no automatic second interaction,
+  and no change to manual-retry eligibility.
+- After validation, a single transcribed page is stored without a
+  synthetic heading. Multiple pages use deterministic `עמוד N` sections.
+  The legacy `[IMAGE N: filename]` format is not an accepted success
+  contract. Historical stored rows are not rewritten; existing invalid
+  production rows require an explicit operational retry or separate
+  cleanup.
+
+**Deferred:** Antigravity native structured outputs if/when the provider
+supports them; automatic repair interactions; rewriting historical
+invalid Document 320-style rows.
+
+**Tests:** `documents/test_antigravity_ocr.py`.
+
 ## Public Person biography
 
 **Decision / implemented:** Optional staff-authored plain-text

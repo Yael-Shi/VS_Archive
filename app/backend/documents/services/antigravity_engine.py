@@ -8,7 +8,7 @@ import random
 import re
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NoReturn
 
 import requests
 
@@ -19,6 +19,13 @@ from documents.services.antigravity_defaults import (
     DEFAULT_TIMEOUT_SECONDS,
     INTERACTIONS_API_REVISION,
     INTERACTIONS_BASE_URL,
+)
+from documents.services.antigravity_ocr_contract import (
+    OcrContractError,
+    build_antigravity_ocr_prompt,
+    extract_final_model_output_text,
+    render_validated_ocr_text,
+    validate_antigravity_ocr_output,
 )
 from documents.services.page_extraction import PageImage
 
@@ -45,7 +52,19 @@ _USAGE_TOTAL_FIELDS = (
     "total_tokens",
 )
 _KNOWN_STATUSES = frozenset({"completed", "in_progress", "failed", "cancelled"})
-_KNOWN_STEP_TYPES = frozenset({"user_input", "model_output", "tool_call", "thought"})
+_KNOWN_STEP_TYPES = frozenset(
+    {
+        "user_input",
+        "model_output",
+        "thought",
+        "tool_call",
+        "tool_result",
+        "function_call",
+        "function_result",
+        "code_execution_call",
+        "code_execution_result",
+    }
+)
 _KNOWN_CONTENT_TYPES = frozenset({"text", "image", "audio", "video", "document"})
 _KNOWN_MODALITIES = frozenset({"text", "image", "audio", "video", "document"})
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
@@ -54,11 +73,6 @@ _POLL_RETRYABLE_HTTP_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
 _POLL_HTTP_RETRY_BASE_SECONDS = 1.0
 _POLL_HTTP_RETRY_MAX_SECONDS = 30.0
 _POLL_HTTP_RETRY_JITTER_RATIO = 0.1
-
-_IMAGE_HEADING_RE = re.compile(
-    r"^\[IMAGE\s+(\d+)\s*:\s*[^\]]+\]\s*$",
-    re.MULTILINE,
-)
 
 
 class AntigravityError(RuntimeError):
@@ -71,6 +85,14 @@ class AntigravityHttpError(AntigravityError):
     def __init__(self, message: str, *, status_code: int) -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+class AntigravityOutputValidationError(AntigravityError):
+    """Provider completed, but OCR output failed structural validation."""
+
+    def __init__(self, message: str, *, reason: str) -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 @dataclass(frozen=True)
@@ -96,22 +118,6 @@ def antigravity_outbound_image(page: PageImage) -> tuple[bytes, str]:
 
 def _outbound_sha256_prefix(image_bytes: bytes) -> str:
     return hashlib.sha256(image_bytes).hexdigest()[:_OUTBOUND_SHA256_PREFIX_LEN]
-
-
-def _page_label(page: PageImage) -> str:
-    _, mime = antigravity_outbound_image(page)
-    mime = (mime or "").lower()
-    if mime == "image/jpeg" or mime == "image/jpg":
-        ext = "jpg"
-    elif mime == "image/webp":
-        ext = "webp"
-    elif mime == "image/gif":
-        ext = "gif"
-    elif mime == "image/tiff":
-        ext = "tiff"
-    else:
-        ext = "png"
-    return f"page-{page.page_index}.{ext}"
 
 
 def _sorted_pages(pages: list[PageImage]) -> list[PageImage]:
@@ -142,68 +148,23 @@ def _raise_for_api_error(response: requests.Response) -> None:
     )
 
 
-def normalize_antigravity_image_headings(text: str) -> str:
-    """
-    Strip or replace Antigravity multi-image section headings for stored OCR text.
-
-    Single-image output drops the ``[IMAGE N: filename]`` line entirely.
-    Multi-image output replaces each heading with ``עמוד N`` (no filenames).
-    """
-    headings = list(_IMAGE_HEADING_RE.finditer(text))
-    if not headings:
-        return text
-    if len(headings) == 1:
-        match = headings[0]
-        start, end = match.span()
-        if end < len(text) and text[end] == "\n":
-            end += 1
-        return text[:start] + text[end:]
-    return _IMAGE_HEADING_RE.sub(
-        lambda match: f"עמוד {int(match.group(1))}",
-        text,
-    )
-
-
 def output_text_from_steps(steps: list[dict[str, Any]] | None) -> str | None:
-    chunks: list[str] = []
-    for step in steps or []:
-        if step.get("type") != "model_output":
-            continue
-        for content in step.get("content") or []:
-            if content.get("type") == "text":
-                text = content.get("text")
-                if text:
-                    chunks.append(text)
-    joined = "\n".join(chunks)
-    return joined if joined.strip() else None
+    """Extract text from the last model_output step only."""
+    return extract_final_model_output_text(steps)
 
 
-def build_antigravity_ocr_prompt(image_labels: list[str]) -> str:
-    image_order = "\n".join(
-        f"- IMAGE {index}: {name}" for index, name in enumerate(image_labels, start=1)
+def _raise_output_validation_error(
+    exc: OcrContractError,
+    *,
+    document_id: int | None,
+) -> NoReturn:
+    logger.warning(
+        "Antigravity OCR output validation failed document_id=%s reason=%s details=%s",
+        document_id,
+        exc.reason,
+        exc.details,
     )
-    heading_examples = "\n\n".join(
-        f"[IMAGE {index}: {name}]\n<transcription for image {index}>"
-        for index, name in enumerate(image_labels, start=1)
-    )
-    return (
-        "You are transcribing historical archive document page images.\n"
-        "TASK: OCR/transcription only. Do not translate.\n"
-        "RULES:\n"
-        "- Preserve Arabic, Hebrew, and Latin scripts exactly as written.\n"
-        "- Preserve names, dates, page numbers, document numbers, and punctuation.\n"
-        "- Include cover/catalog page text when present.\n"
-        "- Include occasional handwritten additions when visible.\n"
-        "- Prefer [UNCLEAR] over inventing confident text.\n"
-        "- Do not browse the web, run code, or use tools unless strictly needed for OCR.\n"
-        "- Reply with plain text only.\n"
-        "\n"
-        f"Images are attached in this order ({len(image_labels)} total):\n"
-        f"{image_order}\n"
-        "\n"
-        "Return one section per image, in order, using headings exactly like:\n"
-        f"{heading_examples}"
-    )
+    raise AntigravityOutputValidationError(str(exc), reason=exc.reason) from exc
 
 
 def build_multimodal_input(prompt: str, pages: list[PageImage]) -> list[dict[str, Any]]:
@@ -675,8 +636,7 @@ def transcribe_pages_with_antigravity(
     if not ordered_pages:
         raise AntigravityError("No page images supplied for Antigravity OCR")
 
-    image_labels = [_page_label(page) for page in ordered_pages]
-    prompt = build_antigravity_ocr_prompt(image_labels)
+    prompt = build_antigravity_ocr_prompt(len(ordered_pages))
     create_timeout = max(120.0, 30.0 * len(ordered_pages))
     multimodal_input = build_multimodal_input(prompt, ordered_pages)
 
@@ -712,6 +672,7 @@ def transcribe_pages_with_antigravity(
                 "input": multimodal_input,
                 "environment": "remote",
                 "background": background,
+                "tool_choice": "none",
             },
             timeout_seconds=create_timeout,
         )
@@ -766,13 +727,15 @@ def transcribe_pages_with_antigravity(
             f"Antigravity interaction finished with status={status!r}"
         )
 
-    text = output_text_from_steps(interaction.get("steps"))
-    if not text:
-        raise AntigravityError(
-            "Antigravity interaction completed with no OCR output text"
+    try:
+        validated = validate_antigravity_ocr_output(
+            interaction.get("steps"),
+            expected_page_count=len(ordered_pages),
         )
+    except OcrContractError as exc:
+        _raise_output_validation_error(exc, document_id=document_id)
 
     return AntigravityResult(
-        text=normalize_antigravity_image_headings(text),
+        text=render_validated_ocr_text(validated),
         engine_name=agent_id,
     )
