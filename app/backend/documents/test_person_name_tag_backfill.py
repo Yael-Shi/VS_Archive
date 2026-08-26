@@ -6,7 +6,6 @@ import importlib
 from unittest.mock import patch
 
 from django.apps import apps as django_apps
-from django.core.management.color import no_style
 from django.db import connection
 from django.test import TestCase, TransactionTestCase
 from django.db.migrations.executor import MigrationExecutor
@@ -28,6 +27,7 @@ from documents.services.archive_search_index import (
     build_archive_item_search_content,
     sync_archive_item_search_index,
 )
+from documents.tag_pk_sequence_support import reset_pk_sequence as _reset_pk_sequence
 
 MIGRATION_MODULE_NAME = (
     "documents.migrations.0055_backfill_person_from_person_name_tags"
@@ -43,13 +43,6 @@ backfill_persons_from_approved_person_name_tags = (
 
 def _run_backfill():
     backfill_persons_from_approved_person_name_tags(django_apps, schema_editor=None)
-
-
-def _reset_pk_sequence(model):
-    sql_statements = connection.ops.sequence_reset_sql(no_style(), [model])
-    with connection.cursor() as cursor:
-        for sql in sql_statements:
-            cursor.execute(sql)
 
 
 def _create_approved_tags(*, exclude_ids=(), name_overrides=None):
