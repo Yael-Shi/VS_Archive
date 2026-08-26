@@ -2,7 +2,9 @@
 
 Identity is Tag.id → Person.id. Names, aliases, PhotoPerson, Person rows,
 ArchiveItemPerson rows, Tag rows, and ordinary Tags are never written.
-Default callers plan only; writes require ``--apply-relations``.
+Mapped Tag rows may all be absent after D2b; that is a no-op success.
+Partial mapped Tag presence stays fail-closed. Default callers plan only;
+writes require ``--apply-relations``.
 """
 
 from __future__ import annotations
@@ -99,7 +101,11 @@ def _mapped_person_ids() -> list[int]:
 
 
 def validate_historical_person_tag_cleanup_preconditions() -> None:
-    """Fail closed unless the frozen map and required Tag/Person rows are intact."""
+    """Fail closed unless the frozen map and required Person rows are intact.
+
+    Mapped Tag ids must be all present or all absent. Partial Tag presence
+    fails closed. All-absent Tags is a D2b success state and is not an error.
+    """
     if len(HISTORICAL_PERSON_NAME_TAG_TO_PERSON_ID) != (
         EXPECTED_HISTORICAL_PERSON_NAME_TAG_MAP_SIZE
     ):
@@ -122,13 +128,13 @@ def validate_historical_person_tag_cleanup_preconditions() -> None:
     found_person_ids = set(
         Person.objects.filter(pk__in=required_person_ids).values_list("pk", flat=True)
     )
-    missing_tag_ids = _sorted_missing_ids(required_tag_ids, found_tag_ids)
-    missing_person_ids = _sorted_missing_ids(required_person_ids, found_person_ids)
     parts: list[str] = []
-    if missing_tag_ids:
-        parts.append(f"missing Tag ids: {missing_tag_ids}")
+    missing_person_ids = _sorted_missing_ids(required_person_ids, found_person_ids)
     if missing_person_ids:
         parts.append(f"missing Person ids: {missing_person_ids}")
+    if found_tag_ids and found_tag_ids != set(required_tag_ids):
+        missing_tag_ids = _sorted_missing_ids(required_tag_ids, found_tag_ids)
+        parts.append(f"missing Tag ids: {missing_tag_ids}")
     if parts:
         raise HistoricalPersonTagCleanupError("; ".join(parts))
 

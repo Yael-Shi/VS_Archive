@@ -12,6 +12,7 @@ from django.test import TestCase
 
 from documents.historical_person_tag_map import (
     HISTORICAL_PERSON_NAME_TAG_TO_PERSON_ID,
+    historical_person_name_tag_ids,
     person_id_for_historical_person_name_tag,
 )
 from documents.models import (
@@ -49,6 +50,12 @@ def _seed_frozen_map_rows() -> None:
     _reset_pk_sequence(Person)
 
 
+def _seed_frozen_person_rows() -> None:
+    for _tag_id, person_id in HISTORICAL_PERSON_NAME_TAG_TO_PERSON_ID:
+        Person.objects.create(pk=person_id, name=f"person-{person_id}-not-a-lookup-key")
+    _reset_pk_sequence(Person)
+
+
 def _create_photo_item(*, title: str) -> tuple[ArchiveItem, PhotoContent]:
     item = ArchiveItem.objects.create(
         title=title,
@@ -73,10 +80,58 @@ class ReconcileHistoricalPersonTagRelationsCommandTests(TestCase):
         stdout = StringIO()
         with self.assertRaises(CommandError) as caught:
             call_command(COMMAND_NAME, stdout=stdout)
-        self.assertIn("missing Tag ids", str(caught.exception))
         self.assertIn("missing Person ids", str(caught.exception))
+        self.assertNotIn("missing Tag ids", str(caught.exception))
         self.assertEqual(ArchiveItemPerson.objects.count(), 0)
         self.assertEqual(item.tags.count(), 0)
+
+    def test_all_mapped_tag_rows_absent_is_zero_plan_success(self):
+        _seed_frozen_person_rows()
+        mapped_ids = historical_person_name_tag_ids()
+        self.assertEqual(Tag.objects.filter(pk__in=mapped_ids).count(), 0)
+        existing_aip = ArchiveItemPerson.objects.count()
+
+        dry_stdout = StringIO()
+        call_command(COMMAND_NAME, stdout=dry_stdout)
+        dry_output = dry_stdout.getvalue()
+        self.assertIn("mode: dry-run", dry_output)
+        self.assertIn("planned: 0", dry_output)
+        self.assertIn("created: 0", dry_output)
+        self.assertEqual(Tag.objects.filter(pk__in=mapped_ids).count(), 0)
+        self.assertEqual(ArchiveItemPerson.objects.count(), existing_aip)
+
+        apply_stdout = StringIO()
+        call_command(COMMAND_NAME, "--apply", stdout=apply_stdout)
+        apply_output = apply_stdout.getvalue()
+        self.assertIn("planned: 0", apply_output)
+        self.assertIn("created: 0", apply_output)
+        self.assertEqual(Tag.objects.filter(pk__in=mapped_ids).count(), 0)
+        self.assertEqual(ArchiveItemPerson.objects.count(), existing_aip)
+
+    def test_partial_mapped_tag_ids_fail_closed(self):
+        _seed_frozen_person_rows()
+        for tag_id, _person_id in HISTORICAL_PERSON_NAME_TAG_TO_PERSON_ID:
+            if tag_id == BLOCKED_TAG_ID:
+                continue
+            Tag.objects.create(pk=tag_id, name=f"tag-{tag_id}-not-a-lookup-key")
+        _reset_pk_sequence(Tag)
+        aip_before = ArchiveItemPerson.objects.count()
+
+        with self.assertRaises(CommandError) as caught:
+            call_command(COMMAND_NAME, stdout=StringIO())
+        self.assertIn("missing Tag ids", str(caught.exception))
+        self.assertIn(str(BLOCKED_TAG_ID), str(caught.exception))
+        self.assertEqual(
+            Tag.objects.filter(pk__in=historical_person_name_tag_ids()).count(), 28
+        )
+        self.assertEqual(ArchiveItemPerson.objects.count(), aip_before)
+
+        with self.assertRaises(CommandError):
+            call_command(COMMAND_NAME, "--apply", stdout=StringIO())
+        self.assertEqual(ArchiveItemPerson.objects.count(), aip_before)
+        self.assertEqual(
+            Tag.objects.filter(pk__in=historical_person_name_tag_ids()).count(), 28
+        )
 
     def test_dry_run_identifies_missing_link_and_writes_nothing(self):
         _seed_frozen_map_rows()

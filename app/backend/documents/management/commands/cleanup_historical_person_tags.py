@@ -17,7 +17,9 @@ class Command(BaseCommand):
         "D1: delete mapped historical person-name Tag relations only. "
         "Default is dry-run (no writes). Pass --apply-relations to delete "
         "mapped ArchiveItem.tags and Document.tags_m2m through rows and "
-        "rebuild search indexes for affected ArchiveItems. Tag rows are kept."
+        "rebuild search indexes for affected ArchiveItems. Tag rows are "
+        "never deleted. After D2b, all 29 mapped Tag rows may be absent; "
+        "that is a no-op success. Partial mapped Tag presence fails closed."
     )
 
     def add_arguments(self, parser):

@@ -1,7 +1,10 @@
 """Create-only reconciliation of missing ArchiveItemPerson links from the frozen map.
 
 Identity is Tag.id → Person.id. Names, aliases, and PhotoPerson are never used.
-Default callers plan only; writes require an explicit apply step.
+Mapped Tag rows may all be absent after D2b; that is a no-op success and does
+not create Tag rows or invent ArchiveItemPerson links from the map. Partial
+mapped Tag presence stays fail-closed. Default callers plan only; writes
+require an explicit apply step.
 """
 
 from __future__ import annotations
@@ -55,7 +58,12 @@ def _sorted_missing_ids(required: list[int], found: set[int]) -> list[int]:
 
 
 def validate_required_historical_person_tag_ids() -> None:
-    """Fail closed unless every frozen Tag.id and Person.id exists."""
+    """Fail closed unless required Person ids exist and Tag ids are all-or-none.
+
+    All 29 mapped Tag ids present keeps current create-only reconciliation.
+    All 29 mapped Tag ids absent is a D2b success state (planned=0). Partial
+    Tag presence fails closed. Does not create Tag rows.
+    """
     required_tag_ids = [
         tag_id for tag_id, _person_id in HISTORICAL_PERSON_NAME_TAG_TO_PERSON_ID
     ]
@@ -68,13 +76,13 @@ def validate_required_historical_person_tag_ids() -> None:
     found_person_ids = set(
         Person.objects.filter(pk__in=required_person_ids).values_list("pk", flat=True)
     )
-    missing_tag_ids = _sorted_missing_ids(required_tag_ids, found_tag_ids)
-    missing_person_ids = _sorted_missing_ids(required_person_ids, found_person_ids)
     parts: list[str] = []
-    if missing_tag_ids:
-        parts.append(f"missing Tag ids: {missing_tag_ids}")
+    missing_person_ids = _sorted_missing_ids(required_person_ids, found_person_ids)
     if missing_person_ids:
         parts.append(f"missing Person ids: {missing_person_ids}")
+    if found_tag_ids and found_tag_ids != set(required_tag_ids):
+        missing_tag_ids = _sorted_missing_ids(required_tag_ids, found_tag_ids)
+        parts.append(f"missing Tag ids: {missing_tag_ids}")
     if parts:
         raise HistoricalPersonTagReconciliationError("; ".join(parts))
 
