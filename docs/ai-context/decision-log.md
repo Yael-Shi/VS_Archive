@@ -1,5 +1,53 @@
 # VS-Archive Decision Log
 
+## Public Person biography
+
+**Decision / implemented:** Optional staff-authored plain-text
+**`Person.biography`** is shown on the existing public Person page when
+nonempty. It is not AI-generated, not indexed, and does not change the
+Person-page authorization/404 contract.
+
+**Current behavior:**
+
+- Field: **`Person.biography`** (`TextField(blank=True, default="")`).
+  Empty string, not NULL. No uniqueness, no DB max length, no backfill.
+  Existing rows stay `""`. New Person creates (name-only picker) stay
+  empty.
+- Staff write: `update_person_biography` in
+  `photo_content_management.py`. `None` and whitespace-only become `""`
+  (clears the field). Leading/trailing whitespace is stripped; internal
+  newlines are preserved. Unchanged values are a no-op. Saves
+  `["biography", "updated_at"]` only. Does **not** refresh
+  `ArchiveItemSearchIndex` and does not touch aliases, ArchiveItemPerson,
+  PhotoPerson, or Tags.
+- Staff UI: third POST form on
+  `/archive/manage/people/<id>/edit/` (`action=update_biography`), after
+  canonical name and before aliases. Label **תקציר**; button **עדכון תקציר**.
+  Access is unchanged (`@login_required` + `_require_admin_page`).
+- Public UI: `/archive/people/<id>/` shows meaningful nonempty biography
+  directly after the `<h1>` name, unlabeled, with Django autoescape and
+  **`linebreaksbr`**. Empty/whitespace/placeholder-only values are omitted
+  (`meaningful_archive_metadata`). No `|safe`, markdown, or rich text.
+  Aliases stay hidden. No public staff-edit link.
+- Authorization/404 is unchanged: missing Person, unlinked Person,
+  PhotoPerson-only, private-only (anonymous), and non-renderable-only
+  links still **404** even when biography is nonempty. Biography is
+  display-only on an otherwise accessible Person page.
+- Search: **`Person.biography` is not indexed.** `q` still uses
+  `Person.name` / `PersonAlias.name` on ArchiveItem index rows only.
+
+**Migration:** `0057_person_biography` (additive `AddField`; depends on
+`0056_archive_item_person_suggestion`). No data migration.
+
+**Deferred:** public alias display; PhotoPerson name linking / appearance
+filter; Person catalog/Admin; search-index inclusion of biography; AI-
+generated biography text; biography on cards, chips, item detail, or
+other public surfaces.
+
+**Tests:** `documents/test_person.py`,
+`documents/test_person_staff_ui.py`,
+`documents/test_archive_person_public_page.py`.
+
 ## Antigravity polling GET transient HTTP retry
 
 **Decision / implemented:** After a successful Antigravity Interactions
@@ -186,7 +234,8 @@ A separate visible **×** is a GET link that removes only that Person id.
   only. No extra Person queries per selected id.
 
 **Deferred:** public alias display on chips/picker; PhotoPerson appearance
-filter / name linking; Person catalog/Admin; public biography field. D2a
+filter / name linking; Person catalog/Admin. Public biography is
+implemented (see **Public Person biography**). D2a
 retired-name policy is implemented. D2b Tag-row deletion is implemented
 (see **Historical person-Tag row deletion (D2b)**).
 
@@ -200,7 +249,9 @@ migration.
 ArchiveItems generally related to that Person via **`ArchiveItemPerson`**,
 using the same authorized/renderable browse queryset as `/archive/`.
 This is Option A: canonical **`Person.name`** plus related public
-cards. No biography field, no schema migration, no staff-form change.
+cards. That PR added no biography field, no schema migration, and no
+staff-form change. Optional staff-authored **`Person.biography`** was
+added later (see **Public Person biography**).
 
 **Current behavior:**
 
@@ -217,7 +268,9 @@ cards. No biography field, no schema migration, no staff-form change.
   `page` follows `normalize_archive_public_list_page` (clamp). No `q`,
   type tabs, advanced filters, or `per_page` control. Order is
   `-created_at`, `pk`.
-- Page shows canonical name, authorized total count, browse cards
+- Page shows canonical name, optional nonempty staff-authored biography
+  (unlabeled, autoescaped, `linebreaksbr`; see **Public Person
+  biography**), authorized total count, browse cards
   (existing card partial), page nav when needed, and **חזרה לארכיון**.
   Aliases are not displayed. No public staff-edit link.
 - Item-level **אנשים קשורים** links on archive cards, homepage cards,
@@ -232,14 +285,17 @@ cards. No biography field, no schema migration, no staff-form change.
   filter chips are implemented separately (see **Public Person
   active-filter chip UX**).
 
-**Deferred:** public biography/summary field; public alias display;
+**Deferred:** public alias display;
 PhotoPerson name linking / appearance filter; Person catalog/Admin.
+Public biography/summary is implemented (see **Public Person
+biography**).
 D2a retired-name policy is implemented. D2b Tag-row deletion is
 implemented (see **Historical person-Tag row deletion (D2b)**).
 
 **Tests:** `documents/test_archive_person_public_page.py` plus updated
 Stage A presentation, Stage B redirect, advanced-filter, and staff
-route tests. No schema migration.
+route tests. The original page PR had no schema migration; biography
+uses `0057_person_biography`.
 
 ## Historical person-Tag relation cleanup (D1)
 
@@ -1307,7 +1363,8 @@ This PR is schema-only. It does not change search, advanced search, public UI,
   **`updated_at`**. **`name` is not unique** — two identities may share a
   display name. No aliases, biography, dates, confidence, or roles.
   Aliases were added later in **Person aliases (PR6a)**; this PR remained
-  schema-only for Person / join tables.
+  schema-only for Person / join tables. Optional public **`biography`**
+  was added later (see **Public Person biography**).
 - **`ArchiveItemPerson`** is the explicit through row for
   **`ArchiveItem.people`**. Meaning: this person is generally related to this
   archival item. It does **not** mean the person appears in a photo or has a

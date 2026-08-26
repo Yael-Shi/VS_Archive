@@ -37,16 +37,19 @@ from documents.services.photo_content_management import (
     PERSON_ALIAS_TOO_LONG_ERROR,
     PERSON_NAME_REQUIRED_ERROR,
     PERSON_NAME_TOO_LONG_ERROR,
+    PhotoContentManagementError,
     create_person_alias,
     delete_person_alias,
     person_staff_picker_label,
     update_person_alias,
+    update_person_biography,
     update_person_name,
 )
 from documents.views import (
     PERSON_ALIAS_ADDED_MSG,
     PERSON_ALIAS_DELETED_MSG,
     PERSON_ALIAS_UPDATED_MSG,
+    PERSON_BIOGRAPHY_UPDATED_MSG,
     PERSON_NAME_UPDATED_MSG,
 )
 
@@ -258,6 +261,10 @@ class PersonStaffEditAccessTests(TestCase):
         self.assertContains(resp, "עריכת אדם")
         self.assertContains(resp, "יעקב כהן")
         self.assertContains(resp, 'name="action"')
+        self.assertContains(resp, 'value="update_biography"')
+        self.assertContains(resp, 'id="person_biography"')
+        self.assertContains(resp, "תקציר")
+        self.assertContains(resp, "עדכון תקציר")
 
     def test_anonymous_is_redirected_to_login(self):
         resp = self.client.get(self.url)
@@ -293,6 +300,116 @@ class PersonStaffEditAccessTests(TestCase):
         self.assertEqual(match.url_name, "archive-person-detail")
         match = resolve("/archive/manage/people/1/edit/")
         self.assertEqual(match.url_name, "archive-manage-person-edit")
+
+
+@override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
+class PersonStaffBiographyTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="person_bio_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.item = _create_photo_item(title="Biography album")
+        self.photo = _add_photo(self.item, position=1)
+        self.person = Person.objects.create(name="BiographyPersonToken")
+        PersonAlias.objects.create(person=self.person, name="BiographyAliasToken")
+        PhotoPerson.objects.create(photo_content=self.photo, person=self.person)
+        ArchiveItemPerson.objects.create(archive_item=self.item, person=self.person)
+        _rebuild(self.item.pk)
+        self.client.force_login(self.staff)
+        self.url = _edit_url(self.person)
+
+    def test_successful_save_and_clear_use_service_without_search_sync(self):
+        with (
+            patch(
+                "documents.views.update_person_biography",
+                wraps=update_person_biography,
+            ) as mocked,
+            patch(
+                "documents.services.photo_content_management._sync_person_search_indexes"
+            ) as mocked_sync,
+        ):
+            resp = self.client.post(
+                self.url,
+                data={
+                    "action": "update_biography",
+                    "biography": "  UniqueBioTokenXYZ\nsecond line  ",
+                },
+                follow=True,
+            )
+        mocked.assert_called_once()
+        mocked_sync.assert_not_called()
+        self.assertContains(resp, PERSON_BIOGRAPHY_UPDATED_MSG)
+        self.person.refresh_from_db()
+        self.assertEqual(self.person.biography, "UniqueBioTokenXYZ\nsecond line")
+        self.assertContains(resp, "UniqueBioTokenXYZ")
+        index = _rebuild(self.item.pk)
+        self.assertNotIn("UniqueBioTokenXYZ", index.metadata_text)
+        self.assertNotIn("UniqueBioTokenXYZ", index.title_text)
+        self.assertNotIn("UniqueBioTokenXYZ", index.body_text)
+        self.assertNotIn("UniqueBioTokenXYZ", index.hebrew_translation_text)
+        self.assertEqual(_search_ids("UniqueBioTokenXYZ"), [])
+        self.assertEqual(_search_ids("BiographyPersonToken"), [self.item.pk])
+        self.assertEqual(_search_ids("BiographyAliasToken"), [self.item.pk])
+
+        with patch(
+            "documents.services.photo_content_management._sync_person_search_indexes"
+        ) as mocked_sync_clear:
+            clear_resp = self.client.post(
+                self.url,
+                data={"action": "update_biography", "biography": "   \n  "},
+                follow=True,
+            )
+        mocked_sync_clear.assert_not_called()
+        self.assertContains(clear_resp, PERSON_BIOGRAPHY_UPDATED_MSG)
+        self.person.refresh_from_db()
+        self.assertEqual(self.person.biography, "")
+        self.assertEqual(_search_ids("UniqueBioTokenXYZ"), [])
+        self.assertEqual(_search_ids("BiographyPersonToken"), [self.item.pk])
+
+    def test_biography_error_preserves_submitted_text(self):
+        self.person.biography = "Stored biography"
+        self.person.save(update_fields=["biography", "updated_at"])
+        with patch(
+            "documents.views.update_person_biography",
+            side_effect=PhotoContentManagementError("שגיאת תקציר"),
+        ):
+            resp = self.client.post(
+                self.url,
+                data={
+                    "action": "update_biography",
+                    "biography": "Submitted biography text",
+                },
+            )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "שגיאת תקציר")
+        self.assertContains(resp, "Submitted biography text")
+        self.person.refresh_from_db()
+        self.assertEqual(self.person.biography, "Stored biography")
+
+    def test_family_and_anonymous_cannot_update_biography(self):
+        family_group, _ = Group.objects.get_or_create(name=ARCHIVE_FAMILY_GROUP_NAME)
+        family = User.objects.create_user(
+            username="person_bio_family",
+            password="test-pass",
+        )
+        family.groups.add(family_group)
+        self.client.logout()
+        anon = self.client.post(
+            self.url,
+            data={"action": "update_biography", "biography": "anon-bio-token"},
+        )
+        self.assertEqual(anon.status_code, 302)
+        self.assertTrue(anon["Location"].startswith("/accounts/login/"))
+        self.client.force_login(family)
+        forbidden = self.client.post(
+            self.url,
+            data={"action": "update_biography", "biography": "family-bio-token"},
+        )
+        self.assertEqual(forbidden.status_code, 403)
+        self.person.refresh_from_db()
+        self.assertEqual(self.person.biography, "")
 
 
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
@@ -633,6 +750,7 @@ class PersonStaffCompatibilityTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         created = Person.objects.get(name="NewPersonToken")
         self.assertEqual(created.aliases.count(), 0)
+        self.assertEqual(created.biography, "")
         self.assertEqual(
             set(self.p2.people.values_list("id", flat=True)),
             {self.existing.id, created.id},
