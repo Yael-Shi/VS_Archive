@@ -4,6 +4,7 @@ import base64
 import binascii
 import hashlib
 import logging
+import random
 import re
 import time
 from dataclasses import dataclass
@@ -49,6 +50,10 @@ _KNOWN_CONTENT_TYPES = frozenset({"text", "image", "audio", "video", "document"}
 _KNOWN_MODALITIES = frozenset({"text", "image", "audio", "video", "document"})
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 _INTERACTION_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,512}$")
+_POLL_RETRYABLE_HTTP_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
+_POLL_HTTP_RETRY_BASE_SECONDS = 1.0
+_POLL_HTTP_RETRY_MAX_SECONDS = 30.0
+_POLL_HTTP_RETRY_JITTER_RATIO = 0.1
 
 _IMAGE_HEADING_RE = re.compile(
     r"^\[IMAGE\s+(\d+)\s*:\s*[^\]]+\]\s*$",
@@ -58,6 +63,14 @@ _IMAGE_HEADING_RE = re.compile(
 
 class AntigravityError(RuntimeError):
     """Raised when Antigravity Interactions OCR fails."""
+
+
+class AntigravityHttpError(AntigravityError):
+    """HTTP error from the Antigravity Interactions API."""
+
+    def __init__(self, message: str, *, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 @dataclass(frozen=True)
@@ -123,7 +136,10 @@ def _raise_for_api_error(response: requests.Response) -> None:
         message = error.get("message") or message
     except ValueError:
         pass
-    raise AntigravityError(f"HTTP {response.status_code}: {message}")
+    raise AntigravityHttpError(
+        f"HTTP {response.status_code}: {message}",
+        status_code=response.status_code,
+    )
 
 
 def normalize_antigravity_image_headings(text: str) -> str:
@@ -206,6 +222,21 @@ def build_multimodal_input(prompt: str, pages: list[PageImage]) -> list[dict[str
 
 def _elapsed_seconds(started_at: float, now: float) -> float:
     return round(max(0.0, now - started_at), 3)
+
+
+def _poll_http_retry_delay_seconds(
+    retry_count: int,
+    *,
+    random_fn=random.random,
+) -> float:
+    exponent = max(0, retry_count - 1)
+    base_delay = min(
+        _POLL_HTTP_RETRY_BASE_SECONDS * (2**exponent),
+        _POLL_HTTP_RETRY_MAX_SECONDS,
+    )
+    jitter_span = _POLL_HTTP_RETRY_JITTER_RATIO * base_delay
+    jitter = (float(random_fn()) * 2.0 - 1.0) * jitter_span
+    return max(0.0, base_delay + jitter)
 
 
 def _sanitize_interaction_id(value: Any) -> str | None:
@@ -511,6 +542,7 @@ def _poll_until_done(
     document_id: int | None = None,
     sleep_fn=time.sleep,
     monotonic_fn=time.monotonic,
+    random_fn=random.random,
 ) -> tuple[dict[str, Any], int]:
     interaction_id = interaction.get("id")
     if not interaction_id:
@@ -522,6 +554,8 @@ def _poll_until_done(
     poll_attempts = 0
     poll_successes = 0
     poll_transport_timeouts = 0
+    poll_http_retries = 0
+    skip_poll_interval = False
     last_status = current.get("status")
     while current.get("status") == IN_PROGRESS_STATUS:
         now = monotonic_fn()
@@ -529,12 +563,14 @@ def _poll_until_done(
             logger.warning(
                 "Antigravity interaction lifecycle document_id=%s phase=poll_deadline "
                 "interaction_id=%s poll_attempts=%s poll_successes=%s "
-                "poll_transport_timeouts=%s elapsed_seconds=%.3f last_status=%s",
+                "poll_transport_timeouts=%s poll_http_retries=%s "
+                "elapsed_seconds=%.3f last_status=%s",
                 document_id,
                 _sanitize_interaction_id(interaction_id),
                 poll_attempts,
                 poll_successes,
                 poll_transport_timeouts,
+                poll_http_retries,
                 _elapsed_seconds(poll_started, now),
                 _known_or_other(last_status, _KNOWN_STATUSES)
                 if last_status is not None
@@ -543,7 +579,10 @@ def _poll_until_done(
             raise AntigravityError(
                 f"Timed out after {timeout_seconds}s waiting for interaction {interaction_id}"
             )
-        sleep_fn(poll_seconds)
+        if skip_poll_interval:
+            skip_poll_interval = False
+        else:
+            sleep_fn(poll_seconds)
         poll_attempts += 1
         try:
             current = _get_interaction(api_key, interaction_id)
@@ -563,18 +602,51 @@ def _poll_until_done(
                 else None,
             )
             continue
+        except AntigravityHttpError as exc:
+            if exc.status_code not in _POLL_RETRYABLE_HTTP_STATUSES:
+                raise
+            poll_http_retries += 1
+            now = monotonic_fn()
+            remaining = deadline - now
+            delay = 0.0
+            if remaining > 0:
+                delay = min(
+                    _poll_http_retry_delay_seconds(
+                        poll_http_retries,
+                        random_fn=random_fn,
+                    ),
+                    remaining,
+                )
+            logger.warning(
+                "Antigravity interaction lifecycle document_id=%s "
+                "phase=poll_http_retry interaction_id=%s http_status=%s "
+                "retry_count=%s delay_seconds=%.3f elapsed_seconds=%.3f",
+                document_id,
+                _sanitize_interaction_id(interaction_id),
+                exc.status_code,
+                poll_http_retries,
+                delay,
+                _elapsed_seconds(poll_started, now),
+            )
+            if remaining <= 0:
+                continue
+            sleep_fn(delay)
+            skip_poll_interval = True
+            continue
         poll_successes += 1
         last_status = current.get("status")
     if poll_attempts:
         logger.info(
             "Antigravity interaction lifecycle document_id=%s phase=poll "
             "interaction_id=%s poll_attempts=%s poll_successes=%s "
-            "poll_transport_timeouts=%s elapsed_seconds=%.3f status=%s",
+            "poll_transport_timeouts=%s poll_http_retries=%s "
+            "elapsed_seconds=%.3f status=%s",
             document_id,
             _sanitize_interaction_id(interaction_id),
             poll_attempts,
             poll_successes,
             poll_transport_timeouts,
+            poll_http_retries,
             _elapsed_seconds(poll_started, monotonic_fn()),
             _known_or_other(current.get("status"), _KNOWN_STATUSES)
             if current.get("status") is not None
@@ -594,6 +666,7 @@ def transcribe_pages_with_antigravity(
     background: bool = True,
     sleep_fn=time.sleep,
     monotonic_fn=time.monotonic,
+    random_fn=random.random,
 ) -> AntigravityResult:
     if not (api_key or "").strip():
         raise AntigravityError("Missing GEMINI_API_KEY")
@@ -676,6 +749,7 @@ def transcribe_pages_with_antigravity(
             document_id=document_id,
             sleep_fn=sleep_fn,
             monotonic_fn=monotonic_fn,
+            random_fn=random_fn,
         )
         if poll_successes:
             response_source = RESPONSE_SOURCE_POLL_GET

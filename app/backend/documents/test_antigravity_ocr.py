@@ -16,9 +16,11 @@ from documents.services.antigravity_defaults import (
     DEFAULT_POLL_GET_TIMEOUT_SECONDS,
     DEFAULT_POLL_SECONDS,
     DEFAULT_TIMEOUT_SECONDS,
+    INTERACTIONS_BASE_URL,
 )
 from documents.services.antigravity_engine import (
     AntigravityError,
+    AntigravityHttpError,
     OUTBOUND_JPEG_MIME,
     antigravity_outbound_image,
     build_antigravity_ocr_prompt,
@@ -66,6 +68,7 @@ _NESTED_RESPONSE_SENTINEL = "NESTED_RESPONSE_SECRET_MUST_NOT_LOG"
 _NESTED_USAGE_SENTINEL = "NESTED_USAGE_SECRET_MUST_NOT_LOG"
 _USER_TEXT_SENTINEL = "USER_INPUT_TEXT_MUST_NOT_APPEAR"
 _POST_OCR_TEXT = "POST_OCR_TEXT_MUST_SURVIVE"
+_POLL_HTTP_BODY_SENTINEL = "504_RESPONSE_BODY_MUST_NOT_LOG"
 
 
 def _make_worker_env(**overrides):
@@ -125,6 +128,20 @@ def _ok_json_response(payload: dict) -> MagicMock:
     response = MagicMock()
     response.ok = True
     response.json.return_value = payload
+    return response
+
+
+def _error_json_response(
+    status_code: int,
+    message: str,
+    *,
+    raw_text: str | None = None,
+) -> MagicMock:
+    response = MagicMock()
+    response.ok = False
+    response.status_code = status_code
+    response.text = message if raw_text is None else raw_text
+    response.json.return_value = {"error": {"message": message}}
     return response
 
 
@@ -316,12 +333,16 @@ class AntigravityEngineTests(SimpleTestCase):
         response.json.return_value = {"error": {"message": "permission denied"}}
         mock_post.return_value = response
 
-        with self.assertRaisesMessage(AntigravityError, "HTTP 403: permission denied"):
+        with self.assertRaisesMessage(
+            AntigravityError, "HTTP 403: permission denied"
+        ) as ctx:
             transcribe_pages_with_antigravity(
                 _one_page(),
                 api_key="key",
                 background=False,
             )
+        self.assertIsInstance(ctx.exception, AntigravityHttpError)
+        self.assertEqual(ctx.exception.status_code, 403)
         mock_get.assert_not_called()
 
     @patch(
@@ -444,8 +465,216 @@ class AntigravityEngineTests(SimpleTestCase):
         self.assertEqual(len(poll_summaries), 1)
         self.assertIn("poll_successes=1", poll_summaries[0])
         self.assertIn("poll_transport_timeouts=1", poll_summaries[0])
+        self.assertIn("poll_http_retries=0", poll_summaries[0])
         self.assertIn("elapsed_seconds=4.000", poll_summaries[0])
         self.assertIn("status=completed", poll_summaries[0])
+
+    def test_poll_retryable_http_statuses_are_explicit(self):
+        from documents.services.antigravity_engine import (
+            _POLL_RETRYABLE_HTTP_STATUSES,
+        )
+
+        self.assertEqual(
+            _POLL_RETRYABLE_HTTP_STATUSES,
+            frozenset({408, 429, 500, 502, 503, 504}),
+        )
+        self.assertNotIn(400, _POLL_RETRYABLE_HTTP_STATUSES)
+        self.assertNotIn(403, _POLL_RETRYABLE_HTTP_STATUSES)
+
+    def test_poll_http_retry_delay_is_bounded_exponential(self):
+        from documents.services.antigravity_engine import (
+            _poll_http_retry_delay_seconds,
+        )
+
+        def zero_jitter() -> float:
+            return 0.5
+
+        self.assertEqual(_poll_http_retry_delay_seconds(1, random_fn=zero_jitter), 1.0)
+        self.assertEqual(_poll_http_retry_delay_seconds(2, random_fn=zero_jitter), 2.0)
+        self.assertEqual(_poll_http_retry_delay_seconds(3, random_fn=zero_jitter), 4.0)
+        self.assertEqual(_poll_http_retry_delay_seconds(6, random_fn=zero_jitter), 30.0)
+        self.assertEqual(
+            _poll_http_retry_delay_seconds(20, random_fn=zero_jitter), 30.0
+        )
+
+    @patch("documents.services.antigravity_engine.requests.get")
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_poll_get_504_retries_same_interaction_then_succeeds(
+        self, mock_post, mock_get
+    ):
+        interaction_id = "ix-progress"
+        mock_post.return_value = _ok_json_response(
+            {"id": interaction_id, "status": "in_progress"}
+        )
+        mock_get.side_effect = [
+            _error_json_response(
+                504,
+                _POLL_HTTP_BODY_SENTINEL,
+                raw_text=_POLL_HTTP_BODY_SENTINEL,
+            ),
+            _ok_json_response(
+                _completed_interaction(
+                    "[IMAGE 1: page-1.png]\nArabic text here",
+                    interaction_id=interaction_id,
+                )
+            ),
+        ]
+        slept: list[float] = []
+        clock = _MonotonicClock(start=0.0, step=1.0)
+
+        with self.assertLogs(_ENGINE_LOGGER, level="INFO") as captured:
+            result = transcribe_pages_with_antigravity(
+                _one_page(),
+                api_key="key",
+                document_id=42,
+                timeout_seconds=300.0,
+                poll_seconds=5.0,
+                monotonic_fn=clock,
+                sleep_fn=slept.append,
+                random_fn=lambda: 0.5,
+            )
+
+        self.assertEqual(result.text, "Arabic text here")
+        self.assertEqual(mock_post.call_count, 1)
+        self.assertEqual(mock_get.call_count, 2)
+        self.assertEqual(
+            [call.args[0] for call in mock_get.call_args_list],
+            [f"{INTERACTIONS_BASE_URL}/{interaction_id}"] * 2,
+        )
+        self.assertEqual(slept, [5.0, 1.0])
+
+        retry_logs = _messages_for_phase(captured, "poll_http_retry")
+        self.assertEqual(len(retry_logs), 1)
+        self.assertIn("document_id=42", retry_logs[0])
+        self.assertIn(f"interaction_id={interaction_id}", retry_logs[0])
+        self.assertIn("http_status=504", retry_logs[0])
+        self.assertIn("retry_count=1", retry_logs[0])
+        self.assertIn("delay_seconds=1.000", retry_logs[0])
+        self.assertIn("elapsed_seconds=2.000", retry_logs[0])
+        for record in captured.records:
+            self.assertNotIn(_POLL_HTTP_BODY_SENTINEL, record.getMessage())
+
+        poll_summaries = [
+            message
+            for message in _messages_for_phase(captured, "poll")
+            if "poll_attempts=2" in message
+        ]
+        self.assertEqual(len(poll_summaries), 1)
+        self.assertIn("poll_successes=1", poll_summaries[0])
+        self.assertIn("poll_http_retries=1", poll_summaries[0])
+        self.assertIn("poll_transport_timeouts=0", poll_summaries[0])
+
+    @patch("documents.services.antigravity_engine.requests.get")
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_poll_get_retryable_http_stops_at_overall_deadline(
+        self, mock_post, mock_get
+    ):
+        interaction_id = "ix-progress"
+        mock_post.return_value = _ok_json_response(
+            {"id": interaction_id, "status": "in_progress"}
+        )
+        mock_get.return_value = _error_json_response(
+            504,
+            _POLL_HTTP_BODY_SENTINEL,
+            raw_text=_POLL_HTTP_BODY_SENTINEL,
+        )
+        clock = _MonotonicClock(start=0.0, step=1.0)
+
+        with self.assertLogs(_ENGINE_LOGGER, level="INFO") as captured:
+            with self.assertRaisesMessage(AntigravityError, "Timed out after 5.0s"):
+                transcribe_pages_with_antigravity(
+                    _one_page(),
+                    api_key="key",
+                    document_id=42,
+                    timeout_seconds=5.0,
+                    poll_seconds=0.0,
+                    monotonic_fn=clock,
+                    sleep_fn=lambda _seconds: None,
+                    random_fn=lambda: 0.5,
+                )
+
+        self.assertEqual(mock_post.call_count, 1)
+        self.assertGreaterEqual(mock_get.call_count, 1)
+        self.assertEqual(
+            {call.args[0] for call in mock_get.call_args_list},
+            {f"{INTERACTIONS_BASE_URL}/{interaction_id}"},
+        )
+        deadline_logs = _messages_for_phase(captured, "poll_deadline")
+        self.assertEqual(len(deadline_logs), 1)
+        self.assertIn("document_id=42", deadline_logs[0])
+        self.assertIn(f"interaction_id={interaction_id}", deadline_logs[0])
+        self.assertIn("poll_http_retries=", deadline_logs[0])
+        self.assertGreaterEqual(
+            int(deadline_logs[0].split("poll_http_retries=")[1].split()[0]),
+            1,
+        )
+        for record in captured.records:
+            self.assertNotIn(_POLL_HTTP_BODY_SENTINEL, record.getMessage())
+
+    @patch("documents.services.antigravity_engine.requests.get")
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_poll_get_400_fails_immediately(self, mock_post, mock_get):
+        mock_post.return_value = _ok_json_response(
+            {"id": "ix-progress", "status": "in_progress"}
+        )
+        mock_get.return_value = _error_json_response(400, "bad request")
+
+        with self.assertRaises(AntigravityError) as ctx:
+            transcribe_pages_with_antigravity(
+                _one_page(),
+                api_key="key",
+                poll_seconds=0.0,
+                sleep_fn=lambda _seconds: None,
+            )
+
+        self.assertIsInstance(ctx.exception, AntigravityHttpError)
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("HTTP 400: bad request", str(ctx.exception))
+        self.assertEqual(mock_post.call_count, 1)
+        self.assertEqual(mock_get.call_count, 1)
+
+    @patch("documents.services.antigravity_engine.requests.get")
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_poll_get_403_fails_immediately(self, mock_post, mock_get):
+        mock_post.return_value = _ok_json_response(
+            {"id": "ix-progress", "status": "in_progress"}
+        )
+        mock_get.return_value = _error_json_response(403, "permission denied")
+
+        with self.assertRaises(AntigravityError) as ctx:
+            transcribe_pages_with_antigravity(
+                _one_page(),
+                api_key="key",
+                poll_seconds=0.0,
+                sleep_fn=lambda _seconds: None,
+            )
+
+        self.assertIsInstance(ctx.exception, AntigravityHttpError)
+        self.assertEqual(ctx.exception.status_code, 403)
+        self.assertIn("HTTP 403: permission denied", str(ctx.exception))
+        self.assertEqual(mock_post.call_count, 1)
+        self.assertEqual(mock_get.call_count, 1)
+
+    @patch(
+        "documents.services.antigravity_engine._get_interaction",
+        side_effect=_unexpected_get,
+    )
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_create_post_504_is_not_retried(self, mock_post, mock_get):
+        mock_post.return_value = _error_json_response(504, "gateway timeout")
+
+        with self.assertRaises(AntigravityError) as ctx:
+            transcribe_pages_with_antigravity(
+                _one_page(),
+                api_key="key",
+                background=False,
+            )
+
+        self.assertIsInstance(ctx.exception, AntigravityHttpError)
+        self.assertEqual(ctx.exception.status_code, 504)
+        self.assertIn("HTTP 504: gateway timeout", str(ctx.exception))
+        self.assertEqual(mock_post.call_count, 1)
+        mock_get.assert_not_called()
 
     @patch(
         "documents.services.antigravity_engine._get_interaction",
