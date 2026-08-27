@@ -1,5 +1,40 @@
 # VS-Archive Decision Log
 
+## Prefixable archive date-entry widget
+
+**Decision / implemented:** The shared staff date-entry widget can render two
+independent instances on one page. This is a DOM/JS scoping change only. It
+does not unify the PHOTO management page, change POST field names, or alter
+current single-widget create/edit/upload behavior.
+
+**Current behavior:**
+
+- `archive_date_form_fields.html` accepts optional `date_widget_prefix`.
+  Empty/omitted prefix keeps the existing unprefixed DOM ids
+  (`date_precision`, `archiveDateEntry`, and the segmented input ids).
+- A non-empty prefix is applied to every widget DOM `id`, matching `for`,
+  and `aria-labelledby`. POST `name` values stay `date_precision`,
+  `date_start_*`, and `date_end_*`.
+- The precision select and segmented inputs are wrapped in
+  `[data-archive-date-widget]`. `archive_date_entry.js` initializes every
+  widget root and scopes lookups to that root instead of document-wide
+  singleton ids.
+- Existing `window.vsArchiveDateEntry.collectMeta(meta)` callers keep working
+  on single-widget pages. A second argument may pass a widget root when more
+  than one instance is present. Bare `collectMeta(meta)` does not guess among
+  multiple prefixed widgets.
+- Current create/edit/upload/add-photo templates do not pass a prefix.
+
+**Why:** A later unified PHOTO page needs item-level and photo-level date
+widgets on the same screen. Duplicate ids would make labels and JS attach to
+the first widget only.
+
+**Deferred:** unified staff PHOTO page / selector; actually placing two
+prefixed widgets on a live page; changing public UI.
+
+**Tests:** `documents/test_archive_date_widget_prefix.py`; existing
+`documents/test_archive_date_input.py` create/edit/upload markup tests.
+
 ## PHOTO add-photo identified people (PhotoPerson)
 
 **Decision / implemented:** Staff add-photo can select existing people and
@@ -58,7 +93,8 @@ staff `?photo=` selection, or change add-photo / Person write paths.
 - Unchanged: PHOTO create redirect to the manage list; add-photo JS
   redirect to item edit; reorder/delete-one-photo redirects to item edit;
   whole-item delete redirect to the manage list; `people_present`; date
-  widgets; public pages. Add-photo PhotoPerson is implemented separately
+  widgets (prefixable, still unprefixed on current pages); public pages.
+  Add-photo PhotoPerson is implemented separately
   (see **PHOTO add-photo identified people**).
 
 **Why:** Leaving the item or the edited photo after every save forces extra
@@ -66,7 +102,9 @@ navigation. Stay-on-page matches the already-decided unified-management UX
 without merging layouts yet.
 
 **Deferred:** unified staff PHOTO page / selector; staff `?photo=` on the
-item edit URL; date-widget prefixing.
+item edit URL. Date-widget prefixing is implemented separately (see
+**Prefixable archive date-entry widget**); current PHOTO pages still render
+one unprefixed widget.
 
 **Tests:** `documents/test_photo_manage_edit_delete.py`,
 `documents/test_photo_multi_manage.py`.
