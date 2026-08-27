@@ -66,6 +66,31 @@ poetry run python ../../scripts/dev/gemini_interactions_smoke.py \
   --image /path/to/page1.png --background
 ```
 
+### Repository-owned printed-Arabic fixture
+
+A small synthetic, non-sensitive fixture is tracked at:
+
+- image: `scripts/dev/fixtures/printed_arabic_smoke.png`
+- ground truth: `scripts/dev/fixtures/printed_arabic_smoke_expected.txt`
+
+It contains three clearly printed Arabic lines rendered right-to-left with
+DejaVu Sans and Pillow RAQM. For the VS-Archive AWS environment, run from
+`app/backend` with the key scoped to this command only:
+
+```bash
+GEMINI_API_KEY="$(aws secretsmanager get-secret-value --secret-id "vs-archive-dev/gemini_api_key" --region eu-central-1 --profile default --query SecretString --output text)" poetry run python ../../scripts/dev/gemini_interactions_smoke.py --check antigravity-image --image ../../scripts/dev/fixtures/printed_arabic_smoke.png --background --timeout-seconds 600 --output-file /tmp/antigravity-printed-arabic-smoke-output.txt
+```
+
+This performs one read-only Secrets Manager access and one real provider call.
+Run it only deliberately. The key is scoped to the command and is not printed
+or persisted. The smoke script requires non-empty OCR output; compare the
+saved transcription with `printed_arabic_smoke_expected.txt` to validate the
+printed-Arabic result.
+
+The repository fixture was live-validated on 2026-08-27: the interaction
+completed and all three ground-truth lines matched after whitespace
+normalization (`missing_lines=[]`, `fixture_match=True`).
+
 ### Two images (one interaction)
 
 ```bash

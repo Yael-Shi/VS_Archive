@@ -50,12 +50,24 @@ the broader schema can still be unknown parameters for this agent.
 - P4: `environment: {"type": "remote", "network": "disabled"}` → HTTP 200,
   completed.
 - P1 (`system_instruction`) was intentionally not run; it is unnecessary.
-- P5 made **no** provider call: the repository has no suitable
-  printed-Arabic image fixture.
+- P5 made **no** provider call in the original probe matrix: the repository
+  had no suitable printed-Arabic image fixture.
 
-**Follow-up:** add a small, non-sensitive, repository-owned printed-Arabic
-fixture for future provider smoke validation. Do not generate that image
-in this change. Non-blocker.
+**Follow-up implementation (2026-08-26):** a small, synthetic,
+non-sensitive printed-Arabic image and its ground-truth text are now
+repository-owned under `scripts/dev/fixtures/`. The existing explicit
+`antigravity-image` smoke mode can use the fixture for provider contract
+validation.
+
+**P5 live fixture validation (2026-08-27):** one explicit provider call used
+the 34,730-byte repository PNG (SHA-256
+`9f5cd9c6b79c82ab483837601aadbf6e3c070a0791782bf2120f64cfade0b493`)
+with the supported Antigravity OCR envelope. The interaction completed,
+produced non-empty OCR, and reproduced all three ground-truth lines exactly
+after whitespace normalization (`missing_lines=[]`, `fixture_match=True`,
+`smoke_rc=0`). The API key was read from
+`vs-archive-dev/gemini_api_key` in AWS Secrets Manager without printing or
+persisting it; no AWS or production state was modified. P5 is closed.
 
 **Deferred:** Antigravity native structured outputs if/when the provider
 supports them; `system_instruction`; `response_format`; create-POST
