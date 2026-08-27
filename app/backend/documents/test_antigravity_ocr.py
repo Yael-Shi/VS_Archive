@@ -100,6 +100,7 @@ _POST_OCR_TEXT = "POST_OCR_TEXT_MUST_SURVIVE"
 _POLL_HTTP_BODY_SENTINEL = "504_RESPONSE_BODY_MUST_NOT_LOG"
 _DOCUMENT_320_GREETING = "Hello! How can I help you today?"
 _NO_IMAGE_FILES_PROSE = "No image files were found to transcribe."
+_ARABIC_TRUNCATION_SENTINEL = "نص-عربي-مقطوع-يجب-ألا-يظهر"
 _LIVE_VALIDATED_REQUESTED_MODEL = "gemini-3.7-flash"
 _LIVE_VALIDATED_ENVIRONMENT = {"type": "remote", "network": "disabled"}
 _EXPECTED_CREATE_PAYLOAD_KEYS = frozenset(
@@ -300,6 +301,49 @@ def _five_page_images() -> list[PageImage]:
         PageImage(page_index=4, image_bytes=raw_pages[3], mime_type="image/png"),
         PageImage(page_index=2, image_bytes=raw_pages[1], mime_type="image/png"),
     ]
+
+
+def _n_pages(count: int) -> list[PageImage]:
+    return [
+        PageImage(
+            page_index=index,
+            image_bytes=f"page-{index}-bytes".encode("ascii"),
+            mime_type="image/png",
+        )
+        for index in range(1, count + 1)
+    ]
+
+
+def _truncated_ocr_json(*page_texts: str) -> str:
+    full = _ocr_contract_json(*page_texts)
+    truncated = full.rstrip()[:-1]
+    assert truncated.startswith("{")
+    assert not truncated.endswith("}")
+    return truncated
+
+
+def _payload_from_post_call(call) -> dict:
+    return call.kwargs["json"]
+
+
+def _post_timeout(call) -> float:
+    return call.kwargs["timeout"]
+
+
+def _payload_image_count(payload: dict) -> int:
+    return sum(
+        1
+        for block in payload.get("input") or []
+        if isinstance(block, dict) and block.get("type") == "image"
+    )
+
+
+def _payload_image_bytes(payload: dict) -> list[bytes]:
+    images: list[bytes] = []
+    for block in payload.get("input") or []:
+        if isinstance(block, dict) and block.get("type") == "image":
+            images.append(base64.b64decode(block["data"]))
+    return images
 
 
 def _five_image_user_input_interaction(*, ocr_text: str) -> dict:
@@ -585,10 +629,10 @@ class AntigravityEngineTests(SimpleTestCase):
             {"id": "ix-progress", "status": "in_progress"}
         )
         mock_get.return_value = {"id": "ix-progress", "status": "in_progress"}
-        clock = _MonotonicClock(values=[0.0, 0.1, 0.2, 301.0])
+        clock = _MonotonicClock(values=[0.0, 0.1, 0.2, 0.3, 301.0])
 
         with self.assertLogs(_ENGINE_LOGGER, level="WARNING") as captured:
-            with self.assertRaisesMessage(AntigravityError, "Timed out after 300.0s"):
+            with self.assertRaisesMessage(AntigravityError, "Timed out after 299.8s"):
                 transcribe_pages_with_antigravity(
                     _one_page(),
                     api_key="key",
@@ -603,7 +647,7 @@ class AntigravityEngineTests(SimpleTestCase):
         self.assertEqual(len(deadline_logs), 1)
         self.assertIn("interaction_id=ix-progress", deadline_logs[0])
         self.assertIn("last_status=in_progress", deadline_logs[0])
-        self.assertIn("elapsed_seconds=300.800", deadline_logs[0])
+        self.assertIn("elapsed_seconds=300.700", deadline_logs[0])
         self.assertIn("poll_attempts=0", deadline_logs[0])
         self.assertEqual(_messages_for_phase(captured, "poll"), [])
 
@@ -770,7 +814,7 @@ class AntigravityEngineTests(SimpleTestCase):
         clock = _MonotonicClock(start=0.0, step=1.0)
 
         with self.assertLogs(_ENGINE_LOGGER, level="INFO") as captured:
-            with self.assertRaisesMessage(AntigravityError, "Timed out after 5.0s"):
+            with self.assertRaisesMessage(AntigravityError, "Timed out after 3.0s"):
                 transcribe_pages_with_antigravity(
                     _one_page(),
                     api_key="key",
@@ -1676,10 +1720,10 @@ class AntigravityTimeoutDefaultTests(SimpleTestCase):
             {"id": "ix-progress", "status": "in_progress"}
         )
         mock_get.return_value = {"id": "ix-progress", "status": "in_progress"}
-        clock = _MonotonicClock(values=[0.0, 0.1, 0.2, 1200.3])
+        clock = _MonotonicClock(values=[0.0, 0.1, 0.2, 0.3, 1200.3])
 
         with self.assertLogs(_ENGINE_LOGGER, level="WARNING") as captured:
-            with self.assertRaisesMessage(AntigravityError, "Timed out after 1200.0s"):
+            with self.assertRaisesMessage(AntigravityError, "Timed out after 1199.8s"):
                 transcribe_pages_with_antigravity(
                     _one_page(),
                     api_key="key",
@@ -1693,7 +1737,7 @@ class AntigravityTimeoutDefaultTests(SimpleTestCase):
         self.assertEqual(len(deadline_logs), 1)
         self.assertIn("interaction_id=ix-progress", deadline_logs[0])
         self.assertIn("last_status=in_progress", deadline_logs[0])
-        self.assertIn("elapsed_seconds=1200.100", deadline_logs[0])
+        self.assertIn("elapsed_seconds=1200.000", deadline_logs[0])
         self.assertIn("poll_attempts=0", deadline_logs[0])
 
     @patch("documents.services.antigravity_engine.requests.get")
@@ -2239,6 +2283,619 @@ class AntigravityCompletedOutputValidationEngineTests(SimpleTestCase):
         self.assertNotIn(secret, logs)
         self.assertNotIn("Looks valid", logs)
         mock_get.assert_not_called()
+
+
+class AntigravityTruncatedJsonRecoveryTests(SimpleTestCase):
+    def _page_text_by_bytes(self, pages: list[PageImage]) -> dict[bytes, str]:
+        return {page.image_bytes: f"PAGE-{page.page_index}-TEXT" for page in pages}
+
+    def _post_side_effect(self, handler):
+        call_index = {"n": 0}
+
+        def side_effect(*_args, **kwargs):
+            call_index["n"] += 1
+            payload = kwargs["json"]
+            interaction_id = f"ix-{call_index['n']}"
+            return handler(payload, interaction_id=interaction_id)
+
+        return side_effect
+
+    def _assert_create_payloads(self, mock_post, *, background: bool = False):
+        for call in mock_post.call_args_list:
+            payload = _payload_from_post_call(call)
+            n = _payload_image_count(payload)
+            _assert_supported_create_payload(
+                self,
+                payload,
+                agent_id=DEFAULT_ANTIGRAVITY_AGENT_ID,
+                background=background,
+            )
+            prompt = payload["input"][0]["text"]
+            image_noun = "image" if n == 1 else "images"
+            self.assertIn(f"exactly {n} inline {image_noun}", prompt)
+            self.assertNotIn(_ARABIC_TRUNCATION_SENTINEL, prompt)
+
+    def _transcribe(self, pages, **kwargs):
+        return transcribe_pages_with_antigravity(
+            pages,
+            api_key="key",
+            background=False,
+            document_id=321,
+            **kwargs,
+        )
+
+    @patch(
+        "documents.services.antigravity_engine._get_interaction",
+        side_effect=_unexpected_get,
+    )
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_valid_multi_page_document_stays_one_interaction(self, mock_post, mock_get):
+        pages = _five_page_images()
+        texts = [f"PAGE-{index}-TEXT" for index in range(1, 6)]
+        mock_post.return_value = _ok_json_response(
+            _completed_ocr_interaction(*texts, interaction_id="ix-happy")
+        )
+
+        with self.assertLogs(_ENGINE_LOGGER, level="INFO") as captured:
+            result = self._transcribe(pages)
+
+        self.assertEqual(
+            result.text,
+            "\n\n".join(
+                f"{PAGE_HEADING_PREFIX} {index}\nPAGE-{index}-TEXT"
+                for index in range(1, 6)
+            ),
+        )
+        self.assertEqual(mock_post.call_count, 1)
+        mock_get.assert_not_called()
+        logs = "\n".join(record.getMessage() for record in captured.records)
+        self.assertNotIn("truncated JSON split", logs)
+        self.assertIn("output_char_length=", logs)
+        self.assertIn("starts_with_open_brace=True", logs)
+        self.assertIn("ends_with_close_brace=True", logs)
+        for text in texts:
+            self.assertNotIn(text, logs)
+        self._assert_create_payloads(mock_post)
+
+    @patch(
+        "documents.services.antigravity_engine._get_interaction",
+        side_effect=_unexpected_get,
+    )
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_truncated_json_split_recovers_global_page_order(self, mock_post, mock_get):
+        pages = _five_page_images()
+        ordered = sorted(pages, key=lambda page: page.page_index)
+        text_by_bytes = self._page_text_by_bytes(ordered)
+
+        def handler(payload, *, interaction_id):
+            image_bytes = _payload_image_bytes(payload)
+            n = len(image_bytes)
+            if n == 5:
+                return _ok_json_response(
+                    _completed_interaction(
+                        _truncated_ocr_json(*([_ARABIC_TRUNCATION_SENTINEL] * 5)),
+                        interaction_id=interaction_id,
+                    )
+                )
+            texts = [text_by_bytes[image] for image in image_bytes]
+            return _ok_json_response(
+                _completed_ocr_interaction(*texts, interaction_id=interaction_id)
+            )
+
+        mock_post.side_effect = self._post_side_effect(handler)
+
+        with self.assertLogs(_ENGINE_LOGGER, level="INFO") as captured:
+            result = self._transcribe(pages)
+
+        self.assertEqual(
+            result.text,
+            "\n\n".join(
+                f"{PAGE_HEADING_PREFIX} {index}\nPAGE-{index}-TEXT"
+                for index in range(1, 6)
+            ),
+        )
+        self.assertEqual(mock_post.call_count, 3)
+        mock_get.assert_not_called()
+
+        image_counts = [
+            _payload_image_count(_payload_from_post_call(call))
+            for call in mock_post.call_args_list
+        ]
+        self.assertEqual(image_counts, [5, 2, 3])
+        first_batch = _payload_image_bytes(
+            _payload_from_post_call(mock_post.call_args_list[1])
+        )
+        second_batch = _payload_image_bytes(
+            _payload_from_post_call(mock_post.call_args_list[2])
+        )
+        self.assertEqual(first_batch, [page.image_bytes for page in ordered[:2]])
+        self.assertEqual(second_batch, [page.image_bytes for page in ordered[2:]])
+
+        logs = "\n".join(record.getMessage() for record in captured.records)
+        self.assertIn("truncated JSON split", logs)
+        self.assertIn("reason=invalid_json", logs)
+        self.assertIn("left_page_count=2", logs)
+        self.assertIn("right_page_count=3", logs)
+        self.assertIn("starts_with_open_brace=True", logs)
+        self.assertIn("ends_with_close_brace=False", logs)
+        self.assertNotIn(_ARABIC_TRUNCATION_SENTINEL, logs)
+        for page in ordered:
+            self.assertNotIn(text_by_bytes[page.image_bytes], logs)
+        self._assert_create_payloads(mock_post)
+
+    @patch(
+        "documents.services.antigravity_engine._get_interaction",
+        side_effect=_unexpected_get,
+    )
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_truncated_json_recursively_splits_secondary_batch(
+        self, mock_post, mock_get
+    ):
+        pages = _n_pages(4)
+        text_by_bytes = self._page_text_by_bytes(pages)
+
+        def handler(payload, *, interaction_id):
+            image_bytes = _payload_image_bytes(payload)
+            n = len(image_bytes)
+            first_is_page_one = image_bytes and image_bytes[0] == pages[0].image_bytes
+            if n == 4 or (n == 2 and first_is_page_one):
+                return _ok_json_response(
+                    _completed_interaction(
+                        _truncated_ocr_json(*([_ARABIC_TRUNCATION_SENTINEL] * n)),
+                        interaction_id=interaction_id,
+                    )
+                )
+            texts = [text_by_bytes[image] for image in image_bytes]
+            return _ok_json_response(
+                _completed_ocr_interaction(*texts, interaction_id=interaction_id)
+            )
+
+        mock_post.side_effect = self._post_side_effect(handler)
+
+        with self.assertLogs(_ENGINE_LOGGER, level="INFO") as captured:
+            result = self._transcribe(pages)
+
+        self.assertEqual(
+            result.text,
+            "\n\n".join(
+                f"{PAGE_HEADING_PREFIX} {index}\nPAGE-{index}-TEXT"
+                for index in range(1, 5)
+            ),
+        )
+        image_counts = [
+            _payload_image_count(_payload_from_post_call(call))
+            for call in mock_post.call_args_list
+        ]
+        self.assertEqual(image_counts, [4, 2, 1, 1, 2])
+        self.assertEqual(mock_post.call_count, 5)
+        mock_get.assert_not_called()
+        logs = "\n".join(record.getMessage() for record in captured.records)
+        self.assertEqual(logs.count("truncated JSON split"), 2)
+        self.assertNotIn(_ARABIC_TRUNCATION_SENTINEL, logs)
+        self._assert_create_payloads(mock_post)
+
+    @patch(
+        "documents.services.antigravity_engine._get_interaction",
+        side_effect=_unexpected_get,
+    )
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_truncated_single_page_fails_without_retry(self, mock_post, mock_get):
+        truncated = _truncated_ocr_json(_ARABIC_TRUNCATION_SENTINEL)
+        mock_post.return_value = _ok_json_response(_completed_interaction(truncated))
+
+        with self.assertLogs(_ENGINE_LOGGER, level="INFO") as captured:
+            with self.assertRaises(AntigravityOutputValidationError) as ctx:
+                self._transcribe(_one_page())
+
+        self.assertEqual(ctx.exception.reason, REASON_INVALID_JSON)
+        self.assertNotIn(_ARABIC_TRUNCATION_SENTINEL, str(ctx.exception))
+        self.assertEqual(mock_post.call_count, 1)
+        mock_get.assert_not_called()
+        logs = "\n".join(record.getMessage() for record in captured.records)
+        self.assertNotIn("truncated JSON split", logs)
+        self.assertIn("reason=invalid_json", logs)
+        self.assertIn("starts_with_open_brace=True", logs)
+        self.assertIn("ends_with_close_brace=False", logs)
+        self.assertNotIn(_ARABIC_TRUNCATION_SENTINEL, logs)
+
+    @patch(
+        "documents.services.antigravity_engine._get_interaction",
+        side_effect=_unexpected_get,
+    )
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_non_truncation_failures_do_not_split(self, mock_post, mock_get):
+        pages = _n_pages(5)
+        cases = (
+            ("greeting", _DOCUMENT_320_GREETING, REASON_INVALID_JSON),
+            (
+                "closed_invalid_object",
+                "{" + _ARABIC_TRUNCATION_SENTINEL + "}",
+                REASON_INVALID_JSON,
+            ),
+            (
+                "fenced_json",
+                f"```json\n{_ocr_contract_json(*(['visible'] * 5))}\n```",
+                REASON_INVALID_JSON,
+            ),
+            (
+                "complete_page_count_mismatch",
+                _ocr_contract_json("only-one"),
+                REASON_PAGE_COUNT_MISMATCH,
+            ),
+        )
+        for label, body, reason in cases:
+            with self.subTest(label=label):
+                mock_post.reset_mock()
+                mock_get.reset_mock()
+                mock_post.return_value = _ok_json_response(_completed_interaction(body))
+                with self.assertLogs(_ENGINE_LOGGER, level="INFO") as captured:
+                    with self.assertRaises(AntigravityOutputValidationError) as ctx:
+                        self._transcribe(pages)
+                self.assertEqual(ctx.exception.reason, reason)
+                self.assertEqual(mock_post.call_count, 1)
+                mock_get.assert_not_called()
+                logs = "\n".join(record.getMessage() for record in captured.records)
+                self.assertNotIn("truncated JSON split", logs)
+                self.assertNotIn(_DOCUMENT_320_GREETING, logs)
+                self.assertNotIn(_ARABIC_TRUNCATION_SENTINEL, logs)
+                self.assertNotIn("only-one", logs)
+                self.assertNotIn("visible", logs)
+
+    @patch(
+        "documents.services.antigravity_engine._get_interaction",
+        side_effect=_unexpected_get,
+    )
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_child_batch_failure_returns_no_partial_result(self, mock_post, mock_get):
+        pages = _n_pages(5)
+        text_by_bytes = self._page_text_by_bytes(pages)
+        left_success_text = text_by_bytes[pages[0].image_bytes]
+
+        def handler(payload, *, interaction_id):
+            image_bytes = _payload_image_bytes(payload)
+            n = len(image_bytes)
+            if n == 5:
+                return _ok_json_response(
+                    _completed_interaction(
+                        _truncated_ocr_json(*([_ARABIC_TRUNCATION_SENTINEL] * 5)),
+                        interaction_id=interaction_id,
+                    )
+                )
+            if n == 2:
+                texts = [text_by_bytes[image] for image in image_bytes]
+                return _ok_json_response(
+                    _completed_ocr_interaction(*texts, interaction_id=interaction_id)
+                )
+            return _ok_json_response(
+                _completed_interaction(
+                    _DOCUMENT_320_GREETING, interaction_id=interaction_id
+                )
+            )
+
+        mock_post.side_effect = self._post_side_effect(handler)
+
+        with self.assertLogs(_ENGINE_LOGGER, level="INFO") as captured:
+            with self.assertRaises(AntigravityOutputValidationError) as ctx:
+                self._transcribe(pages)
+
+        self.assertEqual(ctx.exception.reason, REASON_INVALID_JSON)
+        self.assertNotIn(left_success_text, str(ctx.exception))
+        self.assertNotIn(_DOCUMENT_320_GREETING, str(ctx.exception))
+        self.assertEqual(mock_post.call_count, 3)
+        image_counts = [
+            _payload_image_count(_payload_from_post_call(call))
+            for call in mock_post.call_args_list
+        ]
+        self.assertEqual(image_counts, [5, 2, 3])
+        mock_get.assert_not_called()
+        logs = "\n".join(record.getMessage() for record in captured.records)
+        self.assertIn("truncated JSON split", logs)
+        self.assertNotIn(left_success_text, logs)
+        self.assertNotIn(_DOCUMENT_320_GREETING, logs)
+        self.assertNotIn(_ARABIC_TRUNCATION_SENTINEL, logs)
+
+    @patch(
+        "documents.services.antigravity_engine._get_interaction",
+        side_effect=_unexpected_get,
+    )
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_worst_case_binary_split_stays_within_provider_call_bound(
+        self, mock_post, mock_get
+    ):
+        from documents.services.antigravity_engine import (
+            _max_provider_calls_for_page_count,
+        )
+
+        pages = _n_pages(3)
+        text_by_bytes = self._page_text_by_bytes(pages)
+
+        def handler(payload, *, interaction_id):
+            image_bytes = _payload_image_bytes(payload)
+            n = len(image_bytes)
+            if n > 1:
+                return _ok_json_response(
+                    _completed_interaction(
+                        _truncated_ocr_json(*([_ARABIC_TRUNCATION_SENTINEL] * n)),
+                        interaction_id=interaction_id,
+                    )
+                )
+            texts = [text_by_bytes[image] for image in image_bytes]
+            return _ok_json_response(
+                _completed_ocr_interaction(*texts, interaction_id=interaction_id)
+            )
+
+        mock_post.side_effect = self._post_side_effect(handler)
+
+        result = self._transcribe(pages)
+
+        self.assertEqual(
+            result.text,
+            "\n\n".join(
+                f"{PAGE_HEADING_PREFIX} {index}\nPAGE-{index}-TEXT"
+                for index in range(1, 4)
+            ),
+        )
+        self.assertEqual(mock_post.call_count, 5)
+        self.assertEqual(_max_provider_calls_for_page_count(3), 5)
+        self.assertLessEqual(
+            mock_post.call_count, _max_provider_calls_for_page_count(len(pages))
+        )
+        mock_get.assert_not_called()
+        self._assert_create_payloads(mock_post)
+
+    def _consume_tracker(self):
+        from documents.services.antigravity_engine import _ProviderCallBudget
+
+        consumed: list[int] = []
+        original = _ProviderCallBudget.consume
+
+        def wrapped(budget) -> None:
+            original(budget)
+            consumed.append(budget.used)
+
+        return consumed, wrapped
+
+    def _poll_tracker(self):
+        from documents.services import antigravity_engine as engine
+
+        poll_kwargs: list[dict] = []
+        original = engine._poll_until_done
+
+        def wrapped(*args, **kwargs):
+            poll_kwargs.append(
+                {
+                    "timeout_seconds": kwargs["timeout_seconds"],
+                    "deadline": kwargs["deadline"],
+                }
+            )
+            return original(*args, **kwargs)
+
+        return poll_kwargs, wrapped
+
+    @patch(
+        "documents.services.antigravity_engine._get_interaction",
+        side_effect=_unexpected_get,
+    )
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_split_tree_shares_one_overall_deadline(self, mock_post, mock_get):
+        pages = _n_pages(2)
+        text_by_bytes = self._page_text_by_bytes(pages)
+        clock = _MonotonicClock(values=[0.0, 1.0, 2.0, 10.0, 11.0, 80.0, 81.0])
+
+        def handler(payload, *, interaction_id):
+            image_bytes = _payload_image_bytes(payload)
+            if len(image_bytes) == 2:
+                return _ok_json_response(
+                    _completed_interaction(
+                        _truncated_ocr_json(*([_ARABIC_TRUNCATION_SENTINEL] * 2)),
+                        interaction_id=interaction_id,
+                    )
+                )
+            texts = [text_by_bytes[image] for image in image_bytes]
+            return _ok_json_response(
+                _completed_ocr_interaction(*texts, interaction_id=interaction_id)
+            )
+
+        mock_post.side_effect = self._post_side_effect(handler)
+
+        result = self._transcribe(
+            pages,
+            timeout_seconds=100.0,
+            monotonic_fn=clock,
+        )
+
+        self.assertEqual(
+            result.text,
+            f"{PAGE_HEADING_PREFIX} 1\nPAGE-1-TEXT\n\n"
+            f"{PAGE_HEADING_PREFIX} 2\nPAGE-2-TEXT",
+        )
+        self.assertEqual(mock_post.call_count, 3)
+        self.assertEqual(
+            [_post_timeout(call) for call in mock_post.call_args_list],
+            [99.0, 90.0, 20.0],
+        )
+        mock_get.assert_not_called()
+        self._assert_create_payloads(mock_post)
+
+    @patch(
+        "documents.services.antigravity_engine._get_interaction",
+        side_effect=_unexpected_get,
+    )
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_expired_deadline_prevents_next_child_create_post(
+        self, mock_post, mock_get
+    ):
+        from documents.services.antigravity_engine import _ProviderCallBudget
+
+        pages = _n_pages(2)
+        clock = _MonotonicClock(values=[0.0, 0.1, 0.2, 10.0])
+        consumed, consume_wrapped = self._consume_tracker()
+        mock_post.return_value = _ok_json_response(
+            _completed_interaction(
+                _truncated_ocr_json(*([_ARABIC_TRUNCATION_SENTINEL] * 2))
+            )
+        )
+
+        with patch.object(_ProviderCallBudget, "consume", consume_wrapped):
+            with self.assertLogs(_ENGINE_LOGGER, level="WARNING") as captured:
+                with self.assertRaises(AntigravityError) as ctx:
+                    self._transcribe(
+                        pages,
+                        timeout_seconds=10.0,
+                        monotonic_fn=clock,
+                    )
+
+        self.assertNotIsInstance(ctx.exception, AntigravityOutputValidationError)
+        self.assertEqual(str(ctx.exception), "Timed out waiting for Antigravity OCR")
+        self.assertNotIn(_ARABIC_TRUNCATION_SENTINEL, str(ctx.exception))
+        self.assertEqual(mock_post.call_count, 1)
+        self.assertEqual(consumed, [1])
+        mock_get.assert_not_called()
+        logs = "\n".join(record.getMessage() for record in captured.records)
+        deadline_logs = _messages_for_phase(captured, "create_deadline")
+        self.assertEqual(len(deadline_logs), 1)
+        self.assertIn("pages=1", deadline_logs[0])
+        self.assertIn("remaining_seconds=0.000", deadline_logs[0])
+        self.assertIn("provider_calls_used=1", deadline_logs[0])
+        self.assertNotIn(_ARABIC_TRUNCATION_SENTINEL, logs)
+        self.assertNotIn("PAGE-1-TEXT", logs)
+        self.assertNotIn("PAGE-2-TEXT", logs)
+
+    @patch("documents.services.antigravity_engine._get_interaction")
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_child_poll_receives_remaining_time_not_fresh_timeout(
+        self, mock_post, mock_get
+    ):
+        from documents.services import antigravity_engine as engine
+
+        pages = _n_pages(2)
+        clock = _MonotonicClock(values=[0.0, 1.0, 2.0, 10.0, 11.0, 80.0, 81.0])
+        poll_kwargs, poll_wrapped = self._poll_tracker()
+
+        def handler(payload, *, interaction_id):
+            image_bytes = _payload_image_bytes(payload)
+            if len(image_bytes) == 2:
+                return _ok_json_response(
+                    _completed_interaction(
+                        _truncated_ocr_json(*([_ARABIC_TRUNCATION_SENTINEL] * 2)),
+                        interaction_id=interaction_id,
+                    )
+                )
+            if image_bytes == [pages[0].image_bytes]:
+                return _ok_json_response(
+                    _completed_ocr_interaction(
+                        "PAGE-1-TEXT", interaction_id=interaction_id
+                    )
+                )
+            return _ok_json_response({"id": interaction_id, "status": "in_progress"})
+
+        mock_post.side_effect = self._post_side_effect(handler)
+        mock_get.return_value = _completed_ocr_interaction(
+            "PAGE-2-TEXT", interaction_id="ix-child"
+        )
+
+        with patch.object(engine, "_poll_until_done", side_effect=poll_wrapped):
+            result = self._transcribe(
+                pages,
+                timeout_seconds=100.0,
+                poll_seconds=0.0,
+                monotonic_fn=clock,
+                sleep_fn=lambda _seconds: None,
+            )
+
+        self.assertEqual(
+            result.text,
+            f"{PAGE_HEADING_PREFIX} 1\nPAGE-1-TEXT\n\n"
+            f"{PAGE_HEADING_PREFIX} 2\nPAGE-2-TEXT",
+        )
+        self.assertEqual(mock_post.call_count, 3)
+        self.assertEqual(_post_timeout(mock_post.call_args_list[2]), 20.0)
+        self.assertEqual(len(poll_kwargs), 1)
+        self.assertEqual(poll_kwargs[0]["timeout_seconds"], 19.0)
+        self.assertEqual(poll_kwargs[0]["deadline"], 100.0)
+        self.assertNotEqual(poll_kwargs[0]["timeout_seconds"], 100.0)
+        self.assertNotEqual(poll_kwargs[0]["timeout_seconds"], 1200.0)
+        self.assertEqual(mock_get.call_count, 1)
+        self._assert_create_payloads(mock_post)
+
+    @patch(
+        "documents.services.antigravity_engine._get_interaction",
+        side_effect=_unexpected_get,
+    )
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_provider_call_accounting_matches_create_post_attempts(
+        self, mock_post, mock_get
+    ):
+        from documents.services.antigravity_engine import _ProviderCallBudget
+
+        pages = _five_page_images()
+        ordered = sorted(pages, key=lambda page: page.page_index)
+        text_by_bytes = self._page_text_by_bytes(ordered)
+        consumed, consume_wrapped = self._consume_tracker()
+
+        def handler(payload, *, interaction_id):
+            image_bytes = _payload_image_bytes(payload)
+            n = len(image_bytes)
+            if n == 5:
+                return _ok_json_response(
+                    _completed_interaction(
+                        _truncated_ocr_json(*([_ARABIC_TRUNCATION_SENTINEL] * 5)),
+                        interaction_id=interaction_id,
+                    )
+                )
+            texts = [text_by_bytes[image] for image in image_bytes]
+            return _ok_json_response(
+                _completed_ocr_interaction(*texts, interaction_id=interaction_id)
+            )
+
+        mock_post.side_effect = self._post_side_effect(handler)
+
+        with patch.object(_ProviderCallBudget, "consume", consume_wrapped):
+            result = self._transcribe(pages)
+
+        self.assertEqual(
+            result.text,
+            "\n\n".join(
+                f"{PAGE_HEADING_PREFIX} {index}\nPAGE-{index}-TEXT"
+                for index in range(1, 6)
+            ),
+        )
+        self.assertEqual(mock_post.call_count, 3)
+        self.assertEqual(consumed, [1, 2, 3])
+        self.assertEqual(len(consumed), mock_post.call_count)
+        mock_get.assert_not_called()
+
+    @patch(
+        "documents.services.antigravity_engine._get_interaction",
+        side_effect=_unexpected_get,
+    )
+    @patch("documents.services.antigravity_engine.requests.post")
+    def test_valid_multi_page_path_still_uses_one_create_post(
+        self, mock_post, mock_get
+    ):
+        from documents.services.antigravity_engine import _ProviderCallBudget
+
+        pages = _five_page_images()
+        texts = [f"PAGE-{index}-TEXT" for index in range(1, 6)]
+        consumed, consume_wrapped = self._consume_tracker()
+        mock_post.return_value = _ok_json_response(
+            _completed_ocr_interaction(*texts, interaction_id="ix-happy")
+        )
+
+        with patch.object(_ProviderCallBudget, "consume", consume_wrapped):
+            result = self._transcribe(pages)
+
+        self.assertEqual(
+            result.text,
+            "\n\n".join(
+                f"{PAGE_HEADING_PREFIX} {index}\nPAGE-{index}-TEXT"
+                for index in range(1, 6)
+            ),
+        )
+        self.assertEqual(mock_post.call_count, 1)
+        self.assertEqual(consumed, [1])
+        mock_get.assert_not_called()
+        self._assert_create_payloads(mock_post)
 
 
 class AntigravityInteractionSummaryToolStepTests(SimpleTestCase):

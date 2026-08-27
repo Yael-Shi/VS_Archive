@@ -24,6 +24,9 @@ from documents.services.antigravity_defaults import (
 )
 from documents.services.antigravity_ocr_contract import (
     OcrContractError,
+    REASON_INVALID_JSON,
+    ValidatedOcrOutput,
+    ValidatedOcrPage,
     build_antigravity_ocr_prompt,
     extract_final_model_output_text,
     render_validated_ocr_text,
@@ -95,6 +98,40 @@ class AntigravityOutputValidationError(AntigravityError):
     def __init__(self, message: str, *, reason: str) -> None:
         super().__init__(message)
         self.reason = reason
+
+
+@dataclass(frozen=True)
+class _OcrOutputShape:
+    present: bool
+    char_length: int
+    stripped_char_length: int
+    starts_with_open_brace: bool
+    ends_with_close_brace: bool
+
+    @property
+    def structurally_truncated(self) -> bool:
+        return (
+            self.present
+            and self.starts_with_open_brace
+            and not self.ends_with_close_brace
+        )
+
+
+@dataclass
+class _ProviderCallBudget:
+    limit: int
+    used: int = 0
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.limit - self.used)
+
+    def consume(self) -> None:
+        if self.used >= self.limit:
+            raise AntigravityError(
+                "Antigravity truncated-JSON recovery exceeded provider call budget"
+            )
+        self.used += 1
 
 
 @dataclass(frozen=True)
@@ -213,6 +250,18 @@ def build_antigravity_create_payload(
 
 def _elapsed_seconds(started_at: float, now: float) -> float:
     return round(max(0.0, now - started_at), 3)
+
+
+def _remaining_seconds(deadline: float, now: float) -> float:
+    return deadline - now
+
+
+def _raise_deadline_expired() -> NoReturn:
+    raise AntigravityError("Timed out waiting for Antigravity OCR")
+
+
+def _desired_create_timeout_seconds(page_count: int) -> float:
+    return max(120.0, 30.0 * page_count)
 
 
 def _poll_http_retry_delay_seconds(
@@ -530,6 +579,7 @@ def _poll_until_done(
     *,
     poll_seconds: float,
     timeout_seconds: float,
+    deadline: float,
     document_id: int | None = None,
     sleep_fn=time.sleep,
     monotonic_fn=time.monotonic,
@@ -540,7 +590,6 @@ def _poll_until_done(
         raise AntigravityError("Interaction response missing id")
 
     poll_started = monotonic_fn()
-    deadline = poll_started + timeout_seconds
     current = interaction
     poll_attempts = 0
     poll_successes = 0
@@ -646,29 +695,151 @@ def _poll_until_done(
     return current, poll_successes
 
 
-def transcribe_pages_with_antigravity(
+def _max_provider_calls_for_page_count(page_count: int) -> int:
+    """Worst-case binary splits down to single pages: n successes + n-1 failures."""
+    return max(1, 2 * page_count - 1)
+
+
+def _ocr_output_shape(raw_text: str | None) -> _OcrOutputShape:
+    if raw_text is None:
+        return _OcrOutputShape(
+            present=False,
+            char_length=0,
+            stripped_char_length=0,
+            starts_with_open_brace=False,
+            ends_with_close_brace=False,
+        )
+    stripped = raw_text.strip()
+    return _OcrOutputShape(
+        present=bool(stripped),
+        char_length=len(raw_text),
+        stripped_char_length=len(stripped),
+        starts_with_open_brace=stripped.startswith("{"),
+        ends_with_close_brace=stripped.endswith("}"),
+    )
+
+
+def _log_ocr_output_shape(
+    *,
+    document_id: int | None,
+    page_count: int,
+    global_page_start: int,
+    global_page_end: int,
+    provider_calls_used: int,
+    provider_call_budget: int,
+    shape: _OcrOutputShape,
+) -> None:
+    logger.info(
+        "Antigravity OCR output shape document_id=%s page_count=%s "
+        "global_page_start=%s global_page_end=%s provider_calls_used=%s "
+        "provider_call_budget=%s output_present=%s output_char_length=%s "
+        "output_stripped_char_length=%s starts_with_open_brace=%s "
+        "ends_with_close_brace=%s",
+        document_id,
+        page_count,
+        global_page_start,
+        global_page_end,
+        provider_calls_used,
+        provider_call_budget,
+        shape.present,
+        shape.char_length,
+        shape.stripped_char_length,
+        shape.starts_with_open_brace,
+        shape.ends_with_close_brace,
+    )
+
+
+def _log_truncated_json_split(
+    *,
+    document_id: int | None,
+    page_count: int,
+    global_page_start: int,
+    global_page_end: int,
+    left_page_count: int,
+    right_page_count: int,
+    provider_calls_used: int,
+    provider_call_budget: int,
+    shape: _OcrOutputShape,
+) -> None:
+    logger.warning(
+        "Antigravity OCR truncated JSON split document_id=%s reason=%s "
+        "page_count=%s global_page_start=%s global_page_end=%s "
+        "left_page_count=%s right_page_count=%s provider_calls_used=%s "
+        "provider_call_budget=%s output_char_length=%s "
+        "starts_with_open_brace=%s ends_with_close_brace=%s",
+        document_id,
+        REASON_INVALID_JSON,
+        page_count,
+        global_page_start,
+        global_page_end,
+        left_page_count,
+        right_page_count,
+        provider_calls_used,
+        provider_call_budget,
+        shape.char_length,
+        shape.starts_with_open_brace,
+        shape.ends_with_close_brace,
+    )
+
+
+def _split_contiguous_pages(
+    pages: list[PageImage],
+) -> tuple[list[PageImage], list[PageImage]]:
+    if len(pages) < 2:
+        raise AntigravityError(
+            "Cannot split an Antigravity OCR batch with fewer than 2 pages"
+        )
+    mid = len(pages) // 2
+    return pages[:mid], pages[mid:]
+
+
+def _remap_validated_ocr_output(
+    output: ValidatedOcrOutput,
+    *,
+    global_page_start: int,
+) -> ValidatedOcrOutput:
+    return ValidatedOcrOutput(
+        pages=tuple(
+            ValidatedOcrPage(
+                page_index=global_page_start + page.page_index - 1,
+                outcome=page.outcome,
+                text=page.text,
+            )
+            for page in output.pages
+        )
+    )
+
+
+def _combine_validated_ocr_outputs(
+    left: ValidatedOcrOutput,
+    right: ValidatedOcrOutput,
+) -> ValidatedOcrOutput:
+    combined = ValidatedOcrOutput(pages=left.pages + right.pages)
+    indexes = [page.page_index for page in combined.pages]
+    expected = list(range(indexes[0], indexes[0] + len(indexes))) if indexes else []
+    if indexes != expected:
+        raise AntigravityError(
+            "Antigravity truncated-JSON recovery assembled pages out of order"
+        )
+    return combined
+
+
+def _create_and_poll_interaction(
     pages: list[PageImage],
     *,
     api_key: str,
-    agent_id: str = DEFAULT_ANTIGRAVITY_AGENT_ID,
-    document_id: int | None = None,
-    poll_seconds: float = DEFAULT_POLL_SECONDS,
-    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
-    background: bool = True,
-    sleep_fn=time.sleep,
-    monotonic_fn=time.monotonic,
-    random_fn=random.random,
-) -> AntigravityResult:
-    if not (api_key or "").strip():
-        raise AntigravityError("Missing GEMINI_API_KEY")
-
-    ordered_pages = _sorted_pages(pages)
-    if not ordered_pages:
-        raise AntigravityError("No page images supplied for Antigravity OCR")
-
-    prompt = build_antigravity_ocr_prompt(len(ordered_pages))
-    create_timeout = max(120.0, 30.0 * len(ordered_pages))
-    multimodal_input = build_multimodal_input(prompt, ordered_pages)
+    agent_id: str,
+    document_id: int | None,
+    poll_seconds: float,
+    deadline: float,
+    background: bool,
+    sleep_fn,
+    monotonic_fn,
+    random_fn,
+    budget: _ProviderCallBudget,
+) -> dict[str, Any]:
+    prompt = build_antigravity_ocr_prompt(len(pages))
+    multimodal_input = build_multimodal_input(prompt, pages)
 
     block_types = [
         block.get("type") for block in multimodal_input if isinstance(block, dict)
@@ -694,30 +865,51 @@ def transcribe_pages_with_antigravity(
         and environment.get("network") == "disabled"
     )
 
+    create_started = monotonic_fn()
+    remaining = _remaining_seconds(deadline, create_started)
+    if remaining <= 0:
+        logger.warning(
+            "Antigravity interaction lifecycle document_id=%s phase=create_deadline "
+            "pages=%s remaining_seconds=%.3f provider_calls_used=%s "
+            "provider_call_budget=%s",
+            document_id,
+            len(pages),
+            remaining,
+            budget.used,
+            budget.limit,
+        )
+        _raise_deadline_expired()
+    create_timeout = min(_desired_create_timeout_seconds(len(pages)), remaining)
+
+    budget.consume()
+
     logger.info(
         "Antigravity request payload document_id=%s agent=%s "
         "requested_model=%s tools_config_empty=%s "
         "requested_network_disabled=%s pages=%s "
         "input_blocks=%s image_blocks=%s block_types=%s phase=create "
-        "create_timeout_seconds=%s",
+        "create_timeout_seconds=%s remaining_seconds=%s provider_calls_used=%s "
+        "provider_call_budget=%s",
         document_id,
         agent_id,
         requested_model,
         tools_config_empty,
         requested_network_disabled,
-        len(ordered_pages),
+        len(pages),
         len(multimodal_input),
         image_block_count,
         block_types,
         create_timeout,
+        remaining,
+        budget.used,
+        budget.limit,
     )
     _log_encoded_image_blocks(
         document_id=document_id,
-        pages=ordered_pages,
+        pages=pages,
         input_blocks=multimodal_input,
     )
 
-    create_started = monotonic_fn()
     try:
         interaction = _create_interaction(
             api_key,
@@ -732,15 +924,16 @@ def transcribe_pages_with_antigravity(
             document_id,
             _elapsed_seconds(create_started, monotonic_fn()),
             type(exc).__name__,
-            len(ordered_pages),
+            len(pages),
         )
         raise
 
+    now = monotonic_fn()
     logger.info(
         "Antigravity interaction lifecycle document_id=%s phase=create "
         "elapsed_seconds=%.3f interaction_id=%s status=%s environment_id=%s",
         document_id,
-        _elapsed_seconds(create_started, monotonic_fn()),
+        _elapsed_seconds(create_started, now),
         _sanitize_interaction_id(interaction.get("id")),
         _known_or_other(interaction.get("status"), _KNOWN_STATUSES)
         if interaction.get("status") is not None
@@ -750,11 +943,13 @@ def transcribe_pages_with_antigravity(
 
     response_source = RESPONSE_SOURCE_CREATE
     if background or interaction.get("status") == IN_PROGRESS_STATUS:
+        remaining = max(0.0, _remaining_seconds(deadline, now))
         interaction, poll_successes = _poll_until_done(
             api_key,
             interaction,
             poll_seconds=poll_seconds,
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=remaining,
+            deadline=deadline,
             document_id=document_id,
             sleep_fn=sleep_fn,
             monotonic_fn=monotonic_fn,
@@ -774,15 +969,147 @@ def transcribe_pages_with_antigravity(
         raise AntigravityError(
             f"Antigravity interaction finished with status={status!r}"
         )
+    return interaction
 
+
+def _transcribe_pages_recovering_truncated_json(
+    pages: list[PageImage],
+    *,
+    global_page_start: int,
+    budget: _ProviderCallBudget,
+    api_key: str,
+    agent_id: str,
+    document_id: int | None,
+    poll_seconds: float,
+    deadline: float,
+    background: bool,
+    sleep_fn,
+    monotonic_fn,
+    random_fn,
+) -> ValidatedOcrOutput:
+    interaction = _create_and_poll_interaction(
+        pages,
+        api_key=api_key,
+        agent_id=agent_id,
+        document_id=document_id,
+        poll_seconds=poll_seconds,
+        deadline=deadline,
+        background=background,
+        sleep_fn=sleep_fn,
+        monotonic_fn=monotonic_fn,
+        random_fn=random_fn,
+        budget=budget,
+    )
+    raw_text = extract_final_model_output_text(interaction.get("steps"))
+    shape = _ocr_output_shape(raw_text)
+    page_count = len(pages)
+    global_page_end = global_page_start + page_count - 1
+    _log_ocr_output_shape(
+        document_id=document_id,
+        page_count=page_count,
+        global_page_start=global_page_start,
+        global_page_end=global_page_end,
+        provider_calls_used=budget.used,
+        provider_call_budget=budget.limit,
+        shape=shape,
+    )
     try:
         validated = validate_antigravity_ocr_output(
             interaction.get("steps"),
-            expected_page_count=len(ordered_pages),
+            expected_page_count=page_count,
         )
     except OcrContractError as exc:
-        _raise_output_validation_error(exc, document_id=document_id)
+        can_split = (
+            exc.reason == REASON_INVALID_JSON
+            and shape.structurally_truncated
+            and page_count > 1
+            and budget.remaining >= 2
+        )
+        if not can_split:
+            _raise_output_validation_error(exc, document_id=document_id)
+        left_pages, right_pages = _split_contiguous_pages(pages)
+        _log_truncated_json_split(
+            document_id=document_id,
+            page_count=page_count,
+            global_page_start=global_page_start,
+            global_page_end=global_page_end,
+            left_page_count=len(left_pages),
+            right_page_count=len(right_pages),
+            provider_calls_used=budget.used,
+            provider_call_budget=budget.limit,
+            shape=shape,
+        )
+        left = _transcribe_pages_recovering_truncated_json(
+            left_pages,
+            global_page_start=global_page_start,
+            budget=budget,
+            api_key=api_key,
+            agent_id=agent_id,
+            document_id=document_id,
+            poll_seconds=poll_seconds,
+            deadline=deadline,
+            background=background,
+            sleep_fn=sleep_fn,
+            monotonic_fn=monotonic_fn,
+            random_fn=random_fn,
+        )
+        right = _transcribe_pages_recovering_truncated_json(
+            right_pages,
+            global_page_start=global_page_start + len(left_pages),
+            budget=budget,
+            api_key=api_key,
+            agent_id=agent_id,
+            document_id=document_id,
+            poll_seconds=poll_seconds,
+            deadline=deadline,
+            background=background,
+            sleep_fn=sleep_fn,
+            monotonic_fn=monotonic_fn,
+            random_fn=random_fn,
+        )
+        return _combine_validated_ocr_outputs(left, right)
 
+    return _remap_validated_ocr_output(validated, global_page_start=global_page_start)
+
+
+def transcribe_pages_with_antigravity(
+    pages: list[PageImage],
+    *,
+    api_key: str,
+    agent_id: str = DEFAULT_ANTIGRAVITY_AGENT_ID,
+    document_id: int | None = None,
+    poll_seconds: float = DEFAULT_POLL_SECONDS,
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    background: bool = True,
+    sleep_fn=time.sleep,
+    monotonic_fn=time.monotonic,
+    random_fn=random.random,
+) -> AntigravityResult:
+    if not (api_key or "").strip():
+        raise AntigravityError("Missing GEMINI_API_KEY")
+
+    ordered_pages = _sorted_pages(pages)
+    if not ordered_pages:
+        raise AntigravityError("No page images supplied for Antigravity OCR")
+
+    budget = _ProviderCallBudget(
+        limit=_max_provider_calls_for_page_count(len(ordered_pages))
+    )
+    deadline = monotonic_fn() + timeout_seconds
+    validated = _transcribe_pages_recovering_truncated_json(
+        ordered_pages,
+        global_page_start=1,
+        budget=budget,
+        api_key=api_key,
+        agent_id=agent_id,
+        document_id=document_id,
+        poll_seconds=poll_seconds,
+        deadline=deadline,
+        background=background,
+        sleep_fn=sleep_fn,
+        monotonic_fn=monotonic_fn,
+        random_fn=random_fn,
+    )
     return AntigravityResult(
         text=render_validated_ocr_text(validated),
         engine_name=agent_id,
