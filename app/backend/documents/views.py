@@ -5402,7 +5402,7 @@ def _archive_manage_edit_photo(request, item: ArchiveItem):
                 form_errors = [exc.message]
             else:
                 messages.success(request, ARCHIVE_ITEM_UPDATED_MSG)
-                return redirect("archive-manage-list")
+                return redirect("archive-manage-edit", item_id=item.id)
 
     return render(
         request,
@@ -5484,7 +5484,11 @@ def archive_manage_photo_edit_page(request, item_id: int, photo_id: int):
             except PhotoContentManagementError as exc:
                 form_errors = [exc.message]
             else:
-                return redirect("archive-manage-edit", item_id=item.id)
+                return redirect(
+                    "archive-manage-photo-edit",
+                    item_id=item.id,
+                    photo_id=photo_content.id,
+                )
 
     return render(
         request,

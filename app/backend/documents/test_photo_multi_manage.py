@@ -355,6 +355,7 @@ class PhotoComponentEditTests(TestCase):
             },
         )
         self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], self._edit_url(self.second))
         self.first.refresh_from_db()
         self.second.refresh_from_db()
         self.item.refresh_from_db()
@@ -381,6 +382,15 @@ class PhotoComponentEditTests(TestCase):
         self.assertNotContains(resp, 'name="events"')
         self.assertNotContains(resp, 'name="tags"')
         self.assertNotContains(resp, 'name="visibility"')
+        public_url = (
+            reverse("archive-detail", kwargs={"item_id": self.item.id})
+            + f"?photo={self.first.id}"
+        )
+        self.assertContains(resp, f'href="{public_url}"')
+        self.assertContains(resp, ">צפייה<")
+        manage_edit = reverse("archive-manage-edit", kwargs={"item_id": self.item.id})
+        self.assertContains(resp, f'href="{manage_edit}"')
+        self.assertContains(resp, ">חזרה לפריט<")
 
     def test_invalid_photo_date_range_is_rejected(self):
         resp = self.client.post(
@@ -393,6 +403,7 @@ class PhotoComponentEditTests(TestCase):
             },
         )
         self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.has_header("Location"))
         self.first.refresh_from_db()
         self.assertEqual(self.first.description, "First caption")
         self.assertContains(resp, "date_end must not be before date_start")
@@ -413,6 +424,7 @@ class PhotoComponentEditTests(TestCase):
             },
         )
         self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], self._edit_url(self.first))
         self.assertEqual(
             set(self.first.people.values_list("id", flat=True)),
             {charles.id},
