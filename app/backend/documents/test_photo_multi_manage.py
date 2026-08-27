@@ -29,6 +29,7 @@ from documents.services.photo_content_management import (
     LAST_PHOTO_DELETE_ERROR,
     PERSON_NAME_TOO_LONG_ERROR,
     PERSON_NAMES_COMMAS_ONLY_ERROR,
+    PERSON_NOT_FOUND_ERROR,
     next_photo_position,
     reorder_photo_contents,
 )
@@ -197,8 +198,25 @@ class PhotoAddUploadTests(TestCase):
         self.assertContains(resp, 'id="photoUploadForm"')
         self.assertContains(resp, "/api/photo-uploads/add/")
         self.assertContains(resp, 'name="description"')
+        self.assertContains(resp, 'name="person_ids"')
+        self.assertContains(resp, 'name="new_person_name"')
+        self.assertContains(resp, 'name="people_present"')
+        self.assertContains(resp, 'readSelectedIds("person_ids")')
+        self.assertContains(resp, 'getElementById("new_person_name")')
+        self.assertContains(
+            resp,
+            reverse("archive-manage-edit", kwargs={"item_id": self.item.id}),
+        )
+        match = re.search(
+            r'<input[^>]*id="new_person_name"[^>]*>',
+            resp.content.decode(),
+        )
+        self.assertIsNotNone(match)
+        self.assertNotIn("maxlength", match.group(0))
         self.assertNotContains(resp, 'name="title"')
         self.assertNotContains(resp, 'name="categories"')
+        self.assertNotContains(resp, 'name="archive_item_person_ids"')
+        self.assertNotContains(resp, 'name="new_archive_item_person_name"')
 
     @patch("documents.views.enqueue_uploaded_document_processing")
     def test_second_photo_is_allocated_position_two(self, mock_enqueue):
@@ -302,6 +320,219 @@ class PhotoAddUploadTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(resp.status_code, 400)
+
+    def test_add_with_existing_person_creates_photo_person_only(self):
+        existing = Person.objects.create(name="Ada")
+        ArchiveItemPerson.objects.create(archive_item=self.item, person=existing)
+        before_item_people = ArchiveItemPerson.objects.filter(
+            archive_item=self.item
+        ).count()
+        resp = self.client.post(
+            self.ADD_URL,
+            data=json.dumps(
+                self._payload(
+                    person_ids=[existing.id],
+                    people_present="maybe uncle, crowd",
+                )
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        photo = PhotoContent.objects.get(pk=resp.json()["photo_content_id"])
+        self.assertEqual(list(photo.people.values_list("id", flat=True)), [existing.id])
+        self.assertEqual(photo.people_present, "maybe uncle, crowd")
+        self.assertEqual(
+            ArchiveItemPerson.objects.filter(archive_item=self.item).count(),
+            before_item_people,
+        )
+        self.assertEqual(Person.objects.count(), 1)
+        self.assertEqual(self.first.people.count(), 0)
+
+    def test_add_combines_selected_and_new_people_as_photo_person_only(self):
+        existing = Person.objects.create(name="Selected")
+        resp = self.client.post(
+            self.ADD_URL,
+            data=json.dumps(
+                self._payload(
+                    person_ids=[existing.id],
+                    new_person_name="Newly Added",
+                )
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        photo = PhotoContent.objects.get(pk=resp.json()["photo_content_id"])
+        created = Person.objects.get(name="Newly Added")
+        self.assertEqual(
+            set(photo.people.values_list("id", flat=True)),
+            {existing.id, created.id},
+        )
+        self.assertFalse(
+            ArchiveItemPerson.objects.filter(archive_item=self.item).exists()
+        )
+        self.assertEqual(self.first.people.count(), 0)
+
+    def test_add_comma_separated_new_names_link_only_the_new_photo(self):
+        existing = Person.objects.create(name="רחל כהן")
+        PersonAlias.objects.create(person=existing, name="Ada Lovelace")
+        ArchiveItemPerson.objects.create(archive_item=self.item, person=existing)
+        resp = self.client.post(
+            self.ADD_URL,
+            data=json.dumps(
+                self._payload(
+                    new_person_name="  רחל כהן , ,Ada Lovelace, רחל כהן ",
+                    people_present="crowd",
+                )
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        photo = PhotoContent.objects.get(pk=resp.json()["photo_content_id"])
+        created = list(
+            Person.objects.filter(name__in=["רחל כהן", "Ada Lovelace"])
+            .exclude(pk=existing.pk)
+            .order_by("id")
+        )
+        self.assertEqual(
+            [person.name for person in created], ["רחל כהן", "Ada Lovelace"]
+        )
+        self.assertEqual(
+            list(photo.people.order_by("id").values_list("name", flat=True)),
+            ["רחל כהן", "Ada Lovelace"],
+        )
+        for person in created:
+            self.assertTrue(
+                PhotoPerson.objects.filter(photo_content=photo, person=person).exists()
+            )
+            self.assertFalse(
+                ArchiveItemPerson.objects.filter(
+                    archive_item=self.item, person=person
+                ).exists()
+            )
+            self.assertEqual(person.aliases.count(), 0)
+        self.assertEqual(photo.people_present, "crowd")
+        self.assertEqual(
+            set(self.item.people.values_list("id", flat=True)),
+            {existing.id},
+        )
+        self.assertEqual(self.first.people.count(), 0)
+
+    def test_add_exact_in_input_dedupe_keeps_case_distinct(self):
+        resp = self.client.post(
+            self.ADD_URL,
+            data=json.dumps(self._payload(new_person_name="Ada, ada, Ada")),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        photo = PhotoContent.objects.get(pk=resp.json()["photo_content_id"])
+        self.assertEqual(
+            list(photo.people.order_by("id").values_list("name", flat=True)),
+            ["Ada", "ada"],
+        )
+        self.assertEqual(Person.objects.filter(name__in=["Ada", "ada"]).count(), 2)
+        self.assertFalse(ArchiveItemPerson.objects.exists())
+
+    def test_add_rejects_commas_only_and_overlong_new_names_without_rows(self):
+        before_photos = PhotoContent.objects.count()
+        before_people = Person.objects.count()
+        commas_only = self.client.post(
+            self.ADD_URL,
+            data=json.dumps(self._payload(new_person_name=", , ,")),
+            content_type="application/json",
+        )
+        self.assertEqual(commas_only.status_code, 400)
+        self.assertEqual(commas_only.json()["error"], PERSON_NAMES_COMMAS_ONLY_ERROR)
+        self.assertEqual(PhotoContent.objects.count(), before_photos)
+        self.assertEqual(Person.objects.count(), before_people)
+
+        too_long = "y" * 256
+        length_resp = self.client.post(
+            self.ADD_URL,
+            data=json.dumps(self._payload(new_person_name=f"{'a' * 200}, {too_long}")),
+            content_type="application/json",
+        )
+        self.assertEqual(length_resp.status_code, 400)
+        self.assertEqual(length_resp.json()["error"], PERSON_NAME_TOO_LONG_ERROR)
+        self.assertEqual(PhotoContent.objects.count(), before_photos)
+        self.assertEqual(Person.objects.count(), before_people)
+
+    def test_add_rejects_unknown_person_id_before_creating_rows(self):
+        before_photos = PhotoContent.objects.count()
+        before_people = Person.objects.count()
+        resp = self.client.post(
+            self.ADD_URL,
+            data=json.dumps(self._payload(person_ids=[999_999])),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["error"], PERSON_NOT_FOUND_ERROR)
+        self.assertEqual(PhotoContent.objects.count(), before_photos)
+        self.assertEqual(Person.objects.count(), before_people)
+
+    def test_add_people_present_stays_free_text(self):
+        resp = self.client.post(
+            self.ADD_URL,
+            data=json.dumps(self._payload(people_present="Ada, Charles, Ada Lovelace")),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        photo = PhotoContent.objects.get(pk=resp.json()["photo_content_id"])
+        self.assertEqual(photo.people_present, "Ada, Charles, Ada Lovelace")
+        self.assertEqual(photo.people.count(), 0)
+        self.assertFalse(Person.objects.exists())
+        self.assertFalse(ArchiveItemPerson.objects.exists())
+
+    def test_add_ignores_archive_item_person_payload_keys(self):
+        person = Person.objects.create(name="ShouldStayItemOnly")
+        resp = self.client.post(
+            self.ADD_URL,
+            data=json.dumps(
+                self._payload(
+                    archive_item_person_ids=[person.id],
+                    new_archive_item_person_name="ShouldNotCreate",
+                )
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        photo = PhotoContent.objects.get(pk=resp.json()["photo_content_id"])
+        self.assertEqual(photo.people.count(), 0)
+        self.assertFalse(
+            ArchiveItemPerson.objects.filter(archive_item=self.item).exists()
+        )
+        self.assertFalse(Person.objects.filter(name="ShouldNotCreate").exists())
+
+    def test_photo_create_still_writes_archive_item_person_only(self):
+        existing = Person.objects.create(name="CreateExisting")
+        resp = self.client.post(
+            "/api/photo-uploads/create/",
+            data=json.dumps(
+                {
+                    "title": "Create people photo",
+                    "visibility": ArchiveItem.Visibility.PUBLIC,
+                    "metadata_status": ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
+                    "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
+                    "original_name": "photo.jpg",
+                    "mime_type": "image/jpeg",
+                    "archive_item_person_ids": [existing.id],
+                    "new_archive_item_person_name": "Create New Token",
+                    "person_ids": [existing.id],
+                    "new_person_name": "ShouldNotBePhotoPerson",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        item = ArchiveItem.objects.get(id=resp.json()["archive_item_id"])
+        photo = PhotoContent.objects.get(pk=resp.json()["photo_content_id"])
+        created = Person.objects.get(name="Create New Token")
+        self.assertEqual(
+            set(item.people.values_list("id", flat=True)),
+            {existing.id, created.id},
+        )
+        self.assertEqual(photo.people.count(), 0)
+        self.assertFalse(Person.objects.filter(name="ShouldNotBePhotoPerson").exists())
+        self.assertEqual(PhotoPerson.objects.count(), 0)
 
 
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")

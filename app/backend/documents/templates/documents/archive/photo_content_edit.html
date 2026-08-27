@@ -32,40 +32,7 @@
       {% csrf_token %}
       {% include "documents/archive/photo_content_form_fields.html" %}
       {% include "documents/archive/archive_date_form_fields.html" %}
-
-      <div class="field">
-        <label for="person_ids">אנשים מזוהים בתמונה</label>
-        <select id="person_ids" name="person_ids" multiple size="8">
-          {% for person in person_choices %}
-            <option value="{{ person.id }}" {% if person.selected %}selected{% endif %}>
-              {{ person.label }}
-            </option>
-          {% endfor %}
-        </select>
-        <div class="field-hint">בחירה מרשומות אדם קיימות. לא יוצר קשר ברמת פריט הארכיון. שמות חלופיים מוצגים בסוגריים.</div>
-      </div>
-
-      {% if selected_people %}
-        <div class="field">
-          <p>אנשים שנבחרו בתמונה זו</p>
-          <ul>
-            {% for person in selected_people %}
-              <li>
-                {{ person.label }}
-                —
-                <a href="{% url 'archive-manage-person-edit' person_id=person.id %}">עריכת אדם</a>
-              </li>
-            {% endfor %}
-          </ul>
-          <div class="field-hint">שמות חלופיים שייכים לאדם בכל הארכיון, לא לתמונה זו בלבד.</div>
-        </div>
-      {% endif %}
-
-      <div class="field">
-        <label for="new_person_name">הוספת אדם מזוהה חדש</label>
-        <input id="new_person_name" name="new_person_name" type="text" value="{{ form_data.new_person_name }}" />
-        <div class="field-hint">ניתן להזין כמה שמות מופרדים בפסיקים. כל שם יוצר רשומת אדם חדשה ומקושרת לתמונה זו. שם תצוגה בלבד.</div>
-      </div>
+      {% include "documents/archive/photo_person_form_fields.html" %}
 
       <div class="spacer"></div>
       <button type="submit" class="btn btn-primary">{{ submit_label }}</button>

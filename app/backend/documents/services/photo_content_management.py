@@ -359,6 +359,17 @@ def set_photo_people(photo_content: PhotoContent, person_ids: list[int]) -> None
     photo_content.people.set([by_id[person_id] for person_id in unique_ids])
 
 
+def missing_person_ids_error(person_ids: list[int]) -> str | None:
+    """Return a not-found error if any id is missing. Does not write rows."""
+    unique_ids = list(dict.fromkeys(person_ids))
+    if not unique_ids:
+        return None
+    found = Person.objects.filter(pk__in=unique_ids).count()
+    if found != len(unique_ids):
+        return PERSON_NOT_FOUND_ERROR
+    return None
+
+
 @transaction.atomic
 def update_photo_content_metadata(
     photo_content: PhotoContent,

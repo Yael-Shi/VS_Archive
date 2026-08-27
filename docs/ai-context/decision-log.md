@@ -1,5 +1,40 @@
 # VS-Archive Decision Log
 
+## PHOTO add-photo identified people (PhotoPerson)
+
+**Decision / implemented:** Staff add-photo can select existing people and
+create comma-separated new people as **`PhotoPerson`** on the new
+`PhotoContent` only. This reuses the #468 parser/create services. It does
+not change PHOTO item create, shared metadata, redirects, or layout.
+
+**Current behavior:**
+
+- `/archive/manage/<id>/photos/add/` includes the same PhotoPerson
+  controls as per-photo edit (`photo_person_form_fields.html`): existing
+  `person_ids` picker and `new_person_name`.
+- Add-photo JS sends `person_ids` and `new_person_name` to
+  `POST /api/photo-uploads/add/`. It does not send
+  `archive_item_person_ids` / `new_archive_item_person_name`.
+- Person input is validated before any `PhotoContent` or `Person` row is
+  created (id format, existing ids, commas-only, per-token length).
+  Invalid input is HTTP 400 with no new rows.
+- Selected ids plus each parsed new name become **`PhotoPerson` only** on
+  the new photo. Names always create; no name/alias lookup or merge.
+  Exact in-input dedupe matches #468. `people_present` stays independent
+  free text.
+- PHOTO item create (`/api/photo-uploads/create/`) still writes
+  **`ArchiveItemPerson` only**. Extra `person_ids` / `new_person_name` on
+  that payload are ignored.
+- Add-photo JS still redirects to the item management page.
+
+**Why:** Staff often identify people while attaching another image. Waiting
+until the per-photo editor forced a second round-trip.
+
+**Deferred:** unified staff PHOTO page / selector; staff `?photo=` after
+add; lookup/merge by name; parsing `people_present`.
+
+**Tests:** `documents/test_photo_multi_manage.py` (`PhotoAddUploadTests`).
+
 ## PHOTO staff save stays on the same page
 
 **Decision / implemented:** Successful staff PHOTO metadata saves remain on
@@ -22,15 +57,16 @@ staff `?photo=` selection, or change add-photo / Person write paths.
   gallery selection behavior is unchanged.
 - Unchanged: PHOTO create redirect to the manage list; add-photo JS
   redirect to item edit; reorder/delete-one-photo redirects to item edit;
-  whole-item delete redirect to the manage list; `ArchiveItemPerson` /
-  `PhotoPerson` writes; `people_present`; date widgets; public pages.
+  whole-item delete redirect to the manage list; `people_present`; date
+  widgets; public pages. Add-photo PhotoPerson is implemented separately
+  (see **PHOTO add-photo identified people**).
 
 **Why:** Leaving the item or the edited photo after every save forces extra
 navigation. Stay-on-page matches the already-decided unified-management UX
 without merging layouts yet.
 
 **Deferred:** unified staff PHOTO page / selector; staff `?photo=` on the
-item edit URL; add-photo PhotoPerson; date-widget prefixing.
+item edit URL; date-widget prefixing.
 
 **Tests:** `documents/test_photo_manage_edit_delete.py`,
 `documents/test_photo_multi_manage.py`.
@@ -46,7 +82,7 @@ identity merge, alias create, or lookup-by-name.
 
 - Fields: item-level **`new_archive_item_person_name`** (ArchiveItem create
   and edit, including PHOTO create) and photo-level **`new_person_name`**
-  (per-photo edit only). Same parse/split contract.
+  (per-photo edit and add-photo). Same parse/split contract.
 - Split on ASCII comma, trim each token, drop empty tokens, then
   order-preserving dedupe **within that submitted string only**. Repeated
   tokens do not create extra Person rows. Dedupe is exact after trim
@@ -66,15 +102,17 @@ identity merge, alias create, or lookup-by-name.
   **`PERSON_NAMES_COMMAS_ONLY_ERROR`** and creates no Person / join rows.
 - Hebrew field hints on both inputs describe comma-separated create.
 - Unchanged: **`people_present`**, **`author_name`**, aliases, redirects,
-  add-photo, search, photo-page layout, picker ids, and C2 suggestion
-  flows.
+  search, photo-page layout, picker ids, and C2 suggestion
+  flows. Add-photo PhotoPerson is implemented separately (see **PHOTO
+  add-photo identified people**).
 
 **Why:** Staff often need to add several new people at once. Comma-separated
 create on the existing fields avoids extra round-trips without weakening
 the always-create / no-merge identity contract.
 
 **Deferred:** lookup/merge by name; bulk alias create; parsing
-`people_present`; changing add-photo or public search.
+`people_present`; public search. Add-photo identified people is
+implemented (see **PHOTO add-photo identified people**).
 
 **Tests:** `documents/test_archive_item_person_staff_ui.py`,
 `documents/test_photo_multi_manage.py`.
@@ -1239,9 +1277,10 @@ no public alias display.
   validation. Success uses PRG + Django messages. Delete is POST-only after a
   confirmation page. Alias CRUD is global to the Person, not scoped to the
   current photo.
-- `new_person_name` on photo edit remains name-only Person create with no
-  automatic aliases. The field may be comma-separated; each token creates
-  a new Person and **`PhotoPerson`** only (see **Comma-separated new Person
+- `new_person_name` on photo edit (and now add-photo; see **PHOTO add-photo
+  identified people**) remains name-only Person create with no automatic
+  aliases. The field may be comma-separated; each token creates a new
+  Person and **`PhotoPerson`** only (see **Comma-separated new Person
   names**). The Person edit link appears on the next photo-edit visit
   after that Person is selected.
 - Canonical rename may equal an existing alias (PR6a). The UI does not
@@ -1477,7 +1516,9 @@ automatic `ArchiveItemPerson` derivation.
   pending `PhotoContent` on the existing item, allocates
   `max(position)+1` under an `ArchiveItem` `select_for_update` lock (does not
   use the model default `position=1`), then keys S3 as
-  `photos/{photo_content_id}/original.{ext}`. Finalize remains
+  `photos/{photo_content_id}/original.{ext}`. Staff can also send
+  `person_ids` / `new_person_name` on that request (see **PHOTO add-photo
+  identified people**). Finalize remains
   `POST /api/photo-uploads/<id>/complete/`. No Document/SQS.
 - **Edit photo:** `/archive/manage/<id>/photos/<photo_id>/edit/` updates one
   `PhotoContent` (description, location, context, people_present, notes,
