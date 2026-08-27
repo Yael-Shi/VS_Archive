@@ -22,6 +22,10 @@ PHOTO_POSITION_CONFLICT_ERROR = "מיקום התמונה כבר תפוס. נסו
 PERSON_NOT_FOUND_ERROR = "אדם מזוהה לא נמצא."
 PERSON_NAME_REQUIRED_ERROR = "שם האדם המזוהה נדרש."
 PERSON_NAME_TOO_LONG_ERROR = "שם האדם המזוהה חייב להיות עד 255 תווים."
+PERSON_NAMES_COMMAS_ONLY_ERROR = (
+    "יש להזין לפחות שם אדם אחד. לא ניתן לשמור קלט שמכיל רק פסיקים או רווחים."
+)
+PERSON_NAME_MAX_LENGTH = 255
 PERSON_ALIAS_REQUIRED_ERROR = "שם חלופי נדרש."
 PERSON_ALIAS_TOO_LONG_ERROR = "השם החלופי חייב להיות עד 255 תווים."
 PERSON_ALIAS_MATCHES_CANONICAL_ERROR = "השם החלופי אינו יכול להיות זהה לשם התצוגה."
@@ -179,21 +183,68 @@ def parse_photo_person_ids(post_data) -> tuple[list[int], list[str]]:
     return person_ids, errors
 
 
+def split_comma_separated_person_names(raw: str | None) -> list[str]:
+    """Split, trim, drop empty tokens, and order-preserving dedupe within input.
+
+    Does not look up, merge, or reuse existing Person rows.
+    """
+    names: list[str] = []
+    seen: set[str] = set()
+    for token in (raw or "").split(","):
+        name = token.strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+    return names
+
+
+def parse_new_person_names_input(raw: str | None) -> tuple[str, list[str], list[str]]:
+    """Validate comma-separated new Person names.
+
+    Returns ``(display, names, errors)``. Empty/whitespace-only input is a
+    no-op. Nonempty input that yields no tokens after split/trim is rejected.
+    Each remaining token is checked independently against the Person-name
+    length limit. Does not look up existing names or aliases.
+    """
+    display = "" if raw is None else str(raw).strip()
+    if not display:
+        return "", [], []
+    names = split_comma_separated_person_names(display)
+    if not names:
+        return display, [], [PERSON_NAMES_COMMAS_ONLY_ERROR]
+    errors: list[str] = []
+    for name in names:
+        if len(name) > PERSON_NAME_MAX_LENGTH:
+            errors.append(PERSON_NAME_TOO_LONG_ERROR)
+            break
+    return display, names, errors
+
+
 def parse_new_person_name(post_data) -> tuple[str, list[str]]:
     raw = post_data.get("new_person_name") if post_data is not None else None
-    name = (raw or "").strip()
-    if len(name) > 255:
-        return name, [PERSON_NAME_TOO_LONG_ERROR]
-    return name, []
+    display, _names, errors = parse_new_person_names_input(raw)
+    return display, errors
 
 
 def create_identified_person(*, name: str) -> Person:
     normalized = (name or "").strip()
     if not normalized:
         raise PhotoContentManagementError(PERSON_NAME_REQUIRED_ERROR)
-    if len(normalized) > 255:
+    if len(normalized) > PERSON_NAME_MAX_LENGTH:
         raise PhotoContentManagementError(PERSON_NAME_TOO_LONG_ERROR)
     return Person.objects.create(name=normalized)
+
+
+def create_identified_people_from_new_names(raw: str | None) -> list[Person]:
+    """Create one new Person per parsed token via ``create_identified_person``.
+
+    Never looks up, merges, or reuses by canonical name or alias.
+    """
+    _display, names, errors = parse_new_person_names_input(raw)
+    if errors:
+        raise PhotoContentManagementError(errors[0])
+    return [create_identified_person(name=name) for name in names]
 
 
 def _sync_person_search_indexes(person_id: int) -> None:
@@ -323,7 +374,13 @@ def update_photo_content_metadata(
     person_ids: list[int],
     new_person_name: str = "",
 ) -> PhotoContent:
-    """Update one PhotoContent row. Does not write ArchiveItem shared metadata."""
+    """Update one PhotoContent row. Does not write ArchiveItem shared metadata.
+
+    Optional ``new_person_name`` may be comma-separated. Each token creates a
+    new Person via ``create_identified_person`` and is linked as PhotoPerson
+    only. Does not look up or merge by name, and does not write
+    ArchiveItemPerson.
+    """
     locked_item = lock_photo_archive_item(photo_content.archive_item_id)
     locked_photos = lock_photo_contents_for_item(locked_item)
     locked = next(
@@ -357,9 +414,8 @@ def update_photo_content_metadata(
     )
 
     resolved_person_ids = list(person_ids)
-    if new_person_name:
-        created = create_identified_person(name=new_person_name)
-        resolved_person_ids.append(created.pk)
+    created_people = create_identified_people_from_new_names(new_person_name)
+    resolved_person_ids.extend(person.pk for person in created_people)
     set_photo_people(locked, resolved_person_ids)
 
     from documents.services.archive_search_index import sync_archive_item_search_index
