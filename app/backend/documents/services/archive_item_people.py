@@ -12,10 +12,10 @@ from django.db import IntegrityError, transaction
 
 from documents.models import ArchiveItem, ArchiveItemPerson, Person
 from documents.services.photo_content_management import (
-    PERSON_NAME_TOO_LONG_ERROR,
     PERSON_NOT_FOUND_ERROR,
     PhotoContentManagementError,
-    create_identified_person,
+    create_identified_people_from_new_names,
+    parse_new_person_names_input,
 )
 
 ARCHIVE_ITEM_PERSON_IDS_FIELD = "archive_item_person_ids"
@@ -101,10 +101,8 @@ def parse_new_archive_item_person_name(post_data) -> tuple[str, list[str]]:
         if post_data is not None
         else None
     )
-    name = (raw or "").strip()
-    if len(name) > 255:
-        return name, [PERSON_NAME_TOO_LONG_ERROR]
-    return name, []
+    display, _names, errors = parse_new_person_names_input(raw)
+    return display, errors
 
 
 def parse_archive_item_people_form(post_data) -> tuple[dict[str, Any], list[str]]:
@@ -171,10 +169,11 @@ def set_archive_item_people(
 ) -> list[ArchiveItemPerson]:
     """Replace ArchiveItemPerson links to match ``person_ids`` in one transaction.
 
-    Optional ``new_person_name`` always creates a new canonical Person and
-    appends it. Does not create aliases, PhotoPerson rows, or Tags. Does not
-    merge by name. Unknown Person ids are rejected. One search-index refresh
-    when links change and ``refresh_search_index`` is true.
+    Optional ``new_person_name`` may be comma-separated. Each token always
+    creates a new canonical Person and appends it. Does not create aliases,
+    PhotoPerson rows, or Tags. Does not look up or merge by name. Unknown
+    Person ids are rejected. One search-index refresh when links change and
+    ``refresh_search_index`` is true.
 
     Callers that already refresh this item in the same transaction (staff
     metadata save) may pass ``refresh_search_index=False`` so the later sync
@@ -188,11 +187,11 @@ def set_archive_item_people(
 
     resolved_ids = list(dict.fromkeys(person_ids))
     created_person = False
-    if new_person_name:
-        try:
-            created = create_identified_person(name=new_person_name)
-        except PhotoContentManagementError as exc:
-            raise ArchiveItemPersonError(exc.message) from exc
+    try:
+        created_people = create_identified_people_from_new_names(new_person_name)
+    except PhotoContentManagementError as exc:
+        raise ArchiveItemPersonError(exc.message) from exc
+    for created in created_people:
         resolved_ids.append(created.pk)
         created_person = True
 

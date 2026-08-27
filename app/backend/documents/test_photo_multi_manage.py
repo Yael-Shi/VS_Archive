@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 from datetime import date
 from unittest.mock import call, patch
@@ -19,12 +20,15 @@ from documents.models import (
     ArchiveItemPerson,
     Document,
     Person,
+    PersonAlias,
     PhotoContent,
     PhotoPerson,
 )
 from documents.s3 import S3HeadObjectResult, build_photo_original_s3_key
 from documents.services.photo_content_management import (
     LAST_PHOTO_DELETE_ERROR,
+    PERSON_NAME_TOO_LONG_ERROR,
+    PERSON_NAMES_COMMAS_ONLY_ERROR,
     next_photo_position,
     reorder_photo_contents,
 )
@@ -447,6 +451,109 @@ class PhotoComponentEditTests(TestCase):
             ).exists()
         )
         self.assertEqual(self.second.people_present, "crowd")
+
+    def test_comma_separated_new_names_link_only_the_photo(self):
+        existing = Person.objects.create(name="רחל כהן")
+        PersonAlias.objects.create(person=existing, name="Ada Lovelace")
+        ArchiveItemPerson.objects.create(archive_item=self.item, person=existing)
+        resp = self.client.post(
+            self._edit_url(self.second),
+            data={
+                "description": "Second caption",
+                "people_present": "crowd",
+                "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
+                "new_person_name": "  רחל כהן , ,Ada Lovelace, רחל כהן ",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        created = list(
+            Person.objects.filter(name__in=["רחל כהן", "Ada Lovelace"])
+            .exclude(pk=existing.pk)
+            .order_by("id")
+        )
+        self.assertEqual(
+            [person.name for person in created], ["רחל כהן", "Ada Lovelace"]
+        )
+        self.assertEqual(
+            list(self.second.people.order_by("id").values_list("name", flat=True)),
+            ["רחל כהן", "Ada Lovelace"],
+        )
+        for person in created:
+            self.assertTrue(
+                PhotoPerson.objects.filter(
+                    photo_content=self.second, person=person
+                ).exists()
+            )
+            self.assertFalse(
+                ArchiveItemPerson.objects.filter(
+                    archive_item=self.item, person=person
+                ).exists()
+            )
+            self.assertEqual(person.aliases.count(), 0)
+        self.assertEqual(self.second.people_present, "crowd")
+        self.assertEqual(
+            set(self.item.people.values_list("id", flat=True)),
+            {existing.id},
+        )
+        self.assertEqual(self.first.people.count(), 0)
+
+    def test_photo_new_person_name_validation_and_maxlength(self):
+        resp = self.client.get(self._edit_url(self.first))
+        html = resp.content.decode()
+        match = re.search(r'<input[^>]*id="new_person_name"[^>]*>', html)
+        self.assertIsNotNone(match)
+        self.assertNotIn("maxlength", match.group(0))
+        self.assertContains(
+            resp,
+            "ניתן להזין כמה שמות מופרדים בפסיקים. כל שם יוצר רשומת אדם חדשה ומקושרת לתמונה זו.",
+        )
+
+        commas_only = self.client.post(
+            self._edit_url(self.first),
+            data={
+                "description": "First caption",
+                "people_present": "maybe uncle",
+                "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
+                "new_person_name": ", , ,",
+            },
+        )
+        self.assertEqual(commas_only.status_code, 200)
+        self.assertContains(commas_only, PERSON_NAMES_COMMAS_ONLY_ERROR)
+        self.assertEqual(Person.objects.count(), 0)
+        self.assertEqual(self.first.people_present, "maybe uncle")
+
+        too_long = "y" * 256
+        length_resp = self.client.post(
+            self._edit_url(self.first),
+            data={
+                "description": "First caption",
+                "people_present": "maybe uncle",
+                "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
+                "new_person_name": f"{'a' * 200}, {too_long}",
+            },
+        )
+        self.assertEqual(length_resp.status_code, 200)
+        self.assertContains(length_resp, PERSON_NAME_TOO_LONG_ERROR)
+        self.assertFalse(Person.objects.exists())
+
+        ok_resp = self.client.post(
+            self._edit_url(self.first),
+            data={
+                "description": "First caption",
+                "people_present": "maybe uncle",
+                "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
+                "new_person_name": f"{'a' * 200}, {'b' * 200}",
+            },
+        )
+        self.assertEqual(ok_resp.status_code, 302)
+        self.assertEqual(
+            list(self.first.people.order_by("id").values_list("name", flat=True)),
+            ["a" * 200, "b" * 200],
+        )
+        self.assertEqual(
+            ArchiveItemPerson.objects.filter(archive_item=self.item).count(), 0
+        )
+        self.assertEqual(self.first.people_present, "maybe uncle")
 
     def test_cannot_edit_photo_from_another_item_via_this_item_url(self):
         other = _create_photo_item(title="Other")

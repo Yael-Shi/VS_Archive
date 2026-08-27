@@ -1,5 +1,49 @@
 # VS-Archive Decision Log
 
+## Comma-separated new Person names (staff create)
+
+**Decision / implemented:** Staff **new Person** fields accept comma-separated
+canonical names on the existing item-level and photo-level inputs. This is a
+convenience for creating several new identities in one submit. It is not
+identity merge, alias create, or lookup-by-name.
+
+**Current behavior:**
+
+- Fields: item-level **`new_archive_item_person_name`** (ArchiveItem create
+  and edit, including PHOTO create) and photo-level **`new_person_name`**
+  (per-photo edit only). Same parse/split contract.
+- Split on ASCII comma, trim each token, drop empty tokens, then
+  order-preserving dedupe **within that submitted string only**. Repeated
+  tokens do not create extra Person rows. Dedupe is exact after trim
+  (`Ada` and `ada` remain distinct).
+- Each remaining token always creates a new **`Person`** through
+  **`create_identified_person`**. No `get_or_create`. No lookup or reuse by
+  canonical name or alias. Duplicate display names remain distinct
+  identities.
+- Item input writes **`ArchiveItemPerson` only**. Photo input writes
+  **`PhotoPerson` only**. Neither relation is inferred from the other.
+- Per-token **`Person.name`** limit remains 255 characters. The HTML inputs
+  no longer use `maxlength="255"` so a multi-name list is not capped at
+  255 characters as a whole. A list longer than 255 is valid when each
+  token is ≤ 255.
+- Empty / whitespace-only input remains a no-op. Nonempty input that is
+  only commas/whitespace is rejected with
+  **`PERSON_NAMES_COMMAS_ONLY_ERROR`** and creates no Person / join rows.
+- Hebrew field hints on both inputs describe comma-separated create.
+- Unchanged: **`people_present`**, **`author_name`**, aliases, redirects,
+  add-photo, search, photo-page layout, picker ids, and C2 suggestion
+  flows.
+
+**Why:** Staff often need to add several new people at once. Comma-separated
+create on the existing fields avoids extra round-trips without weakening
+the always-create / no-merge identity contract.
+
+**Deferred:** lookup/merge by name; bulk alias create; parsing
+`people_present`; changing add-photo or public search.
+
+**Tests:** `documents/test_archive_item_person_staff_ui.py`,
+`documents/test_photo_multi_manage.py`.
+
 ## Antigravity supported request contract
 
 **Decision / implemented:** Antigravity Interactions create requests use the
@@ -814,6 +858,9 @@ missing write path for the identity model that public `q` and advanced
 - New Person: canonical **`Person.name`** only via
   **`create_identified_person`** (always creates; trim; no aliases; no
   `get_or_create`; duplicate names remain distinct identities).
+  **`new_archive_item_person_name`** may be comma-separated; each token
+  creates a new Person and **`ArchiveItemPerson`** only (see
+  **Comma-separated new Person names**).
 - Writes go through **`set_archive_item_people`** in
   `documents/services/archive_item_people.py` (diff current vs submitted
   ids, create/delete through rows, one in-transaction search-index
@@ -1158,8 +1205,10 @@ no public alias display.
   confirmation page. Alias CRUD is global to the Person, not scoped to the
   current photo.
 - `new_person_name` on photo edit remains name-only Person create with no
-  automatic aliases. The Person edit link appears on the next photo-edit
-  visit after that Person is selected.
+  automatic aliases. The field may be comma-separated; each token creates
+  a new Person and **`PhotoPerson`** only (see **Comma-separated new Person
+  names**). The Person edit link appears on the next photo-edit visit
+  after that Person is selected.
 - Canonical rename may equal an existing alias (PR6a). The UI does not
   delete or promote the matching alias; both can appear.
 - Public PHOTO detail still shows canonical `Person.name` only. Search

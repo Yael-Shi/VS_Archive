@@ -9,7 +9,7 @@ from unittest.mock import patch
 from django.contrib.auth.models import Group, User
 from django.contrib.messages import get_messages
 from django.db import connection
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
@@ -42,7 +42,13 @@ from documents.services.archive_search_index import (
     rebuild_archive_item_search_index,
     sync_archive_item_search_index,
 )
-from documents.services.photo_content_management import PERSON_NOT_FOUND_ERROR
+from documents.services.photo_content_management import (
+    PERSON_NAME_TOO_LONG_ERROR,
+    PERSON_NAMES_COMMAS_ONLY_ERROR,
+    PERSON_NOT_FOUND_ERROR,
+    parse_new_person_names_input,
+    split_comma_separated_person_names,
+)
 from documents.test_archive_date_payloads import merge_default_date_fields
 from documents.test_archive_item import create_viewable_ocr_document
 from documents.views import (
@@ -136,6 +142,12 @@ def _presign_url(*, bucket, key, expires_in=3600):
 
 def _edit_url(item: ArchiveItem) -> str:
     return EDIT_URL_TEMPLATE.format(item_id=item.id)
+
+
+def _input_tag(html: str, field_id: str) -> str:
+    match = re.search(rf'<input[^>]*id="{field_id}"[^>]*>', html)
+    assert match is not None, f"missing input {field_id}"
+    return match.group(0)
 
 
 class ArchiveItemPersonStaffUiHarness:
@@ -247,6 +259,53 @@ class ArchiveItemPersonStaffUiHarness:
         ]
 
 
+class CommaSeparatedNewPersonNameParseTests(SimpleTestCase):
+    def test_split_trims_drops_empty_tokens_and_dedupes_in_order(self):
+        self.assertEqual(split_comma_separated_person_names(None), [])
+        self.assertEqual(split_comma_separated_person_names(""), [])
+        self.assertEqual(
+            split_comma_separated_person_names(
+                "  יעקב כהן , ,רחל לוי, יעקב כהן , ada "
+            ),
+            ["יעקב כהן", "רחל לוי", "ada"],
+        )
+        self.assertEqual(
+            split_comma_separated_person_names("Ada, ada, Ada"),
+            ["Ada", "ada"],
+        )
+
+    def test_empty_and_whitespace_only_are_noop(self):
+        for raw in (None, "", "   "):
+            display, names, errors = parse_new_person_names_input(raw)
+            self.assertEqual(display, "")
+            self.assertEqual(names, [])
+            self.assertEqual(errors, [])
+
+    def test_commas_and_whitespace_only_are_rejected(self):
+        for raw in (",", ",,,", " , , ", "\t,\n,"):
+            display, names, errors = parse_new_person_names_input(raw)
+            self.assertEqual(display, (raw or "").strip())
+            self.assertEqual(names, [])
+            self.assertEqual(errors, [PERSON_NAMES_COMMAS_ONLY_ERROR])
+
+    def test_per_token_length_not_whole_list_length(self):
+        first = "a" * 200
+        second = "b" * 200
+        display, names, errors = parse_new_person_names_input(f"  {first}, {second}  ")
+        self.assertEqual(display, f"{first}, {second}")
+        self.assertEqual(names, [first, second])
+        self.assertEqual(errors, [])
+
+        too_long = "x" * 256
+        _display, names, errors = parse_new_person_names_input(f"ok, {too_long}")
+        self.assertEqual(names, ["ok", too_long])
+        self.assertEqual(errors, [PERSON_NAME_TOO_LONG_ERROR])
+
+        _display, names, errors = parse_new_person_names_input("x" * 255)
+        self.assertEqual(names, ["x" * 255])
+        self.assertEqual(errors, [])
+
+
 class ArchiveItemPersonBatchServiceTests(TestCase):
     def test_multiple_add_and_remove_refresh_index_once(self):
         item = create_manual_text_archive_item(
@@ -310,6 +369,35 @@ class ArchiveItemPersonBatchServiceTests(TestCase):
         self.assertEqual(Person.objects.filter(name="יעקב כהן").count(), 2)
         self.assertEqual({link.person_id for link in links}, {existing.pk, created.pk})
         self.assertEqual(PersonAlias.objects.count(), 0)
+
+    def test_comma_separated_names_create_distinct_item_people_only(self):
+        item = create_manual_text_archive_item(
+            title="Comma people item",
+            body="body",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        existing = Person.objects.create(name="יעקב כהן")
+        PersonAlias.objects.create(person=existing, name="רחל לוי")
+        photo_item = _create_photo_item(title="Unrelated photo")
+        photo = _add_photo(photo_item, position=1, filename="unrelated.jpg")
+        links = set_archive_item_people(
+            archive_item=item,
+            person_ids=[],
+            new_person_name="  יעקב כהן , ,רחל לוי, יעקב כהן ",
+        )
+        created_names = [link.person.name for link in links]
+        self.assertEqual(created_names, ["יעקב כהן", "רחל לוי"])
+        created = [link.person for link in links]
+        self.assertNotEqual(created[0].pk, existing.pk)
+        self.assertEqual(Person.objects.filter(name="יעקב כהן").count(), 2)
+        self.assertEqual(Person.objects.filter(name="רחל לוי").count(), 1)
+        self.assertEqual(
+            set(item.people.values_list("id", flat=True)),
+            {created[0].pk, created[1].pk},
+        )
+        self.assertEqual(PersonAlias.objects.filter(person__in=created).count(), 0)
+        self.assertEqual(PhotoPerson.objects.filter(person__in=created).count(), 0)
+        self.assertEqual(photo.people.count(), 0)
 
 
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
@@ -466,6 +554,84 @@ class ArchiveItemPersonStaffUiTests(ArchiveItemPersonStaffUiHarness, TestCase):
             ArchiveItemPerson.objects.filter(archive_item=item, person=created).exists()
         )
         self.assertEqual(PersonAlias.objects.filter(person=created).count(), 0)
+
+    def test_comma_separated_new_names_on_edit_create_item_people_only(self):
+        item = self._create_photo(title="Comma edit photo")
+        photo = item.photo_contents.get()
+        resp = self.client.post(
+            _edit_url(item),
+            data=self._payload_for(
+                item,
+                **{
+                    NEW_ARCHIVE_ITEM_PERSON_NAME_FIELD: (
+                        "  אדם ראשון , ,אדם שני, אדם ראשון "
+                    )
+                },
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        created = list(
+            Person.objects.filter(name__in=["אדם ראשון", "אדם שני"]).order_by("id")
+        )
+        self.assertEqual([person.name for person in created], ["אדם ראשון", "אדם שני"])
+        self.assertEqual(
+            list(item.people.order_by("id").values_list("name", flat=True)),
+            ["אדם ראשון", "אדם שני"],
+        )
+        self.assertEqual(PhotoPerson.objects.filter(photo_content=photo).count(), 0)
+        self.assertEqual(PersonAlias.objects.filter(person__in=created).count(), 0)
+
+    def test_comma_only_and_per_token_length_errors_on_edit(self):
+        item = self._create_manual(title="Comma validation item")
+        resp = self.client.post(
+            _edit_url(item),
+            data=self._payload_for(
+                item,
+                **{NEW_ARCHIVE_ITEM_PERSON_NAME_FIELD: " , , "},
+            ),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, PERSON_NAMES_COMMAS_ONLY_ERROR)
+        self.assertContains(resp, 'value=", ,"')
+        self.assertEqual(Person.objects.count(), 0)
+
+        too_long = "x" * 256
+        combined = f"{'a' * 200}, {too_long}"
+        length_resp = self.client.post(
+            _edit_url(item),
+            data=self._payload_for(
+                item,
+                **{NEW_ARCHIVE_ITEM_PERSON_NAME_FIELD: combined},
+            ),
+        )
+        self.assertEqual(length_resp.status_code, 200)
+        self.assertContains(length_resp, PERSON_NAME_TOO_LONG_ERROR)
+        self.assertFalse(Person.objects.exists())
+
+        ok_first = "a" * 200
+        ok_second = "b" * 200
+        ok_resp = self.client.post(
+            _edit_url(item),
+            data=self._payload_for(
+                item,
+                **{NEW_ARCHIVE_ITEM_PERSON_NAME_FIELD: f"{ok_first}, {ok_second}"},
+            ),
+        )
+        self.assertEqual(ok_resp.status_code, 302)
+        self.assertEqual(
+            list(item.people.order_by("id").values_list("name", flat=True)),
+            [ok_first, ok_second],
+        )
+
+    def test_new_person_name_input_is_not_capped_at_255(self):
+        item = self._create_manual(title="No maxlength item")
+        resp = self.client.get(_edit_url(item))
+        tag = _input_tag(resp.content.decode(), "new_archive_item_person_name")
+        self.assertNotIn("maxlength", tag)
+        self.assertContains(
+            resp,
+            "ניתן להזין כמה שמות מופרדים בפסיקים. כל שם יוצר רשומת אדם חדשה ומקושרת לפריט זה.",
+        )
 
     def test_duplicate_canonical_names_remain_distinct(self):
         item = self._create_manual(title="Dup identities")
@@ -801,8 +967,8 @@ class ArchiveItemPersonStaffUiTests(ArchiveItemPersonStaffUiHarness, TestCase):
             self.assertNotContains(resp, 'name="archive_item_person_ids"')
             self.assertNotContains(resp, PHOTO_ARCHIVE_ITEM_PEOPLE_HEADING)
             self.assertNotContains(resp, "אנשים קשורים לפריט זה")
-        self.assertNotContains(manual_detail, "PublicHiddenPersonToken")
-        self.assertNotContains(photo_detail, "PublicHiddenPersonToken")
+        self.assertContains(manual_detail, "PublicHiddenPersonToken")
+        self.assertContains(photo_detail, "PublicHiddenPersonToken")
         self.assertNotContains(photo_detail, "אנשים מזוהים:")
 
 
@@ -1142,6 +1308,16 @@ class ArchiveItemPersonStaffCreateTests(ArchiveItemPersonStaffUiHarness, TestCas
         self.assertEqual(ArchiveItemPerson.objects.filter(archive_item=item).count(), 1)
         self.assertEqual(PhotoPerson.objects.count(), 0)
         self.assertEqual(item.photo_contents.count(), 1)
+
+    def test_photo_create_comma_names_write_item_people_not_photo_people(self):
+        item, resp = self._post_create(
+            ArchiveItem.ItemType.PHOTO,
+            **{NEW_ARCHIVE_ITEM_PERSON_NAME_FIELD: "PhotoCreateOne, PhotoCreateTwo"},
+        )
+        self._assert_created(item, resp, ArchiveItem.ItemType.PHOTO)
+        names = list(item.people.order_by("id").values_list("name", flat=True))
+        self.assertEqual(names, ["PhotoCreateOne", "PhotoCreateTwo"])
+        self.assertEqual(PhotoPerson.objects.count(), 0)
 
     def test_create_does_not_mutate_tags(self):
         item_tag = Tag.objects.create(name="KeepCreateItemTag")
