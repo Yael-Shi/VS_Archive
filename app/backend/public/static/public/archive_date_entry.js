@@ -1,5 +1,7 @@
 (function () {
   var MOBILE_MEDIA_QUERY = "(max-width: 640px)";
+  var WIDGET_SELECTOR = "[data-archive-date-widget]";
+  var viewportBound = false;
 
   var DATE_COMPONENT_FIELD_NAMES = [
     "date_start_day",
@@ -12,21 +14,48 @@
 
   var ISO_FIELD_NAMES = ["date_start", "date_end"];
 
-  function getDateEntryRoot() {
-    return document.getElementById("archiveDateEntry");
+  function getWidgetRoots() {
+    return Array.prototype.slice.call(
+      document.querySelectorAll(WIDGET_SELECTOR)
+    );
   }
 
-  function getPrecisionSelect(entry) {
-    if (!entry) return null;
-    var form = entry.closest("form");
-    if (form) {
-      return form.querySelector('select[name="date_precision"]');
+  function resolveWidget(hint) {
+    if (hint && hint.nodeType === 1) {
+      if (hint.matches && hint.matches(WIDGET_SELECTOR)) {
+        return hint;
+      }
+      var scoped = hint.closest ? hint.closest(WIDGET_SELECTOR) : null;
+      if (scoped) return scoped;
     }
-    return document.getElementById("date_precision");
+    var widgets = getWidgetRoots();
+    if (widgets.length === 1) {
+      return widgets[0];
+    }
+    var unprefixedEntry = document.getElementById("archiveDateEntry");
+    if (unprefixedEntry) {
+      return unprefixedEntry.closest
+        ? unprefixedEntry.closest(WIDGET_SELECTOR) || unprefixedEntry
+        : unprefixedEntry;
+    }
+    return null;
   }
 
-  function precisionValue(entry) {
-    var precisionEl = getPrecisionSelect(entry);
+  function getDateEntryRoot(widget) {
+    if (!widget) return null;
+    if (widget.classList && widget.classList.contains("archive-date-entry")) {
+      return widget;
+    }
+    return widget.querySelector(".archive-date-entry") || widget;
+  }
+
+  function getPrecisionSelect(widget) {
+    if (!widget) return null;
+    return widget.querySelector('select[name="date_precision"]');
+  }
+
+  function precisionValue(widget) {
+    var precisionEl = getPrecisionSelect(widget);
     return precisionEl ? precisionEl.value : "UNKNOWN";
   }
 
@@ -116,11 +145,13 @@
     setFieldsDisabled(group, !active);
   }
 
-  function updateDateUi() {
-    var entry = getDateEntryRoot();
+  function updateOneDateUi(widget) {
+    widget = resolveWidget(widget);
+    if (!widget) return;
+    var entry = getDateEntryRoot(widget);
     if (!entry) return;
 
-    var precision = precisionValue(entry);
+    var precision = precisionValue(widget);
     var mobile = isMobileUi();
     var areas = getUiAreas(entry);
     var activeMode = mobile ? "mobile" : "desktop";
@@ -145,6 +176,14 @@
     });
 
     entry.dataset.dateUiMode = activeMode;
+  }
+
+  function updateDateUi(widget) {
+    if (widget) {
+      updateOneDateUi(widget);
+      return;
+    }
+    getWidgetRoots().forEach(updateOneDateUi);
   }
 
   function extractLogicalValues(entry, uiMode) {
@@ -211,35 +250,43 @@
     });
   }
 
-  function prepareSubmission(entry) {
-    updateDateUi();
+  function prepareSubmission(widget) {
+    updateOneDateUi(widget);
   }
 
-  function handleViewportChange(entry) {
+  function handleViewportChange(widget) {
+    widget = resolveWidget(widget);
+    if (!widget) return;
+    var entry = getDateEntryRoot(widget);
+    if (!entry) return;
+
     var nowMobile = isMobileUi();
     var previousMode = entry.dataset.dateUiMode;
     var nowMode = nowMobile ? "mobile" : "desktop";
 
     if (!previousMode || previousMode === nowMode) {
-      updateDateUi();
+      updateOneDateUi(widget);
       return;
     }
 
     var values = extractLogicalValues(entry, previousMode);
     applyLogicalValues(entry, nowMode, values);
-    updateDateUi();
+    updateOneDateUi(widget);
   }
 
-  function collectArchiveDateMeta(target) {
-    var entry = getDateEntryRoot();
-    if (!entry) return;
+  function collectArchiveDateMeta(target, widgetHint) {
+    var widget = resolveWidget(widgetHint);
+    if (!widget) return;
 
-    prepareSubmission(entry);
+    prepareSubmission(widget);
 
-    var precisionEl = getPrecisionSelect(entry);
+    var precisionEl = getPrecisionSelect(widget);
     if (precisionEl) {
       target.date_precision = precisionEl.value || "UNKNOWN";
     }
+
+    var entry = getDateEntryRoot(widget);
+    if (!entry) return;
 
     var activeUi = isMobileUi() ? "mobile" : "desktop";
     var area = entry.querySelector('[data-date-ui="' + activeUi + '"]');
@@ -253,43 +300,52 @@
     });
   }
 
-  function bindFormSubmission(entry) {
-    var form = entry.closest("form");
+  function bindFormSubmission(widget) {
+    var form = widget.closest("form");
     if (!form || form.dataset.dateEntrySubmitBound === "1") return;
     form.dataset.dateEntrySubmitBound = "1";
     form.addEventListener("submit", function () {
-      prepareSubmission(entry);
+      form.querySelectorAll(WIDGET_SELECTOR).forEach(prepareSubmission);
     });
   }
 
-  function initArchiveDateEntry() {
-    var entry = getDateEntryRoot();
-    if (!entry || entry.dataset.dateEntryInit === "1") return;
+  function bindViewportChange() {
+    if (viewportBound || !window.matchMedia) return;
+    viewportBound = true;
+    var media = window.matchMedia(MOBILE_MEDIA_QUERY);
+    var onChange = function () {
+      getWidgetRoots().forEach(handleViewportChange);
+    };
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", onChange);
+    } else if (typeof media.addListener === "function") {
+      media.addListener(onChange);
+    }
+  }
 
-    var precisionEl = getPrecisionSelect(entry);
+  function initOneWidget(widget) {
+    if (!widget || widget.dataset.dateEntryInit === "1") return;
+
+    var precisionEl = getPrecisionSelect(widget);
     if (!precisionEl) return;
 
-    entry.dataset.dateEntryInit = "1";
+    widget.dataset.dateEntryInit = "1";
+    var entry = getDateEntryRoot(widget);
     var areas = getUiAreas(entry);
     bindArchiveDateDigitInputs(areas.mobile);
     bindArchiveDateDigitInputs(areas.desktop);
-    bindFormSubmission(entry);
+    bindFormSubmission(widget);
 
-    precisionEl.addEventListener("change", updateDateUi);
+    precisionEl.addEventListener("change", function () {
+      updateOneDateUi(widget);
+    });
 
-    if (window.matchMedia) {
-      var media = window.matchMedia(MOBILE_MEDIA_QUERY);
-      var onChange = function () {
-        handleViewportChange(entry);
-      };
-      if (typeof media.addEventListener === "function") {
-        media.addEventListener("change", onChange);
-      } else if (typeof media.addListener === "function") {
-        media.addListener(onChange);
-      }
-    }
+    handleViewportChange(widget);
+  }
 
-    handleViewportChange(entry);
+  function initArchiveDateEntry() {
+    getWidgetRoots().forEach(initOneWidget);
+    bindViewportChange();
   }
 
   document.addEventListener("DOMContentLoaded", initArchiveDateEntry);
