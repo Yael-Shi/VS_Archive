@@ -280,7 +280,7 @@ Non-viewable items return **404**.
 
 - Staff create **one PHOTO** via **`/archive/manage/new/?item_type=photo`** (first `PhotoContent` at `position=1`).
 - **`/archive/manage/`** lists PHOTO items with upload-status and archive-renderability badges (primary photo).
-- Edit shared metadata at **`/archive/manage/<id>/edit/`**, which also lists all photos. Add/edit/reorder/delete individual photos from nested `/photos/` routes. Shared metadata is not duplicated on the per-photo form. A PHOTO item must keep at least one `PhotoContent`.
+- Edit shared metadata at **`/archive/manage/<id>/edit/`**, which also lists all photos. Add/edit/reorder/delete individual photos from nested `/photos/` routes. Shared metadata is not duplicated on the per-photo form. A PHOTO item must keep at least one `PhotoContent`. Successful **shared** save stays on **`/archive/manage/<id>/edit/`**. Successful **per-photo** save stays on **`/archive/manage/<id>/photos/<photo_id>/edit/`**. Validation errors re-render the same form (HTTP 200). PHOTO **create** still redirects to **`/archive/manage/`**. Add-photo JS still returns to the item edit page. The item manage toolbar keeps existing **חזרה לפריט** to **`/archive/<id>/`**. The per-photo editor keeps **חזרה לפריט** to the staff item-management page and has a separate **צפייה** link to **`/archive/<id>/?photo=<photo_id>`**.
 - Per-photo file replace is not implemented.
 - Per-photo identified-person picker labels include aliases for staff
   (`Canonical (Alias 1, Alias 2)`). Selected people link to

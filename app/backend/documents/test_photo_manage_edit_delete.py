@@ -109,6 +109,11 @@ class PhotoManageEditTests(TestCase):
             resp,
             reverse("archive-manage-photo-add", kwargs={"item_id": self.photo_item.id}),
         )
+        public_url = reverse("archive-detail", kwargs={"item_id": self.photo_item.id})
+        self.assertContains(resp, f'href="{public_url}"')
+        self.assertContains(resp, ">חזרה לפריט<")
+        self.assertNotContains(resp, ">צפייה<")
+        self.assertNotContains(resp, f"{public_url}?photo=")
 
     def test_anonymous_cannot_open_photo_edit_page(self):
         resp = self.client.get(
@@ -154,6 +159,10 @@ class PhotoManageEditTests(TestCase):
             ),
         )
         self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            resp["Location"],
+            reverse("archive-manage-edit", kwargs={"item_id": self.photo_item.id}),
+        )
         self.photo_item.refresh_from_db()
         self.assertEqual(self.photo_item.title, "Updated photo title")
         self.assertEqual(self.photo_item.visibility, ArchiveItem.Visibility.PRIVATE)
@@ -166,14 +175,27 @@ class PhotoManageEditTests(TestCase):
             self.photo_item.date_precision, ArchiveItem.DatePrecision.RANGE
         )
 
-    def test_staff_can_update_photo_metadata_on_photo_component_page(self):
-        photo = self.photo_item.primary_photo_content
+    def test_invalid_shared_photo_metadata_stays_on_edit_form(self):
         self.client.force_login(self.staff)
         resp = self.client.post(
-            reverse(
-                "archive-manage-photo-edit",
-                kwargs={"item_id": self.photo_item.id, "photo_id": photo.id},
-            ),
+            self.EDIT_URL_TEMPLATE.format(item_id=self.photo_item.id),
+            data=self._photo_edit_payload(title=""),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.has_header("Location"))
+        self.photo_item.refresh_from_db()
+        self.assertEqual(self.photo_item.title, "Editable photo")
+        self.assertContains(resp, "שגיאה בטופס")
+
+    def test_staff_can_update_photo_metadata_on_photo_component_page(self):
+        photo = self.photo_item.primary_photo_content
+        photo_edit_url = reverse(
+            "archive-manage-photo-edit",
+            kwargs={"item_id": self.photo_item.id, "photo_id": photo.id},
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            photo_edit_url,
             data={
                 "description": "  Wedding day caption  ",
                 "location": " Cairo ",
@@ -184,6 +206,7 @@ class PhotoManageEditTests(TestCase):
             },
         )
         self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], photo_edit_url)
         photo.refresh_from_db()
         self.assertEqual(photo.description, "Wedding day caption")
         self.assertEqual(photo.location, "Cairo")
@@ -288,16 +311,19 @@ class PhotoManageEditTests(TestCase):
             html=True,
         )
 
-    def test_uploaded_photo_edit_redirects_to_archive_manage_list(self):
+    def test_uploaded_photo_edit_redirects_to_archive_manage_edit(self):
         self.client.force_login(self.staff)
         resp = self.client.post(
             self.EDIT_URL_TEMPLATE.format(item_id=self.photo_item.id),
             data=self._photo_edit_payload(title="Uploaded redirect photo"),
         )
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp["Location"], reverse("archive-manage-list"))
+        self.assertEqual(
+            resp["Location"],
+            reverse("archive-manage-edit", kwargs={"item_id": self.photo_item.id}),
+        )
 
-    def test_pending_photo_edit_redirects_to_archive_manage_list_and_saves_metadata(
+    def test_pending_photo_edit_redirects_to_archive_manage_edit_and_saves_metadata(
         self,
     ):
         pending_item = _create_photo_archive_item(
@@ -315,7 +341,10 @@ class PhotoManageEditTests(TestCase):
             ),
         )
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp["Location"], reverse("archive-manage-list"))
+        self.assertEqual(
+            resp["Location"],
+            reverse("archive-manage-edit", kwargs={"item_id": pending_item.id}),
+        )
         pending_item.refresh_from_db()
         self.assertEqual(pending_item.title, "Pending after edit")
         self.assertEqual(pending_item.visibility, ArchiveItem.Visibility.PRIVATE)

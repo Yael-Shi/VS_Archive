@@ -1,5 +1,40 @@
 # VS-Archive Decision Log
 
+## PHOTO staff save stays on the same page
+
+**Decision / implemented:** Successful staff PHOTO metadata saves remain on
+the page that was submitted. This is a redirect-contract change only. It
+does not unify the shared-metadata page with the per-photo editor, add
+staff `?photo=` selection, or change add-photo / Person write paths.
+
+**Current behavior:**
+
+- Shared PHOTO metadata save (`POST /archive/manage/<id>/edit/`) redirects
+  to the same item edit URL, not `/archive/manage/`.
+- Per-photo save (`POST /archive/manage/<id>/photos/<photo_id>/edit/`)
+  redirects to that same per-photo edit URL, not the item photo list.
+- Validation errors still re-render the submitted form as HTTP 200 with
+  no `Location` header.
+- Item manage toolbar keeps the existing **חזרה לפריט** public link to
+  `/archive/<id>/` (no extra **צפייה** button on that page). Per-photo
+  edit keeps **חזרה לפריט** to the staff item-management page and adds a
+  separate **צפייה** link to `/archive/<id>/?photo=<photo_id>`. Public
+  gallery selection behavior is unchanged.
+- Unchanged: PHOTO create redirect to the manage list; add-photo JS
+  redirect to item edit; reorder/delete-one-photo redirects to item edit;
+  whole-item delete redirect to the manage list; `ArchiveItemPerson` /
+  `PhotoPerson` writes; `people_present`; date widgets; public pages.
+
+**Why:** Leaving the item or the edited photo after every save forces extra
+navigation. Stay-on-page matches the already-decided unified-management UX
+without merging layouts yet.
+
+**Deferred:** unified staff PHOTO page / selector; staff `?photo=` on the
+item edit URL; add-photo PhotoPerson; date-widget prefixing.
+
+**Tests:** `documents/test_photo_manage_edit_delete.py`,
+`documents/test_photo_multi_manage.py`.
+
 ## Comma-separated new Person names (staff create)
 
 **Decision / implemented:** Staff **new Person** fields accept comma-separated
