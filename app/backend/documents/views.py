@@ -1863,6 +1863,8 @@ def add_photo_upload(request):
             date_start=parsed["date_start"],
             date_end=parsed["date_end"],
             date_precision=parsed["date_precision"],
+            person_ids=parsed["person_ids"],
+            new_person_name=parsed["new_person_name"],
         )
     except PhotoContentManagementError as exc:
         status = 409
@@ -4609,6 +4611,20 @@ def _save_archive_item_people(
     )
 
 
+def _staff_photo_person_form_context(form_data: dict) -> dict:
+    selected_person_ids = [
+        int(person_id) for person_id in form_data.get("person_ids") or []
+    ]
+    person_choices, selected_people = build_staff_person_choices(
+        selected_person_ids=selected_person_ids
+    )
+    return {
+        "person_choices": person_choices,
+        "selected_people": selected_people,
+        "selected_person_ids": set(selected_person_ids),
+    }
+
+
 def _photo_content_edit_form_context(
     *,
     item: ArchiveItem,
@@ -4616,12 +4632,6 @@ def _photo_content_edit_form_context(
     form_data: dict,
     form_errors: list[str],
 ) -> dict:
-    selected_person_ids = [
-        int(person_id) for person_id in form_data.get("person_ids") or []
-    ]
-    person_choices, selected_people = build_staff_person_choices(
-        selected_person_ids=selected_person_ids
-    )
     return {
         "item": item,
         "photo_content": photo_content,
@@ -4630,9 +4640,7 @@ def _photo_content_edit_form_context(
         "page_title": "עריכת תמונה בפריט",
         "submit_label": "עדכון",
         "date_precision_choices": DATE_PRECISION_UI_CHOICES,
-        "person_choices": person_choices,
-        "selected_people": selected_people,
-        "selected_person_ids": set(selected_person_ids),
+        **_staff_photo_person_form_context(form_data),
     }
 
 
@@ -5439,6 +5447,8 @@ def archive_manage_photo_add_page(request, item_id: int):
             date_end=None,
             date_precision=ArchiveItem.DatePrecision.UNKNOWN,
         ),
+        "new_person_name": "",
+        "person_ids": [],
     }
     return render(
         request,
@@ -5449,6 +5459,7 @@ def archive_manage_photo_add_page(request, item_id: int):
             "form_errors": [],
             "page_title": "הוספת תמונה לפריט",
             "date_precision_choices": DATE_PRECISION_UI_CHOICES,
+            **_staff_photo_person_form_context(form_data),
         },
     )
 

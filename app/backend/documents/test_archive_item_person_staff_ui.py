@@ -741,7 +741,14 @@ class ArchiveItemPersonStaffUiTests(ArchiveItemPersonStaffUiHarness, TestCase):
                     follow=True,
                 )
                 self.assertContains(resp, ARCHIVE_ITEM_UPDATED_MSG)
-                self.assertEqual(resp.resolver_match.url_name, "archive-manage-list")
+                if item.item_type == ArchiveItem.ItemType.PHOTO:
+                    self.assertEqual(
+                        resp.resolver_match.url_name, "archive-manage-edit"
+                    )
+                else:
+                    self.assertEqual(
+                        resp.resolver_match.url_name, "archive-manage-list"
+                    )
 
     def test_search_index_refresh_on_add_and_remove(self):
         item = self._create_manual(title="Search people item")

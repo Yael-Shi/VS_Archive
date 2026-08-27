@@ -186,12 +186,18 @@ def create_additional_photo_upload_plan(
     date_start=None,
     date_end=None,
     date_precision: str = ArchiveItem.DatePrecision.UNKNOWN,
+    person_ids: list[int] | None = None,
+    new_person_name: str = "",
 ) -> tuple[ArchiveItem, PhotoContent, str]:
     """
     Add a pending PhotoContent to an existing PHOTO item and return a presigned PUT.
 
     Allocates the next position under an ArchiveItem row lock. Does not create a
     Document, enqueue SQS, or modify shared ArchiveItem metadata.
+
+    Optional ``person_ids`` / ``new_person_name`` write ``PhotoPerson`` only.
+    Callers must validate those fields before this create. Does not write
+    ``ArchiveItemPerson``.
 
     The new row is ``PENDING`` and is not public-renderable, so its descriptive
     metadata is omitted from search even though this path still syncs the
@@ -227,6 +233,17 @@ def create_additional_photo_upload_plan(
     s3_key = build_photo_original_s3_key(photo_content.id, normalized_mime)
     photo_content.original_file_key = s3_key
     photo_content.save(update_fields=["original_file_key", "updated_at"])
+
+    from documents.services.photo_content_management import (
+        create_identified_people_from_new_names,
+        set_photo_people,
+    )
+
+    resolved_person_ids = list(person_ids or [])
+    created_people = create_identified_people_from_new_names(new_person_name)
+    resolved_person_ids.extend(person.pk for person in created_people)
+    if resolved_person_ids:
+        set_photo_people(photo_content, resolved_person_ids)
 
     from documents.services.archive_search_index import sync_archive_item_search_index
 
@@ -485,6 +502,11 @@ def parse_add_photo_upload_metadata(
     """Parse JSON body for adding a PhotoContent to an existing PHOTO item."""
     from documents.services.archive_item_validation import parse_date_precision
     from documents.services.archive_date_input import parse_archive_date_bounds
+    from documents.services.photo_content_management import (
+        missing_person_ids_error,
+        parse_new_person_name,
+        parse_photo_person_ids,
+    )
     from documents.services.photo_metadata_validation import (
         parse_photo_content_date_fields,
         photo_metadata_from_mapping,
@@ -533,6 +555,16 @@ def parse_add_photo_upload_metadata(
         return None, date_error
 
     photo_metadata = photo_metadata_from_mapping(payload)
+    person_ids, person_errors = parse_photo_person_ids(payload)
+    if person_errors:
+        return None, person_errors[0]
+    new_person_name, name_errors = parse_new_person_name(payload)
+    if name_errors:
+        return None, name_errors[0]
+    missing_person_error = missing_person_ids_error(person_ids)
+    if missing_person_error:
+        return None, missing_person_error
+
     return {
         "archive_item_id": archive_item_id,
         "original_name": original_name,
@@ -540,5 +572,7 @@ def parse_add_photo_upload_metadata(
         "date_start": date_start,
         "date_end": date_end,
         "date_precision": date_precision,
+        "person_ids": person_ids,
+        "new_person_name": new_person_name,
         **photo_metadata,
     }, None
