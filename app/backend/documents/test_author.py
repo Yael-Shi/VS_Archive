@@ -649,6 +649,10 @@ class PhotoAuthorIsolationTests(TestCase):
         self.assertEqual(edit_resp.status_code, 200)
         self.assertNotContains(create_resp, 'name="author_name"')
         self.assertNotContains(edit_resp, 'name="author_name"')
+        self.assertNotContains(create_resp, 'name="author_ids"')
+        self.assertNotContains(edit_resp, 'name="author_ids"')
+        self.assertNotContains(create_resp, 'name="new_author_name"')
+        self.assertNotContains(edit_resp, 'name="new_author_name"')
 
 
 class AuthorCompatibilityBehaviorTests(TestCase):

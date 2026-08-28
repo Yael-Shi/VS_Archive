@@ -24,11 +24,42 @@ ARCHIVE_ITEM_SHARED_FIELD_NAMES = (
 )
 
 
-def _apply_legacy_author_name(archive_item: Any, author_name: str) -> None:
-    """Dual-write OCR/MANUAL_TEXT/VIDEO author_name onto ordered Author relations."""
-    from documents.services.archive_item_authors import apply_legacy_author_name
+def _apply_archive_item_authors(
+    archive_item: Any,
+    *,
+    author_name: str = "",
+    staff_author_ids: list[int] | None = None,
+    new_author_name: str = "",
+) -> None:
+    """Dual-write OCR/MANUAL_TEXT/VIDEO authors before search-index sync.
 
+    Staff ``staff_author_ids is not None`` uses ordered ids plus new names.
+    Otherwise the legacy ``author_name`` string path is unchanged.
+    """
+    from documents.services.archive_item_authors import (
+        apply_legacy_author_name,
+        apply_staff_archive_item_authors,
+    )
+
+    if staff_author_ids is not None:
+        apply_staff_archive_item_authors(
+            archive_item,
+            author_ids=staff_author_ids,
+            new_author_name=new_author_name,
+        )
+        return
     apply_legacy_author_name(archive_item, author_name)
+
+
+def _create_author_name_value(
+    *,
+    author_name: str,
+    staff_author_ids: list[int] | None,
+) -> str:
+    """Avoid writing a staff POST string before staff author apply."""
+    if staff_author_ids is not None:
+        return ""
+    return author_name
 
 
 def archive_item_field_values_from_archive_item(archive_item: Any) -> dict[str, Any]:
@@ -66,6 +97,8 @@ def _split_ocr_document_create_kwargs(
         "author_name": runtime_kwargs.pop("author_name", ""),
         "source_title": runtime_kwargs.pop("source_title", ""),
         "public_note": runtime_kwargs.pop("public_note", ""),
+        "staff_author_ids": runtime_kwargs.pop("staff_author_ids", None),
+        "new_author_name": runtime_kwargs.pop("new_author_name", ""),
     }
 
     return shared_kwargs, source_metadata_kwargs, runtime_kwargs
@@ -90,14 +123,23 @@ def create_ocr_document(**document_kwargs: Any):
         **shared_kwargs,
     )
     archive_values = archive_item_field_values_from_archive_item(pending_item)
+    staff_author_ids = source_metadata_kwargs["staff_author_ids"]
     archive_item = ArchiveItem.objects.create(
         item_type=ArchiveItem.ItemType.OCR_DOCUMENT,
         **archive_values,
-        author_name=source_metadata_kwargs["author_name"],
+        author_name=_create_author_name_value(
+            author_name=source_metadata_kwargs["author_name"],
+            staff_author_ids=staff_author_ids,
+        ),
         source_title=source_metadata_kwargs["source_title"],
         public_note=source_metadata_kwargs["public_note"],
     )
-    _apply_legacy_author_name(archive_item, source_metadata_kwargs["author_name"])
+    _apply_archive_item_authors(
+        archive_item,
+        author_name=source_metadata_kwargs["author_name"],
+        staff_author_ids=staff_author_ids,
+        new_author_name=source_metadata_kwargs["new_author_name"],
+    )
     document = Document.objects.create(
         archive_item=archive_item,
         **runtime_kwargs,
@@ -121,6 +163,8 @@ def create_manual_text_archive_item(
     author_name: str = "",
     source_title: str = "",
     public_note: str = "",
+    staff_author_ids: list[int] | None = None,
+    new_author_name: str = "",
 ):
     """
     Create a MANUAL_TEXT ArchiveItem with linked ManualTextContent.
@@ -137,11 +181,19 @@ def create_manual_text_archive_item(
         date_end=date_end,
         date_precision=date_precision or ArchiveItem.DatePrecision.UNKNOWN,
         metadata_status=metadata_status or ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
-        author_name=author_name,
+        author_name=_create_author_name_value(
+            author_name=author_name,
+            staff_author_ids=staff_author_ids,
+        ),
         source_title=source_title,
         public_note=public_note,
     )
-    _apply_legacy_author_name(archive_item, author_name)
+    _apply_archive_item_authors(
+        archive_item,
+        author_name=author_name,
+        staff_author_ids=staff_author_ids,
+        new_author_name=new_author_name,
+    )
     ManualTextContent.objects.create(archive_item=archive_item, body=body)
     from documents.services.archive_search_index import sync_archive_item_search_index
 
@@ -163,6 +215,8 @@ def update_manual_text_archive_item(
     author_name: str = "",
     source_title: str = "",
     public_note: str = "",
+    staff_author_ids: list[int] | None = None,
+    new_author_name: str = "",
 ):
     """
     Update a MANUAL_TEXT ArchiveItem and its ManualTextContent body.
@@ -180,11 +234,17 @@ def update_manual_text_archive_item(
     archive_item.date_end = date_end
     archive_item.date_precision = date_precision
     archive_item.metadata_status = metadata_status
-    archive_item.author_name = author_name
+    if staff_author_ids is None:
+        archive_item.author_name = author_name
     archive_item.source_title = source_title
     archive_item.public_note = public_note
     archive_item.save()
-    _apply_legacy_author_name(archive_item, author_name)
+    _apply_archive_item_authors(
+        archive_item,
+        author_name=author_name,
+        staff_author_ids=staff_author_ids,
+        new_author_name=new_author_name,
+    )
 
     content = archive_item.manual_text_content
     content.body = body
@@ -242,6 +302,8 @@ def create_video_archive_item(
     event_names: list[str] | None = None,
     tag_names: list[str] | None = None,
     user=None,
+    staff_author_ids: list[int] | None = None,
+    new_author_name: str = "",
 ):
     """
     Create a VIDEO ArchiveItem with linked VideoContent.
@@ -276,7 +338,7 @@ def create_video_archive_item(
         date_precision=resolved_date_precision,
         date_start=date_start,
         date_end=date_end,
-        author_name=author_name,
+        author_name="" if staff_author_ids is not None else author_name,
         source_title=source_title,
         user=user,
     )
@@ -294,11 +356,19 @@ def create_video_archive_item(
         date_end=date_end,
         date_precision=resolved_date_precision,
         metadata_status=resolved_metadata_status,
-        author_name=author_name,
+        author_name=_create_author_name_value(
+            author_name=author_name,
+            staff_author_ids=staff_author_ids,
+        ),
         source_title=source_title,
         public_note=public_note,
     )
-    _apply_legacy_author_name(archive_item, author_name)
+    _apply_archive_item_authors(
+        archive_item,
+        author_name=author_name,
+        staff_author_ids=staff_author_ids,
+        new_author_name=new_author_name,
+    )
     content = VideoContent(
         archive_item=archive_item,
         **video_fields,
@@ -335,6 +405,8 @@ def update_video_archive_item(
     event_names: list[str] | None = None,
     tag_names: list[str] | None = None,
     user=None,
+    staff_author_ids: list[int] | None = None,
+    new_author_name: str = "",
 ):
     """
     Update a VIDEO ArchiveItem and recompute VideoContent from ``source_url``.
@@ -367,7 +439,7 @@ def update_video_archive_item(
         date_precision=date_precision,
         date_start=date_start,
         date_end=date_end,
-        author_name=author_name,
+        author_name="" if staff_author_ids is not None else author_name,
         source_title=source_title,
         user=user,
     )
@@ -383,11 +455,17 @@ def update_video_archive_item(
     archive_item.date_end = date_end
     archive_item.date_precision = date_precision
     archive_item.metadata_status = metadata_status
-    archive_item.author_name = author_name
+    if staff_author_ids is None:
+        archive_item.author_name = author_name
     archive_item.source_title = source_title
     archive_item.public_note = public_note
     archive_item.save()
-    _apply_legacy_author_name(archive_item, author_name)
+    _apply_archive_item_authors(
+        archive_item,
+        author_name=author_name,
+        staff_author_ids=staff_author_ids,
+        new_author_name=new_author_name,
+    )
 
     content = archive_item.video_content
     content.source_url = video_fields["source_url"]
@@ -475,6 +553,8 @@ def update_ocr_document_metadata(
     author_name: str = "",
     source_title: str = "",
     public_note: str = "",
+    staff_author_ids: list[int] | None = None,
+    new_author_name: str = "",
 ):
     """
     Update shared archival metadata on an OCR-backed Document.
@@ -494,19 +574,25 @@ def update_ocr_document_metadata(
     archive_item.date_end = date_end
     archive_item.date_precision = date_precision
     archive_item.metadata_status = metadata_status
-    archive_item.author_name = author_name
+    if staff_author_ids is None:
+        archive_item.author_name = author_name
     archive_item.source_title = source_title
     archive_item.public_note = public_note
-    archive_item.save(
-        update_fields=[
-            *ARCHIVE_ITEM_SHARED_FIELD_NAMES,
-            "author_name",
-            "source_title",
-            "public_note",
-            "updated_at",
-        ]
+    update_fields = [
+        *ARCHIVE_ITEM_SHARED_FIELD_NAMES,
+        "source_title",
+        "public_note",
+        "updated_at",
+    ]
+    if staff_author_ids is None:
+        update_fields.insert(-1, "author_name")
+    archive_item.save(update_fields=update_fields)
+    _apply_archive_item_authors(
+        archive_item,
+        author_name=author_name,
+        staff_author_ids=staff_author_ids,
+        new_author_name=new_author_name,
     )
-    _apply_legacy_author_name(archive_item, author_name)
     from documents.services.archive_search_index import sync_archive_item_search_index
 
     sync_archive_item_search_index(archive_item.pk)

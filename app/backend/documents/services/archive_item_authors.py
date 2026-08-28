@@ -2,21 +2,36 @@
 
 Author is bibliographic, not Person. Callers that persist ``author_name`` on
 OCR / MANUAL_TEXT / VIDEO writers must use ``apply_legacy_author_name`` in the
-same transaction. PHOTO writers do not dual-write. Comma input is not split.
+same transaction unless they pass staff ``author_ids`` / ``new_author_name``,
+which use ``apply_staff_archive_item_authors``. PHOTO writers do not dual-write.
+``apply_legacy_author_name`` does not split commas.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any
 
 from django.db import transaction
 
 from documents.models import ArchiveItem, ArchiveItemAuthor, Author
+from documents.services.archive_metadata_validation import SOURCE_METADATA_MAX_LENGTH
 
 AMBIGUOUS_AUTHOR_ERROR = (
     "multiple authors exist with this exact name; resolve duplicates before saving"
 )
 DUPLICATE_AUTHOR_IN_ORDER_ERROR = "duplicate author in ordered author list"
+AUTHOR_NOT_FOUND_ERROR = "מחבר/ת לא נמצא."
+AUTHOR_NAME_TOO_LONG_ERROR = "שם המחבר/ת חייב להיות עד 255 תווים."
+AUTHOR_NAMES_COMMAS_ONLY_ERROR = (
+    "יש להזין לפחות שם מחבר/ת אחד. לא ניתן לשמור קלט שמכיל רק פסיקים או רווחים."
+)
+AUTHOR_NAME_EXISTS_ERROR = "שם המחבר/ת כבר קיים. בחרו אותו מהרשימה במקום להקליד אותו."
+AUTHOR_JOINED_TOO_LONG_ERROR = "מחבר/ת חייב להיות עד 255 תווים"
+AUTHOR_IDS_FIELD = "author_ids"
+NEW_AUTHOR_NAME_FIELD = "new_author_name"
+AUTHOR_NAME_MAX_LENGTH = SOURCE_METADATA_MAX_LENGTH
 
 
 class ArchiveItemAuthorError(Exception):
@@ -25,6 +40,13 @@ class ArchiveItemAuthorError(Exception):
     def __init__(self, message: str):
         super().__init__(message)
         self.message = message
+
+
+@dataclass(frozen=True)
+class StaffAuthorChoice:
+    id: int
+    name: str
+    selected: bool = False
 
 
 def ordered_author_links(archive_item: ArchiveItem) -> list[ArchiveItemAuthor]:
@@ -37,6 +59,177 @@ def ordered_author_links(archive_item: ArchiveItem) -> list[ArchiveItemAuthor]:
 def ordered_authors(archive_item: ArchiveItem) -> list[Author]:
     """Return this item's authors in position order."""
     return [link.author for link in ordered_author_links(archive_item)]
+
+
+def empty_archive_item_authors_form_fields() -> dict[str, Any]:
+    """Empty staff form values for item-level authors on create."""
+    return {
+        AUTHOR_IDS_FIELD: [],
+        NEW_AUTHOR_NAME_FIELD: "",
+    }
+
+
+def archive_item_authors_form_data_from_item(
+    archive_item: ArchiveItem,
+) -> dict[str, Any]:
+    """Seed staff form values from current ArchiveItemAuthor links in position order."""
+    return {
+        AUTHOR_IDS_FIELD: [author.pk for author in ordered_authors(archive_item)],
+        NEW_AUTHOR_NAME_FIELD: "",
+    }
+
+
+def split_comma_separated_author_names(raw: str | None) -> list[str]:
+    """Split, trim, drop empty tokens, and order-preserving dedupe within input.
+
+    Splits on ASCII commas only. Does not look up or merge existing Authors.
+    """
+    names: list[str] = []
+    seen: set[str] = set()
+    for token in (raw or "").split(","):
+        name = token.strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+    return names
+
+
+def parse_new_author_names_input(raw: str | None) -> tuple[str, list[str], list[str]]:
+    """Validate comma-separated new Author names.
+
+    Returns ``(display, names, errors)``. Empty/whitespace-only input is a
+    no-op. Nonempty input that yields no tokens after split/trim is rejected.
+    Each remaining token is checked independently against the name length limit.
+    Does not look up existing names.
+    """
+    display = "" if raw is None else str(raw).strip()
+    if not display:
+        return "", [], []
+    names = split_comma_separated_author_names(display)
+    if not names:
+        return display, [], [AUTHOR_NAMES_COMMAS_ONLY_ERROR]
+    errors: list[str] = []
+    for name in names:
+        if len(name) > AUTHOR_NAME_MAX_LENGTH:
+            errors.append(AUTHOR_NAME_TOO_LONG_ERROR)
+            break
+    return display, names, errors
+
+
+def parse_author_ids(post_data) -> tuple[list[int], list[str]]:
+    """Parse Author primary keys from the staff multi-select or JSON array.
+
+    Values must be positive integers. Names are not accepted.
+    """
+    if hasattr(post_data, "getlist"):
+        raw_values = post_data.getlist(AUTHOR_IDS_FIELD)
+    else:
+        raw = post_data.get(AUTHOR_IDS_FIELD) if post_data is not None else None
+        if raw is None:
+            raw_values = []
+        elif isinstance(raw, (list, tuple)):
+            raw_values = list(raw)
+        else:
+            raw_values = [raw]
+
+    author_ids: list[int] = []
+    seen: set[int] = set()
+    errors: list[str] = []
+    for raw in raw_values:
+        text = str(raw).strip()
+        if not text:
+            continue
+        try:
+            author_id = int(text)
+        except (TypeError, ValueError):
+            errors.append(AUTHOR_NOT_FOUND_ERROR)
+            return [], errors
+        if author_id < 1:
+            errors.append(AUTHOR_NOT_FOUND_ERROR)
+            return [], errors
+        if author_id not in seen:
+            seen.add(author_id)
+            author_ids.append(author_id)
+    return author_ids, errors
+
+
+def parse_new_author_name(post_data) -> tuple[str, list[str], list[str]]:
+    raw = post_data.get(NEW_AUTHOR_NAME_FIELD) if post_data is not None else None
+    return parse_new_author_names_input(raw)
+
+
+def _authors_in_submitted_id_order(author_ids: list[int]) -> tuple[list[Author], bool]:
+    authors = list(Author.objects.filter(pk__in=author_ids))
+    by_id = {author.pk: author for author in authors}
+    if set(by_id) != set(author_ids):
+        return [], False
+    return [by_id[author_id] for author_id in author_ids], True
+
+
+def parse_archive_item_authors_form(post_data) -> tuple[dict[str, Any], list[str]]:
+    """Parse staff author fields and reject invalid ids or typed existing names.
+
+    Validates before any caller write. Empty ids plus empty new names is a
+    valid clear. Does not create Author rows or Person rows.
+    """
+    author_ids, id_errors = parse_author_ids(post_data)
+    display, names, name_errors = parse_new_author_name(post_data)
+    errors = id_errors + name_errors
+    selected_authors: list[Author] = []
+    if not errors and author_ids:
+        selected_authors, found = _authors_in_submitted_id_order(author_ids)
+        if not found:
+            errors.append(AUTHOR_NOT_FOUND_ERROR)
+    if not errors and names:
+        existing_names = set(
+            Author.objects.filter(name__in=names).values_list("name", flat=True)
+        )
+        if existing_names:
+            errors.append(AUTHOR_NAME_EXISTS_ERROR)
+    if not errors:
+        ordered_names = [author.name for author in selected_authors] + names
+        joined = ", ".join(ordered_names)
+        if len(joined) > AUTHOR_NAME_MAX_LENGTH:
+            errors.append(AUTHOR_JOINED_TOO_LONG_ERROR)
+    return {
+        AUTHOR_IDS_FIELD: author_ids,
+        NEW_AUTHOR_NAME_FIELD: display,
+    }, errors
+
+
+def build_staff_author_choices(
+    *,
+    selected_author_ids: list[int] | tuple[int, ...] | set[int],
+) -> tuple[list[StaffAuthorChoice], list[StaffAuthorChoice]]:
+    """Return picker choices with selected authors first in submitted order.
+
+    Remaining unselected authors follow in ``(name, id)`` order so a no-op
+    native multi-select save preserves stored position.
+    """
+    selected_ids = list(
+        dict.fromkeys(int(author_id) for author_id in selected_author_ids)
+    )
+    selected_set = set(selected_ids)
+    all_authors = list(Author.objects.order_by("name", "id"))
+    by_id = {author.pk: author for author in all_authors}
+
+    choices: list[StaffAuthorChoice] = []
+    selected: list[StaffAuthorChoice] = []
+    for author_id in selected_ids:
+        author = by_id.get(author_id)
+        if author is None:
+            continue
+        choice = StaffAuthorChoice(id=author.pk, name=author.name, selected=True)
+        choices.append(choice)
+        selected.append(choice)
+    for author in all_authors:
+        if author.pk in selected_set:
+            continue
+        choices.append(
+            StaffAuthorChoice(id=author.pk, name=author.name, selected=False)
+        )
+    return choices, selected
 
 
 def _resolve_unique_author_by_exact_name(name: str) -> Author:
@@ -85,6 +278,71 @@ def replace_archive_item_authors(
     if locked_item is None:
         raise ArchiveItem.DoesNotExist
     return _replace_author_links(locked_item, authors)
+
+
+@transaction.atomic
+def apply_staff_archive_item_authors(
+    archive_item: ArchiveItem,
+    *,
+    author_ids: list[int] | None = None,
+    new_author_name: str = "",
+) -> list[ArchiveItemAuthor]:
+    """Replace ordered author links from staff ids plus new comma-separated names.
+
+    Selected ids keep submitted order; new tokens append in input order. Typed
+    exact names that already exist fail closed before any item, Author, or link
+    write. Dual-writes ``author_name`` as ``", ".join(ordered names)``. Empty
+    ids plus empty new names clears relations and the compatibility string.
+    Does not create Person / ArchiveItemPerson / PhotoPerson rows.
+    """
+    parsed, errors = parse_archive_item_authors_form(
+        {
+            AUTHOR_IDS_FIELD: list(author_ids or []),
+            NEW_AUTHOR_NAME_FIELD: new_author_name,
+        }
+    )
+    if errors:
+        raise ArchiveItemAuthorError(errors[0])
+
+    locked_item = (
+        ArchiveItem.objects.select_for_update().filter(pk=archive_item.pk).first()
+    )
+    if locked_item is None:
+        raise ArchiveItem.DoesNotExist
+
+    locked_ids = parsed[AUTHOR_IDS_FIELD]
+    existing_authors: list[Author] = []
+    if locked_ids:
+        locked_existing = list(
+            Author.objects.select_for_update().filter(pk__in=locked_ids)
+        )
+        by_id = {author.pk: author for author in locked_existing}
+        if set(by_id) != set(locked_ids):
+            raise ArchiveItemAuthorError(AUTHOR_NOT_FOUND_ERROR)
+        existing_authors = [by_id[author_id] for author_id in locked_ids]
+
+    _display, names, name_errors = parse_new_author_names_input(new_author_name)
+    if name_errors:
+        raise ArchiveItemAuthorError(name_errors[0])
+
+    created: list[Author] = []
+    for name in names:
+        matches = list(
+            Author.objects.select_for_update().filter(name=name).order_by("id")
+        )
+        if matches:
+            raise ArchiveItemAuthorError(AUTHOR_NAME_EXISTS_ERROR)
+        created.append(Author.objects.create(name=name))
+
+    ordered = existing_authors + created
+    joined = ", ".join(author.name for author in ordered)
+    if len(joined) > AUTHOR_NAME_MAX_LENGTH:
+        raise ArchiveItemAuthorError(AUTHOR_JOINED_TOO_LONG_ERROR)
+
+    locked_item.author_name = joined
+    locked_item.save(update_fields=["author_name", "updated_at"])
+    archive_item.author_name = joined
+    return _replace_author_links(locked_item, ordered)
 
 
 @transaction.atomic

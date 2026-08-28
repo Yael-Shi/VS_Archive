@@ -1,5 +1,41 @@
 # VS-Archive Decision Log
 
+## Multi-author staff create/edit UX (PR2)
+
+**Decision / implemented:** Staff create/edit for **OCR_DOCUMENT**,
+**MANUAL_TEXT**, and **VIDEO** selects multiple existing **`Author`** rows and
+can add comma-separated new names. This does **not** change PHOTO author UI,
+public display, `q` indexing, snippets, advanced filters, models, or schema.
+
+**Current behavior:**
+
+- Staff POST/JSON fields are **`author_ids`** (submitted order) and
+  **`new_author_name`** (ASCII commas). **`author_name`** is not a staff write
+  field on these paths. Typed exact names that already exist are rejected
+  before any item / Author / link write; staff must select the existing row.
+- New tokens are trimmed, empty tokens dropped, order-deduped within input,
+  max 255 per name. Commas-only input is invalid. Selected ids keep submitted
+  order; new names append in token order. The picker renders currently linked
+  authors first in stored **`position`** order, then remaining authors by
+  **`(name, id)`**, so a no-op native multi-select save preserves order.
+- Writers dual-write **`author_name = ", ".join(ordered names)`**. The joined
+  compatibility string must fit **`CharField(max_length=255)`**; over-length is
+  rejected before writes. Empty ids plus empty new names clears links and
+  **`author_name`**.
+- Staff HTTP/JSON calls **`apply_staff_archive_item_authors`** inside the
+  existing OCR / MANUAL_TEXT / VIDEO writers before search-index sync. They
+  never pass the joined string to **`apply_legacy_author_name`**. The legacy
+  **`author_name=`** service path is unchanged and still does not split commas.
+- **`Author`** remains separate from **`Person`**. These paths never create or
+  infer **`Person`**, **`ArchiveItemPerson`**, or **`PhotoPerson`**.
+
+**Deferred:** public display/search/filter cutover from **`author_name`**; PHOTO
+author UI; unique **`Author.name`**; independent drag-reorder of selected
+authors; removing the legacy **`author_name=`** writer path.
+
+**Tests:** `documents/test_archive_item_author_staff_ux.py`;
+`documents/test_author.py` (foundation + PHOTO isolation).
+
 ## Multi-author data foundation (PR1)
 
 **Decision / implemented:** Add a bibliographic **`Author`** model and ordered
@@ -30,23 +66,25 @@ UI, templates, or URLs.
   **not** split commas. Empty / whitespace-only values create no rows. Every
   item type with a stored value is included, including PHOTO. Reverse deletes
   **`Author`** / **`ArchiveItemAuthor`** rows; **`author_name`** stays intact.
-- Until later PRs, OCR / MANUAL_TEXT / VIDEO writers remain string-based.
-  Whenever they save **`author_name`**, they keep the exact normalized string
-  and replace that item's author relations with one exact-name **`Author`** at
-  **`position=0`** (`apply_legacy_author_name`). Empty clears relations. Exactly
-  one matching **`Author`** is reused; when none exists, one is created; multiple exact matches
-  fail closed with no partial item / string / relation writes. Comma input is
-  not split.
+- Legacy service **`author_name=`** still dual-writes one Author at
+  **`position=0`** (`apply_legacy_author_name`). Staff HTTP/JSON create/edit
+  uses the PR2 multi-author path instead of this string writer. Whenever the
+  legacy path saves **`author_name`**, it keeps the exact normalized string
+  and replaces that item's author relations with one exact-name **`Author`**.
+  Empty clears relations. Exactly one matching **`Author`** is reused; when
+  none exists, one is created; multiple exact matches fail closed with no
+  partial item / string / relation writes. Comma input is not split.
 - PHOTO create/edit still has no author UI and does **not** dual-write.
-- Exact duplicate **`Author`** creation will be blocked in the later staff-UI
-  PR. This PR allows duplicate display names (same as **`Person.name`**).
+- Exact duplicate **`Author`** creation is blocked on the staff UI path (PR2).
+  This PR allows duplicate display names (same as **`Person.name`**).
 
 **Migrations:** `0058_author_foundation` (schema) +
 `0059_backfill_authors_from_author_name` (reversible data).
 
-**Deferred:** staff Author UI / duplicate-create guard; comma-separated
-multi-author input; public display/search/filter cutover from
-**`author_name`**; PHOTO author UI.
+**Deferred (superseded in part by PR2):** ~~staff Author UI / duplicate-create
+guard; comma-separated multi-author input~~ → implemented in **Multi-author
+staff create/edit UX (PR2)**. Remaining: public display/search/filter cutover
+from **`author_name`**; PHOTO author UI.
 
 **Tests:** `documents/test_author.py`.
 

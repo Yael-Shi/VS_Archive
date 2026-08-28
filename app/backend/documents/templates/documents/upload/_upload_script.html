@@ -348,7 +348,6 @@
     const language = languageEl.value || "";
     const text_input_type = textInputTypeEl.value || "";
     const visibility = document.getElementById("visibility").value || "private";
-    const author_name = document.getElementById("author_name").value.trim();
     const source_title = document.getElementById("source_title").value.trim();
     const publicNoteEl = document.getElementById("public_note");
     const public_note = publicNoteEl ? publicNoteEl.value : "";
@@ -379,7 +378,6 @@
     if (isHebrewHandwrittenSelection()) {
       meta.handwriting_type = handwritingTypeEl.value;
     }
-    if (author_name) meta.author_name = author_name;
     if (source_title) meta.source_title = source_title;
     if (public_note) meta.public_note = public_note;
     if (selected_categories.length) meta.selected_categories = selected_categories;
@@ -395,6 +393,14 @@
       : "";
     if (new_archive_item_person_name) {
       meta.new_archive_item_person_name = new_archive_item_person_name;
+    }
+    meta.author_ids = readSelectedIds("author_ids");
+    const newAuthorNameEl = document.getElementById("new_author_name");
+    const new_author_name = newAuthorNameEl
+      ? (newAuthorNameEl.value || "").trim()
+      : "";
+    if (new_author_name) {
+      meta.new_author_name = new_author_name;
     }
     return meta;
   }

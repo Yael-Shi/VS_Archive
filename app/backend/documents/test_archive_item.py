@@ -916,7 +916,7 @@ class ManualTextArchiveItemTests(TestCase):
             data=self._valid_create_payload(
                 title="Manual with source metadata",
                 body="Body text.",
-                author_name="  Ada Lovelace  ",
+                new_author_name="  Ada Lovelace  ",
                 source_title=" The Times ",
             ),
         )
@@ -975,7 +975,7 @@ class ManualTextArchiveItemTests(TestCase):
             data=self._valid_create_payload(
                 title="Manual source edit",
                 body="Body.",
-                author_name="After author",
+                new_author_name="After author",
                 source_title="After source",
             ),
         )
@@ -999,7 +999,7 @@ class ManualTextArchiveItemTests(TestCase):
             data=self._valid_create_payload(
                 title="Manual source clear",
                 body="Body.",
-                author_name="   ",
+                new_author_name="",
                 source_title="",
             ),
         )
@@ -1013,14 +1013,14 @@ class ManualTextArchiveItemTests(TestCase):
             title="Manual source seed",
             body="Body.",
             visibility=ArchiveItem.Visibility.PUBLIC,
+            author_name="Seeded author",
+            source_title="Seeded source",
         )
-        item.author_name = "Seeded author"
-        item.source_title = "Seeded source"
-        item.save(update_fields=["author_name", "source_title", "updated_at"])
         self.client.force_login(self.staff)
         resp = self.client.get(self.EDIT_URL_TEMPLATE.format(item_id=item.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'value="Seeded author"')
+        self.assertContains(resp, 'name="author_ids"')
+        self.assertContains(resp, "Seeded author")
         self.assertContains(resp, 'value="Seeded source"')
 
     def test_over_255_author_name_rejected_on_manual_text_create(self):
@@ -1029,11 +1029,11 @@ class ManualTextArchiveItemTests(TestCase):
             self.CREATE_URL,
             data=self._valid_create_payload(
                 title="Too long author",
-                author_name="a" * 256,
+                new_author_name="a" * 256,
             ),
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "מחבר/ת חייב להיות עד 255 תווים")
+        self.assertContains(resp, "שם המחבר/ת חייב להיות עד 255 תווים.")
         self.assertFalse(ArchiveItem.objects.filter(title="Too long author").exists())
 
     def test_over_255_source_title_rejected_on_manual_text_edit(self):
@@ -1524,7 +1524,7 @@ class OcrDocumentMetadataEditTests(TestCase):
             self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
             data=self._valid_metadata_payload(
                 title="OCR source edit",
-                author_name="  יוסף לוי  ",
+                new_author_name="  יוסף לוי  ",
                 source_title=" דבר ",
             ),
         )
@@ -1570,7 +1570,7 @@ class OcrDocumentMetadataEditTests(TestCase):
             self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
             data=self._valid_metadata_payload(
                 title="OCR source clear",
-                author_name="   ",
+                new_author_name="",
                 source_title="",
             ),
         )
@@ -1586,8 +1586,6 @@ class OcrDocumentMetadataEditTests(TestCase):
             doc_type=Document.DocType.IMAGE,
             text_input_type=Document.TextInputType.HANDWRITTEN,
             visibility=Document.Visibility.PUBLIC,
-        )
-        ArchiveItem.objects.filter(pk=doc.archive_item_id).update(
             author_name="Seeded OCR author",
             source_title="Seeded OCR source",
         )
@@ -1596,7 +1594,8 @@ class OcrDocumentMetadataEditTests(TestCase):
             self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id)
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'value="Seeded OCR author"')
+        self.assertContains(resp, 'name="author_ids"')
+        self.assertContains(resp, "Seeded OCR author")
         self.assertContains(resp, 'value="Seeded OCR source"')
 
     def test_over_255_author_name_rejected_on_ocr_edit(self):
@@ -1610,11 +1609,11 @@ class OcrDocumentMetadataEditTests(TestCase):
             self.EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
             data=self._valid_metadata_payload(
                 title="OCR long author",
-                author_name="a" * 256,
+                new_author_name="a" * 256,
             ),
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "מחבר/ת חייב להיות עד 255 תווים")
+        self.assertContains(resp, "שם המחבר/ת חייב להיות עד 255 תווים.")
         doc.archive_item.refresh_from_db()
         self.assertEqual(doc.archive_item.author_name, "")
 

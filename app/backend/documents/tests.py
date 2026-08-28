@@ -4819,7 +4819,7 @@ class UploadApiTests(TestCase):
     ):
         resp = self._post_create(
             self._base_create_payload(
-                author_name="רחל כהן",
+                new_author_name="רחל כהן",
                 source_title="הארץ",
             )
         )
@@ -4837,7 +4837,7 @@ class UploadApiTests(TestCase):
     ):
         resp = self._post_create(
             self._base_create_payload(
-                author_name="  יוסף לוי  ",
+                new_author_name="  יוסף לוי  ",
                 source_title="  דבר  ",
             )
         )
@@ -4866,7 +4866,7 @@ class UploadApiTests(TestCase):
     ):
         resp = self._post_create(
             self._base_create_payload(
-                author_name="   ",
+                new_author_name="   ",
                 source_title="\t",
             )
         )
@@ -4880,10 +4880,10 @@ class UploadApiTests(TestCase):
     )
     def test_create_upload_rejects_over_255_author_name(self, _mock_put):
         before_count = Document.objects.count()
-        resp = self._post_create(self._base_create_payload(author_name="א" * 256))
+        resp = self._post_create(self._base_create_payload(new_author_name="א" * 256))
         self.assertEqual(resp.status_code, 400)
         self.assertIn(
-            "מחבר/ת חייב להיות עד 255 תווים".encode("utf-8"),
+            "שם המחבר/ת חייב להיות עד 255 תווים.".encode("utf-8"),
             resp.content,
         )
         self.assertEqual(Document.objects.count(), before_count)
@@ -4908,7 +4908,7 @@ class UploadApiTests(TestCase):
     def test_multi_image_create_saves_source_metadata_on_archive_item(self, _mock_put):
         resp = self._post_create(
             self._multi_files_payload(
-                author_name="דוד בן-גוריון",
+                new_author_name="דוד בן-גוריון",
                 source_title="מגילת העצמאות",
             )
         )
@@ -10630,7 +10630,7 @@ class UploadPageTemplateTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         for needle in (
             'id="title"',
-            'id="author_name"',
+            'id="author_ids"',
             'id="source_title"',
             'id="doc_type"',
             'id="text_input_type"',

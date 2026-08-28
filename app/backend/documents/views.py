@@ -64,6 +64,15 @@ from documents.services.archive_discovery_metadata_validation import (
     empty_discovery_metadata_form_fields,
     parse_archive_item_discovery_metadata_form,
 )
+from documents.services.archive_item_authors import (
+    AUTHOR_IDS_FIELD,
+    NEW_AUTHOR_NAME_FIELD,
+    ArchiveItemAuthorError,
+    archive_item_authors_form_data_from_item,
+    build_staff_author_choices,
+    empty_archive_item_authors_form_fields,
+    parse_archive_item_authors_form,
+)
 from documents.services.archive_item_people import (
     ArchiveItemPersonError,
     archive_item_people_form_data_from_item,
@@ -416,7 +425,7 @@ class _CreateUploadCommon(TypedDict):
     handwriting_type: str
     visibility: str
     admin_meta: dict
-    author_name: str
+    authors: dict
     source_title: str
     public_note: str
     discovery_metadata: dict
@@ -808,15 +817,18 @@ def _parse_create_upload_common(
     if not isinstance(admin_meta, dict):
         return None, _bad("admin_meta must be an object")
 
-    author_name = (payload.get("author_name") or "").strip()
     source_title = (payload.get("source_title") or "").strip()
     public_note = parse_public_note(payload.get("public_note"))
     source_errors = validate_source_metadata_fields(
-        author_name=author_name,
+        author_name="",
         source_title=source_title,
     )
     if source_errors:
         return None, _bad(source_errors[0])
+
+    parsed_authors, author_errors = parse_archive_item_authors_form(payload)
+    if author_errors:
+        return None, _bad(author_errors[0])
 
     parsed_discovery, discovery_errors = _parse_create_upload_discovery_metadata(
         payload
@@ -838,7 +850,7 @@ def _parse_create_upload_common(
         "handwriting_type": handwriting_type,
         "visibility": visibility,
         "admin_meta": admin_meta,
-        "author_name": author_name,
+        "authors": parsed_authors,
         "source_title": source_title,
         "public_note": public_note,
         "discovery_metadata": parsed_discovery,
@@ -863,6 +875,13 @@ def _apply_upload_discovery_metadata(doc: Document, discovery_metadata: dict) ->
         event_names=discovery_metadata["event_names"],
         tag_names=discovery_metadata["tag_names"],
     )
+
+
+def _staff_author_write_kwargs(parsed_authors: dict) -> dict:
+    return {
+        "staff_author_ids": list(parsed_authors.get(AUTHOR_IDS_FIELD) or []),
+        "new_author_name": parsed_authors.get(NEW_AUTHOR_NAME_FIELD) or "",
+    }
 
 
 def _apply_created_ocr_relations(doc: Document, common: _CreateUploadCommon) -> None:
@@ -965,24 +984,27 @@ def _create_incremental_multi_image_upload(
     if isinstance(bucket_or_response, JsonResponse):
         return bucket_or_response
 
-    with transaction.atomic():
-        doc = create_ocr_document(
-            title=common["title"],
-            doc_type=Document.DocType.IMAGE,
-            date_start=common["date_start"],
-            date_end=common["date_end"],
-            date_precision=common["date_precision"],
-            language=common["language"],
-            text_input_type=common["text_input_type"],
-            handwriting_type=common["handwriting_type"],
-            visibility=common["visibility"],
-            author_name=common["author_name"],
-            source_title=common["source_title"],
-            public_note=common["public_note"],
-            upload_status=Document.UploadStatus.UPLOADING,
-            expected_source_file_count=None,
-        )
-        _apply_created_ocr_relations(doc, common)
+    try:
+        with transaction.atomic():
+            doc = create_ocr_document(
+                title=common["title"],
+                doc_type=Document.DocType.IMAGE,
+                date_start=common["date_start"],
+                date_end=common["date_end"],
+                date_precision=common["date_precision"],
+                language=common["language"],
+                text_input_type=common["text_input_type"],
+                handwriting_type=common["handwriting_type"],
+                visibility=common["visibility"],
+                source_title=common["source_title"],
+                public_note=common["public_note"],
+                upload_status=Document.UploadStatus.UPLOADING,
+                expected_source_file_count=None,
+                **_staff_author_write_kwargs(common["authors"]),
+            )
+            _apply_created_ocr_relations(doc, common)
+    except ArchiveItemAuthorError as exc:
+        return _bad(exc.message)
 
     return JsonResponse(
         {
@@ -1049,24 +1071,27 @@ def _create_multi_image_upload(request, payload: dict, common: _CreateUploadComm
         return bucket_or_response
     bucket = bucket_or_response
 
-    with transaction.atomic():
-        doc = create_ocr_document(
-            title=common["title"],
-            doc_type=Document.DocType.IMAGE,
-            date_start=common["date_start"],
-            date_end=common["date_end"],
-            date_precision=common["date_precision"],
-            language=common["language"],
-            text_input_type=common["text_input_type"],
-            handwriting_type=common["handwriting_type"],
-            visibility=common["visibility"],
-            author_name=common["author_name"],
-            source_title=common["source_title"],
-            public_note=common["public_note"],
-            upload_status=Document.UploadStatus.UPLOADING,
-            expected_source_file_count=file_count,
-        )
-        _apply_created_ocr_relations(doc, common)
+    try:
+        with transaction.atomic():
+            doc = create_ocr_document(
+                title=common["title"],
+                doc_type=Document.DocType.IMAGE,
+                date_start=common["date_start"],
+                date_end=common["date_end"],
+                date_precision=common["date_precision"],
+                language=common["language"],
+                text_input_type=common["text_input_type"],
+                handwriting_type=common["handwriting_type"],
+                visibility=common["visibility"],
+                source_title=common["source_title"],
+                public_note=common["public_note"],
+                upload_status=Document.UploadStatus.UPLOADING,
+                expected_source_file_count=file_count,
+                **_staff_author_write_kwargs(common["authors"]),
+            )
+            _apply_created_ocr_relations(doc, common)
+    except ArchiveItemAuthorError as exc:
+        return _bad(exc.message)
 
     uploads = []
     for order_index, file_meta in enumerate(parsed_files):
@@ -1117,31 +1142,34 @@ def _create_single_file_upload(request, payload: dict, common: _CreateUploadComm
         return bucket_or_response
     bucket = bucket_or_response
 
-    with transaction.atomic():
-        doc = create_ocr_document(
-            title=common["title"],
-            doc_type=doc_type,
-            date_start=common["date_start"],
-            date_end=common["date_end"],
-            date_precision=common["date_precision"],
-            language=common["language"],
-            text_input_type=common["text_input_type"],
-            handwriting_type=common["handwriting_type"],
-            visibility=common["visibility"],
-            author_name=common["author_name"],
-            source_title=common["source_title"],
-            public_note=common["public_note"],
-            upload_status=Document.UploadStatus.UPLOADING,
-            file_original_name=original_name,
-            mime_type=mime_type,
-            size_bytes=size_bytes if isinstance(size_bytes, int) else None,
-        )
-        _apply_created_ocr_relations(doc, common)
+    try:
+        with transaction.atomic():
+            doc = create_ocr_document(
+                title=common["title"],
+                doc_type=doc_type,
+                date_start=common["date_start"],
+                date_end=common["date_end"],
+                date_precision=common["date_precision"],
+                language=common["language"],
+                text_input_type=common["text_input_type"],
+                handwriting_type=common["handwriting_type"],
+                visibility=common["visibility"],
+                source_title=common["source_title"],
+                public_note=common["public_note"],
+                upload_status=Document.UploadStatus.UPLOADING,
+                file_original_name=original_name,
+                mime_type=mime_type,
+                size_bytes=size_bytes if isinstance(size_bytes, int) else None,
+                **_staff_author_write_kwargs(common["authors"]),
+            )
+            _apply_created_ocr_relations(doc, common)
 
-        ext = mime_type_to_extension(mime_type)
-        key = f"documents/{doc.id}/original.{ext}"
-        doc.file_s3_key = key
-        doc.save(update_fields=["file_s3_key"])
+            ext = mime_type_to_extension(mime_type)
+            key = f"documents/{doc.id}/original.{ext}"
+            doc.file_s3_key = key
+            doc.save(update_fields=["file_s3_key"])
+    except ArchiveItemAuthorError as ext_err:
+        return _bad(ext_err.message)
 
     upload_url = create_presigned_put(bucket=bucket, key=key, content_type=mime_type)
 
@@ -4284,6 +4312,7 @@ def _upload_form_context(*, user=None) -> dict:
     form_data = {
         **empty_discovery_metadata_form_fields(),
         **empty_archive_item_people_form_fields(),
+        **empty_archive_item_authors_form_fields(),
     }
     return {
         "doc_type_choices": Document.DocType.choices,
@@ -4308,6 +4337,7 @@ def _upload_form_context(*, user=None) -> dict:
             item_type=ArchiveItem.ItemType.OCR_DOCUMENT,
             form_data=form_data,
         ),
+        **_archive_item_authors_staff_form_context(form_data),
     }
 
 
@@ -4362,6 +4392,7 @@ def _archive_metadata_form_context(
         "visibility_choices": archive_visibility_ui_choices(user),
         "date_precision_choices": DATE_PRECISION_UI_CHOICES,
         "metadata_status_choices": archive_metadata_status_ui_choices(),
+        **_archive_item_authors_staff_form_context(form_data),
     }
 
 
@@ -4439,6 +4470,7 @@ def _ocr_document_edit_form_data_from_document(document: Document) -> dict:
         **_ocr_catalog_form_data_from_document(document),
         **discovery_metadata_form_data_from_item(item),
         **archive_item_people_form_data_from_item(item),
+        **archive_item_authors_form_data_from_item(item),
     }
 
 
@@ -4459,6 +4491,7 @@ def _empty_manual_text_form_data() -> dict:
         "body": "",
         **empty_discovery_metadata_form_fields(),
         **empty_archive_item_people_form_fields(),
+        **empty_archive_item_authors_form_fields(),
     }
 
 
@@ -4495,6 +4528,7 @@ def _manual_text_form_data_from_item(item: ArchiveItem) -> dict:
         "body": item.manual_text_content.body,
         **discovery_metadata_form_data_from_item(item),
         **archive_item_people_form_data_from_item(item),
+        **archive_item_authors_form_data_from_item(item),
     }
 
 
@@ -4566,6 +4600,24 @@ PHOTO_ARCHIVE_ITEM_PEOPLE_HINT = (
     "קשר ברמת פריט הארכיון, לא הופעה בתמונה. "
     "אנשים מזוהים בתמונה נערכים בדף התמונה עצמו."
 )
+
+
+def _archive_item_authors_staff_form_context(form_data: dict) -> dict:
+    selected_author_ids = [
+        int(author_id) for author_id in form_data.get(AUTHOR_IDS_FIELD) or []
+    ]
+    author_choices, selected_authors = build_staff_author_choices(
+        selected_author_ids=selected_author_ids
+    )
+    return {
+        "archive_item_author_choices": author_choices,
+        "archive_item_selected_authors": selected_authors,
+    }
+
+
+def _parse_archive_item_authors_post(request, form_data: dict, form_errors: list[str]):
+    parsed_authors, author_errors = parse_archive_item_authors_form(request.POST)
+    return {**form_data, **parsed_authors}, form_errors + author_errors, parsed_authors
 
 
 def _archive_item_people_staff_form_context(*, item_type: str, form_data: dict) -> dict:
@@ -4659,6 +4711,7 @@ def _empty_video_form_data() -> dict:
         "provider_display_label": "",
         **empty_discovery_metadata_form_fields(),
         **empty_archive_item_people_form_fields(),
+        **empty_archive_item_authors_form_fields(),
     }
 
 
@@ -4691,6 +4744,7 @@ def _video_form_data_from_item(item: ArchiveItem) -> dict:
         "provider_display_label": video_provider_display_label(content.provider),
         **discovery_metadata_form_data_from_item(item),
         **archive_item_people_form_data_from_item(item),
+        **archive_item_authors_form_data_from_item(item),
     }
 
 
@@ -4729,27 +4783,33 @@ def _submit_video_create(request):
     form_data, form_errors, parsed_people = _parse_archive_item_people_post(
         request, form_data, form_errors
     )
+    form_data, form_errors, parsed_authors = _parse_archive_item_authors_post(
+        request, form_data, form_errors
+    )
     if form_errors:
         return None, form_data, form_errors
-    with transaction.atomic():
-        item = create_video_archive_item(
-            title=parsed["title"],
-            source_url=parsed["source_url"],
-            visibility=parsed["visibility"],
-            date_start=parsed["date_start_value"],
-            date_end=parsed["date_end_value"],
-            date_precision=parsed["date_precision"],
-            metadata_status=parsed["metadata_status"],
-            author_name=parsed["author_name"],
-            source_title=parsed["source_title"],
-            public_note=parsed["public_note"],
-            category_names=parsed["category_names"],
-            event_names=parsed["event_names"],
-            tag_names=parsed["tag_names"],
-            user=request.user,
-            **_video_service_time_kwargs(parsed),
-        )
-        _save_archive_item_people(item, parsed_people, refresh_search_index=True)
+    try:
+        with transaction.atomic():
+            item = create_video_archive_item(
+                title=parsed["title"],
+                source_url=parsed["source_url"],
+                visibility=parsed["visibility"],
+                date_start=parsed["date_start_value"],
+                date_end=parsed["date_end_value"],
+                date_precision=parsed["date_precision"],
+                metadata_status=parsed["metadata_status"],
+                source_title=parsed["source_title"],
+                public_note=parsed["public_note"],
+                category_names=parsed["category_names"],
+                event_names=parsed["event_names"],
+                tag_names=parsed["tag_names"],
+                user=request.user,
+                **_video_service_time_kwargs(parsed),
+                **_staff_author_write_kwargs(parsed_authors),
+            )
+            _save_archive_item_people(item, parsed_people, refresh_search_index=True)
+    except (ArchiveItemPersonError, ArchiveItemAuthorError) as exc:
+        return None, form_data, [exc.message]
     return redirect("archive-manage-list"), form_data, form_errors
 
 
@@ -4775,28 +4835,34 @@ def _submit_manual_text_create(request):
     form_data, form_errors, parsed_people = _parse_archive_item_people_post(
         request, form_data, form_errors
     )
+    form_data, form_errors, parsed_authors = _parse_archive_item_authors_post(
+        request, form_data, form_errors
+    )
     if form_errors:
         return None, form_data, form_errors
-    with transaction.atomic():
-        item = create_manual_text_archive_item(
-            title=parsed["title"],
-            body=parsed["body"],
-            visibility=parsed["visibility"],
-            date_start=parsed["date_start_value"],
-            date_end=parsed["date_end_value"],
-            date_precision=parsed["date_precision"],
-            metadata_status=parsed["metadata_status"],
-            author_name=parsed["author_name"],
-            source_title=parsed["source_title"],
-            public_note=parsed["public_note"],
-        )
-        _save_archive_item_people(item, parsed_people)
-        update_archive_item_discovery_metadata(
-            item,
-            category_names=parsed_discovery["category_names"],
-            event_names=parsed_discovery["event_names"],
-            tag_names=parsed_discovery["tag_names"],
-        )
+    try:
+        with transaction.atomic():
+            item = create_manual_text_archive_item(
+                title=parsed["title"],
+                body=parsed["body"],
+                visibility=parsed["visibility"],
+                date_start=parsed["date_start_value"],
+                date_end=parsed["date_end_value"],
+                date_precision=parsed["date_precision"],
+                metadata_status=parsed["metadata_status"],
+                source_title=parsed["source_title"],
+                public_note=parsed["public_note"],
+                **_staff_author_write_kwargs(parsed_authors),
+            )
+            _save_archive_item_people(item, parsed_people)
+            update_archive_item_discovery_metadata(
+                item,
+                category_names=parsed_discovery["category_names"],
+                event_names=parsed_discovery["event_names"],
+                tag_names=parsed_discovery["tag_names"],
+            )
+    except (ArchiveItemPersonError, ArchiveItemAuthorError) as exc:
+        return None, form_data, [exc.message]
     return redirect("archive-detail", item_id=item.id), form_data, form_errors
 
 
@@ -5321,6 +5387,9 @@ def _archive_manage_edit_manual_text(request, item: ArchiveItem):
         form_data, form_errors, parsed_people = _parse_archive_item_people_post(
             request, form_data, form_errors
         )
+        form_data, form_errors, parsed_authors = _parse_archive_item_authors_post(
+            request, form_data, form_errors
+        )
         if not form_errors:
             try:
                 with transaction.atomic():
@@ -5334,9 +5403,9 @@ def _archive_manage_edit_manual_text(request, item: ArchiveItem):
                         date_end=parsed["date_end_value"],
                         date_precision=parsed["date_precision"],
                         metadata_status=parsed["metadata_status"],
-                        author_name=parsed["author_name"],
                         source_title=parsed["source_title"],
                         public_note=parsed["public_note"],
+                        **_staff_author_write_kwargs(parsed_authors),
                     )
                     update_archive_item_discovery_metadata(
                         item,
@@ -5344,7 +5413,7 @@ def _archive_manage_edit_manual_text(request, item: ArchiveItem):
                         event_names=parsed_discovery["event_names"],
                         tag_names=parsed_discovery["tag_names"],
                     )
-            except ArchiveItemPersonError as exc:
+            except (ArchiveItemPersonError, ArchiveItemAuthorError) as exc:
                 form_errors = [exc.message]
             else:
                 messages.success(request, ARCHIVE_ITEM_UPDATED_MSG)
@@ -5747,6 +5816,9 @@ def _archive_manage_edit_video(request, item: ArchiveItem):
         form_data, form_errors, parsed_people = _parse_archive_item_people_post(
             request, form_data, form_errors
         )
+        form_data, form_errors, parsed_authors = _parse_archive_item_authors_post(
+            request, form_data, form_errors
+        )
         if not form_errors:
             try:
                 with transaction.atomic():
@@ -5760,7 +5832,6 @@ def _archive_manage_edit_video(request, item: ArchiveItem):
                         date_end=parsed["date_end_value"],
                         date_precision=parsed["date_precision"],
                         metadata_status=parsed["metadata_status"],
-                        author_name=parsed["author_name"],
                         source_title=parsed["source_title"],
                         public_note=parsed["public_note"],
                         category_names=parsed["category_names"],
@@ -5768,8 +5839,9 @@ def _archive_manage_edit_video(request, item: ArchiveItem):
                         tag_names=parsed["tag_names"],
                         user=request.user,
                         **_video_service_time_kwargs(parsed),
+                        **_staff_author_write_kwargs(parsed_authors),
                     )
-            except ArchiveItemPersonError as exc:
+            except (ArchiveItemPersonError, ArchiveItemAuthorError) as exc:
                 form_errors = [exc.message]
             else:
                 messages.success(request, ARCHIVE_ITEM_UPDATED_MSG)
@@ -5825,6 +5897,9 @@ def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
         form_data, form_errors, parsed_people = _parse_archive_item_people_post(
             request, form_data, form_errors
         )
+        form_data, form_errors, parsed_authors = _parse_archive_item_authors_post(
+            request, form_data, form_errors
+        )
         if not form_errors:
             try:
                 with transaction.atomic():
@@ -5837,9 +5912,9 @@ def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
                         date_end=parsed_shared["date_end_value"],
                         date_precision=parsed_shared["date_precision"],
                         metadata_status=parsed_shared["metadata_status"],
-                        author_name=parsed_shared["author_name"],
                         source_title=parsed_shared["source_title"],
                         public_note=parsed_shared["public_note"],
+                        **_staff_author_write_kwargs(parsed_authors),
                     )
                     update_ocr_document_catalog_metadata(
                         doc,
@@ -5854,7 +5929,7 @@ def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
                         event_names=parsed_discovery["event_names"],
                         tag_names=parsed_discovery["tag_names"],
                     )
-            except ArchiveItemPersonError as exc:
+            except (ArchiveItemPersonError, ArchiveItemAuthorError) as exc:
                 form_errors = [exc.message]
             else:
                 messages.success(request, ARCHIVE_ITEM_UPDATED_MSG)

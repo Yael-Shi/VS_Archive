@@ -1,0 +1,22 @@
+<div class="field">
+  <label for="author_ids">מחבר/ת</label>
+  <select id="author_ids" name="author_ids" multiple size="8">
+    {% for author in archive_item_author_choices %}
+      <option value="{{ author.id }}" {% if author.selected %}selected{% endif %}>
+        {{ author.name }}
+      </option>
+    {% endfor %}
+  </select>
+  <div class="field-hint">בחירה מרשומות מחבר/ת קיימות. מחברים שכבר משויכים מוצגים לפי הסדר השמור.</div>
+</div>
+
+<div class="field">
+  <label for="new_author_name">הוספת מחבר/ת חדש/ה</label>
+  <input
+    id="new_author_name"
+    name="new_author_name"
+    type="text"
+    value="{{ form_data.new_author_name }}"
+  />
+  <div class="field-hint">ניתן להזין כמה שמות מופרדים בפסיקים. אם השם כבר קיים, בחרו אותו מהרשימה במקום להקליד אותו.</div>
+</div>
