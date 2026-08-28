@@ -81,6 +81,12 @@ class ArchiveItem(models.Model):
         blank=True,
         related_name="archive_items",
     )
+    authors: models.ManyToManyField[Author, ArchiveItemAuthor] = models.ManyToManyField(
+        "Author",
+        through="ArchiveItemAuthor",
+        blank=True,
+        related_name="archive_items",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -364,6 +370,56 @@ class ArchiveItemPerson(models.Model):
         return (
             f"ArchiveItemPerson(archive_item_id={self.archive_item_id}, "
             f"person_id={self.person_id})"
+        )
+
+
+class Author(models.Model):
+    """Bibliographic author name. Not a Person and never inferred from Person."""
+
+    name = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name", "id"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class ArchiveItemAuthor(models.Model):
+    """Ordered author link for an archival item (not a Person relation)."""
+
+    archive_item = models.ForeignKey(
+        ArchiveItem,
+        on_delete=models.CASCADE,
+        related_name="author_links",
+    )
+    author = models.ForeignKey(
+        Author,
+        on_delete=models.CASCADE,
+        related_name="archive_item_links",
+    )
+    position = models.PositiveSmallIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["archive_item", "position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["archive_item", "author"],
+                name="uniq_archive_item_author",
+            ),
+            models.UniqueConstraint(
+                fields=["archive_item", "position"],
+                name="uniq_archive_item_author_position",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return (
+            f"ArchiveItemAuthor(archive_item_id={self.archive_item_id}, "
+            f"author_id={self.author_id}, position={self.position})"
         )
 
 

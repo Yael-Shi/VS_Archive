@@ -1,5 +1,55 @@
 # VS-Archive Decision Log
 
+## Multi-author data foundation (PR1)
+
+**Decision / implemented:** Add a bibliographic **`Author`** model and ordered
+**`ArchiveItemAuthor`** links, plus a 1:1 exact-string backfill from
+**`ArchiveItem.author_name`**. This PR is data foundation only. It does **not**
+change public display, `q` indexing, snippets, advanced filters, PHOTO author
+UI, templates, or URLs.
+
+**Current behavior:**
+
+- **`Author`** is a bibliographic name (`CharField(max_length=255)`), **not
+  unique**, with **`created_at`** / **`updated_at`**. It is **not** a
+  **`Person`**. Dual-write and backfill never infer, create, or link
+  **`Person`**, **`ArchiveItemPerson`**, or **`PhotoPerson`**.
+- Titles such as ד״ר / Dr. remain part of the stored **`Author.name`** for now.
+  There is no title-stripping, spelling merge, or casefold.
+- **`ArchiveItemAuthor`** is the through row for **`ArchiveItem.authors`**:
+  **`archive_item`** FK CASCADE (`related_name=author_links`), **`author`** FK
+  CASCADE (`related_name=archive_item_links`), **`position`**
+  (`PositiveSmallIntegerField`), **`created_at`**. Unique
+  **`(archive_item, author)`** and **`(archive_item, position)`**. Ordering is
+  **`(archive_item, position, id)`**.
+- **`ArchiveItem.author_name`** remains the compatibility field used by public
+  display, search indexing, snippets, and the advanced author filter.
+- Backfill (`0059_backfill_authors_from_author_name`) creates one **`Author`**
+  per distinct exact non-empty stored **`author_name`**, and one
+  **`ArchiveItemAuthor`** at **`position=0`** for each matching item. It does
+  **not** split commas. Empty / whitespace-only values create no rows. Every
+  item type with a stored value is included, including PHOTO. Reverse deletes
+  **`Author`** / **`ArchiveItemAuthor`** rows; **`author_name`** stays intact.
+- Until later PRs, OCR / MANUAL_TEXT / VIDEO writers remain string-based.
+  Whenever they save **`author_name`**, they keep the exact normalized string
+  and replace that item's author relations with one exact-name **`Author`** at
+  **`position=0`** (`apply_legacy_author_name`). Empty clears relations. Exactly
+  one matching **`Author`** is reused; when none exists, one is created; multiple exact matches
+  fail closed with no partial item / string / relation writes. Comma input is
+  not split.
+- PHOTO create/edit still has no author UI and does **not** dual-write.
+- Exact duplicate **`Author`** creation will be blocked in the later staff-UI
+  PR. This PR allows duplicate display names (same as **`Person.name`**).
+
+**Migrations:** `0058_author_foundation` (schema) +
+`0059_backfill_authors_from_author_name` (reversible data).
+
+**Deferred:** staff Author UI / duplicate-create guard; comma-separated
+multi-author input; public display/search/filter cutover from
+**`author_name`**; PHOTO author UI.
+
+**Tests:** `documents/test_author.py`.
+
 ## Prefixable archive date-entry widget
 
 **Decision / implemented:** The shared staff date-entry widget can render two
