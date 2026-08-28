@@ -186,7 +186,7 @@ class ArchiveItemAdmin(_VisibilityScopedAdminMixin, admin.ModelAdmin):
     search_fields = ("title",)
     ordering = ("-created_at",)
     readonly_fields = ("created_at", "updated_at")
-    exclude = ("people",)
+    exclude = ("people", "authors")
 
     def get_queryset(self, request):
         return filter_archive_items_for_user(

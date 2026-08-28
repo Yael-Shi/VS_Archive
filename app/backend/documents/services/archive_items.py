@@ -24,6 +24,13 @@ ARCHIVE_ITEM_SHARED_FIELD_NAMES = (
 )
 
 
+def _apply_legacy_author_name(archive_item: Any, author_name: str) -> None:
+    """Dual-write OCR/MANUAL_TEXT/VIDEO author_name onto ordered Author relations."""
+    from documents.services.archive_item_authors import apply_legacy_author_name
+
+    apply_legacy_author_name(archive_item, author_name)
+
+
 def archive_item_field_values_from_archive_item(archive_item: Any) -> dict[str, Any]:
     """Build shared archival field values from an ArchiveItem (no inference)."""
     return {
@@ -90,6 +97,7 @@ def create_ocr_document(**document_kwargs: Any):
         source_title=source_metadata_kwargs["source_title"],
         public_note=source_metadata_kwargs["public_note"],
     )
+    _apply_legacy_author_name(archive_item, source_metadata_kwargs["author_name"])
     document = Document.objects.create(
         archive_item=archive_item,
         **runtime_kwargs,
@@ -133,6 +141,7 @@ def create_manual_text_archive_item(
         source_title=source_title,
         public_note=public_note,
     )
+    _apply_legacy_author_name(archive_item, author_name)
     ManualTextContent.objects.create(archive_item=archive_item, body=body)
     from documents.services.archive_search_index import sync_archive_item_search_index
 
@@ -175,6 +184,7 @@ def update_manual_text_archive_item(
     archive_item.source_title = source_title
     archive_item.public_note = public_note
     archive_item.save()
+    _apply_legacy_author_name(archive_item, author_name)
 
     content = archive_item.manual_text_content
     content.body = body
@@ -288,6 +298,7 @@ def create_video_archive_item(
         source_title=source_title,
         public_note=public_note,
     )
+    _apply_legacy_author_name(archive_item, author_name)
     content = VideoContent(
         archive_item=archive_item,
         **video_fields,
@@ -376,6 +387,7 @@ def update_video_archive_item(
     archive_item.source_title = source_title
     archive_item.public_note = public_note
     archive_item.save()
+    _apply_legacy_author_name(archive_item, author_name)
 
     content = archive_item.video_content
     content.source_url = video_fields["source_url"]
@@ -494,6 +506,7 @@ def update_ocr_document_metadata(
             "updated_at",
         ]
     )
+    _apply_legacy_author_name(archive_item, author_name)
     from documents.services.archive_search_index import sync_archive_item_search_index
 
     sync_archive_item_search_index(archive_item.pk)
