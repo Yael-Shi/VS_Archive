@@ -15,6 +15,7 @@
             />
             {{ author.name }}
           </label>
+          <a href="{% url 'archive-manage-author-edit' author_id=author.id %}">עריכת מחבר/ת</a>
         </li>
       {% endfor %}
     </ul>

@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - {{ page_title }}{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-manage-list' %}">חזרה לניהול</a>
+    </div>
+
+    <h1 class="page-title">{{ page_title }}</h1>
+    <p class="page-subtitle">{{ author.name }}</p>
+    <p class="muted">
+      שינוי השם חל על כל הפריטים המשויכים למחבר/ת זה/זו ומעדכן את שדה המחבר/ת ואת החיפוש בכולם.
+      אין אפשרות לשם שונה לפריט בודד. אם קיים/ת כבר מחבר/ת אחר/ת בשם זהה, השמירה תיחסם ורשומות לא יאוחדו.
+    </p>
+
+    {% if messages %}
+      <div class="spacer"></div>
+      {% for message in messages %}
+        <div class="alert{% if message.tags == 'error' %} alert-danger{% elif message.tags == 'success' %} alert-ok{% endif %}">
+          {{ message }}
+        </div>
+      {% endfor %}
+    {% endif %}
+
+    {% if form_errors %}
+      <div class="spacer"></div>
+      <div class="alert alert-danger">
+        <div class="alert-title">שגיאה בטופס</div>
+        <ul>
+          {% for error in form_errors %}
+            <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    <div class="spacer"></div>
+    <h2>פריטים שיושפעו ({{ affected_item_count }})</h2>
+    {% if affected_items %}
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>כותרת</th>
+              <th>מחבר/ת מוצג/ת כיום</th>
+              <th>פעולות</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in affected_items %}
+              <tr>
+                <td>{{ item.title }}</td>
+                <td>{{ item.author_name }}</td>
+                <td>
+                  <a class="btn" href="{% url 'archive-manage-edit' item_id=item.id %}">עריכת פריט</a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">אין פריטים משויכים. שינוי השם יעדכן את רשומת המחבר/ת בלבד.</p>
+    {% endif %}
+
+    <div class="spacer"></div>
+    <form method="post">
+      {% csrf_token %}
+      <div class="field">
+        <label for="author_name">שם מחבר/ת</label>
+        <input id="author_name" name="name" type="text" value="{{ author_name }}" maxlength="255" />
+        <div class="field-hint">השם הביבליוגרפי כפי שיוצג בכל הפריטים המשויכים. מחבר/ת אינו/ה רשומת אדם ואינו/ה מקושר/ת לזיהוי אנשים בתמונות.</div>
+      </div>
+      <button type="submit" class="btn btn-primary">עדכון שם מחבר/ת</button>
+    </form>
+  </div>
+{% endblock %}

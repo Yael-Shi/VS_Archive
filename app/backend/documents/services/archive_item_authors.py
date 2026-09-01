@@ -4,7 +4,8 @@ Author is bibliographic, not Person. Callers that persist ``author_name`` on
 OCR / MANUAL_TEXT / VIDEO writers must use ``apply_legacy_author_name`` in the
 same transaction unless they pass staff ``author_ids`` / ``new_author_name``,
 which use ``apply_staff_archive_item_authors``. PHOTO writers do not dual-write.
-``apply_legacy_author_name`` does not split commas.
+``apply_legacy_author_name`` does not split commas. ``rename_author`` renames one
+Author globally and rebuilds every affected ``author_name`` from its ordered links.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from django.db import transaction
+from django.db.models import Q
 
 from documents.models import ArchiveItem, ArchiveItemAuthor, Author
 from documents.services.archive_metadata_validation import SOURCE_METADATA_MAX_LENGTH
@@ -28,6 +30,13 @@ AUTHOR_NAMES_COMMAS_ONLY_ERROR = (
     "יש להזין לפחות שם מחבר/ת אחד. לא ניתן לשמור קלט שמכיל רק פסיקים או רווחים."
 )
 AUTHOR_JOINED_TOO_LONG_ERROR = "מחבר/ת חייב להיות עד 255 תווים"
+AUTHOR_NAME_REQUIRED_ERROR = "יש להזין שם מחבר/ת."
+AUTHOR_NAME_COLLISION_ERROR = (
+    "קיים/ת כבר מחבר/ת אחר/ת בשם זהה. שינוי השם היה מאחד רשומות ולכן נחסם."
+)
+AUTHOR_LINKS_CHANGED_RETRY_ERROR = (
+    "רשימת הפריטים המשויכים השתנתה בזמן השמירה. יש לטעון מחדש ולנסות שוב."
+)
 AUTHOR_IDS_FIELD = "author_ids"
 NEW_AUTHOR_NAME_FIELD = "new_author_name"
 AUTHOR_NAME_MAX_LENGTH = SOURCE_METADATA_MAX_LENGTH
@@ -58,6 +67,11 @@ def ordered_author_links(archive_item: ArchiveItem) -> list[ArchiveItemAuthor]:
 def ordered_authors(archive_item: ArchiveItem) -> list[Author]:
     """Return this item's authors in position order."""
     return [link.author for link in ordered_author_links(archive_item)]
+
+
+def _joined_author_name(names: Sequence[str]) -> str:
+    """Build the compatibility ``ArchiveItem.author_name`` from ordered names."""
+    return ", ".join(names)
 
 
 def empty_archive_item_authors_form_fields() -> dict[str, Any]:
@@ -245,7 +259,7 @@ def parse_archive_item_authors_form(post_data) -> tuple[dict[str, Any], list[str
         errors.extend(plan_errors)
         if not errors:
             ordered_names = [author.name for author in reused] + pending_create
-            joined = ", ".join(ordered_names)
+            joined = _joined_author_name(ordered_names)
             if len(joined) > AUTHOR_NAME_MAX_LENGTH:
                 errors.append(AUTHOR_JOINED_TOO_LONG_ERROR)
     return {
@@ -411,7 +425,7 @@ def apply_staff_archive_item_authors(
         seen_ids.add(created.pk)
         ordered.append(created)
 
-    joined = ", ".join(author.name for author in ordered)
+    joined = _joined_author_name([author.name for author in ordered])
     if len(joined) > AUTHOR_NAME_MAX_LENGTH:
         raise ArchiveItemAuthorError(AUTHOR_JOINED_TOO_LONG_ERROR)
 
@@ -454,3 +468,198 @@ def apply_legacy_author_name(
         [resolved] if resolved is not None else [],
     )
     return links
+
+
+def affected_archive_item_ids_for_author(author: Author) -> list[int]:
+    """Return ascending ids of every ArchiveItem linked to this Author.
+
+    Ascending order matches ``sync_archive_item_search_indexes`` so rename
+    locking and index fan-out take rows in the same order.
+    """
+    return sorted(
+        ArchiveItemAuthor.objects.filter(author=author)
+        .values_list("archive_item_id", flat=True)
+        .distinct()
+    )
+
+
+def affected_archive_items_for_author(author: Author) -> list[ArchiveItem]:
+    """Return every ArchiveItem linked to this Author, for staff preview only."""
+    return list(
+        ArchiveItem.objects.filter(
+            pk__in=affected_archive_item_ids_for_author(author)
+        ).order_by("pk")
+    )
+
+
+def _lock_archive_items_for_update(item_ids: Sequence[int]) -> dict[int, ArchiveItem]:
+    """Lock ArchiveItem rows in ascending pk order.
+
+    Matches ``apply_staff_archive_item_authors`` / ``apply_legacy_author_name``,
+    which lock the item before any Author row.
+    """
+    ordered_ids = sorted(set(item_ids))
+    if not ordered_ids:
+        return {}
+    return {
+        item.pk: item
+        for item in (
+            ArchiveItem.objects.select_for_update()
+            .filter(pk__in=ordered_ids)
+            .order_by("pk")
+        )
+    }
+
+
+def _lock_archive_item_author_links_for_update(
+    item_ids: Sequence[int],
+) -> list[ArchiveItemAuthor]:
+    """Lock through rows for ``item_ids`` in (item, position, id) order."""
+    ordered_ids = sorted(set(item_ids))
+    if not ordered_ids:
+        return []
+    return list(
+        ArchiveItemAuthor.objects.select_for_update()
+        .filter(archive_item_id__in=ordered_ids)
+        .order_by("archive_item_id", "position", "id")
+    )
+
+
+def _lock_authors_for_update(
+    *,
+    author_ids: Sequence[int],
+    exact_name: str | None = None,
+) -> dict[int, Author]:
+    """Lock Author rows in ascending pk order.
+
+    Includes ``author_ids`` and, when ``exact_name`` is set, every Author with
+    that exact name (collision candidates). One query so co-authors and
+    collision rows are taken in the same deterministic order as item-level
+    writers, which lock Authors only after the ArchiveItem.
+    """
+    ordered_ids = sorted({int(author_id) for author_id in author_ids})
+    query = Q()
+    if ordered_ids:
+        query |= Q(pk__in=ordered_ids)
+    if exact_name is not None:
+        query |= Q(name=exact_name)
+    if not query:
+        return {}
+    return {
+        author.pk: author
+        for author in Author.objects.select_for_update().filter(query).order_by("pk")
+    }
+
+
+@transaction.atomic
+def rename_author(author: Author, *, name: str) -> Author:
+    """Rename one Author globally and rebuild every linked ``author_name``.
+
+    The rename applies to every linked ArchiveItem; there is no per-item
+    override. Blank names, names over 255 characters, and an exact name
+    collision with another Author are rejected before any write. A collision
+    is never merged: duplicate ``Author.name`` rows make item-level saves fail
+    closed with ``AMBIGUOUS_AUTHOR_ERROR``.
+
+    Lock order matches item-level author writers and is deterministic:
+    affected ``ArchiveItem`` rows (ascending pk), then their
+    ``ArchiveItemAuthor`` rows, then every ``Author`` whose name is used to
+    rebuild ``author_name`` plus any exact-name collision candidate
+    (ascending pk). After those Author locks, the target Author's linked
+    item ids are re-read. A newly linked item that is not already locked
+    fails closed with ``AUTHOR_LINKS_CHANGED_RETRY_ERROR`` (staff must retry).
+    Additional ArchiveItem rows are never locked while Author locks are held.
+    A concurrently removed link is simply omitted from the locked through
+    rows. Co-author names are read only from the locked Author rows.
+
+    Prevalidates every rebuilt joined ``author_name`` against the 255-character
+    limit before renaming. Each affected ``author_name`` is then rebuilt from
+    that item's ordered author links and the affected search indexes are
+    refreshed in the same transaction. Renaming to the current name is a no-op
+    with no writes and no index refresh. Does not create, delete, or merge
+    Author rows, change author ``position`` values, or touch Person /
+    ArchiveItemPerson / PhotoPerson rows.
+    """
+    normalized = (name or "").strip()
+    if not normalized:
+        raise ArchiveItemAuthorError(AUTHOR_NAME_REQUIRED_ERROR)
+    if len(normalized) > AUTHOR_NAME_MAX_LENGTH:
+        raise ArchiveItemAuthorError(AUTHOR_NAME_TOO_LONG_ERROR)
+
+    locked_items: dict[int, ArchiveItem] = {}
+    while True:
+        current_ids = affected_archive_item_ids_for_author(author)
+        missing_ids = [
+            item_id for item_id in current_ids if item_id not in locked_items
+        ]
+        if not missing_ids:
+            break
+        locked_items.update(_lock_archive_items_for_update(missing_ids))
+
+    locked_links = _lock_archive_item_author_links_for_update(locked_items.keys())
+    author_ids_for_rebuild = {link.author_id for link in locked_links}
+    author_ids_for_rebuild.add(author.pk)
+
+    locked_authors = _lock_authors_for_update(
+        author_ids=author_ids_for_rebuild,
+        exact_name=normalized,
+    )
+    locked_author = locked_authors.get(author.pk)
+    if locked_author is None:
+        raise Author.DoesNotExist
+    if locked_author.name == normalized:
+        return locked_author
+    if any(
+        other.pk != locked_author.pk and other.name == normalized
+        for other in locked_authors.values()
+    ):
+        raise ArchiveItemAuthorError(AUTHOR_NAME_COLLISION_ERROR)
+
+    current_linked_ids = affected_archive_item_ids_for_author(locked_author)
+    if any(item_id not in locked_items for item_id in current_linked_ids):
+        raise ArchiveItemAuthorError(AUTHOR_LINKS_CHANGED_RETRY_ERROR)
+
+    names_by_author_id = {pk: row.name for pk, row in locked_authors.items()}
+    names_by_author_id[locked_author.pk] = normalized
+
+    links_by_item_id: dict[int, list[ArchiveItemAuthor]] = {}
+    for link in locked_links:
+        links_by_item_id.setdefault(link.archive_item_id, []).append(link)
+
+    affected_ids = sorted(
+        {
+            link.archive_item_id
+            for link in locked_links
+            if link.author_id == locked_author.pk
+        }
+    )
+    rebuilt_author_names: dict[int, str] = {}
+    for item_id in affected_ids:
+        item_links = links_by_item_id.get(item_id, [])
+        try:
+            joined = _joined_author_name(
+                [names_by_author_id[link.author_id] for link in item_links]
+            )
+        except KeyError as exc:
+            raise ArchiveItemAuthorError(AUTHOR_NOT_FOUND_ERROR) from exc
+        if len(joined) > AUTHOR_NAME_MAX_LENGTH:
+            raise ArchiveItemAuthorError(AUTHOR_JOINED_TOO_LONG_ERROR)
+        rebuilt_author_names[item_id] = joined
+
+    locked_author.name = normalized
+    locked_author.save(update_fields=["name", "updated_at"])
+    author.name = normalized
+
+    for item_id in affected_ids:
+        locked_item = locked_items[item_id]
+        locked_item.author_name = rebuilt_author_names[item_id]
+        locked_item.save(update_fields=["author_name", "updated_at"])
+
+    if affected_ids:
+        from documents.services.archive_search_index import (
+            sync_archive_item_search_indexes,
+        )
+
+        sync_archive_item_search_indexes(affected_ids)
+
+    return locked_author

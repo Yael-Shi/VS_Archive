@@ -1,5 +1,80 @@
 # VS-Archive Decision Log
 
+## Global staff Author rename
+
+**Decision / implemented:** Staff can rename one **`Author`** globally from
+**`/archive/manage/authors/<author_id>/edit/`**
+(**`archive-manage-author-edit`**). The rename applies to every linked
+**`ArchiveItem`**; there is no per-item author name override. An exact name
+collision with another **`Author`** is **rejected, never merged**.
+
+**Current behavior:**
+
+- Page is staff-only (**`@login_required`** + **`_require_admin_page`**), reached
+  from the **"עריכת מחבר/ת"** link next to each already-linked author in
+  `archive_item_authors_form_fields.html`. Reuses the Person-edit view shape:
+  plain POST parsing (no Django Forms), single **`name`** field,
+  **`messages.success`** + redirect on success, HTTP 200 re-render with
+  **`form_errors`** on failure.
+- GET shows an **affected-items preview**: every linked **`ArchiveItem`** with
+  its current **`author_name`**, an **`archive-manage-edit`** link, and the
+  count. The preview performs no writes and is re-rendered with the submitted
+  value on validation error. The preview is advisory only; POST re-derives
+  affected items under lock, so correctness does not depend on it.
+- **`rename_author`** rejects before any write: blank/whitespace-only
+  (**`AUTHOR_NAME_REQUIRED_ERROR`**), over 255 characters
+  (**`AUTHOR_NAME_TOO_LONG_ERROR`**), and an exact post-strip name match on
+  another **`Author`** (**`AUTHOR_NAME_COLLISION_ERROR`**). Collision is
+  case-sensitive and exact, matching item-level exact-name reuse. Merging is
+  **out of scope**: duplicate **`Author.name`** rows make item-level saves fail
+  closed with **`AMBIGUOUS_AUTHOR_ERROR`**, so creating one is blocked.
+  A **`Person`** with the same name is **not** a collision — Author stays
+  separate from Person.
+- One **`transaction.atomic`**. Lock order matches item-level author writers
+  (**`apply_staff_archive_item_authors`** / **`apply_legacy_author_name`**):
+  affected **`ArchiveItem`** rows first (ascending pk, expanded until the
+  linked set is stable), then their **`ArchiveItemAuthor`** rows, then every
+  **`Author`** whose name is used to rebuild **`author_name`** plus any
+  exact-name collision candidate (ascending pk). After Author locks, the
+  target Author's linked item ids are re-read. If a newly linked item is not
+  already locked, the rename **fails closed** with
+  **`AUTHOR_LINKS_CHANGED_RETRY_ERROR`** (staff reload and retry). Extra
+  **`ArchiveItem`** rows are **not** locked while Author locks are held, so
+  the item→Author order is not inverted. A concurrently removed link is
+  omitted from the locked through rows and is not rebuilt. Co-author names
+  are read only from those locked Author rows, so a concurrent rename cannot
+  supply a stale joined string. **Prevalidate every rebuilt joined
+  `author_name`** against 255 per item (**`AUTHOR_JOINED_TOO_LONG_ERROR`**)
+  before any write — a longer name can push a multi-author item over the
+  limit; rename; rebuild each affected **`author_name`** from that item's
+  ordered **`ArchiveItemAuthor`** rows; then
+  **`sync_archive_item_search_indexes(affected_ids)`** inside the same
+  transaction. Index failure rolls back the rename and every rebuilt string.
+  Renaming to the current name is a no-op (no writes, no index refresh)
+  after the same locks.
+- Because rebuild reads the ordered relations as source of truth, an
+  **`author_name`** that had drifted from its links is corrected as a side
+  effect on the items touched by that rename. **Intentional.**
+- Rename does not change author **`position`** values, create/delete
+  **`Author`** or **`ArchiveItemAuthor`** rows, or touch **`Person`** /
+  **`PersonAlias`** / **`ArchiveItemPerson`** / **`PhotoPerson`**.
+- No schema migration. **`Author.name`** stays non-unique. **`Author`** /
+  **`ArchiveItemAuthor`** stay unregistered in Django admin. PHOTO create/edit
+  still has no author UI and therefore no rename link. Public templates,
+  advanced-filter code, and search-index code are unchanged — the rename is
+  visible publicly only because **`author_name`** and the index rows are
+  rebuilt.
+- The joined-string rule is now shared: **`_joined_author_name`** is used by both
+  **`apply_staff_archive_item_authors`** and **`rename_author`**.
+
+**Out of scope / deferred:** Author **merge** and dedupe of pre-existing
+duplicate names; Author delete; a staff Author list/catalog page or nav entry;
+PHOTO author UI; unique **`Author.name`** constraint; public
+display/search/filter cutover from **`author_name`** to the **`Author`**
+relations; optimistic-concurrency token between preview and save.
+
+**Tests:** `documents/test_author_name_edit.py`.
+
 ## Staff author exact-name reuse and explicit item unlink
 
 **Decision / implemented:** Staff **`new_author_name`** tokens reuse a unique
