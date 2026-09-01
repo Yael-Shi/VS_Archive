@@ -1,5 +1,39 @@
 # VS-Archive Decision Log
 
+## Staff author exact-name reuse and explicit item unlink
+
+**Decision / implemented:** Staff **`new_author_name`** tokens reuse a unique
+exact **`Author.name`** match instead of rejecting it. Currently linked
+authors are kept or unlinked with per-author checkboxes (no Ctrl-click
+native multi-select). Unlink removes **`ArchiveItemAuthor`** rows only.
+
+**Current behavior:**
+
+- Each ordered **`new_author_name`** token: exactly one exact-name **`Author`**
+  → reuse; none → create; more than one exact match → fail closed before any
+  item / Author / link write (`AMBIGUOUS_AUTHOR_ERROR`). Token order is
+  preserved. If that Author is already in submitted **`author_ids`** or repeats
+  in the token list, the first occurrence is kept.
+- Submitted **`author_ids`** are the kept/added existing Authors. Kept linked
+  authors render as checked checkboxes in stored **`position`** order; the
+  multi-select lists only authors that are not currently kept. A no-op save
+  re-submits the checked ids. Omitting an id unlinks that Author from the
+  item and does **not** delete the global **`Author`** row.
+- One save may unlink an old Author and add/reuse another. Final order is
+  kept ids (submitted order) then reused/created names (token order).
+  Dual-write remains **`author_name = ", ".join(final ordered names)`**.
+  Empty ids plus empty new names still clears links and **`author_name`**.
+- Validation stays before writes; HTTP 200 re-renders submitted
+  **`author_ids`** / **`new_author_name`**. Search-index refresh after the
+  writer is unchanged. **`Author`** stays separate from **`Person`**. PHOTO /
+  public UI / models / schema are unchanged.
+
+**Supersedes:** the PR2 rule that typed exact existing names are rejected,
+and the PR2 native multi-select ordering workaround for currently linked
+authors.
+
+**Tests:** `documents/test_archive_item_author_staff_ux.py`.
+
 ## Multi-author staff create/edit UX (PR2)
 
 **Decision / implemented:** Staff create/edit for **OCR_DOCUMENT**,
@@ -11,13 +45,14 @@ public display, `q` indexing, snippets, advanced filters, models, or schema.
 
 - Staff POST/JSON fields are **`author_ids`** (submitted order) and
   **`new_author_name`** (ASCII commas). **`author_name`** is not a staff write
-  field on these paths. Typed exact names that already exist are rejected
-  before any item / Author / link write; staff must select the existing row.
+  field on these paths. Typed unique exact names are reused (see **Staff
+  author exact-name reuse and explicit item unlink**); multiple exact matches
+  fail closed.
 - New tokens are trimmed, empty tokens dropped, order-deduped within input,
   max 255 per name. Commas-only input is invalid. Selected ids keep submitted
-  order; new names append in token order. The picker renders currently linked
-  authors first in stored **`position`** order, then remaining authors by
-  **`(name, id)`**, so a no-op native multi-select save preserves order.
+  order; reused/created names append in token order. Currently linked authors
+  use keep/remove checkboxes; the add picker lists unselected authors by
+  **`(name, id)`**.
 - Writers dual-write **`author_name = ", ".join(ordered names)`**. The joined
   compatibility string must fit **`CharField(max_length=255)`**; over-length is
   rejected before writes. Empty ids plus empty new names clears links and
@@ -75,8 +110,9 @@ UI, templates, or URLs.
   none exists, one is created; multiple exact matches fail closed with no
   partial item / string / relation writes. Comma input is not split.
 - PHOTO create/edit still has no author UI and does **not** dual-write.
-- Exact duplicate **`Author`** creation is blocked on the staff UI path (PR2).
-  This PR allows duplicate display names (same as **`Person.name`**).
+- Staff UI reuses a unique exact **`Author.name`** and fails closed on
+  ambiguous duplicates (see **Staff author exact-name reuse and explicit item
+  unlink**). This PR allows duplicate display names (same as **`Person.name`**).
 
 **Migrations:** `0058_author_foundation` (schema) +
 `0059_backfill_authors_from_author_name` (reversible data).

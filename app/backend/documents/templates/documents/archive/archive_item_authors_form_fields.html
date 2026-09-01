@@ -1,22 +1,47 @@
+{% if archive_item_selected_authors %}
 <div class="field">
-  <label for="author_ids">מחבר/ת</label>
+  <fieldset class="staff-linked-authors-fieldset">
+    <legend>מחברים משויכים לפריט זה</legend>
+    <ul class="staff-linked-authors">
+      {% for author in archive_item_selected_authors %}
+        <li>
+          <label for="author_keep_{{ author.id }}">
+            <input
+              id="author_keep_{{ author.id }}"
+              type="checkbox"
+              name="author_ids"
+              value="{{ author.id }}"
+              {% if author.selected %}checked{% endif %}
+            />
+            {{ author.name }}
+          </label>
+        </li>
+      {% endfor %}
+    </ul>
+  </fieldset>
+  <div class="field-hint">סימון משאיר את המחבר/ת על הפריט. ביטול הסימון מנתק מהפריט בלבד ואינו מוחק את רשומת המחבר/ת מהארכיון. אין צורך ב-Ctrl.</div>
+</div>
+{% endif %}
+
+<div class="field">
+  <label for="author_ids">הוספת מחבר/ת קיים/ת</label>
   <select id="author_ids" name="author_ids" multiple size="8">
     {% for author in archive_item_author_choices %}
-      <option value="{{ author.id }}" {% if author.selected %}selected{% endif %}>
-        {{ author.name }}
-      </option>
+      {% if not author.selected %}
+        <option value="{{ author.id }}">{{ author.name }}</option>
+      {% endif %}
     {% endfor %}
   </select>
-  <div class="field-hint">בחירה מרשומות מחבר/ת קיימות. מחברים שכבר משויכים מוצגים לפי הסדר השמור.</div>
+  <div class="field-hint">בחירה מרשומות מחבר/ת שאינן משויכות כרגע. מחברים משויכים מופיעים למעלה לפי הסדר השמור.</div>
 </div>
 
 <div class="field">
-  <label for="new_author_name">הוספת מחבר/ת חדש/ה</label>
+  <label for="new_author_name">הוספת מחבר/ת</label>
   <input
     id="new_author_name"
     name="new_author_name"
     type="text"
     value="{{ form_data.new_author_name }}"
   />
-  <div class="field-hint">ניתן להזין כמה שמות מופרדים בפסיקים. אם השם כבר קיים, בחרו אותו מהרשימה במקום להקליד אותו.</div>
+  <div class="field-hint">ניתן להזין כמה שמות מופרדים בפסיקים. שם שכבר קיים במדויק ישויך מחדש; שם חדש ייצור רשומה. אם אותו שם מופיע יותר מפעם אחת בארכיון, השמירה תיחסם.</div>
 </div>

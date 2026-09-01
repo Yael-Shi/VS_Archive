@@ -22,9 +22,9 @@ from documents.models import (
     PhotoPerson,
 )
 from documents.services.archive_item_authors import (
+    AMBIGUOUS_AUTHOR_ERROR,
     AUTHOR_IDS_FIELD,
     AUTHOR_JOINED_TOO_LONG_ERROR,
-    AUTHOR_NAME_EXISTS_ERROR,
     AUTHOR_NAME_TOO_LONG_ERROR,
     AUTHOR_NAMES_COMMAS_ONLY_ERROR,
     AUTHOR_NOT_FOUND_ERROR,
@@ -63,6 +63,16 @@ def _option_ids_for_field(html: str, field_name: str) -> list[int]:
     return [int(value) for value in re.findall(r'value="(\d+)"', match.group(1))]
 
 
+def _checked_author_ids(html: str) -> list[int]:
+    return [
+        int(value)
+        for value in re.findall(
+            r'<input[^>]*type="checkbox"[^>]*name="author_ids"[^>]*value="(\d+)"[^>]*checked',
+            html,
+        )
+    ]
+
+
 def _person_row_counts() -> tuple[int, int, int]:
     return (
         Person.objects.count(),
@@ -94,14 +104,20 @@ class StaffAuthorParserTests(TestCase):
         )
         self.assertEqual(length_errors, [AUTHOR_NAME_TOO_LONG_ERROR])
 
-    def test_typed_existing_name_and_invalid_id_are_rejected(self):
+    def test_typed_unique_existing_name_is_valid_and_invalid_id_is_rejected(self):
         Author.objects.create(name="Ada")
-        _data, exists_errors = parse_archive_item_authors_form(
+        _data, reuse_errors = parse_archive_item_authors_form(
             {NEW_AUTHOR_NAME_FIELD: "Ada"}
         )
-        self.assertEqual(exists_errors, [AUTHOR_NAME_EXISTS_ERROR])
+        self.assertEqual(reuse_errors, [])
         _data, id_errors = parse_archive_item_authors_form({AUTHOR_IDS_FIELD: ["nope"]})
         self.assertEqual(id_errors, [AUTHOR_NOT_FOUND_ERROR])
+
+    def test_ambiguous_exact_name_is_rejected_before_writes(self):
+        Author.objects.create(name="Ada")
+        Author.objects.create(name="Ada")
+        _data, errors = parse_archive_item_authors_form({NEW_AUTHOR_NAME_FIELD: "Ada"})
+        self.assertEqual(errors, [AMBIGUOUS_AUTHOR_ERROR])
 
     def test_joined_compatibility_string_over_255_is_rejected(self):
         first = "a" * 130
@@ -110,6 +126,30 @@ class StaffAuthorParserTests(TestCase):
             {NEW_AUTHOR_NAME_FIELD: f"{first}, {second}"}
         )
         self.assertEqual(errors, [AUTHOR_JOINED_TOO_LONG_ERROR])
+
+    def test_mixed_selected_id_reused_name_and_new_name_preserve_order(self):
+        selected = Author.objects.create(name="Zed")
+        reused = Author.objects.create(name="Ann")
+        data, errors = parse_archive_item_authors_form(
+            {
+                AUTHOR_IDS_FIELD: [str(selected.pk)],
+                NEW_AUTHOR_NAME_FIELD: "Ann, Brand New, Zed",
+            }
+        )
+        self.assertEqual(errors, [])
+        self.assertEqual(data[AUTHOR_IDS_FIELD], [selected.pk])
+        self.assertEqual(data[NEW_AUTHOR_NAME_FIELD], "Ann, Brand New, Zed")
+        item = create_manual_text_archive_item(title="Mixed order", body="body")
+        apply_staff_archive_item_authors(
+            item,
+            author_ids=[selected.pk],
+            new_author_name="Ann, Brand New, Zed",
+        )
+        self.assertEqual(
+            [author.name for author in ordered_authors(item)],
+            ["Zed", "Ann", "Brand New"],
+        )
+        self.assertEqual(ordered_authors(item)[1].pk, reused.pk)
 
 
 class StaffAuthorServiceTests(TestCase):
@@ -130,7 +170,25 @@ class StaffAuthorServiceTests(TestCase):
         self.assertEqual(item.author_name, "Zed, Ann, New One, New Two")
         self.assertEqual(_person_row_counts(), (0, 0, 0))
 
-    def test_staff_apply_clear_and_existing_name_rollback(self):
+    def test_staff_apply_reuses_unique_exact_name_and_suppresses_duplicates(self):
+        existing = Author.objects.create(name="Ada")
+        also_selected = Author.objects.create(name="Charles")
+        item = create_manual_text_archive_item(title="Reuse apply", body="body")
+        apply_staff_archive_item_authors(
+            item,
+            author_ids=[existing.pk, also_selected.pk, existing.pk],
+            new_author_name="Ada, New One, Charles, New One",
+        )
+        item.refresh_from_db()
+        self.assertEqual(
+            [author.name for author in ordered_authors(item)],
+            ["Ada", "Charles", "New One"],
+        )
+        self.assertEqual(item.author_name, "Ada, Charles, New One")
+        self.assertEqual(Author.objects.filter(name="Ada").count(), 1)
+        self.assertEqual(Author.objects.filter(name="New One").count(), 1)
+
+    def test_staff_apply_clear_and_ambiguous_name_rollback(self):
         item = create_manual_text_archive_item(
             title="Keep title",
             body="keep body",
@@ -142,6 +200,8 @@ class StaffAuthorServiceTests(TestCase):
         self.assertEqual(ordered_authors(item), [])
 
         Author.objects.create(name="Ada")
+        Author.objects.create(name="Ada")
+        before_authors = Author.objects.count()
         with self.assertRaises(ArchiveItemAuthorError) as raised:
             update_manual_text_archive_item(
                 item,
@@ -155,13 +215,30 @@ class StaffAuthorServiceTests(TestCase):
                 staff_author_ids=[],
                 new_author_name="Ada",
             )
-        self.assertEqual(raised.exception.message, AUTHOR_NAME_EXISTS_ERROR)
+        self.assertEqual(raised.exception.message, AMBIGUOUS_AUTHOR_ERROR)
         item.refresh_from_db()
         self.assertEqual(item.title, "Keep title")
         self.assertEqual(item.manual_text_content.body, "keep body")
         self.assertEqual(item.author_name, "")
-        self.assertEqual(Author.objects.filter(name="Ada").count(), 1)
+        self.assertEqual(Author.objects.count(), before_authors)
+        self.assertEqual(Author.objects.filter(name="Ada").count(), 2)
         self.assertEqual(_person_row_counts(), (0, 0, 0))
+
+    def test_staff_apply_unlinks_without_deleting_author_rows(self):
+        old = Author.objects.create(name="Old Author")
+        replacement = Author.objects.create(name="Replacement")
+        item = create_manual_text_archive_item(title="Replace authors", body="body")
+        apply_staff_archive_item_authors(item, author_ids=[old.pk])
+        apply_staff_archive_item_authors(
+            item,
+            author_ids=[],
+            new_author_name="Replacement",
+        )
+        item.refresh_from_db()
+        self.assertEqual(ordered_authors(item), [replacement])
+        self.assertEqual(item.author_name, "Replacement")
+        self.assertTrue(Author.objects.filter(pk=old.pk, name="Old Author").exists())
+        self.assertEqual(ArchiveItemAuthor.objects.filter(author=old).count(), 0)
 
     def test_legacy_author_name_path_still_does_not_split_commas(self):
         item = create_manual_text_archive_item(
@@ -251,8 +328,13 @@ class StaffAuthorHtmlFormTests(TestCase):
         item.save(update_fields=["author_name", "updated_at"])
 
         get_resp = self.client.get(EDIT_URL_TEMPLATE.format(item_id=item.id))
-        option_ids = _option_ids_for_field(get_resp.content.decode(), AUTHOR_IDS_FIELD)
-        self.assertEqual(option_ids[:2], [later.pk, earlier.pk])
+        html = get_resp.content.decode()
+        self.assertEqual(_checked_author_ids(html), [later.pk, earlier.pk])
+        picker_ids = _option_ids_for_field(html, AUTHOR_IDS_FIELD)
+        self.assertNotIn(later.pk, picker_ids)
+        self.assertNotIn(earlier.pk, picker_ids)
+        self.assertContains(get_resp, "מחברים משויכים לפריט זה")
+        self.assertContains(get_resp, "אין צורך ב-Ctrl")
 
         no_op = self.client.post(
             EDIT_URL_TEMPLATE.format(item_id=item.id),
@@ -275,20 +357,37 @@ class StaffAuthorHtmlFormTests(TestCase):
         self.assertEqual(item.author_name, "")
         self.assertEqual(ordered_authors(item), [])
 
-        exists_resp = self.client.post(
+        exists = Author.objects.create(name="Reuse Target")
+        reuse_resp = self.client.post(
             EDIT_URL_TEMPLATE.format(item_id=item.id),
             data=self._manual_payload(
                 title="Should not rename",
-                **{NEW_AUTHOR_NAME_FIELD: "Selected Author"},
+                **{NEW_AUTHOR_NAME_FIELD: "Reuse Target"},
             ),
         )
-        self.assertEqual(exists_resp.status_code, 200)
-        self.assertContains(exists_resp, AUTHOR_NAME_EXISTS_ERROR)
-        self.assertContains(exists_resp, 'value="Selected Author"')
+        self.assertEqual(reuse_resp.status_code, 302)
         item.refresh_from_db()
-        self.assertEqual(item.title, "Manual authors")
-        self.assertEqual(item.author_name, "")
-        self.assertEqual(Author.objects.filter(name="Selected Author").count(), 1)
+        self.assertEqual(item.title, "Should not rename")
+        self.assertEqual(ordered_authors(item), [exists])
+        self.assertEqual(item.author_name, "Reuse Target")
+        self.assertEqual(Author.objects.filter(name="Reuse Target").count(), 1)
+
+        Author.objects.create(name="Dup Ada")
+        Author.objects.create(name="Dup Ada")
+        ambiguous_resp = self.client.post(
+            EDIT_URL_TEMPLATE.format(item_id=item.id),
+            data=self._manual_payload(
+                title="Should stay renamed",
+                **{NEW_AUTHOR_NAME_FIELD: "Dup Ada"},
+            ),
+        )
+        self.assertEqual(ambiguous_resp.status_code, 200)
+        self.assertContains(ambiguous_resp, AMBIGUOUS_AUTHOR_ERROR)
+        self.assertContains(ambiguous_resp, 'value="Dup Ada"')
+        item.refresh_from_db()
+        self.assertEqual(item.title, "Should not rename")
+        self.assertEqual(item.author_name, "Reuse Target")
+        self.assertEqual(Author.objects.filter(name="Dup Ada").count(), 2)
 
         invalid_resp = self.client.post(
             EDIT_URL_TEMPLATE.format(item_id=item.id),
@@ -338,6 +437,44 @@ class StaffAuthorHtmlFormTests(TestCase):
         )
         self.assertFalse(Author.objects.filter(name="a" * 130).exists())
 
+    def test_manual_edit_validation_preserves_keep_remove_picker_and_typed_input(self):
+        self.client.force_login(self.staff)
+        kept = Author.objects.create(name="Keep Linked")
+        removed = Author.objects.create(name="Remove Linked")
+        added = Author.objects.create(name="Picker Added")
+        item = create_manual_text_archive_item(
+            title="Preserve authors",
+            body="Body.",
+            staff_author_ids=[kept.pk, removed.pk],
+        )
+        resp = self.client.post(
+            EDIT_URL_TEMPLATE.format(item_id=item.id),
+            data=self._manual_payload(
+                title="Preserve authors",
+                **{
+                    AUTHOR_IDS_FIELD: [str(kept.pk), str(added.pk)],
+                    NEW_AUTHOR_NAME_FIELD: ", ,",
+                },
+            ),
+        )
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertContains(resp, AUTHOR_NAMES_COMMAS_ONLY_ERROR)
+        self.assertEqual(_checked_author_ids(html), [kept.pk, added.pk])
+        picker_ids = _option_ids_for_field(html, AUTHOR_IDS_FIELD)
+        self.assertNotIn(kept.pk, picker_ids)
+        self.assertNotIn(added.pk, picker_ids)
+        self.assertIn(removed.pk, picker_ids)
+        self.assertContains(resp, 'id="author_keep_%s"' % kept.pk)
+        self.assertContains(resp, 'value=", ,"')
+        self.assertContains(resp, "<legend>מחברים משויכים לפריט זה</legend>")
+        item.refresh_from_db()
+        self.assertEqual(item.title, "Preserve authors")
+        self.assertEqual(
+            [author.pk for author in ordered_authors(item)],
+            [kept.pk, removed.pk],
+        )
+
     def test_ocr_edit_selects_existing_and_rejects_unknown_id(self):
         doc = create_ocr_document(
             title="OCR authors",
@@ -364,6 +501,38 @@ class StaffAuthorHtmlFormTests(TestCase):
         )
         self.assertEqual(item.author_name, "OCR First, OCR New")
 
+        keep_first_remove_new = self.client.post(
+            EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._ocr_payload(**{AUTHOR_IDS_FIELD: [str(first.pk)]}),
+        )
+        self.assertEqual(keep_first_remove_new.status_code, 302)
+        item.refresh_from_db()
+        self.assertEqual(ordered_authors(item), [first])
+        self.assertTrue(Author.objects.filter(name="OCR New").exists())
+
+        replacement = Author.objects.create(name="OCR Replacement")
+        replace_resp = self.client.post(
+            EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
+            data=self._ocr_payload(
+                **{
+                    AUTHOR_IDS_FIELD: [str(replacement.pk)],
+                    NEW_AUTHOR_NAME_FIELD: "OCR Extra",
+                }
+            ),
+        )
+        self.assertEqual(replace_resp.status_code, 302)
+        item.refresh_from_db()
+        self.assertEqual(
+            [author.name for author in ordered_authors(item)],
+            ["OCR Replacement", "OCR Extra"],
+        )
+        self.assertEqual(item.author_name, "OCR Replacement, OCR Extra")
+        self.assertTrue(Author.objects.filter(pk=first.pk).exists())
+        self.assertIn(
+            "OCR Replacement, OCR Extra",
+            ArchiveItemSearchIndex.objects.get(archive_item_id=item.pk).metadata_text,
+        )
+
         bad = self.client.post(
             EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
             data=self._ocr_payload(**{AUTHOR_IDS_FIELD: ["999999"]}),
@@ -371,7 +540,7 @@ class StaffAuthorHtmlFormTests(TestCase):
         self.assertEqual(bad.status_code, 200)
         self.assertContains(bad, AUTHOR_NOT_FOUND_ERROR)
         item.refresh_from_db()
-        self.assertEqual(item.author_name, "OCR First, OCR New")
+        self.assertEqual(item.author_name, "OCR Replacement, OCR Extra")
 
     def test_video_create_and_edit_authors(self):
         existing = Author.objects.create(name="Video Selected")
@@ -405,6 +574,16 @@ class StaffAuthorHtmlFormTests(TestCase):
         )
         self.assertEqual(item.author_name, "Video Selected")
         self.assertEqual(_person_row_counts(), (0, 0, 0))
+
+        replace_video = self.client.post(
+            EDIT_URL_TEMPLATE.format(item_id=item.id),
+            data=self._video_payload(**{NEW_AUTHOR_NAME_FIELD: "Video Selected"}),
+        )
+        self.assertEqual(replace_video.status_code, 302)
+        item.refresh_from_db()
+        self.assertEqual(ordered_authors(item), [existing])
+        self.assertEqual(item.author_name, "Video Selected")
+        self.assertEqual(Author.objects.filter(name="Video Selected").count(), 1)
 
     def test_photo_forms_and_writer_stay_isolated(self):
         staff = self.staff
@@ -480,10 +659,11 @@ class StaffAuthorOcrJsonTests(TestCase):
     )
     def test_json_create_uses_author_ids_and_new_names(self, _mock_put):
         existing = Author.objects.create(name="JSON Selected")
+        reused = Author.objects.create(name="JSON Reused")
         resp = self._post_create(
             self._base_payload(
                 author_ids=[existing.pk],
-                new_author_name=" JSON New, JSON Two ",
+                new_author_name=" JSON Reused, JSON New ",
             )
         )
         self.assertEqual(resp.status_code, 201)
@@ -491,22 +671,39 @@ class StaffAuthorOcrJsonTests(TestCase):
         item = doc.archive_item
         self.assertEqual(
             [author.name for author in ordered_authors(item)],
-            ["JSON Selected", "JSON New", "JSON Two"],
+            ["JSON Selected", "JSON Reused", "JSON New"],
         )
-        self.assertEqual(item.author_name, "JSON Selected, JSON New, JSON Two")
+        self.assertEqual(ordered_authors(item)[1].pk, reused.pk)
+        self.assertEqual(item.author_name, "JSON Selected, JSON Reused, JSON New")
+        self.assertEqual(Author.objects.filter(name="JSON Reused").count(), 1)
         self.assertEqual(_person_row_counts(), (0, 0, 0))
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
     @patch(
         "documents.views.create_presigned_put", return_value="https://example/upload"
     )
-    def test_json_create_rejects_existing_typed_name_without_rows(self, _mock_put):
-        Author.objects.create(name="JSON Existing")
-        before_docs = Document.objects.count()
+    def test_json_create_reuses_existing_typed_name_without_new_row(self, _mock_put):
+        existing = Author.objects.create(name="JSON Existing")
         before_authors = Author.objects.count()
         resp = self._post_create(self._base_payload(new_author_name="JSON Existing"))
+        self.assertEqual(resp.status_code, 201)
+        doc = Document.objects.get(id=resp.json()["document_id"])
+        self.assertEqual(ordered_authors(doc.archive_item), [existing])
+        self.assertEqual(doc.archive_item.author_name, "JSON Existing")
+        self.assertEqual(Author.objects.count(), before_authors)
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch(
+        "documents.views.create_presigned_put", return_value="https://example/upload"
+    )
+    def test_json_create_rejects_ambiguous_typed_name_without_rows(self, _mock_put):
+        Author.objects.create(name="JSON Dup")
+        Author.objects.create(name="JSON Dup")
+        before_docs = Document.objects.count()
+        before_authors = Author.objects.count()
+        resp = self._post_create(self._base_payload(new_author_name="JSON Dup"))
         self.assertEqual(resp.status_code, 400)
-        self.assertIn(AUTHOR_NAME_EXISTS_ERROR.encode("utf-8"), resp.content)
+        self.assertIn(AMBIGUOUS_AUTHOR_ERROR.encode("utf-8"), resp.content)
         self.assertEqual(Document.objects.count(), before_docs)
         self.assertEqual(Author.objects.count(), before_authors)
 
@@ -531,7 +728,7 @@ class StaffAuthorOcrJsonTests(TestCase):
         resp = self.client.get(reverse("upload-page"))
         self.assertContains(resp, 'id="author_ids"')
         self.assertContains(resp, 'id="new_author_name"')
-        self.assertContains(resp, 'meta.author_ids = readSelectedIds("author_ids")')
+        self.assertContains(resp, "meta.author_ids = readAuthorIds()")
         self.assertNotContains(resp, 'id="author_name"')
         self.assertNotContains(resp, "meta.author_name")
 
