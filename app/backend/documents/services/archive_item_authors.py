@@ -27,7 +27,6 @@ AUTHOR_NAME_TOO_LONG_ERROR = "שם המחבר/ת חייב להיות עד 255 ת
 AUTHOR_NAMES_COMMAS_ONLY_ERROR = (
     "יש להזין לפחות שם מחבר/ת אחד. לא ניתן לשמור קלט שמכיל רק פסיקים או רווחים."
 )
-AUTHOR_NAME_EXISTS_ERROR = "שם המחבר/ת כבר קיים. בחרו אותו מהרשימה במקום להקליד אותו."
 AUTHOR_JOINED_TOO_LONG_ERROR = "מחבר/ת חייב להיות עד 255 תווים"
 AUTHOR_IDS_FIELD = "author_ids"
 NEW_AUTHOR_NAME_FIELD = "new_author_name"
@@ -96,12 +95,12 @@ def split_comma_separated_author_names(raw: str | None) -> list[str]:
 
 
 def parse_new_author_names_input(raw: str | None) -> tuple[str, list[str], list[str]]:
-    """Validate comma-separated new Author names.
+    """Validate comma-separated Author name tokens.
 
     Returns ``(display, names, errors)``. Empty/whitespace-only input is a
     no-op. Nonempty input that yields no tokens after split/trim is rejected.
     Each remaining token is checked independently against the name length limit.
-    Does not look up existing names.
+    Does not create Author rows. Exact-name reuse is resolved by callers.
     """
     display = "" if raw is None else str(raw).strip()
     if not display:
@@ -118,7 +117,7 @@ def parse_new_author_names_input(raw: str | None) -> tuple[str, list[str], list[
 
 
 def parse_author_ids(post_data) -> tuple[list[int], list[str]]:
-    """Parse Author primary keys from the staff multi-select or JSON array.
+    """Parse Author primary keys from keep checkboxes, add-picker, or JSON.
 
     Values must be positive integers. Names are not accepted.
     """
@@ -167,11 +166,67 @@ def _authors_in_submitted_id_order(author_ids: list[int]) -> tuple[list[Author],
     return [by_id[author_id] for author_id in author_ids], True
 
 
+def _authors_grouped_by_exact_name(
+    names: Sequence[str],
+    *,
+    for_update: bool = False,
+) -> dict[str, list[Author]]:
+    unique_names = list(dict.fromkeys(names))
+    grouped: dict[str, list[Author]] = {name: [] for name in unique_names}
+    if not unique_names:
+        return grouped
+    queryset = Author.objects.filter(name__in=unique_names).order_by("id")
+    if for_update:
+        queryset = queryset.select_for_update()
+    for author in queryset:
+        grouped.setdefault(author.name, []).append(author)
+    return grouped
+
+
+def _staff_author_plan(
+    selected_authors: Sequence[Author],
+    new_names: Sequence[str],
+    matches_by_name: dict[str, list[Author]],
+) -> tuple[list[Author], list[str], list[str]]:
+    """Plan kept/reused authors plus names that still need a new Author row.
+
+    Selected ids keep first-occurrence order. Each new token reuses the unique
+    exact-name Author, queues a create when none exists, and fails closed when
+    more than one exact match exists. Duplicate Author ids are skipped.
+    """
+    ordered: list[Author] = []
+    seen_ids: set[int] = set()
+    for author in selected_authors:
+        if author.pk in seen_ids:
+            continue
+        seen_ids.add(author.pk)
+        ordered.append(author)
+
+    pending_create: list[str] = []
+    pending_seen: set[str] = set()
+    for name in new_names:
+        matches = matches_by_name.get(name, [])
+        if len(matches) > 1:
+            return [], [], [AMBIGUOUS_AUTHOR_ERROR]
+        if len(matches) == 1:
+            author = matches[0]
+            if author.pk not in seen_ids:
+                seen_ids.add(author.pk)
+                ordered.append(author)
+            continue
+        if name in pending_seen:
+            continue
+        pending_seen.add(name)
+        pending_create.append(name)
+    return ordered, pending_create, []
+
+
 def parse_archive_item_authors_form(post_data) -> tuple[dict[str, Any], list[str]]:
-    """Parse staff author fields and reject invalid ids or typed existing names.
+    """Parse staff author fields and reject invalid ids or ambiguous names.
 
     Validates before any caller write. Empty ids plus empty new names is a
-    valid clear. Does not create Author rows or Person rows.
+    valid clear. Typed tokens with exactly one exact Author match are reused;
+    unmatched tokens are new names. Does not create Author rows or Person rows.
     """
     author_ids, id_errors = parse_author_ids(post_data)
     display, names, name_errors = parse_new_author_name(post_data)
@@ -181,17 +236,18 @@ def parse_archive_item_authors_form(post_data) -> tuple[dict[str, Any], list[str
         selected_authors, found = _authors_in_submitted_id_order(author_ids)
         if not found:
             errors.append(AUTHOR_NOT_FOUND_ERROR)
-    if not errors and names:
-        existing_names = set(
-            Author.objects.filter(name__in=names).values_list("name", flat=True)
-        )
-        if existing_names:
-            errors.append(AUTHOR_NAME_EXISTS_ERROR)
     if not errors:
-        ordered_names = [author.name for author in selected_authors] + names
-        joined = ", ".join(ordered_names)
-        if len(joined) > AUTHOR_NAME_MAX_LENGTH:
-            errors.append(AUTHOR_JOINED_TOO_LONG_ERROR)
+        reused, pending_create, plan_errors = _staff_author_plan(
+            selected_authors,
+            names,
+            _authors_grouped_by_exact_name(names),
+        )
+        errors.extend(plan_errors)
+        if not errors:
+            ordered_names = [author.name for author in reused] + pending_create
+            joined = ", ".join(ordered_names)
+            if len(joined) > AUTHOR_NAME_MAX_LENGTH:
+                errors.append(AUTHOR_JOINED_TOO_LONG_ERROR)
     return {
         AUTHOR_IDS_FIELD: author_ids,
         NEW_AUTHOR_NAME_FIELD: display,
@@ -202,10 +258,11 @@ def build_staff_author_choices(
     *,
     selected_author_ids: list[int] | tuple[int, ...] | set[int],
 ) -> tuple[list[StaffAuthorChoice], list[StaffAuthorChoice]]:
-    """Return picker choices with selected authors first in submitted order.
+    """Return picker choices with kept authors first in submitted order.
 
-    Remaining unselected authors follow in ``(name, id)`` order so a no-op
-    native multi-select save preserves stored position.
+    Remaining unselected authors follow in ``(name, id)`` order for the add
+    picker. Kept authors are rendered as keep/remove checkboxes, not in the
+    native multi-select, so a no-op save does not require Ctrl-click.
     """
     selected_ids = list(
         dict.fromkeys(int(author_id) for author_id in selected_author_ids)
@@ -287,13 +344,16 @@ def apply_staff_archive_item_authors(
     author_ids: list[int] | None = None,
     new_author_name: str = "",
 ) -> list[ArchiveItemAuthor]:
-    """Replace ordered author links from staff ids plus new comma-separated names.
+    """Replace ordered author links from staff ids plus comma-separated names.
 
-    Selected ids keep submitted order; new tokens append in input order. Typed
-    exact names that already exist fail closed before any item, Author, or link
-    write. Dual-writes ``author_name`` as ``", ".join(ordered names)``. Empty
-    ids plus empty new names clears relations and the compatibility string.
-    Does not create Person / ArchiveItemPerson / PhotoPerson rows.
+    Submitted ids keep first-occurrence order. Each new token reuses the unique
+    exact-name Author, creates one when none exists, and fails closed when more
+    than one exact match exists — before any item, Author, or link write.
+    Duplicate Author ids (already selected or repeated tokens) keep the first
+    occurrence. Dual-writes ``author_name`` as ``", ".join(ordered names)``.
+    Empty ids plus empty new names clears relations and the compatibility
+    string. Unlinking removes ``ArchiveItemAuthor`` rows only; Author rows are
+    not deleted. Does not create Person / ArchiveItemPerson / PhotoPerson rows.
     """
     parsed, errors = parse_archive_item_authors_form(
         {
@@ -325,16 +385,32 @@ def apply_staff_archive_item_authors(
     if name_errors:
         raise ArchiveItemAuthorError(name_errors[0])
 
-    created: list[Author] = []
-    for name in names:
+    reused, pending_create, plan_errors = _staff_author_plan(
+        existing_authors,
+        names,
+        _authors_grouped_by_exact_name(names, for_update=True),
+    )
+    if plan_errors:
+        raise ArchiveItemAuthorError(plan_errors[0])
+
+    seen_ids = {author.pk for author in reused}
+    ordered = list(reused)
+    for name in pending_create:
         matches = list(
             Author.objects.select_for_update().filter(name=name).order_by("id")
         )
+        if len(matches) > 1:
+            raise ArchiveItemAuthorError(AMBIGUOUS_AUTHOR_ERROR)
         if matches:
-            raise ArchiveItemAuthorError(AUTHOR_NAME_EXISTS_ERROR)
-        created.append(Author.objects.create(name=name))
+            author = matches[0]
+            if author.pk not in seen_ids:
+                seen_ids.add(author.pk)
+                ordered.append(author)
+            continue
+        created = Author.objects.create(name=name)
+        seen_ids.add(created.pk)
+        ordered.append(created)
 
-    ordered = existing_authors + created
     joined = ", ".join(author.name for author in ordered)
     if len(joined) > AUTHOR_NAME_MAX_LENGTH:
         raise ArchiveItemAuthorError(AUTHOR_JOINED_TOO_LONG_ERROR)
