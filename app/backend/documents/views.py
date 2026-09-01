@@ -41,6 +41,7 @@ from .models import (
     ArchiveItemPerson,
     ArchiveItemPersonSuggestion,
     ArchiveMetadataSuggestion,
+    Author,
     Document,
     DocumentMetadata,
     DocumentSourceFile,
@@ -68,10 +69,12 @@ from documents.services.archive_item_authors import (
     AUTHOR_IDS_FIELD,
     NEW_AUTHOR_NAME_FIELD,
     ArchiveItemAuthorError,
+    affected_archive_items_for_author,
     archive_item_authors_form_data_from_item,
     build_staff_author_choices,
     empty_archive_item_authors_form_fields,
     parse_archive_item_authors_form,
+    rename_author,
 )
 from documents.services.archive_item_people import (
     ArchiveItemPersonError,
@@ -4588,6 +4591,7 @@ PERSON_BIOGRAPHY_UPDATED_MSG = "התקציר עודכן."
 PERSON_ALIAS_ADDED_MSG = "השם החלופי נוסף."
 PERSON_ALIAS_UPDATED_MSG = "השם החלופי עודכן."
 PERSON_ALIAS_DELETED_MSG = "השם החלופי נמחק."
+AUTHOR_NAME_UPDATED_MSG = "שם המחבר/ת עודכן בכל הפריטים המשויכים."
 ARCHIVE_ITEM_UPDATED_MSG = "הפריט עודכן."
 ARCHIVE_ITEM_PEOPLE_HEADING = "אנשים קשורים"
 PHOTO_ARCHIVE_ITEM_PEOPLE_HEADING = "אנשים קשורים לפריט"
@@ -5655,6 +5659,57 @@ def _get_staff_person_alias(
     person = _get_staff_person(person_id)
     alias = get_object_or_404(PersonAlias, pk=alias_id, person_id=person.pk)
     return person, alias
+
+
+def _author_edit_form_context(
+    *,
+    author: Author,
+    form_errors: list[str],
+    author_name: str,
+) -> dict:
+    affected_items = affected_archive_items_for_author(author)
+    return {
+        "author": author,
+        "author_name": author_name,
+        "affected_items": affected_items,
+        "affected_item_count": len(affected_items),
+        "form_errors": form_errors,
+        "page_title": "עריכת מחבר/ת",
+    }
+
+
+@login_required
+def archive_manage_author_edit_page(request, author_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    author = get_object_or_404(Author, pk=author_id)
+    form_errors: list[str] = []
+    author_name = author.name
+
+    if request.method == "POST":
+        submitted_name = request.POST.get("name") or ""
+        try:
+            author = rename_author(author, name=submitted_name)
+        except ArchiveItemAuthorError as exc:
+            form_errors = [exc.message]
+            author_name = submitted_name
+        else:
+            messages.success(request, AUTHOR_NAME_UPDATED_MSG)
+            return redirect("archive-manage-author-edit", author_id=author.id)
+
+        author = get_object_or_404(Author, pk=author_id)
+
+    return render(
+        request,
+        "documents/archive/author_edit.html",
+        context=_author_edit_form_context(
+            author=author,
+            form_errors=form_errors,
+            author_name=author_name,
+        ),
+    )
 
 
 def _person_edit_form_context(
