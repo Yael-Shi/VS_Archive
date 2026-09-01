@@ -218,6 +218,21 @@ class PhotoAddUploadTests(TestCase):
         self.assertNotContains(resp, 'name="archive_item_person_ids"')
         self.assertNotContains(resp, 'name="new_archive_item_person_name"')
 
+    def test_add_page_file_input_stays_single_file(self):
+        resp = self.client.get(
+            reverse("archive-manage-photo-add", kwargs={"item_id": self.item.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        match = re.search(r'<input[^>]*id="file"[^>]*>', html)
+        self.assertIsNotNone(match)
+        assert match is not None
+        self.assertNotIn("multiple", match.group(0))
+        self.assertIn("תמונה אחת", html)
+        # Add mode keeps its single-file slice even though the shared script
+        # supports multi-file create.
+        self.assertIn('uploadMode === "add" ? files.slice(0, 1) : files', html)
+
     @patch("documents.views.enqueue_uploaded_document_processing")
     def test_second_photo_is_allocated_position_two(self, mock_enqueue):
         resp = self.client.post(
