@@ -8,14 +8,19 @@
     id="photoUploadForm"
     data-mode="create"
     data-create-url="{% url 'photo-uploads-create' %}"
+    data-add-url="{% url 'photo-uploads-add' %}"
     data-complete-url-template="/api/photo-uploads/__ID__/complete/"
+    data-item-redirect-url-template="/archive/manage/__ITEM_ID__/edit/"
     data-redirect-url="{% url 'archive-manage-list' %}"
   >
     {% csrf_token %}
     <div class="field">
-      <label for="file">קובץ תמונה *</label>
-      <input id="file" name="file" type="file" accept="image/jpeg,image/png,image/tiff,image/webp,.jpg,.jpeg,.png,.tif,.tiff,.webp" required />
-      <div class="field-hint">תמונה אחת בלבד (JPEG, PNG, TIFF, WebP).</div>
+      <label for="file">קבצי תמונה (תמונה אחת או יותר) *</label>
+      <input id="file" name="file" type="file" accept="image/jpeg,image/png,image/tiff,image/webp,.jpg,.jpeg,.png,.tif,.tiff,.webp" multiple required />
+      <div class="field-hint">
+        ניתן לבחור תמונה אחת או יותר (JPEG, PNG, TIFF, WebP). סדר הבחירה יהיה הסדר ההתחלתי של הגלריה בפריט.
+        פרטי התמונה שבטופס זה יחולו על התמונה הראשונה בלבד; את שאר התמונות אפשר לערוך אחרי היצירה בדף ניהול הפריט.
+      </div>
     </div>
 
     {% include "documents/archive/photo_metadata_form_fields.html" %}
@@ -28,7 +33,7 @@
     {% endif %}
 
     <div class="form-actions form-actions--spaced">
-      <button id="submitBtn" class="btn btn-primary" type="submit">העלאת תמונה</button>
+      <button id="submitBtn" class="btn btn-primary" type="submit">העלאת תמונות</button>
     </div>
   </form>
 </div>

@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import date
 from unittest.mock import patch
 
@@ -6,7 +7,14 @@ from django.contrib.auth.models import Group, User
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from documents.models import ArchiveCategory, ArchiveItem, Document, PhotoContent, Tag
+from documents.models import (
+    ArchiveCategory,
+    ArchiveItem,
+    Document,
+    Person,
+    PhotoContent,
+    Tag,
+)
 from documents.services.archive_item_access import (
     ARCHIVE_FAMILY_GROUP_NAME,
     archive_browse_queryset_for_user,
@@ -533,6 +541,272 @@ class PhotoUploadFlowTests(TestCase):
         resp = self.client.get("/archive/manage/new/")
         self.assertContains(resp, 'value="photo"')
         self.assertContains(resp, "תמונה")
+
+
+@override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
+class PhotoCreateMultiFileUploadTests(TestCase):
+    """Create mode accepts several images: create first, then add the rest."""
+
+    NEW_URL = "/archive/manage/new/"
+    CREATE_URL = "/api/photo-uploads/create/"
+    ADD_URL = "/api/photo-uploads/add/"
+    S3_CONTENT_LENGTH = 4096
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="photo_multi_create_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.client.force_login(self.staff)
+        self.presigned_patcher = patch(
+            "documents.services.photo_upload.create_presigned_put",
+            return_value="https://s3.example/presigned-put",
+        )
+        self.presigned_patcher.start()
+        self.addCleanup(self.presigned_patcher.stop)
+        self.s3_head_patcher = patch(
+            "documents.services.photo_upload.head_s3_object",
+            return_value=S3HeadObjectResult(
+                exists=True,
+                content_type="image/jpeg",
+                content_length=self.S3_CONTENT_LENGTH,
+            ),
+        )
+        self.s3_head_patcher.start()
+        self.addCleanup(self.s3_head_patcher.stop)
+        self.thumbnail_patcher = patch(
+            "documents.services.photo_upload.generate_and_persist_photo_thumbnail",
+            return_value=None,
+        )
+        self.thumbnail_patcher.start()
+        self.addCleanup(self.thumbnail_patcher.stop)
+
+    def _create_form_html(self) -> str:
+        resp = self.client.get(self.NEW_URL, {"item_type": "photo"})
+        self.assertEqual(resp.status_code, 200)
+        return resp.content.decode()
+
+    def _post_create(self, **overrides):
+        payload = {
+            "title": "Album import",
+            "visibility": ArchiveItem.Visibility.PRIVATE,
+            "metadata_status": ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
+            "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
+            "description": "First photo description",
+            "location": "Haifa",
+            "context": "First photo context",
+            "people_present": "Grandma",
+            "notes": "First photo notes",
+            "original_name": "one.jpg",
+            "mime_type": "image/jpeg",
+        }
+        payload.update(overrides)
+        return self.client.post(
+            self.CREATE_URL,
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def _post_add(self, archive_item_id: int, original_name: str):
+        return self.client.post(
+            self.ADD_URL,
+            data=json.dumps(
+                {
+                    "archive_item_id": archive_item_id,
+                    "original_name": original_name,
+                    "mime_type": "image/jpeg",
+                }
+            ),
+            content_type="application/json",
+        )
+
+    def _post_complete(self, photo_content_id: int, payload: dict):
+        return self.client.post(
+            f"/api/photo-uploads/{photo_content_id}/complete/",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def test_create_file_input_allows_multiple_images(self):
+        html = self._create_form_html()
+        match = re.search(r'<input[^>]*id="file"[^>]*>', html)
+        self.assertIsNotNone(match)
+        assert match is not None
+        self.assertIn("multiple", match.group(0))
+        self.assertIn("image/jpeg,image/png,image/tiff,image/webp", match.group(0))
+        self.assertNotIn("תמונה אחת בלבד", html)
+        self.assertIn("תמונה אחת או יותר", html)
+        self.assertIn("סדר הבחירה", html)
+
+    def test_create_form_exposes_add_and_item_manage_urls(self):
+        html = self._create_form_html()
+        self.assertIn('data-add-url="/api/photo-uploads/add/"', html)
+        expected_template = reverse(
+            "archive-manage-edit", kwargs={"item_id": 12345}
+        ).replace("12345", "__ITEM_ID__")
+        self.assertIn(
+            f'data-item-redirect-url-template="{expected_template}"',
+            html,
+        )
+
+    def test_create_script_uploads_files_sequentially_through_shared_lifecycle(self):
+        html = self._create_form_html()
+        self.assertIn("async function runCreateUploads(files, progress)", html)
+        self.assertIn("for (let index = 0; index < total; index += 1)", html)
+        self.assertIn("await uploadPlannedPhoto(plan, file, mimeType, suffix)", html)
+        self.assertIn("if (index === 0)", html)
+        self.assertIn("createUrl", html)
+        self.assertIn("addUrl", html)
+        self.assertIn("archive_item_id: progress.archiveItemId", html)
+
+    def test_create_script_preflight_records_failing_file_before_validating(self):
+        html = self._create_form_html()
+        preflight = (
+            "for (let index = 0; index < files.length; index += 1) {\n"
+            "        progress.failedIndex = index;\n"
+            "        progress.failedFileName = files[index].name;\n"
+            "        const validationError = imageFileValidationError(files[index]);\n"
+            "        if (validationError) {\n"
+            "          throw new Error(validationError);\n"
+            "        }\n"
+            "      }"
+        )
+        self.assertIn(preflight, html)
+
+        # The whole preflight loop must finish before the first create/add
+        # request, so an invalid later file cannot leave a half-created item.
+        preflight_end = html.index(preflight) + len(preflight)
+        create_call = html.index("await runCreateUploads(files, progress);")
+        add_call = html.index("await runAddUpload(files[0], progress);")
+        self.assertLess(preflight_end, create_call)
+        self.assertLess(preflight_end, add_call)
+
+        # A preflight rejection happens before any ArchiveItem exists, so the
+        # form stays recoverable and the submit button is re-enabled.
+        self.assertLess(html.index("archiveItemId: null,"), html.index(preflight))
+        self.assertIn(
+            "if (!progress.archiveItemId) {\n        submitBtn.disabled = false;\n      }",
+            html,
+        )
+
+    def test_create_script_reports_progress_and_partial_failure(self):
+        html = self._create_form_html()
+        self.assertIn("מתוך", html)
+        self.assertIn("ההעלאה נעצרה בקובץ", html)
+        self.assertIn("התמונות שכבר הועלו נשמרו ולא נמחקו", html)
+        self.assertIn("מעבר לדף ניהול הפריט שנוצר", html)
+        self.assertIn("success: false", html)
+
+    def test_create_then_add_keeps_selected_order_on_one_archive_item(self):
+        person = Person.objects.create(name="Shared item person")
+        created = self._post_create(archive_item_person_ids=[person.id])
+        self.assertEqual(created.status_code, 201)
+        archive_item_id = created.json()["archive_item_id"]
+        self.assertEqual(
+            self._post_complete(
+                created.json()["photo_content_id"],
+                {"success": True, "file_mime": "image/jpeg"},
+            ).status_code,
+            200,
+        )
+
+        for original_name in ("two.jpg", "three.jpg"):
+            added = self._post_add(archive_item_id, original_name)
+            self.assertEqual(added.status_code, 201)
+            self.assertEqual(added.json()["archive_item_id"], archive_item_id)
+            self.assertEqual(
+                self._post_complete(
+                    added.json()["photo_content_id"],
+                    {"success": True, "file_mime": "image/jpeg"},
+                ).status_code,
+                200,
+            )
+
+        self.assertEqual(ArchiveItem.objects.count(), 1)
+        item = ArchiveItem.objects.get(id=archive_item_id)
+        self.assertEqual(item.item_type, ArchiveItem.ItemType.PHOTO)
+        self.assertEqual(set(item.people.values_list("id", flat=True)), {person.id})
+
+        photos = list(item.photo_contents.order_by("position"))
+        self.assertEqual([photo.position for photo in photos], [1, 2, 3])
+        self.assertEqual(
+            [photo.original_filename for photo in photos],
+            ["one.jpg", "two.jpg", "three.jpg"],
+        )
+        self.assertTrue(
+            all(
+                photo.upload_status == PhotoContent.UploadStatus.UPLOADED
+                for photo in photos
+            )
+        )
+
+    def test_only_first_photo_receives_create_form_photo_metadata(self):
+        created = self._post_create()
+        archive_item_id = created.json()["archive_item_id"]
+        added = self._post_add(archive_item_id, "two.jpg")
+        self.assertEqual(added.status_code, 201)
+
+        first = PhotoContent.objects.get(id=created.json()["photo_content_id"])
+        second = PhotoContent.objects.get(id=added.json()["photo_content_id"])
+        self.assertEqual(first.description, "First photo description")
+        self.assertEqual(first.location, "Haifa")
+        self.assertEqual(first.context, "First photo context")
+        self.assertEqual(first.people_present, "Grandma")
+        self.assertEqual(first.notes, "First photo notes")
+        self.assertEqual(second.description, "")
+        self.assertEqual(second.location, "")
+        self.assertEqual(second.context, "")
+        self.assertEqual(second.people_present, "")
+        self.assertEqual(second.notes, "")
+        self.assertIsNone(second.date_start)
+        self.assertIsNone(second.date_end)
+        self.assertEqual(second.people.count(), 0)
+
+    def test_single_selected_file_still_creates_one_photo_item(self):
+        created = self._post_create()
+        self.assertEqual(created.status_code, 201)
+        archive_item_id = created.json()["archive_item_id"]
+        self.assertEqual(
+            self._post_complete(
+                created.json()["photo_content_id"],
+                {"success": True, "file_mime": "image/jpeg"},
+            ).status_code,
+            200,
+        )
+        self.assertEqual(ArchiveItem.objects.count(), 1)
+        item = ArchiveItem.objects.get(id=archive_item_id)
+        self.assertEqual(item.photo_contents.count(), 1)
+
+    def test_failed_later_file_keeps_earlier_photos_and_item(self):
+        created = self._post_create()
+        archive_item_id = created.json()["archive_item_id"]
+        first_id = created.json()["photo_content_id"]
+        self._post_complete(first_id, {"success": True, "file_mime": "image/jpeg"})
+
+        added = self._post_add(archive_item_id, "two.jpg")
+        second_id = added.json()["photo_content_id"]
+        failed = self._post_complete(
+            second_id,
+            {"success": False, "error": "S3 PUT failed: HTTP 403"},
+        )
+        self.assertEqual(failed.status_code, 200)
+        self.assertFalse(failed.json()["upload_complete"])
+
+        self.assertEqual(ArchiveItem.objects.count(), 1)
+        self.assertEqual(
+            PhotoContent.objects.get(id=first_id).upload_status,
+            PhotoContent.UploadStatus.UPLOADED,
+        )
+        second = PhotoContent.objects.get(id=second_id)
+        self.assertEqual(second.upload_status, PhotoContent.UploadStatus.FAILED)
+        self.assertEqual(second.upload_error, "S3 PUT failed: HTTP 403")
+        self.assertEqual(
+            self.client.get(
+                reverse("archive-manage-edit", kwargs={"item_id": archive_item_id})
+            ).status_code,
+            200,
+        )
 
 
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")

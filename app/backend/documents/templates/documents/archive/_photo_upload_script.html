@@ -6,14 +6,45 @@
   const fileEl = document.getElementById("file");
   const uploadMode = (form && form.dataset.mode) || "create";
   const createUrl = (form && form.dataset.createUrl) || "/api/photo-uploads/create/";
+  const addUrl = (form && form.dataset.addUrl) || "/api/photo-uploads/add/";
   const completeUrlTemplate = (form && form.dataset.completeUrlTemplate) || "/api/photo-uploads/__ID__/complete/";
   const redirectUrl = (form && form.dataset.redirectUrl) || "/archive/manage/";
+  const itemRedirectUrlTemplate = (form && form.dataset.itemRedirectUrlTemplate) || "";
+
+  // Mirrors documents/services/upload_validation.py so every selected file is
+  // rejected before any ArchiveItem or PhotoContent row is created.
+  const ALLOWED_IMAGE_EXTENSIONS_BY_MIME = {
+    "image/jpeg": [".jpg", ".jpeg"],
+    "image/png": [".png"],
+    "image/tiff": [".tif", ".tiff"],
+    "image/webp": [".webp"],
+  };
+  const MIME_TYPE_ALIASES = {
+    "image/jpg": "image/jpeg",
+    "image/pjpeg": "image/jpeg",
+  };
 
   function setMessage(kind, text) {
     msgEl.className = "msg";
     if (kind === "error") msgEl.classList.add("msg-error");
     else if (kind === "ok") msgEl.classList.add("msg-ok");
     msgEl.textContent = text || "";
+  }
+
+  function itemManageUrl(archiveItemId) {
+    if (!itemRedirectUrlTemplate || !archiveItemId) return "";
+    return itemRedirectUrlTemplate.replace("__ITEM_ID__", String(archiveItemId));
+  }
+
+  function setErrorMessageWithItemLink(text, archiveItemId) {
+    setMessage("error", text);
+    const href = itemManageUrl(archiveItemId);
+    if (!href) return;
+    msgEl.appendChild(document.createTextNode(" "));
+    const link = document.createElement("a");
+    link.href = href;
+    link.textContent = "מעבר לדף ניהול הפריט שנוצר";
+    msgEl.appendChild(link);
   }
 
   function getCsrfToken() {
@@ -121,72 +152,214 @@
     return meta;
   }
 
+  function normalizeMimeType(rawMimeType) {
+    const base = String(rawMimeType || "").trim().toLowerCase().split(";")[0].trim();
+    return MIME_TYPE_ALIASES[base] || base;
+  }
+
+  function fileExtension(originalName) {
+    const name = String(originalName || "").trim().toLowerCase();
+    if (name.indexOf(".") === -1) return "";
+    return "." + name.split(".").pop();
+  }
+
+  function mimeTypeForFile(file) {
+    return normalizeMimeType(file.type) || "application/octet-stream";
+  }
+
+  function imageFileValidationError(file) {
+    const allowedExtensions = ALLOWED_IMAGE_EXTENSIONS_BY_MIME[mimeTypeForFile(file)];
+    if (!allowedExtensions) {
+      return `הקובץ ״${file.name}״ אינו בפורמט תמונה נתמך (JPEG, PNG, TIFF, WebP)`;
+    }
+    if (allowedExtensions.indexOf(fileExtension(file.name)) === -1) {
+      return `סיומת הקובץ ״${file.name}״ אינה תואמת לסוג התמונה שלו`;
+    }
+    return "";
+  }
+
+  function selectedFiles() {
+    const files = Array.from((fileEl && fileEl.files) || []);
+    // Add mode stays a strict one-file operation.
+    return uploadMode === "add" ? files.slice(0, 1) : files;
+  }
+
+  function progressSuffix(index, total) {
+    return total > 1 ? ` (תמונה ${index + 1} מתוך ${total})` : "";
+  }
+
+  /**
+   * Shared PUT + complete lifecycle for both the create and add plans.
+   * Best-effort complete(success=false) is preserved for failed PUTs.
+   */
+  async function uploadPlannedPhoto(plan, file, mimeType, suffix) {
+    const photoContentId = plan && plan.photo_content_id;
+    const uploadUrl = plan && plan.upload_url;
+    if (!photoContentId || !uploadUrl) {
+      throw new Error("Create response missing photo_content_id or upload_url");
+    }
+
+    setMessage("ok", `מעלה ל-S3…${suffix}`);
+    const putRes = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: {"Content-Type": mimeType},
+      body: file,
+    });
+    const completeUrl = completeUrlTemplate.replace("__ID__", String(photoContentId));
+    if (!putRes.ok) {
+      const putText = await putRes.text().catch(() => "");
+      try {
+        await jsonFetch(completeUrl, {
+          method: "POST",
+          body: JSON.stringify({ success: false, error: `S3 PUT failed: HTTP ${putRes.status}` }),
+        });
+      } catch (_) {}
+      throw new Error(`S3 PUT failed: HTTP ${putRes.status} ${putText}`);
+    }
+
+    setMessage("ok", `מאמתת העלאה…${suffix}`);
+    const completed = await jsonFetch(completeUrl, {
+      method: "POST",
+      body: JSON.stringify({
+        success: true,
+        file_mime: mimeType,
+      }),
+    });
+    if (!completed || !completed.upload_complete) {
+      throw new Error((completed && completed.error) || "העלאה לא הושלמה");
+    }
+    return completed;
+  }
+
+  function batchFailureMessage(progress, err) {
+    const detail = err && err.message ? err.message : String(err);
+    if (progress.total <= 1) {
+      return progress.archiveItemId
+        ? `הפריט נוצר אך העלאת התמונה לא הושלמה. שגיאה: ${detail}`
+        : detail;
+    }
+    return (
+      `ההעלאה נעצרה בקובץ ${progress.failedIndex + 1} מתוך ${progress.total} ` +
+      `(״${progress.failedFileName}״). הושלמו ${progress.completedCount} מתוך ` +
+      `${progress.total} תמונות. התמונות שכבר הועלו נשמרו ולא נמחקו. שגיאה: ${detail}`
+    );
+  }
+
+  /**
+   * Create mode: the first file creates the ArchiveItem through the create
+   * endpoint (shared item metadata and item people are sent once, and the
+   * photo-specific fields apply to this first photo only). Every later file
+   * uses the add endpoint with blank photo metadata, sequentially, so selected
+   * order becomes PhotoContent position order.
+   */
+  async function runCreateUploads(files, progress) {
+    const total = files.length;
+    for (let index = 0; index < total; index += 1) {
+      const file = files[index];
+      const mimeType = mimeTypeForFile(file);
+      const suffix = progressSuffix(index, total);
+      progress.failedIndex = index;
+      progress.failedFileName = file.name;
+
+      let plan;
+      if (index === 0) {
+        setMessage("ok", `יוצרת פריט תמונה…${suffix}`);
+        plan = await jsonFetch(createUrl, {
+          method: "POST",
+          body: JSON.stringify(Object.assign({}, readFormMeta(), {
+            original_name: file.name,
+            mime_type: mimeType,
+          })),
+        });
+        progress.archiveItemId = (plan && plan.archive_item_id) || null;
+        if (total > 1 && !progress.archiveItemId) {
+          throw new Error("Create response missing archive_item_id");
+        }
+      } else {
+        setMessage("ok", `מוסיפה תמונה לפריט…${suffix}`);
+        plan = await jsonFetch(addUrl, {
+          method: "POST",
+          body: JSON.stringify({
+            archive_item_id: progress.archiveItemId,
+            original_name: file.name,
+            mime_type: mimeType,
+          }),
+        });
+      }
+
+      await uploadPlannedPhoto(plan, file, mimeType, suffix);
+      progress.completedCount += 1;
+    }
+  }
+
+  // Add mode keeps its own single-file contract: `createUrl` is the add
+  // endpoint here, and the full add form metadata belongs to that one photo.
+  async function runAddUpload(file, progress) {
+    const mimeType = mimeTypeForFile(file);
+    progress.failedIndex = 0;
+    progress.failedFileName = file.name;
+    setMessage("ok", "מוסיפה תמונה לפריט…");
+    const plan = await jsonFetch(createUrl, {
+      method: "POST",
+      body: JSON.stringify(Object.assign({}, readFormMeta(), {
+        original_name: file.name,
+        mime_type: mimeType,
+      })),
+    });
+    await uploadPlannedPhoto(plan, file, mimeType, "");
+    progress.completedCount += 1;
+  }
+
   form.addEventListener("submit", async (ev) => {
     ev.preventDefault();
     setMessage("", "");
     submitBtn.disabled = true;
 
+    const progress = {
+      archiveItemId: null,
+      completedCount: 0,
+      failedIndex: -1,
+      failedFileName: "",
+      total: 0,
+    };
+
     try {
-      const file = (fileEl.files && fileEl.files[0]) || null;
-      if (!file) {
+      const files = selectedFiles();
+      if (!files.length) {
         throw new Error("יש לבחור קובץ תמונה");
       }
+      progress.total = files.length;
 
-      const mime_type = file.type || "application/octet-stream";
-      const meta = readFormMeta();
-      const createPayload = Object.assign({}, meta, {
-        original_name: file.name,
-        mime_type,
-      });
-
-      setMessage("ok", uploadMode === "add" ? "מוסיפה תמונה לפריט…" : "יוצרת פריט תמונה…");
-      const created = await jsonFetch(createUrl, {
-        method: "POST",
-        body: JSON.stringify(createPayload),
-      });
-
-      const photoContentId = created.photo_content_id;
-      const uploadUrl = created.upload_url;
-      if (!photoContentId || !uploadUrl) {
-        throw new Error("Create response missing photo_content_id or upload_url");
+      // Every file is validated before the first create/add request, so the
+      // failing file must be recorded before each check can throw.
+      for (let index = 0; index < files.length; index += 1) {
+        progress.failedIndex = index;
+        progress.failedFileName = files[index].name;
+        const validationError = imageFileValidationError(files[index]);
+        if (validationError) {
+          throw new Error(validationError);
+        }
       }
 
-      setMessage("ok", `מעלה ל-S3… (תמונה #${photoContentId})`);
-      const putRes = await fetch(uploadUrl, {
-        method: "PUT",
-        headers: {"Content-Type": mime_type},
-        body: file,
-      });
-      const completeUrl = completeUrlTemplate.replace("__ID__", String(photoContentId));
-      if (!putRes.ok) {
-        const putText = await putRes.text().catch(() => "");
-        try {
-          await jsonFetch(completeUrl, {
-            method: "POST",
-            body: JSON.stringify({ success: false, error: `S3 PUT failed: HTTP ${putRes.status}` }),
-          });
-        } catch (_) {}
-        throw new Error(`S3 PUT failed: HTTP ${putRes.status} ${putText}`);
-      }
-
-      setMessage("ok", "מאמתת העלאה…");
-      const completed = await jsonFetch(completeUrl, {
-        method: "POST",
-        body: JSON.stringify({
-          success: true,
-          file_mime: mime_type,
-        }),
-      });
-
-      if (!completed.upload_complete) {
-        throw new Error(completed.error || "העלאה לא הושלמה");
+      if (uploadMode === "add") {
+        await runAddUpload(files[0], progress);
+      } else {
+        await runCreateUploads(files, progress);
       }
 
       setMessage("ok", "בוצע. מעבירה…");
-      window.location.href = redirectUrl;
+      const target = itemManageUrl(progress.archiveItemId) || redirectUrl;
+      window.location.href = target;
     } catch (err) {
-      setMessage("error", err && err.message ? err.message : String(err));
-      submitBtn.disabled = false;
+      setErrorMessageWithItemLink(
+        batchFailureMessage(progress, err),
+        progress.archiveItemId
+      );
+      // Once an ArchiveItem exists, re-submitting the form would create a
+      // second item; recovery happens on that item's staff manage page.
+      if (!progress.archiveItemId) {
+        submitBtn.disabled = false;
+      }
     }
   });
 </script>
