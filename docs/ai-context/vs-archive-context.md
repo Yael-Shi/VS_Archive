@@ -76,6 +76,8 @@ Engine selection is implemented as a small routing layer (`select_ocr_route` →
 
 **Human ground truth:** **`verification_status=VERIFIED`** is the human-approved layer. Row **`status`** does not replace that.
 
+**Public text quality (PR1 foundation):** persisted **`DocumentTextResult.quality`** is **`UNKNOWN`/`LOW`/`MEDIUM`/`GOOD`** (default **`UNKNOWN`**; no historical inference). Effective public quality: **`VERIFIED` → `HUMAN_VERIFIED`**, **`REJECTED` → `NEEDS_CORRECTION`**, else the persisted base value (`documents.services.text_quality`). **`HUMAN_VERIFIED` and `NEEDS_CORRECTION` are not stored.** Staff **`MANUAL_TEXT`** is **`HUMAN_VERIFIED`** in that helper only. No public UI in PR1.
+
 **Parent document rollup:**
 
 - **`READY`** = all expected outputs exist and are usable/displayable (non-empty text; `SUCCEEDED` or `NEEDS_REVIEW`). **Not** human-verified.
