@@ -312,7 +312,7 @@ class VsArchiveAppStack(Stack):
                 # Preserve current live worker OCR/runtime tuning to avoid drift on CDK deploy.
                 "ENABLE_HYBRID_HTR": "false",
                 "ENABLE_ANTIGRAVITY_ARABIC_PRINTED": "true",
-                "ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED": "false",
+                "ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED": "true",
                 "ENABLE_DAILY_REPORT": "false",
                 "GEMINI_DOUBLE_PASS": "true",
                 "GEMINI_TEMPERATURE": "0.0",
