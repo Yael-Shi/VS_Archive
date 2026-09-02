@@ -954,6 +954,461 @@ class GeminiOcrPageCheckpoint(models.Model):
         ]
 
 
+class ArabicPrintedOcrAttempt(models.Model):
+    """Durable identity for one printed-Arabic banded OCR input/configuration."""
+
+    class Status(models.TextChoices):
+        IN_PROGRESS = "IN_PROGRESS", "In progress"
+        PARTIAL = "PARTIAL", "Partial"
+        COMPLETED = "COMPLETED", "Completed"
+
+    document = models.ForeignKey(
+        Document,
+        on_delete=models.CASCADE,
+        related_name="arabic_printed_ocr_attempts",
+    )
+    identity_fingerprint = models.CharField(max_length=64)
+    source_fingerprint = models.CharField(max_length=64)
+    route_fingerprint = models.CharField(max_length=64)
+    prompt_fingerprint = models.CharField(max_length=64)
+    config_fingerprint = models.CharField(max_length=64)
+    prompt_contract_version = models.CharField(max_length=64)
+    expected_page_count = models.PositiveIntegerField()
+    status = models.CharField(
+        max_length=32,
+        choices=Status.choices,
+        default=Status.IN_PROGRESS,
+    )
+    missing_page_indices = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["document", "-created_at"],
+                name="ar_pr_ocr_attempt_doc_idx",
+            ),
+            models.Index(
+                fields=["document", "status"],
+                name="ar_pr_ocr_attempt_status_idx",
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["document", "identity_fingerprint"],
+                name="uniq_ar_pr_ocr_attempt_identity",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(expected_page_count__gte=1),
+                name="ar_pr_ocr_attempt_page_count_gte_1",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(status__in=["IN_PROGRESS", "PARTIAL", "COMPLETED"]),
+                name="ar_pr_ocr_attempt_status_valid",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="COMPLETED")
+                    | (
+                        models.Q(completed_at__isnull=False)
+                        & models.Q(missing_page_indices=[])
+                    )
+                ),
+                name="ar_pr_ocr_attempt_completed_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(status="COMPLETED") | models.Q(completed_at__isnull=True)
+                ),
+                name="ar_pr_ocr_attempt_noncompleted_shape",
+            ),
+        ]
+
+
+class ArabicPrintedOcrPageCheckpoint(models.Model):
+    """Fenced printed-Arabic OCR result for one zero-based source page."""
+
+    class Status(models.TextChoices):
+        PLANNING = "PLANNING", "Planning"
+        RUNNING = "RUNNING", "Running"
+        SUCCEEDED = "SUCCEEDED", "Succeeded"
+        FAILED = "FAILED", "Failed"
+
+    class PageQuality(models.TextChoices):
+        UNASSISTED = "UNASSISTED", "Unassisted"
+        ASSISTED = "ASSISTED", "Assisted"
+        MIXED = "MIXED", "Mixed"
+        CLOUD_VISION_LOW_QUALITY = (
+            "CLOUD_VISION_LOW_QUALITY",
+            "Cloud Vision low quality",
+        )
+
+    attempt = models.ForeignKey(
+        ArabicPrintedOcrAttempt,
+        on_delete=models.CASCADE,
+        related_name="page_checkpoints",
+    )
+    page_index = models.IntegerField()
+    page_fingerprint = models.CharField(max_length=64)
+    source_content_fingerprint = models.CharField(max_length=64)
+    oriented_image_sha256 = models.CharField(max_length=64)
+    oriented_image_width = models.IntegerField()
+    oriented_image_height = models.IntegerField()
+    cloud_vision_response_sha256 = models.CharField(max_length=64, blank=True, default="")
+    cloud_vision_call_count = models.PositiveSmallIntegerField(default=0)
+    banding_contract_fingerprint = models.CharField(max_length=64)
+    banding_strategy = models.CharField(max_length=64)
+    band_count = models.PositiveSmallIntegerField(default=0)
+    max_band_height_ratio = models.DecimalField(
+        max_digits=4,
+        decimal_places=3,
+        default="0.350",
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=Status.choices,
+        default=Status.PLANNING,
+    )
+    lease_token = models.UUIDField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    assembled_text = models.TextField(null=True, blank=True)
+    page_quality = models.CharField(
+        max_length=32,
+        choices=PageQuality.choices,
+        blank=True,
+        default="",
+    )
+    runtime_engine_marker = models.CharField(max_length=64, blank=True, default="")
+    antigravity_create_count = models.PositiveSmallIntegerField(default=0)
+    failure_code = models.CharField(max_length=64, blank=True, default="")
+    failure_message = models.CharField(max_length=512, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["page_index"]
+        indexes = [
+            models.Index(
+                fields=["attempt", "status"],
+                name="ar_pr_ocr_page_status_idx",
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["attempt", "page_index"],
+                name="uniq_ar_pr_ocr_attempt_page",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(page_index__gte=0),
+                name="ar_pr_ocr_page_index_gte_0",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(oriented_image_width__gte=1)
+                & models.Q(oriented_image_height__gte=1),
+                name="ar_pr_ocr_page_oriented_dims",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(cloud_vision_call_count__lte=1),
+                name="ar_pr_ocr_page_vision_calls",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(antigravity_create_count__lte=12),
+                name="ar_pr_ocr_page_ag_creates",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(band_count__lte=6),
+                name="ar_pr_ocr_page_band_count_lte_6",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    status__in=["PLANNING", "RUNNING", "SUCCEEDED", "FAILED"]
+                ),
+                name="ar_pr_ocr_page_status_valid",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="PLANNING")
+                    | (
+                        models.Q(lease_token__isnull=True)
+                        & models.Q(lease_expires_at__isnull=True)
+                        & models.Q(completed_at__isnull=True)
+                        & models.Q(assembled_text__isnull=True)
+                        & models.Q(page_quality="")
+                        & models.Q(runtime_engine_marker="")
+                        & models.Q(failure_code="")
+                        & models.Q(failure_message="")
+                    )
+                ),
+                name="ar_pr_ocr_page_planning_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="RUNNING")
+                    | (
+                        models.Q(lease_token__isnull=False)
+                        & models.Q(lease_expires_at__isnull=False)
+                        & models.Q(completed_at__isnull=True)
+                        & models.Q(assembled_text__isnull=True)
+                        & models.Q(page_quality="")
+                        & models.Q(runtime_engine_marker="")
+                        & models.Q(failure_code="")
+                        & models.Q(failure_message="")
+                    )
+                ),
+                name="ar_pr_ocr_page_running_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="SUCCEEDED")
+                    | (
+                        models.Q(lease_token__isnull=True)
+                        & models.Q(lease_expires_at__isnull=True)
+                        & models.Q(completed_at__isnull=False)
+                        & models.Q(assembled_text__isnull=False)
+                        & ~models.Q(assembled_text="")
+                        & models.Q(
+                            page_quality__in=[
+                                "UNASSISTED",
+                                "ASSISTED",
+                                "MIXED",
+                                "CLOUD_VISION_LOW_QUALITY",
+                            ]
+                        )
+                        & ~models.Q(runtime_engine_marker="")
+                        & models.Q(failure_code="")
+                        & models.Q(failure_message="")
+                        & models.Q(band_count__gte=1)
+                    )
+                ),
+                name="ar_pr_ocr_page_succeeded_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="FAILED")
+                    | (
+                        models.Q(lease_token__isnull=True)
+                        & models.Q(lease_expires_at__isnull=True)
+                        & models.Q(completed_at__isnull=False)
+                        & models.Q(assembled_text__isnull=True)
+                        & models.Q(page_quality="")
+                        & models.Q(runtime_engine_marker="")
+                        & ~models.Q(failure_code="")
+                    )
+                ),
+                name="ar_pr_ocr_page_failed_shape",
+            ),
+        ]
+
+
+class ArabicPrintedOcrBandCheckpoint(models.Model):
+    """Normalized band plan and selected transcription for one page band."""
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        PRIMARY_RUNNING = "PRIMARY_RUNNING", "Primary running"
+        CANCEL_PENDING = "CANCEL_PENDING", "Cancel pending"
+        FALLBACK_RUNNING = "FALLBACK_RUNNING", "Fallback running"
+        SUCCEEDED = "SUCCEEDED", "Succeeded"
+        FAILED = "FAILED", "Failed"
+
+    class SelectedResult(models.TextChoices):
+        UNASSISTED = "UNASSISTED", "Unassisted"
+        ASSISTED_FALLBACK = "ASSISTED_FALLBACK", "Assisted fallback"
+        CLOUD_VISION_LOW_QUALITY = (
+            "CLOUD_VISION_LOW_QUALITY",
+            "Cloud Vision low quality",
+        )
+
+    page_checkpoint = models.ForeignKey(
+        ArabicPrintedOcrPageCheckpoint,
+        on_delete=models.CASCADE,
+        related_name="band_checkpoints",
+    )
+    band_index = models.IntegerField()
+    rect_x = models.IntegerField()
+    rect_y = models.IntegerField()
+    rect_width = models.IntegerField()
+    rect_height = models.IntegerField()
+    crop_mime = models.CharField(max_length=64)
+    crop_byte_length = models.PositiveIntegerField()
+    crop_sha256 = models.CharField(max_length=64)
+    vision_draft_text = models.TextField()
+    vision_draft_byte_length = models.PositiveIntegerField()
+    vision_draft_sha256 = models.CharField(max_length=64)
+    selected_result = models.CharField(
+        max_length=32,
+        choices=SelectedResult.choices,
+        blank=True,
+        default="",
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    primary_interaction_id = models.CharField(max_length=128, blank=True, default="")
+    primary_provider_status = models.CharField(max_length=64, blank=True, default="")
+    primary_latency_ms = models.PositiveIntegerField(null=True, blank=True)
+    primary_failure_type = models.CharField(max_length=64, blank=True, default="")
+    primary_safe_diagnostics = models.CharField(max_length=512, blank=True, default="")
+    fallback_interaction_id = models.CharField(max_length=128, blank=True, default="")
+    fallback_provider_status = models.CharField(max_length=64, blank=True, default="")
+    fallback_latency_ms = models.PositiveIntegerField(null=True, blank=True)
+    fallback_failure_type = models.CharField(max_length=64, blank=True, default="")
+    fallback_safe_diagnostics = models.CharField(max_length=512, blank=True, default="")
+    cancel_attempted = models.BooleanField(default=False)
+    cancel_attempted_at = models.DateTimeField(null=True, blank=True)
+    cancel_http_status = models.IntegerField(null=True, blank=True)
+    cancel_confirmed_status = models.CharField(max_length=64, blank=True, default="")
+    cancel_safe_diagnostics = models.CharField(max_length=512, blank=True, default="")
+    prior_attempts = models.JSONField(default=list)
+    transcription_text = models.TextField(null=True, blank=True)
+    transcription_byte_length = models.PositiveIntegerField(null=True, blank=True)
+    transcription_sha256 = models.CharField(max_length=64, blank=True, default="")
+    create_call_count = models.PositiveSmallIntegerField(default=0)
+    failure_code = models.CharField(max_length=64, blank=True, default="")
+    failure_message = models.CharField(max_length=512, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["band_index"]
+        indexes = [
+            models.Index(
+                fields=["page_checkpoint", "status"],
+                name="ar_pr_ocr_band_status_idx",
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["page_checkpoint", "band_index"],
+                name="uniq_ar_pr_ocr_page_band",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(band_index__gte=0),
+                name="ar_pr_ocr_band_index_gte_0",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(rect_x__gte=0)
+                    & models.Q(rect_y__gte=0)
+                    & models.Q(rect_width__gte=1)
+                    & models.Q(rect_height__gte=1)
+                ),
+                name="ar_pr_ocr_band_rect_valid",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(create_call_count__lte=2),
+                name="ar_pr_ocr_band_create_count",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    status__in=[
+                        "PENDING",
+                        "PRIMARY_RUNNING",
+                        "CANCEL_PENDING",
+                        "FALLBACK_RUNNING",
+                        "SUCCEEDED",
+                        "FAILED",
+                    ]
+                ),
+                name="ar_pr_ocr_band_status_valid",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="SUCCEEDED")
+                    | (
+                        models.Q(
+                            selected_result__in=[
+                                "UNASSISTED",
+                                "ASSISTED_FALLBACK",
+                                "CLOUD_VISION_LOW_QUALITY",
+                            ]
+                        )
+                        & models.Q(transcription_text__isnull=False)
+                        & ~models.Q(transcription_text="")
+                        & models.Q(transcription_byte_length__isnull=False)
+                        & ~models.Q(transcription_sha256="")
+                        & models.Q(completed_at__isnull=False)
+                        & models.Q(failure_code="")
+                    )
+                ),
+                name="ar_pr_ocr_band_succeeded_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(status="SUCCEEDED")
+                    | (
+                        models.Q(selected_result="")
+                        & models.Q(transcription_text__isnull=True)
+                        & models.Q(transcription_sha256="")
+                        & models.Q(transcription_byte_length__isnull=True)
+                    )
+                ),
+                name="ar_pr_ocr_band_nonsuccess_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="FAILED")
+                    | (
+                        models.Q(completed_at__isnull=False)
+                        & ~models.Q(failure_code="")
+                    )
+                ),
+                name="ar_pr_ocr_band_failed_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="CANCEL_PENDING")
+                    | (
+                        models.Q(cancel_attempted=True)
+                        & models.Q(cancel_attempted_at__isnull=False)
+                    )
+                ),
+                name="ar_pr_ocr_band_cancel_shape",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="PRIMARY_RUNNING")
+                    | models.Q(create_call_count=1)
+                ),
+                name="ar_pr_ocr_band_primary_count",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status="FALLBACK_RUNNING")
+                    | models.Q(create_call_count=2)
+                ),
+                name="ar_pr_ocr_band_fallback_count",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~(
+                        models.Q(status="SUCCEEDED")
+                        & models.Q(selected_result="UNASSISTED")
+                    )
+                    | models.Q(create_call_count=1)
+                ),
+                name="ar_pr_ocr_band_unassisted_count",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~(
+                        models.Q(status="SUCCEEDED")
+                        & models.Q(selected_result="ASSISTED_FALLBACK")
+                    )
+                    | models.Q(create_call_count=2)
+                ),
+                name="ar_pr_ocr_band_assisted_count",
+            ),
+        ]
+
+
 class DocumentTextResultEdit(models.Model):
     class EditType(models.TextChoices):
         SOURCE_TEXT = "SOURCE_TEXT", "Source text"

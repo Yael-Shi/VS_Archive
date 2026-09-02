@@ -91,6 +91,7 @@ class GeminiAdapter:
         text_input_type = kwargs.pop("text_input_type", None)
         handwriting_type = kwargs.pop("handwriting_type", None)
         engine_key = kwargs.pop("engine_key", self.engine_key)
+        kwargs.pop("absolute_deadline_monotonic", None)
         # English handwriting retains its RECITATION-only candidate switch.
         # Hebrew GENERAL handwriting gets a separate cost-aware policy: one
         # primary 2.5 Flash call, then 3.6 Flash only for MAX_TOKENS or

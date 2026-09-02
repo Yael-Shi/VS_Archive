@@ -50,6 +50,7 @@ Some OCR routes are activated by environment flags read in `select_ocr_route` (n
 |------|-------------------------------|--------------------|-------------------|
 | `ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN` | `false` (SSM; see below) | see SSM | `he` + `HANDWRITTEN` → Transkribus |
 | `ENABLE_ANTIGRAVITY_ARABIC_PRINTED` | `false` | `true` | `ar` + `PRINTED` → Antigravity |
+| `ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED` | `false` | `false` | execution only; does not change routing |
 
 **Antigravity Arabic printed rollout**
 
@@ -60,6 +61,7 @@ Some OCR routes are activated by environment flags read in `select_ocr_route` (n
 - **Phase 2 — controlled test:** worker routing uses **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED=true`** (and optionally `ANTIGRAVITY_AGENT_ID` if overriding the default). Uses existing `GEMINI_API_KEY`. A follow-up CDK/SSM wiring change (mirroring Transkribus) is optional but recommended before broader enablement.
 - **`ar` + `HANDWRITTEN`** is not routed to Antigravity regardless of the flag.
 - The adapter also validates `worker_env.enable_antigravity_arabic_printed` as a second safety check.
+- **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED=false`** is the execution-code default and the current `app_stack.py` **worker** environment value. It is **not** set on the web task. Turning it on later requires a separate worker-only change plus a Cloud Vision secret; this phase does **not** add `GOOGLE_CLOUD_VISION_API_KEY` to CDK, ECS, web, or Secrets Manager.
 
 Local template: `app/backend/.env.template`. Routing reference: `docs/ocr-routing-reference.md`.
 

@@ -31,6 +31,10 @@ def transcribe_pages(
 
     When ``route`` is provided (e.g. from the worker), it must be the same route
     used for persistence; ``select_ocr_route`` is not called again.
+
+    Optional ``absolute_deadline_monotonic`` is a generic remaining
+    request/lease deadline in ``time.monotonic()`` units. Adapters that do
+    not use it ignore it.
     """
     selected = (
         route

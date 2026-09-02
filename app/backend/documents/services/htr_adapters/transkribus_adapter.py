@@ -77,6 +77,7 @@ class TranskribusAdapter:
         **kwargs,
     ) -> HtrResult:
         worker_env = kwargs.pop("worker_env", None)
+        kwargs.pop("absolute_deadline_monotonic", None)
         if worker_env is None:
             raise EnginePermanentError(
                 "TranskribusAdapter requires worker_env (supplied by run_worker)."
