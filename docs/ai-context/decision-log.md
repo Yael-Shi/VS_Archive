@@ -1,5 +1,40 @@
 # VS-Archive Decision Log
 
+## Public PhotoPerson name links (presentation only)
+
+**Decision / implemented:** Public PHOTO detail **אנשים מזוהים:** names are
+canonical-name links to the existing public Person page. This is
+presentation only. `PhotoPerson` and `ArchiveItemPerson` stay separate
+relations. Person-page authorization is unchanged.
+
+**Current behavior:**
+
+- Selected-photo `PhotoPerson` rows still use canonical `Person.name`,
+  order `(person.name, person.pk)`, and `meaningful_metadata_value`
+  filtering. Aliases are not read or displayed.
+- Each remaining name is a link whose href is `person_public_page_url`
+  (`/archive/people/<Person.id>/`). Duplicate canonical names stay
+  distinct by `Person.id`.
+- `identified_people_display_names()` remains a name-only compatibility
+  helper. `PublicPhotoGallery` also exposes immutable
+  `PublicIdentifiedPersonLink` rows (`name`, `href`).
+- Layout stays comma-separated under **אנשים מזוהים:**. No ids, aliases,
+  or extra label text.
+- `build_public_photo_gallery()` still reads prefetched
+  `photo_contents` / nested `people` and does not add a people query.
+- PhotoPerson-only people still do not appear on ArchiveItemPerson
+  cards, search, discovery, or advanced `person=` filters.
+- A public Person page with no authorized `ArchiveItemPerson` items
+  still **404**s, including PhotoPerson-only identities. Following a
+  PhotoPerson name link can therefore 404; that is the existing Person
+  page contract, not a new authorization rule.
+
+**Deferred:** public alias display; PhotoPerson appearance filter;
+automatic `ArchiveItemPerson` from `PhotoPerson`; Person catalog/Admin.
+
+**Tests:** `documents/test_photo_public_gallery.py`,
+`documents/test_archive_person_public_presentation.py`.
+
 ## Arabic printed banded OCR — Phase 6A generic execution-lease deadline
 
 **Decision / implemented:** Banded Antigravity uses one generic absolute
@@ -605,10 +640,11 @@ Person-page authorization/404 contract.
 **Migration:** `0057_person_biography` (additive `AddField`; depends on
 `0056_archive_item_person_suggestion`). No data migration.
 
-**Deferred:** public alias display; PhotoPerson name linking / appearance
+**Deferred:** public alias display; PhotoPerson appearance
 filter; Person catalog/Admin; search-index inclusion of biography; AI-
 generated biography text; biography on cards, chips, item detail, or
-other public surfaces.
+other public surfaces. PhotoPerson name linking on public PHOTO detail
+is implemented (see **Public PhotoPerson name links**).
 
 **Tests:** `documents/test_person.py`,
 `documents/test_person_staff_ui.py`,
@@ -841,8 +877,10 @@ added later (see **Public Person biography**).
   Aliases are not displayed. No public staff-edit link.
 - Item-level **אנשים קשורים** links on archive cards, homepage cards,
   archive detail, and OCR document detail go to the Person page
-  (`person_public_page_url`). PhotoPerson **אנשים מזוהים:** names stay
-  plain text.
+  (`person_public_page_url`). PhotoPerson **אנשים מזוהים:** names are
+  canonical-name links to the same Person page (see **Public PhotoPerson
+  name links**). PhotoPerson still does not create ArchiveItemPerson
+  cards or change Person-page 404 rules.
 - Stage B mapped historical Tag browse
   `/archive/tags/<mapped_tag_id>/` now **302**s to the Person page
   (map-first). Following that URL still 404s when the Person has no
@@ -851,8 +889,9 @@ added later (see **Public Person biography**).
   filter chips are implemented separately (see **Public Person
   active-filter chip UX**).
 
-**Deferred:** public alias display;
-PhotoPerson name linking / appearance filter; Person catalog/Admin.
+**Deferred:** public alias display; PhotoPerson appearance filter;
+Person catalog/Admin. PhotoPerson name linking on public PHOTO detail is
+implemented (see **Public PhotoPerson name links**).
 Public biography/summary is implemented (see **Public Person
 biography**).
 D2a retired-name policy is implemented. D2b Tag-row deletion is
@@ -935,11 +974,13 @@ Tag browse, visibility, and authorized item querysets are unchanged.
 
 **Deferred:** D2a retired-name policy is implemented. D2b Tag-row deletion
 is implemented (see **Historical person-Tag row deletion (D2b)**);
-public alias display; PhotoPerson name linking; Person catalog;
+public alias display; PhotoPerson appearance filter; Person catalog;
 query-string redirects (Option 1+). Public Person pages and Person
 filter-chip UX are implemented (see **Public Person page** and
-**Public Person active-filter chip UX**). Search-index cleanup of
-mapped Tag names is part of D1 apply (rebuild for affected ArchiveItems).
+**Public Person active-filter chip UX**). PhotoPerson name linking on
+public PHOTO detail is implemented (see **Public PhotoPerson name
+links**). Search-index cleanup of mapped Tag names is part of D1 apply
+(rebuild for affected ArchiveItems).
 
 **Tests:** `documents/test_archive_person_tag_stage_b.py`.
 
@@ -1783,10 +1824,11 @@ searchable (PR6a) but still not shown on this public gallery.
   **visible** photos. Per-photo metadata sits with the gallery; shared
   ArchiveItem metadata (title, umbrella dates, visibility, public_note,
   categories, events, tags) remains once in the header.
-- Identified people are `PhotoPerson → Person` names for the **selected**
-  photo only, ordered by `(name, id)`, not clickable. `people_present` stays
-  separate free text. No `ArchiveItemPerson` derivation. Person ids are not
-  shown as metadata.
+- Identified people are `PhotoPerson → Person` canonical names for the
+  **selected** photo only, ordered by `(name, id)`, linked to
+  `/archive/people/<Person.id>/` (see **Public PhotoPerson name links**).
+  `people_present` stays separate free text. No `ArchiveItemPerson`
+  derivation. Person ids are not shown as metadata text.
 - Per-photo dates use `format_document_date` and are omitted when unknown.
 - Main display presigns the selected **original**. Selectors presign
   thumbnails only. No raw private S3 URLs. Missing thumbnails are not

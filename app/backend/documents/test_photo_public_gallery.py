@@ -26,6 +26,7 @@ from documents.services.archive_item_access import (
     ARCHIVE_FAMILY_GROUP_NAME,
     get_viewable_archive_item,
 )
+from documents.services.archive_item_presentation import person_public_page_url
 from documents.services.photo_gallery import (
     PUBLIC_PHOTO_QUERY_PARAM,
     build_public_photo_gallery,
@@ -47,6 +48,10 @@ def _people_sql(captured_queries) -> list[str]:
             and "documents_photoperson" not in query["sql"].lower()
         )
     ]
+
+
+def _identified_person_link_html(person: Person) -> str:
+    return f'<a href="{person_public_page_url(person.pk)}">{person.name}</a>'
 
 
 def _create_photo_item(
@@ -354,7 +359,10 @@ class PhotoPublicGalleryTests(TestCase):
         PersonAlias.objects.create(person=self.ada, name="Ada Lovelace")
         PersonAlias.objects.create(person=self.rivka, name="Rivka Cohen")
         resp = self._detail()
-        self.assertContains(resp, "Ada, Rivka")
+        self.assertContains(
+            resp,
+            f"{_identified_person_link_html(self.ada)}, {_identified_person_link_html(self.rivka)}",
+        )
         self.assertNotContains(resp, "Ada Lovelace")
         self.assertNotContains(resp, "Rivka Cohen")
         self.assertEqual(
@@ -376,28 +384,95 @@ class PhotoPublicGalleryTests(TestCase):
     def test_identified_people_and_people_present_stay_separate(self):
         resp = self._detail()
         self.assertContains(resp, "אנשים מזוהים:")
-        self.assertContains(resp, "Ada, Rivka")
+        ada_html = _identified_person_link_html(self.ada)
+        rivka_html = _identified_person_link_html(self.rivka)
+        self.assertContains(resp, f"{ada_html}, {rivka_html}")
+        self.assertContains(resp, person_public_page_url(self.ada.pk))
+        self.assertContains(resp, person_public_page_url(self.rivka.pk))
         self.assertContains(resp, "נוכחים:")
         self.assertContains(resp, "someone in the back")
         html = resp.content.decode("utf-8")
         identified = html[html.index("אנשים מזוהים:") : html.index("נוכחים:")]
         self.assertIn("Ada", identified)
+        self.assertIn(ada_html, identified)
+        self.assertIn(rivka_html, identified)
         self.assertNotIn("someone in the back", identified)
         identified_value = identified.split("</span>", 1)[0]
         self.assertNotIn("person", identified_value.lower())
-        self.assertNotIn(str(self.p1.id), identified_value)
+        self.assertNotIn(f">{self.p1.id}<", identified_value)
+        self.assertNotIn(f">{self.ada.pk}<", identified_value)
+        self.assertNotIn(f">{self.rivka.pk}<", identified_value)
 
         second = self._detail(photo=self.p2.id)
         self.assertContains(second, "אנשים מזוהים:")
-        self.assertContains(second, "Rivka")
-        self.assertNotContains(second, "Ada, Rivka")
+        self.assertContains(second, rivka_html)
+        self.assertContains(second, person_public_page_url(self.rivka.pk))
+        self.assertNotContains(second, ada_html)
+        self.assertNotContains(second, f"{ada_html}, {rivka_html}")
         self.assertNotContains(second, "someone in the back")
+
+    def test_duplicate_identified_person_names_use_distinct_hrefs(self):
+        first = Person.objects.create(name="Same Name")
+        second = Person.objects.create(name="Same Name")
+        PhotoPerson.objects.create(photo_content=self.p3, person=second)
+        PhotoPerson.objects.create(photo_content=self.p3, person=first)
+        first_html = _identified_person_link_html(first)
+        second_html = _identified_person_link_html(second)
+        self.assertNotEqual(first.pk, second.pk)
+        self.assertNotEqual(
+            person_public_page_url(first.pk),
+            person_public_page_url(second.pk),
+        )
+
+        resp = self._detail(photo=self.p3.id)
+        self.assertContains(resp, "אנשים מזוהים:")
+        self.assertContains(resp, first_html)
+        self.assertContains(resp, second_html)
+        self.assertContains(resp, f"{first_html}, {second_html}")
+        html = resp.content.decode("utf-8")
+        label_idx = html.index("אנשים מזוהים:")
+        identified = html[label_idx : html.index("</span>", label_idx)]
+        self.assertLess(identified.index(first_html), identified.index(second_html))
+
+        names = identified_people_display_names(self.p3)
+        self.assertEqual(names, ["Same Name", "Same Name"])
+        gallery = build_public_photo_gallery(
+            self.item,
+            selected_photo_param=str(self.p3.id),
+            bucket="test-uploads-bucket",
+        )
+        self.assertIsNotNone(gallery)
+        assert gallery is not None
+        self.assertEqual(
+            [(link.name, link.href) for link in gallery.identified_people],
+            [
+                ("Same Name", person_public_page_url(first.pk)),
+                ("Same Name", person_public_page_url(second.pk)),
+            ],
+        )
 
     def test_item_level_person_is_not_shown_as_photo_identity(self):
         outsider = Person.objects.create(name="Item-only person")
         ArchiveItemPerson.objects.create(archive_item=self.item, person=outsider)
+        outsider_href = person_public_page_url(outsider.pk)
         resp = self._detail()
-        self.assertNotContains(resp, "Item-only person")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "אנשים קשורים")
+        self.assertContains(resp, "Item-only person")
+        self.assertContains(resp, outsider_href)
+        html = resp.content.decode("utf-8")
+        identified_idx = html.index("אנשים מזוהים:")
+        related_idx = html.index("אנשים קשורים")
+        identified_block = html[identified_idx : html.index("נוכחים:", identified_idx)]
+        if related_idx < identified_idx:
+            related_block = html[related_idx:identified_idx]
+        else:
+            related_block = html[related_idx:]
+        self.assertNotIn("Item-only person", identified_block)
+        self.assertNotIn(outsider_href, identified_block)
+        self.assertIn("Ada", identified_block)
+        self.assertIn("Item-only person", related_block)
+        self.assertIn(outsider_href, related_block)
 
     def test_per_photo_dates_render_with_archive_formatting(self):
         resp = self._detail()
@@ -562,6 +637,12 @@ class PhotoPublicGalleryTests(TestCase):
         assert gallery is not None
         self.assertEqual(primary.pk, self.p1.pk)
         self.assertEqual(gallery.identified_people_names, ["Rivka"])
+        self.assertEqual(len(gallery.identified_people), 1)
+        self.assertEqual(gallery.identified_people[0].name, "Rivka")
+        self.assertEqual(
+            gallery.identified_people[0].href,
+            person_public_page_url(self.rivka.pk),
+        )
         self.assertEqual(_people_sql(ctx.captured_queries), [])
         self.assertEqual(len(ctx.captured_queries), 0)
 

@@ -27,7 +27,7 @@
         {% if identified_people %}
           <div class="archive-detail-meta-row">
             <strong class="archive-detail-meta-label">אנשים מזוהים:</strong>
-            <span class="archive-detail-meta-value">{% for name in identified_people %}{{ name }}{% if not forloop.last %}, {% endif %}{% endfor %}</span>
+            <span class="archive-detail-meta-value">{% for person in identified_people %}<a href="{{ person.href }}">{{ person.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</span>
           </div>
         {% endif %}
         {% if people_present %}
