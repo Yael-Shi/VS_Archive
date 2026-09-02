@@ -12,6 +12,7 @@ from documents.services.archive_items import (
     create_ocr_document,
 )
 from documents.services.photo_presentation import (
+    filter_archive_renderable_photo_contents,
     photo_archive_renderability_label,
     photo_archive_renderability_tone,
     photo_is_archive_renderable,
@@ -107,6 +108,38 @@ class PhotoPresentationHelperTests(TestCase):
             photo_archive_renderability_label(photo_content), "לא מוצג בארכיון"
         )
         self.assertEqual(photo_archive_renderability_tone(photo_content), "badge-warn")
+
+    def test_filter_archive_renderable_photo_contents_matches_helper(self):
+        uploaded = _create_photo_archive_item(
+            title="Filter uploaded",
+            upload_status=PhotoContent.UploadStatus.UPLOADED,
+            original_file_key="photos/1/original.jpg",
+        ).primary_photo_content
+        empty_key = _create_photo_archive_item(
+            title="Filter empty key",
+            upload_status=PhotoContent.UploadStatus.UPLOADED,
+            original_file_key="",
+        ).primary_photo_content
+        pending = _create_photo_archive_item(
+            title="Filter pending",
+            upload_status=PhotoContent.UploadStatus.PENDING,
+        ).primary_photo_content
+        whitespace = _create_photo_archive_item(
+            title="Filter whitespace key",
+            upload_status=PhotoContent.UploadStatus.UPLOADED,
+            original_file_key="   ",
+        ).primary_photo_content
+        ids = set(
+            filter_archive_renderable_photo_contents(
+                PhotoContent.objects.all()
+            ).values_list("pk", flat=True)
+        )
+        self.assertEqual(ids, {uploaded.pk})
+        self.assertTrue(photo_is_archive_renderable(uploaded))
+        self.assertFalse(photo_is_archive_renderable(empty_key))
+        self.assertFalse(photo_is_archive_renderable(pending))
+        self.assertFalse(photo_is_archive_renderable(whitespace))
+        self.assertNotIn(whitespace.pk, ids)
 
 
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from django.db.models import QuerySet
+from django.db.models.functions import Length, Trim
+
 from documents.models import PhotoContent
 
 _PHOTO_UPLOAD_STATUS_LABELS: dict[str, str] = {
@@ -50,6 +53,24 @@ def photo_is_archive_renderable(photo_content: PhotoContent | None) -> bool:
         return False
     return photo_content.upload_status == PhotoContent.UploadStatus.UPLOADED and bool(
         (photo_content.original_file_key or "").strip()
+    )
+
+
+def filter_archive_renderable_photo_contents(
+    queryset: QuerySet[PhotoContent],
+) -> QuerySet[PhotoContent]:
+    """Restrict a PhotoContent queryset to ``photo_is_archive_renderable`` rows.
+
+    Encodes the same public-gallery contract as the Python helper: uploaded
+    with a non-empty ``original_file_key`` after trimming whitespace.
+    Visibility and item-level browse eligibility remain the caller's
+    responsibility.
+    """
+    return queryset.alias(
+        _archive_renderable_trimmed_key_len=Length(Trim("original_file_key")),
+    ).filter(
+        upload_status=PhotoContent.UploadStatus.UPLOADED,
+        _archive_renderable_trimmed_key_len__gt=0,
     )
 
 
