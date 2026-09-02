@@ -2,7 +2,7 @@
 
 Design and implementation scope for **`PHOTO`** archive items: private S3 storage, presigned display, browse-card thumbnails, and no OCR/HTR pipeline. The data model now allows **1..N** **`PhotoContent`** rows per PHOTO **`ArchiveItem`**. Staff can manage those rows. Public detail presents all renderable photos; browse cards still use the **first** photo.
 
-**Status:** Design (PR1) through staff manage status clarity (PR6) are **implemented**. **Browse-card thumbnail generation**, **upload-time thumbnail persistence**, and **idempotent backfill commands** are **implemented**. The **multi-photo data model**, **staff multi-photo management (PR3)**, the **public multi-photo gallery (PR4)**, **search aggregation across PhotoContent / PhotoPerson (multi-photo PR5)**, **Person aliases schema + PHOTO search (PR6a)**, and **staff Person/alias management UI (PR6b)** are **implemented**. Public alias display, re-upload/retry after **`FAILED`**, and browse-card aggregation remain **not implemented**.
+**Status:** Design (PR1) through staff manage status clarity (PR6) are **implemented**. **Browse-card thumbnail generation**, **upload-time thumbnail persistence**, and **idempotent backfill commands** are **implemented**. The **multi-photo data model**, **staff multi-photo management (PR3)**, the **public multi-photo gallery (PR4)**, **search aggregation across PhotoContent / PhotoPerson (multi-photo PR5)**, **Person aliases schema + PHOTO search (PR6a)**, and **staff Person/alias management UI (PR6b)** are **implemented**. **Staff Person identity merge** (explicit keeper/duplicate ids; not name matching) is **implemented**. Public alias display, re-upload/retry after **`FAILED`**, and browse-card aggregation remain **not implemented**.
 
 **Related docs:**
 
@@ -15,6 +15,7 @@ Design and implementation scope for **`PHOTO`** archive items: private S3 storag
 
 - `documents/models.py` — **`ArchiveItem`**, **`ManualTextContent`**, **`PhotoContent`**, **`Person`**, **`PersonAlias`**
 - `documents/services/photo_content_management.py` — staff PHOTO child writes, Person rename, PersonAlias writes
+- `documents/services/person_merge.py` — staff Person identity merge (explicit ids)
 - `documents/services/archive_item_access.py` — visibility and browse renderability
 - `documents/services/archive_item_presentation.py` — **`ArchiveBrowseCard`**, text preview, type markers
 - `documents/services/photo_archive_urls.py` — presigned browse thumbnails for PHOTO
@@ -28,7 +29,7 @@ Design and implementation scope for **`PHOTO`** archive items: private S3 storag
 - `documents/management/commands/backfill_document_thumbnails.py` — operational OCR image thumbnail backfill
 - `documents/templates/documents/archive/partials/item_list_cards.html` — public browse cards
 - `documents/s3.py` — presigned PUT/GET helpers, deterministic thumbnail key builders
-- `documents/views.py` — **`/archive/`** list/detail, unified create at **`/archive/manage/new/`**, staff Person index at **`/archive/manage/people/`**, staff Person edit at **`/archive/manage/people/<id>/edit/`**
+- `documents/views.py` — **`/archive/`** list/detail, unified create at **`/archive/manage/new/`**, staff Person index at **`/archive/manage/people/`**, staff Person edit at **`/archive/manage/people/<id>/edit/`**, staff Person merge confirm at **`/archive/manage/people/<id>/merge/`**
 
 ---
 

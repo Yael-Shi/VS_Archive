@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - {{ page_title }}{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-manage-person-edit' person_id=keeper.id %}">חזרה לאדם</a>
+    </div>
+
+    <h1 class="page-title">{{ page_title }}</h1>
+    <p class="page-subtitle">מיזוג זהות לפי מזהה אדם. אין התאמה לפי שם.</p>
+
+    {% if form_errors %}
+      <div class="spacer"></div>
+      <div class="alert alert-danger">
+        <div class="alert-title">לא ניתן למזג</div>
+        <ul>
+          {% for error in form_errors %}
+            <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    {% if preview %}
+      <div class="spacer"></div>
+      <h2>רשומה שתישאר</h2>
+      <p><strong>יישאר</strong></p>
+      <p>מזהה: {{ preview.keeper_id }}</p>
+      <p>שם תצוגה: {{ preview.keeper_name }}</p>
+      <p class="muted">
+        שמות חלופיים:
+        {% if preview.keeper_aliases %}
+          {{ preview.keeper_aliases|join:", " }}
+        {% else %}
+          אין
+        {% endif %}
+      </p>
+      <p class="muted">קשר לפריטים: {{ preview.archive_item_person_count_keeper }}</p>
+      <p class="muted">הופעות בתמונות: {{ preview.photo_person_count_keeper }}</p>
+
+      <div class="spacer"></div>
+      <h2>רשומה שתימחק</h2>
+      <p><strong>יימחק</strong></p>
+      <p>מזהה: {{ preview.duplicate_id }}</p>
+      <p>שם תצוגה: {{ preview.duplicate_name }}</p>
+      <p class="muted">
+        שמות חלופיים:
+        {% if preview.duplicate_aliases %}
+          {{ preview.duplicate_aliases|join:", " }}
+        {% else %}
+          אין
+        {% endif %}
+      </p>
+      <p class="muted">קשר לפריטים: {{ preview.archive_item_person_count_duplicate }}</p>
+      <p class="muted">הופעות בתמונות: {{ preview.photo_person_count_duplicate }}</p>
+      <p class="muted">הצעות אדם: {{ preview.suggestion_count }} (מתוכן ממתינות: {{ preview.pending_suggestion_count }})</p>
+
+      {% if preview.duplicate_canonical_becomes_alias %}
+        <p>שם התצוגה של הרשומה הכפולה יישמר כשם חלופי: {{ preview.duplicate_canonical_becomes_alias }}</p>
+      {% endif %}
+
+      <div class="spacer"></div>
+      <h2>תקציר</h2>
+      {% if preview.biography_outcome == "keep_keeper" %}
+        <p>התקציר של הרשומה שתישאר יישמר.</p>
+      {% elif preview.biography_outcome == "copy_duplicate" %}
+        <p>התקציר יועתק מהרשומה הכפולה אל הרשומה שתישאר.</p>
+      {% elif preview.biography_outcome == "unchanged" %}
+        <p>אין שינוי בתקציר.</p>
+      {% elif preview.biography_outcome == "conflict" %}
+        <p>לא ניתן למזג: לשתי הרשומות יש תקצירים שונים.</p>
+      {% endif %}
+
+      {% if preview.duplicate_is_frozen %}
+        <p>הרשומה הכפולה היא זהות היסטורית קפואה ולא ניתן למחוק אותה.</p>
+      {% endif %}
+
+      <p>פריטי ארכיון שעשויים להתעדכן בחיפוש: {{ preview.affected_archive_item_count }}</p>
+      <p class="muted">
+        אזהרה: מזהה הרשומה הכפולה ({{ preview.duplicate_id }}) יחדל להתקיים אחרי המיזוג.
+      </p>
+
+      {% if preview.can_execute %}
+        <div class="spacer"></div>
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="duplicate_id" value="{{ preview.duplicate_id }}" />
+          <input type="hidden" name="confirm_merge" value="1" />
+          <div class="page-toolbar">
+            <button type="submit" class="btn btn-danger">אישור מיזוג ומחיקת הרשומה הכפולה</button>
+            <a class="btn" href="{% url 'archive-manage-person-edit' person_id=keeper.id %}">ביטול</a>
+          </div>
+        </form>
+      {% else %}
+        <div class="spacer"></div>
+        <a class="btn" href="{% url 'archive-manage-person-edit' person_id=keeper.id %}">חזרה לעריכה</a>
+      {% endif %}
+    {% else %}
+      <div class="spacer"></div>
+      <a class="btn" href="{% url 'archive-manage-person-edit' person_id=keeper.id %}">חזרה לעריכה</a>
+    {% endif %}
+  </div>
+{% endblock %}

@@ -86,6 +86,11 @@ urlpatterns = [
         name="archive-manage-person-edit",
     ),
     path(
+        "manage/people/<int:person_id>/merge/",
+        views.archive_manage_person_merge_page,
+        name="archive-manage-person-merge",
+    ),
+    path(
         "manage/people/<int:person_id>/aliases/<int:alias_id>/edit/",
         views.archive_manage_person_alias_edit_page,
         name="archive-manage-person-alias-edit",
