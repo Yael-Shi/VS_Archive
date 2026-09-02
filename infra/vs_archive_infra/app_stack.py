@@ -67,6 +67,9 @@ class VsArchiveAppStack(Stack):
         gemini_secret = secretsmanager.Secret.from_secret_name_v2(
             self, "GeminiApiKeySecret", "vs-archive-dev/gemini_api_key"
         )
+        google_cloud_vision_secret = secretsmanager.Secret.from_secret_name_v2(
+            self, "GoogleCloudVisionApiKeySecret", "vs-archive/google-vision-key"
+        )
         django_secret_key = secretsmanager.Secret.from_secret_name_v2(
             self, "DjangoSecretKeySecret", "vs-archive-dev/django_secret_key"
         )
@@ -335,6 +338,9 @@ class VsArchiveAppStack(Stack):
             secrets={
                 "DB_PASSWORD": ecs.Secret.from_secrets_manager(db_secret, "password"),
                 "GEMINI_API_KEY": ecs.Secret.from_secrets_manager(gemini_secret),
+                "GOOGLE_CLOUD_VISION_API_KEY": ecs.Secret.from_secrets_manager(
+                    google_cloud_vision_secret
+                ),
                 "DJANGO_SECRET_KEY": ecs.Secret.from_secrets_manager(django_secret_key),
                 "ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": ecs.Secret.from_ssm_parameter(
                     transkribus_enable_hebrew_handwritten_param

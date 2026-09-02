@@ -35,6 +35,28 @@ automatic `ArchiveItemPerson` from `PhotoPerson`; Person catalog/Admin.
 **Tests:** `documents/test_photo_public_gallery.py`,
 `documents/test_archive_person_public_presentation.py`.
 
+## Arabic printed banded OCR — Cloud Vision worker secret (flag still off)
+
+**Decision / implemented:** Worker ECS injects `GOOGLE_CLOUD_VISION_API_KEY`
+from the existing Secrets Manager secret named exactly
+`vs-archive/google-vision-key`, using the same
+`Secret.from_secret_name_v2` + `ecs.Secret.from_secrets_manager` pattern as
+`GEMINI_API_KEY`. The credential is injected into the worker container only;
+the web container does not receive it. Web and worker share the existing ECS
+execution role; that IAM boundary is intentional and matches Transkribus
+secret injection.
+
+**Does not:** enable `ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED` (code default
+and worker CDK remain **false**); change OCR routing, adapters, or provider
+behavior.
+
+**Supersedes:** the Phase 6A deferred item “Cloud Vision secret/CDK wiring”
+and the earlier “do not reference a Cloud Vision secret yet” constraint.
+Enabling the banded flag in production remains deferred.
+
+**Tests:** `documents/test_antigravity_ocr.py`
+(`AntigravityBandedCdkWiringTests`).
+
 ## Arabic printed banded OCR — Phase 6A generic execution-lease deadline
 
 **Decision / implemented:** Banded Antigravity uses one generic absolute
@@ -68,8 +90,9 @@ timeout as the document budget.
 
 **Decision / implemented:** Wire the already-implemented Arabic Printed Banded
 coordinator into `AntigravityAdapter` behind a new worker-only execution flag.
-Do not enable it in deployment. Do not create or reference a Cloud Vision secret
-yet.
+Do not enable it in deployment. Cloud Vision secret/CDK wiring is implemented
+separately (injected into the worker container only; flag remains false);
+see “Cloud Vision worker secret” above.
 
 **Current behavior:**
 
@@ -90,8 +113,10 @@ yet.
   `antigravity_outbound_image`.
 - Antigravity Interactions still uses existing `GEMINI_API_KEY`.
   `GOOGLE_CLOUD_VISION_API_KEY` is required in worker env validation only when
-  the banded flag is true. This phase does not add the Vision key to CDK, ECS,
-  web, or Secrets Manager.
+  the banded flag is true. Worker CDK now injects that key from
+  `vs-archive/google-vision-key`. The credential is injected into the worker
+  container only; the web container does not receive it. The banded flag
+  remains false, so the injected credential is unused in execution.
 - `ArabicPrintedCheckpointBusyError` → `EnginePageCheckpointBusyError`.
   `ArabicPrintedCheckpointPersistenceRetryableError` →
   `EnginePageCheckpointPersistenceRetryableError`. Coordinator PARTIAL →
@@ -103,8 +128,8 @@ yet.
   `antigravity-banded:mixed:<24-hex-stable-digest>` (fits the 64-character
   `DocumentTextResult.engine` field).
 
-**Deferred:** Enabling the banded flag in production; Cloud Vision secret/CDK
-wiring; broadening beyond Arabic printed Antigravity.
+**Deferred:** Enabling the banded flag in production; broadening beyond Arabic
+printed Antigravity.
 
 **Tests:** `documents/test_antigravity_ocr.py` (adapter wiring, env
 validation, CDK source assertions).
