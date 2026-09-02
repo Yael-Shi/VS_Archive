@@ -1,5 +1,38 @@
 # VS-Archive Decision Log
 
+## Text quality PR1 — persisted base quality + effective public helper
+
+**Decision / implemented:** `DocumentTextResult.quality` stores automatic/base
+quality only: `UNKNOWN` / `LOW` / `MEDIUM` / `GOOD` (default `UNKNOWN`).
+`HUMAN_VERIFIED` and `NEEDS_CORRECTION` are **not** persisted quality values.
+Effective public quality is resolved by `documents.services.text_quality`:
+`VERIFIED` → `HUMAN_VERIFIED`; `REJECTED` → `NEEDS_CORRECTION`; otherwise the
+persisted base quality. `REJECTED` does not map to `LOW` and does not expose
+the stored automatic quality publicly.
+
+**Current behavior:**
+
+- Migration `0061` backfills existing rows to `UNKNOWN`. Do not infer historical
+  quality from `status`, `review_reasons`, engine, `NEEDS_REVIEW`, `READY`, or
+  processing success.
+- OCR staff text edit and verify/reject do not write `quality`. Verify still
+  only changes `verification_status` (plus optional text save). Effective
+  quality becomes `HUMAN_VERIFIED` automatically once `VERIFIED`, and
+  `NEEDS_CORRECTION` once `REJECTED`.
+- Worker/translation persist does not set `quality` yet (model default
+  `UNKNOWN`). Future `HEBREW_TEXT` scoring should set
+  `persist_hebrew_translation_result` `defaults["quality"]` via
+  `capped_inherited_base_quality(source.quality, candidate)` — not wired yet.
+- Staff-created `MANUAL_TEXT` (`create_manual_text_archive_item` /
+  `update_manual_text_archive_item`) is treated as `HUMAN_VERIFIED` in the
+  helper. No quality/verification column on `ManualTextContent`. Django admin
+  cannot add/change `ManualTextContent`. No automated/import writer exists.
+
+**Deferred / PR2:** public detail UI heading `איכות התעתוק` and Hebrew level
+labels in `PUBLIC_TEXT_QUALITY_LABELS`. No templates/CSS in this PR.
+
+**Tests:** `documents/test_text_quality.py`.
+
 ## Unified staff PHOTO edit cards
 
 **Decision / implemented:** Staff PHOTO item edit

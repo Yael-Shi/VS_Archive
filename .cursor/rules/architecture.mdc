@@ -228,6 +228,13 @@ This applies to **Gemini**, **Transkribus**, and any route persisted through the
 
 Do not treat **`READY`** on the parent document as human-verified.
 
+### Public text quality (PR1 foundation)
+
+- Persisted **`DocumentTextResult.quality`**: **`UNKNOWN` / `LOW` / `MEDIUM` / `GOOD`** only (default **`UNKNOWN`**).
+- **`HUMAN_VERIFIED` and `NEEDS_CORRECTION` are not persisted.** Effective public quality: **`VERIFIED` → HUMAN_VERIFIED**, **`REJECTED` → NEEDS_CORRECTION**, else the persisted base value (`documents.services.text_quality`).
+- **`REJECTED` does not map to `LOW`** and does not publicly show stored automatic quality. Do not infer quality from **`status`**, **`review_reasons`**, engine, or processing state.
+- Staff **`MANUAL_TEXT`** is **`HUMAN_VERIFIED`** in that helper; do not add a duplicate verification field on **`ManualTextContent`** for this.
+
 ### Review reasons (worker vocabulary)
 
 On successful automatic persistence, the worker adds policy and content/engine signals (deduplicated, meaningful order preserved):

@@ -735,6 +735,18 @@ class DocumentTextResult(models.Model):
         VERIFIED = "VERIFIED", "Verified"
         REJECTED = "REJECTED", "Rejected"
 
+    class Quality(models.TextChoices):
+        """Persisted automatic/base quality: UNKNOWN/LOW/MEDIUM/GOOD.
+
+        HUMAN_VERIFIED and NEEDS_CORRECTION are presentation-only and are
+        not persisted.
+        """
+
+        UNKNOWN = "UNKNOWN", "Unknown"
+        LOW = "LOW", "Low"
+        MEDIUM = "MEDIUM", "Medium"
+        GOOD = "GOOD", "Good"
+
     document = models.ForeignKey(
         Document, on_delete=models.CASCADE, related_name="text_results"
     )
@@ -750,6 +762,16 @@ class DocumentTextResult(models.Model):
         max_length=32,
         choices=VerificationStatus.choices,
         default=VerificationStatus.UNVERIFIED,
+    )
+    quality = models.CharField(
+        max_length=32,
+        choices=Quality.choices,
+        default=Quality.UNKNOWN,
+        help_text=(
+            "Automatic/base public quality (UNKNOWN/LOW/MEDIUM/GOOD). "
+            "HUMAN_VERIFIED and NEEDS_CORRECTION are presentation-only and "
+            "are not persisted."
+        ),
     )
 
     text = models.TextField(null=True, blank=True)
@@ -777,7 +799,13 @@ class DocumentTextResult(models.Model):
             models.UniqueConstraint(
                 fields=["document", "result_type", "engine"],
                 name="uniq_document_resulttype_engine",
-            )
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    quality__in=["UNKNOWN", "LOW", "MEDIUM", "GOOD"]
+                ),
+                name="dtr_quality_persisted_values",
+            ),
         ]
 
 
