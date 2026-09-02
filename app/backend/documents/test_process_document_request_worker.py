@@ -20,6 +20,7 @@ from documents.services.process_document_outcome import (
 from documents.services.process_document_request_worker import (
     EXECUTION_LEASE,
     FRESH_IN_PROGRESS_DEFER_SECONDS,
+    LEASE_EXPIRES_AT_PAYLOAD_KEY,
     SQS_VISIBILITY_AFTER_CLAIM_SECONDS,
     ProcessDocumentRequestAction,
     ProcessDocumentRequestClaim,
@@ -85,11 +86,15 @@ class ProcessDocumentRequestWorkerTests(TestCase):
 
         self.assertEqual(claim.action, ProcessDocumentRequestAction.EXECUTE)
         self.assertIsNotNone(claim.lease_token)
+        request.refresh_from_db()
         self.assertEqual(
             claim.execution_payload,
-            {"type": "PROCESS_DOCUMENT", "document_id": self.document.id},
+            {
+                "type": "PROCESS_DOCUMENT",
+                "document_id": self.document.id,
+                LEASE_EXPIRES_AT_PAYLOAD_KEY: request.lease_expires_at,
+            },
         )
-        request.refresh_from_db()
         self.assertEqual(request.status, ProcessDocumentRequest.Status.RUNNING)
         self.assertEqual(request.lease_token, claim.lease_token)
         self.assertIsNotNone(request.started_at)
@@ -107,6 +112,7 @@ class ProcessDocumentRequestWorkerTests(TestCase):
 
         claim = claim_process_document_request(request_id=request.id)
 
+        request.refresh_from_db()
         self.assertEqual(
             claim.execution_payload,
             {
@@ -114,6 +120,7 @@ class ProcessDocumentRequestWorkerTests(TestCase):
                 "document_id": self.document.id,
                 "ocr_retry_mode": "transkribus_recognition_only",
                 "source_transkribus_run_id": run.id,
+                LEASE_EXPIRES_AT_PAYLOAD_KEY: request.lease_expires_at,
             },
         )
 
@@ -126,12 +133,14 @@ class ProcessDocumentRequestWorkerTests(TestCase):
 
         claim = claim_process_document_request(request_id=request.id)
 
+        request.refresh_from_db()
         self.assertEqual(
             claim.execution_payload,
             {
                 "type": "PROCESS_DOCUMENT",
                 "document_id": self.document.id,
                 "operation": "retry_hebrew_translation",
+                LEASE_EXPIRES_AT_PAYLOAD_KEY: request.lease_expires_at,
             },
         )
 
@@ -505,9 +514,14 @@ class ProcessDocumentRequestHandlerTests(TestCase):
 
     def test_queued_request_executes_canonical_db_payload_and_terminalizes(self):
         request = self._request()
-        execute_payload = MagicMock(
-            return_value=ProcessDocumentOutcome(ProcessDocumentDisposition.COMPLETED)
-        )
+        persisted_lease = {}
+
+        def execute_payload(_payload):
+            request.refresh_from_db()
+            persisted_lease["value"] = request.lease_expires_at
+            return ProcessDocumentOutcome(ProcessDocumentDisposition.COMPLETED)
+
+        execute_payload_mock = MagicMock(side_effect=execute_payload)
 
         ack = self._handle(
             {
@@ -516,15 +530,21 @@ class ProcessDocumentRequestHandlerTests(TestCase):
                 "document_id": 999_999,
                 "operation": "tampered",
             },
-            execute_payload=execute_payload,
+            execute_payload=execute_payload_mock,
         )
 
         self.assertTrue(ack)
-        execute_payload.assert_called_once_with(
+        execute_payload_mock.assert_called_once()
+        payload = execute_payload_mock.call_args.args[0]
+        self.assertIn(LEASE_EXPIRES_AT_PAYLOAD_KEY, payload)
+        self.assertEqual(payload[LEASE_EXPIRES_AT_PAYLOAD_KEY], persisted_lease["value"])
+        self.assertEqual(
+            payload,
             {
                 "type": "PROCESS_DOCUMENT",
                 "document_id": self.document.id,
-            }
+                LEASE_EXPIRES_AT_PAYLOAD_KEY: persisted_lease["value"],
+            },
         )
         self.assertEqual(
             self._visibility_timeouts(),

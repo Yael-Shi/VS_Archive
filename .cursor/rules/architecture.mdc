@@ -154,9 +154,11 @@ On successful OCR/HTR persistence, these values should come from the worker-held
 
 ## Current provider state
 
-**Gemini** is the **production/default** OCR/HTR provider for all routed pairs except Hebrew handwritten. Real API; the static `OCR_ROUTES` entries that remain in the table point to `GEMINI`.
+**Gemini** is the **production/default** OCR/HTR provider for all routed pairs except Hebrew handwritten and env-gated Arabic printed Antigravity. Real API; the static `OCR_ROUTES` entries that remain in the table point to `GEMINI`.
 
 **Transkribus** is a **real** Legacy TrpServer / PyLaia integration (not a skeleton): `TranskribusAdapter`, `transkribus_engine.py`, registry wiring, and `DocumentTextResult.OcrEngineKey.TRANSKRIBUS`. It is **not** broad production-default routing. Current approved routing scope is **Hebrew handwritten only**, behind **`ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN`**.
+
+**Antigravity** is a **real** Gemini Interactions adapter (`AntigravityAdapter`, `antigravity_engine.py`). Approved routing scope is **Arabic printed only**, behind **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED`**. Banded Cloud-Vision-assisted execution is a **second worker-only execution flag**, **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED`** (code default **false**; worker CDK sets **false**). It does **not** change `select_ocr_route`. When that flag is false, the existing whole-document JSON Antigravity path is unchanged. When both Arabic-Antigravity eligibility and the banded flag are true, `AntigravityAdapter.execute` calls `process_arabic_printed_banded_document` with a generic `absolute_deadline_monotonic` derived from remaining `ProcessDocumentRequest` execution-lease wall-clock time (not the JSON 1200s poll timeout). Banded completed `HtrResult.engine_name` is the banded runtime engine marker (`antigravity-banded:…`), never the Antigravity agent id. Coordinator **PARTIAL** raises `EnginePageIncompleteError` (no `DocumentTextResult` row; checkpoints remain the resume source). `GOOGLE_CLOUD_VISION_API_KEY` is required only in the worker process when the banded flag is true; this phase does **not** add it to CDK, ECS, web, or Secrets Manager.
 
 **Intended routing policy (current):**
 
@@ -164,9 +166,11 @@ On successful OCR/HTR persistence, these values should come from the worker-held
 - `language=he` + `text_input_type=HANDWRITTEN` requires **Transkribus**.
 - If **`ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN=true`**, route that pair to **Transkribus**.
 - If **`ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN=false`**, fail routing explicitly for that pair. Do **not** silently route Hebrew handwritten documents to Gemini.
+- `language=ar` + `text_input_type=PRINTED` uses **Antigravity** when **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED=true`**, otherwise **Gemini**.
 - All other `(language, text_input_type)` pairs remain **Gemini**.
 - Existing `TRANSKRIBUS_DEV_UPLOAD_MODE`, `TRANSKRIBUS_USE_EXISTING_SERVER_DOCUMENT`, `TRANSKRIBUS_FORCE_REPROCESS`, and `TRANSKRIBUS_RECOGNITION_ONLY_RETRY` are execution/recovery controls, not route-selection flags.
-- **No** Gemini→Transkribus fallback. **No** Transkribus→Gemini fallback. **No** hybrid OCR routing in code.
+- **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED`** is an Antigravity **execution** gate, not a route-selection flag.
+- **No** Gemini→Transkribus fallback. **No** Transkribus→Gemini fallback. **No** Gemini↔Antigravity fallback. **No** hybrid OCR routing in code.
 - **`ENABLE_HYBRID_HTR`** only validates Transkribus credentials in `validate_required_env`; it does **not** enable hybrid engine routing.
 
 Gemini-specific behavior belongs in:
@@ -188,7 +192,15 @@ Transkribus-specific behavior belongs in:
 - `documents/services/htr_adapters/transkribus_adapter.py`
 - `documents/services/transkribus_engine.py`
 
-`run_worker.py` must not contain Gemini- or Transkribus-specific retry loops, model logic, prompt selection, or provider HTTP.
+Antigravity-specific behavior belongs in:
+
+- `documents/services/htr_adapters/antigravity_adapter.py`
+- `documents/services/antigravity_engine.py`
+
+Arabic printed banded execution (Vision + band coordinator) is invoked only from
+`AntigravityAdapter`, not from `run_worker.py` / `htr_engine.py`.
+
+`run_worker.py` must not contain Gemini-, Transkribus-, or Antigravity-specific retry loops, model logic, prompt selection, or provider HTTP.
 
 Do not add **fake** Transkribus HTTP behavior or **hybrid/fallback between providers** unless the task explicitly requests it.
 
@@ -272,8 +284,9 @@ If route selection fails:
 Current worker/SQS policy:
 
 - processing and adapter errors are persisted as failed `DocumentTextResult` rows
-- exception: a Gemini page-incomplete attempt preserves page checkpoints,
-  produces an explicit `PARTIAL` outcome with missing page indices, and does
+- exception: a Gemini page-incomplete attempt, or Arabic printed banded
+  Antigravity `PARTIAL`, preserves page checkpoints, produces an explicit
+  `PARTIAL` outcome with missing page indices, and does
   not persist a misleading whole-document failed text row
 - handled failures are acked from SQS
 - retry/backoff/DLQ redesign is deferred

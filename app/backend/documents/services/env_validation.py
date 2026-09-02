@@ -253,6 +253,10 @@ class WorkerEnvConfig:
     # Antigravity Interactions OCR (Arabic printed; routing not enabled yet)
     enable_antigravity_arabic_printed: bool = field(default=False)
     antigravity_agent_id: str = field(default=DEFAULT_ANTIGRAVITY_AGENT_ID)
+    # Banded Arabic printed execution inside AntigravityAdapter. Default off.
+    # Does not change route selection. Vision key is required only when true.
+    enable_antigravity_arabic_printed_banded: bool = field(default=False)
+    google_cloud_vision_api_key: Optional[str] = field(default=None)
 
 
 def validate_required_env() -> WorkerEnvConfig:
@@ -379,7 +383,13 @@ def validate_required_env() -> WorkerEnvConfig:
     enable_antigravity_arabic_printed = _get_bool(
         "ENABLE_ANTIGRAVITY_ARABIC_PRINTED", default=False
     )
+    enable_antigravity_arabic_printed_banded = _get_bool(
+        "ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED", default=False
+    )
     antigravity_agent_id = _get("ANTIGRAVITY_AGENT_ID") or DEFAULT_ANTIGRAVITY_AGENT_ID
+    google_cloud_vision_api_key = None
+    if enable_antigravity_arabic_printed_banded:
+        google_cloud_vision_api_key = _require("GOOGLE_CLOUD_VISION_API_KEY")
 
     if enable_hybrid_htr and not (
         transkribus_api_token or (transkribus_username and transkribus_password)
@@ -431,4 +441,8 @@ def validate_required_env() -> WorkerEnvConfig:
         gemini_hebrew_printed_model=gemini_hebrew_printed_model,
         enable_antigravity_arabic_printed=enable_antigravity_arabic_printed,
         antigravity_agent_id=antigravity_agent_id,
+        enable_antigravity_arabic_printed_banded=(
+            enable_antigravity_arabic_printed_banded
+        ),
+        google_cloud_vision_api_key=google_cloud_vision_api_key,
     )

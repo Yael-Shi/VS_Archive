@@ -9,9 +9,12 @@ from typing import Any, Dict, List, Optional
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
+from datetime import datetime
+
 from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.utils import timezone
 
 from documents.models import Document, DocumentTextResult
 from documents.s3 import get_object_bytes
@@ -52,6 +55,7 @@ from documents.services.process_document_outcome import (
     ProcessDocumentOutcome,
 )
 from documents.services.process_document_request_worker import (
+    LEASE_EXPIRES_AT_PAYLOAD_KEY,
     PROCESS_DOCUMENT_REQUEST_ID_PAYLOAD_KEY,
     handle_process_document_request,
 )
@@ -78,6 +82,25 @@ from documents.services.transkribus_local_completion import (
 logger = logging.getLogger(__name__)
 
 UNRESOLVED_ROUTE_METADATA = "UNRESOLVED"
+
+
+def absolute_deadline_monotonic_from_lease(
+    lease_expires_at,
+    *,
+    now=None,
+    monotonic_fn=None,
+) -> float | None:
+    """Convert remaining ProcessDocumentRequest lease time to monotonic time.
+
+    Does not extend or reset the lease. Expired leases map to the current
+    monotonic clock (remaining seconds clamped at zero).
+    """
+    if not isinstance(lease_expires_at, datetime):
+        return None
+    wall_now = timezone.now() if now is None else now
+    remaining_seconds = (lease_expires_at - wall_now).total_seconds()
+    clock = time.monotonic if monotonic_fn is None else monotonic_fn
+    return float(clock()) + max(0.0, remaining_seconds)
 
 
 def _dedupe_strings_preserve_order(items: List[str]) -> List[str]:
@@ -454,15 +477,23 @@ class Command(BaseCommand):
                 source_transkribus_run_id = payload.get(
                     SOURCE_TRANSKRIBUS_RUN_ID_PAYLOAD_KEY
                 )
+            transcribe_kwargs: Dict[str, Any] = {
+                "worker_env": self._effective_worker_env(payload),
+                "document_id": document_id,
+                "source_transkribus_run_id": source_transkribus_run_id,
+            }
+            deadline = absolute_deadline_monotonic_from_lease(
+                payload.get(LEASE_EXPIRES_AT_PAYLOAD_KEY)
+            )
+            if deadline is not None:
+                transcribe_kwargs["absolute_deadline_monotonic"] = deadline
             htr_result = transcribe_pages(
                 pages=pages,
                 language_hint=doc.language,
                 text_input_type=doc.text_input_type,
                 handwriting_type=doc.handwriting_type,
                 route=route,
-                worker_env=self._effective_worker_env(payload),
-                document_id=document_id,
-                source_transkribus_run_id=source_transkribus_run_id,
+                **transcribe_kwargs,
             )
 
         except EnginePageCheckpointBusyError as e:

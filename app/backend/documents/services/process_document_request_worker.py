@@ -29,6 +29,7 @@ from documents.services.process_document_outcome import (
 logger = logging.getLogger(__name__)
 
 PROCESS_DOCUMENT_REQUEST_ID_PAYLOAD_KEY = "request_id"
+LEASE_EXPIRES_AT_PAYLOAD_KEY = "lease_expires_at"
 EXECUTION_LEASE = timedelta(minutes=45)
 SQS_VISIBILITY_AFTER_CLAIM_SECONDS = 45 * 60
 FRESH_IN_PROGRESS_DEFER_SECONDS = 2 * 60
@@ -201,6 +202,9 @@ def claim_process_document_request(
         ):
             execution_payload = _execution_payload(sync_request)
             token = _claim_new_lease(sync_request, now=now)
+            execution_payload[LEASE_EXPIRES_AT_PAYLOAD_KEY] = (
+                sync_request.lease_expires_at
+            )
             return ProcessDocumentRequestClaim(
                 ProcessDocumentRequestAction.EXECUTE,
                 request_id,
@@ -421,6 +425,7 @@ def handle_process_document_request(
 __all__ = [
     "EXECUTION_LEASE",
     "FRESH_IN_PROGRESS_DEFER_SECONDS",
+    "LEASE_EXPIRES_AT_PAYLOAD_KEY",
     "PROCESS_DOCUMENT_REQUEST_ID_PAYLOAD_KEY",
     "SQS_VISIBILITY_AFTER_CLAIM_SECONDS",
     "ProcessDocumentRequestAction",

@@ -1,6 +1,81 @@
 # VS-Archive Decision Log
 
+## Arabic printed banded OCR — Phase 6A generic execution-lease deadline
+
+**Decision / implemented:** Banded Antigravity uses one generic absolute
+monotonic deadline derived from the actual `ProcessDocumentRequest`
+execution lease. It does not use Antigravity’s 1200-second JSON poll
+timeout as the document budget.
+
+**Current behavior:**
+
+- Claiming a request sets `lease_expires_at = now + EXECUTION_LEASE`
+  (45 minutes) and copies that timestamp onto the in-process execution
+  payload as `lease_expires_at`. The lease is not extended or reset for
+  OCR.
+- Immediately before `transcribe_pages`, `run_worker` converts remaining
+  wall-clock seconds to `time.monotonic() + max(0, remaining_seconds)`.
+  An expired lease therefore yields a deadline at the current monotonic
+  time. Legacy payloads without a lease pass no deadline.
+- `transcribe_pages` forwards `absolute_deadline_monotonic` as an optional
+  kwargs field. Gemini ignores it. JSON Antigravity pops it and keeps
+  `DEFAULT_TIMEOUT_SECONDS` (1200s). Banded Antigravity requires it and
+  fails closed before coordinator/provider work if it is absent.
+- The coordinator still applies its 60-second terminalization reserve,
+  150-second page-start minimum, and 240-second per-page cap.
+- Phase 5B identity is unchanged: oriented SHA/dimensions are prepared
+  eagerly for all pages before claiming.
+
+**Tests:** `documents/test_antigravity_ocr.py`,
+`documents/test_process_document_request_worker.py`.
+
+## Arabic printed banded OCR — Phase 6A safe production wiring (default OFF)
+
+**Decision / implemented:** Wire the already-implemented Arabic Printed Banded
+coordinator into `AntigravityAdapter` behind a new worker-only execution flag.
+Do not enable it in deployment. Do not create or reference a Cloud Vision secret
+yet.
+
+**Current behavior:**
+
+- `ENABLE_ANTIGRAVITY_ARABIC_PRINTED` is unchanged (route activation for
+  `ar` + `PRINTED`).
+- `ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED` defaults to **false**. Worker CDK
+  sets **`false`**. The flag is **not** on the web task.
+- When Arabic printed is routed to Antigravity and the banded flag is false,
+  the existing whole-document JSON Antigravity path is unchanged.
+- When both existing Arabic-Antigravity eligibility and the banded flag are
+  true, `AntigravityAdapter.execute` calls
+  `process_arabic_printed_banded_document`. No provider-specific logic was added
+  to `run_worker.py`, `htr_engine.py`, `ocr_routing.py`, or the registry.
+- `PageImage.page_index` is mapped from 1-based to contiguous 0-based
+  coordinator indexes. Existing `source_identity` /
+  `source_content_fingerprint` pass through unchanged. EXECUTE crops use Phase 3
+  `prepare_arabic_printed_working_image`, not JSON-path
+  `antigravity_outbound_image`.
+- Antigravity Interactions still uses existing `GEMINI_API_KEY`.
+  `GOOGLE_CLOUD_VISION_API_KEY` is required in worker env validation only when
+  the banded flag is true. This phase does not add the Vision key to CDK, ECS,
+  web, or Secrets Manager.
+- `ArabicPrintedCheckpointBusyError` → `EnginePageCheckpointBusyError`.
+  `ArabicPrintedCheckpointPersistenceRetryableError` →
+  `EnginePageCheckpointPersistenceRetryableError`. Coordinator PARTIAL →
+  `EnginePageIncompleteError` (no `DocumentTextResult`; checkpoints remain the
+  resume source). Identity mismatch and stale-lease errors fail closed as
+  `EnginePermanentError`.
+- Completed `HtrResult.engine_name` is the banded runtime marker, never the
+  Antigravity agent id. If completed pages disagree:
+  `antigravity-banded:mixed:<24-hex-stable-digest>` (fits the 64-character
+  `DocumentTextResult.engine` field).
+
+**Deferred:** Enabling the banded flag in production; Cloud Vision secret/CDK
+wiring; broadening beyond Arabic printed Antigravity.
+
+**Tests:** `documents/test_antigravity_ocr.py` (adapter wiring, env
+validation, CDK source assertions).
+
 ## Global staff Author rename
+
 
 **Decision / implemented:** Staff can rename one **`Author`** globally from
 **`/archive/manage/authors/<author_id>/edit/`**

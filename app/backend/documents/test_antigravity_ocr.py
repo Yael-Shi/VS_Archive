@@ -5,15 +5,21 @@ import hashlib
 import json
 import math
 import os
+from datetime import timedelta
 from io import BytesIO
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import requests
 from PIL import Image
 
 from django.test import SimpleTestCase, TestCase
+from django.utils import timezone
 
-from documents.management.commands.run_worker import Command
+from documents.management.commands.run_worker import (
+    Command,
+    absolute_deadline_monotonic_from_lease,
+)
 from documents.models import Document, DocumentTextResult
 from documents.services.antigravity_defaults import (
     ANTIGRAVITY_REMOTE_ENVIRONMENT,
@@ -53,9 +59,36 @@ from documents.services.antigravity_ocr_contract import (
     render_validated_ocr_text,
     validate_antigravity_ocr_output,
 )
+from documents.services.arabic_printed_banded_document_ocr import (
+    OUTCOME_COMPLETED,
+    OUTCOME_PARTIAL,
+    ArabicPrintedBandedDocumentResult,
+)
+from documents.services.arabic_printed_banded_ocr import (
+    OUTCOME_SUCCEEDED,
+    ArabicPrintedBandedPageResult,
+)
+from documents.services.arabic_printed_page_checkpoints import (
+    ARABIC_PRINTED_RUNTIME_ENGINE_DIGEST_LEN,
+    ArabicPrintedCheckpointBusyError,
+    ArabicPrintedCheckpointPersistenceRetryableError,
+    ArabicPrintedIdentityMismatchError,
+    StaleArabicPrintedPageClaimError,
+)
 from documents.services.archive_items import create_ocr_document
+from documents.services.env_validation import EnvConfigError, validate_required_env
 from documents.services.htr_adapters.antigravity_adapter import AntigravityAdapter
-from documents.services.htr_adapters.base import EnginePermanentError
+from documents.services.htr_adapters.base import (
+    EnginePageCheckpointBusyError,
+    EnginePageCheckpointPersistenceRetryableError,
+    EnginePageIncompleteError,
+    EnginePermanentError,
+)
+from documents.services.ocr_routing import OcrRouteConfig, select_ocr_route
+from documents.services.htr_engine import transcribe_pages
+from documents.services.process_document_request_worker import (
+    LEASE_EXPIRES_AT_PAYLOAD_KEY,
+)
 from documents.services.ocr_reprocess import (
     OcrRetryMode,
     assess_ocr_reprocess,
@@ -1072,6 +1105,621 @@ class AntigravityAdapterTests(SimpleTestCase):
                 prompt_variant="printed",
                 worker_env=_make_worker_env(),
             )
+
+
+def _jpeg_page(page_index: int, *, label: bytes) -> PageImage:
+    jpeg = _solid_image_bytes("JPEG")
+    return PageImage(
+        page_index=page_index,
+        image_bytes=b"normalized-png-not-for-banded-crops",
+        mime_type="image/png",
+        source_identity=f"arabic-{label.decode('ascii')}.pdf",
+        source_content_fingerprint=hashlib.sha256(label).hexdigest(),
+        original_image_bytes=jpeg,
+        original_mime_type="image/jpeg",
+    )
+
+
+def _banded_page_result(
+    page_index: int,
+    *,
+    text: str,
+    marker: str = "antigravity-banded:unassisted",
+    outcome: str = OUTCOME_SUCCEEDED,
+) -> ArabicPrintedBandedPageResult:
+    return ArabicPrintedBandedPageResult(
+        checkpoint_id=page_index + 1,
+        page_index=page_index,
+        outcome=outcome,
+        assembled_text=text,
+        page_quality="UNASSISTED" if outcome == OUTCOME_SUCCEEDED else "",
+        runtime_engine_marker=marker if outcome == OUTCOME_SUCCEEDED else "",
+        failure_code=None if outcome == OUTCOME_SUCCEEDED else "PAGE_FAILED",
+    )
+
+
+def _completed_banded_result(
+    *pages: ArabicPrintedBandedPageResult,
+    document_id: int = 9,
+) -> ArabicPrintedBandedDocumentResult:
+    return ArabicPrintedBandedDocumentResult(
+        attempt_id=1,
+        document_id=document_id,
+        outcome=OUTCOME_COMPLETED,
+        pages=pages,
+        missing_page_indices=(),
+        failure_code=None,
+    )
+
+
+def _make_banded_worker_env(**overrides):
+    return _make_worker_env(
+        enable_antigravity_arabic_printed_banded=True,
+        google_cloud_vision_api_key="vision-test-key-DO-NOT-LEAK",
+        **overrides,
+    )
+
+
+_BANDED_DEADLINE = 12_345.678
+
+
+class AntigravityAdapterBandedWiringTests(SimpleTestCase):
+    @patch(
+        "documents.services.htr_adapters.antigravity_adapter.process_arabic_printed_banded_document"
+    )
+    @patch(
+        "documents.services.htr_adapters.antigravity_adapter.transcribe_pages_with_antigravity"
+    )
+    def test_banded_flag_false_uses_json_path_not_coordinator(
+        self, mock_transcribe, mock_coordinator
+    ):
+        from documents.services.antigravity_engine import AntigravityResult
+
+        mock_transcribe.return_value = AntigravityResult(
+            text="json-transcript",
+            engine_name=DEFAULT_ANTIGRAVITY_AGENT_ID,
+            needs_review=True,
+        )
+        adapter = AntigravityAdapter()
+        pages = _one_page()
+
+        result = adapter.execute(
+            pages=pages,
+            language_hint="ar",
+            prompt_variant="printed",
+            worker_env=_make_worker_env(
+                enable_antigravity_arabic_printed_banded=False
+            ),
+            document_id=9,
+        )
+
+        self.assertEqual(result.text, "json-transcript")
+        self.assertEqual(result.engine_name, DEFAULT_ANTIGRAVITY_AGENT_ID)
+        mock_transcribe.assert_called_once()
+        mock_coordinator.assert_not_called()
+        self.assertIs(mock_transcribe.call_args.args[0], pages)
+        self.assertEqual(mock_transcribe.call_args.kwargs["api_key"], "test-api-key")
+        self.assertEqual(
+            mock_transcribe.call_args.kwargs["agent_id"], DEFAULT_ANTIGRAVITY_AGENT_ID
+        )
+        self.assertNotIn("timeout_seconds", mock_transcribe.call_args.kwargs)
+        self.assertNotIn(
+            "absolute_deadline_monotonic", mock_transcribe.call_args.kwargs
+        )
+
+    @patch(
+        "documents.services.htr_adapters.antigravity_adapter.process_arabic_printed_banded_document"
+    )
+    @patch(
+        "documents.services.htr_adapters.antigravity_adapter.transcribe_pages_with_antigravity"
+    )
+    def test_json_path_does_not_use_generic_deadline_when_banded_off(
+        self, mock_transcribe, mock_coordinator
+    ):
+        from documents.services.antigravity_engine import AntigravityResult
+
+        mock_transcribe.return_value = AntigravityResult(
+            text="json-transcript",
+            engine_name=DEFAULT_ANTIGRAVITY_AGENT_ID,
+            needs_review=True,
+        )
+
+        AntigravityAdapter().execute(
+            pages=_one_page(),
+            language_hint="ar",
+            prompt_variant="printed",
+            worker_env=_make_worker_env(
+                enable_antigravity_arabic_printed_banded=False
+            ),
+            document_id=9,
+            absolute_deadline_monotonic=_BANDED_DEADLINE,
+        )
+
+        mock_coordinator.assert_not_called()
+        mock_transcribe.assert_called_once()
+        self.assertNotIn(
+            "absolute_deadline_monotonic", mock_transcribe.call_args.kwargs
+        )
+        self.assertNotIn("timeout_seconds", mock_transcribe.call_args.kwargs)
+
+    @patch(
+        "documents.services.htr_adapters.antigravity_adapter.antigravity_outbound_image"
+    )
+    @patch(
+        "documents.services.htr_adapters.antigravity_adapter.transcribe_pages_with_antigravity"
+    )
+    @patch(
+        "documents.services.htr_adapters.antigravity_adapter.process_arabic_printed_banded_document"
+    )
+    def test_banded_flag_true_calls_coordinator_not_json(
+        self, mock_coordinator, mock_transcribe, mock_outbound
+    ):
+        page = _jpeg_page(1, label=b"source-one")
+        mock_coordinator.return_value = _completed_banded_result(
+            _banded_page_result(0, text="النص الكامل", marker="antigravity-banded:unassisted")
+        )
+        adapter = AntigravityAdapter()
+
+        result = adapter.execute(
+            pages=[page],
+            language_hint="ar",
+            prompt_variant="printed",
+            worker_env=_make_banded_worker_env(),
+            document_id=9,
+            absolute_deadline_monotonic=_BANDED_DEADLINE,
+        )
+
+        mock_transcribe.assert_not_called()
+        mock_outbound.assert_not_called()
+        mock_coordinator.assert_called_once()
+        kwargs = mock_coordinator.call_args.kwargs
+        self.assertEqual(kwargs["document_id"], 9)
+        self.assertEqual(kwargs["gemini_api_key"], "test-api-key")
+        self.assertEqual(
+            kwargs["cloud_vision_api_key"], "vision-test-key-DO-NOT-LEAK"
+        )
+        self.assertEqual(kwargs["language_hint"], "ar")
+        self.assertEqual(kwargs["text_input_type"], Document.TextInputType.PRINTED)
+        self.assertEqual(kwargs["absolute_deadline_monotonic"], _BANDED_DEADLINE)
+        coordinator_page = kwargs["pages"][0]
+        self.assertEqual(coordinator_page.page_index, 0)
+        self.assertEqual(coordinator_page.source_identity, page.source_identity)
+        self.assertEqual(
+            coordinator_page.source_content_fingerprint,
+            page.source_content_fingerprint,
+        )
+        working = kwargs["load_working_image"](0)
+        self.assertEqual(working.mime_type, "image/jpeg")
+        self.assertEqual(working.sha256, coordinator_page.oriented_image_sha256)
+        self.assertEqual(result.text, "النص الكامل")
+        self.assertEqual(result.engine_name, "antigravity-banded:unassisted")
+        self.assertNotEqual(result.engine_name, DEFAULT_ANTIGRAVITY_AGENT_ID)
+        self.assertTrue(result.needs_review)
+
+    def test_old_arabic_eligibility_flag_false_keeps_gemini_route(self):
+        with patch.dict(
+            os.environ,
+            {
+                "ENABLE_ANTIGRAVITY_ARABIC_PRINTED": "false",
+                "ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED": "true",
+            },
+            clear=False,
+        ):
+            route = select_ocr_route("ar", Document.TextInputType.PRINTED)
+        self.assertEqual(route.engine_key, DocumentTextResult.OcrEngineKey.GEMINI)
+        self.assertEqual(
+            route.prompt_variant, DocumentTextResult.OcrPromptVariant.PRINTED
+        )
+
+    @patch(
+        "documents.services.htr_adapters.antigravity_adapter.process_arabic_printed_banded_document"
+    )
+    @patch(
+        "documents.services.htr_adapters.antigravity_adapter.transcribe_pages_with_antigravity"
+    )
+    def test_busy_error_maps_to_engine_page_checkpoint_busy(
+        self, mock_transcribe, mock_coordinator
+    ):
+        mock_coordinator.side_effect = ArabicPrintedCheckpointBusyError(
+            "Arabic printed OCR page_index=0 is already claimed"
+        )
+        with self.assertRaises(EnginePageCheckpointBusyError) as raised:
+            AntigravityAdapter().execute(
+                pages=[_jpeg_page(1, label=b"busy")],
+                language_hint="ar",
+                prompt_variant="printed",
+                worker_env=_make_banded_worker_env(),
+                document_id=9,
+                absolute_deadline_monotonic=_BANDED_DEADLINE,
+            )
+        self.assertEqual(raised.exception.page_index, 0)
+        mock_transcribe.assert_not_called()
+
+    @patch(
+        "documents.services.htr_adapters.antigravity_adapter.process_arabic_printed_banded_document"
+    )
+    @patch(
+        "documents.services.htr_adapters.antigravity_adapter.transcribe_pages_with_antigravity"
+    )
+    def test_retryable_persistence_maps_to_engine_page_exception(
+        self, mock_transcribe, mock_coordinator
+    ):
+        mock_coordinator.side_effect = (
+            ArabicPrintedCheckpointPersistenceRetryableError(
+                stage="claim_page",
+                page_index=0,
+            )
+        )
+        with self.assertRaises(EnginePageCheckpointPersistenceRetryableError) as raised:
+            AntigravityAdapter().execute(
+                pages=[_jpeg_page(1, label=b"persist")],
+                language_hint="ar",
+                prompt_variant="printed",
+                worker_env=_make_banded_worker_env(),
+                document_id=9,
+                absolute_deadline_monotonic=_BANDED_DEADLINE,
+            )
+        self.assertEqual(raised.exception.stage, "claim_page")
+        self.assertEqual(raised.exception.page_index, 0)
+        mock_transcribe.assert_not_called()
+
+    @patch(
+        "documents.services.htr_adapters.antigravity_adapter.process_arabic_printed_banded_document"
+    )
+    @patch(
+        "documents.services.htr_adapters.antigravity_adapter.transcribe_pages_with_antigravity"
+    )
+    def test_partial_maps_to_page_incomplete_and_does_not_return_htr_result(
+        self, mock_transcribe, mock_coordinator
+    ):
+        mock_coordinator.return_value = ArabicPrintedBandedDocumentResult(
+            attempt_id=1,
+            document_id=9,
+            outcome=OUTCOME_PARTIAL,
+            pages=(
+                _banded_page_result(0, text="page-zero"),
+                _banded_page_result(1, text="", outcome="FAILED"),
+            ),
+            missing_page_indices=(1,),
+            failure_code="ARABIC_PRINTED_DOCUMENT_DEADLINE",
+        )
+        with self.assertRaises(EnginePageIncompleteError) as raised:
+            AntigravityAdapter().execute(
+                pages=[
+                    _jpeg_page(1, label=b"partial-a"),
+                    _jpeg_page(2, label=b"partial-b"),
+                ],
+                language_hint="ar",
+                prompt_variant="printed",
+                worker_env=_make_banded_worker_env(),
+                document_id=9,
+                absolute_deadline_monotonic=_BANDED_DEADLINE,
+            )
+        self.assertEqual(raised.exception.missing_page_indices, (1,))
+        self.assertEqual(
+            raised.exception.failure_code, "ARABIC_PRINTED_DOCUMENT_DEADLINE"
+        )
+        mock_transcribe.assert_not_called()
+
+    @patch(
+        "documents.services.htr_adapters.antigravity_adapter.process_arabic_printed_banded_document"
+    )
+    def test_completed_uses_banded_runtime_marker_not_agent_id(
+        self, mock_coordinator
+    ):
+        mock_coordinator.return_value = _completed_banded_result(
+            _banded_page_result(
+                0, text="one", marker="antigravity-banded:unassisted"
+            ),
+            _banded_page_result(
+                1, text="two", marker="antigravity-banded:assisted"
+            ),
+        )
+        result = AntigravityAdapter().execute(
+            pages=[_jpeg_page(1, label=b"m1"), _jpeg_page(2, label=b"m2")],
+            language_hint="ar",
+            prompt_variant="printed",
+            worker_env=_make_banded_worker_env(),
+            document_id=9,
+            absolute_deadline_monotonic=_BANDED_DEADLINE,
+        )
+        markers = [
+            "antigravity-banded:unassisted",
+            "antigravity-banded:assisted",
+        ]
+        digest = hashlib.sha256(
+            json.dumps(markers, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()[:ARABIC_PRINTED_RUNTIME_ENGINE_DIGEST_LEN]
+        expected = f"antigravity-banded:mixed:{digest}"
+        self.assertEqual(result.engine_name, expected)
+        self.assertLessEqual(len(result.engine_name), 64)
+        self.assertNotEqual(result.engine_name, DEFAULT_ANTIGRAVITY_AGENT_ID)
+        self.assertFalse(result.engine_name.startswith("antigravity-preview"))
+        self.assertEqual(result.text, "one\n\ntwo")
+
+    @patch(
+        "documents.services.htr_adapters.antigravity_adapter.process_arabic_printed_banded_document"
+    )
+    def test_identity_mismatch_fails_closed_as_permanent(self, mock_coordinator):
+        mock_coordinator.side_effect = ArabicPrintedIdentityMismatchError(
+            "source fingerprint mismatch"
+        )
+        with self.assertRaisesMessage(
+            EnginePermanentError, "Arabic printed banded OCR identity mismatch"
+        ):
+            AntigravityAdapter().execute(
+                pages=[_jpeg_page(1, label=b"identity")],
+                language_hint="ar",
+                prompt_variant="printed",
+                worker_env=_make_banded_worker_env(),
+                document_id=9,
+                absolute_deadline_monotonic=_BANDED_DEADLINE,
+            )
+
+    @patch(
+        "documents.services.htr_adapters.antigravity_adapter.process_arabic_printed_banded_document"
+    )
+    def test_stale_lease_fails_closed_as_permanent(self, mock_coordinator):
+        mock_coordinator.side_effect = StaleArabicPrintedPageClaimError(
+            "Stale Arabic printed page success claim for page_index=0"
+        )
+        with self.assertRaisesMessage(
+            EnginePermanentError, "Arabic printed banded OCR stale page lease"
+        ):
+            AntigravityAdapter().execute(
+                pages=[_jpeg_page(1, label=b"stale")],
+                language_hint="ar",
+                prompt_variant="printed",
+                worker_env=_make_banded_worker_env(),
+                document_id=9,
+                absolute_deadline_monotonic=_BANDED_DEADLINE,
+            )
+
+
+    @patch(
+        "documents.services.htr_adapters.antigravity_adapter.prepare_arabic_printed_working_image"
+    )
+    @patch(
+        "documents.services.htr_adapters.antigravity_adapter.process_arabic_printed_banded_document"
+    )
+    @patch(
+        "documents.services.htr_adapters.antigravity_adapter.transcribe_pages_with_antigravity"
+    )
+    def test_banded_missing_deadline_fails_before_coordinator(
+        self, mock_transcribe, mock_coordinator, mock_prepare
+    ):
+        with self.assertRaisesMessage(
+            EnginePermanentError,
+            "Arabic printed banded OCR requires absolute_deadline_monotonic",
+        ):
+            AntigravityAdapter().execute(
+                pages=[_jpeg_page(1, label=b"no-deadline")],
+                language_hint="ar",
+                prompt_variant="printed",
+                worker_env=_make_banded_worker_env(),
+                document_id=9,
+            )
+        mock_coordinator.assert_not_called()
+        mock_transcribe.assert_not_called()
+        mock_prepare.assert_not_called()
+
+
+class AntigravityBandedEnvValidationTests(SimpleTestCase):
+    def test_vision_key_not_required_when_banded_flag_false(self):
+        with patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": "test-gemini-key",
+                "ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED": "false",
+            },
+            clear=True,
+        ):
+            cfg = validate_required_env()
+        self.assertFalse(cfg.enable_antigravity_arabic_printed_banded)
+        self.assertIsNone(cfg.google_cloud_vision_api_key)
+
+    def test_vision_key_required_when_banded_flag_true(self):
+        with patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": "test-gemini-key",
+                "ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED": "true",
+            },
+            clear=True,
+        ):
+            with self.assertRaises(EnvConfigError) as raised:
+                validate_required_env()
+        self.assertIn("GOOGLE_CLOUD_VISION_API_KEY", str(raised.exception))
+
+    def test_vision_key_accepted_when_banded_flag_true(self):
+        with patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": "test-gemini-key",
+                "ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED": "true",
+                "GOOGLE_CLOUD_VISION_API_KEY": "vision-test-key-DO-NOT-LEAK",
+            },
+            clear=True,
+        ):
+            cfg = validate_required_env()
+        self.assertTrue(cfg.enable_antigravity_arabic_printed_banded)
+        self.assertEqual(
+            cfg.google_cloud_vision_api_key, "vision-test-key-DO-NOT-LEAK"
+        )
+
+
+class AntigravityBandedCdkWiringTests(SimpleTestCase):
+    def test_cdk_sets_worker_banded_flag_false_and_does_not_expose_to_web(self):
+        stack_path = (
+            Path(__file__).resolve().parents[3]
+            / "infra"
+            / "vs_archive_infra"
+            / "app_stack.py"
+        )
+        source = stack_path.read_text(encoding="utf-8")
+        web_start = source.index("web_task.add_container")
+        worker_start = source.index("worker_task.add_container")
+        web_block = source[web_start:worker_start]
+        worker_block = source[worker_start:]
+        self.assertIn(
+            '"ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED": "false"',
+            worker_block,
+        )
+        self.assertNotIn("ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED", web_block)
+        self.assertNotIn("GOOGLE_CLOUD_VISION", web_block)
+        self.assertNotIn("GOOGLE_CLOUD_VISION", worker_block)
+        self.assertNotIn("cloud-vision", worker_block)
+        self.assertNotIn("cloud_vision", worker_block)
+
+
+class ProcessDocumentLeaseDeadlineTests(SimpleTestCase):
+    def test_future_lease_converts_remaining_seconds_to_monotonic(self):
+        now = timezone.now()
+        lease = now + timedelta(seconds=120)
+        deadline = absolute_deadline_monotonic_from_lease(
+            lease,
+            now=now,
+            monotonic_fn=lambda: 1000.0,
+        )
+        self.assertEqual(deadline, 1120.0)
+
+    def test_expired_lease_deadline_is_at_or_before_current_monotonic(self):
+        now = timezone.now()
+        lease = now - timedelta(seconds=45)
+        monotonic_now = 500.0
+        deadline = absolute_deadline_monotonic_from_lease(
+            lease,
+            now=now,
+            monotonic_fn=lambda: monotonic_now,
+        )
+        self.assertEqual(deadline, monotonic_now)
+        self.assertLessEqual(deadline, monotonic_now)
+
+    def test_missing_lease_returns_none(self):
+        self.assertIsNone(absolute_deadline_monotonic_from_lease(None))
+
+    def test_transcribe_pages_forwards_generic_deadline_to_adapter(self):
+        adapter = MagicMock()
+        adapter.execute.return_value = MagicMock(text="ok")
+        route = OcrRouteConfig(
+            engine_key=DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+        )
+        with patch(
+            "documents.services.htr_engine.get_htr_adapter",
+            return_value=adapter,
+        ):
+            transcribe_pages(
+                pages=_one_page(),
+                language_hint="ar",
+                text_input_type=Document.TextInputType.PRINTED,
+                route=route,
+                absolute_deadline_monotonic=_BANDED_DEADLINE,
+            )
+        self.assertEqual(
+            adapter.execute.call_args.kwargs["absolute_deadline_monotonic"],
+            _BANDED_DEADLINE,
+        )
+
+
+class ProcessDocumentWorkerDeadlineForwardTests(TestCase):
+    def setUp(self):
+        self.command = Command()
+        self.command._cfg = _make_worker_env()
+        self.doc = create_ocr_document(
+            title="Lease deadline forwarding",
+            doc_type=Document.DocType.IMAGE,
+            language=Document.Language.ARABIC,
+            text_input_type=Document.TextInputType.PRINTED,
+            upload_status=Document.UploadStatus.UPLOADED,
+            file_s3_key="lease-deadline.png",
+            mime_type="image/png",
+        )
+
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    @patch("documents.management.commands.run_worker.select_ocr_route")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    def test_worker_forwards_deadline_derived_from_future_lease(
+        self,
+        mock_get_object,
+        mock_extract,
+        mock_route,
+        mock_transcribe,
+    ):
+        mock_get_object.return_value = (b"png-bytes", "image/png")
+        mock_extract.return_value = _one_page()
+        mock_route.return_value = OcrRouteConfig(
+            engine_key=DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+        )
+        mock_transcribe.side_effect = EnginePageIncompleteError(
+            [1],
+            failure_code="OCR_PAGES_INCOMPLETE",
+        )
+        now = timezone.now()
+        lease = now + timedelta(seconds=90)
+        with patch(
+            "documents.management.commands.run_worker.time.monotonic",
+            return_value=2000.0,
+        ):
+            with patch(
+                "documents.management.commands.run_worker.timezone.now",
+                return_value=now,
+            ):
+                self.command._execute_process_document_payload(
+                    {
+                        "type": "PROCESS_DOCUMENT",
+                        "document_id": self.doc.id,
+                        LEASE_EXPIRES_AT_PAYLOAD_KEY: lease,
+                    }
+                )
+        self.assertEqual(
+            mock_transcribe.call_args.kwargs["absolute_deadline_monotonic"],
+            2090.0,
+        )
+
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    @patch("documents.management.commands.run_worker.select_ocr_route")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    def test_worker_expired_lease_forwards_current_monotonic_deadline(
+        self,
+        mock_get_object,
+        mock_extract,
+        mock_route,
+        mock_transcribe,
+    ):
+        mock_get_object.return_value = (b"png-bytes", "image/png")
+        mock_extract.return_value = _one_page()
+        mock_route.return_value = OcrRouteConfig(
+            engine_key=DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+        )
+        mock_transcribe.side_effect = EnginePageIncompleteError(
+            [1],
+            failure_code="OCR_PAGES_INCOMPLETE",
+        )
+        now = timezone.now()
+        lease = now - timedelta(seconds=10)
+        with patch(
+            "documents.management.commands.run_worker.time.monotonic",
+            return_value=300.0,
+        ):
+            with patch(
+                "documents.management.commands.run_worker.timezone.now",
+                return_value=now,
+            ):
+                self.command._execute_process_document_payload(
+                    {
+                        "type": "PROCESS_DOCUMENT",
+                        "document_id": self.doc.id,
+                        LEASE_EXPIRES_AT_PAYLOAD_KEY: lease,
+                    }
+                )
+        deadline = mock_transcribe.call_args.kwargs["absolute_deadline_monotonic"]
+        self.assertEqual(deadline, 300.0)
+        self.assertLessEqual(deadline, 300.0)
 
 
 class AntigravityMultimodalPayloadTests(SimpleTestCase):
