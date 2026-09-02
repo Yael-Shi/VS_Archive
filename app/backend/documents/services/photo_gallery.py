@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
 from urllib.parse import urlencode
 
+from django.db.models import Prefetch, QuerySet
 from django.urls import reverse
 
-from documents.models import ArchiveItem, PhotoContent
-from documents.services.archive_item_presentation import person_public_page_url
+from documents.models import ArchiveItem, PhotoContent, PhotoPerson
+from documents.services.archive_item_presentation import (
+    ArchiveBrowseCard,
+    build_archive_browse_card,
+    person_public_page_url,
+)
 from documents.services.archive_metadata_validation import meaningful_metadata_value
 from documents.services.document_date import NO_DATE_LABEL, format_document_date
 from documents.services.photo_archive_urls import presign_photo_thumbnail_url
-from documents.services.photo_presentation import photo_is_archive_renderable
+from documents.services.photo_presentation import (
+    filter_archive_renderable_photo_contents,
+    photo_is_archive_renderable,
+)
 
 PUBLIC_PHOTO_QUERY_PARAM = "photo"
 
@@ -242,3 +251,81 @@ def build_public_photo_gallery(
         photo_date_label=public_photo_date_label(selected),
         selector_items=selector_items,
     )
+
+
+def photo_person_appearances_queryset(
+    *,
+    person_id: int,
+    authorized_archive_items: QuerySet[ArchiveItem],
+) -> QuerySet[PhotoPerson]:
+    """Authorized, publicly renderable PhotoPerson appearances for one Person.
+
+    Does not read or create ArchiveItemPerson. Owning ArchiveItems must already
+    be in ``authorized_archive_items`` (visibility plus item-level browse
+    renderability). Each appearance PhotoContent must pass
+    ``filter_archive_renderable_photo_contents`` (same contract as
+    ``photo_is_archive_renderable``). Order is owning item ``-created_at``,
+    item id, then photo ``(position, id)``.
+    """
+    renderable_photos = filter_archive_renderable_photo_contents(
+        PhotoContent.objects.all()
+    )
+    return (
+        PhotoPerson.objects.filter(
+            person_id=person_id,
+            photo_content__in=renderable_photos,
+            photo_content__archive_item_id__in=authorized_archive_items.values("pk"),
+        )
+        .select_related(
+            "photo_content",
+            "photo_content__archive_item",
+            "photo_content__archive_item__manual_text_content",
+            "photo_content__archive_item__ocr_document",
+            "photo_content__archive_item__video_content",
+        )
+        .prefetch_related(
+            Prefetch(
+                "photo_content__archive_item__photo_contents",
+                queryset=PhotoContent.objects.order_by("position", "id"),
+            ),
+            "photo_content__archive_item__categories",
+            "photo_content__archive_item__events",
+            "photo_content__archive_item__tags",
+            "photo_content__archive_item__people",
+        )
+        .order_by(
+            "-photo_content__archive_item__created_at",
+            "photo_content__archive_item_id",
+            "photo_content__position",
+            "photo_content_id",
+        )
+    )
+
+
+def build_photo_person_appearance_cards(
+    appearances: Sequence[PhotoPerson],
+    *,
+    bucket: str,
+    expires_in: int = 3600,
+) -> list[ArchiveBrowseCard]:
+    """Browse-style cards for PhotoPerson appearances, linking ``?photo=``.
+
+    Reuses ArchiveItem card title/meta. Thumbnail comes from the appearance
+    PhotoContent when a thumbnail key exists, not from the item primary photo.
+    """
+    cards: list[ArchiveBrowseCard] = []
+    for appearance in appearances:
+        photo = appearance.photo_content
+        item = photo.archive_item
+        card = build_archive_browse_card(item)
+        card = replace(
+            card,
+            detail_url=public_photo_detail_url(item.pk, photo.pk),
+            thumbnail_url=presign_photo_thumbnail_url(
+                photo,
+                bucket=bucket,
+                expires_in=expires_in,
+            ),
+        )
+        cards.append(card)
+    return cards

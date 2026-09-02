@@ -1,5 +1,53 @@
 # VS-Archive Decision Log
 
+## Public Person page PhotoPerson appearances
+
+**Decision / implemented:** `/archive/people/<person_id>/` is accessible
+when the current user can see **at least one** authorized/renderable
+`ArchiveItemPerson` item **or** authorized/renderable `PhotoPerson`
+appearance. The two relations stay semantically separate. Neither is
+inferred from the other. Advanced `person=` filtering and public `q`
+indexing are unchanged.
+
+**Current behavior:**
+
+- 404 only when the Person id is missing, or the user has neither
+  visible related items nor visible photo appearances. Same status for
+  unauthorized/non-renderable-only cases; no private-count leak.
+- Related items (`ArchiveItemPerson`) still use
+  `archive_browse_queryset_for_user`, order `-created_at`, `pk`, and
+  fixed 48-per-page pagination. `total_count` remains that queryset’s
+  length. Section heading: **פריטים הקשורים לאדם**.
+- Photo appearances (`PhotoPerson`) are a separate unpaged section on
+  the same page (**תמונות שבהן האדם מופיע**). Queryset:
+  `photo_person_appearances_queryset` in `photo_gallery.py`. Owning
+  ArchiveItem must be in the same browse queryset (visibility + item-
+  level PHOTO first-row eligibility). Appearance `PhotoContent` must
+  pass `filter_archive_renderable_photo_contents` /
+  `photo_is_archive_renderable`. Order: item `-created_at`, item id,
+  photo `(position, id)`.
+- Each appearance is its own card linking to
+  `/archive/<item_id>/?photo=<photo_content_id>` via
+  `public_photo_detail_url`. Multiple photos in one ArchiveItem stay
+  separate cards. Item-level card title/meta are reused; thumbnail is
+  the appearance photo when a thumbnail key exists.
+- PhotoPerson-only identities no longer 404 when an appearance is
+  visible. Biography still displays when the page is otherwise
+  accessible. Aliases remain hidden. No public Person index.
+- Advanced `person=` remains ArchiveItemPerson-only. Public `q` is
+  unchanged.
+
+**Pagination tradeoff:** Photo appearances are not combined into the
+related-item paginator. They are listed in full on every related-item
+page. A combined paginator was deferred to keep the two relations
+separate and the page architecture small.
+
+**Deferred:** public alias display; PhotoPerson appearance filter on
+`/archive/`; Person catalog/Admin; paginating photo appearances.
+
+**Tests:** `documents/test_archive_person_public_page.py`. No schema
+migration.
+
 ## Staff Person identity merge (explicit ids)
 
 **Decision / implemented:** Controlled staff merge of one `Person` INTO
@@ -106,10 +154,11 @@ relations. Person-page authorization is unchanged.
   `photo_contents` / nested `people` and does not add a people query.
 - PhotoPerson-only people still do not appear on ArchiveItemPerson
   cards, search, discovery, or advanced `person=` filters.
-- A public Person page with no authorized `ArchiveItemPerson` items
-  still **404**s, including PhotoPerson-only identities. Following a
-  PhotoPerson name link can therefore 404; that is the existing Person
-  page contract, not a new authorization rule.
+- A public Person page is accessible when the user can see at least
+  one authorized/renderable `ArchiveItemPerson` item **or**
+  authorized/renderable `PhotoPerson` appearance (see **Public Person
+  page PhotoPerson appearances**). Following a PhotoPerson name link
+  404s only when that Person has neither visible relation.
 
 **Deferred:** public alias display; PhotoPerson appearance filter;
 automatic `ArchiveItemPerson` from `PhotoPerson`; Person catalog/Admin.
@@ -737,10 +786,12 @@ Person-page authorization/404 contract.
   **`linebreaksbr`**. Empty/whitespace/placeholder-only values are omitted
   (`meaningful_archive_metadata`). No `|safe`, markdown, or rich text.
   Aliases stay hidden. No public staff-edit link.
-- Authorization/404 is unchanged: missing Person, unlinked Person,
-  PhotoPerson-only, private-only (anonymous), and non-renderable-only
-  links still **404** even when biography is nonempty. Biography is
-  display-only on an otherwise accessible Person page.
+- Authorization/404: missing Person, unlinked Person, private-only
+  (anonymous), and non-renderable-only links still **404** even when
+  biography is nonempty. A visible authorized `PhotoPerson` appearance
+  is sufficient to open the page (see **Public Person page PhotoPerson
+  appearances**). Biography is display-only on an otherwise accessible
+  Person page.
 - Search: **`Person.biography` is not indexed.** `q` still uses
   `Person.name` / `PersonAlias.name` on ArchiveItem index rows only.
 
@@ -955,50 +1006,57 @@ migration.
 
 **Decision / implemented:** Public Person detail exists at
 **`/archive/people/<person_id>/`** (`archive-person-detail`). It lists
-ArchiveItems generally related to that Person via **`ArchiveItemPerson`**,
-using the same authorized/renderable browse queryset as `/archive/`.
-This is Option A: canonical **`Person.name`** plus related public
-cards. That PR added no biography field, no schema migration, and no
-staff-form change. Optional staff-authored **`Person.biography`** was
-added later (see **Public Person biography**).
+ArchiveItems generally related to that Person via **`ArchiveItemPerson`**
+and, separately, photos where the Person appears via **`PhotoPerson`**.
+Related items use the same authorized/renderable browse queryset as
+`/archive/`. This started as Option A (canonical **`Person.name`** plus
+related public cards). PhotoPerson appearances were added later (see
+**Public Person page PhotoPerson appearances**). Optional staff-authored
+**`Person.biography`** is documented under **Public Person biography**.
 
 **Current behavior:**
 
 - Route is registered before the `<int:item_id>/` catch-all. Missing
-  Person ids and Persons with **zero** authorized/renderable
-  `ArchiveItemPerson` items both **404** (same status; no private-count
-  leak). PhotoPerson-only identities 404. Non-renderable PHOTO/OCR-only
-  links 404.
+  Person ids **404**. Persons with **zero** authorized/renderable
+  `ArchiveItemPerson` items **and** zero authorized/renderable
+  `PhotoPerson` appearances **404** (same status; no private-count
+  leak). Non-renderable PHOTO/OCR-only ArchiveItemPerson links 404.
+  Pending/failed/empty-key PhotoContent does not make the page
+  accessible.
 - Related items: `archive_browse_queryset_for_user(request.user)` filtered
   by `ArchiveItemPerson.person_id`. Count is that queryset’s length.
   Family/restricted-capable users may see a higher authorized count than
   anonymous. Duplicate canonical names stay distinct by `Person.id`.
-- Pagination is fixed **48** per page (`page=`); invalid/out-of-range
-  `page` follows `normalize_archive_public_list_page` (clamp). No `q`,
-  type tabs, advanced filters, or `per_page` control. Order is
-  `-created_at`, `pk`.
+- Pagination is fixed **48** per page (`page=`) for the ArchiveItemPerson
+  section only; invalid/out-of-range `page` follows
+  `normalize_archive_public_list_page` (clamp). Photo appearances are a
+  separate unpaged section on the same page. No `q`, type tabs, advanced
+  filters, or `per_page` control. Related-item order is `-created_at`,
+  `pk`.
 - Page shows canonical name, optional nonempty staff-authored biography
   (unlabeled, autoescaped, `linebreaksbr`; see **Public Person
-  biography**), authorized total count, browse cards
-  (existing card partial), page nav when needed, and **חזרה לארכיון**.
-  Aliases are not displayed. No public staff-edit link.
+  biography**), related-item heading **פריטים הקשורים לאדם** with
+  authorized related-item count and browse cards when that section is
+  non-empty, photo-appearance heading **תמונות שבהן האדם מופיע** with
+  appearance cards when that section is non-empty, page nav when related
+  items span multiple pages, and **חזרה לארכיון**. Aliases are not
+  displayed. No public staff-edit link.
 - Item-level **אנשים קשורים** links on archive cards, homepage cards,
   archive detail, and OCR document detail go to the Person page
   (`person_public_page_url`). PhotoPerson **אנשים מזוהים:** names are
   canonical-name links to the same Person page (see **Public PhotoPerson
   name links**). PhotoPerson still does not create ArchiveItemPerson
-  cards or change Person-page 404 rules.
+  cards.
 - Stage B mapped historical Tag browse
   `/archive/tags/<mapped_tag_id>/` now **302**s to the Person page
   (map-first). Following that URL still 404s when the Person has no
-  authorized related items. Ordinary Tag browse is unchanged. Advanced
-  `person=` list filtering is unchanged by this page PR. Active Person
-  filter chips are implemented separately (see **Public Person
-  active-filter chip UX**).
+  authorized related items and no authorized photo appearances. Ordinary
+  Tag browse is unchanged. Advanced `person=` list filtering remains
+  ArchiveItemPerson-only. Active Person filter chips are implemented
+  separately (see **Public Person active-filter chip UX**).
 
 **Deferred:** public alias display; PhotoPerson appearance filter;
-Person catalog/Admin. PhotoPerson name linking on public PHOTO detail is
-implemented (see **Public PhotoPerson name links**).
+Person catalog/Admin; combined related-item/appearance pagination.
 Public biography/summary is implemented (see **Public Person
 biography**).
 D2a retired-name policy is implemented. D2b Tag-row deletion is
@@ -1066,7 +1124,8 @@ Tag browse, visibility, and authorized item querysets are unchanged.
 - `archive_tag_browse_page` resolves mapped Tag ids to Person ids, then
   `person_public_page_url`. Unmapped missing Tags remain 404.
   The Person page itself 404s when that Person has no authorized
-  renderable `ArchiveItemPerson` items.
+  renderable `ArchiveItemPerson` items and no authorized renderable
+  `PhotoPerson` appearances.
 - `archive_advanced_filter_choice_context` excludes
   `historical_person_name_tag_ids()` from authorized public Tag choices
   only. Category/event/person choices are unchanged. Visibility scoping,

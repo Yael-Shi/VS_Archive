@@ -240,7 +240,11 @@ from documents.services.document_archive_urls import (
 from documents.services.photo_archive_urls import (
     apply_photo_thumbnail_urls_to_browse_cards,
 )
-from documents.services.photo_gallery import build_public_photo_gallery
+from documents.services.photo_gallery import (
+    build_photo_person_appearance_cards,
+    build_public_photo_gallery,
+    photo_person_appearances_queryset,
+)
 from documents.services.archive_advanced_search import (
     EMPTY_ARCHIVE_ADVANCED_FILTER_CHOICE_CONTEXT,
     archive_advanced_filter_choice_context,
@@ -4983,15 +4987,22 @@ def archive_tag_browse_page(request, tag_id: int):
 
 def archive_person_detail_page(request, person_id: int):
     person = get_object_or_404(Person, pk=person_id)
+    authorized_items = archive_browse_queryset_for_user(request.user)
     items = _archive_browse_select_related(
-        archive_browse_queryset_for_user(request.user).filter(
+        authorized_items.filter(
             pk__in=ArchiveItemPerson.objects.filter(person_id=person.pk).values(
                 "archive_item_id"
             )
         )
     ).order_by("-created_at", "pk")
     total_count = items.count()
-    if total_count == 0:
+    photo_appearances = list(
+        photo_person_appearances_queryset(
+            person_id=person.pk,
+            authorized_archive_items=authorized_items,
+        )
+    )
+    if total_count == 0 and not photo_appearances:
         raise Http404() from None
 
     per_page = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE
@@ -5003,6 +5014,11 @@ def archive_person_detail_page(request, person_id: int):
     offset = (page - 1) * per_page
     page_items = list(items[offset : offset + per_page])
     browse_cards = _archive_browse_cards_for_items(page_items)
+    photo_appearance_cards = build_photo_person_appearance_cards(
+        photo_appearances,
+        bucket=getattr(settings, "UPLOADS_BUCKET_NAME", ""),
+        expires_in=PRESIGNED_GET_EXPIRY_SECONDS,
+    )
     return render(
         request,
         "documents/archive/person_detail.html",
@@ -5010,6 +5026,7 @@ def archive_person_detail_page(request, person_id: int):
             "person": person,
             "items": page_items,
             "browse_cards": browse_cards,
+            "photo_appearance_cards": photo_appearance_cards,
             "is_admin": _is_admin(request.user),
             "total_count": total_count,
             **archive_public_list_pagination_context(
