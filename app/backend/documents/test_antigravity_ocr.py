@@ -1566,10 +1566,12 @@ class AntigravityBandedCdkWiringTests(SimpleTestCase):
             worker_block,
         )
         self.assertNotIn("ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED", web_block)
+        self.assertIn("GOOGLE_CLOUD_VISION_API_KEY", worker_block)
+        self.assertIn("vs-archive/google-vision-key", source)
+        self.assertIn("google_cloud_vision_secret", worker_block)
         self.assertNotIn("GOOGLE_CLOUD_VISION", web_block)
-        self.assertNotIn("GOOGLE_CLOUD_VISION", worker_block)
-        self.assertNotIn("cloud-vision", worker_block)
-        self.assertNotIn("cloud_vision", worker_block)
+        self.assertNotIn("google-vision", web_block)
+        self.assertNotIn("google_cloud_vision", web_block)
 
 
 class ProcessDocumentLeaseDeadlineTests(SimpleTestCase):

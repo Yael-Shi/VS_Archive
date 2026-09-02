@@ -61,7 +61,7 @@ Some OCR routes are activated by environment flags read in `select_ocr_route` (n
 - **Phase 2 — controlled test:** worker routing uses **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED=true`** (and optionally `ANTIGRAVITY_AGENT_ID` if overriding the default). Uses existing `GEMINI_API_KEY`. A follow-up CDK/SSM wiring change (mirroring Transkribus) is optional but recommended before broader enablement.
 - **`ar` + `HANDWRITTEN`** is not routed to Antigravity regardless of the flag.
 - The adapter also validates `worker_env.enable_antigravity_arabic_printed` as a second safety check.
-- **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED=false`** is the execution-code default and the current `app_stack.py` **worker** environment value. It is **not** set on the web task. Turning it on later requires a separate worker-only change plus a Cloud Vision secret; this phase does **not** add `GOOGLE_CLOUD_VISION_API_KEY` to CDK, ECS, web, or Secrets Manager.
+- **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED=false`** is the execution-code default and the current `app_stack.py` **worker** environment value. It is **not** set on the web task. Worker CDK injects **`GOOGLE_CLOUD_VISION_API_KEY`** from existing Secrets Manager secret **`vs-archive/google-vision-key`**. The credential is injected into the worker container only; the web container does not receive it. Web and worker share the existing ECS execution role. The banded execution flag remains **`false`**; injecting the secret does not enable banded OCR.
 
 Local template: `app/backend/.env.template`. Routing reference: `docs/ocr-routing-reference.md`.
 
@@ -80,6 +80,7 @@ Local template: `app/backend/.env.template`. Routing reference: `docs/ocr-routin
 - `vs-archive/dev/transkribus/username`
 - `vs-archive/dev/transkribus/password`
 - `vs-archive/dev/transkribus/api-token`
+- `vs-archive/google-vision-key` (injected into the worker container only as `GOOGLE_CLOUD_VISION_API_KEY`; the web container does not receive it; banded flag remains false)
 
 ## Preflight checks before deploy
 
