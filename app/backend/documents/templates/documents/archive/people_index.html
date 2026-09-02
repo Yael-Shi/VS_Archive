@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - {{ page_title }}{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-manage-list' %}">חזרה לניהול</a>
+    </div>
+
+    <h1 class="page-title">{{ page_title }}</h1>
+    <p class="page-subtitle">חיפוש ופתיחה של רשומות אדם קיימות — לצוות בלבד.</p>
+
+    <div class="spacer"></div>
+    <form method="get" class="toolbar" action="{% url 'archive-manage-people' %}">
+      <div class="field field--grow">
+        <label for="people-index-search">חיפוש</label>
+        <input
+          id="people-index-search"
+          type="search"
+          name="q"
+          value="{{ q }}"
+          placeholder="שם תצוגה או שם חלופי"
+        />
+      </div>
+      <div class="field field--actions">
+        <div class="form-actions">
+          <button type="submit" class="btn">חיפוש</button>
+          {% if q %}
+            <a class="btn" href="{% url 'archive-manage-people' %}">ניקוי</a>
+          {% endif %}
+        </div>
+      </div>
+    </form>
+
+    <div class="spacer"></div>
+
+    {% if people %}
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>מזהה</th>
+              <th>שם תצוגה</th>
+              <th>שמות חלופיים</th>
+              <th>קשר לפריטים</th>
+              <th>הופעות בתמונות</th>
+              <th>פעולות</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for person in people %}
+              <tr>
+                <td>{{ person.id }}</td>
+                <td>{{ person.name }}</td>
+                <td>
+                  {% for alias in person.aliases.all %}
+                    {% if not forloop.first %}, {% endif %}{{ alias.name }}
+                  {% empty %}
+                    —
+                  {% endfor %}
+                </td>
+                <td>{{ person.archive_item_person_count }}</td>
+                <td>{{ person.photo_person_count }}</td>
+                <td>
+                  <a class="btn" href="{% url 'archive-manage-person-edit' person_id=person.id %}">עריכה</a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% elif q %}
+      <p class="muted">לא נמצאו אנשים תואמים.</p>
+    {% else %}
+      <p class="muted">אין רשומות אדם.</p>
+    {% endif %}
+  </div>
+{% endblock %}

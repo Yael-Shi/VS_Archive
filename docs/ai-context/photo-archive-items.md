@@ -28,7 +28,7 @@ Design and implementation scope for **`PHOTO`** archive items: private S3 storag
 - `documents/management/commands/backfill_document_thumbnails.py` — operational OCR image thumbnail backfill
 - `documents/templates/documents/archive/partials/item_list_cards.html` — public browse cards
 - `documents/s3.py` — presigned PUT/GET helpers, deterministic thumbnail key builders
-- `documents/views.py` — **`/archive/`** list/detail, unified create at **`/archive/manage/new/`**, staff Person edit at **`/archive/manage/people/<id>/edit/`**
+- `documents/views.py` — **`/archive/`** list/detail, unified create at **`/archive/manage/new/`**, staff Person index at **`/archive/manage/people/`**, staff Person edit at **`/archive/manage/people/<id>/edit/`**
 
 ---
 
@@ -288,8 +288,9 @@ Non-viewable items return **404**.
   **`/archive/manage/people/<person_id>/edit/`** for canonical rename,
   optional public biography, and alias add/edit/delete. Aliases belong to
   the Person globally. **`new_person_name`** may be comma-separated; each
-  token always creates a new Person as **`PhotoPerson`** only. There is no
-  Person catalog. Public pages still show canonical names only.
+  token always creates a new Person as **`PhotoPerson`** only. Staff can
+  find existing Person rows at **`/archive/manage/people/`**. There is no
+  public Person catalog. Public pages still show canonical names only.
 
 ### Public / family archive surfaces
 
@@ -352,7 +353,7 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 - OCR/HTR on photos
 - Worker / SQS processing for PHOTO
 - Face recognition, AI identification, comments
-- Public alias display; Person catalog/Admin
+- Public alias display; public Person catalog/Admin
 - automatic ArchiveItemPerson from PhotoPerson; staff PHOTO appearance review / PhotoPerson backfill from `people_present`; no new-Person proposals
 - Public alias display on Person pages
 - PhotoPerson appearance filter

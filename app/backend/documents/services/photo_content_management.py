@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import Max, Prefetch
+from django.db.models import Count, Exists, Max, OuterRef, Prefetch, Q
 
 from documents.models import ArchiveItem, Person, PersonAlias, PhotoContent
 from documents.s3 import create_presigned_get
@@ -70,6 +70,32 @@ def staff_person_picker_queryset():
     return Person.objects.order_by("name", "id").prefetch_related(
         staff_person_aliases_prefetch()
     )
+
+
+def staff_person_index_queryset(*, search_query: str = ""):
+    """Staff Person index: one row per Person, with alias prefetch and relation counts.
+
+    Optional ``search_query`` matches canonical ``Person.name`` or ``PersonAlias.name``
+    case-insensitively. Alias matching uses ``Exists`` so the filter does not join
+    aliases. Relation counts use ``Count(..., distinct=True)`` so ArchiveItemPerson
+    and PhotoPerson joins do not inflate each other.
+    """
+    people = (
+        Person.objects.annotate(
+            archive_item_person_count=Count("archive_item_links", distinct=True),
+            photo_person_count=Count("photo_links", distinct=True),
+        )
+        .prefetch_related(staff_person_aliases_prefetch())
+        .order_by("name", "id")
+    )
+    q = (search_query or "").strip()
+    if q:
+        alias_match = PersonAlias.objects.filter(
+            person_id=OuterRef("pk"),
+            name__icontains=q,
+        )
+        people = people.filter(Q(name__icontains=q) | Exists(alias_match))
+    return people
 
 
 def person_staff_picker_label(person: Person) -> str:

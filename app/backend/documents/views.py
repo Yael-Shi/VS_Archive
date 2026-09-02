@@ -32,7 +32,7 @@ from django.urls import reverse
 from django.utils.cache import add_never_cache_headers
 from django.views.decorators.cache import never_cache
 from django.utils.http import urlencode
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from .models import (
     ArchiveCategory,
@@ -221,6 +221,7 @@ from documents.services.photo_content_management import (
     person_staff_picker_label,
     reorder_photo_contents,
     staff_person_aliases_prefetch,
+    staff_person_index_queryset,
     staff_photo_contents_queryset,
     update_person_alias,
     update_person_biography,
@@ -5729,6 +5730,26 @@ def _person_edit_form_context(
         "form_errors": form_errors,
         "page_title": "עריכת אדם",
     }
+
+
+@login_required
+@require_GET
+def archive_manage_people_page(request):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    q = (request.GET.get("q") or "").strip()
+    people = staff_person_index_queryset(search_query=q)
+    return render(
+        request,
+        "documents/archive/people_index.html",
+        context={
+            "people": people,
+            "q": q,
+            "page_title": "ניהול אנשים",
+        },
+    )
 
 
 @login_required
