@@ -166,6 +166,23 @@ automatic `ArchiveItemPerson` from `PhotoPerson`; Person catalog/Admin.
 **Tests:** `documents/test_photo_public_gallery.py`,
 `documents/test_archive_person_public_presentation.py`.
 
+## Arabic printed banded OCR — worker CDK execution flag ON
+
+**Decision / implemented:** Worker CDK config (`app_stack.py`) sets
+`ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED` to **`true`**. This is desired
+source configuration, not a claim that live ECS already has the flag on.
+It is effective in runtime after deployment; verify deployed runtime
+separately. The env-validation / code default when the variable is unset
+remains **false**. The flag is still not set on the web task. Routing,
+adapters, Cloud Vision secret wiring, models, deadlines, and retry
+behavior are unchanged by this rollout.
+
+**Supersedes:** Phase 6A “do not enable it in deployment”; the Cloud Vision
+worker-secret entry’s “flag still off / enabling remains deferred” status.
+
+**Tests:** `documents/test_antigravity_ocr.py`
+(`AntigravityBandedCdkWiringTests`).
+
 ## Arabic printed banded OCR — Cloud Vision worker secret (flag still off)
 
 **Decision / implemented:** Worker ECS injects `GOOGLE_CLOUD_VISION_API_KEY`
@@ -177,13 +194,14 @@ the web container does not receive it. Web and worker share the existing ECS
 execution role; that IAM boundary is intentional and matches Transkribus
 secret injection.
 
-**Does not:** enable `ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED` (code default
-and worker CDK remain **false**); change OCR routing, adapters, or provider
-behavior.
+**Does not:** enable `ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED` (at the time
+of this wiring, code default and worker CDK remained **false**); change OCR
+routing, adapters, or provider behavior.
 
 **Supersedes:** the Phase 6A deferred item “Cloud Vision secret/CDK wiring”
 and the earlier “do not reference a Cloud Vision secret yet” constraint.
-Enabling the banded flag in production remains deferred.
+Enabling the banded flag in production was deferred here and is **superseded**
+by “worker CDK execution flag ON” above.
 
 **Tests:** `documents/test_antigravity_ocr.py`
 (`AntigravityBandedCdkWiringTests`).
@@ -221,16 +239,20 @@ timeout as the document budget.
 
 **Decision / implemented:** Wire the already-implemented Arabic Printed Banded
 coordinator into `AntigravityAdapter` behind a new worker-only execution flag.
-Do not enable it in deployment. Cloud Vision secret/CDK wiring is implemented
-separately (injected into the worker container only; flag remains false);
-see “Cloud Vision worker secret” above.
+Do not enable it in deployment (historical Phase 6A constraint; **superseded**
+by “worker CDK execution flag ON” above). Cloud Vision secret/CDK wiring is
+implemented separately (injected into the worker container only); see “Cloud
+Vision worker secret” above.
 
 **Current behavior:**
 
 - `ENABLE_ANTIGRAVITY_ARABIC_PRINTED` is unchanged (route activation for
   `ar` + `PRINTED`).
-- `ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED` defaults to **false**. Worker CDK
-  sets **`false`**. The flag is **not** on the web task.
+- `ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED` defaults to **false**. At Phase
+  6A wiring time, worker CDK config set **`false`**. The flag is **not** on
+  the web task. Worker CDK config now sets **`true`** (see “worker CDK
+  execution flag ON”); that is desired source, effective in runtime after
+  deployment — verify deployed runtime separately.
 - When Arabic printed is routed to Antigravity and the banded flag is false,
   the existing whole-document JSON Antigravity path is unchanged.
 - When both existing Arabic-Antigravity eligibility and the banded flag are

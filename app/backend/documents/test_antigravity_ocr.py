@@ -1549,7 +1549,7 @@ class AntigravityBandedEnvValidationTests(SimpleTestCase):
 
 
 class AntigravityBandedCdkWiringTests(SimpleTestCase):
-    def test_cdk_sets_worker_banded_flag_false_and_does_not_expose_to_web(self):
+    def test_cdk_sets_worker_banded_flag_true_and_does_not_expose_to_web(self):
         stack_path = (
             Path(__file__).resolve().parents[3]
             / "infra"
@@ -1562,7 +1562,7 @@ class AntigravityBandedCdkWiringTests(SimpleTestCase):
         web_block = source[web_start:worker_start]
         worker_block = source[worker_start:]
         self.assertIn(
-            '"ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED": "false"',
+            '"ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED": "true"',
             worker_block,
         )
         self.assertNotIn("ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED", web_block)
