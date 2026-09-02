@@ -1,78 +1,80 @@
 {% load archive_labels %}
-{% if photo_rows %}
-  <div class="table-wrap staff-photo-list">
-    <table class="table">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>תצוגה</th>
-          <th>קובץ / תיאור</th>
-          <th>סטטוס</th>
-          <th>פעולות</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in photo_rows %}
-          {% with photo=row.photo %}
-            <tr>
-              <td>{{ photo.position }}</td>
-              <td>
-                {% if row.thumbnail_url %}
-                  <img
-                    class="staff-photo-thumb"
-                    src="{{ row.thumbnail_url }}"
-                    alt=""
-                    width="64"
-                    height="64"
-                  />
-                {% else %}
-                  <div class="staff-photo-thumb staff-photo-thumb--missing" aria-hidden="true"></div>
-                {% endif %}
-              </td>
-              <td>
-                <div class="cell-title">{{ photo.original_filename|default:"(ללא שם קובץ)" }}</div>
-                {% if photo.description %}
-                  <div class="muted">{{ photo.description|truncatechars:80 }}</div>
-                {% endif %}
-                {% if photo.location %}
-                  <div class="muted">{{ photo.location }}</div>
-                {% endif %}
-                {% if row.identified_people_summary %}
-                  <div class="muted">{{ row.identified_people_summary }}</div>
-                {% endif %}
-              </td>
-              <td>
+{% if photo_edit_cards %}
+  <div class="staff-photo-cards">
+    {% for card in photo_edit_cards %}
+      {% with row=card.row photo=card.row.photo %}
+        <article class="card card--nested staff-photo-card" id="photo-{{ photo.id }}">
+          <div class="staff-photo-card-header">
+            {% if row.thumbnail_url %}
+              <img
+                class="staff-photo-thumb"
+                src="{{ row.thumbnail_url }}"
+                alt=""
+                width="64"
+                height="64"
+              />
+            {% else %}
+              <div class="staff-photo-thumb staff-photo-thumb--missing" aria-hidden="true"></div>
+            {% endif %}
+            <div class="staff-photo-card-meta">
+              <h3 class="section-title">תמונה {{ photo.position }}</h3>
+              <div class="cell-title">{{ photo.original_filename|default:"(ללא שם קובץ)" }}</div>
+              <div class="badge-row">
                 <span class="badge{% if photo|photo_upload_status_tone %} {{ photo|photo_upload_status_tone }}{% endif %}">{{ photo|photo_upload_status_label }}</span>
-              </td>
-              <td>
-                <div class="page-toolbar">
-                  <a class="btn" href="{% url 'archive-manage-photo-edit' item_id=item.id photo_id=photo.id %}">עריכה</a>
-                  <a class="btn" href="{% url 'archive-manage-photo-delete' item_id=item.id photo_id=photo.id %}">מחיקה</a>
-                  {% if row.move_up_ids %}
-                    <form method="post" action="{% url 'archive-manage-photo-reorder' item_id=item.id %}">
-                      {% csrf_token %}
-                      {% for photo_id in row.move_up_ids %}
-                        <input type="hidden" name="photo_ids" value="{{ photo_id }}" />
-                      {% endfor %}
-                      <button type="submit" class="btn">למעלה</button>
-                    </form>
-                  {% endif %}
-                  {% if row.move_down_ids %}
-                    <form method="post" action="{% url 'archive-manage-photo-reorder' item_id=item.id %}">
-                      {% csrf_token %}
-                      {% for photo_id in row.move_down_ids %}
-                        <input type="hidden" name="photo_ids" value="{{ photo_id }}" />
-                      {% endfor %}
-                      <button type="submit" class="btn">למטה</button>
-                    </form>
-                  {% endif %}
-                </div>
-              </td>
-            </tr>
-          {% endwith %}
-        {% endfor %}
-      </tbody>
-    </table>
+              </div>
+            </div>
+            <div class="page-toolbar staff-photo-card-actions">
+              <a class="btn" href="{% url 'archive-detail' item_id=item.id %}?photo={{ photo.id }}">צפייה</a>
+              <a class="btn" href="{% url 'archive-manage-photo-delete' item_id=item.id photo_id=photo.id %}">מחיקה</a>
+              {% if row.move_up_ids %}
+                <form method="post" action="{% url 'archive-manage-photo-reorder' item_id=item.id %}">
+                  {% csrf_token %}
+                  {% for photo_id in row.move_up_ids %}
+                    <input type="hidden" name="photo_ids" value="{{ photo_id }}" />
+                  {% endfor %}
+                  <button type="submit" class="btn">למעלה</button>
+                </form>
+              {% endif %}
+              {% if row.move_down_ids %}
+                <form method="post" action="{% url 'archive-manage-photo-reorder' item_id=item.id %}">
+                  {% csrf_token %}
+                  {% for photo_id in row.move_down_ids %}
+                    <input type="hidden" name="photo_ids" value="{{ photo_id }}" />
+                  {% endfor %}
+                  <button type="submit" class="btn">למטה</button>
+                </form>
+              {% endif %}
+            </div>
+          </div>
+
+          {% if card.form_errors %}
+            <div class="spacer"></div>
+            <div class="alert alert-danger">
+              <div class="alert-title">שגיאה בטופס</div>
+              <ul>
+                {% for error in card.form_errors %}
+                  <li>{{ error }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+
+          <div class="spacer"></div>
+          <form
+            method="post"
+            action="{% url 'archive-manage-photo-edit' item_id=item.id photo_id=photo.id %}"
+          >
+            {% csrf_token %}
+            <input type="hidden" name="inline_photo_edit" value="1" />
+            {% include "documents/archive/photo_content_form_fields.html" with form_data=card.form_data field_id_prefix=card.field_id_prefix %}
+            {% include "documents/archive/archive_date_form_fields.html" with form_data=card.form_data date_widget_prefix=card.date_widget_prefix %}
+            {% include "documents/archive/photo_person_form_fields.html" with form_data=card.form_data field_id_prefix=card.field_id_prefix person_choices=card.person_choices selected_people=card.selected_people %}
+            <div class="spacer"></div>
+            <button type="submit" class="btn btn-primary">שמירת תמונה זו</button>
+          </form>
+        </article>
+      {% endwith %}
+    {% endfor %}
   </div>
 {% else %}
   <p class="muted">אין תמונות בפריט זה.</p>

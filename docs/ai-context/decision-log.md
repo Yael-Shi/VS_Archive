@@ -1,5 +1,52 @@
 # VS-Archive Decision Log
 
+## Unified staff PHOTO edit cards
+
+**Decision / implemented:** Staff PHOTO item edit
+(`/archive/manage/<id>/edit/`) is the primary place to edit each
+`PhotoContent` row. Per-photo metadata is no longer a separate-page-only
+workflow. The standalone per-photo URL remains as a compatibility
+fallback.
+
+**Current behavior:**
+
+- Shared ArchiveItem metadata stays in its own form at the top
+  (title, visibility, item dates, discovery, ArchiveItemPerson).
+- Each PhotoContent is a separate card in `(position, id)` order under
+  **תמונות בפריט זה**, with thumbnail/status/filename, public **צפייה**
+  (`/archive/<id>/?photo=<photo_id>`), move up/down, delete confirmation,
+  and the existing per-photo fields.
+- Each card is an independent `<form>` POSTing to
+  `/archive/manage/<id>/photos/<photo_id>/edit/` with hidden
+  `inline_photo_edit=1`. Saving one card updates only that PhotoContent /
+  PhotoPerson. It does not write ArchiveItem shared metadata or another
+  photo. No inference between ArchiveItemPerson and PhotoPerson.
+- Successful inline save redirects to
+  `/archive/manage/<id>/edit/#photo-<photo_id>`. Validation errors
+  re-render the **item** edit page (HTTP 200) with submitted values and
+  errors on that card only.
+- GET/POST without `inline_photo_edit` on the standalone photo-edit URL
+  still renders/saves that page and redirects back to itself on success.
+- Date-widget POST `name`s stay unprefixed (`date_precision`,
+  `date_start_*`, `date_end_*`). Photo cards prefix DOM ids via
+  `date_widget_prefix=photo<id>` so multiple widgets can coexist with the
+  unprefixed item-level widget. Other per-photo control ids use the same
+  `photo<id>_` prefix; add-photo and the standalone editor stay
+  unprefixed.
+- Add-photo, reorder, and delete-one-photo endpoints are unchanged.
+
+**Why:** Editing N photos required a round-trip per photo. Independent
+server-rendered forms keep the existing parse/update path without a
+modal/JS editor or mixed POST of item + photo fields.
+
+**Deferred:** staff `?photo=` selector on the item edit URL; removing the
+standalone photo-edit route; add-photo returning with a card hash.
+
+**Tests:** `documents/test_photo_multi_manage.py`,
+`documents/test_photo_manage_edit_delete.py`,
+`documents/test_photo_manage_status_clarity.py`,
+`documents/test_archive_item_person_staff_ui.py`.
+
 ## Public Person page PhotoPerson appearances
 
 **Decision / implemented:** `/archive/people/<person_id>/` is accessible
@@ -516,8 +563,9 @@ current single-widget create/edit/upload behavior.
 widgets on the same screen. Duplicate ids would make labels and JS attach to
 the first widget only.
 
-**Deferred:** unified staff PHOTO page / selector; actually placing two
-prefixed widgets on a live page; changing public UI.
+**Deferred:** ~~unified staff PHOTO page / actually placing two prefixed
+widgets on a live page~~ → implemented in **Unified staff PHOTO edit
+cards**. Remaining: public UI date widgets; staff `?photo=` selector.
 
 **Tests:** `documents/test_archive_date_widget_prefix.py`; existing
 `documents/test_archive_date_input.py` create/edit/upload markup tests.
@@ -588,10 +636,10 @@ staff `?photo=` selection, or change add-photo / Person write paths.
 navigation. Stay-on-page matches the already-decided unified-management UX
 without merging layouts yet.
 
-**Deferred:** unified staff PHOTO page / selector; staff `?photo=` on the
-item edit URL. Date-widget prefixing is implemented separately (see
-**Prefixable archive date-entry widget**); current PHOTO pages still render
-one unprefixed widget.
+**Deferred (superseded in part):** ~~unified staff PHOTO page~~ →
+**Unified staff PHOTO edit cards**. Remaining: staff `?photo=` selector
+on the item edit URL. Non-inline POST to the standalone photo-edit URL
+still redirects to that same URL.
 
 **Tests:** `documents/test_photo_manage_edit_delete.py`,
 `documents/test_photo_multi_manage.py`.

@@ -11,7 +11,7 @@
     <h1 class="page-title">{{ page_title }}</h1>
     <p class="page-subtitle">
       פריט ארכיון מסוג תמונה — עריכת מטא־דאטה בלבד, ללא החלפת קובץ התמונה.
-      מטא־דאטה משותף לפריט מוצג למטה; עריכת תמונה בודדת נעשית מדף התמונה עצמו.
+      מטא־דאטה משותף לפריט נשמר בטופס העליון; מטא־דאטה של כל תמונה נערך ונשמר בכרטיס שלה באותו דף.
     </p>
     <p class="muted">
       דף זה מאפשר עריכת מטא־דאטה בלבד (תיאור קצר, נראות, תאריכים, קטגוריות וכו׳).
@@ -42,7 +42,7 @@
 
     <div class="spacer"></div>
     <h2 class="section-title">מטא־דאטה משותף לפריט</h2>
-    <form method="post">
+    <form method="post" id="archive-item-shared-form">
       {% csrf_token %}
       {% include "documents/archive/photo_item_shared_form_fields.html" %}
       {% if show_discovery_metadata %}
