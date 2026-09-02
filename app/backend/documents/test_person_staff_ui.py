@@ -123,6 +123,13 @@ def _alias_sql(captured_queries) -> list[str]:
     ]
 
 
+def _table_sql(captured_queries, table: str) -> list[str]:
+    needle = table.lower()
+    return [
+        query["sql"] for query in captured_queries if needle in query["sql"].lower()
+    ]
+
+
 def _edit_url(person: Person) -> str:
     return reverse("archive-manage-person-edit", kwargs={"person_id": person.id})
 
@@ -290,16 +297,227 @@ class PersonStaffEditAccessTests(TestCase):
         self.assertEqual(resp.status_code, 404)
 
     def test_no_public_person_catalog_or_alternate_routes(self):
-        for path in (
-            "/archive/person/1/",
-            "/archive/manage/people/",
-        ):
-            with self.assertRaises(Resolver404):
-                resolve(path)
+        with self.assertRaises(Resolver404):
+            resolve("/archive/person/1/")
         match = resolve("/archive/people/1/")
         self.assertEqual(match.url_name, "archive-person-detail")
+        match = resolve("/archive/manage/people/")
+        self.assertEqual(match.url_name, "archive-manage-people")
         match = resolve("/archive/manage/people/1/edit/")
         self.assertEqual(match.url_name, "archive-manage-person-edit")
+
+
+class PersonStaffIndexAccessTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="person_index_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.url = reverse("archive-manage-people")
+
+    def test_staff_can_open_people_index(self):
+        self.client.force_login(self.staff)
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "ניהול אנשים")
+        self.assertContains(resp, "אין רשומות אדם.")
+
+    def test_anonymous_is_redirected_to_login(self):
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(resp["Location"].startswith("/accounts/login/"))
+
+    def test_non_staff_is_forbidden(self):
+        family_group, _ = Group.objects.get_or_create(name=ARCHIVE_FAMILY_GROUP_NAME)
+        user = User.objects.create_user(
+            username="person_index_family",
+            password="test-pass",
+        )
+        user.groups.add(family_group)
+        self.client.force_login(user)
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 403)
+
+    def test_post_is_method_not_allowed(self):
+        self.client.force_login(self.staff)
+        person = Person.objects.create(name="Post Guard Person")
+        resp = self.client.post(self.url, data={"q": "ignored", "name": "mutated"})
+        self.assertEqual(resp.status_code, 405)
+        person.refresh_from_db()
+        self.assertEqual(person.name, "Post Guard Person")
+        self.assertEqual(Person.objects.count(), 1)
+
+
+@override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
+class PersonStaffIndexPageTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="person_index_page_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.client.force_login(self.staff)
+        self.url = reverse("archive-manage-people")
+
+    def test_duplicate_canonical_names_are_separate_rows_by_id(self):
+        first = Person.objects.create(name="Duplicate Name")
+        second = Person.objects.create(name="Duplicate Name")
+        other = Person.objects.create(name="Other Person")
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertEqual(html.count("Duplicate Name"), 2)
+        self.assertContains(resp, str(first.id))
+        self.assertContains(resp, str(second.id))
+        self.assertContains(resp, str(other.id))
+        self.assertContains(resp, _edit_url(first))
+        self.assertContains(resp, _edit_url(second))
+        self.assertContains(resp, _edit_url(other))
+        people = list(resp.context["people"])
+        self.assertEqual(
+            [person.id for person in people],
+            [first.id, second.id, other.id],
+        )
+
+    def test_aliases_render_and_alias_only_query_finds_canonical_person(self):
+        matched = Person.objects.create(name="CanonicalMatched")
+        PersonAlias.objects.create(person=matched, name="HiddenAliasToken")
+        PersonAlias.objects.create(person=matched, name="AnotherAlias")
+        unrelated = Person.objects.create(name="UnrelatedPerson")
+        PersonAlias.objects.create(person=unrelated, name="OtherAliasToken")
+
+        resp = self.client.get(self.url, data={"q": "hiddenaliastoken"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "CanonicalMatched")
+        self.assertContains(resp, "HiddenAliasToken")
+        self.assertContains(resp, "AnotherAlias")
+        self.assertContains(resp, _edit_url(matched))
+        self.assertNotContains(resp, "UnrelatedPerson")
+        self.assertNotContains(resp, "OtherAliasToken")
+        self.assertContains(resp, 'value="hiddenaliastoken"')
+        self.assertEqual(list(resp.context["people"]), [matched])
+
+    def test_canonical_name_query_excludes_unrelated_people(self):
+        matched = Person.objects.create(name="FindableCanonical")
+        unrelated = Person.objects.create(name="Someone Else")
+        resp = self.client.get(self.url, data={"q": "findablecanonical"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, matched.name)
+        self.assertContains(resp, _edit_url(matched))
+        self.assertNotContains(resp, unrelated.name)
+        self.assertNotContains(resp, _edit_url(unrelated))
+
+    def test_empty_filtered_state_is_clear_and_preserves_q(self):
+        Person.objects.create(name="Existing Person")
+        resp = self.client.get(self.url, data={"q": "NoSuchPersonToken"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "לא נמצאו אנשים תואמים.")
+        self.assertContains(resp, 'value="NoSuchPersonToken"')
+        self.assertNotContains(resp, "Existing Person")
+        self.assertEqual(list(resp.context["people"]), [])
+
+    def test_archive_item_person_and_photo_person_counts_stay_separate(self):
+        item_a = _create_photo_item(title="Count album A")
+        item_b = _create_photo_item(title="Count album B")
+        photo_a1 = _add_photo(item_a, position=1)
+        photo_a2 = _add_photo(item_a, position=2)
+        photo_b = _add_photo(item_b, position=1)
+
+        both = Person.objects.create(name="Person With Both")
+        item_only = Person.objects.create(name="Item Only Person")
+        photo_only = Person.objects.create(name="Photo Only Person")
+
+        ArchiveItemPerson.objects.create(archive_item=item_a, person=both)
+        ArchiveItemPerson.objects.create(archive_item=item_b, person=both)
+        PhotoPerson.objects.create(photo_content=photo_a1, person=both)
+        PhotoPerson.objects.create(photo_content=photo_a2, person=both)
+        PhotoPerson.objects.create(photo_content=photo_b, person=both)
+
+        ArchiveItemPerson.objects.create(archive_item=item_a, person=item_only)
+        PhotoPerson.objects.create(photo_content=photo_a1, person=photo_only)
+
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        by_id = {person.id: person for person in resp.context["people"]}
+        self.assertEqual(by_id[both.id].archive_item_person_count, 2)
+        self.assertEqual(by_id[both.id].photo_person_count, 3)
+        self.assertEqual(by_id[item_only.id].archive_item_person_count, 1)
+        self.assertEqual(by_id[item_only.id].photo_person_count, 0)
+        self.assertEqual(by_id[photo_only.id].archive_item_person_count, 0)
+        self.assertEqual(by_id[photo_only.id].photo_person_count, 1)
+
+    def test_index_does_not_n_plus_one_on_aliases_or_relation_counts(self):
+        people = [
+            Person.objects.create(name=f"Index person {index}") for index in range(4)
+        ]
+        item = _create_photo_item(title="Index query album")
+        photo = _add_photo(item, position=1)
+        for person in people:
+            PersonAlias.objects.create(person=person, name=f"{person.name} alias")
+            ArchiveItemPerson.objects.create(archive_item=item, person=person)
+            PhotoPerson.objects.create(photo_content=photo, person=person)
+
+        self.client.get(self.url)
+
+        with CaptureQueriesContext(connection) as few_ctx:
+            few_resp = self.client.get(self.url)
+        self.assertEqual(few_resp.status_code, 200)
+
+        extra_item = _create_photo_item(title="Index query album extra")
+        extra_photo = _add_photo(extra_item, position=1)
+        extra_people = [
+            Person.objects.create(name=f"Extra index {index}") for index in range(4)
+        ]
+        for person in [*people, *extra_people]:
+            PersonAlias.objects.create(person=person, name=f"{person.name} alias 2")
+            PersonAlias.objects.create(person=person, name=f"{person.name} alias 3")
+            ArchiveItemPerson.objects.create(archive_item=extra_item, person=person)
+            PhotoPerson.objects.create(photo_content=extra_photo, person=person)
+
+        with CaptureQueriesContext(connection) as many_ctx:
+            many_resp = self.client.get(self.url)
+        self.assertEqual(many_resp.status_code, 200)
+        self.assertEqual(len(_alias_sql(few_ctx.captured_queries)), 1)
+        self.assertEqual(len(_alias_sql(many_ctx.captured_queries)), 1)
+        self.assertEqual(
+            len(_table_sql(few_ctx.captured_queries, "documents_archiveitemperson")),
+            len(_table_sql(many_ctx.captured_queries, "documents_archiveitemperson")),
+        )
+        self.assertEqual(
+            len(_table_sql(few_ctx.captured_queries, "documents_photoperson")),
+            len(_table_sql(many_ctx.captured_queries, "documents_photoperson")),
+        )
+        self.assertGreaterEqual(
+            len(_table_sql(few_ctx.captured_queries, "documents_archiveitemperson")),
+            1,
+        )
+        self.assertGreaterEqual(
+            len(_table_sql(few_ctx.captured_queries, "documents_photoperson")),
+            1,
+        )
+
+    def test_management_page_links_to_people_index(self):
+        resp = self.client.get(reverse("archive-manage-list"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, reverse("archive-manage-people"))
+        self.assertContains(resp, "ניהול אנשים")
+
+    def test_public_surfaces_do_not_link_to_staff_people_index(self):
+        person = Person.objects.create(name="Public Index Person")
+        item = _create_photo_item(title="Public index album")
+        _add_photo(item, position=1)
+        ArchiveItemPerson.objects.create(archive_item=item, person=person)
+        self.client.logout()
+        public_list = self.client.get(reverse("archive-list"))
+        public_person = self.client.get(
+            reverse("archive-person-detail", kwargs={"person_id": person.id})
+        )
+        self.assertEqual(public_list.status_code, 200)
+        self.assertEqual(public_person.status_code, 200)
+        self.assertNotContains(public_list, reverse("archive-manage-people"))
+        self.assertNotContains(public_person, reverse("archive-manage-people"))
+        self.assertNotContains(public_person, "ניהול אנשים")
 
 
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")

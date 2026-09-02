@@ -1,5 +1,35 @@
 # VS-Archive Decision Log
 
+## Staff Person index
+
+**Decision / implemented:** Staff-only GET index at `/archive/manage/people/`
+(`archive-manage-people`) for finding and opening existing `Person` rows.
+This is not a public Person catalog, not Django Admin, and not a create /
+merge / delete surface.
+
+**Current behavior:**
+
+- Access matches other archive-manage pages: `@login_required` +
+  `_require_admin_page`. Anonymous users redirect to login; other
+  authenticated users get 403.
+- Optional `q` is case-insensitive `icontains` on canonical `Person.name`
+  and `PersonAlias.name`. Duplicate canonical names remain separate rows
+  keyed by `Person.id`. Results order by `(name, id)`.
+- Columns: Person id, canonical name, aliases, `ArchiveItemPerson` count,
+  `PhotoPerson` count, edit link to existing `archive-manage-person-edit`.
+  The two relation counts are independent annotations; neither relation is
+  inferred from the other.
+- Queryset uses alias prefetch plus `Count(..., distinct=True)` on each
+  relation, and `Exists` for alias search, so alias/count queries do not
+  grow per row.
+- `/archive/manage/` links to the index. Public Person pages and public
+  browse are unchanged.
+
+**Deferred:** Person create/merge/delete from this index; Django Admin for
+Person; public Person catalog; pagination if the staff list becomes large.
+
+**Tests:** `documents/test_person_staff_ui.py`.
+
 ## Public PhotoPerson name links (presentation only)
 
 **Decision / implemented:** Public PHOTO detail **אנשים מזוהים:** names are
@@ -1260,7 +1290,9 @@ missing write path for the identity model that public `q` and advanced
 **Current behavior:**
 
 - Shared people section on the existing type-specific ArchiveItem
-  **create** and **edit** forms. No Person catalog page. No user-submitted
+  **create** and **edit** forms. Staff Person index for find/open is
+  `/archive/manage/people/` (not a public catalog and not a create/merge
+  page). No user-submitted
   Person suggestions (C2).
 - Create surfaces:
   - MANUAL_TEXT: `/archive/manage/new/?item_type=manual_text` and legacy
@@ -1603,7 +1635,8 @@ not claimed solved until that validation.
 
 **Decision / implemented:** Staff-only UX for managing one existing Person's
 canonical name and aliases, plus alias-aware labels on the PHOTO per-photo
-Person picker. No catalog, no Admin registration, no public Person pages, and
+Person picker. A GET-only staff index at `/archive/manage/people/` finds
+existing rows. No Django Admin registration, no public Person catalog, and
 no public alias display.
 
 **Current behavior:**
@@ -1622,7 +1655,9 @@ no public alias display.
   `.../delete/`. Access matches other archive-manage pages:
   `@login_required` + `_require_admin_page` (staff/superuser). Anonymous users
   are redirected to login; other authenticated users get 403; missing Person
-  or mismatched alias is 404. There is no `/archive/manage/people/` list.
+  or mismatched alias is 404. Staff can list existing people at
+  `/archive/manage/people/` (`archive-manage-people`); that index is GET-only
+  find/open, not create/merge/delete.
 - The Person page edits canonical `Person.name` and can add/edit/delete
   aliases through the existing PR6a services (`update_person_name`,
   `create_person_alias`, `update_person_alias`, `delete_person_alias`). Views
@@ -1644,10 +1679,10 @@ no public alias display.
 
 **Migration:** none.
 
-**Deferred:** general Person catalog/list; Person Admin; identity
-merge/deduplication; Tag → Person migration; public Person pages; public
+**Deferred:** Person Admin; identity
+merge/deduplication; Tag → Person migration; public Person catalog; public
 alias display; alias kind/type; language/script metadata; fuzzy matching; AI
-identification.
+identification. The staff Person index is in **Staff Person index**.
 
 **Tests:** `documents/test_person_staff_ui.py`.
 
