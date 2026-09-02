@@ -1,11 +1,63 @@
 # VS-Archive Decision Log
 
+## Staff Person identity merge (explicit ids)
+
+**Decision / implemented:** Controlled staff merge of one `Person` INTO
+another. This is identity merge by explicit `Person.id`, not name
+matching. `Person` and `Author` remain completely separate. Merge logic
+lives in `documents/services/person_merge.py`, not in the view.
+
+**Current behavior:**
+
+- `merge_persons(keeper_id=..., duplicate_id=...)` merges duplicate INTO
+  keeper. Ids must exist and differ. Keeper `Person.id` and canonical
+  `Person.name` are unchanged. Duplicate is deleted only after dependents
+  are handled. The whole merge is `transaction.atomic` and fail-closed.
+- Person rows are locked with `select_for_update` in deterministic id
+  order. Dependent alias, `ArchiveItemPerson`, `PhotoPerson`, and
+  `ArchiveItemPersonSuggestion` rows are locked before mutation.
+  Fail-closed checks run before destructive writes.
+- Frozen historical Person ids from
+  `HISTORICAL_PERSON_NAME_TAG_RECORDS` may be the keeper. They must never
+  be the duplicate/deleted Person. The frozen map is not modified.
+- Biography: keep keeper if keeper nonempty and duplicate empty; copy
+  duplicate onto keeper if keeper empty and duplicate nonempty; no change
+  if both empty or equal; fail closed before writes if both nonempty and
+  different. No concatenation or automatic choice.
+- Aliases move to keeper with `(person, name)` dedupe. An incoming alias
+  equal to keeper canonical name is skipped. Duplicate canonical name
+  becomes a keeper alias when it differs from keeper canonical name and
+  is not already an alias.
+- `ArchiveItemPerson` and `PhotoPerson` are moved independently. Collision
+  on the same item/photo keeps one keeper row and deletes the duplicate
+  row. Neither relation is inferred from the other.
+- `ArchiveItemPersonSuggestion.person` is PROTECT, so suggestions are
+  repointed to keeper. Two PENDING suggestions for the same
+  `(archive_item, action)` fail the entire merge. Reviewed
+  APPROVED/REJECTED rows may coexist after repointing.
+- Search: capture the pre-merge union of ArchiveItem ids reached through
+  `ArchiveItemPerson` or `PhotoPerson` for either person; after duplicate
+  deletion, `sync_archive_item_search_indexes` refreshes each id once.
+- Staff UI: from `/archive/manage/people/<keeper_id>/edit/`, enter the
+  duplicate id and GET `/archive/manage/people/<keeper_id>/merge/`. Only
+  POST with `confirm_merge=1` executes. Success returns to keeper edit.
+  Access is `@login_required` + `_require_admin_page`. Public pages do
+  not expose merge. The staff people index remains find/open only (no
+  per-row merge buttons).
+
+**Deferred:** Person create/delete; merge from the people index; name-based
+merge; Django Admin Person tools; changing frozen map ids.
+
+**Tests:** `documents/test_person_merge.py`,
+`documents/test_person_merge_staff_ui.py`.
+
 ## Staff Person index
 
 **Decision / implemented:** Staff-only GET index at `/archive/manage/people/`
 (`archive-manage-people`) for finding and opening existing `Person` rows.
 This is not a public Person catalog, not Django Admin, and not a create /
-merge / delete surface.
+delete surface. Merge is a separate explicit-id flow on the Person edit
+page, not from this index.
 
 **Current behavior:**
 
@@ -25,7 +77,7 @@ merge / delete surface.
 - `/archive/manage/` links to the index. Public Person pages and public
   browse are unchanged.
 
-**Deferred:** Person create/merge/delete from this index; Django Admin for
+**Deferred:** Person create/delete from this index; Django Admin for
 Person; public Person catalog; pagination if the staff list becomes large.
 
 **Tests:** `documents/test_person_staff_ui.py`.

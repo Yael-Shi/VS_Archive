@@ -32,7 +32,7 @@ from django.urls import reverse
 from django.utils.cache import add_never_cache_headers
 from django.views.decorators.cache import never_cache
 from django.utils.http import urlencode
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from .models import (
     ArchiveCategory,
@@ -207,6 +207,12 @@ from documents.services.photo_metadata_validation import (
     empty_photo_metadata_form_data,
     parse_photo_content_staff_form,
     photo_content_staff_form_data,
+)
+from documents.services.person_merge import (
+    PersonMergeError,
+    merge_persons,
+    parse_person_merge_id,
+    preview_person_merge,
 )
 from documents.services.photo_content_management import (
     ARCHIVE_ITEM_NOT_PHOTO_ERROR,
@@ -4592,6 +4598,7 @@ PERSON_BIOGRAPHY_UPDATED_MSG = "התקציר עודכן."
 PERSON_ALIAS_ADDED_MSG = "השם החלופי נוסף."
 PERSON_ALIAS_UPDATED_MSG = "השם החלופי עודכן."
 PERSON_ALIAS_DELETED_MSG = "השם החלופי נמחק."
+PERSON_MERGED_MSG = "רשומות האדם מוזגו. הרשומה הכפולה נמחקה."
 AUTHOR_NAME_UPDATED_MSG = "שם המחבר/ת עודכן בכל הפריטים המשויכים."
 ARCHIVE_ITEM_UPDATED_MSG = "הפריט עודכן."
 ARCHIVE_ITEM_PEOPLE_HEADING = "אנשים קשורים"
@@ -5812,6 +5819,90 @@ def archive_manage_person_edit_page(request, person_id: int):
             canonical_name=canonical_name,
             alias_name=alias_name,
             biography=biography,
+        ),
+    )
+
+
+def _person_merge_duplicate_id_from_request(request):
+    if request.method == "POST":
+        return request.POST.get("duplicate_id")
+    return request.GET.get("duplicate_id")
+
+
+def _person_merge_confirm_context(*, keeper, preview, duplicate_id_raw, form_errors):
+    return {
+        "keeper": keeper,
+        "preview": preview,
+        "duplicate_id_raw": duplicate_id_raw or "",
+        "form_errors": form_errors,
+        "page_title": "אישור מיזוג רשומת אדם",
+    }
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def archive_manage_person_merge_page(request, person_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    keeper = _get_staff_person(person_id)
+    form_errors: list[str] = []
+    preview = None
+    duplicate_id_raw = _person_merge_duplicate_id_from_request(request)
+
+    try:
+        duplicate_id = parse_person_merge_id(duplicate_id_raw)
+        preview = preview_person_merge(
+            keeper_id=keeper.pk,
+            duplicate_id=duplicate_id,
+        )
+    except PersonMergeError as exc:
+        form_errors = [exc.message]
+
+    if request.method == "POST":
+        confirm = (request.POST.get("confirm_merge") or "").strip()
+        if (
+            confirm == "1"
+            and preview is not None
+            and preview.can_execute
+            and not form_errors
+        ):
+            try:
+                merge_persons(
+                    keeper_id=keeper.pk,
+                    duplicate_id=preview.duplicate_id,
+                )
+            except PersonMergeError as exc:
+                form_errors = [exc.message]
+            else:
+                messages.success(request, PERSON_MERGED_MSG)
+                return redirect("archive-manage-person-edit", person_id=keeper.id)
+        elif confirm == "1" and preview is not None and preview.blockers:
+            form_errors = [preview.blockers[0]]
+
+        return render(
+            request,
+            "documents/archive/person_merge_confirm.html",
+            context=_person_merge_confirm_context(
+                keeper=keeper,
+                preview=preview,
+                duplicate_id_raw=duplicate_id_raw,
+                form_errors=form_errors,
+            ),
+        )
+
+    if preview is not None and preview.blockers and not form_errors:
+        form_errors = list(preview.blockers)
+
+    return render(
+        request,
+        "documents/archive/person_merge_confirm.html",
+        context=_person_merge_confirm_context(
+            keeper=keeper,
+            preview=preview,
+            duplicate_id_raw=duplicate_id_raw,
+            form_errors=form_errors,
         ),
     )
 
