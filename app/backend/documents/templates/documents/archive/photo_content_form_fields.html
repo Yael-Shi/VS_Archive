@@ -1,25 +1,27 @@
+{% with fid=field_id_prefix|default:"" %}
 <div class="field">
-  <label for="description">תיאור / כיתוב</label>
-  <textarea id="description" name="description" rows="3">{{ form_data.description }}</textarea>
+  <label for="{{ fid }}description">תיאור / כיתוב</label>
+  <textarea id="{{ fid }}description" name="description" rows="3">{{ form_data.description }}</textarea>
 </div>
 
 <div class="field">
-  <label for="location">מיקום</label>
-  <input id="location" name="location" type="text" value="{{ form_data.location }}" />
+  <label for="{{ fid }}location">מיקום</label>
+  <input id="{{ fid }}location" name="location" type="text" value="{{ form_data.location }}" />
 </div>
 
 <div class="field">
-  <label for="context">הקשר / נסיבות</label>
-  <textarea id="context" name="context" rows="3">{{ form_data.context }}</textarea>
+  <label for="{{ fid }}context">הקשר / נסיבות</label>
+  <textarea id="{{ fid }}context" name="context" rows="3">{{ form_data.context }}</textarea>
 </div>
 
 <div class="field">
-  <label for="people_present">נוכחים בתמונה (טקסט חופשי)</label>
-  <textarea id="people_present" name="people_present" rows="2">{{ form_data.people_present }}</textarea>
+  <label for="{{ fid }}people_present">נוכחים בתמונה (טקסט חופשי)</label>
+  <textarea id="{{ fid }}people_present" name="people_present" rows="2">{{ form_data.people_present }}</textarea>
   <div class="field-hint">לתיאור לא מזוהה, חלקי או לא ודאי. אנשים מזוהים נבחרים בנפרד.</div>
 </div>
 
 <div class="field">
-  <label for="notes">הערות נוספות</label>
-  <textarea id="notes" name="notes" rows="3">{{ form_data.notes }}</textarea>
+  <label for="{{ fid }}notes">הערות נוספות</label>
+  <textarea id="{{ fid }}notes" name="notes" rows="3">{{ form_data.notes }}</textarea>
 </div>
+{% endwith %}

@@ -1,6 +1,7 @@
+{% with fid=field_id_prefix|default:"" %}
 <div class="field">
-  <label for="person_ids">אנשים מזוהים בתמונה</label>
-  <select id="person_ids" name="person_ids" multiple size="8">
+  <label for="{{ fid }}person_ids">אנשים מזוהים בתמונה</label>
+  <select id="{{ fid }}person_ids" name="person_ids" multiple size="8">
     {% for person in person_choices %}
       <option value="{{ person.id }}" {% if person.selected %}selected{% endif %}>
         {{ person.label }}
@@ -27,7 +28,8 @@
 {% endif %}
 
 <div class="field">
-  <label for="new_person_name">הוספת אדם מזוהה חדש</label>
-  <input id="new_person_name" name="new_person_name" type="text" value="{{ form_data.new_person_name }}" />
+  <label for="{{ fid }}new_person_name">הוספת אדם מזוהה חדש</label>
+  <input id="{{ fid }}new_person_name" name="new_person_name" type="text" value="{{ form_data.new_person_name }}" />
   <div class="field-hint">ניתן להזין כמה שמות מופרדים בפסיקים. כל שם יוצר רשומת אדם חדשה ומקושרת לתמונה זו. שם תצוגה בלבד.</div>
 </div>
+{% endwith %}

@@ -228,6 +228,7 @@ from documents.services.photo_content_management import (
     reorder_photo_contents,
     staff_person_aliases_prefetch,
     staff_person_index_queryset,
+    staff_person_picker_queryset,
     staff_photo_contents_queryset,
     update_person_alias,
     update_person_biography,
@@ -4572,6 +4573,83 @@ def _staff_photo_manage_rows(item: ArchiveItem) -> list:
     )
 
 
+def _photo_inline_edit_prefixes(photo_content: PhotoContent) -> tuple[str, str]:
+    date_widget_prefix = f"photo{photo_content.id}"
+    return date_widget_prefix, f"{date_widget_prefix}_"
+
+
+def _staff_photo_edit_cards(
+    item: ArchiveItem,
+    *,
+    inline_photo_id: int | None = None,
+    inline_form_data: dict | None = None,
+    inline_form_errors: list[str] | None = None,
+) -> list[dict]:
+    rows = _staff_photo_manage_rows(item)
+    picker_people = list(staff_person_picker_queryset())
+    cards: list[dict] = []
+    for row in rows:
+        photo = row.photo
+        if inline_photo_id == photo.id and inline_form_data is not None:
+            form_data = inline_form_data
+            form_errors = list(inline_form_errors or [])
+        else:
+            form_data = photo_content_staff_form_data(photo)
+            form_errors = []
+        person_context = _staff_photo_person_form_context(
+            form_data, people=picker_people
+        )
+        date_widget_prefix, field_id_prefix = _photo_inline_edit_prefixes(photo)
+        cards.append(
+            {
+                "row": row,
+                "form_data": form_data,
+                "form_errors": form_errors,
+                "person_choices": person_context["person_choices"],
+                "selected_people": person_context["selected_people"],
+                "date_widget_prefix": date_widget_prefix,
+                "field_id_prefix": field_id_prefix,
+            }
+        )
+    return cards
+
+
+def _save_photo_content_from_staff_post(
+    photo_content: PhotoContent, post_data
+) -> tuple[bool, dict, list[str]]:
+    parsed, form_errors = parse_photo_content_staff_form(post_data)
+    if form_errors:
+        return False, parsed, form_errors
+    try:
+        update_photo_content_metadata(
+            photo_content,
+            description=parsed["description"],
+            location=parsed["location"],
+            context=parsed["context"],
+            people_present=parsed["people_present"],
+            notes=parsed["notes"],
+            date_start=parsed["date_start_value"],
+            date_end=parsed["date_end_value"],
+            date_precision=parsed["date_precision"],
+            person_ids=parsed["person_ids"],
+            new_person_name=parsed["new_person_name"],
+        )
+    except PhotoContentManagementError as exc:
+        return False, parsed, [exc.message]
+    return True, parsed, []
+
+
+def _photo_item_edit_redirect(item_id: int, *, photo_id: int | None = None):
+    url = reverse("archive-manage-edit", kwargs={"item_id": item_id})
+    if photo_id is not None:
+        return redirect(f"{url}#photo-{photo_id}")
+    return redirect(url)
+
+
+def _is_inline_photo_edit_post(post_data) -> bool:
+    return (post_data.get(PHOTO_INLINE_EDIT_FIELD) or "") == "1"
+
+
 def _get_staff_photo_archive_item(request, item_id: int) -> ArchiveItem:
     item = get_accessible_archive_item(
         request.user,
@@ -4605,6 +4683,8 @@ PERSON_ALIAS_DELETED_MSG = "השם החלופי נמחק."
 PERSON_MERGED_MSG = "רשומות האדם מוזגו. הרשומה הכפולה נמחקה."
 AUTHOR_NAME_UPDATED_MSG = "שם המחבר/ת עודכן בכל הפריטים המשויכים."
 ARCHIVE_ITEM_UPDATED_MSG = "הפריט עודכן."
+PHOTO_CONTENT_UPDATED_MSG = "התמונה עודכנה."
+PHOTO_INLINE_EDIT_FIELD = "inline_photo_edit"
 ARCHIVE_ITEM_PEOPLE_HEADING = "אנשים קשורים"
 PHOTO_ARCHIVE_ITEM_PEOPLE_HEADING = "אנשים קשורים לפריט"
 ARCHIVE_ITEM_PEOPLE_CURRENT_HEADING = "אנשים קשורים לפריט זה"
@@ -4614,7 +4694,7 @@ ARCHIVE_ITEM_PEOPLE_HINT = (
 )
 PHOTO_ARCHIVE_ITEM_PEOPLE_HINT = (
     "קשר ברמת פריט הארכיון, לא הופעה בתמונה. "
-    "אנשים מזוהים בתמונה נערכים בדף התמונה עצמו."
+    "אנשים מזוהים בתמונה נשמרים על התמונה עצמה ואינם מועתקים מכאן."
 )
 
 
@@ -4679,12 +4759,13 @@ def _save_archive_item_people(
     )
 
 
-def _staff_photo_person_form_context(form_data: dict) -> dict:
+def _staff_photo_person_form_context(form_data: dict, *, people=None) -> dict:
     selected_person_ids = [
         int(person_id) for person_id in form_data.get("person_ids") or []
     ]
     person_choices, selected_people = build_staff_person_choices(
-        selected_person_ids=selected_person_ids
+        selected_person_ids=selected_person_ids,
+        people=people,
     )
     return {
         "person_choices": person_choices,
@@ -5467,11 +5548,47 @@ def _archive_manage_edit_manual_text(request, item: ArchiveItem):
     )
 
 
+def _render_archive_manage_edit_photo(
+    request,
+    item: ArchiveItem,
+    *,
+    form_data: dict,
+    form_errors: list[str],
+    inline_photo_id: int | None = None,
+    inline_form_data: dict | None = None,
+    inline_form_errors: list[str] | None = None,
+):
+    return render(
+        request,
+        "documents/archive/photo_form.html",
+        context={
+            "item": item,
+            "photo_edit_cards": _staff_photo_edit_cards(
+                item,
+                inline_photo_id=inline_photo_id,
+                inline_form_data=inline_form_data,
+                inline_form_errors=inline_form_errors,
+            ),
+            **_archive_metadata_form_context(
+                form_data=form_data,
+                form_errors=form_errors,
+                page_title="עריכת תמונה",
+                submit_label="עדכון",
+                user=request.user,
+            ),
+            **_manual_text_discovery_metadata_form_context(),
+            **_archive_item_people_staff_form_context(
+                item_type=item.item_type, form_data=form_data
+            ),
+        },
+    )
+
+
 def _archive_manage_edit_photo(request, item: ArchiveItem):
     form_errors: list[str] = []
     form_data = _photo_form_data_from_item(item)
 
-    if request.method == "POST":
+    if request.method == "POST" and not _is_inline_photo_edit_post(request.POST):
         parsed, form_errors = parse_archive_metadata_form(
             request.POST, user=request.user
         )
@@ -5510,24 +5627,11 @@ def _archive_manage_edit_photo(request, item: ArchiveItem):
                 messages.success(request, ARCHIVE_ITEM_UPDATED_MSG)
                 return redirect("archive-manage-edit", item_id=item.id)
 
-    return render(
+    return _render_archive_manage_edit_photo(
         request,
-        "documents/archive/photo_form.html",
-        context={
-            "item": item,
-            "photo_rows": _staff_photo_manage_rows(item),
-            **_archive_metadata_form_context(
-                form_data=form_data,
-                form_errors=form_errors,
-                page_title="עריכת תמונה",
-                submit_label="עדכון",
-                user=request.user,
-            ),
-            **_manual_text_discovery_metadata_form_context(),
-            **_archive_item_people_staff_form_context(
-                item_type=item.item_type, form_data=form_data
-            ),
-        },
+        item,
+        form_data=form_data,
+        form_errors=form_errors,
     )
 
 
@@ -5571,33 +5675,31 @@ def archive_manage_photo_edit_page(request, item_id: int, photo_id: int):
     item, photo_content = _get_staff_photo_content(request, item_id, photo_id)
     form_errors: list[str] = []
     form_data = photo_content_staff_form_data(photo_content)
+    inline_post = request.method == "POST" and _is_inline_photo_edit_post(request.POST)
 
     if request.method == "POST":
-        parsed, form_errors = parse_photo_content_staff_form(request.POST)
-        form_data = parsed
-        if not form_errors:
-            try:
-                update_photo_content_metadata(
-                    photo_content,
-                    description=parsed["description"],
-                    location=parsed["location"],
-                    context=parsed["context"],
-                    people_present=parsed["people_present"],
-                    notes=parsed["notes"],
-                    date_start=parsed["date_start_value"],
-                    date_end=parsed["date_end_value"],
-                    date_precision=parsed["date_precision"],
-                    person_ids=parsed["person_ids"],
-                    new_person_name=parsed["new_person_name"],
-                )
-            except PhotoContentManagementError as exc:
-                form_errors = [exc.message]
-            else:
-                return redirect(
-                    "archive-manage-photo-edit",
-                    item_id=item.id,
-                    photo_id=photo_content.id,
-                )
+        saved, form_data, form_errors = _save_photo_content_from_staff_post(
+            photo_content, request.POST
+        )
+        if saved:
+            if inline_post:
+                messages.success(request, PHOTO_CONTENT_UPDATED_MSG)
+                return _photo_item_edit_redirect(item.id, photo_id=photo_content.id)
+            return redirect(
+                "archive-manage-photo-edit",
+                item_id=item.id,
+                photo_id=photo_content.id,
+            )
+        if inline_post:
+            return _render_archive_manage_edit_photo(
+                request,
+                item,
+                form_data=_photo_form_data_from_item(item),
+                form_errors=[],
+                inline_photo_id=photo_content.id,
+                inline_form_data=form_data,
+                inline_form_errors=form_errors,
+            )
 
     return render(
         request,

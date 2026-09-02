@@ -444,7 +444,8 @@ class ArchiveItemPersonStaffUiTests(ArchiveItemPersonStaffUiHarness, TestCase):
                 if item.item_type == ArchiveItem.ItemType.PHOTO:
                     self.assertContains(resp, PHOTO_ARCHIVE_ITEM_PEOPLE_HEADING)
                     self.assertContains(resp, PHOTO_ARCHIVE_ITEM_PEOPLE_HINT)
-                    self.assertNotContains(resp, 'name="person_ids"')
+                    self.assertContains(resp, 'name="person_ids"')
+                    self.assertContains(resp, 'name="archive_item_person_ids"')
                 else:
                     self.assertContains(resp, ARCHIVE_ITEM_PEOPLE_HEADING)
 

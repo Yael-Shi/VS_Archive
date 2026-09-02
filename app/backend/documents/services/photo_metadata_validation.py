@@ -89,7 +89,7 @@ def parse_photo_content_date_fields(
 def photo_content_staff_form_data(photo_content) -> dict[str, Any]:
     selected_ids: list[int] = []
     if photo_content is not None:
-        selected_ids = list(photo_content.people.values_list("id", flat=True))
+        selected_ids = [person.id for person in photo_content.people.all()]
     return {
         **photo_metadata_form_data_from_content(photo_content),
         **archive_date_form_data(

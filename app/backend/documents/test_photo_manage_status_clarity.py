@@ -271,6 +271,8 @@ class PhotoManageCopyClarityTests(TestCase):
         self.assertContains(resp, "עריכת מטא־דאטה בלבד")
         self.assertContains(resp, "לא ניתן להחליף או להעלות מחדש את קובץ התמונה")
         self.assertContains(resp, "תופיע בארכיון הציבורי רק לאחר שההעלאה הושלמה")
+        self.assertContains(resp, "בכרטיס שלה באותו דף")
+        self.assertNotContains(resp, "עריכת תמונה בודדת נעשית מדף התמונה עצמו")
         self.assertNotContains(resp, 'type="file"')
 
     def test_photo_delete_confirmation_contains_db_delete_and_s3_cleanup_guidance(

@@ -115,12 +115,15 @@ def person_staff_picker_label(person: Person) -> str:
 def build_staff_person_choices(
     *,
     selected_person_ids: list[int] | tuple[int, ...] | set[int],
+    people=None,
 ) -> tuple[list[StaffPersonChoice], list[StaffPersonChoice]]:
     """Return picker choices and the selected subset, both ordered by ``(name, id)``."""
     selected_set = {int(person_id) for person_id in selected_person_ids}
     choices: list[StaffPersonChoice] = []
     selected: list[StaffPersonChoice] = []
-    for person in staff_person_picker_queryset():
+    if people is None:
+        people = staff_person_picker_queryset()
+    for person in people:
         choice = StaffPersonChoice(
             id=person.pk,
             name=person.name,

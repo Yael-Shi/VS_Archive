@@ -842,9 +842,28 @@ textarea {
   border: 1px dashed var(--border-strong);
 }
 
-.staff-photo-list .page-toolbar {
+.staff-photo-list .page-toolbar,
+.staff-photo-card-actions {
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+
+.staff-photo-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.staff-photo-card-header {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.staff-photo-card-meta {
+  flex: 1;
+  min-width: 12rem;
 }
 
 .badge-row {

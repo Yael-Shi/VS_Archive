@@ -92,8 +92,10 @@ class PhotoManageEditTests(TestCase):
         self.assertContains(resp, "תיאור קצר")
         self.assertContains(resp, "מטא־דאטה משותף לפריט")
         self.assertContains(resp, "תמונות בפריט זה")
+        self.assertContains(resp, 'id="archive-item-shared-form"')
         self.assertContains(resp, 'name="title"')
-        self.assertNotContains(resp, 'name="description"')
+        self.assertContains(resp, 'name="description"')
+        self.assertContains(resp, 'name="inline_photo_edit"')
         self.assertNotContains(resp, 'name="author_name"')
         self.assertNotContains(resp, 'name="source_title"')
         self.assertNotContains(resp, 'name="body"')
@@ -112,8 +114,10 @@ class PhotoManageEditTests(TestCase):
         public_url = reverse("archive-detail", kwargs={"item_id": self.photo_item.id})
         self.assertContains(resp, f'href="{public_url}"')
         self.assertContains(resp, ">חזרה לפריט<")
-        self.assertNotContains(resp, ">צפייה<")
-        self.assertNotContains(resp, f"{public_url}?photo=")
+        self.assertContains(resp, ">צפייה<")
+        self.assertContains(resp, f"{public_url}?photo={photo.id}")
+        self.assertContains(resp, "בכרטיס שלה באותו דף")
+        self.assertNotContains(resp, "עריכת תמונה בודדת נעשית מדף התמונה עצמו")
 
     def test_anonymous_cannot_open_photo_edit_page(self):
         resp = self.client.get(

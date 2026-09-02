@@ -6,6 +6,7 @@ import json
 import re
 import threading
 from datetime import date
+from html.parser import HTMLParser
 from unittest.mock import call, patch
 
 from django.contrib.auth.models import User
@@ -75,6 +76,50 @@ def _add_photo(
     return photo
 
 
+def _fragment_by_id(html: str, element_id: str) -> str:
+    marker = f'id="{element_id}"'
+    attr_at = html.find(marker)
+    if attr_at == -1:
+        raise AssertionError(f"missing id={element_id!r}")
+    start = html.rfind("<", 0, attr_at)
+    tag = html[start + 1 :].split(None, 1)[0].rstrip(">")
+    next_open = html.find(f"<{tag}", attr_at)
+    if next_open == -1:
+        return html[start:]
+    return html[start:next_open]
+
+
+class _IdCollector(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.ids: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        attr_map = dict(attrs)
+        if "id" in attr_map:
+            self.ids.append(attr_map["id"])
+
+
+def _duplicate_ids(html: str) -> list[str]:
+    collector = _IdCollector()
+    collector.feed(html)
+    collector.close()
+    return sorted({value for value in collector.ids if collector.ids.count(value) > 1})
+
+
+def _photo_content_post(**overrides):
+    payload = {
+        "description": "",
+        "location": "",
+        "context": "",
+        "people_present": "",
+        "notes": "",
+        "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
+    }
+    payload.update(overrides)
+    return payload
+
+
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
 class PhotoMultiManagePageTests(TestCase):
     def setUp(self):
@@ -126,6 +171,52 @@ class PhotoMultiManagePageTests(TestCase):
         )
         self.assertNotContains(resp, ">למעלה<")
         self.assertNotContains(resp, ">למטה<")
+
+    def test_manage_page_renders_distinct_inline_photo_forms(self):
+        resp = self.client.get(
+            reverse("archive-manage-edit", kwargs={"item_id": self.item.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertEqual(html.count('name="description"'), 3)
+        self.assertEqual(html.count('name="person_ids"'), 3)
+        self.assertEqual(html.count('name="inline_photo_edit"'), 3)
+        shared = _fragment_by_id(html, "archive-item-shared-form")
+        self.assertIn('name="title"', shared)
+        self.assertNotIn('name="description"', shared)
+        self.assertNotIn('name="person_ids"', shared)
+        self.assertNotIn('name="inline_photo_edit"', shared)
+        for photo in (self.first, self.second, self.third):
+            card = _fragment_by_id(html, f"photo-{photo.id}")
+            edit_url = reverse(
+                "archive-manage-photo-edit",
+                kwargs={"item_id": self.item.id, "photo_id": photo.id},
+            )
+            self.assertIn(f'action="{edit_url}"', card)
+            self.assertIn(f'id="photo{photo.id}_description"', card)
+            self.assertIn(f'id="photo{photo.id}_person_ids"', card)
+            self.assertIn(photo.original_filename, card)
+            self.assertIn(f"?photo={photo.id}", card)
+            self.assertIn(">צפייה<", card)
+            self.assertIn(">מחיקה<", card)
+            self.assertIn("שמירת תמונה זו", card)
+            self.assertNotIn('name="title"', card)
+            self.assertNotIn('name="archive_item_person_ids"', card)
+
+    def test_unified_page_date_widgets_use_unique_ids_and_shared_post_names(self):
+        resp = self.client.get(
+            reverse("archive-manage-edit", kwargs={"item_id": self.item.id})
+        )
+        html = resp.content.decode()
+        self.assertEqual(_duplicate_ids(html), [])
+        self.assertIn('id="date_precision"', html)
+        self.assertIn('id="archiveDateWidget"', html)
+        for photo in (self.first, self.second, self.third):
+            card = _fragment_by_id(html, f"photo-{photo.id}")
+            self.assertIn(f'id="photo{photo.id}_date_precision"', card)
+            self.assertIn(f'id="photo{photo.id}_archiveDateWidget"', card)
+            self.assertIn('name="date_precision"', card)
+            self.assertNotIn(f'name="photo{photo.id}_date_precision"', card)
 
     def test_manage_page_prefetches_photo_people_without_n_plus_one(self):
         person = Person.objects.create(name="Ada")
@@ -823,6 +914,209 @@ class PhotoComponentEditTests(TestCase):
             )
         )
         self.assertEqual(resp.status_code, 404)
+
+
+@override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
+class PhotoUnifiedInlineEditTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="photo_inline_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.item = _create_photo_item(title="Shared title")
+        self.item.date_precision = ArchiveItem.DatePrecision.YEAR
+        self.item.date_start = date(1950, 1, 1)
+        self.item.date_end = date(1950, 12, 31)
+        self.item.save()
+        self.first = _add_photo(
+            self.item,
+            position=1,
+            filename="one.jpg",
+            description="First caption",
+            people_present="maybe uncle",
+        )
+        self.second = _add_photo(
+            self.item,
+            position=2,
+            filename="two.jpg",
+            description="Second caption",
+            people_present="crowd",
+        )
+        self.client.force_login(self.staff)
+
+    def _edit_url(self, photo: PhotoContent) -> str:
+        return reverse(
+            "archive-manage-photo-edit",
+            kwargs={"item_id": self.item.id, "photo_id": photo.id},
+        )
+
+    def _item_edit_url(self) -> str:
+        return reverse("archive-manage-edit", kwargs={"item_id": self.item.id})
+
+    def test_inline_save_updates_only_selected_photo_and_returns_to_item_edit(self):
+        resp = self.client.post(
+            self._edit_url(self.second),
+            data=_photo_content_post(
+                inline_photo_edit="1",
+                description="Updated second",
+                location="Haifa",
+                date_precision=ArchiveItem.DatePrecision.YEAR,
+                date_start_year="1948",
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            resp["Location"],
+            f"{self._item_edit_url()}#photo-{self.second.id}",
+        )
+        self.first.refresh_from_db()
+        self.second.refresh_from_db()
+        self.item.refresh_from_db()
+        self.assertEqual(self.second.description, "Updated second")
+        self.assertEqual(self.second.location, "Haifa")
+        self.assertEqual(self.second.date_start, date(1948, 1, 1))
+        self.assertEqual(self.first.description, "First caption")
+        self.assertEqual(self.first.location, "")
+        self.assertEqual(self.item.title, "Shared title")
+        self.assertEqual(self.item.date_start, date(1950, 1, 1))
+
+    def test_saving_one_inline_photo_does_not_overwrite_another(self):
+        self.client.post(
+            self._edit_url(self.first),
+            data=_photo_content_post(
+                inline_photo_edit="1",
+                description="Only first",
+                people_present="maybe uncle",
+            ),
+        )
+        self.first.refresh_from_db()
+        self.second.refresh_from_db()
+        self.assertEqual(self.first.description, "Only first")
+        self.assertEqual(self.second.description, "Second caption")
+
+    def test_invalid_inline_submission_stays_on_item_edit_in_the_same_card(self):
+        resp = self.client.post(
+            self._edit_url(self.second),
+            data=_photo_content_post(
+                inline_photo_edit="1",
+                description="Kept in card",
+                date_precision=ArchiveItem.DatePrecision.RANGE,
+                date_start="1960-01-02",
+                date_end="1960-01-01",
+            ),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.has_header("Location"))
+        html = resp.content.decode()
+        self.assertIn("מטא־דאטה משותף לפריט", html)
+        self.assertIn('id="archive-item-shared-form"', html)
+        self.assertNotIn("עריכת מטא־דאטה לתמונה אחת", html)
+        self.second.refresh_from_db()
+        self.assertEqual(self.second.description, "Second caption")
+        second_card = _fragment_by_id(html, f"photo-{self.second.id}")
+        first_card = _fragment_by_id(html, f"photo-{self.first.id}")
+        self.assertIn("date_end must not be before date_start", second_card)
+        self.assertIn("Kept in card", second_card)
+        self.assertNotIn("date_end must not be before date_start", first_card)
+        self.assertIn("First caption", first_card)
+
+    def test_inline_photo_person_editing_stays_photo_only(self):
+        ada = Person.objects.create(name="Ada")
+        charles = Person.objects.create(name="Charles")
+        PhotoPerson.objects.create(photo_content=self.first, person=ada)
+        ArchiveItemPerson.objects.create(archive_item=self.item, person=charles)
+        resp = self.client.post(
+            self._edit_url(self.first),
+            data=_photo_content_post(
+                inline_photo_edit="1",
+                description="First caption",
+                people_present="maybe uncle",
+                person_ids=[str(charles.id)],
+            ),
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            set(self.first.people.values_list("id", flat=True)),
+            {charles.id},
+        )
+        self.assertEqual(self.second.people.count(), 0)
+        self.assertEqual(
+            set(self.item.people.values_list("id", flat=True)),
+            {charles.id},
+        )
+        self.assertFalse(
+            ArchiveItemPerson.objects.filter(
+                archive_item=self.item, person=ada
+            ).exists()
+        )
+
+    def test_shared_item_save_does_not_overwrite_per_photo_metadata(self):
+        resp = self.client.post(
+            self._item_edit_url(),
+            data={
+                "title": "Shared title only",
+                "visibility": ArchiveItem.Visibility.PUBLIC,
+                "metadata_status": ArchiveItem.MetadataStatus.NEEDS_COMPLETION,
+                "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
+                "description": "Should be ignored",
+                "location": "Should also be ignored",
+                "categories": "",
+                "events": "",
+                "tags": "",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.item.refresh_from_db()
+        self.first.refresh_from_db()
+        self.second.refresh_from_db()
+        self.assertEqual(self.item.title, "Shared title only")
+        self.assertEqual(self.first.description, "First caption")
+        self.assertEqual(self.second.description, "Second caption")
+
+    def test_standalone_photo_edit_url_remains_functional(self):
+        get_resp = self.client.get(self._edit_url(self.first))
+        self.assertEqual(get_resp.status_code, 200)
+        self.assertContains(get_resp, "עריכת מטא־דאטה לתמונה אחת")
+        self.assertContains(get_resp, 'id="description"')
+        self.assertNotContains(get_resp, 'name="inline_photo_edit"')
+        post_resp = self.client.post(
+            self._edit_url(self.first),
+            data=_photo_content_post(description="Standalone save"),
+        )
+        self.assertEqual(post_resp.status_code, 302)
+        self.assertEqual(post_resp["Location"], self._edit_url(self.first))
+        self.first.refresh_from_db()
+        self.assertEqual(self.first.description, "Standalone save")
+        self.second.refresh_from_db()
+        self.assertEqual(self.second.description, "Second caption")
+
+    def test_inline_save_requires_staff(self):
+        self.client.logout()
+        anonymous = self.client.post(
+            self._edit_url(self.first),
+            data=_photo_content_post(
+                inline_photo_edit="1",
+                description="Nope",
+            ),
+        )
+        self.assertIn(anonymous.status_code, (302, 403))
+        user = User.objects.create_user(
+            username="photo_inline_user",
+            password="test-pass",
+            is_staff=False,
+        )
+        self.client.force_login(user)
+        forbidden = self.client.post(
+            self._edit_url(self.first),
+            data=_photo_content_post(
+                inline_photo_edit="1",
+                description="Nope",
+            ),
+        )
+        self.assertEqual(forbidden.status_code, 403)
+        self.first.refresh_from_db()
+        self.assertEqual(self.first.description, "First caption")
 
 
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
