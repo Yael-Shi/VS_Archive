@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 from django.urls import reverse
 
 from documents.models import ArchiveItem, PhotoContent
+from documents.services.archive_item_presentation import person_public_page_url
 from documents.services.archive_metadata_validation import meaningful_metadata_value
 from documents.services.document_date import NO_DATE_LABEL, format_document_date
 from documents.services.photo_archive_urls import presign_photo_thumbnail_url
@@ -30,6 +31,14 @@ class PublicPhotoGalleryItem:
 
 
 @dataclass(frozen=True, slots=True)
+class PublicIdentifiedPersonLink:
+    """Canonical PhotoPerson display name plus public Person page href."""
+
+    name: str
+    href: str
+
+
+@dataclass(frozen=True, slots=True)
 class PublicPhotoGallery:
     """Server-rendered public presentation for one PHOTO ArchiveItem."""
 
@@ -41,6 +50,7 @@ class PublicPhotoGallery:
     next_url: str | None
     status_label: str
     selected_alt_text: str
+    identified_people: list[PublicIdentifiedPersonLink]
     identified_people_names: list[str]
     photo_date_label: str
     selector_items: list[PublicPhotoGalleryItem]
@@ -77,16 +87,32 @@ def public_renderable_photo_contents(archive_item: ArchiveItem) -> list[PhotoCon
     return [photo for photo in photos if photo_is_archive_renderable(photo)]
 
 
-def identified_people_display_names(photo_content: PhotoContent) -> list[str]:
-    """Stable public names for people identified on this photo only."""
+def identified_people_links(
+    photo_content: PhotoContent,
+) -> list[PublicIdentifiedPersonLink]:
+    """Stable public PhotoPerson links for this photo only.
+
+    Identity is ``Person.id``. Duplicate canonical names stay distinct.
+    Aliases are not read. Empty/placeholder names are omitted.
+    """
     people = list(photo_content.people.all())
     people.sort(key=lambda person: (person.name, person.pk))
-    names: list[str] = []
+    links: list[PublicIdentifiedPersonLink] = []
     for person in people:
         name = meaningful_metadata_value(person.name)
         if name:
-            names.append(name)
-    return names
+            links.append(
+                PublicIdentifiedPersonLink(
+                    name=name,
+                    href=person_public_page_url(person.pk),
+                )
+            )
+    return links
+
+
+def identified_people_display_names(photo_content: PhotoContent) -> list[str]:
+    """Stable public names for people identified on this photo only."""
+    return [link.name for link in identified_people_links(photo_content)]
 
 
 def public_photo_date_label(photo_content: PhotoContent) -> str:
@@ -196,6 +222,7 @@ def build_public_photo_gallery(
                 )
             )
 
+    identified_people = identified_people_links(selected)
     return PublicPhotoGallery(
         selected=selected,
         selected_index=selected_index,
@@ -210,7 +237,8 @@ def build_public_photo_gallery(
             display_index=selected_index,
             total=total,
         ),
-        identified_people_names=identified_people_display_names(selected),
+        identified_people=identified_people,
+        identified_people_names=[link.name for link in identified_people],
         photo_date_label=public_photo_date_label(selected),
         selector_items=selector_items,
     )

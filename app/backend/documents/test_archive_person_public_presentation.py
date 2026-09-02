@@ -297,12 +297,15 @@ class ArchivePersonPublicDetailTests(TestCase):
         self.assertContains(resp, _person_href_html(related))
         self.assertContains(resp, "אנשים מזוהים:")
         self.assertContains(resp, "Photo Identified Person")
+        self.assertContains(resp, _person_href_html(identified))
         identified_idx = html.index("אנשים מזוהים:")
         related_idx = html.index("אנשים קשורים")
         self.assertLess(identified_idx, related_idx)
+        identified_block = html[identified_idx:related_idx]
         related_block = html[related_idx:]
+        self.assertIn(_person_href_html(identified), identified_block)
         self.assertNotIn("Photo Identified Person", related_block)
-        self.assertNotIn(_person_href_html(identified), html)
+        self.assertNotIn(_person_href_html(identified), related_block)
 
 
 class ArchivePersonPublicQueryCountTests(TestCase):

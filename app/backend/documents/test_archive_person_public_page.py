@@ -474,7 +474,7 @@ class PersonPublicPageLinkRetargetTests(TestCase):
         self.assertContains(ocr, href)
 
     @patch("documents.views.create_presigned_get", return_value=PRESIGNED_URL)
-    def test_photoperson_names_remain_unlinked(self, _mock_presign):
+    def test_photoperson_names_link_to_person_page(self, _mock_presign):
         related = Person.objects.create(name="Item Related Person")
         identified = Person.objects.create(name="Photo Identified Person")
         item = _create_photo_item(title="Split people photo")
@@ -484,10 +484,30 @@ class PersonPublicPageLinkRetargetTests(TestCase):
 
         resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
         html = resp.content.decode("utf-8")
+        identified_href = person_public_page_url(identified.id)
+        related_href = person_public_page_url(related.id)
         self.assertContains(resp, "אנשים מזוהים:")
         self.assertContains(resp, "Photo Identified Person")
-        self.assertNotIn(person_public_page_url(identified.id), html)
-        self.assertIn(person_public_page_url(related.id), html)
+        self.assertContains(
+            resp,
+            f'<a href="{identified_href}">Photo Identified Person</a>',
+        )
+        self.assertContains(resp, "אנשים קשורים")
+        self.assertContains(resp, "Item Related Person")
+        self.assertContains(resp, related_href)
+        identified_idx = html.index("אנשים מזוהים:")
+        related_idx = html.index("אנשים קשורים")
+        self.assertLess(identified_idx, related_idx)
+        identified_block = html[identified_idx:related_idx]
+        related_block = html[related_idx:]
+        self.assertIn(identified_href, identified_block)
+        self.assertIn("Photo Identified Person", identified_block)
+        self.assertNotIn("Item Related Person", identified_block)
+        self.assertNotIn(related_href, identified_block)
+        self.assertIn(related_href, related_block)
+        self.assertIn("Item Related Person", related_block)
+        self.assertNotIn("Photo Identified Person", related_block)
+        self.assertNotIn(identified_href, related_block)
 
 
 class PersonPublicPageQueryCountTests(TestCase):
