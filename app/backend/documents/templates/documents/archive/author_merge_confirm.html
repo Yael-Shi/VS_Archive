@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - {{ page_title }}{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-manage-author-edit' author_id=keeper.id %}">חזרה למחבר/ת</a>
+    </div>
+
+    <h1 class="page-title">{{ page_title }}</h1>
+    <p class="page-subtitle">מיזוג מחבר/ת לפי מזהה בלבד. אין התאמה לפי שם.</p>
+
+    {% if form_errors %}
+      <div class="spacer"></div>
+      <div class="alert alert-danger">
+        <div class="alert-title">לא ניתן למזג</div>
+        <ul>
+          {% for error in form_errors %}
+            <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    <div class="spacer"></div>
+    <form method="get" action="{% url 'archive-manage-author-merge' author_id=keeper.id %}">
+      <div class="field">
+        <label for="duplicate_author_id">מזהה הרשומה הכפולה שתימחק</label>
+        <input
+          id="duplicate_author_id"
+          name="duplicate_id"
+          type="text"
+          inputmode="numeric"
+          autocomplete="off"
+          value="{{ duplicate_id_raw }}"
+        />
+        <div class="field-hint">הזינו מזהה מחבר/ת. מסך האישור יוצג לפני כל שינוי.</div>
+      </div>
+      <button type="submit" class="btn">הצגת תצוגה מקדימה</button>
+    </form>
+
+    {% if preview %}
+      <div class="spacer"></div>
+      <h2>רשומה שתישאר</h2>
+      <p><strong>יישאר</strong></p>
+      <p>מזהה: {{ preview.keeper_id }}</p>
+      <p>שם: {{ preview.keeper_name }}</p>
+
+      <div class="spacer"></div>
+      <h2>רשומה שתימחק</h2>
+      <p><strong>יימחק</strong></p>
+      <p>מזהה: {{ preview.duplicate_id }}</p>
+      <p>שם: {{ preview.duplicate_name }}</p>
+
+      {% if preview.names_differ %}
+        <p>השם הציבורי ייבנה משם הרשומה שתישאר. שם הרשומה הכפולה לא יישמר כשם חלופי.</p>
+      {% endif %}
+
+      <div class="spacer"></div>
+      <h2>פריטים שיושפעו ({{ preview.affected_items|length }})</h2>
+      <p class="muted">
+        רק פריטים המשויכים כרגע לרשומה הכפולה. אם שתי הרשומות משויכות לאותו פריט,
+        הקישור הכפול יוסר והרשומה שתישאר תישאר במקומה בסדר המחברים.
+      </p>
+      {% if preview.affected_items %}
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>כותרת</th>
+                <th>מחבר/ת מוצג/ת כיום</th>
+                <th>סדר נוכחי</th>
+                <th>סדר אחרי המיזוג</th>
+                <th>פעולות</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in preview.affected_items %}
+                <tr>
+                  <td>{{ item.title }}</td>
+                  <td>{{ item.current_author_name }}</td>
+                  <td>
+                    {% if item.current_order %}
+                      {{ item.current_order|join:", " }}
+                    {% else %}
+                      אין
+                    {% endif %}
+                    {% if item.keeper_already_linked %}
+                      <div class="muted">הרשומה שתישאר כבר משויכת; הקישור הכפול יוסר.</div>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if item.planned_order %}
+                      {{ item.planned_order|join:", " }}
+                    {% else %}
+                      אין
+                    {% endif %}
+                  </td>
+                  <td>
+                    <a class="btn" href="{% url 'archive-manage-edit' item_id=item.archive_item_id %}">עריכת פריט</a>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">אין פריטים משויכים לרשומה הכפולה. המיזוג ימחק את הרשומה הכפולה בלבד.</p>
+      {% endif %}
+
+      <p class="muted">
+        אזהרה: מזהה הרשומה הכפולה ({{ preview.duplicate_id }}) יחדל להתקיים אחרי המיזוג.
+      </p>
+
+      {% if preview.can_execute %}
+        <div class="spacer"></div>
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="duplicate_id" value="{{ preview.duplicate_id }}" />
+          <input type="hidden" name="confirm_merge" value="1" />
+          <div class="page-toolbar">
+            <button type="submit" class="btn btn-danger">אישור מיזוג ומחיקת הרשומה הכפולה</button>
+            <a class="btn" href="{% url 'archive-manage-author-edit' author_id=keeper.id %}">ביטול</a>
+          </div>
+        </form>
+      {% else %}
+        <div class="spacer"></div>
+        <a class="btn" href="{% url 'archive-manage-author-edit' author_id=keeper.id %}">חזרה לעריכה</a>
+      {% endif %}
+    {% endif %}
+  </div>
+{% endblock %}

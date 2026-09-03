@@ -74,5 +74,26 @@
       </div>
       <button type="submit" class="btn btn-primary">עדכון שם מחבר/ת</button>
     </form>
+
+    <div class="spacer"></div>
+    <h2>מיזוג רשומת מחבר/ת כפולה</h2>
+    <p class="muted">
+      מיזוג ביבליוגרפי לפי מזהה מחבר/ת בלבד. הרשומה הנוכחית תישאר, כולל השם.
+      הרשומה הכפולה תימחק אחרי אישור. אין התאמה לפי שם, ואין שמות חלופיים.
+    </p>
+    <form method="get" action="{% url 'archive-manage-author-merge' author_id=author.id %}">
+      <div class="field">
+        <label for="duplicate_author_id">מזהה הרשומה הכפולה שתימחק</label>
+        <input
+          id="duplicate_author_id"
+          name="duplicate_id"
+          type="text"
+          inputmode="numeric"
+          autocomplete="off"
+        />
+        <div class="field-hint">הזינו את מזהה רשומת המחבר/ת הכפולה. יוצג מסך אישור לפני כל שינוי.</div>
+      </div>
+      <button type="submit" class="btn">המשך לאישור מיזוג</button>
+    </form>
   </div>
 {% endblock %}

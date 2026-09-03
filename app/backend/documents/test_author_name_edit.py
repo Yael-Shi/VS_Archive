@@ -104,17 +104,15 @@ def _author_name(item: ArchiveItem) -> str:
 
 
 class AuthorRenameRouteTests(TestCase):
-    def test_route_resolves_and_no_delete_or_merge_routes_exist(self):
+    def test_route_resolves_delete_absent_and_merge_present(self):
         match = resolve("/archive/manage/authors/1/edit/")
         self.assertEqual(match.url_name, "archive-manage-author-edit")
         index = resolve("/archive/manage/authors/")
         self.assertEqual(index.url_name, "archive-manage-authors")
-        for path in (
-            "/archive/manage/authors/1/delete/",
-            "/archive/manage/authors/1/merge/",
-        ):
-            with self.assertRaises(Resolver404):
-                resolve(path)
+        merge = resolve("/archive/manage/authors/1/merge/")
+        self.assertEqual(merge.url_name, "archive-manage-author-merge")
+        with self.assertRaises(Resolver404):
+            resolve("/archive/manage/authors/1/delete/")
 
     def test_author_models_stay_out_of_django_admin(self):
         self.assertFalse(django_admin.site.is_registered(Author))

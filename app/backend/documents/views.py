@@ -67,6 +67,7 @@ from documents.services.archive_discovery_metadata_validation import (
 )
 from documents.services.archive_item_authors import (
     AUTHOR_IDS_FIELD,
+    AUTHOR_NOT_FOUND_ERROR,
     NEW_AUTHOR_NAME_FIELD,
     ArchiveItemAuthorError,
     affected_archive_items_for_author,
@@ -76,6 +77,12 @@ from documents.services.archive_item_authors import (
     parse_archive_item_authors_form,
     rename_author,
     staff_author_index_queryset,
+)
+from documents.services.author_merge import (
+    AUTHOR_MERGE_ID_REQUIRED_ERROR,
+    merge_author,
+    parse_author_merge_id,
+    preview_author_merge,
 )
 from documents.services.archive_item_people import (
     ArchiveItemPersonError,
@@ -4740,6 +4747,7 @@ PERSON_ALIAS_UPDATED_MSG = "השם החלופי עודכן."
 PERSON_ALIAS_DELETED_MSG = "השם החלופי נמחק."
 PERSON_MERGED_MSG = "רשומות האדם מוזגו. הרשומה הכפולה נמחקה."
 AUTHOR_NAME_UPDATED_MSG = "שם המחבר/ת עודכן בכל הפריטים המשויכים."
+AUTHOR_MERGED_MSG = "רשומות המחבר/ת מוזגו. הרשומה הכפולה נמחקה."
 ARCHIVE_ITEM_UPDATED_MSG = "הפריט עודכן."
 PHOTO_CONTENT_UPDATED_MSG = "התמונה עודכנה."
 PHOTO_INLINE_EDIT_FIELD = "inline_photo_edit"
@@ -5927,6 +5935,97 @@ def archive_manage_author_edit_page(request, author_id: int):
             author=author,
             form_errors=form_errors,
             author_name=author_name,
+        ),
+    )
+
+
+def _author_merge_duplicate_id_from_request(request):
+    if request.method == "POST":
+        return request.POST.get("duplicate_id")
+    return request.GET.get("duplicate_id")
+
+
+def _author_merge_confirm_context(*, keeper, preview, duplicate_id_raw, form_errors):
+    return {
+        "keeper": keeper,
+        "preview": preview,
+        "duplicate_id_raw": duplicate_id_raw or "",
+        "form_errors": form_errors,
+        "page_title": "אישור מיזוג רשומת מחבר/ת",
+    }
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def archive_manage_author_merge_page(request, author_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    keeper = get_object_or_404(Author, pk=author_id)
+    form_errors: list[str] = []
+    preview = None
+    duplicate_id_raw = _author_merge_duplicate_id_from_request(request)
+    has_duplicate_input = bool((duplicate_id_raw or "").strip())
+
+    if has_duplicate_input:
+        try:
+            duplicate_id = parse_author_merge_id(duplicate_id_raw)
+            duplicate = Author.objects.filter(pk=duplicate_id).first()
+            if duplicate is None:
+                raise ArchiveItemAuthorError(AUTHOR_NOT_FOUND_ERROR)
+            preview = preview_author_merge(keeper=keeper, duplicate=duplicate)
+        except ArchiveItemAuthorError as exc:
+            form_errors = [exc.message]
+
+    if request.method == "POST":
+        confirm = (request.POST.get("confirm_merge") or "").strip()
+        if confirm == "1" and preview is None and not form_errors:
+            form_errors = [AUTHOR_MERGE_ID_REQUIRED_ERROR]
+        if (
+            confirm == "1"
+            and preview is not None
+            and preview.can_execute
+            and not form_errors
+        ):
+            duplicate = Author.objects.filter(pk=preview.duplicate_id).first()
+            if duplicate is None:
+                form_errors = [AUTHOR_NOT_FOUND_ERROR]
+            else:
+                try:
+                    merge_author(keeper=keeper, duplicate=duplicate)
+                except ArchiveItemAuthorError as exc:
+                    form_errors = [exc.message]
+                else:
+                    messages.success(request, AUTHOR_MERGED_MSG)
+                    return redirect(
+                        "archive-manage-author-edit", author_id=keeper.id
+                    )
+        elif confirm == "1" and preview is not None and preview.blockers:
+            form_errors = [preview.blockers[0]]
+
+        return render(
+            request,
+            "documents/archive/author_merge_confirm.html",
+            context=_author_merge_confirm_context(
+                keeper=keeper,
+                preview=preview,
+                duplicate_id_raw=duplicate_id_raw,
+                form_errors=form_errors,
+            ),
+        )
+
+    if preview is not None and preview.blockers and not form_errors:
+        form_errors = list(preview.blockers)
+
+    return render(
+        request,
+        "documents/archive/author_merge_confirm.html",
+        context=_author_merge_confirm_context(
+            keeper=keeper,
+            preview=preview,
+            duplicate_id_raw=duplicate_id_raw,
+            form_errors=form_errors,
         ),
     )
 
