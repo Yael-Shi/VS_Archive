@@ -1,4 +1,4 @@
-"""Public /archive/ advanced Person filter: ArchiveItemPerson only, not PhotoPerson."""
+"""Public /archive/ advanced Person filter: AIP or renderable PhotoPerson."""
 
 from __future__ import annotations
 
@@ -76,15 +76,26 @@ def _create_photo_item(
     )
 
 
-def _add_photo(item: ArchiveItem, *, position: int = 1) -> PhotoContent:
+def _add_photo(
+    item: ArchiveItem,
+    *,
+    position: int = 1,
+    upload_status: str = PhotoContent.UploadStatus.UPLOADED,
+    original_file_key: str | None = None,
+) -> PhotoContent:
+    key = (
+        f"photos/{item.pk}-{position}/original.jpg"
+        if original_file_key is None
+        else original_file_key
+    )
     return PhotoContent.objects.create(
         archive_item=item,
         position=position,
-        original_file_key=f"photos/{item.pk}-{position}/original.jpg",
+        original_file_key=key,
         original_filename="photo.jpg",
         original_mime_type="image/jpeg",
         original_size_bytes=1024,
-        upload_status=PhotoContent.UploadStatus.UPLOADED,
+        upload_status=upload_status,
         upload_error="",
     )
 
@@ -111,9 +122,11 @@ def _person_related_query_count(captured_queries) -> int:
             continue
         if "documents_person" not in sql:
             continue
-        if "documents_photoperson" in sql:
-            continue
-        if "documents_archiveitemperson" in sql or "archive_items" in sql:
+        if (
+            "documents_archiveitemperson" in sql
+            or "archive_items" in sql
+            or "documents_photoperson" in sql
+        ):
             count += 1
     return count
 
@@ -207,7 +220,7 @@ class ArchiveAdvancedPersonFilterQuerysetTests(TestCase):
             [match.pk],
         )
 
-    def test_photoperson_only_item_does_not_match_person_filter(self):
+    def test_photoperson_only_item_matches_person_filter(self):
         person = Person.objects.create(name="Appears Only")
         photo_only = _create_photo_item(title="PhotoPerson only")
         photo = _add_photo(photo_only)
@@ -220,7 +233,102 @@ class ArchiveAdvancedPersonFilterQuerysetTests(TestCase):
                 normalize_archive_advanced_filters({"person": str(person.id)}),
             )
         )
+        self.assertEqual(ids, [photo_only.pk])
+
+    def test_dual_aip_and_photoperson_item_appears_once(self):
+        person = Person.objects.create(name="Both Relations")
+        item = _create_photo_item(title="AIP and PhotoPerson")
+        photo = _add_photo(item)
+        PhotoPerson.objects.create(photo_content=photo, person=person)
+        ArchiveItemPerson.objects.create(archive_item=item, person=person)
+
+        ids = _ids(
+            filter_archive_items_by_advanced_filters(
+                ArchiveItem.objects.all(),
+                normalize_archive_advanced_filters({"person": str(person.id)}),
+            )
+        )
+        self.assertEqual(ids, [item.pk])
+        self.assertEqual(ids.count(item.pk), 1)
+
+    def test_multiple_matching_photos_on_same_item_appear_once(self):
+        person = Person.objects.create(name="Multi Photo")
+        item = _create_photo_item(title="Two matching photos")
+        first = _add_photo(item, position=1)
+        second = _add_photo(item, position=2)
+        PhotoPerson.objects.create(photo_content=first, person=person)
+        PhotoPerson.objects.create(photo_content=second, person=person)
+
+        ids = _ids(
+            filter_archive_items_by_advanced_filters(
+                ArchiveItem.objects.all(),
+                normalize_archive_advanced_filters({"person": str(person.id)}),
+            )
+        )
+        self.assertEqual(ids, [item.pk])
+        self.assertEqual(ids.count(item.pk), 1)
+
+    def test_non_renderable_photoperson_does_not_match(self):
+        person = Person.objects.create(name="Pending Appearance")
+        pending_only = _create_photo_item(title="Pending PhotoPerson only")
+        pending_photo = _add_photo(
+            pending_only,
+            upload_status=PhotoContent.UploadStatus.PENDING,
+            original_file_key="",
+        )
+        PhotoPerson.objects.create(photo_content=pending_photo, person=person)
+
+        visible = _create_photo_item(title="Visible with pending extra")
+        _add_photo(visible, position=1)
+        extra = _add_photo(
+            visible,
+            position=2,
+            upload_status=PhotoContent.UploadStatus.PENDING,
+            original_file_key="   ",
+        )
+        PhotoPerson.objects.create(photo_content=extra, person=person)
+
+        ids = _ids(
+            filter_archive_items_by_advanced_filters(
+                ArchiveItem.objects.all(),
+                normalize_archive_advanced_filters({"person": str(person.id)}),
+            )
+        )
         self.assertEqual(ids, [])
+
+    def test_people_present_free_text_does_not_match_person_filter(self):
+        person = Person.objects.create(name="Free Text Twin")
+        item = _create_photo_item(title="people_present only")
+        photo = _add_photo(item)
+        photo.people_present = person.name
+        photo.save(update_fields=["people_present", "updated_at"])
+
+        ids = _ids(
+            filter_archive_items_by_advanced_filters(
+                ArchiveItem.objects.all(),
+                normalize_archive_advanced_filters({"person": str(person.id)}),
+            )
+        )
+        self.assertEqual(ids, [])
+
+    def test_repeatable_person_ids_or_across_aip_and_photoperson(self):
+        ada = Person.objects.create(name="Ada Mixed")
+        charles = Person.objects.create(name="Charles Mixed")
+        aip_only = _public_manual("Ada AIP")
+        pp_only = _create_photo_item(title="Charles PhotoPerson")
+        ArchiveItemPerson.objects.create(archive_item=aip_only, person=ada)
+        PhotoPerson.objects.create(photo_content=_add_photo(pp_only), person=charles)
+
+        ids = _ids(
+            filter_archive_items_by_advanced_filters(
+                ArchiveItem.objects.all(),
+                normalize_archive_advanced_filters(
+                    [("person", str(ada.id)), ("person", str(charles.id))]
+                ),
+            )
+        )
+        self.assertEqual(set(ids), {aip_only.pk, pp_only.pk})
+        self.assertEqual(len(ids), 2)
 
     def test_archive_item_person_photo_item_does_match(self):
         person = Person.objects.create(name="Item Linked Photo")
@@ -390,6 +498,45 @@ class ArchiveAdvancedPersonFilterAccessTests(TestCase):
         restricted_titles = {item.title for item in restricted_resp.context["items"]}
         self.assertEqual(
             restricted_titles, {"PERSON-PUBLIC-TITLE", "PERSON-RESTRICTED-TITLE"}
+        )
+
+    def test_photoperson_only_private_and_restricted_visibility_still_enforced(self):
+        person = Person.objects.create(name="Hidden PhotoPerson Filter")
+        private = _create_photo_item(
+            title="PERSON-PP-PRIVATE-TITLE",
+            visibility=ArchiveItem.Visibility.PRIVATE,
+        )
+        restricted = _create_photo_item(
+            title="PERSON-PP-RESTRICTED-TITLE",
+            visibility=ArchiveItem.Visibility.RESTRICTED,
+        )
+        public = _create_photo_item(title="PERSON-PP-PUBLIC-TITLE")
+        PhotoPerson.objects.create(photo_content=_add_photo(private), person=person)
+        PhotoPerson.objects.create(photo_content=_add_photo(restricted), person=person)
+        PhotoPerson.objects.create(photo_content=_add_photo(public), person=person)
+
+        anon = self.client.get(self.url, {"person": str(person.id)})
+        self.assertEqual(anon.status_code, 200)
+        anon_html = anon.content.decode("utf-8")
+        self.assertIn("PERSON-PP-PUBLIC-TITLE", anon_html)
+        self.assertNotIn("PERSON-PP-PRIVATE-TITLE", anon_html)
+        self.assertNotIn("PERSON-PP-RESTRICTED-TITLE", anon_html)
+        self.assertEqual(anon.context["total_count"], 1)
+
+        self.client.force_login(self.family)
+        family = self.client.get(self.url, {"person": str(person.id)})
+        family_titles = {item.title for item in family.context["items"]}
+        self.assertEqual(
+            family_titles, {"PERSON-PP-PUBLIC-TITLE", "PERSON-PP-PRIVATE-TITLE"}
+        )
+        self.assertNotIn("PERSON-PP-RESTRICTED-TITLE", family_titles)
+
+        self.client.force_login(self.restricted_user)
+        restricted_resp = self.client.get(self.url, {"person": str(person.id)})
+        restricted_titles = {item.title for item in restricted_resp.context["items"]}
+        self.assertEqual(
+            restricted_titles,
+            {"PERSON-PP-PUBLIC-TITLE", "PERSON-PP-RESTRICTED-TITLE"},
         )
 
 
@@ -879,6 +1026,12 @@ class ArchiveAdvancedPersonFilterUiTests(TestCase):
         self.assertEqual(
             _person_related_query_count(few_ctx), _person_related_query_count(many_ctx)
         )
+        self.assertTrue(
+            any(
+                "documents_photoperson" in query["sql"].lower().replace('"', "")
+                for query in few_ctx.captured_queries
+            )
+        )
         self.assertGreaterEqual(len(few_choices["advanced_filter_person_choices"]), 22)
         self.assertGreaterEqual(len(many_choices["advanced_filter_person_choices"]), 22)
 
@@ -886,10 +1039,18 @@ class ArchiveAdvancedPersonFilterUiTests(TestCase):
             resp = self.client.get(self.url, {"advanced": "1"})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(_person_related_query_count(request_ctx), 2)
+        self.assertTrue(
+            any(
+                "documents_person" in query["sql"].lower().replace('"', "")
+                and "documents_photoperson" in query["sql"].lower().replace('"', "")
+                for query in request_ctx.captured_queries
+            )
+        )
 
-    def test_photoperson_only_person_is_not_a_choice(self):
+    def test_photoperson_only_person_is_a_choice(self):
         linked_person = Person.objects.create(name="Linked Choice")
         appearance_only = Person.objects.create(name="Appearance Only")
+        PersonAlias.objects.create(person=appearance_only, name="Appearance Alias")
         linked_item = _public_manual("Has ArchiveItemPerson")
         ArchiveItemPerson.objects.create(archive_item=linked_item, person=linked_person)
         photo_item = _create_photo_item(title="Appearance photo")
@@ -898,8 +1059,42 @@ class ArchiveAdvancedPersonFilterUiTests(TestCase):
 
         resp = self.client.get(self.url, {"advanced": "1"})
         names = [p.name for p in resp.context["advanced_filter_person_choices"]]
-        self.assertEqual(names, ["Linked Choice"])
-        self.assertNotIn("Appearance Only", names)
+        self.assertEqual(names, ["Appearance Only", "Linked Choice"])
+        html = resp.content.decode("utf-8")
+        self.assertIn("Appearance Only", html)
+        self.assertNotIn("Appearance Alias", html)
+
+    def test_picker_excludes_inaccessible_and_non_renderable_photoperson_only(self):
+        public_person = Person.objects.create(name="Public Appearance")
+        private_person = Person.objects.create(name="Private Appearance")
+        pending_person = Person.objects.create(name="Pending Appearance")
+        PhotoPerson.objects.create(
+            photo_content=_add_photo(_create_photo_item(title="Public PP")),
+            person=public_person,
+        )
+        PhotoPerson.objects.create(
+            photo_content=_add_photo(
+                _create_photo_item(
+                    title="Private PP",
+                    visibility=ArchiveItem.Visibility.PRIVATE,
+                )
+            ),
+            person=private_person,
+        )
+        PhotoPerson.objects.create(
+            photo_content=_add_photo(
+                _create_photo_item(title="Pending PP"),
+                upload_status=PhotoContent.UploadStatus.PENDING,
+                original_file_key="",
+            ),
+            person=pending_person,
+        )
+
+        resp = self.client.get(self.url, {"advanced": "1"})
+        names = [p.name for p in resp.context["advanced_filter_person_choices"]]
+        self.assertEqual(names, ["Public Appearance"])
+        self.assertNotIn("Private Appearance", names)
+        self.assertNotIn("Pending Appearance", names)
 
     def test_public_person_page_is_not_a_filter_deeplink(self):
         person = Person.objects.create(name="Public Page Person")

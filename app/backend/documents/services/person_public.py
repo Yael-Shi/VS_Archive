@@ -55,24 +55,32 @@ def authorized_browse_item_pks(user) -> QuerySet:
     return archive_browse_queryset_for_user(user).order_by().values("pk")
 
 
-def person_public_membership_q(user) -> Q:
-    """Person rows with at least one authorized+renderable AIP or PhotoPerson item."""
-    authorized_pks = authorized_browse_item_pks(user)
+def person_public_membership_q_for_item_pks(item_pks: QuerySet) -> Q:
+    """Person rows with AIP or renderable PhotoPerson on the given ArchiveItem pks.
+
+    ``item_pks`` must already be authorized + browse-renderable. Does not
+    infer ArchiveItemPerson from PhotoPerson. ``people_present`` is ignored.
+    """
     renderable_photos = renderable_photo_contents_queryset()
     aip_exists = Exists(
         ArchiveItemPerson.objects.filter(
             person_id=OuterRef("pk"),
-            archive_item_id__in=authorized_pks,
+            archive_item_id__in=item_pks,
         )
     )
     pp_exists = Exists(
         PhotoPerson.objects.filter(
             person_id=OuterRef("pk"),
             photo_content__in=renderable_photos,
-            photo_content__archive_item_id__in=authorized_pks,
+            photo_content__archive_item_id__in=item_pks,
         )
     )
     return aip_exists | pp_exists
+
+
+def person_public_membership_q(user) -> Q:
+    """Person rows with at least one authorized+renderable AIP or PhotoPerson item."""
+    return person_public_membership_q_for_item_pks(authorized_browse_item_pks(user))
 
 
 def public_people_queryset(user, *, search_query: str = "") -> QuerySet[Person]:

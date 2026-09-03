@@ -1,5 +1,39 @@
 # VS-Archive Decision Log
 
+## Public `/archive/` Person advanced filter — unified AIP ∪ PhotoPerson
+
+**Decision / implemented:** Repeatable public **`person=<person_id>`** matches
+authorized+browse-renderable **`ArchiveItem`** rows related through
+**`ArchiveItemPerson` OR identified `PhotoPerson` on renderable
+`PhotoContent`**. Same user-facing membership as **`/archive/people/`** and
+**`/archive/people/<id>/`**. This supersedes the ArchiveItemPerson-only
+filter contract in **Public `/archive/` Person advanced filter**.
+
+**Current behavior:**
+
+- Outer list queryset remains **`archive_browse_queryset_for_user`**. The
+  filter does not copy that queryset into inner subqueries.
+- ORM: correlated **`Exists(ArchiveItemPerson)` OR `Exists(PhotoPerson)`**
+  with **`person_id__in`** (OR within the Person group). Person still ANDs
+  with author / category / event / tag / year. No join fan-out: dual AIP+PP
+  and multiple matching photos of one item yield one ArchiveItem.
+- PhotoPerson matches only identified people on
+  **`filter_archive_renderable_photo_contents`** rows.
+  **`people_present` is excluded.** AIP is not inferred from PhotoPerson.
+- Picker membership is **`person_public_membership_q_for_item_pks`**
+  (authorized item pks + renderable PhotoPerson). Canonical **`Person.name`**
+  only; order **`name`, then `id`**. Aliases are not choices. Private /
+  restricted / non-renderable links cannot leak.
+- Active Person chips, global **`/archive/?q=`** indexing, People index,
+  Person detail, and Person/Author models are unchanged.
+- No schema change.
+
+**Deferred:** alias-assisted picker search; photo-level “appears in this
+photo” cards/filter (list results remain ArchiveItems).
+
+**Tests:** `documents/test_archive_advanced_search_person.py`, plus updated
+Person-page and Stage B PhotoPerson-only assertions. No migration.
+
 ## Public People catalog and unified Person detail
 
 **Decision / implemented:** Public People catalog exists at
@@ -35,10 +69,11 @@ deferred “Person catalog” note and the two-section Person page
   to the earliest matching photo by **`(PhotoContent.position, id)`**
   (`/archive/<item_id>/?photo=<photo_id>`) and uses that photo’s
   thumbnail. AIP-only items use the normal ArchiveItem URL.
-- Advanced **`person=`** filtering and the advanced Person picker remain
-  **ArchiveItemPerson-only**. Global **`/archive/?q=`** indexing is
-  unchanged. Person and Author stay separate. No public alias display.
-  No schema change.
+- Advanced **`person=`** filtering and the Person picker use the same
+  AIP-or-renderable-PhotoPerson membership (see **Public `/archive/` Person
+  advanced filter — unified AIP ∪ PhotoPerson**). Global **`/archive/?q=`**
+  indexing is unchanged. Person and Author stay separate. No public alias
+  display. No schema change.
 
 **Helpers:** `documents/services/person_public.py`.
 
@@ -361,14 +396,22 @@ standalone photo-edit route; add-photo returning with a card hash.
 
 ## Public Person page PhotoPerson appearances
 
-**Decision / implemented:** `/archive/people/<person_id>/` is accessible
-when the current user can see **at least one** authorized/renderable
-`ArchiveItemPerson` item **or** authorized/renderable `PhotoPerson`
-appearance. The two relations stay semantically separate. Neither is
-inferred from the other. Advanced `person=` filtering and public `q`
-indexing are unchanged.
+**Superseded:** This two-section Person page (ArchiveItemPerson related items
+plus a separate unpaged PhotoPerson appearance list) is **not** current
+behavior. Current public Person detail is one unified DISTINCT
+**`ArchiveItem`** stream from **`ArchiveItemPerson` OR renderable
+`PhotoPerson`**. See **Public People catalog and unified Person detail**.
 
-**Current behavior:**
+**Decision / implemented (historical):** `/archive/people/<person_id>/` is
+accessible when the current user can see **at least one**
+authorized/renderable `ArchiveItemPerson` item **or** authorized/renderable
+`PhotoPerson` appearance. The two relations stay semantically separate.
+Neither is inferred from the other. Advanced `person=` filtering and public
+`q` indexing are unchanged in this historical note; current `person=` is
+documented under **Public `/archive/` Person advanced filter — unified AIP ∪
+PhotoPerson**.
+
+**Historical behavior:**
 
 - 404 only when the Person id is missing, or the user has neither
   visible related items nor visible photo appearances. Same status for
@@ -393,16 +436,19 @@ indexing are unchanged.
 - PhotoPerson-only identities no longer 404 when an appearance is
   visible. Biography still displays when the page is otherwise
   accessible. Aliases remain hidden. No public Person index.
-- Advanced `person=` remains ArchiveItemPerson-only. Public `q` is
-  unchanged.
 
-**Pagination tradeoff:** Photo appearances are not combined into the
-related-item paginator. They are listed in full on every related-item
-page. A combined paginator was deferred to keep the two relations
-separate and the page architecture small.
+**Historical pagination tradeoff:** Photo appearances were not combined into
+the related-item paginator. They were listed in full on every related-item
+page. A combined paginator was deferred to keep the two relations separate
+and the page architecture small.
 
-**Deferred:** public alias display; PhotoPerson appearance filter on
-`/archive/`; Person catalog/Admin; paginating photo appearances.
+**Deferred at the time (partially superseded):** public alias display remains
+deferred. Person catalog and combined related-item/appearance pagination are
+implemented as the unified ArchiveItem stream (see **Public People catalog
+and unified Person detail**). Photo-level appearance cards/filter on
+`/archive/` remain deferred; list `person=` is unified AIP ∪ renderable
+PhotoPerson (see **Public `/archive/` Person advanced filter — unified AIP ∪
+PhotoPerson**).
 
 **Tests:** `documents/test_archive_person_public_page.py`. No schema
 migration.
@@ -1413,8 +1459,10 @@ A separate visible **×** is a GET link that removes only that Person id.
   choice-context load as the picker). `person_public_page_url` is reverse
   only. No extra Person queries per selected id.
 
-**Deferred:** public alias display on chips/picker; PhotoPerson appearance
-filter / name linking; Person Admin. Public biography is
+**Deferred:** public alias display on chips/picker; photo-level PhotoPerson
+appearance cards on `/archive/` (list `person=` is unified AIP ∪ renderable
+PhotoPerson; see **Public `/archive/` Person advanced filter — unified AIP ∪
+PhotoPerson**); Person Admin. Public biography is
 implemented (see **Public Person biography**). D2a
 retired-name policy is implemented. D2b Tag-row deletion is implemented
 (see **Historical person-Tag row deletion (D2b)**).
@@ -1427,8 +1475,9 @@ migration.
 **Superseded in part:** Public catalog is implemented (see **Public People
 catalog and unified Person detail**). Person detail is now one unified
 ArchiveItem stream; the separate PhotoPerson appearance section is removed
-from the primary public Person page. Advanced `person=` remains
-ArchiveItemPerson-only as documented here.
+from the primary public Person page. Advanced `person=` uses AIP or
+renderable PhotoPerson (see **Public `/archive/` Person advanced filter —
+unified AIP ∪ PhotoPerson**).
 
 **Decision / implemented:** Public Person detail exists at
 **`/archive/people/<person_id>/`** (`archive-person-detail`). It lists
@@ -1478,8 +1527,9 @@ and unified Person detail** for current behavior):**
   `/archive/tags/<mapped_tag_id>/` now **302**s to the Person page
   (map-first). Following that URL still 404s when the Person has no
   authorized related items and no authorized photo appearances. Ordinary
-  Tag browse is unchanged. Advanced `person=` list filtering remains
-  ArchiveItemPerson-only. Active Person filter chips are implemented
+  Tag browse is unchanged. Advanced `person=` list filtering uses AIP or
+  renderable PhotoPerson (see **Public `/archive/` Person advanced filter —
+  unified AIP ∪ PhotoPerson**). Active Person filter chips are implemented
   separately (see **Public Person active-filter chip UX**).
 
 **Deferred:** public alias display; PhotoPerson appearance filter;
@@ -1961,11 +2011,15 @@ the overwrite protection.
 
 ## Public `/archive/` Person advanced filter
 
+**Superseded in part:** Filter membership is now ArchiveItemPerson **or**
+renderable PhotoPerson (see **Public `/archive/` Person advanced filter —
+unified AIP ∪ PhotoPerson**). Param shape, OR/AND composition, chips, and
+choice-loading gates below remain current.
+
 **Decision / implemented:** Public advanced search on `/archive/` gains a
-repeatable **`person=<person_id>`** structured filter. It means **show
-ArchiveItems generally related to this Person** via **`ArchiveItemPerson`**
-(`ArchiveItem.people`). It does **not** mean “show photos where this Person
-appears.”
+repeatable **`person=<person_id>`** structured filter. It originally meant
+**show ArchiveItems generally related to this Person** via
+**`ArchiveItemPerson`** (`ArchiveItem.people`) only.
 
 **Current behavior:**
 
@@ -1977,10 +2031,11 @@ appears.”
   preserved; duplicates dropped. Names and aliases are not reinterpreted as
   ids. Unknown-but-well-formed ids stay in the filter tuple and match nothing
   (same as unknown category/event/tag ids).
-- ORM: `pk__in` subquery on **`ArchiveItemPerson.person_id`** (through table
-  only, not a copy of the authorized browse queryset). **`PhotoPerson` is not
-  consulted.** A PHOTO item with only `PhotoPerson(person=X)` does not match
-  `person=X`. A PHOTO item with `ArchiveItemPerson(person=X)` does.
+- ORM: correlated **`Exists`** on **`ArchiveItemPerson`** **or** renderable
+  **`PhotoPerson`** (see **Public `/archive/` Person advanced filter —
+  unified AIP ∪ PhotoPerson**). Inner subqueries do not copy the authorized
+  browse queryset. **`people_present` is not consulted.** AIP is not inferred
+  from PhotoPerson.
 - OR within the Person group; AND with author / category / event / tag / year
   groups. Visibility remains `archive_browse_queryset_for_user` before filters.
 - Applies to VIDEO / OCR_DOCUMENT / MANUAL_TEXT / PHOTO. Results remain
@@ -1988,12 +2043,14 @@ appears.”
   `/archive/people/<id>/` (see **Public Person page**); this filter does
   not deep-link to it. Active Person chips link the name to that page
   without changing filter semantics.
-- Choices: one `Person.objects.filter(archive_items__pk__in=authorized pks).distinct().order_by("name", "id")`
-  query when advanced choice context is needed (panel open or any advanced
+- Choices: `Person.objects.filter(person_public_membership_q_for_item_pks(authorized pks)).order_by("name", "id")`
+  when advanced choice context is needed (panel open or any advanced
   filter active). Canonical **`Person.name`** is the visible label; option
   value is the id. Aliases are not separate options and are not prefetched.
-  Ordinary `/archive/` and q-only requests still skip all choice-context
-  queries (now 5 when loaded: author + category + event + tag + person).
+  PhotoPerson-only people appear when the parent item is authorized and the
+  photo is renderable. Ordinary `/archive/` and q-only requests still skip all
+  choice-context queries (now 5 when loaded: author + category + event + tag +
+  person).
 - Active chips: **one chip per selected Person id** (canonical
   `Person.name`). Name → Person page; × removes that id only via
   `archive_advanced_filters_without_person` and always keeps
@@ -2008,8 +2065,8 @@ already indexes those identities. Structured filtering was the remaining
 public discovery gap. PhotoPerson stays the photo-appearance relation.
 
 **Deferred:** public alias display; alias-assisted picker search (client
-filter matches canonical option text only); PhotoPerson-specific
-“appears in this photo” filter; D2b Tag-row deletion is implemented
+filter matches canonical option text only); photo-level PhotoPerson
+appearance cards/filter on `/archive/`; D2b Tag-row deletion is implemented
 (see **Historical person-Tag row deletion (D2b)**); legacy
 `Document.tags_m2m` cleanup; identity merge/dedupe; fuzzy matching; AI
 identification. Public Person browse/detail and Person filter-chip UX
@@ -2061,8 +2118,9 @@ advanced-search backend/UI regressions. No schema migration.
   run **`backfill_archive_search_index`**. Do not modify `0055`.
 
 **Structured Person filter:** implemented in **Public `/archive/` Person
-advanced filter** (`person=<id>`, ArchiveItemPerson only). Public Person
-browse/detail is implemented (see **Public Person page**).
+advanced filter — unified AIP ∪ PhotoPerson** (`person=<id>`, AIP or
+renderable PhotoPerson). Public Person browse/detail is implemented (see
+**Public Person page**).
 
 **Why:** Production now has 29 Person rows and 124 ArchiveItemPerson links
 copied from historical person-name Tags. Those identities were not in `q`
