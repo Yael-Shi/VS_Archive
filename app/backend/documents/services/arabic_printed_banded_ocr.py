@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from documents.models import (
     ArabicPrintedOcrBandCheckpoint,
@@ -663,16 +663,38 @@ def _try_low_quality(ctx: _PageContext, band_index: int) -> bool:
     return True
 
 
+def _stored_cancel_pending_attempt(
+    band: ArabicPrintedOcrBandCheckpoint,
+) -> tuple[str, str]:
+    if band.create_call_count == 1:
+        return _ATTEMPT_PRIMARY, band.primary_interaction_id.strip()
+    if band.create_call_count == 2:
+        return _ATTEMPT_FALLBACK, band.fallback_interaction_id.strip()
+    return _ATTEMPT_PRIMARY, ""
+
+
+def _poll_stored_cancel_pending_interaction(
+    ctx: _PageContext,
+    band: ArabicPrintedOcrBandCheckpoint,
+) -> AntigravityBandOcrResult:
+    _, interaction_id = _stored_cancel_pending_attempt(band)
+    # A terminal last_status short-circuits polling, so the recovery GET is issued
+    # with in_progress to actually read the stored interaction once.
+    return poll_arabic_printed_band_interaction(
+        api_key=ctx.gemini_api_key,
+        interaction_id=interaction_id,
+        vision_draft_text=band.vision_draft_text,
+        last_status=_IN_PROGRESS_STATUS,
+        absolute_deadline_monotonic=ctx.attempt_deadline(),
+        poll_seconds=ctx.poll_seconds,
+        sleep_fn=ctx.sleep_fn,
+        monotonic_fn=ctx.monotonic_fn,
+    )
+
+
 def _recover_completed_cancel(ctx: _PageContext, band_index: int) -> None:
     band = _band_row(ctx.checkpoint_id, band_index)
-    attempt_kind = (
-        _ATTEMPT_PRIMARY if band.create_call_count == 1 else _ATTEMPT_FALLBACK
-    )
-    interaction_id = (
-        band.primary_interaction_id.strip()
-        if attempt_kind == _ATTEMPT_PRIMARY
-        else band.fallback_interaction_id.strip()
-    )
+    attempt_kind, interaction_id = _stored_cancel_pending_attempt(band)
     if not interaction_id or ctx.remaining() <= 0:
         _persist_band_failure(
             ctx,
@@ -685,18 +707,7 @@ def _recover_completed_cancel(ctx: _PageContext, band_index: int) -> None:
             failure_message="cancel completed without a recoverable interaction",
         )
         return
-    # A terminal last_status short-circuits polling, so the recovery GET is issued
-    # with in_progress to actually read the stored interaction once.
-    result = poll_arabic_printed_band_interaction(
-        api_key=ctx.gemini_api_key,
-        interaction_id=interaction_id,
-        vision_draft_text=band.vision_draft_text,
-        last_status=_IN_PROGRESS_STATUS,
-        absolute_deadline_monotonic=ctx.attempt_deadline(),
-        poll_seconds=ctx.poll_seconds,
-        sleep_fn=ctx.sleep_fn,
-        monotonic_fn=ctx.monotonic_fn,
-    )
+    result = _poll_stored_cancel_pending_interaction(ctx, band)
     diagnostics = _attempt_diagnostics(result, attempt_kind=attempt_kind)
     if result.accepted and result.transcription.strip():
         _persist_band_success(
@@ -722,19 +733,11 @@ def _recover_completed_cancel(ctx: _PageContext, band_index: int) -> None:
     )
 
 
-def _resolve_cancel_pending(
+def _continue_confirmed_cancelled(
     ctx: _PageContext,
     band: ArabicPrintedOcrBandCheckpoint,
     crop,
 ) -> bool | None:
-    """Return True/False for a decided band, or None to re-evaluate the state."""
-    confirmed = band.cancel_confirmed_status.strip().lower()
-    if confirmed == _CANCEL_STATUS_COMPLETED:
-        _recover_completed_cancel(ctx, band.band_index)
-        return None
-    if confirmed != ARABIC_PRINTED_CANCEL_CONFIRMED_CANCELLED:
-        # Unknown, empty, or other cancel status stays fail-closed.
-        return False
     if band.create_call_count >= 2:
         return _try_low_quality(ctx, band.band_index)
     if ctx.remaining() <= 0:
@@ -746,6 +749,73 @@ def _resolve_cancel_pending(
     )
     _run_attempt(ctx, band.band_index, crop, attempt_kind=_ATTEMPT_FALLBACK)
     return None
+
+
+def _recover_unresolved_cancel_pending(
+    ctx: _PageContext,
+    band: ArabicPrintedOcrBandCheckpoint,
+    crop,
+) -> bool | None:
+    """Read the stored interaction once. Never creates a new interaction."""
+    attempt_kind, interaction_id = _stored_cancel_pending_attempt(band)
+    if not interaction_id or ctx.remaining() <= 0:
+        return False
+    result = _poll_stored_cancel_pending_interaction(ctx, band)
+    observed = (_safe_token(result.last_status) or "").lower()
+    diagnostics = _attempt_diagnostics(result, attempt_kind=attempt_kind)
+    if observed in {
+        _CANCEL_STATUS_COMPLETED,
+        ARABIC_PRINTED_CANCEL_CONFIRMED_CANCELLED,
+    }:
+        diagnostics = replace(diagnostics, cancel_confirmed_status=observed)
+    apply_arabic_printed_band_diagnostics(
+        checkpoint_id=ctx.checkpoint_id,
+        lease_token=ctx.lease_token,
+        band_index=band.band_index,
+        diagnostics=diagnostics,
+    )
+    if result.accepted and result.transcription.strip():
+        _persist_band_success(
+            ctx,
+            band.band_index,
+            attempt_kind=attempt_kind,
+            transcription=result.transcription,
+            diagnostics=None,
+        )
+        return None
+    if observed == _CANCEL_STATUS_COMPLETED:
+        _persist_band_failure(
+            ctx,
+            band.band_index,
+            failure_code=(
+                BAND_FAILURE_PRIMARY
+                if attempt_kind == _ATTEMPT_PRIMARY
+                else BAND_FAILURE_FALLBACK
+            ),
+            failure_message=(
+                f"cancel completed rejected kind={result.failure_kind or 'rejected'}"
+            ),
+        )
+        return None
+    if observed == ARABIC_PRINTED_CANCEL_CONFIRMED_CANCELLED:
+        refreshed = _band_row(ctx.checkpoint_id, band.band_index)
+        return _continue_confirmed_cancelled(ctx, refreshed, crop)
+    return False
+
+
+def _resolve_cancel_pending(
+    ctx: _PageContext,
+    band: ArabicPrintedOcrBandCheckpoint,
+    crop,
+) -> bool | None:
+    """Return True/False for a decided band, or None to re-evaluate the state."""
+    confirmed = band.cancel_confirmed_status.strip().lower()
+    if confirmed == _CANCEL_STATUS_COMPLETED:
+        _recover_completed_cancel(ctx, band.band_index)
+        return None
+    if confirmed == ARABIC_PRINTED_CANCEL_CONFIRMED_CANCELLED:
+        return _continue_confirmed_cancelled(ctx, band, crop)
+    return _recover_unresolved_cancel_pending(ctx, band, crop)
 
 
 def _process_band(ctx: _PageContext, band_index: int, crop) -> bool:
