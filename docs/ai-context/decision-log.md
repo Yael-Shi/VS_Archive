@@ -1,5 +1,31 @@
 # VS-Archive Decision Log
 
+## Gemini Hebrew translation — short-chunk length floor is not truncation
+
+**Decision / implemented:** Hebrew translation truncation detection must not
+treat a completed short excerpt as output-token truncation merely because the
+Hebrew result is shorter than `min_text_length` (default 20). Document 322
+failed `HEBREW_TRANSLATION_FAILED` on chunk 1/16 with `source_length=13`,
+`translation_length=5`, `finish_reason=STOP`, and `max_output_tokens=8192`.
+
+**Current behavior:**
+
+- `_is_translation_chunk_truncated` applies the `min_text_length` floor only
+  when the source chunk is itself at least `min_text_length`.
+- Sources under 1000 characters still skip the 20% ratio heuristic.
+- `MAX_TOKENS` still retries, escalates the output cap, and may split.
+- Empty provider output still fails as empty response.
+- A translation shorter than `min_text_length` still sets `needs_review`.
+- Chunking is unchanged: blank-line paragraphs pack up to 2200 characters; a
+  short leading paragraph is flushed as its own chunk when the next block is
+  oversized (`>2200`) or when a short first line is followed by an oversized
+  line inside `_split_oversized_block`.
+
+**Unchanged:** models, routing, OCR/banded OCR, production flags, and
+length-based truncation for normal/large chunks.
+
+**Tests:** `GeminiHebrewTranslationTests` in `documents/tests.py`.
+
 ## Arabic printed banded OCR — stale CANCEL_PENDING recovery
 
 **Decision / implemented:** A reclaimed Arabic printed band in

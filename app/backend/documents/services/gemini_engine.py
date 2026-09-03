@@ -940,7 +940,8 @@ def _translation_min_expected_length(
     Minimum expected Hebrew length for ratio-based truncation checks.
 
     Returns None when the source is too short for a reliable ratio heuristic
-    (sources under 1000 chars rely on MAX_TOKENS and min_text_length instead).
+    (sources under 1000 chars). Those chunks rely on MAX_TOKENS and, when the
+    source itself is at least min_text_length, the min_text_length floor.
     """
     if source_length < 1000:
         return None
@@ -954,11 +955,14 @@ def _is_translation_chunk_truncated(
     *,
     min_text_length: int,
 ) -> bool:
-    if len(translated_text) < min_text_length:
+    source_length = len(source_chunk)
+    # A complete Hebrew translation of a short excerpt can be shorter than the
+    # OCR review floor (default 20). Do not treat that as output-token truncation.
+    if source_length >= min_text_length and len(translated_text) < min_text_length:
         return True
 
     min_expected_length = _translation_min_expected_length(
-        len(source_chunk),
+        source_length,
         min_text_length=min_text_length,
     )
     if min_expected_length is None:

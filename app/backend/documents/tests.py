@@ -38,6 +38,8 @@ from documents.services.gemini_engine import (
     _HEBREW_TRANSLATION_PROMPT,
     _PRINTED_LATIN_PROMPT,
     _PRINTED_TEXT_PROMPT,
+    _TRANSLATION_CHUNK_MAX_CHARS,
+    _split_text_for_translation,
     transcribe_pages_with_gemini,
     translate_text_to_hebrew_with_gemini,
 )
@@ -8744,6 +8746,92 @@ class GeminiHebrewTranslationTests(SimpleTestCase):
 
         self.assertEqual(result.text, hebrew_text)
         mock_client.models.generate_content.assert_called_once()
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_translation_accepts_complete_short_chunk_below_min_text_length(
+        self, _mock_get_key, mock_create_client
+    ):
+        source_text = "وثيقة قصيرة!!"
+        self.assertEqual(len(source_text), 13)
+        hebrew_text = "תרגום"
+        self.assertEqual(len(hebrew_text), 5)
+        mock_client = Mock()
+        mock_client.models.generate_content.return_value = self._translation_response(
+            hebrew_text,
+            finish_reason="STOP",
+        )
+        mock_create_client.return_value = mock_client
+
+        result = translate_text_to_hebrew_with_gemini(source_text, "ar")
+
+        self.assertEqual(result.text, hebrew_text)
+        self.assertTrue(result.needs_review)
+        mock_client.models.generate_content.assert_called_once()
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_translation_medium_source_below_min_text_length_still_truncated(
+        self, _mock_get_key, mock_create_client
+    ):
+        source_text = self._short_source_text(80)
+        mock_client = Mock()
+        mock_client.models.generate_content.side_effect = [
+            self._translation_response("תרגום", finish_reason="STOP"),
+            self._translation_response("תרגום", finish_reason="STOP"),
+        ]
+        mock_create_client.return_value = mock_client
+
+        with self.assertRaises(GeminiError) as ctx:
+            translate_text_to_hebrew_with_gemini(source_text, "en")
+
+        message = str(ctx.exception)
+        self.assertIn("chunk appears truncated after retry", message)
+        self.assertIn("finish_reason=STOP", message)
+        self.assertEqual(mock_client.models.generate_content.call_count, 2)
+
+    def test_translation_flushes_short_leading_paragraph_before_oversized_block(self):
+        short_lead = "وثيقة قصيرة!!"
+        self.assertEqual(len(short_lead), 13)
+        oversized = ("paragraph " * 300).strip()
+        self.assertGreater(len(oversized), _TRANSLATION_CHUNK_MAX_CHARS)
+        source_text = f"{short_lead}\n\n{oversized}"
+
+        chunks = _split_text_for_translation(source_text)
+
+        self.assertGreaterEqual(len(chunks), 2)
+        self.assertEqual(chunks[0], short_lead)
+        self.assertEqual(len(chunks[0]), 13)
+
+    @patch("documents.services.gemini_engine._create_client")
+    @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
+    def test_translation_short_leading_chunk_among_later_chunks_is_accepted(
+        self, _mock_get_key, mock_create_client
+    ):
+        short_lead = "وثيقة قصيرة!!"
+        oversized = ("paragraph " * 300).strip()
+        source_text = f"{short_lead}\n\n{oversized}"
+        chunks = _split_text_for_translation(source_text)
+        self.assertGreaterEqual(len(chunks), 2)
+        self.assertEqual(len(chunks[0]), 13)
+
+        mock_client = Mock()
+        mock_client.models.generate_content.side_effect = [
+            self._translation_response("תרגום", finish_reason="STOP"),
+            *[
+                self._translation_response("י" * 500, finish_reason="STOP")
+                for _ in chunks[1:]
+            ],
+        ]
+        mock_create_client.return_value = mock_client
+
+        result = translate_text_to_hebrew_with_gemini(source_text, "ar")
+
+        self.assertTrue(result.text.startswith("תרגום"))
+        self.assertEqual(
+            mock_client.models.generate_content.call_count,
+            len(chunks),
+        )
 
     @patch("documents.services.gemini_engine._create_client")
     @patch("documents.services.gemini_engine._get_api_key", return_value="test-key")
