@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - {{ author.name }}{% endblock %}
+
+{% block content %}
+  <div class="card page-header" id="archive-top">
+    <h1 class="page-title">{{ author.name }}</h1>
+
+    <div class="page-toolbar page-toolbar--archive-browse">
+      <a class="btn" href="{% url 'archive-list' %}">חזרה לארכיון</a>
+    </div>
+
+    {% if browse_cards %}
+      <h2 class="archive-author-section-title">פריטים קשורים</h2>
+      <p class="archive-search-results-count" aria-live="polite">
+        נמצאו {{ total_count }} תוצאות
+      </p>
+
+      <div class="spacer"></div>
+
+      {% include "documents/archive/partials/item_list_cards.html" with browse_cards=browse_cards is_admin=is_admin %}
+
+      {% if show_page_nav %}
+        <div class="spacer"></div>
+        {% include "documents/archive/partials/author_page_pagination.html" %}
+      {% endif %}
+    {% endif %}
+  </div>
+{% endblock %}

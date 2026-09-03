@@ -55,14 +55,18 @@ class AuthorStaffIndexRouteTests(TestCase):
         with self.assertRaises(Resolver404):
             resolve("/archive/manage/authors/1/delete/")
 
-    def test_no_public_author_catalog_or_detail_routes(self):
-        for path in (
-            "/archive/authors/",
+    def test_public_author_catalog_and_detail_routes_exist(self):
+        index = resolve("/archive/authors/")
+        self.assertEqual(index.url_name, "archive-authors-index")
+        self.assertEqual(reverse("archive-authors-index"), "/archive/authors/")
+        detail = resolve("/archive/authors/1/")
+        self.assertEqual(detail.url_name, "archive-author-detail")
+        self.assertEqual(
+            reverse("archive-author-detail", kwargs={"author_id": 1}),
             "/archive/authors/1/",
-            "/archive/author/1/",
-        ):
-            with self.assertRaises(Resolver404):
-                resolve(path)
+        )
+        with self.assertRaises(Resolver404):
+            resolve("/archive/author/1/")
 
 
 class AuthorStaffIndexAccessTests(TestCase):

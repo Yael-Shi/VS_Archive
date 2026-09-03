@@ -286,6 +286,11 @@ from documents.services.archive_item_presentation import (
     person_public_page_url,
     public_discovery_context,
 )
+from documents.services.author_public import (
+    build_public_authors_index_rows,
+    public_author_archive_items_queryset,
+    public_authors_queryset,
+)
 from documents.services.person_public import (
     build_person_public_item_cards,
     build_public_people_index_rows,
@@ -5177,6 +5182,75 @@ def archive_person_detail_page(request, person_id: int):
                 page=page,
                 per_page=per_page,
                 q="",
+                item_type_filter="",
+            ),
+        },
+    )
+
+
+def archive_author_detail_page(request, author_id: int):
+    author = get_object_or_404(Author, pk=author_id)
+    items = _archive_browse_select_related(
+        public_author_archive_items_queryset(request.user, author.pk)
+    )
+    total_count = items.count()
+    if total_count == 0:
+        raise Http404() from None
+
+    per_page = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE
+    page = normalize_archive_public_list_page(
+        request.GET.get("page"),
+        total_count=total_count,
+        per_page=per_page,
+    )
+    offset = (page - 1) * per_page
+    page_items = list(items[offset : offset + per_page])
+    browse_cards = _archive_browse_cards_for_items(page_items)
+    return render(
+        request,
+        "documents/archive/author_public_detail.html",
+        context={
+            "author": author,
+            "items": page_items,
+            "browse_cards": browse_cards,
+            "is_admin": _is_admin(request.user),
+            "total_count": total_count,
+            **archive_public_list_pagination_context(
+                total_count=total_count,
+                page=page,
+                per_page=per_page,
+                q="",
+                item_type_filter="",
+            ),
+        },
+    )
+
+
+def archive_authors_index_page(request):
+    search_query = (request.GET.get("q") or "").strip()
+    authors = public_authors_queryset(request.user, search_query=search_query)
+    total_count = authors.count()
+    per_page = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE
+    page = normalize_archive_public_list_page(
+        request.GET.get("page"),
+        total_count=total_count,
+        per_page=per_page,
+    )
+    offset = (page - 1) * per_page
+    page_authors = list(authors[offset : offset + per_page])
+    author_rows = build_public_authors_index_rows(request.user, page_authors)
+    return render(
+        request,
+        "documents/archive/authors_public_index.html",
+        context={
+            "author_rows": author_rows,
+            "q": search_query,
+            "page_title": "מחברים",
+            **archive_public_list_pagination_context(
+                total_count=total_count,
+                page=page,
+                per_page=per_page,
+                q=search_query,
                 item_type_filter="",
             ),
         },

@@ -176,7 +176,8 @@ code {
   color: var(--text-heading);
 }
 
-.archive-person-section-title {
+.archive-person-section-title,
+.archive-author-section-title {
   margin: var(--space-4) 0 var(--space-3);
   font-family: var(--font-heading);
   font-size: var(--font-xl);
@@ -2965,6 +2966,38 @@ pre {
   flex: 0 0 auto;
 }
 
+.archive-authors-index-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.archive-authors-index-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.archive-authors-index-name {
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.archive-authors-index-name:hover {
+  text-decoration: underline;
+}
+
+.archive-authors-index-count {
+  flex: 0 0 auto;
+}
+
 .archive-browse-card {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
@@ -3398,6 +3431,11 @@ pre {
   }
 
   .archive-people-index-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-4);
+  }
+
+  .archive-authors-index-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-4);
   }

@@ -29,6 +29,16 @@ urlpatterns = [
         views.archive_person_detail_page,
         name="archive-person-detail",
     ),
+    path(
+        "authors/",
+        views.archive_authors_index_page,
+        name="archive-authors-index",
+    ),
+    path(
+        "authors/<int:author_id>/",
+        views.archive_author_detail_page,
+        name="archive-author-detail",
+    ),
     path("manage/", views.archive_manage_list_page, name="archive-manage-list"),
     path(
         "manage/new/",

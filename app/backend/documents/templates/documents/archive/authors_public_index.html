@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - {{ page_title }}{% endblock %}
+
+{% block content %}
+  <div class="card page-header" id="archive-top">
+    <h1 class="page-title">{{ page_title }}</h1>
+
+    <div class="page-toolbar page-toolbar--archive-browse">
+      <a class="btn" href="{% url 'archive-list' %}">חזרה לארכיון</a>
+    </div>
+
+    <section class="archive-search-panel" aria-label="חיפוש מחברים">
+      <form method="get" class="archive-search-form" action="{% url 'archive-authors-index' %}">
+        <div class="archive-search-form__row">
+          <label class="visually-hidden" for="archive-authors-index-q">חיפוש מחברים</label>
+          <input
+            id="archive-authors-index-q"
+            class="archive-search-form__input"
+            type="search"
+            name="q"
+            placeholder="חיפוש לפי שם…"
+            value="{{ q }}"
+            autocomplete="off"
+          >
+
+          <div class="archive-search-form__actions">
+            <div class="archive-search-form__primary-controls">
+              <button class="btn btn-primary archive-search-form__submit" type="submit">חיפוש</button>
+            </div>
+            {% if q %}
+              <a class="archive-search-form__clear" href="{% url 'archive-authors-index' %}">ניקוי החיפוש</a>
+            {% endif %}
+          </div>
+        </div>
+      </form>
+    </section>
+
+    {% if author_rows %}
+      <p class="archive-search-results-count" aria-live="polite">
+        נמצאו {{ total_count }} תוצאות
+      </p>
+      <div class="spacer"></div>
+      <ul class="archive-authors-index-list">
+        {% for row in author_rows %}
+          <li class="archive-authors-index-row">
+            <a class="archive-authors-index-name" href="{{ row.href }}">{{ row.name }}</a>
+            <span class="archive-authors-index-count muted">
+              {% if row.item_count == 1 %}1 פריט{% else %}{{ row.item_count }} פריטים{% endif %}
+            </span>
+          </li>
+        {% endfor %}
+      </ul>
+      {% if show_page_nav %}
+        <div class="spacer"></div>
+        {% include "documents/archive/partials/authors_index_pagination.html" %}
+      {% endif %}
+    {% elif q %}
+      <p class="muted">לא נמצאו מחברים תואמים.</p>
+    {% else %}
+      <p class="muted">אין מחברים להצגה.</p>
+    {% endif %}
+  </div>
+{% endblock %}
