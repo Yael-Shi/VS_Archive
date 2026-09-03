@@ -1,0 +1,43 @@
+<div class="text-quality-indicator" data-text-quality-indicator>
+  {% if show_heading %}
+    <span class="text-quality-indicator__heading">{{ indicator.heading }}:</span>
+  {% endif %}
+  {% if context_label %}
+    <span class="text-quality-indicator__context" aria-hidden="true">{{ context_label }}</span>
+  {% endif %}
+  <span
+    class="text-quality-indicator__badge text-quality-indicator__badge--{{ indicator.css_modifier }}"
+    aria-label="{{ indicator.accessible_name }}"
+  >
+    {% if indicator.show_verified_mark %}<span class="text-quality-indicator__check" aria-hidden="true">✓</span>{% endif %}{{ indicator.label }}
+  </span>
+  <span class="text-quality-indicator__info-wrap">
+    <button
+      type="button"
+      class="text-quality-indicator__info"
+      aria-label="{{ indicator.tooltip_title }}"
+      aria-expanded="false"
+      aria-controls="{{ indicator.help_dom_id }}"
+      aria-describedby="{{ indicator.help_dom_id }}"
+    >
+      <span class="text-quality-indicator__info-glyph" aria-hidden="true">i</span>
+    </button>
+    <div
+      class="text-quality-indicator__popover"
+      id="{{ indicator.help_dom_id }}"
+      role="tooltip"
+    >
+      <p class="text-quality-indicator__popover-title">{{ indicator.tooltip_title }}</p>
+      <p>{{ indicator.tooltip_intro }}</p>
+      <ul class="text-quality-indicator__popover-levels">
+        {% for level_label, level_text in indicator.tooltip_levels %}
+          <li><strong>{{ level_label }}</strong> — {{ level_text }}</li>
+        {% endfor %}
+      </ul>
+      <p class="text-quality-indicator__popover-footer">{{ indicator.tooltip_footer }}</p>
+      {% if indicator.tooltip_translation_note %}
+        <p class="text-quality-indicator__popover-translation-note">{{ indicator.tooltip_translation_note }}</p>
+      {% endif %}
+    </div>
+  </span>
+</div>

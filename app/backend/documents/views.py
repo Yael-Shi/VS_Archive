@@ -347,6 +347,9 @@ from documents.services.text_presentation import (
     resolve_displayable_source_text_result,
     text_presentation_results_prefetch,
 )
+from documents.services.text_quality_presentation import (
+    public_text_quality_indicator_for_manual_text,
+)
 from documents.services.transkribus_corrected_current_activation import (
     CorrectedCurrentActivationError,
     CorrectedCurrentActivationErrorCode,
@@ -5326,6 +5329,9 @@ def archive_detail_page(request, item_id: int):
                 "body": item.manual_text_content.body,
                 "photo_url": None,
                 "is_admin": _is_admin(request.user),
+                "text_quality_indicator": public_text_quality_indicator_for_manual_text(
+                    item.manual_text_content
+                ),
                 **discovery_context,
             },
         )

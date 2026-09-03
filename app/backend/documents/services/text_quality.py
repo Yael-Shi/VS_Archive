@@ -9,7 +9,7 @@ Effective DocumentTextResult precedence:
 2. verification_status=REJECTED -> NEEDS_CORRECTION
 3. otherwise -> persisted base quality
 
-PR2 UI copy (not rendered in this foundation PR):
+Public UI copy (rendered by text_quality_presentation / templates, not here):
 heading איכות התעתוק; labels in PUBLIC_TEXT_QUALITY_LABELS.
 """
 
@@ -23,7 +23,7 @@ NEEDS_CORRECTION = "NEEDS_CORRECTION"
 PUBLIC_TEXT_QUALITY_HEADING = "איכות התעתוק"
 
 PUBLIC_TEXT_QUALITY_LABELS = {
-    DocumentTextResult.Quality.UNKNOWN: "לא הוערכה",
+    DocumentTextResult.Quality.UNKNOWN: "טרם הוערך",
     DocumentTextResult.Quality.LOW: "איכות נמוכה",
     DocumentTextResult.Quality.MEDIUM: "איכות בינונית",
     DocumentTextResult.Quality.GOOD: "איכות טובה",

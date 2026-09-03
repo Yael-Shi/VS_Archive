@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load document_date_display status_labels archive_labels %}
+{% load document_date_display status_labels archive_labels static %}
 {% block title %}VSArchive - {{ doc.archive_item.title }}{% endblock %}
 
 {% block content %}
@@ -304,5 +304,8 @@
   {% endif %}
   {% if text_line_hover.enabled %}
     {% include "documents/partials/_text_line_hover_script.html" %}
+  {% endif %}
+  {% if text_presentation.source.quality_indicator or text_presentation.hebrew.quality_indicator %}
+    <script src="{% static 'public/text_quality_indicator.js' %}"></script>
   {% endif %}
 {% endblock %}
