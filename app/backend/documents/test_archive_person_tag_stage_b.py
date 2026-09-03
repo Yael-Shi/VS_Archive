@@ -312,7 +312,7 @@ class ArchivePersonTagStageBAuthorizationAndPhotoPersonTests(TestCase):
         self.assertEqual(_titles(resp), {"Public mapped person"})
         self.assertNotIn("Private mapped person", _titles(resp))
 
-    def test_photoperson_only_does_not_match_redirected_person_filter(self):
+    def test_photoperson_only_matches_redirected_person_page_and_filter(self):
         person = _mapped_person()
         item = ArchiveItem.objects.create(
             item_type=ArchiveItem.ItemType.PHOTO,
@@ -339,9 +339,9 @@ class ArchivePersonTagStageBAuthorizationAndPhotoPersonTests(TestCase):
         self.assertEqual(browse.status_code, 302)
         self.assertEqual(browse["Location"], person_public_page_url(person.id))
         person_page = self.client.get(browse["Location"])
-        self.assertEqual(person_page.status_code, 404)
+        self.assertEqual(person_page.status_code, 200)
+        self.assertEqual(_titles(person_page), {"PhotoPerson only"})
 
         resp = self.client.get(person_archive_filter_url(person.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertNotIn("PhotoPerson only", _titles(resp))
-        self.assertEqual(list(resp.context["items"]), [])
+        self.assertEqual(_titles(resp), {"PhotoPerson only"})

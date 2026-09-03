@@ -11,7 +11,7 @@ from dataclasses import dataclass, replace
 from datetime import date
 from typing import Any, Mapping, Sequence
 
-from django.db.models import QuerySet
+from django.db.models import Exists, OuterRef, QuerySet
 
 from documents.historical_person_tag_map import historical_person_name_tag_ids
 from documents.models import (
@@ -20,6 +20,7 @@ from documents.models import (
     ArchiveItem,
     ArchiveItemPerson,
     Person,
+    PhotoPerson,
     Tag,
 )
 
@@ -248,8 +249,10 @@ def filter_archive_items_by_advanced_filters(
 
     Within each multi-value M2M group values are OR'd; groups AND together.
     M2M filtering uses ``pk__in`` subqueries so join fan-out cannot duplicate
-    ``ArchiveItem`` rows. Date filtering requires a known archival date
-    (non-``UNKNOWN`` precision with both bounds) and uses interval overlap.
+    ``ArchiveItem`` rows. Person filtering uses correlated ``Exists``
+    (ArchiveItemPerson OR renderable PhotoPerson) for the same reason.
+    Date filtering requires a known archival date (non-``UNKNOWN`` precision
+    with both bounds) and uses interval overlap.
     """
     if filters is None or not filters.is_active():
         return queryset
@@ -275,14 +278,26 @@ def filter_archive_items_by_advanced_filters(
         )
 
     if filters.person_ids:
-        # ArchiveItemPerson only. Query the through table directly so the
-        # authorized browse queryset (EXISTS/JOINs) is not copied into the
-        # inner subquery. PhotoPerson is a PhotoContent relation and must not
-        # match this filter.
+        # Correlated Exists so the authorized browse queryset is not copied
+        # into the inner subquery and join fan-out cannot duplicate rows.
+        # PhotoPerson matches only identified people on renderable photos;
+        # people_present is not consulted; AIP is not inferred from PP.
+        from documents.services.person_public import renderable_photo_contents_queryset
+
         filtered = filtered.filter(
-            pk__in=ArchiveItemPerson.objects.filter(
-                person_id__in=filters.person_ids
-            ).values("archive_item_id")
+            Exists(
+                ArchiveItemPerson.objects.filter(
+                    person_id__in=filters.person_ids,
+                    archive_item_id=OuterRef("pk"),
+                )
+            )
+            | Exists(
+                PhotoPerson.objects.filter(
+                    person_id__in=filters.person_ids,
+                    photo_content__archive_item_id=OuterRef("pk"),
+                    photo_content__in=renderable_photo_contents_queryset(),
+                )
+            )
         )
 
     if filters.year is not None:
@@ -307,8 +322,11 @@ def archive_advanced_filter_choice_context(
     Discovery/author choices for advanced filters.
 
     Derived only from ``authorized_queryset`` so private/restricted metadata
-    cannot leak to unauthorized viewers.
+    cannot leak to unauthorized viewers. Person choices use the same AIP-or-
+    renderable-PhotoPerson membership as the public People index.
     """
+    from documents.services.person_public import person_public_membership_q_for_item_pks
+
     item_pks = authorized_queryset.order_by().values("pk")
     author_names = tuple(
         authorized_queryset.exclude(author_name="")
@@ -333,9 +351,9 @@ def archive_advanced_filter_choice_context(
         .order_by("name")
     )
     persons = tuple(
-        Person.objects.filter(archive_items__pk__in=item_pks)
-        .distinct()
-        .order_by("name", "id")
+        Person.objects.filter(
+            person_public_membership_q_for_item_pks(item_pks)
+        ).order_by("name", "id")
     )
     return {
         "advanced_filter_author_choices": author_names,

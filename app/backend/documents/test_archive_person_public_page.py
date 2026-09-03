@@ -616,8 +616,8 @@ class PersonPublicPagePhotoPersonTests(TestCase):
         )
         self.assertEqual(_card_urls(resp).count(letter_url), 1)
 
-    def test_advanced_person_filter_still_ignores_photoperson_only(self):
-        person = Person.objects.create(name="Filter Unchanged Person")
+    def test_advanced_person_filter_includes_photoperson_only(self):
+        person = Person.objects.create(name="Filter Unified Person")
         photo_item = _create_photo_item(title="PhotoPerson filter decoy")
         photo = _add_photo(photo_item)
         PhotoPerson.objects.create(photo_content=photo, person=person)
@@ -637,8 +637,8 @@ class PersonPublicPagePhotoPersonTests(TestCase):
                 normalize_archive_advanced_filters({"person": str(person.id)}),
             ).values_list("pk", flat=True)
         )
-        self.assertEqual(ids, [linked.pk])
-        self.assertNotIn(photo_item.pk, ids)
+        self.assertEqual(set(ids), {linked.pk, photo_item.pk})
+        self.assertEqual(len(ids), 2)
 
         list_resp = self.client.get(
             reverse("archive-list"), {"person": str(person.id), "advanced": "1"}
@@ -646,7 +646,7 @@ class PersonPublicPagePhotoPersonTests(TestCase):
         self.assertEqual(list_resp.status_code, 200)
         self.assertEqual(
             {item.title for item in list_resp.context["items"]},
-            {"ArchiveItemPerson filter match"},
+            {"ArchiveItemPerson filter match", "PhotoPerson filter decoy"},
         )
 
     def test_appearance_queries_do_not_grow_with_photo_count(self):
