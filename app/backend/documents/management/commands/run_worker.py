@@ -696,20 +696,31 @@ class Command(BaseCommand):
             target_types.append(DocumentTextResult.ResultType.HEBREW_TEXT)
 
         for r_type in target_types:
+            defaults = {
+                "status": status,
+                "text": htr.text,
+                "engine_key": route.engine_key,
+                "prompt_variant": route.prompt_variant,
+                "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
+                "error_code": None,
+                "error_details": None,
+                "review_reasons": json.dumps(review_reasons),
+            }
+            # Only scoring engines set HtrResult.quality. Omit the field when
+            # unset so a non-scoring rerun cannot overwrite an existing value
+            # (new rows still default to UNKNOWN). Apply to SOURCE_TEXT only;
+            # HEBREW_TEXT quality is unchanged (translation inheritance deferred).
+            if (
+                r_type == DocumentTextResult.ResultType.SOURCE_TEXT
+                and htr.quality is not None
+                and htr.quality in DocumentTextResult.Quality.values
+            ):
+                defaults["quality"] = htr.quality
             DocumentTextResult.objects.update_or_create(
                 document=doc,
                 result_type=r_type,
                 engine=engine,
-                defaults={
-                    "status": status,
-                    "text": htr.text,
-                    "engine_key": route.engine_key,
-                    "prompt_variant": route.prompt_variant,
-                    "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
-                    "error_code": None,
-                    "error_details": None,
-                    "review_reasons": json.dumps(review_reasons),
-                },
+                defaults=defaults,
             )
 
         if not is_he:

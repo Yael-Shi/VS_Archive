@@ -1,5 +1,49 @@
 # VS-Archive Decision Log
 
+## Text quality PR3 — Arabic printed banded SOURCE_TEXT base quality
+
+**Decision / implemented:** Automatic persisted `LOW` / `MEDIUM` / `GOOD` is
+scored **only** for **new or reprocessed Arabic printed banded** OCR
+**SOURCE_TEXT**. Other engines/routes remain `UNKNOWN` unless scored in a
+later PR. Translation `HEBREW_TEXT` quality is unchanged;
+`capped_inherited_base_quality` remains unwired.
+
+**Scoring** (`documents.services.arabic_printed_text_quality.quality_from_banded_page_qualities`):
+input is the completed banded `page_quality` list plus assembled source text.
+The scorer does not query checkpoints.
+
+- **UNKNOWN** — empty page evidence, any missing/blank/unknown `page_quality`,
+  or missing/blank/whitespace-only assembled source text
+- **GOOD** — every page is `UNASSISTED` and assembled text does not contain
+  `[UNCLEAR]`
+- **LOW** — at least half of pages are `CLOUD_VISION_LOW_QUALITY`, using
+  integer-safe `2 * lq_count >= total_pages` (1/1 and 1/2 are LOW; 1/3 is
+  MEDIUM; 2/3 and 2/4 are LOW)
+- **MEDIUM** — every other valid completed case, including `ASSISTED`,
+  `MIXED`, minority LQ, and all-`UNASSISTED` text containing `[UNCLEAR]`
+  (`[UNCLEAR]` caps GOOD → MEDIUM). `ASSISTED` or `MIXED` alone never mean
+  LOW. Do not use `status` / `READY` / `NEEDS_REVIEW` / engine name as
+  quality proxies.
+
+**Current behavior:**
+
+- Completed banded Antigravity attaches `HtrResult.quality` from the scorer.
+  Non-banded Antigravity leaves `quality` unset (`None`).
+- Worker `_save_htr_results` writes `defaults["quality"]` only when
+  `HtrResult.quality` is a persisted `DocumentTextResult.Quality` value.
+  `None` omits the field: new rows default to `UNKNOWN`; existing rows are
+  not overwritten by a non-scoring rerun.
+- A successful **same-engine** banded rerun recomputes and persists base
+  quality. Engine-marker identity / DTR uniqueness is unchanged.
+- VERIFIED reprocess remains blocked; REJECTED may be reprocessed and can
+  return to UNVERIFIED.
+- Gemini, Transkribus, legacy/non-banded Antigravity, and other
+  languages/routes are not scored. `HUMAN_VERIFIED` / `NEEDS_CORRECTION`
+  remain presentation-only and are never written as base quality.
+
+**Tests:** `documents/test_arabic_printed_text_quality.py`; adapter coverage
+in `documents/test_antigravity_ocr.py`.
+
 ## Text quality PR2 — public detail quality indicator
 
 **Decision / implemented:** Public OCR document detail shows **one** compact
@@ -110,7 +154,9 @@ the stored automatic quality publicly.
   only changes `verification_status` (plus optional text save). Effective
   quality becomes `HUMAN_VERIFIED` automatically once `VERIFIED`, and
   `NEEDS_CORRECTION` once `REJECTED`.
-- Worker/translation persist does not set `quality` yet (model default
+- Worker `_save_htr_results` writes `quality` only when `HtrResult` supplies
+  a persisted quality value (PR3: Arabic printed banded SOURCE_TEXT).
+  Translation persist still does not set `quality` (model default
   `UNKNOWN`). Future `HEBREW_TEXT` scoring should set
   `persist_hebrew_translation_result` `defaults["quality"]` via
   `capped_inherited_base_quality(source.quality, candidate)` — not wired yet.

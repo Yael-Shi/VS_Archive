@@ -30,6 +30,9 @@ from documents.services.arabic_printed_page_checkpoints import (
     ArabicPrintedIdentityMismatchError,
     StaleArabicPrintedPageClaimError,
 )
+from documents.services.arabic_printed_text_quality import (
+    quality_from_banded_page_qualities,
+)
 from documents.services.cloud_vision_document_text import (
     CloudVisionDocumentTextError,
     prepare_arabic_printed_working_image,
@@ -328,4 +331,8 @@ def _htr_result_from_banded_document(
         text=text,
         needs_review=True,
         engine_name=_banded_runtime_engine_name(ordered),
+        quality=quality_from_banded_page_qualities(
+            [page.page_quality for page in ordered],
+            assembled_text=text,
+        ),
     )

@@ -1126,13 +1126,16 @@ def _banded_page_result(
     text: str,
     marker: str = "antigravity-banded:unassisted",
     outcome: str = OUTCOME_SUCCEEDED,
+    page_quality: str | None = None,
 ) -> ArabicPrintedBandedPageResult:
+    if page_quality is None:
+        page_quality = "UNASSISTED" if outcome == OUTCOME_SUCCEEDED else ""
     return ArabicPrintedBandedPageResult(
         checkpoint_id=page_index + 1,
         page_index=page_index,
         outcome=outcome,
         assembled_text=text,
-        page_quality="UNASSISTED" if outcome == OUTCOME_SUCCEEDED else "",
+        page_quality=page_quality,
         runtime_engine_marker=marker if outcome == OUTCOME_SUCCEEDED else "",
         failure_code=None if outcome == OUTCOME_SUCCEEDED else "PAGE_FAILED",
     )
@@ -1195,6 +1198,7 @@ class AntigravityAdapterBandedWiringTests(SimpleTestCase):
 
         self.assertEqual(result.text, "json-transcript")
         self.assertEqual(result.engine_name, DEFAULT_ANTIGRAVITY_AGENT_ID)
+        self.assertIsNone(result.quality)
         mock_transcribe.assert_called_once()
         mock_coordinator.assert_not_called()
         self.assertIs(mock_transcribe.call_args.args[0], pages)
@@ -1295,6 +1299,7 @@ class AntigravityAdapterBandedWiringTests(SimpleTestCase):
         self.assertEqual(result.engine_name, "antigravity-banded:unassisted")
         self.assertNotEqual(result.engine_name, DEFAULT_ANTIGRAVITY_AGENT_ID)
         self.assertTrue(result.needs_review)
+        self.assertEqual(result.quality, DocumentTextResult.Quality.GOOD)
 
     def test_old_arabic_eligibility_flag_false_keeps_gemini_route(self):
         with patch.dict(
@@ -1436,6 +1441,37 @@ class AntigravityAdapterBandedWiringTests(SimpleTestCase):
         self.assertNotEqual(result.engine_name, DEFAULT_ANTIGRAVITY_AGENT_ID)
         self.assertFalse(result.engine_name.startswith("antigravity-preview"))
         self.assertEqual(result.text, "one\n\ntwo")
+        self.assertEqual(result.quality, DocumentTextResult.Quality.GOOD)
+
+    @patch(
+        "documents.services.htr_adapters.antigravity_adapter.process_arabic_printed_banded_document"
+    )
+    def test_completed_htr_result_quality_follows_page_qualities(
+        self, mock_coordinator
+    ):
+        mock_coordinator.return_value = _completed_banded_result(
+            _banded_page_result(
+                0,
+                text="lq-page",
+                page_quality="CLOUD_VISION_LOW_QUALITY",
+            ),
+            _banded_page_result(
+                1,
+                text="mixed-page",
+                marker="antigravity-banded:assisted",
+                page_quality="MIXED",
+            ),
+        )
+        result = AntigravityAdapter().execute(
+            pages=[_jpeg_page(1, label=b"q1"), _jpeg_page(2, label=b"q2")],
+            language_hint="ar",
+            prompt_variant="printed",
+            worker_env=_make_banded_worker_env(),
+            document_id=9,
+            absolute_deadline_monotonic=_BANDED_DEADLINE,
+        )
+        self.assertEqual(result.quality, DocumentTextResult.Quality.LOW)
+        self.assertTrue(result.engine_name.startswith("antigravity-banded:"))
 
     @patch(
         "documents.services.htr_adapters.antigravity_adapter.process_arabic_printed_banded_document"

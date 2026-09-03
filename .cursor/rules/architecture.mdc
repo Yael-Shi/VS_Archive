@@ -124,6 +124,7 @@ It may contain result data such as:
 - `needs_review`
 - `engine_name`
 - `review_reasons`
+- optional `quality` (`DocumentTextResult.Quality` or `None`)
 
 It must not contain:
 
@@ -152,13 +153,15 @@ Do not repurpose `DocumentTextResult.engine` as a logical provider key.
 
 On successful OCR/HTR persistence, these values should come from the worker-held `OcrRouteConfig`, not from `HtrResult`.
 
+`DocumentTextResult.quality` is written from `HtrResult.quality` only when that field is an explicit persisted quality value. When `HtrResult.quality` is `None`, the worker omits `quality` from `update_or_create` defaults (new rows keep the model default `UNKNOWN`; existing rows are not overwritten by a non-scoring rerun).
+
 ## Current provider state
 
 **Gemini** is the **production/default** OCR/HTR provider for all routed pairs except Hebrew handwritten and env-gated Arabic printed Antigravity. Real API; the static `OCR_ROUTES` entries that remain in the table point to `GEMINI`.
 
 **Transkribus** is a **real** Legacy TrpServer / PyLaia integration (not a skeleton): `TranskribusAdapter`, `transkribus_engine.py`, registry wiring, and `DocumentTextResult.OcrEngineKey.TRANSKRIBUS`. It is **not** broad production-default routing. Current approved routing scope is **Hebrew handwritten only**, behind **`ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN`**.
 
-**Antigravity** is a **real** Gemini Interactions adapter (`AntigravityAdapter`, `antigravity_engine.py`). Approved routing scope is **Arabic printed only**, behind **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED`**. Banded Cloud-Vision-assisted execution is a **second worker-only execution flag**, **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED`** (code/env default **false**; worker CDK config sets **true**; effective in runtime after deployment — verify deployed runtime separately). It does **not** change `select_ocr_route`. When that flag is false, the existing whole-document JSON Antigravity path is unchanged. When both Arabic-Antigravity eligibility and the banded flag are true, `AntigravityAdapter.execute` calls `process_arabic_printed_banded_document` with a generic `absolute_deadline_monotonic` derived from remaining `ProcessDocumentRequest` execution-lease wall-clock time (not the JSON 1200s poll timeout). Banded completed `HtrResult.engine_name` is the banded runtime engine marker (`antigravity-banded:…`), never the Antigravity agent id. Coordinator **PARTIAL** raises `EnginePageIncompleteError` (no `DocumentTextResult` row; checkpoints remain the resume source). `GOOGLE_CLOUD_VISION_API_KEY` is required in worker env validation only when the banded flag is true. Worker CDK injects it from Secrets Manager **`vs-archive/google-vision-key`**. The credential is injected into the worker container only; the web container does not receive it.
+**Antigravity** is a **real** Gemini Interactions adapter (`AntigravityAdapter`, `antigravity_engine.py`). Approved routing scope is **Arabic printed only**, behind **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED`**. Banded Cloud-Vision-assisted execution is a **second worker-only execution flag**, **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED`** (code/env default **false**; worker CDK config sets **true**; effective in runtime after deployment — verify deployed runtime separately). It does **not** change `select_ocr_route`. When that flag is false, the existing whole-document JSON Antigravity path is unchanged. When both Arabic-Antigravity eligibility and the banded flag are true, `AntigravityAdapter.execute` calls `process_arabic_printed_banded_document` with a generic `absolute_deadline_monotonic` derived from remaining `ProcessDocumentRequest` execution-lease wall-clock time (not the JSON 1200s poll timeout). Banded completed `HtrResult.engine_name` is the banded runtime engine marker (`antigravity-banded:…`), never the Antigravity agent id. Completed banded `HtrResult.quality` is scored from page_quality values plus assembled text (`arabic_printed_text_quality.quality_from_banded_page_qualities`) and persisted on **SOURCE_TEXT** only. Non-banded Antigravity leaves `quality` unset. Engine-marker identity / DTR uniqueness is unchanged. Coordinator **PARTIAL** raises `EnginePageIncompleteError` (no `DocumentTextResult` row; checkpoints remain the resume source). `GOOGLE_CLOUD_VISION_API_KEY` is required in worker env validation only when the banded flag is true. Worker CDK injects it from Secrets Manager **`vs-archive/google-vision-key`**. The credential is injected into the worker container only; the web container does not receive it.
 
 **Intended routing policy (current):**
 
@@ -228,13 +231,14 @@ This applies to **Gemini**, **Transkribus**, and any route persisted through the
 
 Do not treat **`READY`** on the parent document as human-verified.
 
-### Public text quality (PR1 foundation + PR2 public UI)
+### Public text quality (PR1 foundation + PR2 public UI + PR3 banded Arabic SOURCE_TEXT)
 
 - Persisted **`DocumentTextResult.quality`**: **`UNKNOWN` / `LOW` / `MEDIUM` / `GOOD`** only (default **`UNKNOWN`**).
 - **`HUMAN_VERIFIED` and `NEEDS_CORRECTION` are not persisted.** Effective public quality: **`VERIFIED` → HUMAN_VERIFIED**, **`REJECTED` → NEEDS_CORRECTION**, else the persisted base value (`documents.services.text_quality`).
 - **`REJECTED` does not map to `LOW`** and does not publicly show stored automatic quality. Do not infer quality from **`status`**, **`review_reasons`**, engine, or processing state.
 - Staff **`MANUAL_TEXT`** is **`HUMAN_VERIFIED`** in that helper; do not add a duplicate verification field on **`ManualTextContent`** for this.
 - Public OCR document detail shows **one** compact indicator on the **displayed transcription** via **`text_quality_presentation`**. Non-Hebrew: SOURCE_TEXT. Hebrew-language: existing single-panel transcription (HEBREW_TEXT preferred, else SOURCE_TEXT). The Hebrew **translation** panel has no separate public quality badge. Do not derive quality in templates. Tooltip may include the translation-dependency sentence **only when a translation is displayed alongside transcription**; do **not** claim `HEBREW_TEXT` inheritance/scoring is implemented (`capped_inherited_base_quality` remains unwired). **`MANUAL_TEXT`** detail uses the same shared indicator (`HUMAN_VERIFIED` via the PR1 helper) without that sentence.
+- Automatic **LOW/MEDIUM/GOOD** is currently scored **only** for **Arabic printed banded** OCR **SOURCE_TEXT**. Scorer input is completed banded `page_quality` values (`UNASSISTED` / `ASSISTED` / `MIXED` / `CLOUD_VISION_LOW_QUALITY`) plus assembled text. Empty page evidence, any missing/blank/unknown `page_quality`, or missing/blank/whitespace-only assembled source text → **UNKNOWN**. All pages `UNASSISTED` and assembled text without `[UNCLEAR]` → **GOOD**. `[UNCLEAR]` caps that all-UNASSISTED case to **MEDIUM**. At least half of pages `CLOUD_VISION_LOW_QUALITY` (`2 * lq_count >= total_pages`) → **LOW**. Every other valid completed case (including `ASSISTED`, `MIXED`, and minority LQ) → **MEDIUM**. `ASSISTED`/`MIXED` alone never mean **LOW**. Gemini, Transkribus, non-banded Antigravity, and other routes remain **UNKNOWN** unless scored later. Worker writes `quality` only when `HtrResult` supplies a persisted quality value. Translation `HEBREW_TEXT` quality is unchanged (inheritance deferred).
 
 ### Review reasons (worker vocabulary)
 
