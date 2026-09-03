@@ -30,7 +30,68 @@ do not derive quality.
 
 **Tests:** `documents/test_text_quality_public_ui.py`.
 
+## Staff Author merge (explicit ids)
+
+**Decision / implemented:** Controlled staff merge of one bibliographic
+**`Author`** INTO another. This is merge by explicit **`Author.id`**, not
+name matching. Logic lives in **`documents/services/author_merge.py`**.
+**`Author`** remains separate from **`Person`**. There are no Author aliases.
+
+**Current behavior:**
+
+- **`merge_author(keeper=..., duplicate=...)`** merges duplicate INTO keeper.
+  Ids must exist and differ. Keeper **`Author.id`** and **`Author.name`** are
+  unchanged. Duplicate is deleted only after affected **`ArchiveItemAuthor`**
+  rows and rebuilt **`author_name`** strings are resolved.
+- Mutated items are those linked to the **duplicate** at merge time.
+  Keeper-only items are not rewritten and are not passed to search-index
+  fan-out.
+- Same-item collision (**`uniq_archive_item_author`**): if keeper is already
+  linked, **drop the duplicate link and keep the keeper slot**. Do not use
+  first-occurrence-wins. Example: `[duplicate, Bob, keeper]` becomes
+  `[Bob, keeper]`. Surviving relative order is preserved. Positions are
+  rebuilt contiguous **`0..n-1`**. If keeper is not linked, the duplicate
+  slot is re-pointed to keeper (position preserved among remaining authors).
+- Final **`author_name`** is rebuilt with **`_joined_author_name`** from the
+  final ordered **`ArchiveItemAuthor`** rows (relations are source of truth;
+  drifted strings are corrected). Every rebuilt string is prevalidated
+  against 255 characters (**`AUTHOR_JOINED_TOO_LONG_ERROR`**) before any
+  write. Duplicate **`Author.name`** is discarded; it does not become an
+  alias.
+- One **`transaction.atomic`**. Lock order matches Author writers
+  (**`apply_staff_archive_item_authors`** / **`apply_legacy_author_name`** /
+  **`rename_author`**): duplicate-linked **`ArchiveItem`** rows first
+  (ascending pk, expanded until that set is stable), then those items'
+  **`ArchiveItemAuthor`** rows, then **`Author`** rows (keeper, duplicate,
+  and co-authors; ascending pk). Do **not** lock Author first (Person merge
+  lock order would deadlock). After Author locks, duplicate-linked item ids
+  are re-read; a newly linked item that is not already locked fails closed
+  with **`AUTHOR_LINKS_CHANGED_RETRY_ERROR`**. Extra **`ArchiveItem`** rows
+  are not locked while Author locks are held. **`IntegrityError`** is mapped
+  to **`AUTHOR_MERGE_CONCURRENCY_ERROR`**.
+- **`sync_archive_item_search_indexes`** runs inside the same transaction for
+  the mutated duplicate-linked ids only (sorted). Index failure rolls back
+  the entire merge. Search still indexes **`author_name`**, not Author
+  relations.
+- Staff UI: from **`/archive/manage/authors/<keeper_id>/edit/`**, enter the
+  duplicate id and GET **`/archive/manage/authors/<keeper_id>/merge/`**
+  (**`archive-manage-author-merge`**). GET without **`duplicate_id`** shows
+  the id field only (no error, no writes). GET with **`duplicate_id`** shows
+  confirmation preview (ids, names, affected items, current vs planned
+  order). Only POST with **`confirm_merge=1`** executes. Success returns to
+  keeper edit. Access is **`@login_required`** + **`_require_admin_page`**.
+  The staff Author index remains find/open only (no per-row merge buttons).
+
+**Out of scope / deferred:** standalone Author delete; merge from the Author
+index; name-based merge; public Author pages; PHOTO author UI; unique
+**`Author.name`**; public display/search/filter cutover from **`author_name`**
+to Author relations; Django Admin Author tools.
+
+**Tests:** `documents/test_author_merge.py`,
+`documents/test_author_merge_staff_ui.py`.
+
 ## Text quality PR1 — persisted base quality + effective public helper
+
 
 **Decision / implemented:** `DocumentTextResult.quality` stores automatic/base
 quality only: `UNKNOWN` / `LOW` / `MEDIUM` / `GOOD` (default `UNKNOWN`).
@@ -525,11 +586,12 @@ collision with another **`Author`** is **rejected, never merged**.
 - The joined-string rule is now shared: **`_joined_author_name`** is used by both
   **`apply_staff_archive_item_authors`** and **`rename_author`**.
 
-**Out of scope / deferred:** Author **merge** and dedupe of pre-existing
-duplicate names; Author delete; PHOTO author UI; unique **`Author.name`**
-constraint; public display/search/filter cutover from **`author_name`** to the
-**`Author`** relations; optimistic-concurrency token between preview and save.
-The staff Author index is implemented separately (see **Staff Author index**).
+**Out of scope / deferred:** Author delete; PHOTO author UI; unique
+**`Author.name`** constraint; public display/search/filter cutover from
+**`author_name`** to the **`Author`** relations; optimistic-concurrency token
+between preview and save. Author merge is implemented separately (see
+**Staff Author merge**). The staff Author index is implemented separately
+(see **Staff Author index**).
 
 **Tests:** `documents/test_author_name_edit.py`.
 
@@ -553,12 +615,14 @@ staff catalog/index only. **`Author`** remains separate from **`Person`**.
   field; a clear/reset control appears when **`q`** is nonempty.
 - Each row shows **`Author.name`**, **`Author.id`**, annotated
   **`ArchiveItemAuthor`** count (**`Count("archive_item_links")`**), and
-  **עריכה** to existing **`archive-manage-author-edit`**.
-- No standalone Author create, delete, merge, aliases, public Author pages,
+  **עריכה** to existing **`archive-manage-author-edit`**. Merge is reached
+  from the edit page, not from this index.
+- No standalone Author create, delete, aliases, public Author pages,
   Person integration, PHOTO author UI, or schema changes.
 
-**Out of scope / deferred:** Author merge/delete; public Author browsing;
-PHOTO author support.
+**Out of scope / deferred:** standalone Author delete; public Author browsing;
+PHOTO author support. Author merge is implemented separately (see
+**Staff Author merge**).
 
 **Tests:** `documents/test_author_staff_index.py`; route expectation in
 `documents/test_author_name_edit.py`.

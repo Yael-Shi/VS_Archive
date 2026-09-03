@@ -46,13 +46,14 @@ class AuthorStaffIndexRouteTests(TestCase):
         self.assertEqual(match.url_name, "archive-manage-authors")
         self.assertEqual(reverse("archive-manage-authors"), "/archive/manage/authors/")
 
-    def test_delete_and_merge_routes_remain_absent(self):
-        for path in (
-            "/archive/manage/authors/1/delete/",
-            "/archive/manage/authors/1/merge/",
-        ):
-            with self.assertRaises(Resolver404):
-                resolve(path)
+    def test_delete_route_remains_absent_and_merge_route_resolves(self):
+        match = resolve("/archive/manage/authors/")
+        self.assertEqual(match.url_name, "archive-manage-authors")
+        self.assertEqual(reverse("archive-manage-authors"), "/archive/manage/authors/")
+        merge = resolve("/archive/manage/authors/1/merge/")
+        self.assertEqual(merge.url_name, "archive-manage-author-merge")
+        with self.assertRaises(Resolver404):
+            resolve("/archive/manage/authors/1/delete/")
 
     def test_no_public_author_catalog_or_detail_routes(self):
         for path in (
