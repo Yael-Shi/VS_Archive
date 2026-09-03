@@ -1,13 +1,22 @@
-{% if detail_jump_nav.show_nav %}
-  <nav class="document-detail-jump-nav" aria-label="קפיצה לחלקי העמוד">
-    {% if detail_jump_nav.show_source_document %}
-      <a class="document-detail-jump-nav__link" href="#document-detail-source-panel">מסמך מקור</a>
+{% if detail_jump_nav.show_nav or text_presentation.source.quality_indicator or text_presentation.hebrew.quality_indicator %}
+  <div class="document-detail-top-meta">
+    {% if detail_jump_nav.show_nav %}
+      <nav class="document-detail-jump-nav" aria-label="קפיצה לחלקי העמוד">
+        {% if detail_jump_nav.show_source_document %}
+          <a class="document-detail-jump-nav__link" href="#document-detail-source-panel">מסמך מקור</a>
+        {% endif %}
+        {% if detail_jump_nav.show_transcription %}
+          <a class="document-detail-jump-nav__link" href="#{{ detail_jump_nav.transcription_target_id }}">תעתוק</a>
+        {% endif %}
+        {% if detail_jump_nav.show_hebrew_translation %}
+          <a class="document-detail-jump-nav__link" href="#document-detail-hebrew-text">תרגום לעברית</a>
+        {% endif %}
+      </nav>
     {% endif %}
-    {% if detail_jump_nav.show_transcription %}
-      <a class="document-detail-jump-nav__link" href="#{{ detail_jump_nav.transcription_target_id }}">תעתוק</a>
+    {% if text_presentation.source.quality_indicator %}
+      {% include "documents/partials/text_quality_indicator.html" with indicator=text_presentation.source.quality_indicator context_label="התעתוק:" %}
+    {% elif text_presentation.hebrew.quality_indicator %}
+      {% include "documents/partials/text_quality_indicator.html" with indicator=text_presentation.hebrew.quality_indicator context_label="התעתוק:" %}
     {% endif %}
-    {% if detail_jump_nav.show_hebrew_translation %}
-      <a class="document-detail-jump-nav__link" href="#document-detail-hebrew-text">תרגום לעברית</a>
-    {% endif %}
-  </nav>
+  </div>
 {% endif %}

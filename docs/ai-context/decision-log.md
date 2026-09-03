@@ -1,5 +1,35 @@
 # VS-Archive Decision Log
 
+## Text quality PR2 — public detail quality indicator
+
+**Decision / implemented:** Public OCR document detail shows **one** compact
+quality row on the block the public UI presents as **תעתוק**
+(`איכות התעתוק: [badge] [info]`). Public `MANUAL_TEXT` detail shows the same
+shared indicator using the PR1 manual-text helper (`HUMAN_VERIFIED`).
+Presentation uses `documents.services.text_quality_presentation`; templates
+do not derive quality.
+
+**Current behavior:**
+
+- Exactly one OCR quality indicator per page, attached to the **displayed
+  transcription**, using that row’s PR1 effective quality. Selection follows
+  existing document-detail presentation: if the SOURCE panel is shown with
+  text, that is transcription; if SOURCE is hidden and the HEBREW panel is
+  the single shown text (Hebrew-language documents), that HEBREW block is
+  transcription. Non-Hebrew documents normally use SOURCE_TEXT as
+  transcription. The Hebrew **translation** panel never gets a separate badge.
+- Tooltip title/intro/six levels/footer are shared. The sentence
+  `בתרגום לעברית, האיכות תלויה גם באיכות התעתוק שעליו הוא מבוסס.` appears
+  only when a Hebrew translation is actually displayed **in addition to**
+  the transcription (non-Hebrew OCR with both texts). It is omitted on
+  MANUAL_TEXT, Hebrew-language OCR (no translation panel), and
+  transcription-only OCR. Explanatory only — `capped_inherited_base_quality`
+  remains unwired.
+- Staff review workspace is unchanged. Browse/search/homepage cards and
+  quality filters are out of scope.
+
+**Tests:** `documents/test_text_quality_public_ui.py`.
+
 ## Text quality PR1 — persisted base quality + effective public helper
 
 **Decision / implemented:** `DocumentTextResult.quality` stores automatic/base
@@ -28,8 +58,9 @@ the stored automatic quality publicly.
   helper. No quality/verification column on `ManualTextContent`. Django admin
   cannot add/change `ManualTextContent`. No automated/import writer exists.
 
-**Deferred / PR2:** public detail UI heading `איכות התעתוק` and Hebrew level
-labels in `PUBLIC_TEXT_QUALITY_LABELS`. No templates/CSS in this PR.
+**Deferred / PR2 (now implemented):** public detail UI heading
+`איכות התעתוק` and Hebrew level labels in `PUBLIC_TEXT_QUALITY_LABELS`.
+See **Text quality PR2** above.
 
 **Tests:** `documents/test_text_quality.py`.
 

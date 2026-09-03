@@ -167,6 +167,9 @@
 
     {% if item.item_type == "MANUAL_TEXT" %}
       <div class="archive-detail-text archive-detail-manual-text-body">
+        {% if text_quality_indicator %}
+          {% include "documents/partials/text_quality_indicator.html" with indicator=text_quality_indicator show_heading=True %}
+        {% endif %}
         <div class="text-block text-block--pre">{{ body|manual_text_body_display }}</div>
       </div>
       <div class="archive-detail-manual-text-signature" aria-hidden="true"></div>
@@ -195,5 +198,8 @@
   </div>
   {% if item.item_type == "MANUAL_TEXT" %}
     <script src="{% static 'public/manual_text_signature.js' %}"></script>
+    {% if text_quality_indicator %}
+      <script src="{% static 'public/text_quality_indicator.js' %}"></script>
+    {% endif %}
   {% endif %}
 {% endblock %}

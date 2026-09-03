@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional, Literal
 
 from django.db.models import Prefetch, QuerySet
 
 from documents.models import Document, DocumentTextResult
 from documents.services.expected_outputs import expected_result_types_for_document
+from documents.services.text_quality_presentation import (
+    PublicTextQualityIndicator,
+    public_text_quality_indicator_for_result,
+)
 
 
 ResultTypeStr = Literal["SOURCE_TEXT", "HEBREW_TEXT"]
@@ -26,6 +30,7 @@ class DisplayTextBlock:
     engine: str
     error_code: Optional[str] = None
     error_details: Optional[str] = None
+    quality_indicator: Optional[PublicTextQualityIndicator] = None
 
 
 @dataclass(frozen=True)
@@ -338,6 +343,83 @@ def _latest_failed(
     )
 
 
+def _display_text_block(
+    row: DocumentTextResult, result_type: ResultTypeStr, *, include_text: bool
+) -> DisplayTextBlock:
+    text = (row.text or "") if include_text else ""
+    return DisplayTextBlock(
+        result_type=result_type,
+        text=text,
+        status=row.status,
+        verification_status=row.verification_status,
+        created_at=row.created_at.isoformat(timespec="seconds"),
+        engine=row.engine,
+        error_code=row.error_code,
+        error_details=row.error_details,
+    )
+
+
+def _attach_displayed_transcription_quality(
+    *,
+    doc: Document,
+    source: Optional[DisplayTextBlock],
+    hebrew: Optional[DisplayTextBlock],
+    source_row: Optional[DocumentTextResult],
+    hebrew_row: Optional[DocumentTextResult],
+    show_source: bool,
+    show_hebrew: bool,
+) -> tuple[Optional[DisplayTextBlock], Optional[DisplayTextBlock]]:
+    """Attach one quality indicator to the public תעתוק block, if any.
+
+    Selection matches document-detail transcription vs translation:
+    SOURCE with text while the source panel is shown is transcription;
+    otherwise the HEBREW panel is transcription only when SOURCE is hidden
+    (Hebrew-language single-panel presentation).
+    """
+    source_text = (source.text if source else "") or ""
+    hebrew_text = (hebrew.text if hebrew else "") or ""
+    has_source_text = bool(source_text.strip())
+    has_hebrew_text = bool(hebrew_text.strip())
+    include_translation_note = (
+        not is_hebrew_language(doc)
+        and show_source
+        and show_hebrew
+        and has_source_text
+        and has_hebrew_text
+    )
+    if show_source and has_source_text and source is not None and source_row is not None:
+        return (
+            replace(
+                source,
+                quality_indicator=public_text_quality_indicator_for_result(
+                    source_row,
+                    include_translation_note=include_translation_note,
+                    help_dom_id="text-quality-help-transcription",
+                ),
+            ),
+            hebrew,
+        )
+    if (
+        show_hebrew
+        and not show_source
+        and has_hebrew_text
+        and hebrew is not None
+        and hebrew_row is not None
+    ):
+        return (
+            source,
+            replace(
+                hebrew,
+                quality_indicator=public_text_quality_indicator_for_result(
+                    hebrew_row,
+                    include_translation_note=include_translation_note,
+                    help_dom_id="text-quality-help-transcription",
+                ),
+            ),
+        )
+    return source, hebrew
+
+
 def get_text_presentation_for_document(doc: Document) -> TextPresentation:
     expected = expected_result_types_for_document(doc)
 
@@ -349,51 +431,15 @@ def get_text_presentation_for_document(doc: Document) -> TextPresentation:
 
     source = None
     if source_obj:
-        source = DisplayTextBlock(
-            result_type="SOURCE_TEXT",
-            text=source_obj.text or "",
-            status=source_obj.status,
-            verification_status=source_obj.verification_status,
-            created_at=source_obj.created_at.isoformat(timespec="seconds"),
-            engine=source_obj.engine,
-            error_code=source_obj.error_code,
-            error_details=source_obj.error_details,
-        )
+        source = _display_text_block(source_obj, "SOURCE_TEXT", include_text=True)
     elif source_failed:
-        source = DisplayTextBlock(
-            result_type="SOURCE_TEXT",
-            text="",
-            status=source_failed.status,
-            verification_status=source_failed.verification_status,
-            created_at=source_failed.created_at.isoformat(timespec="seconds"),
-            engine=source_failed.engine,
-            error_code=source_failed.error_code,
-            error_details=source_failed.error_details,
-        )
+        source = _display_text_block(source_failed, "SOURCE_TEXT", include_text=False)
 
     hebrew = None
     if hebrew_obj:
-        hebrew = DisplayTextBlock(
-            result_type="HEBREW_TEXT",
-            text=hebrew_obj.text or "",
-            status=hebrew_obj.status,
-            verification_status=hebrew_obj.verification_status,
-            created_at=hebrew_obj.created_at.isoformat(timespec="seconds"),
-            engine=hebrew_obj.engine,
-            error_code=hebrew_obj.error_code,
-            error_details=hebrew_obj.error_details,
-        )
+        hebrew = _display_text_block(hebrew_obj, "HEBREW_TEXT", include_text=True)
     elif hebrew_failed:
-        hebrew = DisplayTextBlock(
-            result_type="HEBREW_TEXT",
-            text="",
-            status=hebrew_failed.status,
-            verification_status=hebrew_failed.verification_status,
-            created_at=hebrew_failed.created_at.isoformat(timespec="seconds"),
-            engine=hebrew_failed.engine,
-            error_code=hebrew_failed.error_code,
-            error_details=hebrew_failed.error_details,
-        )
+        hebrew = _display_text_block(hebrew_failed, "HEBREW_TEXT", include_text=False)
 
     missing: list[ResultTypeStr] = []
     for rt in expected:
@@ -419,6 +465,16 @@ def get_text_presentation_for_document(doc: Document) -> TextPresentation:
     else:
         show_source = "SOURCE_TEXT" in expected or source is not None
         show_hebrew = "HEBREW_TEXT" in expected or hebrew is not None
+
+    source, hebrew = _attach_displayed_transcription_quality(
+        doc=doc,
+        source=source,
+        hebrew=hebrew,
+        source_row=source_obj,
+        hebrew_row=hebrew_obj,
+        show_source=show_source,
+        show_hebrew=show_hebrew,
+    )
 
     presentation_without_disclaimer_flag = TextPresentation(
         source=source,
