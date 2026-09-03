@@ -38,7 +38,6 @@ from .models import (
     ArchiveCategory,
     ArchiveEvent,
     ArchiveItem,
-    ArchiveItemPerson,
     ArchiveItemPersonSuggestion,
     ArchiveMetadataSuggestion,
     Author,
@@ -254,9 +253,7 @@ from documents.services.photo_archive_urls import (
     apply_photo_thumbnail_urls_to_browse_cards,
 )
 from documents.services.photo_gallery import (
-    build_photo_person_appearance_cards,
     build_public_photo_gallery,
-    photo_person_appearances_queryset,
 )
 from documents.services.archive_advanced_search import (
     EMPTY_ARCHIVE_ADVANCED_FILTER_CHOICE_CONTEXT,
@@ -288,6 +285,12 @@ from documents.services.archive_item_presentation import (
     normalize_archive_public_list_type_filter,
     person_public_page_url,
     public_discovery_context,
+)
+from documents.services.person_public import (
+    build_person_public_item_cards,
+    build_public_people_index_rows,
+    public_people_queryset,
+    public_person_archive_items_queryset,
 )
 from documents.services.archive_search_snippets import (
     apply_archive_search_match_presentation_to_cards,
@@ -5140,22 +5143,11 @@ def archive_tag_browse_page(request, tag_id: int):
 
 def archive_person_detail_page(request, person_id: int):
     person = get_object_or_404(Person, pk=person_id)
-    authorized_items = archive_browse_queryset_for_user(request.user)
     items = _archive_browse_select_related(
-        authorized_items.filter(
-            pk__in=ArchiveItemPerson.objects.filter(person_id=person.pk).values(
-                "archive_item_id"
-            )
-        )
-    ).order_by("-created_at", "pk")
-    total_count = items.count()
-    photo_appearances = list(
-        photo_person_appearances_queryset(
-            person_id=person.pk,
-            authorized_archive_items=authorized_items,
-        )
+        public_person_archive_items_queryset(request.user, person.pk)
     )
-    if total_count == 0 and not photo_appearances:
+    total_count = items.count()
+    if total_count == 0:
         raise Http404() from None
 
     per_page = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE
@@ -5166,9 +5158,8 @@ def archive_person_detail_page(request, person_id: int):
     )
     offset = (page - 1) * per_page
     page_items = list(items[offset : offset + per_page])
-    browse_cards = _archive_browse_cards_for_items(page_items)
-    photo_appearance_cards = build_photo_person_appearance_cards(
-        photo_appearances,
+    browse_cards = build_person_public_item_cards(
+        page_items,
         bucket=getattr(settings, "UPLOADS_BUCKET_NAME", ""),
         expires_in=PRESIGNED_GET_EXPIRY_SECONDS,
     )
@@ -5179,7 +5170,6 @@ def archive_person_detail_page(request, person_id: int):
             "person": person,
             "items": page_items,
             "browse_cards": browse_cards,
-            "photo_appearance_cards": photo_appearance_cards,
             "is_admin": _is_admin(request.user),
             "total_count": total_count,
             **archive_public_list_pagination_context(
@@ -5187,6 +5177,37 @@ def archive_person_detail_page(request, person_id: int):
                 page=page,
                 per_page=per_page,
                 q="",
+                item_type_filter="",
+            ),
+        },
+    )
+
+
+def archive_people_index_page(request):
+    search_query = (request.GET.get("q") or "").strip()
+    people = public_people_queryset(request.user, search_query=search_query)
+    total_count = people.count()
+    per_page = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE
+    page = normalize_archive_public_list_page(
+        request.GET.get("page"),
+        total_count=total_count,
+        per_page=per_page,
+    )
+    offset = (page - 1) * per_page
+    page_people = list(people[offset : offset + per_page])
+    people_rows = build_public_people_index_rows(request.user, page_people)
+    return render(
+        request,
+        "documents/archive/people_public_index.html",
+        context={
+            "people_rows": people_rows,
+            "q": search_query,
+            "page_title": "אנשים",
+            **archive_public_list_pagination_context(
+                total_count=total_count,
+                page=page,
+                per_page=per_page,
+                q=search_query,
                 item_type_filter="",
             ),
         },

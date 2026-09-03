@@ -20,7 +20,7 @@
     </div>
 
     {% if browse_cards %}
-      <h2 class="archive-person-section-title">פריטים הקשורים לאדם</h2>
+      <h2 class="archive-person-section-title">פריטים קשורים</h2>
       <p class="archive-search-results-count" aria-live="polite">
         נמצאו {{ total_count }} תוצאות
       </p>
@@ -33,15 +33,6 @@
         <div class="spacer"></div>
         {% include "documents/archive/partials/person_page_pagination.html" %}
       {% endif %}
-    {% endif %}
-
-    {% if photo_appearance_cards %}
-      {% if browse_cards %}
-        <div class="spacer"></div>
-      {% endif %}
-      <h2 class="archive-person-section-title">תמונות שבהן האדם מופיע</h2>
-      <div class="spacer"></div>
-      {% include "documents/archive/partials/item_list_cards.html" with browse_cards=photo_appearance_cards is_admin=is_admin %}
     {% endif %}
   </div>
 {% endblock %}

@@ -20,6 +20,11 @@ urlpatterns = [
         name="archive-tag-browse",
     ),
     path(
+        "people/",
+        views.archive_people_index_page,
+        name="archive-people-index",
+    ),
+    path(
         "people/<int:person_id>/",
         views.archive_person_detail_page,
         name="archive-person-detail",

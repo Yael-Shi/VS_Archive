@@ -7,10 +7,11 @@ from dataclasses import dataclass
 from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Exists, Max, OuterRef, Prefetch, Q
+from django.db.models import Count, Max, Prefetch
 
 from documents.models import ArchiveItem, Person, PersonAlias, PhotoContent
 from documents.s3 import create_presigned_get
+from documents.services.person_search import person_canonical_or_alias_icontains_q
 from documents.services.photo_s3_cleanup import schedule_photo_s3_cleanup_after_commit
 
 LAST_PHOTO_DELETE_ERROR = (
@@ -88,13 +89,9 @@ def staff_person_index_queryset(*, search_query: str = ""):
         .prefetch_related(staff_person_aliases_prefetch())
         .order_by("name", "id")
     )
-    q = (search_query or "").strip()
-    if q:
-        alias_match = PersonAlias.objects.filter(
-            person_id=OuterRef("pk"),
-            name__icontains=q,
-        )
-        people = people.filter(Q(name__icontains=q) | Exists(alias_match))
+    search_q = person_canonical_or_alias_icontains_q(search_query)
+    if search_q is not None:
+        people = people.filter(search_q)
     return people
 
 

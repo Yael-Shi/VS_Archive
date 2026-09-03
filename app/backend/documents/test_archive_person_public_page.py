@@ -133,8 +133,8 @@ def _titles(response) -> set[str]:
     return {item.title for item in response.context["items"]}
 
 
-def _appearance_urls(response) -> list[str]:
-    return [card.detail_url for card in response.context["photo_appearance_cards"]]
+def _card_urls(response) -> list[str]:
+    return [card.detail_url for card in response.context["browse_cards"]]
 
 
 def _people_select_query_count(captured_queries) -> int:
@@ -173,7 +173,7 @@ class PersonPublicPageAuthorizedTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "<h1", html=False)
         self.assertContains(resp, "Ada Lovelace")
-        self.assertContains(resp, "פריטים הקשורים לאדם")
+        self.assertContains(resp, "פריטים קשורים")
         self.assertNotContains(resp, "תמונות שבהן האדם מופיע")
         self.assertContains(resp, "נמצאו 2 תוצאות")
         self.assertEqual(resp.context["total_count"], 2)
@@ -247,8 +247,8 @@ class PersonPublicPageAuthorizedTests(TestCase):
         appearance_resp = self.client.get(_person_page(appearance))
         self.assertEqual(appearance_resp.status_code, 200)
         self.assertContains(appearance_resp, "AppearanceBioToken")
-        self.assertContains(appearance_resp, "תמונות שבהן האדם מופיע")
-        self.assertNotContains(appearance_resp, "פריטים הקשורים לאדם")
+        self.assertContains(appearance_resp, "פריטים קשורים")
+        self.assertNotContains(appearance_resp, "תמונות שבהן האדם מופיע")
 
         private_only = Person.objects.create(
             name="Private Bio Person",
@@ -355,17 +355,17 @@ class PersonPublicPageRelationAndRenderabilityTests(TestCase):
         PhotoPerson.objects.create(photo_content=photo, person=person)
         resp = self.client.get(_person_page(person))
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.context["total_count"], 0)
-        self.assertEqual(resp.context["items"], [])
-        self.assertEqual(len(resp.context["browse_cards"]), 0)
-        self.assertEqual(len(resp.context["photo_appearance_cards"]), 1)
+        self.assertEqual(resp.context["total_count"], 1)
+        self.assertEqual(_titles(resp), {"PhotoPerson only album"})
+        self.assertEqual(len(resp.context["browse_cards"]), 1)
+        self.assertNotIn("photo_appearance_cards", resp.context)
         self.assertContains(resp, "Appearance Only")
-        self.assertContains(resp, "תמונות שבהן האדם מופיע")
+        self.assertContains(resp, "פריטים קשורים")
         self.assertContains(resp, "PhotoPerson only album")
-        self.assertNotContains(resp, "פריטים הקשורים לאדם")
+        self.assertNotContains(resp, "תמונות שבהן האדם מופיע")
         self.assertNotContains(resp, "HiddenAppearanceAlias")
         self.assertEqual(
-            _appearance_urls(resp),
+            _card_urls(resp),
             [public_photo_detail_url(item.id, photo.id)],
         )
 
@@ -413,13 +413,14 @@ class PersonPublicPagePhotoPersonTests(TestCase):
 
         resp = self.client.get(_person_page(person))
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(len(resp.context["photo_appearance_cards"]), 1)
+        self.assertEqual(resp.context["total_count"], 1)
+        self.assertEqual(len(resp.context["browse_cards"]), 1)
         self.assertEqual(
-            resp.context["photo_appearance_cards"][0].title,
+            resp.context["browse_cards"][0].title,
             "Public appearance album",
         )
         self.assertEqual(
-            resp.context["photo_appearance_cards"][0].detail_url,
+            resp.context["browse_cards"][0].detail_url,
             f"/archive/{item.id}/?photo={photo.id}",
         )
 
@@ -432,9 +433,7 @@ class PersonPublicPagePhotoPersonTests(TestCase):
         photo = _add_photo(item)
         PhotoPerson.objects.create(photo_content=photo, person=person)
         family_group, _ = Group.objects.get_or_create(name=ARCHIVE_FAMILY_GROUP_NAME)
-        family = User.objects.create_user(
-            username="person-photo-family", password="x"
-        )
+        family = User.objects.create_user(username="person-photo-family", password="x")
         family.groups.add(family_group)
 
         anon = self.client.get(_person_page(person))
@@ -444,7 +443,7 @@ class PersonPublicPagePhotoPersonTests(TestCase):
         family_resp = self.client.get(_person_page(person))
         self.assertEqual(family_resp.status_code, 200)
         self.assertEqual(
-            _appearance_urls(family_resp),
+            _card_urls(family_resp),
             [public_photo_detail_url(item.id, photo.id)],
         )
 
@@ -462,9 +461,7 @@ class PersonPublicPagePhotoPersonTests(TestCase):
         )
         family.groups.add(family_group)
         restricted_user = _grant_restricted_permission(
-            User.objects.create_user(
-                username="person-photo-restricted", password="x"
-            )
+            User.objects.create_user(username="person-photo-restricted", password="x")
         )
 
         self.assertEqual(self.client.get(_person_page(person)).status_code, 404)
@@ -474,7 +471,7 @@ class PersonPublicPagePhotoPersonTests(TestCase):
         allowed = self.client.get(_person_page(person))
         self.assertEqual(allowed.status_code, 200)
         self.assertEqual(
-            _appearance_urls(allowed),
+            _card_urls(allowed),
             [public_photo_detail_url(item.id, photo.id)],
         )
 
@@ -519,13 +516,14 @@ class PersonPublicPagePhotoPersonTests(TestCase):
         PhotoPerson.objects.create(photo_content=first, person=person)
         resp = self.client.get(_person_page(person))
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["total_count"], 1)
         self.assertEqual(
-            _appearance_urls(resp),
+            _card_urls(resp),
             [public_photo_detail_url(item.id, first.id)],
         )
         self.assertNotIn(
             public_photo_detail_url(item.id, pending.id),
-            _appearance_urls(resp),
+            _card_urls(resp),
         )
 
     def test_item_not_browse_renderable_hides_later_renderable_appearance(self):
@@ -536,7 +534,33 @@ class PersonPublicPagePhotoPersonTests(TestCase):
         PhotoPerson.objects.create(photo_content=later, person=person)
         self.assertEqual(self.client.get(_person_page(person)).status_code, 404)
 
-    def test_multiple_appearances_in_one_item_stay_separate(self):
+    def test_deep_link_uses_earliest_matching_photo_not_primary(self):
+        person = Person.objects.create(name="Later Match Person")
+        item = _create_photo_item(title="Later match album")
+        _add_photo(item, position=1)
+        second = _add_photo(item, position=2)
+        PhotoPerson.objects.create(photo_content=second, person=person)
+        resp = self.client.get(_person_page(person))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["total_count"], 1)
+        self.assertEqual(
+            _card_urls(resp),
+            [public_photo_detail_url(item.id, second.id)],
+        )
+
+    def test_aip_only_photo_item_uses_normal_detail_url(self):
+        person = Person.objects.create(name="AIP Photo Person")
+        item = _create_photo_item(title="Related photo album")
+        _add_photo(item)
+        _link(item, person)
+        resp = self.client.get(_person_page(person))
+        self.assertEqual(resp.status_code, 200)
+        expected = reverse("archive-detail", kwargs={"item_id": item.id})
+        self.assertEqual(_card_urls(resp), [expected])
+        self.assertNotIn("photo=", expected)
+        self.assertNotIn("photo=", _card_urls(resp)[0])
+
+    def test_multiple_photos_in_one_item_appear_once_with_earliest_deep_link(self):
         person = Person.objects.create(name="Two Photos Person")
         item = _create_photo_item(title="Two photo album")
         first = _add_photo(item, position=1)
@@ -546,19 +570,18 @@ class PersonPublicPagePhotoPersonTests(TestCase):
 
         resp = self.client.get(_person_page(person))
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["total_count"], 1)
+        self.assertEqual(len(resp.context["browse_cards"]), 1)
         self.assertEqual(
-            _appearance_urls(resp),
-            [
-                public_photo_detail_url(item.id, first.id),
-                public_photo_detail_url(item.id, second.id),
-            ],
+            _card_urls(resp),
+            [public_photo_detail_url(item.id, first.id)],
         )
-        self.assertEqual(
-            [card.title for card in resp.context["photo_appearance_cards"]],
-            ["Two photo album", "Two photo album"],
+        self.assertNotIn(
+            public_photo_detail_url(item.id, second.id),
+            _card_urls(resp),
         )
 
-    def test_related_and_appearance_sections_stay_separate(self):
+    def test_unified_list_dedupes_dual_item_and_deep_links_matching_photo(self):
         person = Person.objects.create(name="Both Relations Person")
         related = _public_manual("Related letter")
         _link(related, person)
@@ -572,26 +595,26 @@ class PersonPublicPagePhotoPersonTests(TestCase):
 
         resp = self.client.get(_person_page(person))
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["total_count"], 3)
         self.assertEqual(
             _titles(resp),
-            {"Related letter", "Linked and appearing album"},
+            {"Related letter", "Appearance album", "Linked and appearing album"},
         )
-        self.assertEqual(
-            {card.title for card in resp.context["photo_appearance_cards"]},
-            {"Appearance album", "Linked and appearing album"},
-        )
+        self.assertNotIn("photo_appearance_cards", resp.context)
+        self.assertContains(resp, "פריטים קשורים")
+        self.assertNotContains(resp, "תמונות שבהן האדם מופיע")
         html = resp.content.decode("utf-8")
-        related_idx = html.index("פריטים הקשורים לאדם")
-        photos_idx = html.index("תמונות שבהן האדם מופיע")
-        self.assertLess(related_idx, photos_idx)
-        related_block = html[related_idx:photos_idx]
-        photos_block = html[photos_idx:]
-        self.assertIn("Related letter", related_block)
-        self.assertNotIn(f"?photo={photo.id}", related_block)
-        self.assertIn("Appearance album", photos_block)
-        self.assertIn(f"?photo={photo.id}", photos_block)
-        self.assertIn(f"?photo={both_photo.id}", photos_block)
-        self.assertNotIn("Appearance album", related_block)
+        self.assertEqual(html.count("פריטים קשורים"), 1)
+        letter_url = reverse("archive-detail", kwargs={"item_id": related.id})
+        self.assertIn(letter_url, _card_urls(resp))
+        self.assertIn(
+            public_photo_detail_url(photo_item.id, photo.id), _card_urls(resp)
+        )
+        self.assertIn(
+            public_photo_detail_url(both_item.id, both_photo.id),
+            _card_urls(resp),
+        )
+        self.assertEqual(_card_urls(resp).count(letter_url), 1)
 
     def test_advanced_person_filter_still_ignores_photoperson_only(self):
         person = Person.objects.create(name="Filter Unchanged Person")
@@ -604,8 +627,8 @@ class PersonPublicPagePhotoPersonTests(TestCase):
         page = self.client.get(_person_page(person))
         self.assertEqual(page.status_code, 200)
         self.assertEqual(
-            [card.title for card in page.context["photo_appearance_cards"]],
-            ["PhotoPerson filter decoy"],
+            {card.title for card in page.context["browse_cards"]},
+            {"ArchiveItemPerson filter match", "PhotoPerson filter decoy"},
         )
 
         ids = list(
@@ -629,20 +652,16 @@ class PersonPublicPagePhotoPersonTests(TestCase):
     def test_appearance_queries_do_not_grow_with_photo_count(self):
         person = Person.objects.create(name="Appearance Query Person")
         first_item = _create_photo_item(title="Few appearance 0")
-        PhotoPerson.objects.create(
-            photo_content=_add_photo(first_item), person=person
-        )
+        PhotoPerson.objects.create(photo_content=_add_photo(first_item), person=person)
         second_item = _create_photo_item(title="Few appearance 1")
-        PhotoPerson.objects.create(
-            photo_content=_add_photo(second_item), person=person
-        )
+        PhotoPerson.objects.create(photo_content=_add_photo(second_item), person=person)
 
         self.client.get(_person_page(person))
 
         with CaptureQueriesContext(connection) as few_ctx:
             few_resp = self.client.get(_person_page(person))
         self.assertEqual(few_resp.status_code, 200)
-        few_cards = len(few_resp.context["photo_appearance_cards"])
+        few_cards = len(few_resp.context["browse_cards"])
         few_total = len(few_ctx.captured_queries)
         few_photo_queries = sum(
             1
@@ -657,7 +676,7 @@ class PersonPublicPagePhotoPersonTests(TestCase):
         with CaptureQueriesContext(connection) as many_ctx:
             many_resp = self.client.get(_person_page(person))
         self.assertEqual(many_resp.status_code, 200)
-        many_cards = len(many_resp.context["photo_appearance_cards"])
+        many_cards = len(many_resp.context["browse_cards"])
         many_total = len(many_ctx.captured_queries)
         many_photo_queries = sum(
             1
@@ -745,7 +764,7 @@ class PersonPublicPagePaginationTests(TestCase):
         self.assertFalse(resp.context["show_page_nav"])
         self.assertNotContains(resp, "הבא")
 
-    def test_photo_appearances_are_not_combined_into_related_pagination(self):
+    def test_photoperson_only_items_share_unified_pagination(self):
         person = Person.objects.create(name="Paged With Photos Person")
         for index in range(ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE + 1):
             _link(_public_manual(f"RELATEDPAGE-{index:02d}"), person)
@@ -757,14 +776,17 @@ class PersonPublicPagePaginationTests(TestCase):
         page2 = self.client.get(_person_page(person), {"page": "2"})
         self.assertEqual(page1.status_code, 200)
         self.assertEqual(page2.status_code, 200)
+        self.assertEqual(page1.context["total_count"], 50)
         self.assertEqual(len(page1.context["items"]), 48)
-        self.assertEqual(len(page2.context["items"]), 1)
-        self.assertEqual(page1.context["total_count"], 49)
+        self.assertEqual(len(page2.context["items"]), 2)
         href = public_photo_detail_url(photo_item.id, photo.id)
-        self.assertEqual(_appearance_urls(page1), [href])
-        self.assertEqual(_appearance_urls(page2), [href])
-        self.assertContains(page1, "תמונות שבהן האדם מופיע")
-        self.assertContains(page2, "תמונות שבהן האדם מופיע")
+        all_urls = _card_urls(page1) + _card_urls(page2)
+        self.assertEqual(all_urls.count(href), 1)
+        self.assertNotIn("photo_appearance_cards", page1.context)
+        self.assertNotIn("photo_appearance_cards", page2.context)
+        self.assertNotContains(page1, "תמונות שבהן האדם מופיע")
+        self.assertNotContains(page2, "תמונות שבהן האדם מופיע")
+        self.assertContains(page1, "פריטים קשורים")
 
 
 class PersonPublicPageLinkRetargetTests(TestCase):

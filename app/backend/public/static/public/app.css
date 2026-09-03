@@ -2933,6 +2933,38 @@ pre {
   gap: var(--space-3);
 }
 
+.archive-people-index-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.archive-people-index-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.archive-people-index-name {
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.archive-people-index-name:hover {
+  text-decoration: underline;
+}
+
+.archive-people-index-count {
+  flex: 0 0 auto;
+}
+
 .archive-browse-card {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
@@ -3361,6 +3393,11 @@ pre {
 
 @media (min-width: 768px) {
   .archive-browse-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-4);
+  }
+
+  .archive-people-index-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-4);
   }
