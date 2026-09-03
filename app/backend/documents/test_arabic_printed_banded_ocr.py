@@ -180,6 +180,31 @@ def _rejected_result(
     )
 
 
+def _cancelled_result(
+    *,
+    interaction_id: str = "ix-primary",
+) -> AntigravityBandOcrResult:
+    return AntigravityBandOcrResult(
+        interaction_id=interaction_id,
+        last_status="cancelled",
+        polling_outcome="completed",
+        step_types=(),
+        total_input_tokens=None,
+        total_output_tokens=None,
+        total_thought_tokens=None,
+        total_tokens=None,
+        latency_seconds=1.0,
+        marker_seen=False,
+        coverage_ratio=None,
+        output_non_whitespace=None,
+        draft_non_whitespace=None,
+        accepted=False,
+        transcription="",
+        failure_kind="cancelled",
+        create_returned_interaction=True,
+    )
+
+
 def _timeout_result(
     *,
     interaction_id: str = "ix-primary",
@@ -517,6 +542,29 @@ class ArabicPrintedBandedCancelTests(ArabicPrintedBandedOcrTestBase):
         band.completed_at = timezone.now()
         band.save()
 
+    def _seed_stale_cancel_pending(
+        self,
+        claim: ArabicPrintedPageClaim,
+        *,
+        band_index: int = 0,
+        interaction_id: str = "ix-stale",
+        cancel_confirmed_status: str = "",
+    ) -> ArabicPrintedOcrBandCheckpoint:
+        """Document-322 shape: CANCEL_PENDING with id and blank confirmation."""
+        band = ArabicPrintedOcrBandCheckpoint.objects.get(
+            page_checkpoint_id=claim.checkpoint_id, band_index=band_index
+        )
+        band.status = ArabicPrintedOcrBandCheckpoint.Status.CANCEL_PENDING
+        band.create_call_count = 1
+        band.primary_interaction_id = interaction_id
+        band.primary_provider_status = "in_progress"
+        band.cancel_attempted = True
+        band.cancel_attempted_at = timezone.now()
+        band.cancel_http_status = None
+        band.cancel_confirmed_status = cancel_confirmed_status
+        band.save()
+        return band
+
     def test_primary_timeout_persists_id_then_cancel_pending_then_fallback(self):
         claim = self._claim()
         self._single_band_setup(claim)
@@ -611,6 +659,12 @@ class ArabicPrintedBandedCancelTests(ArabicPrintedBandedOcrTestBase):
             kwargs["on_interaction_created"]("ix-unknown")
             return _timeout_result(interaction_id="ix-unknown")
 
+        polls: list[dict[str, Any]] = []
+
+        def fake_poll(**kwargs):
+            polls.append(kwargs)
+            return _timeout_result(interaction_id="ix-unknown")
+
         with (
             patch(f"{MODULE}.transcribe_band_with_antigravity", fake_transcribe),
             patch(
@@ -619,12 +673,16 @@ class ArabicPrintedBandedCancelTests(ArabicPrintedBandedOcrTestBase):
                     "http_error", last_status=None, http_status=500
                 ),
             ),
+            patch(f"{MODULE}.poll_arabic_printed_band_interaction", fake_poll),
         ):
             result = self._run(claim)
 
         self.assertEqual(result.outcome, OUTCOME_FAILED)
         self.assertEqual(result.failure_code, PAGE_FAILURE_BANDS_UNRESOLVED)
         self.assertEqual(creates, ["unassisted"])
+        self.assertEqual(len(polls), 1)
+        self.assertEqual(polls[0]["interaction_id"], "ix-unknown")
+        self.assertEqual(polls[0]["last_status"], "in_progress")
         band = self._bands(claim)[0]
         self.assertEqual(band.create_call_count, 1)
         self.assertEqual(
@@ -717,6 +775,170 @@ class ArabicPrintedBandedCancelTests(ArabicPrintedBandedOcrTestBase):
         )
         self.assertEqual(recovered.transcription_text, BAND_ONE_TEXT)
 
+    def test_stale_cancel_pending_blank_confirmation_recovers_completed_output(self):
+        claim = self._claim()
+        self._single_band_setup(claim)
+        self._seed_stale_cancel_pending(claim, interaction_id="ix-stale")
+        polls: list[dict[str, Any]] = []
+
+        def fake_poll(**kwargs):
+            polls.append(kwargs)
+            return _ok_result(BAND_ONE_TEXT, interaction_id="ix-stale")
+
+        with (
+            patch(f"{MODULE}.poll_arabic_printed_band_interaction", fake_poll),
+            patch(f"{MODULE}.transcribe_band_with_antigravity") as transcribe,
+            patch(f"{MODULE}.cancel_antigravity_interaction") as cancel,
+            patch(f"{MODULE}.detect_arabic_printed_document_text") as vision,
+        ):
+            result = self._run(claim)
+
+        transcribe.assert_not_called()
+        cancel.assert_not_called()
+        vision.assert_not_called()
+        self.assertEqual(len(polls), 1)
+        self.assertEqual(polls[0]["interaction_id"], "ix-stale")
+        self.assertEqual(polls[0]["last_status"], "in_progress")
+        self.assertEqual(result.outcome, OUTCOME_SUCCEEDED)
+        bands = self._bands(claim)
+        self.assertEqual(
+            bands[0].status, ArabicPrintedOcrBandCheckpoint.Status.SUCCEEDED
+        )
+        self.assertEqual(bands[0].create_call_count, 1)
+        self.assertEqual(bands[0].transcription_text, BAND_ONE_TEXT)
+        self.assertEqual(
+            bands[1].status, ArabicPrintedOcrBandCheckpoint.Status.SUCCEEDED
+        )
+        self.assertEqual(bands[1].transcription_text, BAND_TWO_TEXT)
+
+    def test_stale_cancel_pending_blank_confirmation_cancelled_uses_fallback(self):
+        claim = self._claim()
+        self._single_band_setup(claim)
+        self._seed_stale_cancel_pending(claim, interaction_id="ix-stale")
+        creates: list[str] = []
+        polls: list[dict[str, Any]] = []
+
+        def fake_poll(**kwargs):
+            polls.append(kwargs)
+            return _cancelled_result(interaction_id="ix-stale")
+
+        def fake_transcribe(**kwargs):
+            creates.append(kwargs["attempt_kind"])
+            kwargs["on_interaction_created"]("ix-fb")
+            return _ok_result(BAND_ONE_TEXT, interaction_id="ix-fb")
+
+        with (
+            patch(f"{MODULE}.poll_arabic_printed_band_interaction", fake_poll),
+            patch(f"{MODULE}.transcribe_band_with_antigravity", fake_transcribe),
+            patch(f"{MODULE}.cancel_antigravity_interaction") as cancel,
+            patch(f"{MODULE}.detect_arabic_printed_document_text") as vision,
+        ):
+            result = self._run(claim)
+
+        cancel.assert_not_called()
+        vision.assert_not_called()
+        self.assertEqual(creates, ["assisted_fallback"])
+        self.assertEqual(len(polls), 1)
+        self.assertEqual(result.outcome, OUTCOME_SUCCEEDED)
+        bands = self._bands(claim)
+        self.assertEqual(bands[0].create_call_count, 2)
+        self.assertEqual(bands[0].cancel_confirmed_status, "cancelled")
+        self.assertEqual(
+            bands[0].selected_result,
+            ArabicPrintedOcrBandCheckpoint.SelectedResult.ASSISTED_FALLBACK,
+        )
+        self.assertEqual(
+            bands[1].status, ArabicPrintedOcrBandCheckpoint.Status.SUCCEEDED
+        )
+        self.assertEqual(bands[1].transcription_text, BAND_TWO_TEXT)
+
+    def test_stale_cancel_pending_blank_confirmation_unresolved_still_fail_closed(self):
+        claim = self._claim()
+        self._single_band_setup(claim)
+        self._seed_stale_cancel_pending(claim, interaction_id="ix-stale")
+        polls: list[dict[str, Any]] = []
+
+        def fake_poll(**kwargs):
+            polls.append(kwargs)
+            return _timeout_result(interaction_id="ix-stale")
+
+        with (
+            patch(f"{MODULE}.poll_arabic_printed_band_interaction", fake_poll),
+            patch(f"{MODULE}.transcribe_band_with_antigravity") as transcribe,
+            patch(f"{MODULE}.cancel_antigravity_interaction") as cancel,
+            patch(f"{MODULE}.detect_arabic_printed_document_text") as vision,
+        ):
+            result = self._run(claim)
+
+        transcribe.assert_not_called()
+        cancel.assert_not_called()
+        vision.assert_not_called()
+        self.assertEqual(len(polls), 1)
+        self.assertEqual(result.outcome, OUTCOME_FAILED)
+        self.assertEqual(result.failure_code, PAGE_FAILURE_BANDS_UNRESOLVED)
+        bands = self._bands(claim)
+        self.assertEqual(
+            bands[0].status, ArabicPrintedOcrBandCheckpoint.Status.CANCEL_PENDING
+        )
+        self.assertEqual(bands[0].create_call_count, 1)
+        self.assertEqual(
+            bands[1].status, ArabicPrintedOcrBandCheckpoint.Status.SUCCEEDED
+        )
+
+    def test_stale_cancel_pending_blank_confirmation_without_id_does_not_poll(self):
+        claim = self._claim()
+        self._single_band_setup(claim)
+        self._seed_stale_cancel_pending(claim, interaction_id="")
+
+        with (
+            patch(f"{MODULE}.poll_arabic_printed_band_interaction") as poll,
+            patch(f"{MODULE}.transcribe_band_with_antigravity") as transcribe,
+            patch(f"{MODULE}.cancel_antigravity_interaction") as cancel,
+        ):
+            result = self._run(claim)
+
+        poll.assert_not_called()
+        transcribe.assert_not_called()
+        cancel.assert_not_called()
+        self.assertEqual(result.outcome, OUTCOME_FAILED)
+        self.assertEqual(result.failure_code, PAGE_FAILURE_BANDS_UNRESOLVED)
+        self.assertEqual(
+            self._bands(claim)[0].status,
+            ArabicPrintedOcrBandCheckpoint.Status.CANCEL_PENDING,
+        )
+
+    def test_stale_cancel_pending_cancelled_without_budget_uses_low_quality(self):
+        claim = self._claim()
+        self._single_band_setup(claim)
+        self._seed_stale_cancel_pending(claim, interaction_id="ix-stale")
+
+        def fake_poll(**kwargs):
+            self.clock.now = 1_000.0
+            return _cancelled_result(interaction_id="ix-stale")
+
+        with (
+            patch(f"{MODULE}.poll_arabic_printed_band_interaction", fake_poll),
+            patch(f"{MODULE}.transcribe_band_with_antigravity") as transcribe,
+            patch(f"{MODULE}.cancel_antigravity_interaction") as cancel,
+            patch(f"{MODULE}.detect_arabic_printed_document_text") as vision,
+        ):
+            result = self._run(claim, deadline=1_000.0)
+
+        transcribe.assert_not_called()
+        cancel.assert_not_called()
+        vision.assert_not_called()
+        self.assertEqual(result.outcome, OUTCOME_SUCCEEDED)
+        band = self._bands(claim)[0]
+        self.assertEqual(band.create_call_count, 1)
+        self.assertEqual(
+            band.selected_result,
+            ArabicPrintedOcrBandCheckpoint.SelectedResult.CLOUD_VISION_LOW_QUALITY,
+        )
+        self.assertEqual(
+            self._bands(claim)[1].status,
+            ArabicPrintedOcrBandCheckpoint.Status.SUCCEEDED,
+        )
+
     def test_fallback_timeout_with_inconclusive_cancel_has_no_low_quality(self):
         claim = self._claim()
         self._single_band_setup(claim)
@@ -727,12 +949,16 @@ class ArabicPrintedBandedCancelTests(ArabicPrintedBandedOcrTestBase):
                 return _rejected_result()
             return _timeout_result(interaction_id="ix-fb")
 
+        def fake_poll(**kwargs):
+            return _timeout_result(interaction_id="ix-fb")
+
         with (
             patch(f"{MODULE}.transcribe_band_with_antigravity", fake_transcribe),
             patch(
                 f"{MODULE}.cancel_antigravity_interaction",
                 lambda **kwargs: _cancel("other", last_status="weird"),
             ),
+            patch(f"{MODULE}.poll_arabic_printed_band_interaction", fake_poll),
         ):
             result = self._run(claim)
 
