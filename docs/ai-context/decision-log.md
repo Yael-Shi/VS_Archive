@@ -1,5 +1,36 @@
 # VS-Archive Decision Log
 
+## Arabic printed banded OCR — stale CANCEL_PENDING recovery
+
+**Decision / implemented:** A reclaimed Arabic printed band in
+`CANCEL_PENDING` with a known interaction id and blank/unknown
+`cancel_confirmed_status` is recovered with the existing provider GET
+poll (`poll_arabic_printed_band_interaction` with `last_status=in_progress`).
+It must not immediately fail closed, and it must not create a new
+interaction merely to resolve that state.
+
+**Current behavior:**
+
+- Explicit `cancel_confirmed_status=completed` still uses
+  `_recover_completed_cancel` (poll once; accepted transcription persists
+  success; otherwise persist band failure).
+- Explicit `cancel_confirmed_status=cancelled` still uses the existing
+  fallback / Cloud Vision low-quality path.
+- Blank/unknown confirmation with **no** interaction id, or with no
+  remaining page budget before the recovery GET, still fail-closes
+  (`ARABIC_PRINTED_BANDS_UNRESOLVED`); the band stays `CANCEL_PENDING`.
+- Blank/unknown confirmation with a known id: one recovery GET.
+  Completed + accepted transcription persists success without a new
+  create. Confirmed cancelled then follows the normal fallback path when
+  budget remains, or the existing low-quality path when it does not.
+  Still in-progress, poll error/timeout, or other unsafe statuses remain
+  fail-closed with no create and no low-quality selection.
+- Page budget, band attempt timeout, request lease, and routing/flags are
+  unchanged.
+
+**Tests:** `documents/test_arabic_printed_banded_ocr.py` (document-322
+checkpoint shape).
+
 ## Public `/archive/` Person advanced filter — unified AIP ∪ PhotoPerson
 
 **Decision / implemented:** Repeatable public **`person=<person_id>`** matches
