@@ -1,5 +1,41 @@
 # VS-Archive Decision Log
 
+## One-time reviewed legacy comma-author cleanup
+
+**Decision / implemented:** A **one-time**, fail-closed cleanup of four
+reviewed legacy comma-containing bibliographic **`Author`** rows from the
+2026-09-03 live audit. This is **not** a general comma-splitting policy.
+The command does **not** discover or split arbitrary `author_name` values.
+
+**Current behavior:**
+
+- Management command **`cleanup_legacy_comma_authors`**. Default is dry-run
+  (zero writes). **`--apply`** mutates inside one **`transaction.atomic`**.
+- Explicit constants only. ArchiveItem **311** currently linked to aggregate
+  **Author 69** (`חגי אשד, אביעזר גולן`) is rewritten to ordered
+  **Authors `[29, 68]`** (`חגי אשד`, `אביעזר גולן`), which already exist
+  and remain linked to items **121** and **310**. **`author_name`** is rebuilt
+  with **`_joined_author_name`**. Search index for item **311** is refreshed
+  in the same transaction.
+- Unlinked aggregate Authors **4**, **6**, **61**, and (after unlink) **69**
+  are deleted **only** if each has zero remaining **`ArchiveItemAuthor`**
+  links. Items **13**, **29**, and **289** are already correctly split and
+  are verified, not rewritten.
+- Fail closed unless the live rows match the reviewed snapshot (ids, exact
+  names, ordered links, orphan zero-link checks). Concurrent extra links
+  abort with no writes. Index failure rolls back the entire cleanup.
+- Repeat after a successful apply is **`already_complete`**: item 311 already
+  has `[29, 68]`, matching **`author_name`**, items 13/29/289 still match,
+  and Authors 4/6/61/69 are absent. No writes. Partial/unexpected states
+  fail closed (not auto-repaired).
+- Does **not** touch **Person**, rename/merge Authors, infer more comma
+  cases, or add schema.
+
+**Out of scope / deferred:** general comma-split; standalone Author delete
+UI; public display/search cutover from **`author_name`**.
+
+**Tests:** `documents/test_legacy_comma_author_cleanup.py`.
+
 ## Text quality PR3 — Arabic printed banded SOURCE_TEXT base quality
 
 **Decision / implemented:** Automatic persisted `LOW` / `MEDIUM` / `GOOD` is
