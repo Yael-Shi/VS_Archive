@@ -104,11 +104,12 @@ def _author_name(item: ArchiveItem) -> str:
 
 
 class AuthorRenameRouteTests(TestCase):
-    def test_route_resolves_and_no_list_or_delete_routes_exist(self):
+    def test_route_resolves_and_no_delete_or_merge_routes_exist(self):
         match = resolve("/archive/manage/authors/1/edit/")
         self.assertEqual(match.url_name, "archive-manage-author-edit")
+        index = resolve("/archive/manage/authors/")
+        self.assertEqual(index.url_name, "archive-manage-authors")
         for path in (
-            "/archive/manage/authors/",
             "/archive/manage/authors/1/delete/",
             "/archive/manage/authors/1/merge/",
         ):

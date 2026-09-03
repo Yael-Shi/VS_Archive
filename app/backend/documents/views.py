@@ -75,6 +75,7 @@ from documents.services.archive_item_authors import (
     empty_archive_item_authors_form_fields,
     parse_archive_item_authors_form,
     rename_author,
+    staff_author_index_queryset,
 )
 from documents.services.archive_item_people import (
     ArchiveItemPersonError,
@@ -5868,6 +5869,26 @@ def _author_edit_form_context(
         "form_errors": form_errors,
         "page_title": "עריכת מחבר/ת",
     }
+
+
+@login_required
+@require_GET
+def archive_manage_authors_page(request):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    q = (request.GET.get("q") or "").strip()
+    authors = staff_author_index_queryset(search_query=q)
+    return render(
+        request,
+        "documents/archive/authors_index.html",
+        context={
+            "authors": authors,
+            "q": q,
+            "page_title": "ניהול מחברים",
+        },
+    )
 
 
 @login_required

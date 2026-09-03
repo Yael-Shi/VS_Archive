@@ -495,12 +495,42 @@ collision with another **`Author`** is **rejected, never merged**.
   **`apply_staff_archive_item_authors`** and **`rename_author`**.
 
 **Out of scope / deferred:** Author **merge** and dedupe of pre-existing
-duplicate names; Author delete; a staff Author list/catalog page or nav entry;
-PHOTO author UI; unique **`Author.name`** constraint; public
-display/search/filter cutover from **`author_name`** to the **`Author`**
-relations; optimistic-concurrency token between preview and save.
+duplicate names; Author delete; PHOTO author UI; unique **`Author.name`**
+constraint; public display/search/filter cutover from **`author_name`** to the
+**`Author`** relations; optimistic-concurrency token between preview and save.
+The staff Author index is implemented separately (see **Staff Author index**).
 
 **Tests:** `documents/test_author_name_edit.py`.
+
+## Staff Author index
+
+**Decision / implemented:** Staff can list every **`Author`** at
+**`/archive/manage/authors/`** (**`archive-manage-authors`**). This is a
+staff catalog/index only. **`Author`** remains separate from **`Person`**.
+
+**Current behavior:**
+
+- Page is staff-only (**`@login_required`** + **`_require_admin_page`**), same
+  policy as **`archive_manage_author_edit_page`** and
+  **`archive_manage_people_page`**. GET only. Reached from **ניהול מחברים**
+  next to **ניהול אנשים** on **`/archive/manage/`**. Layout follows the staff
+  People index (search toolbar, table, empty / no-match copy).
+- Rows are every **`Author`**, ordered by **`(name, id)`**. Optional GET
+  **`q`** is trimmed and matched with case-insensitive substring on
+  **`Author.name`** only (no aliases, Person, fuzzy, or
+  **`ArchiveItem.author_name`** lookup). Trimmed **`q`** is preserved in the
+  field; a clear/reset control appears when **`q`** is nonempty.
+- Each row shows **`Author.name`**, **`Author.id`**, annotated
+  **`ArchiveItemAuthor`** count (**`Count("archive_item_links")`**), and
+  **עריכה** to existing **`archive-manage-author-edit`**.
+- No standalone Author create, delete, merge, aliases, public Author pages,
+  Person integration, PHOTO author UI, or schema changes.
+
+**Out of scope / deferred:** Author merge/delete; public Author browsing;
+PHOTO author support.
+
+**Tests:** `documents/test_author_staff_index.py`; route expectation in
+`documents/test_author_name_edit.py`.
 
 ## Staff author exact-name reuse and explicit item unlink
 

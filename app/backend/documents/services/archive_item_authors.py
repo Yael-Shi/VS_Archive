@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 
 from documents.models import ArchiveItem, ArchiveItemAuthor, Author
 from documents.services.archive_metadata_validation import SOURCE_METADATA_MAX_LENGTH
@@ -55,6 +55,22 @@ class StaffAuthorChoice:
     id: int
     name: str
     selected: bool = False
+
+
+def staff_author_index_queryset(*, search_query: str = ""):
+    """Staff Author index: one row per Author, with ArchiveItemAuthor counts.
+
+    Optional ``search_query`` matches ``Author.name`` case-insensitively after
+    trim. It does not search aliases, Person, or ``ArchiveItem.author_name``.
+    Counts use ``Count("archive_item_links")`` so the index does not N+1.
+    """
+    authors = Author.objects.annotate(
+        archive_item_author_count=Count("archive_item_links"),
+    ).order_by("name", "id")
+    q = (search_query or "").strip()
+    if q:
+        authors = authors.filter(name__icontains=q)
+    return authors
 
 
 def ordered_author_links(archive_item: ArchiveItem) -> list[ArchiveItemAuthor]:
