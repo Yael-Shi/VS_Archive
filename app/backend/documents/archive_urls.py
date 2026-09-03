@@ -71,6 +71,11 @@ urlpatterns = [
         name="archive-manage-family-access",
     ),
     path(
+        "manage/authors/",
+        views.archive_manage_authors_page,
+        name="archive-manage-authors",
+    ),
+    path(
         "manage/authors/<int:author_id>/edit/",
         views.archive_manage_author_edit_page,
         name="archive-manage-author-edit",
