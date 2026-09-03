@@ -13,9 +13,11 @@ Design and implementation scope for **`PHOTO`** archive items: private S3 storag
 
 **Key code references (current behavior):**
 
-- `documents/models.py` — **`ArchiveItem`**, **`ManualTextContent`**, **`PhotoContent`**, **`Person`**, **`PersonAlias`**
+- `documents/models.py` — **`ArchiveItem`**, **`ManualTextContent`**, **`PhotoContent`**, **`Person`**, **`PersonAlias`**, **`ReviewedPersonImportBinding`**
 - `documents/services/photo_content_management.py` — staff PHOTO child writes, Person rename, PersonAlias writes
-- `documents/services/person_merge.py` — staff Person identity merge (explicit ids)
+- `documents/services/photo_person_reviewed_import.py` — reviewed PhotoPerson import (dry-run / apply)
+- `documents/management/commands/import_reviewed_photo_people.py` — operator import command
+- `documents/services/person_merge.py` — staff Person identity merge (explicit ids; repoints import bindings)
 - `documents/services/archive_item_access.py` — visibility and browse renderability
 - `documents/services/archive_item_presentation.py` — **`ArchiveBrowseCard`**, text preview, type markers
 - `documents/services/photo_archive_urls.py` — presigned browse thumbnails for PHOTO
@@ -356,7 +358,7 @@ See **`docs/ai-context/decision-log.md`** for OCR upload API history and current
 - Worker / SQS processing for PHOTO
 - Face recognition, AI identification, comments
 - Public alias display; public Person catalog/Admin
-- automatic ArchiveItemPerson from PhotoPerson; staff PHOTO appearance review / PhotoPerson backfill from `people_present`; no new-Person proposals
+- automatic ArchiveItemPerson from PhotoPerson; staff PHOTO appearance review / PhotoPerson backfill **from `people_present`**; no new-Person proposals on public AIP suggestions. **Reviewed PhotoPerson import v1** (JSON artifact, dry-run / `--apply`, `ReviewedPersonImportBinding` for `create_person` idempotency) is **implemented** as a management command — not a site UI and not a `people_present` parser.
 - Public alias display on Person pages
 - PhotoPerson appearance filter
 - Public (unauthenticated) upload
