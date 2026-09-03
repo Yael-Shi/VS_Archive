@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}VSArchive - העלאת מסמך{% endblock %}
 
 {% block content %}
@@ -16,6 +17,7 @@
     {% include "documents/upload/_upload_form.html" %}
   </div>
 
+  <script src="{% static 'public/person_name_duplicate.js' %}"></script>
   {% include "documents/upload/_upload_script.html" %}
   {% include "documents/archive/archive_date_form_script.html" %}
 {% endblock %}

@@ -33,6 +33,65 @@ labels in `PUBLIC_TEXT_QUALITY_LABELS`. No templates/CSS in this PR.
 
 **Tests:** `documents/test_text_quality.py`.
 
+## Staff new-Person duplicate prevention
+
+**Decision / implemented:** Staff “create new Person by name” workflows
+look up existing **`Person.name`** and **`PersonAlias.name`** with trim plus
+case-insensitive exact match. A match is a **warning / confirmation**, never
+automatic reuse, merge, or alias create. Intentional same-name Person rows
+remain allowed after an explicit per-token acknowledgement.
+
+**Current behavior:**
+
+- Shared layer: **`documents/services/person_duplicate_check.py`**.
+  **`find_existing_person_candidates(name)`** /
+  **`find_existing_person_candidates_for_names(names)`** batch canonical and
+  alias lookup (one Person query for a comma-separated list). Candidates are
+  distinct by **`Person.id`**, ordered by **`(name, id)`**. Matching a
+  canonical name and an alias on the same Person yields one candidate.
+- **`check_new_person_names`** parses tokens with the existing split/trim
+  rules, then resolves candidates for **all** tokens before any create.
+  **`create_identified_people_from_new_names`** is the only create helper;
+  ArchiveItemPerson and PhotoPerson both use it.
+- Normalization is **input trim + `casefold()` exact equality** only. No
+  fuzzy, substring, transliteration, morphology, punctuation stripping, or
+  automatic alias creation.
+- If any token has candidates and is not force-approved: **zero** new Person
+  rows and **zero** ArchiveItemPerson / PhotoPerson changes from that
+  new-name field. Selected person-id fields are not persisted when the
+  overall staff form fails (existing fail-closed transactions).
+- Intentional create uses POST **`force_create_person`**: a list of SHA-256
+  hex digests of the **exact trimmed UTF-8 token** (`person_new_name_token_key`).
+  Acknowledgements bind to the token text, not array index. Changing the
+  typed name (including case) invalidates a stale key. There is no global
+  “ignore all warnings” checkbox.
+- HTML forms stay on the same page, preserve submitted values, and show
+  candidates (canonical name, aliases, id, link to
+  **`/archive/manage/people/<id>/edit/`**) plus per-token
+  “create a new Person anyway”. Staff may instead pick the existing Person
+  in the picker and remove the new-name token. The typed text is not
+  mutated; existing ids are not auto-selected.
+- JSON PHOTO create / add-photo and OCR create return HTTP 400 with
+  **`error_code=PERSON_NAME_CANDIDATES`**, **`error`**, and
+  **`person_name_conflicts`**. JS renders the same warning and resubmits
+  **`force_create_person`**. Parse/validation runs **before**
+  ArchiveItem / PhotoContent / S3 plan writes.
+- Unchanged: ArchiveItemPerson vs PhotoPerson stay separate; picker ids
+  still link that exact Person; **`Person.name`** is not unique; Person
+  merge remains the repair tool; search refresh, historical Person/Tag
+  rules, and public display are unchanged.
+
+**Why:** Accidental duplicate identities were easy because new-name fields
+always inserted. Lookup-by-name without confirmation would silently attach
+the wrong Person when two people share a display name or alias.
+
+**Deferred:** fuzzy / morphological matching; auto-merge; auto-alias;
+signed confirmation tokens.
+
+**Tests:** `documents/test_person_duplicate_prevention.py`,
+`documents/test_archive_item_person_staff_ui.py`,
+`documents/test_photo_multi_manage.py`.
+
 ## Unified staff PHOTO edit cards
 
 **Decision / implemented:** Staff PHOTO item edit
@@ -615,16 +674,17 @@ not change PHOTO item create, shared metadata, redirects, or layout.
 - `/archive/manage/<id>/photos/add/` includes the same PhotoPerson
   controls as per-photo edit (`photo_person_form_fields.html`): existing
   `person_ids` picker and `new_person_name`.
-- Add-photo JS sends `person_ids` and `new_person_name` to
-  `POST /api/photo-uploads/add/`. It does not send
+- Add-photo JS sends `person_ids`, `new_person_name`, and when present
+  `force_create_person` to `POST /api/photo-uploads/add/`. It does not send
   `archive_item_person_ids` / `new_archive_item_person_name`.
 - Person input is validated before any `PhotoContent` or `Person` row is
-  created (id format, existing ids, commas-only, per-token length).
-  Invalid input is HTTP 400 with no new rows.
-- Selected ids plus each parsed new name become **`PhotoPerson` only** on
-  the new photo. Names always create; no name/alias lookup or merge.
-  Exact in-input dedupe matches #468. `people_present` stays independent
-  free text.
+  created (id format, existing ids, commas-only, per-token length,
+  canonical/alias duplicate candidates). Invalid input is HTTP 400 with
+  no new rows. Duplicate-name warnings use `error_code=PERSON_NAME_CANDIDATES`
+  (see **Staff new-Person duplicate prevention**).
+- Selected ids plus each parsed new name that is clear or force-approved
+  become **`PhotoPerson` only** on the new photo. Exact in-input dedupe
+  matches #468. `people_present` stays independent free text.
 - PHOTO item create (`/api/photo-uploads/create/`) still writes
   **`ArchiveItemPerson` only**. Extra `person_ids` / `new_person_name` on
   that payload are ignored.
@@ -693,10 +753,12 @@ identity merge, alias create, or lookup-by-name.
   order-preserving dedupe **within that submitted string only**. Repeated
   tokens do not create extra Person rows. Dedupe is exact after trim
   (`Ada` and `ada` remain distinct).
-- Each remaining token always creates a new **`Person`** through
-  **`create_identified_person`**. No `get_or_create`. No lookup or reuse by
-  canonical name or alias. Duplicate display names remain distinct
-  identities.
+- Each remaining token creates a new **`Person`** through
+  **`create_identified_person`** **unless** an existing canonical or alias
+  exact (case-insensitive) match requires per-token force-create (see
+  **Staff new-Person duplicate prevention**). No `get_or_create`. No
+  automatic reuse or merge. Duplicate display names remain allowed after
+  explicit confirmation.
 - Item input writes **`ArchiveItemPerson` only**. Photo input writes
   **`PhotoPerson` only**. Neither relation is inferred from the other.
 - Per-token **`Person.name`** limit remains 255 characters. The HTML inputs
@@ -714,11 +776,13 @@ identity merge, alias create, or lookup-by-name.
 
 **Why:** Staff often need to add several new people at once. Comma-separated
 create on the existing fields avoids extra round-trips without weakening
-the always-create / no-merge identity contract.
+the always-create-after-confirmation / no-merge identity contract.
 
-**Deferred:** lookup/merge by name; bulk alias create; parsing
+**Deferred:** fuzzy lookup/merge by name; bulk alias create; parsing
 `people_present`; public search. Add-photo identified people is
-implemented (see **PHOTO add-photo identified people**).
+implemented (see **PHOTO add-photo identified people**). Exact
+canonical/alias duplicate warnings are implemented (see **Staff
+new-Person duplicate prevention**).
 
 **Tests:** `documents/test_archive_item_person_staff_ui.py`,
 `documents/test_photo_multi_manage.py`.
@@ -1553,10 +1617,14 @@ missing write path for the identity model that public `q` and advanced
   Aliases are not selectable entities. Person ids are not display labels.
   Persons ordered by `(name, id)` with alias prefetch (no N+1).
 - New Person: canonical **`Person.name`** only via
-  **`create_identified_person`** (always creates; trim; no aliases; no
-  `get_or_create`; duplicate names remain distinct identities).
+  **`create_identified_person`** (trim; no aliases; no
+  `get_or_create`). Exact canonical/alias matches warn and require
+  per-token **`force_create_person`** (see **Staff new-Person duplicate
+  prevention**). Duplicate names remain distinct identities when
+  confirmed.
   **`new_archive_item_person_name`** may be comma-separated; each token
-  creates a new Person and **`ArchiveItemPerson`** only (see
+  that is clear or force-approved creates a new Person and
+  **`ArchiveItemPerson`** only (see
   **Comma-separated new Person names**).
 - Writes go through **`set_archive_item_people`** in
   `documents/services/archive_item_people.py` (diff current vs submitted

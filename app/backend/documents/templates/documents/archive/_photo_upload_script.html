@@ -73,10 +73,27 @@
     let data = null;
     try { data = JSON.parse(text); } catch (_) {}
     if (!res.ok) {
-      const err = (data && (data.error || data.detail)) ? (data.error || data.detail) : text;
-      throw new Error(`HTTP ${res.status}: ${err}`);
+      const message = (data && (data.error || data.detail)) ? (data.error || data.detail) : text;
+      const err = new Error(`HTTP ${res.status}: ${message}`);
+      err.payload = data;
+      throw err;
     }
     return data;
+  }
+
+  function showPersonNameDuplicateWarning(payload) {
+    if (
+      !window.vsArchivePersonNameDuplicate ||
+      !window.vsArchivePersonNameDuplicate.isConflictPayload(payload)
+    ) {
+      return false;
+    }
+    window.vsArchivePersonNameDuplicate.renderConflicts(
+      document.getElementById("person-name-duplicate-host"),
+      payload
+    );
+    setMessage("error", payload.error || "");
+    return true;
   }
 
   function readSelectedIds(selectId) {
@@ -116,6 +133,10 @@
       if (window.vsArchiveDateEntry && window.vsArchiveDateEntry.collectMeta) {
         window.vsArchiveDateEntry.collectMeta(meta);
       }
+      const forceKeys = window.vsArchivePersonNameDuplicate
+        ? window.vsArchivePersonNameDuplicate.collectForceCreateKeys(form)
+        : [];
+      if (forceKeys.length) meta.force_create_person = forceKeys;
       return meta;
     }
     const meta = {
@@ -149,6 +170,10 @@
     if (new_archive_item_person_name) {
       meta.new_archive_item_person_name = new_archive_item_person_name;
     }
+    const forceKeys = window.vsArchivePersonNameDuplicate
+      ? window.vsArchivePersonNameDuplicate.collectForceCreateKeys(form)
+      : [];
+    if (forceKeys.length) meta.force_create_person = forceKeys;
     return meta;
   }
 
@@ -351,6 +376,12 @@
       const target = itemManageUrl(progress.archiveItemId) || redirectUrl;
       window.location.href = target;
     } catch (err) {
+      if (showPersonNameDuplicateWarning(err && err.payload)) {
+        if (!progress.archiveItemId) {
+          submitBtn.disabled = false;
+        }
+        return;
+      }
       setErrorMessageWithItemLink(
         batchFailureMessage(progress, err),
         progress.archiveItemId

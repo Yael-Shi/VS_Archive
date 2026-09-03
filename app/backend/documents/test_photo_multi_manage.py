@@ -26,6 +26,11 @@ from documents.models import (
     PhotoPerson,
 )
 from documents.s3 import S3HeadObjectResult, build_photo_original_s3_key
+from documents.services.person_duplicate_check import (
+    FORCE_CREATE_PERSON_FIELD,
+    PERSON_NAME_CANDIDATES_ERROR,
+    person_new_name_token_key,
+)
 from documents.services.photo_content_management import (
     LAST_PHOTO_DELETE_ERROR,
     PERSON_NAME_TOO_LONG_ERROR,
@@ -479,9 +484,47 @@ class PhotoAddUploadTests(TestCase):
         self.assertEqual(self.first.people.count(), 0)
 
     def test_add_comma_separated_new_names_link_only_the_new_photo(self):
+        resp = self.client.post(
+            self.ADD_URL,
+            data=json.dumps(
+                self._payload(
+                    new_person_name="  Unique Add One , Unique Add Two ",
+                    people_present="crowd",
+                )
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        photo = PhotoContent.objects.get(pk=resp.json()["photo_content_id"])
+        created = list(
+            Person.objects.filter(name__in=["Unique Add One", "Unique Add Two"]).order_by(
+                "id"
+            )
+        )
+        self.assertEqual(
+            [person.name for person in created], ["Unique Add One", "Unique Add Two"]
+        )
+        self.assertEqual(
+            list(photo.people.order_by("id").values_list("name", flat=True)),
+            ["Unique Add One", "Unique Add Two"],
+        )
+        for person in created:
+            self.assertTrue(
+                PhotoPerson.objects.filter(photo_content=photo, person=person).exists()
+            )
+            self.assertFalse(
+                ArchiveItemPerson.objects.filter(
+                    archive_item=self.item, person=person
+                ).exists()
+            )
+        self.assertEqual(self.first.people.count(), 0)
+
+    def test_add_duplicate_name_returns_candidates_before_rows(self):
         existing = Person.objects.create(name="רחל כהן")
         PersonAlias.objects.create(person=existing, name="Ada Lovelace")
         ArchiveItemPerson.objects.create(archive_item=self.item, person=existing)
+        before_photos = PhotoContent.objects.count()
+        before_people = Person.objects.count()
         resp = self.client.post(
             self.ADD_URL,
             data=json.dumps(
@@ -492,8 +535,33 @@ class PhotoAddUploadTests(TestCase):
             ),
             content_type="application/json",
         )
-        self.assertEqual(resp.status_code, 201)
-        photo = PhotoContent.objects.get(pk=resp.json()["photo_content_id"])
+        self.assertEqual(resp.status_code, 400)
+        body = resp.json()
+        self.assertEqual(body["error_code"], "PERSON_NAME_CANDIDATES")
+        self.assertEqual(body["error"], PERSON_NAME_CANDIDATES_ERROR)
+        submitted = [row["submitted_name"] for row in body["person_name_conflicts"]]
+        self.assertEqual(submitted, ["רחל כהן", "Ada Lovelace"])
+        self.assertEqual(PhotoContent.objects.count(), before_photos)
+        self.assertEqual(Person.objects.count(), before_people)
+        self.assertEqual(self.first.people.count(), 0)
+        self.mock_presigned.assert_not_called()
+
+        forced = self.client.post(
+            self.ADD_URL,
+            data=json.dumps(
+                self._payload(
+                    new_person_name="  רחל כהן , Ada Lovelace ",
+                    people_present="crowd",
+                    force_create_person=[
+                        person_new_name_token_key("רחל כהן"),
+                        person_new_name_token_key("Ada Lovelace"),
+                    ],
+                )
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(forced.status_code, 201)
+        photo = PhotoContent.objects.get(pk=forced.json()["photo_content_id"])
         created = list(
             Person.objects.filter(name__in=["רחל כהן", "Ada Lovelace"])
             .exclude(pk=existing.pk)
@@ -501,10 +569,6 @@ class PhotoAddUploadTests(TestCase):
         )
         self.assertEqual(
             [person.name for person in created], ["רחל כהן", "Ada Lovelace"]
-        )
-        self.assertEqual(
-            list(photo.people.order_by("id").values_list("name", flat=True)),
-            ["רחל כהן", "Ada Lovelace"],
         )
         for person in created:
             self.assertTrue(
@@ -516,7 +580,6 @@ class PhotoAddUploadTests(TestCase):
                 ).exists()
             )
             self.assertEqual(person.aliases.count(), 0)
-        self.assertEqual(photo.people_present, "crowd")
         self.assertEqual(
             set(self.item.people.values_list("id", flat=True)),
             {existing.id},
@@ -802,6 +865,38 @@ class PhotoComponentEditTests(TestCase):
         self.assertEqual(self.second.people_present, "crowd")
 
     def test_comma_separated_new_names_link_only_the_photo(self):
+        resp = self.client.post(
+            self._edit_url(self.second),
+            data={
+                "description": "Second caption",
+                "people_present": "crowd",
+                "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
+                "new_person_name": "  Unique Photo One , Unique Photo Two ",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        created = list(
+            Person.objects.filter(
+                name__in=["Unique Photo One", "Unique Photo Two"]
+            ).order_by("id")
+        )
+        self.assertEqual(
+            [person.name for person in created],
+            ["Unique Photo One", "Unique Photo Two"],
+        )
+        self.assertEqual(
+            list(self.second.people.order_by("id").values_list("name", flat=True)),
+            ["Unique Photo One", "Unique Photo Two"],
+        )
+        for person in created:
+            self.assertFalse(
+                ArchiveItemPerson.objects.filter(
+                    archive_item=self.item, person=person
+                ).exists()
+            )
+        self.assertEqual(self.first.people.count(), 0)
+
+    def test_duplicate_new_person_name_stays_on_standalone_editor(self):
         existing = Person.objects.create(name="רחל כהן")
         PersonAlias.objects.create(person=existing, name="Ada Lovelace")
         ArchiveItemPerson.objects.create(archive_item=self.item, person=existing)
@@ -814,7 +909,28 @@ class PhotoComponentEditTests(TestCase):
                 "new_person_name": "  רחל כהן , ,Ada Lovelace, רחל כהן ",
             },
         )
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, PERSON_NAME_CANDIDATES_ERROR)
+        self.assertContains(resp, 'name="force_create_person"')
+        self.assertEqual(Person.objects.filter(name="Ada Lovelace").count(), 0)
+        self.assertEqual(Person.objects.filter(name="רחל כהן").count(), 1)
+        self.assertEqual(self.second.people.count(), 0)
+        self.assertEqual(self.first.people.count(), 0)
+
+        forced = self.client.post(
+            self._edit_url(self.second),
+            data={
+                "description": "Second caption",
+                "people_present": "crowd",
+                "date_precision": ArchiveItem.DatePrecision.UNKNOWN,
+                "new_person_name": "  רחל כהן , Ada Lovelace ",
+                FORCE_CREATE_PERSON_FIELD: [
+                    person_new_name_token_key("רחל כהן"),
+                    person_new_name_token_key("Ada Lovelace"),
+                ],
+            },
+        )
+        self.assertEqual(forced.status_code, 302)
         created = list(
             Person.objects.filter(name__in=["רחל כהן", "Ada Lovelace"])
             .exclude(pk=existing.pk)
@@ -822,10 +938,6 @@ class PhotoComponentEditTests(TestCase):
         )
         self.assertEqual(
             [person.name for person in created], ["רחל כהן", "Ada Lovelace"]
-        )
-        self.assertEqual(
-            list(self.second.people.order_by("id").values_list("name", flat=True)),
-            ["רחל כהן", "Ada Lovelace"],
         )
         for person in created:
             self.assertTrue(
@@ -838,12 +950,6 @@ class PhotoComponentEditTests(TestCase):
                     archive_item=self.item, person=person
                 ).exists()
             )
-            self.assertEqual(person.aliases.count(), 0)
-        self.assertEqual(self.second.people_present, "crowd")
-        self.assertEqual(
-            set(self.item.people.values_list("id", flat=True)),
-            {existing.id},
-        )
         self.assertEqual(self.first.people.count(), 0)
 
     def test_photo_new_person_name_validation_and_maxlength(self):
@@ -854,7 +960,7 @@ class PhotoComponentEditTests(TestCase):
         self.assertNotIn("maxlength", match.group(0))
         self.assertContains(
             resp,
-            "ניתן להזין כמה שמות מופרדים בפסיקים. כל שם יוצר רשומת אדם חדשה ומקושרת לתמונה זו.",
+            "ניתן להזין כמה שמות מופרדים בפסיקים.",
         )
 
         commas_only = self.client.post(
@@ -1050,6 +1156,58 @@ class PhotoUnifiedInlineEditTests(TestCase):
                 archive_item=self.item, person=ada
             ).exists()
         )
+
+    def test_inline_duplicate_warning_stays_on_correct_card(self):
+        existing = Person.objects.create(name="Inline Dup")
+        PhotoPerson.objects.create(photo_content=self.first, person=existing)
+        resp = self.client.post(
+            self._edit_url(self.second),
+            data=_photo_content_post(
+                inline_photo_edit="1",
+                description="Kept on second",
+                people_present="crowd",
+                new_person_name="Inline Dup",
+            ),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.has_header("Location"))
+        html = resp.content.decode()
+        second_card = _fragment_by_id(html, f"photo-{self.second.id}")
+        first_card = _fragment_by_id(html, f"photo-{self.first.id}")
+        self.assertIn(PERSON_NAME_CANDIDATES_ERROR, second_card)
+        self.assertIn('name="force_create_person"', second_card)
+        self.assertIn("Kept on second", second_card)
+        self.assertNotIn(PERSON_NAME_CANDIDATES_ERROR, first_card)
+        self.assertEqual(Person.objects.filter(name="Inline Dup").count(), 1)
+        self.assertEqual(self.second.people.count(), 0)
+        self.assertEqual(
+            set(self.first.people.values_list("id", flat=True)),
+            {existing.id},
+        )
+
+        forced = self.client.post(
+            self._edit_url(self.second),
+            data=_photo_content_post(
+                inline_photo_edit="1",
+                description="Kept on second",
+                people_present="crowd",
+                new_person_name="Inline Dup",
+                force_create_person=person_new_name_token_key("Inline Dup"),
+            ),
+        )
+        self.assertEqual(forced.status_code, 302)
+        created = Person.objects.exclude(pk=existing.pk).get(name="Inline Dup")
+        self.assertTrue(
+            PhotoPerson.objects.filter(
+                photo_content=self.second, person=created
+            ).exists()
+        )
+        self.assertFalse(
+            ArchiveItemPerson.objects.filter(
+                archive_item=self.item, person=created
+            ).exists()
+        )
+        self.assertEqual(self.first.people.count(), 1)
 
     def test_shared_item_save_does_not_overwrite_per_photo_metadata(self):
         resp = self.client.post(

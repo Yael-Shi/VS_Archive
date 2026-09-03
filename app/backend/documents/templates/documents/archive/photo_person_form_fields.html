@@ -30,6 +30,7 @@
 <div class="field">
   <label for="{{ fid }}new_person_name">הוספת אדם מזוהה חדש</label>
   <input id="{{ fid }}new_person_name" name="new_person_name" type="text" value="{{ form_data.new_person_name }}" />
-  <div class="field-hint">ניתן להזין כמה שמות מופרדים בפסיקים. כל שם יוצר רשומת אדם חדשה ומקושרת לתמונה זו. שם תצוגה בלבד.</div>
+  <div class="field-hint">ניתן להזין כמה שמות מופרדים בפסיקים. שם חדש שלא תואם רשומה קיימת יוצר אדם חדש ומקשר אותו לתמונה זו בלבד. אם השם תואם שם תצוגה או שם חלופי קיים, תוצג אזהרה — בחרו אדם קיים בבורר והסירו את השם, או אשרו יצירה במכוון. אין מיזוג לפי שם.</div>
+  {% include "documents/archive/person_name_duplicate_warning.html" with person_name_conflicts=person_name_conflicts|default:form_data.person_name_conflicts field_id_prefix=fid %}
 </div>
 {% endwith %}

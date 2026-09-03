@@ -17,6 +17,12 @@ from documents.services.photo_content_management import (
     create_identified_people_from_new_names,
     parse_new_person_names_input,
 )
+from documents.services.person_duplicate_check import (
+    FORCE_CREATE_PERSON_FIELD,
+    PersonNameDuplicateConflictError,
+    check_new_person_names,
+    parse_force_create_person_keys,
+)
 
 ARCHIVE_ITEM_PERSON_IDS_FIELD = "archive_item_person_ids"
 NEW_ARCHIVE_ITEM_PERSON_NAME_FIELD = "new_archive_item_person_name"
@@ -29,9 +35,10 @@ ARCHIVE_ITEM_PERSON_DUPLICATE_ERROR = (
 class ArchiveItemPersonError(Exception):
     """Staff/service-facing ArchiveItemPerson write error."""
 
-    def __init__(self, message: str):
+    def __init__(self, message: str, *, check=None):
         super().__init__(message)
         self.message = message
+        self.check = check
 
 
 def empty_archive_item_people_form_fields() -> dict[str, Any]:
@@ -39,6 +46,8 @@ def empty_archive_item_people_form_fields() -> dict[str, Any]:
     return {
         ARCHIVE_ITEM_PERSON_IDS_FIELD: [],
         NEW_ARCHIVE_ITEM_PERSON_NAME_FIELD: "",
+        FORCE_CREATE_PERSON_FIELD: [],
+        "person_name_conflicts": [],
     }
 
 
@@ -51,6 +60,8 @@ def archive_item_people_form_data_from_item(
             archive_item.people.order_by("name", "id").values_list("id", flat=True)
         ),
         NEW_ARCHIVE_ITEM_PERSON_NAME_FIELD: "",
+        FORCE_CREATE_PERSON_FIELD: [],
+        "person_name_conflicts": [],
     }
 
 
@@ -108,9 +119,17 @@ def parse_new_archive_item_person_name(post_data) -> tuple[str, list[str]]:
 def parse_archive_item_people_form(post_data) -> tuple[dict[str, Any], list[str]]:
     """Parse item-level people fields and reject unknown Person ids."""
     person_ids, id_errors = parse_archive_item_person_ids(post_data)
-    new_person_name, name_errors = parse_new_archive_item_person_name(post_data)
-    errors = id_errors + name_errors
-    if not errors and person_ids:
+    raw = (
+        post_data.get(NEW_ARCHIVE_ITEM_PERSON_NAME_FIELD)
+        if post_data is not None
+        else None
+    )
+    force_keys = parse_force_create_person_keys(post_data)
+    name_check = check_new_person_names(
+        raw, force_create_person_keys=force_keys
+    )
+    errors = id_errors + name_check.errors
+    if not id_errors and person_ids:
         found = set(
             Person.objects.filter(pk__in=person_ids).values_list("pk", flat=True)
         )
@@ -118,7 +137,9 @@ def parse_archive_item_people_form(post_data) -> tuple[dict[str, Any], list[str]
             errors.append(PERSON_NOT_FOUND_ERROR)
     return {
         ARCHIVE_ITEM_PERSON_IDS_FIELD: person_ids,
-        NEW_ARCHIVE_ITEM_PERSON_NAME_FIELD: new_person_name,
+        NEW_ARCHIVE_ITEM_PERSON_NAME_FIELD: name_check.display,
+        FORCE_CREATE_PERSON_FIELD: name_check.force_create_person_keys,
+        "person_name_conflicts": list(name_check.matches),
     }, errors
 
 
@@ -166,13 +187,15 @@ def set_archive_item_people(
     person_ids: list[int],
     new_person_name: str = "",
     refresh_search_index: bool = True,
+    force_create_person_keys: list[str] | None = None,
 ) -> list[ArchiveItemPerson]:
     """Replace ArchiveItemPerson links to match ``person_ids`` in one transaction.
 
-    Optional ``new_person_name`` may be comma-separated. Each token always
-    creates a new canonical Person and appends it. Does not create aliases,
-    PhotoPerson rows, or Tags. Does not look up or merge by name. Unknown
-    Person ids are rejected. One search-index refresh when links change and
+    Optional ``new_person_name`` may be comma-separated. Each token creates a
+    new canonical Person and appends it unless an existing canonical/alias
+    match requires per-token force-create. Does not create aliases,
+    PhotoPerson rows, or Tags. Does not merge by name. Unknown Person ids
+    are rejected. One search-index refresh when links change and
     ``refresh_search_index`` is true.
 
     Callers that already refresh this item in the same transaction (staff
@@ -188,7 +211,12 @@ def set_archive_item_people(
     resolved_ids = list(dict.fromkeys(person_ids))
     created_person = False
     try:
-        created_people = create_identified_people_from_new_names(new_person_name)
+        created_people = create_identified_people_from_new_names(
+            new_person_name,
+            force_create_person_keys=force_create_person_keys,
+        )
+    except PersonNameDuplicateConflictError as exc:
+        raise ArchiveItemPersonError(exc.message, check=exc.check) from exc
     except PhotoContentManagementError as exc:
         raise ArchiveItemPersonError(exc.message) from exc
     for created in created_people:

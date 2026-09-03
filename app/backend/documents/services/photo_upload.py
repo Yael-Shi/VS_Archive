@@ -110,6 +110,7 @@ def create_photo_upload_plan(
     public_note: str = "",
     person_ids: list[int] | None = None,
     new_person_name: str = "",
+    force_create_person_keys: list[str] | None = None,
 ) -> tuple[ArchiveItem, PhotoContent, str]:
     """
     Create PHOTO ArchiveItem + pending PhotoContent and return a presigned PUT URL.
@@ -153,6 +154,7 @@ def create_photo_upload_plan(
         archive_item=archive_item,
         person_ids=list(person_ids or []),
         new_person_name=new_person_name or "",
+        force_create_person_keys=force_create_person_keys,
         refresh_search_index=False,
     )
 
@@ -188,6 +190,7 @@ def create_additional_photo_upload_plan(
     date_precision: str = ArchiveItem.DatePrecision.UNKNOWN,
     person_ids: list[int] | None = None,
     new_person_name: str = "",
+    force_create_person_keys: list[str] | None = None,
 ) -> tuple[ArchiveItem, PhotoContent, str]:
     """
     Add a pending PhotoContent to an existing PHOTO item and return a presigned PUT.
@@ -240,7 +243,10 @@ def create_additional_photo_upload_plan(
     )
 
     resolved_person_ids = list(person_ids or [])
-    created_people = create_identified_people_from_new_names(new_person_name)
+    created_people = create_identified_people_from_new_names(
+        new_person_name,
+        force_create_person_keys=force_create_person_keys,
+    )
     resolved_person_ids.extend(person.pk for person in created_people)
     if resolved_person_ids:
         set_photo_people(photo_content, resolved_person_ids)
@@ -457,9 +463,15 @@ def parse_create_photo_upload_metadata(
         return None, discovery_errors[0]
 
     from documents.services.archive_item_people import parse_archive_item_people_form
+    from documents.services.person_duplicate_check import (
+        person_name_candidates_error_payload,
+    )
 
     parsed_people, people_errors = parse_archive_item_people_form(payload)
     if people_errors:
+        conflicts = parsed_people.get("person_name_conflicts") or []
+        if conflicts:
+            return None, person_name_candidates_error_payload(conflicts)
         return None, people_errors[0]
 
     original_name = (payload.get("original_name") or "").strip()
@@ -492,6 +504,7 @@ def parse_create_photo_upload_metadata(
         "public_note": public_note,
         "archive_item_person_ids": parsed_people["archive_item_person_ids"],
         "new_archive_item_person_name": parsed_people["new_archive_item_person_name"],
+        "force_create_person": parsed_people.get("force_create_person") or [],
         **photo_metadata,
     }, None
 
@@ -504,8 +517,13 @@ def parse_add_photo_upload_metadata(
     from documents.services.archive_date_input import parse_archive_date_bounds
     from documents.services.photo_content_management import (
         missing_person_ids_error,
-        parse_new_person_name,
         parse_photo_person_ids,
+    )
+    from documents.services.person_duplicate_check import (
+        FORCE_CREATE_PERSON_FIELD,
+        check_new_person_names,
+        parse_force_create_person_keys,
+        person_name_candidates_error_payload,
     )
     from documents.services.photo_metadata_validation import (
         parse_photo_content_date_fields,
@@ -558,9 +576,14 @@ def parse_add_photo_upload_metadata(
     person_ids, person_errors = parse_photo_person_ids(payload)
     if person_errors:
         return None, person_errors[0]
-    new_person_name, name_errors = parse_new_person_name(payload)
-    if name_errors:
-        return None, name_errors[0]
+    name_check = check_new_person_names(
+        payload.get("new_person_name") if payload is not None else None,
+        force_create_person_keys=parse_force_create_person_keys(payload),
+    )
+    if name_check.errors:
+        if name_check.conflicts:
+            return None, person_name_candidates_error_payload(name_check.matches)
+        return None, name_check.errors[0]
     missing_person_error = missing_person_ids_error(person_ids)
     if missing_person_error:
         return None, missing_person_error
@@ -573,6 +596,7 @@ def parse_add_photo_upload_metadata(
         "date_end": date_end,
         "date_precision": date_precision,
         "person_ids": person_ids,
-        "new_person_name": new_person_name,
+        "new_person_name": name_check.display,
+        FORCE_CREATE_PERSON_FIELD: name_check.force_create_person_keys,
         **photo_metadata,
     }, None

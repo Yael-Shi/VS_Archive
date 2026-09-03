@@ -83,6 +83,10 @@ from documents.services.archive_item_people import (
     parse_archive_item_people_form,
     set_archive_item_people,
 )
+from documents.services.person_duplicate_check import (
+    FORCE_CREATE_PERSON_FIELD,
+    person_name_candidates_error_payload,
+)
 from documents.services.archive_items import (
     create_manual_text_archive_item,
     create_ocr_document,
@@ -422,6 +426,39 @@ PRESIGNED_GET_EXPIRY_SECONDS = 3600
 
 def _bad(msg: str):
     return HttpResponseBadRequest(msg)
+
+
+def _json_people_error_response(parsed_people: dict, people_errors: list[str]):
+    conflicts = parsed_people.get("person_name_conflicts") or []
+    if conflicts:
+        return JsonResponse(
+            person_name_candidates_error_payload(conflicts), status=400
+        )
+    return JsonResponse({"error": people_errors[0]}, status=400)
+
+
+def _upload_parse_error_response(err):
+    if isinstance(err, dict):
+        return JsonResponse(err, status=400)
+    return JsonResponse({"error": err}, status=400)
+
+
+def _apply_person_name_duplicate_error(form_data: dict, exc) -> None:
+    check = getattr(exc, "check", None)
+    if check is None:
+        return
+    form_data["person_name_conflicts"] = list(check.matches)
+    form_data[FORCE_CREATE_PERSON_FIELD] = list(check.force_create_person_keys)
+
+
+def _json_person_write_error_response(exc):
+    check = getattr(exc, "check", None)
+    if check is not None and check.conflicts:
+        return JsonResponse(
+            person_name_candidates_error_payload(check.matches), status=400
+        )
+    message = getattr(exc, "message", None) or str(exc)
+    return JsonResponse({"error": message}, status=400)
 
 
 class _ParsedImageFileMeta(TypedDict):
@@ -853,7 +890,7 @@ def _parse_create_upload_common(
 
     parsed_people, people_errors = parse_archive_item_people_form(payload)
     if people_errors:
-        return None, _bad(people_errors[0])
+        return None, _json_people_error_response(parsed_people, people_errors)
 
     return {
         "title": title,
@@ -1018,6 +1055,8 @@ def _create_incremental_multi_image_upload(
                 **_staff_author_write_kwargs(common["authors"]),
             )
             _apply_created_ocr_relations(doc, common)
+    except ArchiveItemPersonError as exc:
+        return _json_person_write_error_response(exc)
     except ArchiveItemAuthorError as exc:
         return _bad(exc.message)
 
@@ -1105,6 +1144,8 @@ def _create_multi_image_upload(request, payload: dict, common: _CreateUploadComm
                 **_staff_author_write_kwargs(common["authors"]),
             )
             _apply_created_ocr_relations(doc, common)
+    except ArchiveItemPersonError as exc:
+        return _json_person_write_error_response(exc)
     except ArchiveItemAuthorError as exc:
         return _bad(exc.message)
 
@@ -1183,6 +1224,8 @@ def _create_single_file_upload(request, payload: dict, common: _CreateUploadComm
             key = f"documents/{doc.id}/original.{ext}"
             doc.file_s3_key = key
             doc.save(update_fields=["file_s3_key"])
+    except ArchiveItemPersonError as exc:
+        return _json_person_write_error_response(exc)
     except ArchiveItemAuthorError as ext_err:
         return _bad(ext_err.message)
 
@@ -1819,7 +1862,7 @@ def create_photo_upload(request):
 
     parsed, err = parse_create_photo_upload_metadata(payload, user=request.user)
     if err is not None:
-        return JsonResponse({"error": err}, status=400)
+        return _upload_parse_error_response(err)
     assert parsed is not None
 
     bucket_or_response = _uploads_bucket_or_error()
@@ -1827,26 +1870,30 @@ def create_photo_upload(request):
         return bucket_or_response
     bucket = bucket_or_response
 
-    archive_item, photo_content, upload_url = create_photo_upload_plan(
-        bucket=bucket,
-        title=parsed["title"],
-        visibility=parsed["visibility"],
-        date_start=parsed["date_start"],
-        date_end=parsed["date_end"],
-        date_precision=parsed["date_precision"],
-        metadata_status=parsed["metadata_status"],
-        original_name=parsed["original_name"],
-        mime_type=parsed["mime_type"],
-        discovery_metadata=parsed["discovery_metadata"],
-        description=parsed["description"],
-        location=parsed["location"],
-        context=parsed["context"],
-        people_present=parsed["people_present"],
-        notes=parsed["notes"],
-        public_note=parsed["public_note"],
-        person_ids=parsed["archive_item_person_ids"],
-        new_person_name=parsed["new_archive_item_person_name"],
-    )
+    try:
+        archive_item, photo_content, upload_url = create_photo_upload_plan(
+            bucket=bucket,
+            title=parsed["title"],
+            visibility=parsed["visibility"],
+            date_start=parsed["date_start"],
+            date_end=parsed["date_end"],
+            date_precision=parsed["date_precision"],
+            metadata_status=parsed["metadata_status"],
+            original_name=parsed["original_name"],
+            mime_type=parsed["mime_type"],
+            discovery_metadata=parsed["discovery_metadata"],
+            description=parsed["description"],
+            location=parsed["location"],
+            context=parsed["context"],
+            people_present=parsed["people_present"],
+            notes=parsed["notes"],
+            public_note=parsed["public_note"],
+            person_ids=parsed["archive_item_person_ids"],
+            new_person_name=parsed["new_archive_item_person_name"],
+            force_create_person_keys=parsed.get("force_create_person") or [],
+        )
+    except ArchiveItemPersonError as exc:
+        return _json_person_write_error_response(exc)
 
     return JsonResponse(
         {
@@ -1876,7 +1923,7 @@ def add_photo_upload(request):
 
     parsed, err = parse_add_photo_upload_metadata(payload)
     if err is not None:
-        return JsonResponse({"error": err}, status=400)
+        return _upload_parse_error_response(err)
     assert parsed is not None
 
     bucket_or_response = _uploads_bucket_or_error()
@@ -1908,8 +1955,11 @@ def add_photo_upload(request):
             date_precision=parsed["date_precision"],
             person_ids=parsed["person_ids"],
             new_person_name=parsed["new_person_name"],
+            force_create_person_keys=parsed.get(FORCE_CREATE_PERSON_FIELD) or [],
         )
     except PhotoContentManagementError as exc:
+        if getattr(exc, "check", None) is not None:
+            return _json_person_write_error_response(exc)
         status = 409
         if exc.message == ARCHIVE_ITEM_NOT_PHOTO_ERROR:
             status = 400
@@ -4607,6 +4657,7 @@ def _staff_photo_edit_cards(
                 "form_errors": form_errors,
                 "person_choices": person_context["person_choices"],
                 "selected_people": person_context["selected_people"],
+                "person_name_conflicts": person_context["person_name_conflicts"],
                 "date_widget_prefix": date_widget_prefix,
                 "field_id_prefix": field_id_prefix,
             }
@@ -4633,8 +4684,11 @@ def _save_photo_content_from_staff_post(
             date_precision=parsed["date_precision"],
             person_ids=parsed["person_ids"],
             new_person_name=parsed["new_person_name"],
+            force_create_person_keys=parsed.get(FORCE_CREATE_PERSON_FIELD) or [],
         )
     except PhotoContentManagementError as exc:
+        if getattr(exc, "check", None) is not None:
+            parsed["person_name_conflicts"] = list(exc.check.matches)
         return False, parsed, [exc.message]
     return True, parsed, []
 
@@ -4755,6 +4809,7 @@ def _save_archive_item_people(
         archive_item=item,
         person_ids=list(parsed_people.get("archive_item_person_ids") or []),
         new_person_name=parsed_people.get("new_archive_item_person_name") or "",
+        force_create_person_keys=parsed_people.get(FORCE_CREATE_PERSON_FIELD) or [],
         refresh_search_index=refresh_search_index,
     )
 
@@ -4771,6 +4826,7 @@ def _staff_photo_person_form_context(form_data: dict, *, people=None) -> dict:
         "person_choices": person_choices,
         "selected_people": selected_people,
         "selected_person_ids": set(selected_person_ids),
+        "person_name_conflicts": form_data.get("person_name_conflicts") or [],
     }
 
 
@@ -4906,6 +4962,8 @@ def _submit_video_create(request):
             )
             _save_archive_item_people(item, parsed_people, refresh_search_index=True)
     except (ArchiveItemPersonError, ArchiveItemAuthorError) as exc:
+        if isinstance(exc, ArchiveItemPersonError):
+            _apply_person_name_duplicate_error(form_data, exc)
         return None, form_data, [exc.message]
     return redirect("archive-manage-list"), form_data, form_errors
 
@@ -4959,6 +5017,8 @@ def _submit_manual_text_create(request):
                 tag_names=parsed_discovery["tag_names"],
             )
     except (ArchiveItemPersonError, ArchiveItemAuthorError) as exc:
+        if isinstance(exc, ArchiveItemPersonError):
+            _apply_person_name_duplicate_error(form_data, exc)
         return None, form_data, [exc.message]
     return redirect("archive-detail", item_id=item.id), form_data, form_errors
 
@@ -5525,6 +5585,8 @@ def _archive_manage_edit_manual_text(request, item: ArchiveItem):
                     )
             except (ArchiveItemPersonError, ArchiveItemAuthorError) as exc:
                 form_errors = [exc.message]
+                if isinstance(exc, ArchiveItemPersonError):
+                    _apply_person_name_duplicate_error(form_data, exc)
             else:
                 messages.success(request, ARCHIVE_ITEM_UPDATED_MSG)
                 return redirect("archive-detail", item_id=item.id)
@@ -5623,6 +5685,7 @@ def _archive_manage_edit_photo(request, item: ArchiveItem):
                     )
             except ArchiveItemPersonError as exc:
                 form_errors = [exc.message]
+                _apply_person_name_duplicate_error(form_data, exc)
             else:
                 messages.success(request, ARCHIVE_ITEM_UPDATED_MSG)
                 return redirect("archive-manage-edit", item_id=item.id)
@@ -5651,6 +5714,8 @@ def archive_manage_photo_add_page(request, item_id: int):
         ),
         "new_person_name": "",
         "person_ids": [],
+        FORCE_CREATE_PERSON_FIELD: [],
+        "person_name_conflicts": [],
     }
     return render(
         request,
@@ -6129,6 +6194,8 @@ def _archive_manage_edit_video(request, item: ArchiveItem):
                     )
             except (ArchiveItemPersonError, ArchiveItemAuthorError) as exc:
                 form_errors = [exc.message]
+                if isinstance(exc, ArchiveItemPersonError):
+                    _apply_person_name_duplicate_error(form_data, exc)
             else:
                 messages.success(request, ARCHIVE_ITEM_UPDATED_MSG)
                 return redirect("archive-manage-list")
@@ -6217,6 +6284,8 @@ def _archive_manage_edit_ocr_document(request, item: ArchiveItem):
                     )
             except (ArchiveItemPersonError, ArchiveItemAuthorError) as exc:
                 form_errors = [exc.message]
+                if isinstance(exc, ArchiveItemPersonError):
+                    _apply_person_name_duplicate_error(form_data, exc)
             else:
                 messages.success(request, ARCHIVE_ITEM_UPDATED_MSG)
                 return redirect("documents-detail-page", doc_id=doc.id)

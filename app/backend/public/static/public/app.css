@@ -5311,3 +5311,37 @@ body:has(.homepage-found-in-archive) .homepage-ai-note {
     display: none;
   }
 }
+
+.person-name-duplicate-warning {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid rgba(138, 100, 36, 0.35);
+  background: var(--warn-soft);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+}
+
+.person-name-duplicate-warning[hidden] {
+  display: none;
+}
+
+.person-name-duplicate-warning__lead {
+  margin: 0 0 var(--space-3);
+}
+
+.person-name-duplicate-warning__tokens,
+.person-name-duplicate-warning__candidates {
+  margin: 0;
+  padding-inline-start: 1.25rem;
+}
+
+.person-name-duplicate-warning__token + .person-name-duplicate-warning__token {
+  margin-top: var(--space-3);
+}
+
+.person-name-duplicate-warning__ack {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  margin-top: var(--space-2);
+}

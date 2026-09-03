@@ -91,10 +91,28 @@
     let data = null;
     try { data = JSON.parse(text); } catch (_) {}
     if (!res.ok) {
-      const err = (data && (data.error || data.detail)) ? (data.error || data.detail) : text;
-      throw new Error(`HTTP ${res.status}: ${err}`);
+      const message = (data && (data.error || data.detail)) ? (data.error || data.detail) : text;
+      const err = new Error(`HTTP ${res.status}: ${message}`);
+      err.payload = data;
+      throw err;
     }
     return data;
+  }
+
+  function showPersonNameDuplicateWarning(err) {
+    const payload = err && err.payload;
+    if (
+      !window.vsArchivePersonNameDuplicate ||
+      !window.vsArchivePersonNameDuplicate.isConflictPayload(payload)
+    ) {
+      return false;
+    }
+    window.vsArchivePersonNameDuplicate.renderConflicts(
+      document.getElementById("person-name-duplicate-host"),
+      payload
+    );
+    setMessage("error", payload.error || "");
+    return true;
   }
 
   function isImageFile(f) {
@@ -415,6 +433,10 @@
     if (new_archive_item_person_name) {
       meta.new_archive_item_person_name = new_archive_item_person_name;
     }
+    const forceKeys = window.vsArchivePersonNameDuplicate
+      ? window.vsArchivePersonNameDuplicate.collectForceCreateKeys(form)
+      : [];
+    if (forceKeys.length) meta.force_create_person = forceKeys;
     meta.author_ids = readAuthorIds();
     const newAuthorNameEl = document.getElementById("new_author_name");
     const new_author_name = newAuthorNameEl
@@ -604,6 +626,12 @@
       setMessage("ok", `עמוד ${orderIndex + 1} הועלה.`);
     } catch (err) {
       pageEntry.status = PAGE_STATUS.FAILED;
+      if (showPersonNameDuplicateWarning(err)) {
+        incrementalUploadInProgress = false;
+        updateSubmitButtonState();
+        renderPageList();
+        return;
+      }
       const errText = String(err && err.message ? err.message : err);
       setMessage("error", `${errText} ניתן להוסיף עמוד נוסף או לרענן את הדף.`);
     } finally {
@@ -760,7 +788,9 @@
     try {
       await runSingleFileUpload(files[0], doc_type, meta);
     } catch (err) {
-      setMessage("error", String(err && err.message ? err.message : err));
+      if (!showPersonNameDuplicateWarning(err)) {
+        setMessage("error", String(err && err.message ? err.message : err));
+      }
       submitBtn.disabled = false;
     }
   });

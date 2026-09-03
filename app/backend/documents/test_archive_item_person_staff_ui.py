@@ -28,7 +28,13 @@ from documents.services.archive_item_access import ARCHIVE_FAMILY_GROUP_NAME
 from documents.services.archive_item_people import (
     ARCHIVE_ITEM_PERSON_IDS_FIELD,
     NEW_ARCHIVE_ITEM_PERSON_NAME_FIELD,
+    ArchiveItemPersonError,
     set_archive_item_people,
+)
+from documents.services.person_duplicate_check import (
+    FORCE_CREATE_PERSON_FIELD,
+    PERSON_NAME_CANDIDATES_ERROR,
+    person_new_name_token_key,
 )
 from documents.services.archive_item_presentation import (
     filter_archive_items_by_search_query,
@@ -352,9 +358,29 @@ class ArchiveItemPersonBatchServiceTests(TestCase):
             set_archive_item_people(archive_item=item, person_ids=[person.pk])
         mocked.assert_not_called()
 
-    def test_new_canonical_name_always_creates_distinct_person(self):
+    def test_new_canonical_name_without_force_does_not_create(self):
         item = create_manual_text_archive_item(
             title="Dup name item",
+            body="body",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        existing = Person.objects.create(name="יעקב כהן")
+        with self.assertRaises(ArchiveItemPersonError) as raised:
+            set_archive_item_people(
+                archive_item=item,
+                person_ids=[existing.pk],
+                new_person_name="  יעקב כהן  ",
+            )
+        self.assertEqual(raised.exception.message, PERSON_NAME_CANDIDATES_ERROR)
+        self.assertEqual(Person.objects.filter(name="יעקב כהן").count(), 1)
+        self.assertEqual(
+            set(item.people.values_list("id", flat=True)),
+            set(),
+        )
+
+    def test_new_canonical_name_force_create_makes_distinct_person(self):
+        item = create_manual_text_archive_item(
+            title="Dup name item forced",
             body="body",
             visibility=ArchiveItem.Visibility.PUBLIC,
         )
@@ -363,6 +389,7 @@ class ArchiveItemPersonBatchServiceTests(TestCase):
             archive_item=item,
             person_ids=[existing.pk],
             new_person_name="  יעקב כהן  ",
+            force_create_person_keys=[person_new_name_token_key("יעקב כהן")],
         )
         created = Person.objects.exclude(pk=existing.pk).get(name="יעקב כהן")
         self.assertNotEqual(created.pk, existing.pk)
@@ -370,9 +397,30 @@ class ArchiveItemPersonBatchServiceTests(TestCase):
         self.assertEqual({link.person_id for link in links}, {existing.pk, created.pk})
         self.assertEqual(PersonAlias.objects.count(), 0)
 
-    def test_comma_separated_names_create_distinct_item_people_only(self):
+    def test_comma_separated_conflict_creates_nothing(self):
         item = create_manual_text_archive_item(
             title="Comma people item",
+            body="body",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        existing = Person.objects.create(name="יעקב כהן")
+        PersonAlias.objects.create(person=existing, name="רחל לוי")
+        photo_item = _create_photo_item(title="Unrelated photo")
+        photo = _add_photo(photo_item, position=1, filename="unrelated.jpg")
+        with self.assertRaises(ArchiveItemPersonError):
+            set_archive_item_people(
+                archive_item=item,
+                person_ids=[],
+                new_person_name="  יעקב כהן , ,רחל לוי, יעקב כהן ",
+            )
+        self.assertEqual(Person.objects.filter(name="יעקב כהן").count(), 1)
+        self.assertFalse(Person.objects.filter(name="רחל לוי").exists())
+        self.assertEqual(item.people.count(), 0)
+        self.assertEqual(photo.people.count(), 0)
+
+    def test_comma_separated_names_force_create_item_people_only(self):
+        item = create_manual_text_archive_item(
+            title="Comma people item forced",
             body="body",
             visibility=ArchiveItem.Visibility.PUBLIC,
         )
@@ -384,6 +432,10 @@ class ArchiveItemPersonBatchServiceTests(TestCase):
             archive_item=item,
             person_ids=[],
             new_person_name="  יעקב כהן , ,רחל לוי, יעקב כהן ",
+            force_create_person_keys=[
+                person_new_name_token_key("יעקב כהן"),
+                person_new_name_token_key("רחל לוי"),
+            ],
         )
         created_names = [link.person.name for link in links]
         self.assertEqual(created_names, ["יעקב כהן", "רחל לוי"])
@@ -631,10 +683,10 @@ class ArchiveItemPersonStaffUiTests(ArchiveItemPersonStaffUiHarness, TestCase):
         self.assertNotIn("maxlength", tag)
         self.assertContains(
             resp,
-            "ניתן להזין כמה שמות מופרדים בפסיקים. כל שם יוצר רשומת אדם חדשה ומקושרת לפריט זה.",
+            "ניתן להזין כמה שמות מופרדים בפסיקים.",
         )
 
-    def test_duplicate_canonical_names_remain_distinct(self):
+    def test_duplicate_canonical_names_stay_on_form_until_force_create(self):
         item = self._create_manual(title="Dup identities")
         first = Person.objects.create(name="שם כפול")
         ArchiveItemPerson.objects.create(archive_item=item, person=first)
@@ -648,12 +700,83 @@ class ArchiveItemPersonStaffUiTests(ArchiveItemPersonStaffUiHarness, TestCase):
                 },
             ),
         )
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, PERSON_NAME_CANDIDATES_ERROR)
+        self.assertContains(resp, 'name="force_create_person"')
+        self.assertContains(resp, f"/archive/manage/people/{first.id}/edit/")
+        self.assertEqual(Person.objects.filter(name="שם כפול").count(), 1)
+        self.assertEqual(
+            set(item.people.values_list("id", flat=True)),
+            {first.id},
+        )
+
+        forced = self.client.post(
+            _edit_url(item),
+            data=self._payload_for(
+                item,
+                **{
+                    ARCHIVE_ITEM_PERSON_IDS_FIELD: [str(first.id)],
+                    NEW_ARCHIVE_ITEM_PERSON_NAME_FIELD: "שם כפול",
+                    FORCE_CREATE_PERSON_FIELD: [person_new_name_token_key("שם כפול")],
+                },
+            ),
+        )
+        self.assertEqual(forced.status_code, 302)
         people = list(Person.objects.filter(name="שם כפול").order_by("id"))
         self.assertEqual(len(people), 2)
         self.assertEqual(
             set(item.people.values_list("id", flat=True)),
             {people[0].id, people[1].id},
+        )
+        self.assertEqual(PhotoPerson.objects.count(), 0)
+
+    def test_multi_name_conflict_creates_no_people_from_new_names(self):
+        item = self._create_manual(title="Atomic names")
+        existing = Person.objects.create(name="קיים")
+        resp = self.client.post(
+            _edit_url(item),
+            data=self._payload_for(
+                item,
+                **{
+                    ARCHIVE_ITEM_PERSON_IDS_FIELD: [str(existing.id)],
+                    NEW_ARCHIVE_ITEM_PERSON_NAME_FIELD: "קיים, אדם חדש לגמרי",
+                },
+            ),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, PERSON_NAME_CANDIDATES_ERROR)
+        self.assertContains(resp, "אדם חדש לגמרי")
+        self.assertFalse(Person.objects.filter(name="אדם חדש לגמרי").exists())
+        self.assertEqual(
+            set(item.people.values_list("id", flat=True)),
+            set(),
+            "selected Person ids must not persist when a new-name conflict "
+            "fails the overall staff form",
+        )
+
+    def test_select_existing_person_instead_of_new_name(self):
+        item = self._create_manual(title="Pick existing")
+        existing = Person.objects.create(name="לבחירה")
+        warn = self.client.post(
+            _edit_url(item),
+            data=self._payload_for(
+                item,
+                **{NEW_ARCHIVE_ITEM_PERSON_NAME_FIELD: "לבחירה"},
+            ),
+        )
+        self.assertEqual(warn.status_code, 200)
+        chosen = self.client.post(
+            _edit_url(item),
+            data=self._payload_for(
+                item,
+                **{ARCHIVE_ITEM_PERSON_IDS_FIELD: [str(existing.id)]},
+            ),
+        )
+        self.assertEqual(chosen.status_code, 302)
+        self.assertEqual(Person.objects.filter(name="לבחירה").count(), 1)
+        self.assertEqual(
+            set(item.people.values_list("id", flat=True)),
+            {existing.id},
         )
 
     def test_invalid_person_id_is_rejected_and_state_preserved(self):
@@ -1074,6 +1197,7 @@ class ArchiveItemPersonStaffCreateTests(ArchiveItemPersonStaffUiHarness, TestCas
             for key in (
                 ARCHIVE_ITEM_PERSON_IDS_FIELD,
                 NEW_ARCHIVE_ITEM_PERSON_NAME_FIELD,
+                FORCE_CREATE_PERSON_FIELD,
             )
             if key in overrides
         }
@@ -1084,6 +1208,7 @@ class ArchiveItemPersonStaffCreateTests(ArchiveItemPersonStaffUiHarness, TestCas
             not in {
                 ARCHIVE_ITEM_PERSON_IDS_FIELD,
                 NEW_ARCHIVE_ITEM_PERSON_NAME_FIELD,
+                FORCE_CREATE_PERSON_FIELD,
                 "title",
             }
         }
@@ -1197,11 +1322,41 @@ class ArchiveItemPersonStaffCreateTests(ArchiveItemPersonStaffUiHarness, TestCas
         for item_type in self._create_kinds():
             with self.subTest(item_type=item_type):
                 before = Person.objects.filter(name="שם כפול יצירה").count()
+                blocked, blocked_resp = self._post_create(
+                    item_type,
+                    **{
+                        ARCHIVE_ITEM_PERSON_IDS_FIELD: [existing.id],
+                        NEW_ARCHIVE_ITEM_PERSON_NAME_FIELD: "שם כפול יצירה",
+                    },
+                )
+                self.assertIsNone(blocked)
+                if item_type in (
+                    ArchiveItem.ItemType.MANUAL_TEXT,
+                    ArchiveItem.ItemType.VIDEO,
+                ):
+                    self.assertEqual(blocked_resp.status_code, 200)
+                    self.assertContains(blocked_resp, PERSON_NAME_CANDIDATES_ERROR)
+                else:
+                    self.assertEqual(blocked_resp.status_code, 400)
+                    body = blocked_resp.json()
+                    self.assertEqual(body["error"], PERSON_NAME_CANDIDATES_ERROR)
+                    self.assertEqual(body["error_code"], "PERSON_NAME_CANDIDATES")
+                    self.assertEqual(
+                        body["person_name_conflicts"][0]["submitted_name"],
+                        "שם כפול יצירה",
+                    )
+                self.assertEqual(
+                    Person.objects.filter(name="שם כפול יצירה").count(), before
+                )
+
                 item, resp = self._post_create(
                     item_type,
                     **{
                         ARCHIVE_ITEM_PERSON_IDS_FIELD: [existing.id],
                         NEW_ARCHIVE_ITEM_PERSON_NAME_FIELD: "שם כפול יצירה",
+                        FORCE_CREATE_PERSON_FIELD: [
+                            person_new_name_token_key("שם כפול יצירה")
+                        ],
                     },
                 )
                 self._assert_created(item, resp, item_type)
@@ -1218,6 +1373,12 @@ class ArchiveItemPersonStaffCreateTests(ArchiveItemPersonStaffUiHarness, TestCas
                     ).exists()
                 )
                 self.assertEqual(PersonAlias.objects.filter(person=created).count(), 0)
+                self.assertEqual(
+                    PhotoPerson.objects.filter(
+                        photo_content__archive_item=item
+                    ).count(),
+                    0,
+                )
 
     def test_validation_error_preserves_create_form_state(self):
         existing = Person.objects.create(name="ValidCreatePerson")
