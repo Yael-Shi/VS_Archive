@@ -12,6 +12,10 @@ class HtrResult:
     needs_review: bool = False
     engine_name: str = ""
     review_reasons: List[str] = field(default_factory=list)
+    # Optional persisted DocumentTextResult.Quality. None means the worker
+    # must not write quality (model default UNKNOWN on insert; existing
+    # rows keep their stored value on rerun).
+    quality: str | None = None
     # Transkribus automatic snapshot local-completion (optional; not routing metadata).
     transkribus_run_id: int | None = None
     transkribus_snapshot_id: int | None = None
