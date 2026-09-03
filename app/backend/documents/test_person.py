@@ -18,6 +18,7 @@ from documents.models import (
     PersonAlias,
     PhotoContent,
     PhotoPerson,
+    ReviewedPersonImportBinding,
 )
 from documents.services.photo_content_management import update_person_biography
 
@@ -272,6 +273,7 @@ class PersonAdminExposureTests(TestCase):
         self.assertFalse(django_admin.site.is_registered(PersonAlias))
         self.assertFalse(django_admin.site.is_registered(ArchiveItemPerson))
         self.assertFalse(django_admin.site.is_registered(PhotoPerson))
+        self.assertFalse(django_admin.site.is_registered(ReviewedPersonImportBinding))
 
 
 class PersonBiographyMigrationTests(TestCase):

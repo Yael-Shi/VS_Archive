@@ -453,6 +453,28 @@ class PhotoPerson(models.Model):
         )
 
 
+class ReviewedPersonImportBinding(models.Model):
+    """Maps a reviewed create_person operation_id to the Person it created.
+
+    Internal import infrastructure only. Not searchable. Not a public or
+    staff Person UI surface. Does not relate to Author.
+    """
+
+    operation_id = models.CharField(max_length=255, unique=True)
+    person = models.ForeignKey(
+        Person,
+        on_delete=models.PROTECT,
+        related_name="reviewed_import_bindings",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return (
+            f"ReviewedPersonImportBinding(operation_id={self.operation_id!r}, "
+            f"person_id={self.person_id})"
+        )
+
+
 class VideoContent(models.Model):
     """External video reference for VIDEO archive items (URL metadata only; no media bytes)."""
 

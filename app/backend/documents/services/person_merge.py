@@ -2,7 +2,8 @@
 
 Keeper id and duplicate id are explicit. This is not name matching.
 Person and Author remain separate. ArchiveItemPerson and PhotoPerson are
-moved independently with no cross-inference.
+moved independently with no cross-inference. ReviewedPersonImportBinding
+rows on the duplicate are repointed to the keeper.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from documents.models import (
     Person,
     PersonAlias,
     PhotoPerson,
+    ReviewedPersonImportBinding,
 )
 from documents.services.archive_search_index import (
     archive_item_ids_for_person_search_refresh,
@@ -97,6 +99,7 @@ class PersonMergeResult:
     photo_person_moved: int
     photo_person_deduped: int
     suggestions_repointed: int
+    import_bindings_repointed: int
     biography_copied: bool
     search_indexes_refreshed: int
 
@@ -297,6 +300,11 @@ def _lock_person_dependents(keeper_id: int, duplicate_id: int) -> None:
         .filter(person_id__in=person_ids)
         .order_by("id")
     )
+    list(
+        ReviewedPersonImportBinding.objects.select_for_update()
+        .filter(person_id__in=person_ids)
+        .order_by("id")
+    )
 
 
 def _raise_if_not_executable(preview_like: PersonMergePreview) -> None:
@@ -383,6 +391,14 @@ def _repoint_suggestions(keeper: Person, duplicate: Person) -> int:
     return count
 
 
+def _repoint_import_bindings(keeper: Person, duplicate: Person) -> int:
+    count = ReviewedPersonImportBinding.objects.filter(person_id=duplicate.pk).count()
+    ReviewedPersonImportBinding.objects.filter(person_id=duplicate.pk).update(
+        person_id=keeper.pk
+    )
+    return count
+
+
 def _apply_biography(keeper: Person, duplicate: Person, outcome: str) -> bool:
     if outcome != BIOGRAPHY_OUTCOME_COPY_DUPLICATE:
         return False
@@ -412,6 +428,7 @@ def merge_persons(*, keeper_id: int, duplicate_id: int) -> PersonMergeResult:
         aip_moved, aip_deduped = _merge_archive_item_people(keeper, duplicate)
         photo_moved, photo_deduped = _merge_photo_people(keeper, duplicate)
         suggestions_repointed = _repoint_suggestions(keeper, duplicate)
+        import_bindings_repointed = _repoint_import_bindings(keeper, duplicate)
         duplicate.delete()
     except IntegrityError as exc:
         raise PersonMergeError(PERSON_MERGE_CONCURRENCY_ERROR) from exc
@@ -429,6 +446,7 @@ def merge_persons(*, keeper_id: int, duplicate_id: int) -> PersonMergeResult:
         photo_person_moved=photo_moved,
         photo_person_deduped=photo_deduped,
         suggestions_repointed=suggestions_repointed,
+        import_bindings_repointed=import_bindings_repointed,
         biography_copied=biography_copied,
         search_indexes_refreshed=len(synced),
     )

@@ -25,6 +25,57 @@ failed `HEBREW_TRANSLATION_FAILED` on chunk 1/16 with `source_length=13`,
 length-based truncation for normal/large chunks.
 
 **Tests:** `GeminiHebrewTranslationTests` in `documents/tests.py`.
+## Reviewed PhotoPerson import v1
+
+**Decision / implemented:** Staff/operator import of a reviewed JSON artifact
+(`schema=photo-person-reviewed-import-v1`) into **`PhotoPerson`**, optional
+**`PersonAlias`**, and explicit **`create_person`**. Default is dry-run.
+**`--apply`** writes in one transaction. No public/staff Person UI. The
+binding table is import infrastructure only (not searchable, not indexed,
+not Author-related).
+
+**Supersedes:** the previous “create_person re-apply blocker” note on this
+page. Name-based re-apply remains forbidden; persistence is the binding.
+
+**Current behavior:**
+
+- Command: `import_reviewed_photo_people <artifact.json>` (dry-run);
+  `--apply` persists.
+- Service: `documents/services/photo_person_reviewed_import.py`.
+- Ops: `create_person`, `add_alias`, `add_photo_person` (ADD-only).
+- Photo bind: `archive_item_id` + `photo_content_id` +
+  `expected_original_file_key`; parent must be PHOTO; photo must be
+  **renderable** (`photo_is_archive_renderable`).
+- Existing Person: `person_id` plus strip-exact (not casefold)
+  `expected_canonical_name`.
+- New Person: `local_person_ref` + `canonical_name`. First apply runs
+  `find_existing_person_candidates`; any hit is ERROR (no force-create,
+  no name reuse). Then `Person` + `ReviewedPersonImportBinding(operation_id)`.
+- Re-apply of `create_person` resolves **only** via
+  `ReviewedPersonImportBinding.operation_id` → `person_id`. Same-name
+  unrelated Persons cannot satisfy it. Canonical stale mismatch fails
+  closed. Missing/broken binding fails closed.
+- Identical `PersonAlias` / `PhotoPerson` rows are NOOP.
+- No `ArchiveItemPerson` writes or inference. `people_present` is not
+  written. Document ids are rejected.
+- Search-index: `sync_archive_item_search_indexes` only for ArchiveItems
+  affected by an actual alias create (fan-out) or PhotoPerson create
+  (owning item). Pure NOOP does not call sync. The binding itself is not
+  indexed.
+- Staff Person merge **repoints** duplicate bindings onto the keeper
+  (`PROTECT` on Person) so merge is not blocked.
+
+**Model:** `ReviewedPersonImportBinding`: unique `operation_id` (max 255),
+FK `person` PROTECT, `created_at`. Migration
+`0062_reviewed_person_import_binding`.
+
+**Why not name-match:** `Person.name` is not unique; `(photo, name)` is not
+unique; aliases are not globally unique.
+
+**Deferred:** staff HTML review UI; REMOVE ops; AIP in this importer;
+parsing `people_present`; exposing bindings in Person UI.
+
+**Tests:** `documents/test_photo_person_reviewed_import.py`.
 
 ## Arabic printed banded OCR — stale CANCEL_PENDING recovery
 
