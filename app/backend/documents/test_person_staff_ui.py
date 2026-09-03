@@ -296,9 +296,11 @@ class PersonStaffEditAccessTests(TestCase):
         )
         self.assertEqual(resp.status_code, 404)
 
-    def test_no_public_person_catalog_or_alternate_routes(self):
+    def test_public_and_staff_person_routes(self):
         with self.assertRaises(Resolver404):
             resolve("/archive/person/1/")
+        match = resolve("/archive/people/")
+        self.assertEqual(match.url_name, "archive-people-index")
         match = resolve("/archive/people/1/")
         self.assertEqual(match.url_name, "archive-person-detail")
         match = resolve("/archive/manage/people/")
@@ -513,11 +515,15 @@ class PersonStaffIndexPageTests(TestCase):
         public_person = self.client.get(
             reverse("archive-person-detail", kwargs={"person_id": person.id})
         )
+        public_index = self.client.get(reverse("archive-people-index"))
         self.assertEqual(public_list.status_code, 200)
         self.assertEqual(public_person.status_code, 200)
+        self.assertEqual(public_index.status_code, 200)
         self.assertNotContains(public_list, reverse("archive-manage-people"))
         self.assertNotContains(public_person, reverse("archive-manage-people"))
         self.assertNotContains(public_person, "ניהול אנשים")
+        self.assertNotContains(public_index, reverse("archive-manage-people"))
+        self.assertNotContains(public_index, "ניהול אנשים")
 
 
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")

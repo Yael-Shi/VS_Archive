@@ -1,5 +1,51 @@
 # VS-Archive Decision Log
 
+## Public People catalog and unified Person detail
+
+**Decision / implemented:** Public People catalog exists at
+**`/archive/people/`** (`archive-people-index`). Public Person detail
+**`/archive/people/<person_id>/`** (`archive-person-detail`) lists one
+unified stream of authorized+renderable **`ArchiveItem`** rows reachable
+through **`ArchiveItemPerson` OR `PhotoPerson`**. This supersedes the
+deferred “Person catalog” note and the two-section Person page
+(related items vs unpaged PhotoPerson appearance cards).
+
+**Current behavior:**
+
+- Index membership is the same accessibility contract as Person detail:
+  at least one authorized+renderable AIP item or renderable PhotoPerson
+  appearance (`archive_browse_queryset_for_user` +
+  `filter_archive_renderable_photo_contents`). Unlinked people and
+  non-renderable-only links are omitted (detail still 404s).
+- Index order is **`Person.name`, then `id`**. Pagination is fixed **48**.
+  Optional GET **`q`** matches canonical **`Person.name`** or
+  **`PersonAlias.name`** with the same icontains/`Exists` predicate as
+  the staff People index. Aliases are search-only and are not displayed.
+  Duplicate canonical names are separate rows with distinct Person URLs.
+- Each index row shows one count: **DISTINCT** authorized+renderable
+  ArchiveItems via AIP ∪ PhotoPerson. Implementation: two page-restricted
+  pair queries (ArchiveItemPerson and renderable PhotoPerson), then a
+  Python set union of `(person_id, archive_item_id)`. Dual AIP+PP and
+  multiple photos of one item count once. This is not a Django SQL
+  `UNION` queryset. Staff index still shows two unfiltered relation
+  counts.
+- Person detail uses one heading (**פריטים קשורים**), one
+  **`total_count`**, and one 48-item pagination stream ordered
+  **`-created_at`, `pk`**. A matching renderable PhotoPerson deep-links
+  to the earliest matching photo by **`(PhotoContent.position, id)`**
+  (`/archive/<item_id>/?photo=<photo_id>`) and uses that photo’s
+  thumbnail. AIP-only items use the normal ArchiveItem URL.
+- Advanced **`person=`** filtering and the advanced Person picker remain
+  **ArchiveItemPerson-only**. Global **`/archive/?q=`** indexing is
+  unchanged. Person and Author stay separate. No public alias display.
+  No schema change.
+
+**Helpers:** `documents/services/person_public.py`.
+
+**Tests:** `documents/test_archive_people_public_index.py`,
+`documents/test_archive_person_public_page.py`,
+`documents/test_person_staff_ui.py`.
+
 ## One-time reviewed legacy comma-author cleanup
 
 **Decision / implemented:** A **one-time**, fail-closed cleanup of four
@@ -1368,7 +1414,7 @@ A separate visible **×** is a GET link that removes only that Person id.
   only. No extra Person queries per selected id.
 
 **Deferred:** public alias display on chips/picker; PhotoPerson appearance
-filter / name linking; Person catalog/Admin. Public biography is
+filter / name linking; Person Admin. Public biography is
 implemented (see **Public Person biography**). D2a
 retired-name policy is implemented. D2b Tag-row deletion is implemented
 (see **Historical person-Tag row deletion (D2b)**).
@@ -1377,6 +1423,12 @@ retired-name policy is implemented. D2b Tag-row deletion is implemented
 migration.
 
 ## Public Person page
+
+**Superseded in part:** Public catalog is implemented (see **Public People
+catalog and unified Person detail**). Person detail is now one unified
+ArchiveItem stream; the separate PhotoPerson appearance section is removed
+from the primary public Person page. Advanced `person=` remains
+ArchiveItemPerson-only as documented here.
 
 **Decision / implemented:** Public Person detail exists at
 **`/archive/people/<person_id>/`** (`archive-person-detail`). It lists
@@ -1388,7 +1440,8 @@ related public cards). PhotoPerson appearances were added later (see
 **Public Person page PhotoPerson appearances**). Optional staff-authored
 **`Person.biography`** is documented under **Public Person biography**.
 
-**Current behavior:**
+**Historical behavior (before unified stream; see **Public People catalog
+and unified Person detail** for current behavior):**
 
 - Route is registered before the `<int:item_id>/` catch-all. Missing
   Person ids **404**. Persons with **zero** authorized/renderable
@@ -1430,7 +1483,9 @@ related public cards). PhotoPerson appearances were added later (see
   separately (see **Public Person active-filter chip UX**).
 
 **Deferred:** public alias display; PhotoPerson appearance filter;
-Person catalog/Admin; combined related-item/appearance pagination.
+Person Admin. Combined related-item/appearance pagination is implemented
+as one unified ArchiveItem stream (see **Public People catalog and
+unified Person detail**).
 Public biography/summary is implemented (see **Public Person
 biography**).
 D2a retired-name policy is implemented. D2b Tag-row deletion is
