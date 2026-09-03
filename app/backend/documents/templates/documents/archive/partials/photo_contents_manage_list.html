@@ -68,7 +68,7 @@
             <input type="hidden" name="inline_photo_edit" value="1" />
             {% include "documents/archive/photo_content_form_fields.html" with form_data=card.form_data field_id_prefix=card.field_id_prefix %}
             {% include "documents/archive/archive_date_form_fields.html" with form_data=card.form_data date_widget_prefix=card.date_widget_prefix %}
-            {% include "documents/archive/photo_person_form_fields.html" with form_data=card.form_data field_id_prefix=card.field_id_prefix person_choices=card.person_choices selected_people=card.selected_people %}
+            {% include "documents/archive/photo_person_form_fields.html" with form_data=card.form_data field_id_prefix=card.field_id_prefix person_choices=card.person_choices selected_people=card.selected_people person_name_conflicts=card.person_name_conflicts %}
             <div class="spacer"></div>
             <button type="submit" class="btn btn-primary">שמירת תמונה זו</button>
           </form>

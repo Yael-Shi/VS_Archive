@@ -265,15 +265,29 @@ def create_identified_person(*, name: str) -> Person:
     return Person.objects.create(name=normalized)
 
 
-def create_identified_people_from_new_names(raw: str | None) -> list[Person]:
+def create_identified_people_from_new_names(
+    raw: str | None,
+    *,
+    force_create_person_keys: list[str] | None = None,
+) -> list[Person]:
     """Create one new Person per parsed token via ``create_identified_person``.
 
-    Never looks up, merges, or reuses by canonical name or alias.
+    Existing canonical/alias matches block creation unless the exact token is
+    force-approved. Does not reuse, merge, or auto-create aliases.
     """
-    _display, names, errors = parse_new_person_names_input(raw)
-    if errors:
-        raise PhotoContentManagementError(errors[0])
-    return [create_identified_person(name=name) for name in names]
+    from documents.services.person_duplicate_check import (
+        PersonNameDuplicateConflictError,
+        check_new_person_names,
+    )
+
+    check = check_new_person_names(
+        raw, force_create_person_keys=force_create_person_keys
+    )
+    if check.errors:
+        if check.conflicts:
+            raise PersonNameDuplicateConflictError(check)
+        raise PhotoContentManagementError(check.errors[0])
+    return [create_identified_person(name=name) for name in check.names]
 
 
 def _sync_person_search_indexes(person_id: int) -> None:
@@ -413,13 +427,14 @@ def update_photo_content_metadata(
     date_precision: str,
     person_ids: list[int],
     new_person_name: str = "",
+    force_create_person_keys: list[str] | None = None,
 ) -> PhotoContent:
     """Update one PhotoContent row. Does not write ArchiveItem shared metadata.
 
     Optional ``new_person_name`` may be comma-separated. Each token creates a
     new Person via ``create_identified_person`` and is linked as PhotoPerson
-    only. Does not look up or merge by name, and does not write
-    ArchiveItemPerson.
+    only unless an existing canonical/alias match requires per-token
+    force-create. Does not merge by name, and does not write ArchiveItemPerson.
     """
     locked_item = lock_photo_archive_item(photo_content.archive_item_id)
     locked_photos = lock_photo_contents_for_item(locked_item)
@@ -454,7 +469,10 @@ def update_photo_content_metadata(
     )
 
     resolved_person_ids = list(person_ids)
-    created_people = create_identified_people_from_new_names(new_person_name)
+    created_people = create_identified_people_from_new_names(
+        new_person_name,
+        force_create_person_keys=force_create_person_keys,
+    )
     resolved_person_ids.extend(person.pk for person in created_people)
     set_photo_people(locked, resolved_person_ids)
 

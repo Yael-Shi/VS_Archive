@@ -19,8 +19,12 @@ from documents.services.archive_metadata_validation import (
     validate_archive_metadata_fields,
 )
 from documents.services.photo_content_management import (
-    parse_new_person_name,
     parse_photo_person_ids,
+)
+from documents.services.person_duplicate_check import (
+    FORCE_CREATE_PERSON_FIELD,
+    check_new_person_names,
+    parse_force_create_person_keys,
 )
 
 PHOTO_METADATA_FIELD_NAMES: tuple[str, ...] = (
@@ -100,6 +104,8 @@ def photo_content_staff_form_data(photo_content) -> dict[str, Any]:
         ),
         "person_ids": selected_ids,
         "new_person_name": "",
+        FORCE_CREATE_PERSON_FIELD: [],
+        "person_name_conflicts": [],
     }
 
 
@@ -109,8 +115,12 @@ def parse_photo_content_staff_form(
     """Parse per-photo metadata, dates, and identified people. No ArchiveItem fields."""
     photo_metadata, photo_errors = parse_photo_metadata_form(post_data)
     person_ids, person_errors = parse_photo_person_ids(post_data)
-    new_person_name, name_errors = parse_new_person_name(post_data)
-    errors = photo_errors + person_errors + name_errors
+    raw_new_name = post_data.get("new_person_name") if post_data is not None else None
+    name_check = check_new_person_names(
+        raw_new_name,
+        force_create_person_keys=parse_force_create_person_keys(post_data),
+    )
+    errors = photo_errors + person_errors + name_check.errors
 
     date_precision = "UNKNOWN"
     date_start = None
@@ -119,8 +129,12 @@ def parse_photo_content_staff_form(
         date_precision = parse_date_precision(post_data.get("date_precision"))
     except ValueError as exc:
         errors.append(str(exc))
-
-    if not errors:
+        date_components = archive_date_form_data(
+            date_start=None,
+            date_end=None,
+            date_precision=date_precision,
+        )
+    else:
         date_start, date_end, date_components, date_errors = parse_archive_date_bounds(
             date_precision=date_precision,
             post_data=post_data,
@@ -134,27 +148,22 @@ def parse_photo_content_staff_form(
                 date_precision=date_precision,
             ),
         }
-    else:
-        date_components = archive_date_form_data(
-            date_start=None,
-            date_end=None,
-            date_precision=date_precision,
-        )
-
-    if not errors:
-        date_error = parse_photo_content_date_fields(
-            date_start=date_start,
-            date_end=date_end,
-            date_precision=date_precision,
-        )
-        if date_error:
-            errors.append(date_error)
+        if not date_errors:
+            date_error = parse_photo_content_date_fields(
+                date_start=date_start,
+                date_end=date_end,
+                date_precision=date_precision,
+            )
+            if date_error:
+                errors.append(date_error)
 
     parsed = {
         **photo_metadata,
         **date_components,
         "person_ids": person_ids,
-        "new_person_name": new_person_name,
+        "new_person_name": name_check.display,
+        FORCE_CREATE_PERSON_FIELD: name_check.force_create_person_keys,
+        "person_name_conflicts": list(name_check.matches),
         "date_start_value": date_start,
         "date_end_value": date_end,
         "date_precision": date_precision,

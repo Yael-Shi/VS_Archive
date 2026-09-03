@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}VSArchive - {{ page_title }}{% endblock %}
 
 {% block content %}
@@ -110,9 +111,11 @@
   {% if item_type == "manual_text" %}
     {% include "documents/archive/archive_date_form_script.html" %}
   {% elif item_type == "ocr_document" %}
+    <script src="{% static 'public/person_name_duplicate.js' %}"></script>
     {% include "documents/upload/_upload_script.html" %}
     {% include "documents/archive/archive_date_form_script.html" %}
   {% elif item_type == "photo" %}
+    <script src="{% static 'public/person_name_duplicate.js' %}"></script>
     {% include "documents/archive/_photo_upload_script.html" %}
     {% include "documents/archive/archive_date_form_script.html" %}
   {% elif item_type == "video" %}

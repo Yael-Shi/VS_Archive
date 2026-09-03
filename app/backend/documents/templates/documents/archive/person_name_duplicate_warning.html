@@ -1,0 +1,46 @@
+{% with fid=field_id_prefix|default:"" conflicts=person_name_conflicts %}
+<div
+  id="{{ fid }}person-name-duplicate-host"
+  class="person-name-duplicate-warning{% if conflicts %} is-visible{% endif %}"
+  {% if not conflicts %}hidden{% endif %}
+  data-person-name-duplicate-host="1"
+>
+  {% if conflicts %}
+    <p class="person-name-duplicate-warning__lead">
+      נמצאו רשומות אדם קיימות עם אותו שם. אפשר לבחור אדם קיים בבורר ולהסיר את השם משדה ההוספה, או לאשר במכוון ״יצירת אדם חדש בכל זאת״ לכל שם מסומן ואז לשלוח שוב. אין בחירה אוטומטית ואין מיזוג.
+    </p>
+    <ul class="person-name-duplicate-warning__tokens">
+      {% for conflict in conflicts %}
+        <li class="person-name-duplicate-warning__token">
+          <p>
+            שם שהוזן:
+            <strong>{{ conflict.submitted_name }}</strong>
+          </p>
+          <ul class="person-name-duplicate-warning__candidates">
+            {% for candidate in conflict.candidates %}
+              <li>
+                {{ candidate.name }}
+                {% if candidate.aliases %}
+                  ({{ candidate.aliases|join:", " }})
+                {% endif %}
+                — מזהה {{ candidate.id }}
+                —
+                <a href="{% url 'archive-manage-person-edit' person_id=candidate.id %}">עריכת אדם</a>
+              </li>
+            {% endfor %}
+          </ul>
+          <label class="person-name-duplicate-warning__ack">
+            <input
+              type="checkbox"
+              name="force_create_person"
+              value="{{ conflict.token_key }}"
+              {% if not conflict.needs_confirmation %}checked{% endif %}
+            />
+            יצירת אדם חדש בכל זאת עבור ״{{ conflict.submitted_name }}״
+          </label>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+</div>
+{% endwith %}
