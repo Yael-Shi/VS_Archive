@@ -240,7 +240,7 @@ class AntigravityBandOcrTests(SimpleTestCase):
         self.assertEqual(INTERACTIONS_API_REVISION, "2026-05-20")
         self.assertEqual(ANTIGRAVITY_BAND_ATTEMPT_TIMEOUT_CAP_SECONDS, 90.0)
         self.assertEqual(ANTIGRAVITY_CANCEL_HTTP_TIMEOUT_SECONDS, 30.0)
-        self.assertEqual(ARABIC_PRINTED_PAGE_BUDGET_CAP_SECONDS, 240.0)
+        self.assertEqual(ARABIC_PRINTED_PAGE_BUDGET_CAP_SECONDS, 480.0)
         self.assertEqual(ARABIC_PRINTED_DOCUMENT_SAFETY_MARGIN_SECONDS, 60.0)
 
     @patch("documents.services.antigravity_engine.requests.get")

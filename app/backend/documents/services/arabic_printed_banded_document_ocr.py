@@ -116,7 +116,7 @@ def arabic_printed_page_absolute_deadline(
     Usable document time is the caller deadline minus the terminalization
     reserve. That remainder is split equally among unfinished executable
     pages. If the equal share is below the 150-second start minimum, the page
-    must not start. Otherwise the share is capped at 240 seconds.
+    must not start. Otherwise the share is capped at 480 seconds.
     """
     if unfinished_executable_pages < 1:
         return None

@@ -3,13 +3,18 @@ from __future__ import annotations
 import hashlib
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 
 from documents.models import (
     ArabicPrintedOcrAttempt,
     ArabicPrintedOcrBandCheckpoint,
     ArabicPrintedOcrPageCheckpoint,
     Document,
+)
+from documents.services.antigravity_defaults import (
+    ARABIC_PRINTED_DOCUMENT_SAFETY_MARGIN_SECONDS,
+    ARABIC_PRINTED_PAGE_BUDGET_CAP_SECONDS,
+    ARABIC_PRINTED_PAGE_START_BUDGET_SECONDS,
 )
 from documents.services.arabic_printed_banded_document_ocr import (
     DOCUMENT_FAILURE_DEADLINE,
@@ -116,6 +121,72 @@ def _page_result(
         runtime_engine_marker=ENGINE_UNASSISTED if outcome == OUTCOME_SUCCEEDED else "",
         failure_code=failure_code,
     )
+
+
+class ArabicPrintedPageBudgetHelperTests(SimpleTestCase):
+    def test_page_budget_cap_is_480_seconds(self):
+        self.assertEqual(ARABIC_PRINTED_PAGE_BUDGET_CAP_SECONDS, 480.0)
+
+    def test_shares_above_480_are_capped_at_480(self):
+        capped = arabic_printed_page_absolute_deadline(
+            now=0.0,
+            document_deadline_monotonic=560.0,
+            unfinished_executable_pages=1,
+        )
+        self.assertEqual(capped, 480.0)
+        large = arabic_printed_page_absolute_deadline(
+            now=0.0,
+            document_deadline_monotonic=10_000.0,
+            unfinished_executable_pages=1,
+        )
+        self.assertEqual(large, 480.0)
+
+    def test_shares_below_480_are_unchanged(self):
+        share = arabic_printed_page_absolute_deadline(
+            now=0.0,
+            document_deadline_monotonic=460.0,
+            unfinished_executable_pages=2,
+        )
+        self.assertEqual(share, 200.0)
+
+    def test_outer_document_deadline_and_safety_margin_are_respected(self):
+        self.assertEqual(ARABIC_PRINTED_DOCUMENT_SAFETY_MARGIN_SECONDS, 60.0)
+        self.assertIsNone(
+            arabic_printed_page_absolute_deadline(
+                now=0.0,
+                document_deadline_monotonic=60.0,
+                unfinished_executable_pages=2,
+            )
+        )
+        remaining_after_margin = arabic_printed_page_absolute_deadline(
+            now=0.0,
+            document_deadline_monotonic=460.0,
+            unfinished_executable_pages=1,
+        )
+        self.assertEqual(remaining_after_margin, 400.0)
+
+    def test_page_start_minimum_is_unchanged(self):
+        self.assertEqual(ARABIC_PRINTED_PAGE_START_BUDGET_SECONDS, 150.0)
+        self.assertIsNone(
+            arabic_printed_page_absolute_deadline(
+                now=0.0,
+                document_deadline_monotonic=209.0,
+                unfinished_executable_pages=1,
+            )
+        )
+        self.assertIsNone(
+            arabic_printed_page_absolute_deadline(
+                now=0.0,
+                document_deadline_monotonic=260.0,
+                unfinished_executable_pages=2,
+            )
+        )
+        permitted = arabic_printed_page_absolute_deadline(
+            now=0.0,
+            document_deadline_monotonic=210.0,
+            unfinished_executable_pages=1,
+        )
+        self.assertEqual(permitted, 150.0)
 
 
 class ArabicPrintedBandedDocumentOcrTests(TestCase):
@@ -433,32 +504,67 @@ class ArabicPrintedBandedDocumentOcrTests(TestCase):
         attempt = ArabicPrintedOcrAttempt.objects.get(pk=result.attempt_id)
         self.assertEqual(attempt.status, ArabicPrintedOcrAttempt.Status.PARTIAL)
 
-    def test_page_deadlines_use_equal_share_then_240_cap(self):
+    def test_page_deadlines_use_equal_share_then_480_cap(self):
         too_small = arabic_printed_page_absolute_deadline(
             now=0.0,
             document_deadline_monotonic=260.0,
             unfinished_executable_pages=2,
         )
         self.assertIsNone(too_small)
-        share = arabic_printed_page_absolute_deadline(
+        share_below_cap = arabic_printed_page_absolute_deadline(
             now=0.0,
             document_deadline_monotonic=460.0,
             unfinished_executable_pages=2,
         )
-        self.assertEqual(share, 200.0)
+        self.assertEqual(share_below_cap, 200.0)
+        share_above_cap = arabic_printed_page_absolute_deadline(
+            now=0.0,
+            document_deadline_monotonic=560.0,
+            unfinished_executable_pages=1,
+        )
+        self.assertEqual(share_above_cap, 480.0)
         capped = arabic_printed_page_absolute_deadline(
             now=0.0,
             document_deadline_monotonic=10_000.0,
             unfinished_executable_pages=1,
         )
-        self.assertEqual(capped, 240.0)
-        none = arabic_printed_page_absolute_deadline(
+        self.assertEqual(capped, 480.0)
+        safety_margin_exhausted = arabic_printed_page_absolute_deadline(
             now=0.0,
             document_deadline_monotonic=60.0,
             unfinished_executable_pages=2,
         )
-        self.assertIsNone(none)
+        self.assertIsNone(safety_margin_exhausted)
+        remaining_after_margin = arabic_printed_page_absolute_deadline(
+            now=0.0,
+            document_deadline_monotonic=460.0,
+            unfinished_executable_pages=1,
+        )
+        self.assertEqual(remaining_after_margin, 400.0)
 
+        recorded_below_cap: list[float] = []
+
+        def fake_process_below_cap(**kwargs):
+            recorded_below_cap.append(kwargs["absolute_deadline_monotonic"])
+            claim = kwargs["claim"]
+            self._persist_success(
+                claim, PAGE_TEXT_ZERO if claim.page_index == 0 else PAGE_TEXT_ONE
+            )
+            return _page_result(
+                claim,
+                outcome=OUTCOME_SUCCEEDED,
+                text=PAGE_TEXT_ZERO if claim.page_index == 0 else PAGE_TEXT_ONE,
+            )
+
+        with patch(
+            f"{MODULE}.process_claimed_arabic_printed_page", fake_process_below_cap
+        ):
+            below_cap_result = self._run(deadline=460.0)
+
+        self.assertEqual(below_cap_result.outcome, OUTCOME_COMPLETED)
+        self.assertEqual(recorded_below_cap, [200.0, 400.0])
+
+    def test_page_deadlines_cap_shares_above_480(self):
         recorded: list[float] = []
 
         def fake_process(**kwargs):
@@ -474,10 +580,10 @@ class ArabicPrintedBandedDocumentOcrTests(TestCase):
             )
 
         with patch(f"{MODULE}.process_claimed_arabic_printed_page", fake_process):
-            result = self._run(deadline=460.0)
+            result = self._run(deadline=10_000.0)
 
         self.assertEqual(result.outcome, OUTCOME_COMPLETED)
-        self.assertEqual(recorded, [200.0, 240.0])
+        self.assertEqual(recorded, [480.0, 480.0])
 
     def test_control_errors_propagate_unchanged(self):
         errors = (

@@ -587,7 +587,7 @@ timeout as the document budget.
   `DEFAULT_TIMEOUT_SECONDS` (1200s). Banded Antigravity requires it and
   fails closed before coordinator/provider work if it is absent.
 - The coordinator still applies its 60-second terminalization reserve,
-  150-second page-start minimum, and 240-second per-page cap.
+  150-second page-start minimum, and 480-second per-page cap.
 - Phase 5B identity is unchanged: oriented SHA/dimensions are prepared
   eagerly for all pages before claiming.
 
