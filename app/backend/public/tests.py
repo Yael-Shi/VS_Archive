@@ -40,9 +40,19 @@ class PublicNavTests(TestCase):
     def test_public_nav_omits_redundant_home_link(self):
         resp = self.client.get(reverse("archive-list"))
         self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+        nav_start = html.find('class="nav-links"')
+        self.assertNotEqual(nav_start, -1)
+        nav_block_start = html.rfind("<div", 0, nav_start)
+        nav_block_end = html.find("</div>", nav_start)
+        public_nav = html[nav_block_start : nav_block_end + len("</div>")]
         self.assertContains(resp, 'class="nav-brand-link"')
-        self.assertContains(resp, "ארכיון")
-        self.assertContains(resp, "אודות")
+        self.assertIn("ארכיון", public_nav)
+        self.assertIn("אנשים", public_nav)
+        self.assertIn("אודות", public_nav)
+        self.assertIn(reverse("archive-people-index"), public_nav)
+        self.assertNotIn("מחברים", public_nav)
+        self.assertNotIn(reverse("archive-authors-index"), public_nav)
         self.assertNotContains(resp, '<a class="btn btn-link" href="/">דף הבית</a>')
 
 

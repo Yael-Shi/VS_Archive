@@ -12,6 +12,8 @@ from django.urls import reverse
 
 from documents.models import ArchiveItem, Author, Person, PersonAlias
 from documents.services.archive_item_access import ARCHIVE_FAMILY_GROUP_NAME
+from documents.services.archive_item_presentation import person_public_page_url
+from documents.services.author_public import author_public_page_url
 from documents.services.archive_item_authors import AUTHOR_NOT_FOUND_ERROR
 from documents.services.archive_items import create_manual_text_archive_item
 from documents.services.author_person_link import (
@@ -298,8 +300,8 @@ class AuthorPersonLinkStaffEditTests(TestCase):
         self.assertIsNone(self.author.person_id)
 
 
-class AuthorPersonLinkPublicIsolationTests(TestCase):
-    def test_public_catalog_and_detail_do_not_use_the_link(self):
+class AuthorPersonLinkPublicPresentationTests(TestCase):
+    def test_linked_author_is_absorbed_into_person_public_surfaces(self):
         person = Person.objects.create(
             name="UniquePersonTokenForAuthorLink",
             biography="Person biography must stay off author pages.",
@@ -327,20 +329,27 @@ class AuthorPersonLinkPublicIsolationTests(TestCase):
             reverse("archive-detail", kwargs={"item_id": item.id})
         )
 
-        self.assertEqual(authors_index.status_code, 200)
-        self.assertEqual(author_detail.status_code, 200)
+        self.assertEqual(authors_index.status_code, 302)
+        self.assertEqual(authors_index["Location"], reverse("archive-people-index"))
+        self.assertEqual(author_detail.status_code, 302)
+        self.assertEqual(author_detail["Location"], person_public_page_url(person.id))
         self.assertEqual(people_index.status_code, 200)
-        self.assertEqual(person_detail.status_code, 404)
+        self.assertEqual(person_detail.status_code, 200)
         self.assertEqual(archive_list.status_code, 200)
         self.assertEqual(item_detail.status_code, 200)
 
-        for resp in (
-            authors_index,
-            author_detail,
-            people_index,
-            archive_list,
-            item_detail,
-        ):
+        people_hrefs = [row.href for row in people_index.context["people_rows"]]
+        self.assertEqual(people_hrefs, [person_public_page_url(person.id)])
+        self.assertNotIn(author_public_page_url(author.id), people_hrefs)
+        self.assertContains(people_index, "UniquePersonTokenForAuthorLink")
+        self.assertNotContains(people_index, "UniqueAuthorTokenForPersonLink")
+        self.assertContains(person_detail, "UniquePersonTokenForAuthorLink")
+        self.assertContains(person_detail, "Person biography must stay off author pages.")
+        self.assertContains(item_detail, "UniqueAuthorTokenForPersonLink")
+        self.assertContains(item_detail, person_public_page_url(person.id))
+        self.assertNotContains(item_detail, author_public_page_url(author.id))
+
+        for resp in (people_index, person_detail, archive_list, item_detail):
             html = resp.content.decode()
             self.assertNotIn("קישור לרשומת אדם", html)
             self.assertNotIn("עדכון קישור לאדם", html)
@@ -351,13 +360,6 @@ class AuthorPersonLinkPublicIsolationTests(TestCase):
                 ),
                 html,
             )
-            self.assertNotIn("UniquePersonTokenForAuthorLink", html)
-            self.assertNotIn("Person biography must stay off author pages.", html)
-
-        self.assertContains(authors_index, "UniqueAuthorTokenForPersonLink")
-        self.assertContains(author_detail, "UniqueAuthorTokenForPersonLink")
-        self.assertNotContains(author_detail, reverse("archive-people-index"))
-        self.assertNotContains(people_index, reverse("archive-authors-index"))
 
 
 class AuthorPersonLinkMigrationContractTests(TestCase):

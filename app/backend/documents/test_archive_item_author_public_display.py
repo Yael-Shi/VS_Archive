@@ -12,12 +12,14 @@ from documents.models import (
     ArchiveItemAuthor,
     Author,
     Document,
+    Person,
     PhotoContent,
 )
 from documents.services.archive_item_presentation import (
     ArchiveBrowseLink,
     author_presentation_for_item,
     build_archive_browse_card,
+    person_public_page_url,
 )
 from documents.services.archive_search_index import sync_archive_item_search_index
 from documents.services.archive_items import create_manual_text_archive_item
@@ -288,3 +290,32 @@ class PublicArchiveItemAuthorPresentationTests(TestCase):
             if "documents_archiveitemauthor" in query["sql"].lower()
         ]
         self.assertLessEqual(len(author_link_queries), 1)
+
+    def test_linked_author_href_goes_to_person_page_unlinked_keeps_author_page(self):
+        person = Person.objects.create(name="Canonical Linked Person")
+        linked = Author.objects.create(name="Linked Card Author", person=person)
+        unlinked = Author.objects.create(name="Unlinked Card Author")
+        item = _public_manual("Mixed author hrefs")
+        _link(item, linked, position=0)
+        _link(item, unlinked, position=1)
+
+        links, fallback = author_presentation_for_item(item)
+        self.assertEqual(fallback, "")
+        self.assertEqual(
+            [link.href for link in links],
+            [
+                person_public_page_url(person.id),
+                author_public_page_url(unlinked.id),
+            ],
+        )
+        self.assertEqual(
+            [link.name for link in links],
+            ["Linked Card Author", "Unlinked Card Author"],
+        )
+
+        detail = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
+        self.assertContains(detail, person_public_page_url(person.id))
+        self.assertContains(detail, author_public_page_url(unlinked.id))
+        listing = self.client.get(reverse("archive-list"))
+        self.assertContains(listing, person_public_page_url(person.id))
+        self.assertContains(listing, author_public_page_url(unlinked.id))

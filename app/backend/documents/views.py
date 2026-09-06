@@ -293,15 +293,14 @@ from documents.services.archive_item_presentation import (
     public_discovery_context,
 )
 from documents.services.author_public import (
-    build_public_authors_index_rows,
     public_author_archive_items_queryset,
-    public_authors_queryset,
 )
 from documents.services.person_public import (
     build_person_public_item_cards,
-    build_public_people_index_rows,
-    public_people_queryset,
     public_person_archive_items_queryset,
+)
+from documents.services.public_people_directory import (
+    build_paginated_public_directory_rows,
 )
 from documents.services.archive_search_snippets import (
     apply_archive_search_match_presentation_to_cards,
@@ -5198,12 +5197,13 @@ def archive_person_detail_page(request, person_id: int):
 
 def archive_author_detail_page(request, author_id: int):
     author = get_object_or_404(Author, pk=author_id)
-    items = _archive_browse_select_related(
-        public_author_archive_items_queryset(request.user, author.pk)
-    )
-    total_count = items.count()
-    if total_count == 0:
+    items = public_author_archive_items_queryset(request.user, author.pk)
+    if not items.exists():
         raise Http404() from None
+    if author.person_id is not None:
+        return redirect(person_public_page_url(author.person_id))
+    items = _archive_browse_select_related(items)
+    total_count = items.count()
 
     per_page = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE
     page = normalize_archive_public_list_page(
@@ -5236,48 +5236,21 @@ def archive_author_detail_page(request, author_id: int):
 
 def archive_authors_index_page(request):
     search_query = (request.GET.get("q") or "").strip()
-    authors = public_authors_queryset(request.user, search_query=search_query)
-    total_count = authors.count()
-    per_page = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE
-    page = normalize_archive_public_list_page(
-        request.GET.get("page"),
-        total_count=total_count,
-        per_page=per_page,
-    )
-    offset = (page - 1) * per_page
-    page_authors = list(authors[offset : offset + per_page])
-    author_rows = build_public_authors_index_rows(request.user, page_authors)
-    return render(
-        request,
-        "documents/archive/authors_public_index.html",
-        context={
-            "author_rows": author_rows,
-            "q": search_query,
-            "page_title": "מחברים",
-            **archive_public_list_pagination_context(
-                total_count=total_count,
-                page=page,
-                per_page=per_page,
-                q=search_query,
-                item_type_filter="",
-            ),
-        },
-    )
+    target = reverse("archive-people-index")
+    if search_query:
+        target = f"{target}?{urlencode({'q': search_query})}"
+    return redirect(target)
 
 
 def archive_people_index_page(request):
     search_query = (request.GET.get("q") or "").strip()
-    people = public_people_queryset(request.user, search_query=search_query)
-    total_count = people.count()
     per_page = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE
-    page = normalize_archive_public_list_page(
-        request.GET.get("page"),
-        total_count=total_count,
+    people_rows, total_count, page = build_paginated_public_directory_rows(
+        request.user,
+        search_query=search_query,
+        page_raw=request.GET.get("page"),
         per_page=per_page,
     )
-    offset = (page - 1) * per_page
-    page_people = list(people[offset : offset + per_page])
-    people_rows = build_public_people_index_rows(request.user, page_people)
     return render(
         request,
         "documents/archive/people_public_index.html",

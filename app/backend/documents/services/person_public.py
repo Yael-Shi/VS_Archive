@@ -1,4 +1,8 @@
-"""Public Person catalog and unified Person-detail ArchiveItem relations."""
+"""Public Person catalog and unified Person-detail ArchiveItem relations.
+
+Directory membership is AIP, renderable PhotoPerson, or an explicitly linked
+Author with public ArchiveItemAuthor membership. Name equality is not identity.
+"""
 
 from __future__ import annotations
 
@@ -9,12 +13,15 @@ from django.db.models import Exists, OuterRef, Q, QuerySet, Subquery
 
 from documents.models import (
     ArchiveItem,
+    ArchiveItemAuthor,
     ArchiveItemPerson,
+    Author,
     Person,
     PhotoContent,
     PhotoPerson,
 )
 from documents.services.archive_item_access import archive_browse_queryset_for_user
+from documents.services.author_public import author_public_membership_q
 from documents.services.archive_item_presentation import (
     ArchiveBrowseCard,
     build_archive_browse_cards,
@@ -79,28 +86,80 @@ def person_public_membership_q_for_item_pks(item_pks: QuerySet) -> Q:
 
 
 def person_public_membership_q(user) -> Q:
-    """Person rows with at least one authorized+renderable AIP or PhotoPerson item."""
+    """Person rows with at least one authorized+renderable AIP or PhotoPerson item.
+
+    Used by the advanced Person filter picker. Does not include linked-Author
+    membership; that belongs to the unified public People directory/detail.
+    """
     return person_public_membership_q_for_item_pks(authorized_browse_item_pks(user))
 
 
+def person_linked_author_membership_q_for_item_pks(item_pks: QuerySet) -> Q:
+    """Person rows with an explicit ``Author.person`` link to public AIA items.
+
+    Uses the FK only. Does not infer identity from Author/Person names.
+    """
+    return Exists(
+        ArchiveItemAuthor.objects.filter(
+            author__person_id=OuterRef("pk"),
+            archive_item_id__in=item_pks,
+        )
+    )
+
+
+def person_unified_public_membership_q(user) -> Q:
+    """Directory/detail membership: AIP, renderable PhotoPerson, or linked Author AIA."""
+    item_pks = authorized_browse_item_pks(user)
+    return person_public_membership_q_for_item_pks(
+        item_pks
+    ) | person_linked_author_membership_q_for_item_pks(item_pks)
+
+
+def _person_linked_author_name_icontains_q(user, search_query: str) -> Q | None:
+    """Match linked ``Author.name`` only when that Author has public AIA membership.
+
+    Uses ``author_public_membership_q`` (authorized + browse-renderable
+    ``ArchiveItemAuthor``). A private-only linked Author name is not searchable.
+    Does not infer identity from names.
+    """
+    q = (search_query or "").strip()
+    if not q:
+        return None
+    return Exists(
+        Author.objects.filter(
+            person_id=OuterRef("pk"),
+            name__icontains=q,
+        ).filter(author_public_membership_q(user))
+    )
+
+
 def public_people_queryset(user, *, search_query: str = "") -> QuerySet[Person]:
-    """Public People index queryset: membership, optional name/alias q, name then id."""
-    people = Person.objects.filter(person_public_membership_q(user)).order_by(
+    """Public People-directory Person identities: unified membership and search.
+
+    Search is canonical name, alias, or an explicitly linked ``Author.name``
+    that itself has authorized+browse-renderable ``ArchiveItemAuthor``
+    membership. Name equality with an unlinked Author is not identity.
+    """
+    people = Person.objects.filter(person_unified_public_membership_q(user)).order_by(
         "name", "id"
     )
     search_q = person_canonical_or_alias_icontains_q(search_query)
-    if search_q is not None:
-        people = people.filter(search_q)
+    linked_author_q = _person_linked_author_name_icontains_q(user, search_query)
+    if search_q is not None and linked_author_q is not None:
+        people = people.filter(search_q | linked_author_q)
     return people
 
 
 def public_person_archive_items_queryset(user, person_id: int) -> QuerySet[ArchiveItem]:
-    """Distinct authorized+renderable ArchiveItems for one Person (AIP or PhotoPerson).
+    """Distinct authorized+renderable ArchiveItems for one Person.
 
-    Annotates ``person_first_matching_photo_id``: earliest matching renderable
-    ``PhotoContent`` by ``(position, id)``, or NULL when the item is AIP-only.
-    Outer queryset is ``ArchiveItem``, so overlap and multiple photos do not
-    duplicate rows. Order is ``-created_at, pk``.
+    Membership is AIP, renderable PhotoPerson, or ArchiveItemAuthor on an
+    Author explicitly linked with ``Author.person_id``. Annotates
+    ``person_first_matching_photo_id``: earliest matching renderable
+    ``PhotoContent`` by ``(position, id)``, or NULL when there is no matching
+    PhotoPerson (including authored-only items). Authored overlap does not
+    drop that PhotoPerson deep-link. Outer queryset is ``ArchiveItem``, so
+    overlap does not duplicate rows. Order is ``-created_at, pk``.
     """
     renderable_photos = renderable_photo_contents_queryset()
     aip_exists = Exists(
@@ -116,6 +175,12 @@ def public_person_archive_items_queryset(user, person_id: int) -> QuerySet[Archi
             photo_content__in=renderable_photos,
         )
     )
+    aia_exists = Exists(
+        ArchiveItemAuthor.objects.filter(
+            author__person_id=person_id,
+            archive_item_id=OuterRef("pk"),
+        )
+    )
     first_photo_id = Subquery(
         PhotoPerson.objects.filter(
             person_id=person_id,
@@ -127,7 +192,7 @@ def public_person_archive_items_queryset(user, person_id: int) -> QuerySet[Archi
     )
     return (
         archive_browse_queryset_for_user(user)
-        .filter(aip_exists | pp_exists)
+        .filter(aip_exists | pp_exists | aia_exists)
         .annotate(
             **{PERSON_FIRST_MATCHING_PHOTO_ANNOTATION: first_photo_id},
         )
@@ -141,11 +206,11 @@ def public_people_item_counts_for_person_ids(
 ) -> dict[int, int]:
     """DISTINCT authorized+renderable ArchiveItem counts for a page of Person ids.
 
-    UNION DISTINCT of ``(person_id, archive_item_id)`` from ArchiveItemPerson and
-    renderable PhotoPerson, applied in Python over two restricted pair
-    queries so empty AIP or PP sides cannot drop the other. Multiple photos
-    of one item and dual AIP+PP links count once. Does not add AIP count to
-    PhotoPerson count.
+    UNION DISTINCT of ``(person_id, archive_item_id)`` from ArchiveItemPerson,
+    renderable PhotoPerson, and ArchiveItemAuthor via explicit
+    ``Author.person_id``. Applied in Python over restricted pair queries so
+    empty sides cannot drop the others. Multiple photos, dual AIP+PP, and
+    authored overlap count once.
     """
     page_ids = [int(person_id) for person_id in person_ids]
     if not page_ids:
@@ -167,6 +232,15 @@ def public_people_item_counts_for_person_ids(
     }
     distinct_pairs.update(
         (int(person_id), int(item_id)) for person_id, item_id in pp_pairs
+    )
+    aia_pairs = ArchiveItemAuthor.objects.filter(
+        author__person_id__in=page_ids,
+        archive_item_id__in=authorized_pks,
+    ).values_list("author__person_id", "archive_item_id")
+    distinct_pairs.update(
+        (int(person_id), int(item_id))
+        for person_id, item_id in aia_pairs
+        if person_id is not None
     )
     counts: dict[int, int] = {}
     for person_id, _item_id in distinct_pairs:

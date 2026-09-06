@@ -24,6 +24,7 @@ from documents.services.archive_item_access import (
 )
 from documents.services.archive_item_presentation import (
     ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
+    person_public_page_url,
 )
 from documents.services.archive_items import create_manual_text_archive_item
 from documents.services.author_public import author_public_page_url
@@ -420,3 +421,85 @@ class AuthorPublicPagePaginationTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(resp.context["show_page_nav"])
         self.assertNotContains(resp, "archive-list-pagination")
+
+
+class AuthorPublicPageLinkedPersonRedirectTests(TestCase):
+    def test_linked_author_private_only_is_404_even_if_person_is_independently_public(
+        self,
+    ):
+        person = Person.objects.create(name="Independently Public Person")
+        ArchiveItemPerson.objects.create(
+            archive_item=_public_manual("Public AIP letter"), person=person
+        )
+        author = Author.objects.create(name="Private Only Linked Author", person=person)
+        _link(_private_manual("Hidden authored letter"), author)
+
+        resp = self.client.get(_author_page(author))
+        self.assertEqual(resp.status_code, 404)
+        self.assertFalse(resp.has_header("Location"))
+
+        person_resp = self.client.get(
+            reverse("archive-person-detail", kwargs={"person_id": person.id})
+        )
+        self.assertEqual(person_resp.status_code, 200)
+
+    def test_linked_author_redirects_to_person_detail(self):
+        person = Person.objects.create(name="Canonical Linked Person")
+        author = Author.objects.create(name="Linked Bibliographic Author", person=person)
+        _link(_public_manual("Linked authored letter"), author)
+
+        resp = self.client.get(_author_page(author))
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], person_public_page_url(person.id))
+        followed = self.client.get(resp["Location"])
+        self.assertEqual(followed.status_code, 200)
+        self.assertContains(
+            followed,
+            '<h1 class="page-title">Canonical Linked Person</h1>',
+            html=True,
+        )
+        self.assertContains(followed, "Linked Bibliographic Author")
+        person_href = person_public_page_url(person.id)
+        self.assertContains(
+            followed,
+            f'<a href="{person_href}">Linked Bibliographic Author</a>',
+            html=True,
+        )
+        self.assertNotContains(followed, author_public_page_url(author.id))
+
+    def test_family_user_gets_redirect_for_private_linked_author(self):
+        person = Person.objects.create(name="Family Linked Person")
+        author = Author.objects.create(name="Family Linked Author", person=person)
+        _link(_private_manual("Family authored letter"), author)
+        family_group, _ = Group.objects.get_or_create(name=ARCHIVE_FAMILY_GROUP_NAME)
+        family = User.objects.create_user(
+            username="linked-author-family-redirect", password="x"
+        )
+        family.groups.add(family_group)
+
+        anon = self.client.get(_author_page(author))
+        self.assertEqual(anon.status_code, 404)
+
+        self.client.force_login(family)
+        family_resp = self.client.get(_author_page(author))
+        self.assertEqual(family_resp.status_code, 302)
+        self.assertEqual(family_resp["Location"], person_public_page_url(person.id))
+        followed = self.client.get(family_resp["Location"])
+        self.assertEqual(followed.status_code, 200)
+        self.assertContains(followed, "Family Linked Person")
+
+    def test_unlinked_author_keeps_author_detail(self):
+        author = Author.objects.create(name="Still Unlinked Author")
+        _link(_public_manual("Unlinked authored letter"), author)
+        resp = self.client.get(_author_page(author))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Still Unlinked Author")
+        self.assertEqual(_titles(resp), {"Unlinked authored letter"})
+
+    def test_linked_author_without_visible_membership_is_404(self):
+        person = Person.objects.create(name="Hidden Linked Person")
+        author = Author.objects.create(name="Hidden Linked Author", person=person)
+        _link(_private_manual("Hidden authored letter"), author)
+        resp = self.client.get(_author_page(author))
+        self.assertEqual(resp.status_code, 404)
+        self.assertFalse(resp.has_header("Location"))
