@@ -1130,16 +1130,28 @@ def _ordered_author_links(archive_item: ArchiveItem) -> list[ArchiveItemAuthor]:
     )
 
 
-def author_links_for_item(archive_item: ArchiveItem) -> tuple[ArchiveBrowseLink, ...]:
-    """Ordered ``ArchiveItemAuthor`` names linking to public Author pages.
+def public_structured_author_href(*, author_id: int, person_id: int | None) -> str:
+    """Public href for a structured Author: Person page when explicitly linked."""
+    if person_id is not None:
+        return person_public_page_url(person_id)
+    return author_public_page_url(author_id)
 
-    Identity is ``Author.id``. Duplicate names stay distinct. Does not read,
-    split, or infer Authors from ``author_name``.
+
+def author_links_for_item(archive_item: ArchiveItem) -> tuple[ArchiveBrowseLink, ...]:
+    """Ordered ``ArchiveItemAuthor`` names linking to Person or Author pages.
+
+    Identity is ``Author.id``. Duplicate names stay distinct. An explicit
+    ``Author.person_id`` retargets the href to the Person page; names are
+    never used to infer that link. Does not read, split, or infer Authors
+    from ``author_name``.
     """
     return tuple(
         ArchiveBrowseLink(
             name=link.author.name,
-            href=author_public_page_url(link.author_id),
+            href=public_structured_author_href(
+                author_id=link.author_id,
+                person_id=link.author.person_id,
+            ),
         )
         for link in _ordered_author_links(archive_item)
     )

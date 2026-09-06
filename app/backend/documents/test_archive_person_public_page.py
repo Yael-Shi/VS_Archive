@@ -13,7 +13,9 @@ from django.urls import reverse
 
 from documents.models import (
     ArchiveItem,
+    ArchiveItemAuthor,
     ArchiveItemPerson,
+    Author,
     Document,
     Person,
     PersonAlias,
@@ -36,6 +38,7 @@ from documents.services.archive_items import (
     create_manual_text_archive_item,
     create_ocr_document,
 )
+from documents.services.author_public import author_public_page_url
 from documents.services.photo_gallery import public_photo_detail_url
 from documents.test_archive_item import create_viewable_ocr_document
 
@@ -888,3 +891,76 @@ class PersonPublicPageQueryCountTests(TestCase):
             _people_select_query_count(many_ctx),
         )
         self.assertGreaterEqual(_people_select_query_count(few_ctx), 1)
+
+
+def _link_author(item: ArchiveItem, author: Author, *, position: int = 0) -> None:
+    ArchiveItemAuthor.objects.create(
+        archive_item=item, author=author, position=position
+    )
+
+
+class PersonPublicPageLinkedAuthorTests(TestCase):
+    def test_authored_only_linked_person_page_includes_authored_items(self):
+        person = Person.objects.create(name="Authored Only Person")
+        author = Author.objects.create(name="Bibliographic Name", person=person)
+        item = _public_manual("Authored public letter")
+        _link_author(item, author)
+
+        resp = self.client.get(_person_page(person))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(_titles(resp), {"Authored public letter"})
+        self.assertEqual(resp.context["total_count"], 1)
+        self.assertEqual(len(resp.context["browse_cards"]), 1)
+        self.assertContains(resp, '<h1 class="page-title">Authored Only Person</h1>', html=True)
+        self.assertContains(resp, "Bibliographic Name")
+        person_href = person_public_page_url(person.id)
+        self.assertContains(
+            resp,
+            f'<a href="{person_href}">Bibliographic Name</a>',
+            html=True,
+        )
+        self.assertNotContains(resp, author_public_page_url(author.id))
+
+    def test_aip_photoperson_and_authored_overlap_is_deduped_with_photo_deeplink(self):
+        person = Person.objects.create(name="Overlap Linked Person")
+        author = Author.objects.create(name="Overlap Linked Author", person=person)
+        item = _create_photo_item(title="Overlap authored album")
+        photo = _add_photo(item)
+        _link(item, person)
+        PhotoPerson.objects.create(photo_content=photo, person=person)
+        _link_author(item, author)
+        extra = _public_manual("Authored extra letter")
+        _link_author(extra, author)
+
+        resp = self.client.get(_person_page(person))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["total_count"], 2)
+        self.assertEqual(_titles(resp), {"Overlap authored album", "Authored extra letter"})
+        self.assertEqual(
+            _card_urls(resp).count(public_photo_detail_url(item.id, photo.id)),
+            1,
+        )
+        self.assertIn(
+            reverse("archive-detail", kwargs={"item_id": extra.id}),
+            _card_urls(resp),
+        )
+
+    def test_unauthorized_authored_items_do_not_open_person_page(self):
+        person = Person.objects.create(name="Private Authored Person")
+        author = Author.objects.create(name="Private Authored Author", person=person)
+        _link_author(_private_manual("Hidden authored letter"), author)
+        self.assertEqual(self.client.get(_person_page(person)).status_code, 404)
+
+    def test_advanced_person_filter_does_not_use_authored_membership(self):
+        person = Person.objects.create(name="Authored Filter Person")
+        author = Author.objects.create(name="Authored Filter Author", person=person)
+        authored = _public_manual("Authored filter letter")
+        _link_author(authored, author)
+        self.assertEqual(self.client.get(_person_page(person)).status_code, 200)
+        ids = list(
+            filter_archive_items_by_advanced_filters(
+                ArchiveItem.objects.all(),
+                normalize_archive_advanced_filters({"person": str(person.id)}),
+            ).values_list("pk", flat=True)
+        )
+        self.assertEqual(ids, [])

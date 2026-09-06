@@ -1,5 +1,69 @@
 # VS-Archive Decision Log
 
+## Unified public People directory (PR2)
+
+**Decision / implemented:** Public human browsing is one directory at
+**`/archive/people/`** (`archive-people-index`), labeled **אנשים**. Person
+and Author remain distinct models. **`Author.person`** is the only identity
+link. Names, including exact-name equality, are never identity. There is no
+automatic linking or data backfill in this PR.
+
+**Current behavior:**
+
+- Directory rows are a presentation merge of (1) Persons with public
+  membership through **`ArchiveItemPerson`**, renderable **`PhotoPerson`**,
+  or any linked Author with public **`ArchiveItemAuthor`** membership, and
+  (2) Authors with public **`ArchiveItemAuthor`** membership and
+  **`Author.person_id` null**. A linked Author is not a separate directory
+  row. Same display name on an unlinked Person and an unlinked Author yields
+  two rows.
+- Person-backed display name is **`Person.name`**. Author-only display name
+  is **`Author.name`**. Identity kind is not shown in the public UI.
+  **`item_count`** is DISTINCT authorized/renderable **`ArchiveItem`** ids
+  across applicable relations. Order is display name, then kind
+  (Person before Author-only), then source id. Pagination remains **48**
+  using the shared public list contract. Authorization filtering and
+  search run in SQL per identity type; the page is a bounded Python merge
+  of those result sets (not concatenated independent page slices).
+- Directory **`q`** matches **`Person.name`**, **`PersonAlias.name`**, names
+  of Authors explicitly linked to that Person **and** that have
+  authorized+browse-renderable **`ArchiveItemAuthor`** membership for the
+  current user, and **`Author.name`** for Author-only rows. A private-only
+  linked Author name does not match even when the Person is independently
+  public via AIP/PhotoPerson.
+- Person detail membership and related holdings are the DISTINCT union of
+  AIP, renderable PhotoPerson, and AIA via **`Author.person_id`**. PhotoPerson
+  deep-links are unchanged: the earliest matching renderable photo is used
+  even when the same item is also authored. Biography is unchanged.
+- **`/archive/authors/`** 302-redirects to **`/archive/people/`** and
+  preserves **`q`** only. Linked Author detail 302-redirects to
+  **`/archive/people/<person_id>/` only when that Author has at least one
+  authorized+browse-renderable `ArchiveItemAuthor` holding** (same
+  ``public_author_archive_items_queryset`` membership as unlinked Author
+  detail). Otherwise Author detail 404s and does not reveal
+  **`Author.person`**, even if the Person is independently public. Unlinked
+  Author detail is unchanged. A linked Author does not grant Person-page
+  access unless the user can see at least one authorized/renderable holding
+  through the unified Person membership rules.
+- Structured public Author links use **`Author.person_id`** when set
+  (href to the Person page) and otherwise keep the Author page. Ordered
+  structured rendering and **`author_name`** fallback are unchanged. Global
+  **`q`** structured-author search and the advanced **`author=<Author.id>`**
+  filter are unchanged. Advanced **`person=`** picker membership remains
+  AIP ∪ renderable PhotoPerson (not authored-only).
+- Public navigation has one **אנשים** link to **`/archive/people/`** and no
+  separate **מחברים** nav entry. Compact nav **`q`** search is unchanged.
+
+**Unchanged:** staff Person/Author manage, merge, and **`Author.person`**
+edit; no name-based backfill.
+
+**Tests:** `documents/test_archive_people_public_index.py`,
+`documents/test_archive_person_public_page.py`,
+`documents/test_archive_author_public_page.py`,
+`documents/test_archive_authors_public_index.py`,
+`documents/test_archive_item_author_public_display.py`,
+`documents/test_author_person_link.py`, `public/tests.py`.
+
 ## Author → Person explicit link foundation (PR1)
 
 **Decision / implemented:** Person and Author remain distinct identities.
@@ -9,7 +73,7 @@ nullable FK (`Author.person`, `on_delete=SET_NULL`, related_name
 identities. Linkage is staff-explicit only and is never inferred from
 names, including exact-name equality (review candidate only, never
 identity evidence). Public People/Author catalog, detail, and navigation
-unification is deferred to PR2.
+unification is implemented in **Unified public People directory (PR2)**.
 
 **Current behavior:**
 
@@ -29,8 +93,8 @@ unification is deferred to PR2.
   affected Author-identity counts and the duplicate’s linked Authors.
   Duplicate Person delete remains last. Unlinked Authors stay unlinked.
 
-**Deferred:** public unification of People/Author catalog and detail;
-public navigation; automatic or name-based linking.
+**Deferred:** automatic or name-based linking. Public catalog/detail/nav
+unification is implemented in **Unified public People directory (PR2)**.
 
 **Tests:** `documents/test_author_person_link.py`, plus Author/Person
 merge cases in `documents/test_author_merge.py`,
@@ -130,9 +194,11 @@ token, and **must** match the structured **`Author.name`** token(s). Then
 **`backfill_archive_search_index --check-only`**. Do not treat ``q`` as cut
 over until that verification passes.
 
-**Unchanged:** Person filter/chips; public Author catalog/detail membership;
-PHOTO Author staff UI; navigation; FTS ranking/weights besides the author
-string source.
+**Unchanged by this search cutover:** Person filter/chips; PHOTO Author staff UI;
+FTS ranking/weights besides the author string source. Public Author
+catalog/detail/nav were later unified in **Unified public People directory
+(PR2)**; this entry’s **`q`** / advanced **`author=<Author.id>`** contract
+is unchanged.
 
 **Tests:** `documents/test_archive_search_author.py`,
 `documents/test_archive_advanced_search_author.py`; updates in
@@ -206,29 +272,30 @@ quality scoring.
 
 ## Public Author catalog and Author detail
 
-**Decision / implemented:** Public Author browsing exists at
+**Historical / superseded for public catalog index:** the standalone public
+Authors index listing is replaced by **Unified public People directory (PR2)**.
+**`/archive/authors/`** is a compatibility redirect. Linked Author detail
+redirects to the Person page. Unlinked Author detail membership below remains
+current.
+
+**Decision / implemented:** Public Author browsing originally existed at
 **`/archive/authors/`** (`archive-authors-index`) and
 **`/archive/authors/<author_id>/`** (`archive-author-detail`). Membership is
 **`ArchiveItemAuthor` only**. **`Author`** remains fully separate from
 **`Person`**. This supersedes the deferred “public Author browsing / pages”
 notes on the staff Author index and Author merge entries.
 
-**Current behavior:**
+**Current behavior (unlinked Author detail; Author-only directory rows live on People):**
 
-- Catalog membership is Authors with at least one authorized +
+- Unlinked Author detail membership is Authors with at least one authorized +
   browse-renderable linked **`ArchiveItem`** via **`ArchiveItemAuthor`**.
-  Authorization is **`archive_browse_queryset_for_user`**. Unlinked Authors,
-  **`author_name`-only items**, Person links, and inaccessible /
-  non-renderable-only links are omitted. Detail 404s in those cases.
-- Index order is **`Author.name`, then `id`**. Pagination is fixed **48**.
-  Optional GET **`q`** is a case-insensitive substring on **`Author.name`**
-  only (no aliases, Person, or **`ArchiveItem.author_name`**). Duplicate
-  names stay separate Author IDs and URLs.
-- Each index row shows **`Author.name`** and a DISTINCT linked item count
-  (Hebrew **`1 פריט` / `N פריטים`**). Counts are one page-restricted
-  **`ArchiveItemAuthor`** aggregate (`Count(..., distinct=True)`), not
-  per-row queries.
-- Author detail H1 is **`Author.name`**, heading **פריטים קשורים**, then
+  Authorization is **`archive_browse_queryset_for_user`**. Authors with no
+  **`ArchiveItemAuthor`** rows, **`author_name`-only items**, and inaccessible /
+  non-renderable-only links 404. Linked Authors redirect to Person detail
+  (PR2) instead of rendering this page.
+- Author-only identities (no **`Author.person`**) remain discoverable on
+  **`/archive/people/`** with **`Author.name`** and DISTINCT AIA counts.
+- Unlinked Author detail H1 is **`Author.name`**, heading **פריטים קשורים**, then
   DISTINCT authorized+renderable linked ArchiveItems. Cards use the shared
   browse-card path (`build_archive_browse_cards` + thumbnail helpers) and
   **normal item detail URLs** (no Person-style photo deep-links). Order is
@@ -237,21 +304,22 @@ notes on the staff Author index and Author merge entries.
   Existing **`ArchiveItemAuthor`** rows on renderable PHOTO items still
   count.
 
-**Unchanged / still deferred:** public navigation links to these routes;
-staff Author edit/merge behavior; PHOTO author UI; schema. Global **`q`**
-and the advanced **`author`** filter now use structured Authors (see
-**Public structured-Author search and advanced Author filter**).
+**Unchanged:** staff Author edit/merge behavior; PHOTO author UI; schema. Global **`q`**
+and the advanced **`author`** filter use structured Authors (see
+**Public structured-Author search and advanced Author filter**). Public nav
+to the unified People directory is in **Unified public People directory (PR2)**.
 
 **Public item Author presentation (cards / source metadata):** when an item
 has one or more **`ArchiveItemAuthor`** rows, public cards and non-PHOTO
 source metadata render those **`Author.name`** values in **`position`**
-order as links to **`/archive/authors/<author_id>/`**. Duplicate names stay
+order. Href is **`/archive/people/<person_id>/`** when **`Author.person_id`**
+is set, otherwise **`/archive/authors/<author_id>/`**. Duplicate names stay
 distinct IDs/URLs. Structured links take precedence over
 **`ArchiveItem.author_name`** (including stale/drifted or empty strings).
 When there are **no** structured links, the existing trimmed
 **`author_name`** text is shown unchanged (detail still applies the
 placeholder-metadata filter). **`author_name` is never parsed or used to
-infer Author links.** PHOTO **detail** still has no Author/source-metadata
+infer Author links or Person identity.** PHOTO **detail** still has no Author/source-metadata
 surface. PHOTO **cards** already showed **`author_name`** and now use the
 same structured-vs-fallback rule. Prefetch is ordered
 **`author_links` + `select_related("author")`** on browse and public
@@ -447,43 +515,47 @@ Person-page and Stage B PhotoPerson-only assertions. No migration.
 **Decision / implemented:** Public People catalog exists at
 **`/archive/people/`** (`archive-people-index`). Public Person detail
 **`/archive/people/<person_id>/`** (`archive-person-detail`) lists one
-unified stream of authorized+renderable **`ArchiveItem`** rows reachable
-through **`ArchiveItemPerson` OR `PhotoPerson`**. This supersedes the
-deferred “Person catalog” note and the two-section Person page
-(related items vs unpaged PhotoPerson appearance cards).
+unified stream of authorized+renderable **`ArchiveItem`** rows. Directory
+unification with Author-only identities is in **Unified public People
+directory (PR2)**; this entry remains the Person-detail / AIP ∪ PhotoPerson
+foundation (extended by PR2 with explicit linked-Author AIA).
 
 **Current behavior:**
 
-- Index membership is the same accessibility contract as Person detail:
-  at least one authorized+renderable AIP item or renderable PhotoPerson
-  appearance (`archive_browse_queryset_for_user` +
-  `filter_archive_renderable_photo_contents`). Unlinked people and
-  non-renderable-only links are omitted (detail still 404s).
-- Index order is **`Person.name`, then `id`**. Pagination is fixed **48**.
-  Optional GET **`q`** matches canonical **`Person.name`** or
-  **`PersonAlias.name`** with the same icontains/`Exists` predicate as
-  the staff People index. Aliases are search-only and are not displayed.
-  Duplicate canonical names are separate rows with distinct Person URLs.
-- Each index row shows one count: **DISTINCT** authorized+renderable
-  ArchiveItems via AIP ∪ PhotoPerson. Implementation: two page-restricted
-  pair queries (ArchiveItemPerson and renderable PhotoPerson), then a
-  Python set union of `(person_id, archive_item_id)`. Dual AIP+PP and
-  multiple photos of one item count once. This is not a Django SQL
-  `UNION` queryset. Staff index still shows two unfiltered relation
-  counts.
+- Person-backed directory/detail membership is at least one authorized+
+  renderable AIP item, renderable PhotoPerson appearance, **or** AIA on an
+  Author with **`Author.person_id`** equal to this Person
+  (`archive_browse_queryset_for_user` +
+  `filter_archive_renderable_photo_contents` for photos). Unlinked people and
+  non-renderable-only links are omitted (detail still 404s). Author-only
+  directory rows are documented in PR2.
+- Person-backed index display is **`Person.name`**. Pagination is fixed **48**.
+  Optional GET **`q`** matches canonical **`Person.name`**,
+  **`PersonAlias.name`**, or an explicitly linked **`Author.name`** that has
+  authorized+browse-renderable AIA for the current user. Aliases
+  are search-only and are not displayed. Duplicate canonical names are
+  separate Person rows. Same-name unlinked Authors are not merged.
+- Each Person-backed index row shows one count: **DISTINCT**
+  authorized+renderable ArchiveItems via AIP ∪ PhotoPerson ∪ linked-Author
+  AIA. Implementation: restricted pair queries then a Python set union of
+  `(person_id, archive_item_id)`. Dual AIP+PP, authored overlap, and
+  multiple photos of one item count once. Staff index still shows two
+  unfiltered relation counts.
 - Person detail uses one heading (**פריטים קשורים**), one
   **`total_count`**, and one 48-item pagination stream ordered
   **`-created_at`, `pk`**. A matching renderable PhotoPerson deep-links
   to the earliest matching photo by **`(PhotoContent.position, id)`**
   (`/archive/<item_id>/?photo=<photo_id>`) and uses that photo’s
-  thumbnail. AIP-only items use the normal ArchiveItem URL.
-- Advanced **`person=`** filtering and the Person picker use the same
-  AIP-or-renderable-PhotoPerson membership (see **Public `/archive/` Person
+  thumbnail even when the same item is also authored. AIP-only and
+  authored-only items use the normal ArchiveItem URL.
+- Advanced **`person=`** filtering and the Person picker remain
+  AIP-or-renderable-PhotoPerson only (see **Public `/archive/` Person
   advanced filter — unified AIP ∪ PhotoPerson**). Global **`/archive/?q=`**
-  indexing is unchanged. Person and Author stay separate. No public alias
-  display. No schema change.
+  indexing is unchanged. Person and Author stay separate models. No public
+  alias display. No schema change.
 
-**Helpers:** `documents/services/person_public.py`.
+**Helpers:** `documents/services/person_public.py`,
+`documents/services/public_people_directory.py`.
 
 **Tests:** `documents/test_archive_people_public_index.py`,
 `documents/test_archive_person_public_page.py`,

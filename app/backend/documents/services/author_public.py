@@ -46,9 +46,26 @@ def author_public_membership_q(user) -> Q:
 
 
 def public_authors_queryset(user, *, search_query: str = "") -> QuerySet[Author]:
-    """Public Authors index queryset: membership, optional name q, name then id."""
+    """Authors with public AIA membership (linked and unlinked).
+
+    The public People directory uses ``public_unlinked_authors_queryset`` so
+    linked Authors are absorbed into Person-backed rows.
+    """
     authors = Author.objects.filter(author_public_membership_q(user)).order_by(
         "name", "id"
+    )
+    q = (search_query or "").strip()
+    if q:
+        authors = authors.filter(name__icontains=q)
+    return authors
+
+
+def public_unlinked_authors_queryset(user, *, search_query: str = "") -> QuerySet[Author]:
+    """Public directory Author-only identities: public AIA and no ``Author.person``."""
+    authors = (
+        Author.objects.filter(person_id__isnull=True)
+        .filter(author_public_membership_q(user))
+        .order_by("name", "id")
     )
     q = (search_query or "").strip()
     if q:
