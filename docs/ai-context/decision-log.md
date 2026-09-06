@@ -1,5 +1,68 @@
 # VS-Archive Decision Log
 
+## Public structured-Author search and advanced Author filter
+
+**Decision / implemented:** Public `/archive/` `q` discovery and the advanced
+`author` filter cut over from **`ArchiveItem.author_name`** to structured
+**`Author` / `ArchiveItemAuthor`** identity, with a narrow fail-closed legacy
+fallback. This supersedes the deferred “global `q` / advanced author filter
+cutover” notes on the public Author catalog, staff Author, and Author-merge
+entries.
+
+**Current behavior:**
+
+- **`q` indexing and match-source attribution** share
+  **`searchable_author_names_for_item`**: when any **`ArchiveItemAuthor`**
+  row exists, ordered **`Author.name`** values (position, then id) are used
+  and **`author_name` is ignored**, including stale/drifted strings. When an
+  item has **zero** links, trimmed **`author_name`** remains the fallback.
+  Weighting is unchanged (author text stays in **`metadata_text`**, weight B).
+  Search-index build prefetches ordered **`author_links`**.
+- Advanced GET **`author`** is **one positive `Author.id`**, not a name
+  string. Malformed values are skipped. Repeatable params keep the first
+  valid id. Filtering uses correlated **`Exists`** on
+  **`ArchiveItemAuthor.author_id`** (no join fan-out).
+- Legacy **`author_name`** membership is added **only** for items with zero
+  structured links, **only** when the selected **`Author.name`** is
+  **globally unique**, and **only** when that Author already has structured
+  **`ArchiveItemAuthor`** membership in the **already-authorized queryset**
+  passed to **`filter_archive_items_by_advanced_filters`**. The filter
+  service does not take a user; authorization is that queryset. A manually
+  supplied Author id with no structured membership there cannot enable
+  leftover **`author_name`** matches (including a private-only Author id
+  against a public zero-link item with the same name). Duplicate Author
+  names never infer a leftover **`author_name`** onto one of those
+  identities.
+- Advanced Author choices are **`Author`** rows with at least one
+  **`ArchiveItemAuthor`** link to the authorized browse queryset (order
+  **`name`, `id`**). **`author_name`-only** items are not choice membership.
+  The control stays single-select; option values are ids and labels are
+  names. Duplicate names remain distinct options. Chips/removal,
+  pagination, `q`, type, and other advanced filters preserve the Author id.
+  Ordinary and `q`-only requests still skip choice-context queries.
+
+**Rollout (required):** This cutover changes **`ArchiveItemSearchIndex.metadata_text`**
+semantics. Existing index rows still contain pre-cutover author text until
+rebuilt. After deploy, operators **must** run **`backfill_archive_search_index`**
+before the new public ``q`` author contract is considered live. Write-path
+sync of later edits is not a substitute for rebuilding the full table.
+Verify after backfill: a structured item whose stale **`author_name`** token
+differs from linked **`Author.name`** values must **not** match that stale
+token, and **must** match the structured **`Author.name`** token(s). Then
+**`backfill_archive_search_index --check-only`**. Do not treat ``q`` as cut
+over until that verification passes.
+
+**Unchanged:** Person filter/chips; public Author catalog/detail membership;
+PHOTO Author staff UI; navigation; FTS ranking/weights besides the author
+string source.
+
+**Tests:** `documents/test_archive_search_author.py`,
+`documents/test_archive_advanced_search_author.py`; updates in
+`test_archive_advanced_search.py`, `test_archive_advanced_search_ui.py`,
+`test_archive_advanced_search_person.py`,
+`test_archive_item_author_public_display.py`, `test_author.py`,
+`test_archive_item_author_staff_ux.py`. No migration.
+
 ## Worker Hebrew translation runs outside the OCR persist transaction
 
 **Decision / implemented:** On the initial non-Hebrew OCR success path,
@@ -61,10 +124,10 @@ notes on the staff Author index and Author merge entries.
   Existing **`ArchiveItemAuthor`** rows on renderable PHOTO items still
   count.
 
-**Unchanged / still deferred:** global **`q`** indexing of Author relations;
-advanced author filter cutover from **`author_name`**; public navigation
-links to these routes; staff Author edit/merge behavior; PHOTO author UI;
-schema.
+**Unchanged / still deferred:** public navigation links to these routes;
+staff Author edit/merge behavior; PHOTO author UI; schema. Global **`q`**
+and the advanced **`author`** filter now use structured Authors (see
+**Public structured-Author search and advanced Author filter**).
 
 **Public item Author presentation (cards / source metadata):** when an item
 has one or more **`ArchiveItemAuthor`** rows, public cards and non-PHOTO
@@ -464,8 +527,9 @@ name matching. Logic lives in **`documents/services/author_merge.py`**.
   to **`AUTHOR_MERGE_CONCURRENCY_ERROR`**.
 - **`sync_archive_item_search_indexes`** runs inside the same transaction for
   the mutated duplicate-linked ids only (sorted). Index failure rolls back
-  the entire merge. Search still indexes **`author_name`**, not Author
-  relations.
+  the entire merge. Search-index fan-out remains duplicate-linked items
+  only; indexed author text now follows the structured-Author `q` contract
+  (see **Public structured-Author search and advanced Author filter**).
 - Staff UI: from **`/archive/manage/authors/<keeper_id>/edit/`**, enter the
   duplicate id and GET **`/archive/manage/authors/<keeper_id>/merge/`**
   (**`archive-manage-author-merge`**). GET without **`duplicate_id`** shows
@@ -476,11 +540,10 @@ name matching. Logic lives in **`documents/services/author_merge.py`**.
   The staff Author index remains find/open only (no per-row merge buttons).
 
 **Out of scope / deferred:** standalone Author delete; merge from the Author
-index; name-based merge; global **`q`** / advanced author filter cutover to
-Author relations; PHOTO author UI; unique **`Author.name`**;
-Django Admin Author tools. Public Author catalog/detail and public item
-Author link presentation are implemented separately (see **Public Author
-catalog and Author detail**).
+index; name-based merge; PHOTO author UI; unique **`Author.name`**;
+Django Admin Author tools. Public Author catalog/detail, public item
+Author link presentation, and public **`q` / advanced Author filter**
+cutover are implemented separately.
 
 **Tests:** `documents/test_author_merge.py`,
 `documents/test_author_merge_staff_ui.py`.
@@ -1100,9 +1163,10 @@ public display, `q` indexing, snippets, advanced filters, models, or schema.
 - **`Author`** remains separate from **`Person`**. These paths never create or
   infer **`Person`**, **`ArchiveItemPerson`**, or **`PhotoPerson`**.
 
-**Deferred:** public display/search/filter cutover from **`author_name`**; PHOTO
-author UI; unique **`Author.name`**; independent drag-reorder of selected
-authors; removing the legacy **`author_name=`** writer path.
+**Deferred:** PHOTO author UI; unique **`Author.name`**; independent
+drag-reorder of selected authors; removing the legacy **`author_name=`**
+writer path. Public display, ``q``, and advanced Author filter cutover from
+**`author_name`** is implemented separately.
 
 **Tests:** `documents/test_archive_item_author_staff_ux.py`;
 `documents/test_author.py` (foundation + PHOTO isolation).
@@ -1153,10 +1217,12 @@ UI, templates, or URLs.
 **Migrations:** `0058_author_foundation` (schema) +
 `0059_backfill_authors_from_author_name` (reversible data).
 
-**Deferred (superseded in part by PR2):** ~~staff Author UI / duplicate-create
-guard; comma-separated multi-author input~~ → implemented in **Multi-author
-staff create/edit UX (PR2)**. Remaining: public display/search/filter cutover
-from **`author_name`**; PHOTO author UI.
+**Deferred (superseded in part by PR2 and later public Author work):**
+~~staff Author UI / duplicate-create guard; comma-separated multi-author
+input~~ → **Multi-author staff create/edit UX (PR2)**. ~~public
+display/search/filter cutover from **`author_name`**~~ → public Author
+pages, item presentation, ``q``, and advanced Author filter. Remaining:
+PHOTO author UI.
 
 **Tests:** `documents/test_author.py`.
 

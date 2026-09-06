@@ -528,10 +528,12 @@ class StaffAuthorHtmlFormTests(TestCase):
         )
         self.assertEqual(item.author_name, "OCR Replacement, OCR Extra")
         self.assertTrue(Author.objects.filter(pk=first.pk).exists())
-        self.assertIn(
-            "OCR Replacement, OCR Extra",
-            ArchiveItemSearchIndex.objects.get(archive_item_id=item.pk).metadata_text,
-        )
+        metadata_text = ArchiveItemSearchIndex.objects.get(
+            archive_item_id=item.pk
+        ).metadata_text
+        self.assertIn("OCR Replacement", metadata_text)
+        self.assertIn("OCR Extra", metadata_text)
+        self.assertNotIn("OCR Replacement, OCR Extra", metadata_text)
 
         bad = self.client.post(
             EDIT_URL_TEMPLATE.format(item_id=doc.archive_item_id),
@@ -734,7 +736,7 @@ class StaffAuthorOcrJsonTests(TestCase):
 
 
 class StaffAuthorCompatibilityTests(TestCase):
-    def test_q_search_and_public_display_still_use_author_name(self):
+    def test_q_search_indexes_structured_author_names(self):
         item = create_manual_text_archive_item(
             title="Display author",
             body="body",
@@ -743,11 +745,14 @@ class StaffAuthorCompatibilityTests(TestCase):
             new_author_name="Visible Author, Second Author",
         )
         resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
-        self.assertContains(resp, "Visible Author, Second Author")
-        self.assertIn(
-            "Visible Author, Second Author",
-            ArchiveItemSearchIndex.objects.get(archive_item_id=item.pk).metadata_text,
-        )
+        self.assertContains(resp, "Visible Author")
+        self.assertContains(resp, "Second Author")
+        metadata = ArchiveItemSearchIndex.objects.get(
+            archive_item_id=item.pk
+        ).metadata_text
+        self.assertIn("Visible Author", metadata)
+        self.assertIn("Second Author", metadata)
+        self.assertNotIn("Visible Author, Second Author", metadata)
 
     def test_ocr_and_video_service_staff_kwargs_do_not_use_legacy_string(self):
         first = Author.objects.create(name="Svc First")

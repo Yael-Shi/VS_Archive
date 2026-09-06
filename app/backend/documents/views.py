@@ -5395,6 +5395,7 @@ def archive_list_page(request):
                 event_choices=choice_context["advanced_filter_event_choices"],
                 tag_choices=choice_context["advanced_filter_tag_choices"],
                 person_choices=choice_context["advanced_filter_person_choices"],
+                author_choices=choice_context["advanced_filter_author_choices"],
             ),
             **archive_public_list_pagination_context(
                 total_count=total_count,

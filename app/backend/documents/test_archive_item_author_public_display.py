@@ -242,42 +242,34 @@ class PublicArchiveItemAuthorPresentationTests(TestCase):
         self.assertNotContains(detail, "מחבר/ת:")
         self.assertNotContains(detail, "Hidden photo author")
 
-    def test_global_q_and_advanced_author_still_use_author_name(self):
-        item = _public_manual("Search unchanged item")
-        author = Author.objects.create(name="IndexedCanonicalUnused")
+    def test_global_q_and_advanced_author_use_structured_authors(self):
+        item = _public_manual("Search cutover item")
+        author = Author.objects.create(name="IndexedCanonicalToken")
         _link(item, author, position=0)
         _set_author_name_only(item, "IndexedLegacyAuthorToken")
         sync_archive_item_search_index(item.pk)
 
         q_resp = self.client.get(
             reverse("archive-list"),
-            {"q": "IndexedLegacyAuthorToken"},
+            {"q": "IndexedCanonicalToken"},
         )
         self.assertContains(q_resp, item.title)
 
-        unused_q = self.client.get(
+        stale_q = self.client.get(
             reverse("archive-list"),
-            {"q": "IndexedCanonicalUnused"},
+            {"q": "IndexedLegacyAuthorToken"},
         )
-        self.assertNotContains(unused_q, item.title)
+        self.assertNotContains(stale_q, item.title)
 
         advanced_match = self.client.get(
             reverse("archive-list"),
             {
                 "advanced": "1",
-                "author": "IndexedLegacyAuthorToken",
+                "author": str(author.id),
             },
         )
         self.assertContains(advanced_match, item.title)
-
-        advanced_canonical = self.client.get(
-            reverse("archive-list"),
-            {
-                "advanced": "1",
-                "author": "IndexedCanonicalUnused",
-            },
-        )
-        self.assertNotContains(advanced_canonical, item.title)
+        self.assertEqual(advanced_match.context["advanced_filter_author"], author.id)
 
     def test_browse_list_prefetches_author_links_without_n_plus_one(self):
         for index in range(3):

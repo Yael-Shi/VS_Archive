@@ -128,11 +128,11 @@
                   data-archive-choice-filter-select
                 >
                   <option value="" {% if not advanced_filter_author %}selected{% endif %}>הכל</option>
-                  {% for author_name in advanced_filter_author_choices %}
+                  {% for author in advanced_filter_author_choices %}
                     <option
-                      value="{{ author_name }}"
-                      {% if author_name == advanced_filter_author %}selected{% endif %}
-                    >{{ author_name }}</option>
+                      value="{{ author.id }}"
+                      {% if author.id == advanced_filter_author %}selected{% endif %}
+                    >{{ author.name }}</option>
                   {% endfor %}
                 </select>
                 <div class="field-hint" data-archive-choice-filter-empty hidden>
