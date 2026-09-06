@@ -621,7 +621,7 @@ class PhotoAuthorIsolationTests(TestCase):
         self.assertEqual(item.author_links.count(), 0)
         self.assertEqual(Author.objects.count(), 0)
 
-    def test_photo_staff_forms_still_omit_author_name(self):
+    def test_photo_staff_forms_use_structured_authors_not_author_name(self):
         staff = User.objects.create_user(
             username="photo_author_staff",
             password="test-pass",
@@ -650,10 +650,10 @@ class PhotoAuthorIsolationTests(TestCase):
         self.assertEqual(edit_resp.status_code, 200)
         self.assertNotContains(create_resp, 'name="author_name"')
         self.assertNotContains(edit_resp, 'name="author_name"')
-        self.assertNotContains(create_resp, 'name="author_ids"')
-        self.assertNotContains(edit_resp, 'name="author_ids"')
-        self.assertNotContains(create_resp, 'name="new_author_name"')
-        self.assertNotContains(edit_resp, 'name="new_author_name"')
+        self.assertContains(create_resp, 'name="author_ids"')
+        self.assertContains(edit_resp, 'name="author_ids"')
+        self.assertContains(create_resp, 'name="new_author_name"')
+        self.assertContains(edit_resp, 'name="new_author_name"')
 
 
 class AuthorCompatibilityBehaviorTests(TestCase):

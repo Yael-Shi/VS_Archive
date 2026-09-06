@@ -472,6 +472,17 @@ def _row_by_href(response, href: str):
 
 
 class UnifiedPeopleDirectoryMembershipTests(TestCase):
+    def test_photo_only_linked_author_aia_is_a_person_row(self):
+        person = Person.objects.create(name="Photo AIA Directory Person")
+        author = Author.objects.create(name="Photo AIA Directory Author", person=person)
+        item = _create_photo_item(title="Directory authored album")
+        _add_photo(item)
+        _link_author(item, author)
+        resp = self.client.get(_index_url())
+        self.assertEqual(_row_names(resp), ["Photo AIA Directory Person"])
+        self.assertEqual(_row_hrefs(resp), [person_public_page_url(person.id)])
+        self.assertEqual(_count_for(resp, "Photo AIA Directory Person"), 1)
+
     def test_aip_photoperson_and_linked_author_membership_shapes(self):
         aip_only = Person.objects.create(name="Unified AIP Only")
         _link(_public_manual("AIP letter"), aip_only)

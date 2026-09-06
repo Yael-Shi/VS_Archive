@@ -111,11 +111,15 @@ def create_photo_upload_plan(
     person_ids: list[int] | None = None,
     new_person_name: str = "",
     force_create_person_keys: list[str] | None = None,
+    staff_author_ids: list[int] | None = None,
+    new_author_name: str = "",
 ) -> tuple[ArchiveItem, PhotoContent, str]:
     """
     Create PHOTO ArchiveItem + pending PhotoContent and return a presigned PUT URL.
 
     PhotoContent is created before client upload with ``upload_status=PENDING``.
+    Staff ``staff_author_ids is not None`` writes ArchiveItem-level authors
+    before the search-index sync. PhotoContent has no Author relation.
     """
     normalized_mime = normalize_upload_mime_type(mime_type)
 
@@ -157,6 +161,17 @@ def create_photo_upload_plan(
         force_create_person_keys=force_create_person_keys,
         refresh_search_index=False,
     )
+
+    if staff_author_ids is not None:
+        from documents.services.archive_item_authors import (
+            apply_staff_archive_item_authors,
+        )
+
+        apply_staff_archive_item_authors(
+            archive_item,
+            author_ids=staff_author_ids,
+            new_author_name=new_author_name,
+        )
 
     update_archive_item_discovery_metadata(
         archive_item,
@@ -474,6 +489,16 @@ def parse_create_photo_upload_metadata(
             return None, person_name_candidates_error_payload(conflicts)
         return None, people_errors[0]
 
+    from documents.services.archive_item_authors import (
+        AUTHOR_IDS_FIELD,
+        NEW_AUTHOR_NAME_FIELD,
+        parse_archive_item_authors_form,
+    )
+
+    parsed_authors, author_errors = parse_archive_item_authors_form(payload)
+    if author_errors:
+        return None, author_errors[0]
+
     original_name = (payload.get("original_name") or "").strip()
     mime_type = (payload.get("mime_type") or "").strip()
     if not original_name:
@@ -505,6 +530,8 @@ def parse_create_photo_upload_metadata(
         "archive_item_person_ids": parsed_people["archive_item_person_ids"],
         "new_archive_item_person_name": parsed_people["new_archive_item_person_name"],
         "force_create_person": parsed_people.get("force_create_person") or [],
+        AUTHOR_IDS_FIELD: parsed_authors[AUTHOR_IDS_FIELD],
+        NEW_AUTHOR_NAME_FIELD: parsed_authors[NEW_AUTHOR_NAME_FIELD],
         **photo_metadata,
     }, None
 

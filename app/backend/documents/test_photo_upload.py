@@ -56,6 +56,8 @@ class PhotoUploadAccessTests(TestCase):
         self.assertContains(resp, "/api/photo-uploads/create/")
         self.assertContains(resp, "תיאור קצר")
         self.assertContains(resp, 'name="description"')
+        self.assertContains(resp, 'name="author_ids"')
+        self.assertContains(resp, 'name="new_author_name"')
         self.assertNotContains(resp, 'name="author_name"')
         self.assertNotContains(resp, 'name="source_title"')
 
@@ -659,6 +661,47 @@ class PhotoCreateMultiFileUploadTests(TestCase):
         self.assertIn("createUrl", html)
         self.assertIn("addUrl", html)
         self.assertIn("archive_item_id: progress.archiveItemId", html)
+
+    def test_create_script_sends_author_ids_and_new_author_name(self):
+        html = self._create_form_html()
+        self.assertIn('id="author_ids"', html)
+        self.assertIn('id="new_author_name"', html)
+        self.assertIn("function readAuthorIds()", html)
+        self.assertIn("meta.author_ids = readAuthorIds()", html)
+        self.assertIn("meta.new_author_name = new_author_name", html)
+        self.assertNotIn("meta.author_name", html)
+        self.assertNotIn('id="author_name"', html)
+
+    def test_add_photo_form_and_script_do_not_send_author_fields(self):
+        item = ArchiveItem.objects.create(
+            item_type=ArchiveItem.ItemType.PHOTO,
+            title="Add photo authors stay off",
+            visibility=ArchiveItem.Visibility.PRIVATE,
+        )
+        PhotoContent.objects.create(
+            archive_item=item,
+            position=1,
+            original_file_key="photos/add/original.jpg",
+            original_filename="one.jpg",
+            original_mime_type="image/jpeg",
+            original_size_bytes=1024,
+            upload_status=PhotoContent.UploadStatus.UPLOADED,
+        )
+        resp = self.client.get(
+            reverse("archive-manage-photo-add", kwargs={"item_id": item.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        self.assertNotIn('id="author_ids"', html)
+        self.assertNotIn('id="new_author_name"', html)
+        add_branch = html[
+            html.index('if (uploadMode === "add")') : html.index(
+                "const meta = {\n      title: get(\"title\")"
+            )
+        ]
+        self.assertNotIn("author_ids", add_branch)
+        self.assertNotIn("new_author_name", add_branch)
+        self.assertIn("function readAuthorIds()", html)
 
     def test_create_script_preflight_records_failing_file_before_validating(self):
         html = self._create_form_html()

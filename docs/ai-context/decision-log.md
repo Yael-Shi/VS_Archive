@@ -1,5 +1,53 @@
 # VS-Archive Decision Log
 
+## PHOTO structured ArchiveItem Author staff UX
+
+**Decision / implemented:** PHOTO ArchiveItems use the same structured
+multi-author staff contract as OCR_DOCUMENT, MANUAL_TEXT, and VIDEO.
+Authorship stays ArchiveItem-level. There is no PhotoContent Author
+relation, no `author_name` text input, no fuzzy/alias matching, and no
+Person / PhotoPerson / `people_present` inference from Authors.
+
+**Current behavior:**
+
+- PHOTO create (`/archive/manage/new/?item_type=photo` →
+  `/api/photo-uploads/create/`) parses `author_ids` and
+  `new_author_name` via `parse_archive_item_authors_form` before any
+  ArchiveItem or PhotoContent row is created. Invalid Author input is
+  HTTP 400 with no presigned upload URL.
+- `create_photo_upload_plan` applies `apply_staff_archive_item_authors`
+  inside the existing create transaction after ArchiveItemPerson and
+  before discovery/search-index sync, so structured Author names land in
+  the ArchiveItem search index. Author application failure rolls back
+  the whole PHOTO create.
+- `/api/photo-uploads/add/` and inline per-PhotoContent edit remain
+  Author-independent.
+- PHOTO shared-item edit uses the same keep/remove/add/new-token form
+  and the same outer transaction as people + shared metadata +
+  discovery. `ArchiveItemAuthorError` leaves title, people, discovery,
+  and authors unchanged. Successful save redirects to
+  `archive-manage-edit`.
+- Public PHOTO detail now includes the shared `source_metadata.html`
+  partial (structured Author links; `source_title` stays unset unless
+  later work adds it). An empty block is not shown when there are no
+  Authors and no source metadata.
+- No automatic migration from leftover PHOTO `author_name` strings.
+  After staff submit the structured form empty, leftover compatibility
+  `author_name` is cleared, matching OCR/MANUAL/VIDEO.
+- No dedicated search backfill; existing type-agnostic Author public,
+  filter, `q`, browse-card, Person-directory, and Author.person union
+  paths already include PHOTO AIA.
+
+**Supersedes:** deferred “PHOTO author UI” notes under Author foundation
+/ multi-author staff UX, and the statements that PHOTO writers do not
+dual-write and PHOTO detail omits Authors.
+
+**Tests:** `documents/test_archive_item_author_staff_ux.py` (PHOTO JSON,
+HTML, public); inverted PHOTO isolation assertions in
+`documents/test_author.py`; create/add script coverage in
+`documents/test_photo_upload.py`; PHOTO detail in
+`documents/test_photo_archive_display.py`.
+
 ## Arabic printed banded OCR — operator ambiguous-fence resolution
 
 **Decision / implemented:** Automatic reclaim remains fail-closed for Vision

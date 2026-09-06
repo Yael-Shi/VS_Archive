@@ -31,7 +31,7 @@ def _apply_archive_item_authors(
     staff_author_ids: list[int] | None = None,
     new_author_name: str = "",
 ) -> None:
-    """Dual-write OCR/MANUAL_TEXT/VIDEO authors before search-index sync.
+    """Dual-write OCR/MANUAL_TEXT/VIDEO/PHOTO authors before search-index sync.
 
     Staff ``staff_author_ids is not None`` uses ordered ids plus new names.
     Otherwise the legacy ``author_name`` string path is unchanged.
@@ -507,13 +507,16 @@ def update_photo_archive_item_metadata(
     date_precision: str,
     metadata_status: str,
     public_note: str = "",
+    staff_author_ids: list[int] | None = None,
+    new_author_name: str = "",
 ):
     """
     Update shared ArchiveItem metadata for a PHOTO item.
 
     Does not modify PhotoContent rows, file fields, Person relations, create
     Document rows, or enqueue processing. Per-photo fields are edited through
-    ``update_photo_content_metadata``.
+    ``update_photo_content_metadata``. Staff ``staff_author_ids is not None``
+    replaces ArchiveItem-level authors; omitted kwargs leave authors unchanged.
     """
     from documents.models import ArchiveItem
 
@@ -534,6 +537,12 @@ def update_photo_archive_item_metadata(
             "updated_at",
         ]
     )
+    if staff_author_ids is not None:
+        _apply_archive_item_authors(
+            archive_item,
+            staff_author_ids=staff_author_ids,
+            new_author_name=new_author_name,
+        )
     from documents.services.archive_search_index import sync_archive_item_search_index
 
     sync_archive_item_search_index(archive_item.pk)

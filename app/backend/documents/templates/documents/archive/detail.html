@@ -21,6 +21,7 @@
             {% if not photo_gallery.show_gallery %}
               {% include "documents/archive/partials/photo_metadata_display.html" with photo_content=photo_content identified_people=photo_gallery.identified_people photo_date_label=photo_gallery.photo_date_label %}
             {% endif %}
+            {% include "documents/archive/partials/source_metadata.html" with item=item %}
             {% include "documents/archive/partials/discovery_metadata.html" with item=item %}
             {% include "documents/archive/partials/public_note_display.html" with item=item %}
           </div>

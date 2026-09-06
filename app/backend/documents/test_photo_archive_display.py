@@ -12,6 +12,8 @@ from documents.models import (
     ArchiveCategory,
     ArchiveEvent,
     ArchiveItem,
+    ArchiveItemAuthor,
+    Author,
     Document,
     PhotoContent,
 )
@@ -345,21 +347,44 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         "documents.views.create_presigned_get",
         return_value=PRESIGNED_URL,
     )
-    def test_photo_detail_does_not_show_author_or_source_labels(
+    def test_photo_detail_omits_empty_author_and_source_block(
         self, _mock_presigned_get
     ):
-        self.public_uploaded.author_name = "Hidden author"
-        self.public_uploaded.source_title = "Hidden source"
+        self.public_uploaded.author_name = ""
+        self.public_uploaded.source_title = ""
         self.public_uploaded.save()
 
         resp = self.client.get(
             reverse("archive-detail", kwargs={"item_id": self.public_uploaded.id})
         )
         self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "archive-detail-meta-block--source")
         self.assertNotContains(resp, "מחבר/ת:")
-        self.assertNotContains(resp, "Hidden author")
         self.assertNotContains(resp, "מקור:")
-        self.assertNotContains(resp, "Hidden source")
+
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value=PRESIGNED_URL,
+    )
+    def test_photo_detail_shows_structured_author_link(self, _mock_presigned_get):
+        author = Author.objects.create(name="Structured Photo Author")
+        ArchiveItemAuthor.objects.create(
+            archive_item=self.public_uploaded,
+            author=author,
+            position=0,
+        )
+
+        resp = self.client.get(
+            reverse("archive-detail", kwargs={"item_id": self.public_uploaded.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "archive-detail-meta-block--source")
+        self.assertContains(resp, "מחבר/ת:")
+        self.assertContains(resp, "Structured Photo Author")
+        self.assertContains(
+            resp,
+            reverse("archive-author-detail", kwargs={"author_id": author.id}),
+        )
 
     @patch(
         "documents.views.create_presigned_get",

@@ -104,6 +104,27 @@
       .filter((id) => !Number.isNaN(id));
   }
 
+  function readAuthorIds() {
+    const ids = [];
+    const seen = new Set();
+    function pushId(raw) {
+      const id = parseInt(raw, 10);
+      if (Number.isNaN(id) || seen.has(id)) {
+        return;
+      }
+      seen.add(id);
+      ids.push(id);
+    }
+    document
+      .querySelectorAll('input[type="checkbox"][name="author_ids"]:checked')
+      .forEach((input) => pushId(input.value));
+    const select = document.getElementById("author_ids");
+    if (select) {
+      Array.from(select.selectedOptions).forEach((option) => pushId(option.value));
+    }
+    return ids;
+  }
+
   function readFormMeta() {
     const get = (id) => {
       const el = document.getElementById(id);
@@ -169,6 +190,14 @@
       : "";
     if (new_archive_item_person_name) {
       meta.new_archive_item_person_name = new_archive_item_person_name;
+    }
+    meta.author_ids = readAuthorIds();
+    const newAuthorNameEl = document.getElementById("new_author_name");
+    const new_author_name = newAuthorNameEl
+      ? (newAuthorNameEl.value || "").trim()
+      : "";
+    if (new_author_name) {
+      meta.new_author_name = new_author_name;
     }
     const forceKeys = window.vsArchivePersonNameDuplicate
       ? window.vsArchivePersonNameDuplicate.collectForceCreateKeys(form)
