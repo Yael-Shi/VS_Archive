@@ -34,6 +34,7 @@ from documents.services.author_merge import (
     AUTHOR_MERGE_CONCURRENCY_ERROR,
     AUTHOR_MERGE_ID_INVALID_ERROR,
     AUTHOR_MERGE_ID_REQUIRED_ERROR,
+    AUTHOR_MERGE_PERSON_CONFLICT_ERROR,
     AUTHOR_MERGE_SAME_ID_ERROR,
     AuthorMergeError,
     merge_author,
@@ -335,6 +336,7 @@ class AuthorMergeServiceTests(TestCase):
         )
         self.keeper.refresh_from_db()
         self.assertEqual(self.keeper.name, "KeeperAuthor")
+        self.assertIsNone(self.keeper.person_id)
 
     def test_stale_link_after_author_locks_fails_closed(self):
         item = _item(title="Locked", author_name="DuplicateAuthor")
@@ -425,3 +427,68 @@ class AuthorMergeServiceTests(TestCase):
         self.assertEqual(result.affected_archive_item_ids, ())
         self.assertFalse(Author.objects.filter(pk=self.duplicate.pk).exists())
         self.assertTrue(Author.objects.filter(pk=self.keeper.pk).exists())
+
+    def test_neither_author_linked_to_person_leaves_keeper_unlinked(self):
+        item = _item(title="Unlinked merge", author_name="DuplicateAuthor")
+        _link(item, self.duplicate, position=0)
+        merge_author(keeper=self.keeper, duplicate=self.duplicate)
+        self.keeper.refresh_from_db()
+        self.assertIsNone(self.keeper.person_id)
+
+    def test_exactly_one_linked_person_is_retained_on_keeper(self):
+        person = Person.objects.create(name="Linked Person")
+        self.duplicate.person = person
+        self.duplicate.save(update_fields=["person"])
+        merge_author(keeper=self.keeper, duplicate=self.duplicate)
+        self.keeper.refresh_from_db()
+        self.assertEqual(self.keeper.person_id, person.pk)
+        self.assertFalse(Author.objects.filter(pk=self.duplicate.pk).exists())
+
+        other_keeper = Author.objects.create(name="OtherKeeper")
+        other_dup = Author.objects.create(name="OtherDup")
+        other_keeper.person = person
+        other_keeper.save(update_fields=["person"])
+        merge_author(keeper=other_keeper, duplicate=other_dup)
+        other_keeper.refresh_from_db()
+        self.assertEqual(other_keeper.person_id, person.pk)
+
+    def test_same_linked_person_merge_is_allowed(self):
+        person = Person.objects.create(name="Shared Person")
+        self.keeper.person = person
+        self.keeper.save(update_fields=["person"])
+        self.duplicate.person = person
+        self.duplicate.save(update_fields=["person"])
+        item = _item(title="Same person merge", author_name="DuplicateAuthor")
+        _link(item, self.duplicate, position=0)
+        merge_author(keeper=self.keeper, duplicate=self.duplicate)
+        self.keeper.refresh_from_db()
+        self.assertEqual(self.keeper.person_id, person.pk)
+        self.assertFalse(Author.objects.filter(pk=self.duplicate.pk).exists())
+
+    def test_different_linked_persons_fail_closed_before_mutation(self):
+        keeper_person = Person.objects.create(name="Keeper Person")
+        duplicate_person = Person.objects.create(name="Duplicate Person")
+        self.keeper.person = keeper_person
+        self.keeper.save(update_fields=["person"])
+        self.duplicate.person = duplicate_person
+        self.duplicate.save(update_fields=["person"])
+        item = _item(title="Conflict merge", author_name="DuplicateAuthor")
+        _link(item, self.duplicate, position=0)
+
+        with self.assertRaises(AuthorMergeError) as ctx:
+            merge_author(keeper=self.keeper, duplicate=self.duplicate)
+        self.assertEqual(ctx.exception.message, AUTHOR_MERGE_PERSON_CONFLICT_ERROR)
+
+        self.keeper.refresh_from_db()
+        self.duplicate.refresh_from_db()
+        self.assertEqual(self.keeper.person_id, keeper_person.pk)
+        self.assertEqual(self.duplicate.person_id, duplicate_person.pk)
+        self.assertEqual(_order(item), [self.duplicate.pk])
+        self.assertTrue(Author.objects.filter(pk=self.duplicate.pk).exists())
+
+        preview = preview_author_merge(keeper=self.keeper, duplicate=self.duplicate)
+        self.assertFalse(preview.can_execute)
+        self.assertIn(AUTHOR_MERGE_PERSON_CONFLICT_ERROR, preview.blockers)
+        self.assertEqual(preview.keeper_person_id, keeper_person.pk)
+        self.assertEqual(preview.duplicate_person_id, duplicate_person.pk)
+        self.assertEqual(_order(item), [self.duplicate.pk])

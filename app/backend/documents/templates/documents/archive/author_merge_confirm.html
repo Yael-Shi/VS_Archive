@@ -45,12 +45,28 @@
       <p><strong>יישאר</strong></p>
       <p>מזהה: {{ preview.keeper_id }}</p>
       <p>שם: {{ preview.keeper_name }}</p>
+      <p class="muted">
+        אדם מקושר:
+        {% if preview.keeper_person_id %}
+          מזהה {{ preview.keeper_person_id }}
+        {% else %}
+          אין
+        {% endif %}
+      </p>
 
       <div class="spacer"></div>
       <h2>רשומה שתימחק</h2>
       <p><strong>יימחק</strong></p>
       <p>מזהה: {{ preview.duplicate_id }}</p>
       <p>שם: {{ preview.duplicate_name }}</p>
+      <p class="muted">
+        אדם מקושר:
+        {% if preview.duplicate_person_id %}
+          מזהה {{ preview.duplicate_person_id }}
+        {% else %}
+          אין
+        {% endif %}
+      </p>
 
       {% if preview.names_differ %}
         <p>השם הציבורי ייבנה משם הרשומה שתישאר. שם הרשומה הכפולה לא יישמר כשם חלופי.</p>

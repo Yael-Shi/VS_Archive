@@ -437,6 +437,7 @@ class PersonMergeServiceTests(TestCase):
         item = _item(title="Linked")
         ArchiveItemPerson.objects.create(archive_item=item, person=duplicate)
         suggestion = _suggestion(item, duplicate)
+        author = Author.objects.create(name="Linked bibliographic", person=duplicate)
 
         with patch(
             "documents.services.person_merge.sync_archive_item_search_indexes",
@@ -461,6 +462,8 @@ class PersonMergeServiceTests(TestCase):
         )
         self.assertEqual(suggestion.person_id, duplicate.pk)
         self.assertFalse(PersonAlias.objects.filter(person=keeper).exists())
+        author.refresh_from_db()
+        self.assertEqual(author.person_id, duplicate.pk)
 
     def test_integrity_error_after_mutation_rolls_back_and_raises_concurrency_error(
         self,
@@ -519,6 +522,41 @@ class PersonMergeServiceTests(TestCase):
         self.assertEqual(Author.objects.count(), 1)
         self.assertEqual(ArchiveItemAuthor.objects.count(), 1)
         self.assertEqual(author.name, "Separate Author")
+        self.assertIsNone(author.person_id)
+
+    def test_explicit_author_identities_on_duplicate_are_repointed(self):
+        keeper = _create_ordinary_person(name="Keeper")
+        duplicate = _create_ordinary_person(name="Duplicate")
+        same_name_decoy = _create_ordinary_person(name="Duplicate")
+        first = Author.objects.create(name="First bibliographic")
+        second = Author.objects.create(name="Second bibliographic")
+        unlinked = Author.objects.create(name="Duplicate")
+        first.person = duplicate
+        first.save(update_fields=["person"])
+        second.person = duplicate
+        second.save(update_fields=["person"])
+
+        preview = preview_person_merge(keeper_id=keeper.pk, duplicate_id=duplicate.pk)
+        self.assertEqual(preview.author_identity_count_duplicate, 2)
+        self.assertEqual(preview.author_identity_count_keeper, 0)
+        self.assertEqual(
+            [identity.author_id for identity in preview.duplicate_author_identities],
+            [first.pk, second.pk],
+        )
+
+        result = merge_persons(keeper_id=keeper.pk, duplicate_id=duplicate.pk)
+
+        self.assertEqual(result.author_identities_repointed, 2)
+        first.refresh_from_db()
+        second.refresh_from_db()
+        unlinked.refresh_from_db()
+        self.assertEqual(first.person_id, keeper.pk)
+        self.assertEqual(second.person_id, keeper.pk)
+        self.assertIsNone(unlinked.person_id)
+        self.assertEqual(keeper.author_identities.count(), 2)
+        self.assertFalse(Person.objects.filter(pk=duplicate.pk).exists())
+        self.assertTrue(Person.objects.filter(pk=same_name_decoy.pk).exists())
+        self.assertEqual(same_name_decoy.author_identities.count(), 0)
 
     def test_preview_is_read_only_and_reports_outcomes(self):
         keeper = _create_ordinary_person(name="Keeper", biography="Alpha")

@@ -70,9 +70,42 @@
       <div class="field">
         <label for="author_name">שם מחבר/ת</label>
         <input id="author_name" name="name" type="text" value="{{ author_name }}" maxlength="255" />
-        <div class="field-hint">השם הביבליוגרפי כפי שיוצג בכל הפריטים המשויכים. מחבר/ת אינו/ה רשומת אדם ואינו/ה מקושר/ת לזיהוי אנשים בתמונות.</div>
+        <div class="field-hint">השם הביבליוגרפי כפי שיוצג בכל הפריטים המשויכים. מחבר/ת אינו/ה רשומת אדם; קישור מפורש לאדם, אם קיים, נשמר בנפרד ואינו נוצר לפי שם.</div>
       </div>
       <button type="submit" class="btn btn-primary">עדכון שם מחבר/ת</button>
+    </form>
+
+    <div class="spacer"></div>
+    <h2>קישור לרשומת אדם</h2>
+    <p class="muted">
+      קישור מפורש לפי מזהה אדם בלבד. מחבר/ת ואדם נשארים זהויות נפרדות.
+      אין יצירת אדם מכאן, ואין קישור אוטומטי לפי שם. כמה רשומות מחבר/ת יכולות להיות מקושרות לאותו אדם.
+    </p>
+    {% if linked_person %}
+      <p>
+        מקושר כרגע: {{ linked_person.label }} (מזהה {{ linked_person.id }})
+        —
+        <a href="{% url 'archive-manage-person-edit' person_id=linked_person.id %}">עריכת אדם</a>
+      </p>
+    {% else %}
+      <p class="muted">אין קישור לרשומת אדם.</p>
+    {% endif %}
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="update_person_link" />
+      <div class="field">
+        <label for="author_person_id">אדם מקושר</label>
+        <select id="author_person_id" name="person_id">
+          <option value=""{% if not author.person_id %} selected{% endif %}>אין קישור לאדם</option>
+          {% for person in person_choices %}
+            <option value="{{ person.id }}"{% if author.person_id == person.id %} selected{% endif %}>
+              {{ person.label }} (מזהה {{ person.id }})
+            </option>
+          {% endfor %}
+        </select>
+        <div class="field-hint">בחירה מרשומות אדם קיימות לפי מזהה. שמות זהים נשארים רשומות נפרדות. בחירה ריקה מנתקת את הקישור.</div>
+      </div>
+      <button type="submit" class="btn btn-primary">עדכון קישור לאדם</button>
     </form>
 
     <div class="spacer"></div>

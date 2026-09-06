@@ -116,6 +116,7 @@ class AuthorModelTests(TestCase):
         Author.objects.create(name="Ada Lovelace")
         self.assertEqual(Person.objects.count(), 0)
         self.assertFalse(hasattr(Author(), "biography"))
+        self.assertIsNone(Author.objects.get(name="Ada Lovelace").person_id)
 
 
 class ArchiveItemAuthorRelationTests(TestCase):
