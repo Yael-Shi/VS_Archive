@@ -3,6 +3,8 @@
   <input id="title" name="title" type="text" value="{{ form_data.title }}" />
 </div>
 
+{% include "documents/archive/archive_item_authors_form_fields.html" %}
+
 <div class="field">
   <label for="public_note">הערת הארכיון</label>
   <textarea id="public_note" name="public_note" rows="3">{{ form_data.public_note }}</textarea>

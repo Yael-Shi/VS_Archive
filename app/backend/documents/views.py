@@ -1917,9 +1917,12 @@ def create_photo_upload(request):
             person_ids=parsed["archive_item_person_ids"],
             new_person_name=parsed["new_archive_item_person_name"],
             force_create_person_keys=parsed.get("force_create_person") or [],
+            **_staff_author_write_kwargs(parsed),
         )
     except ArchiveItemPersonError as exc:
         return _json_person_write_error_response(exc)
+    except ArchiveItemAuthorError as exc:
+        return JsonResponse({"error": exc.message}, status=400)
 
     return JsonResponse(
         {
@@ -4439,6 +4442,7 @@ def _photo_upload_form_context(*, user=None) -> dict:
         **empty_photo_metadata_form_data(),
         **empty_discovery_metadata_form_fields(),
         **empty_archive_item_people_form_fields(),
+        **empty_archive_item_authors_form_fields(),
     }
     return {
         "date_precision_choices": DATE_PRECISION_UI_CHOICES,
@@ -4452,6 +4456,7 @@ def _photo_upload_form_context(*, user=None) -> dict:
             item_type=ArchiveItem.ItemType.PHOTO,
             form_data=form_data,
         ),
+        **_archive_item_authors_staff_form_context(form_data),
     }
 
 
@@ -4637,6 +4642,7 @@ def _photo_form_data_from_item(item: ArchiveItem) -> dict:
         ),
         **discovery_metadata_form_data_from_item(item),
         **archive_item_people_form_data_from_item(item),
+        **archive_item_authors_form_data_from_item(item),
     }
 
 
@@ -5772,6 +5778,9 @@ def _archive_manage_edit_photo(request, item: ArchiveItem):
         form_data, form_errors, parsed_people = _parse_archive_item_people_post(
             request, form_data, form_errors
         )
+        form_data, form_errors, parsed_authors = _parse_archive_item_authors_post(
+            request, form_data, form_errors
+        )
         if not form_errors:
             try:
                 with transaction.atomic():
@@ -5785,6 +5794,7 @@ def _archive_manage_edit_photo(request, item: ArchiveItem):
                         date_precision=parsed["date_precision"],
                         metadata_status=parsed["metadata_status"],
                         public_note=parsed["public_note"],
+                        **_staff_author_write_kwargs(parsed_authors),
                     )
                     update_archive_item_discovery_metadata(
                         item,
@@ -5792,9 +5802,10 @@ def _archive_manage_edit_photo(request, item: ArchiveItem):
                         event_names=parsed_discovery["event_names"],
                         tag_names=parsed_discovery["tag_names"],
                     )
-            except ArchiveItemPersonError as exc:
+            except (ArchiveItemPersonError, ArchiveItemAuthorError) as exc:
                 form_errors = [exc.message]
-                _apply_person_name_duplicate_error(form_data, exc)
+                if isinstance(exc, ArchiveItemPersonError):
+                    _apply_person_name_duplicate_error(form_data, exc)
             else:
                 messages.success(request, ARCHIVE_ITEM_UPDATED_MSG)
                 return redirect("archive-manage-edit", item_id=item.id)

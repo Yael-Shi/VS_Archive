@@ -1,11 +1,12 @@
 """Ordered ArchiveItemAuthor relations and legacy author_name dual-write.
 
 Author is bibliographic, not Person. Callers that persist ``author_name`` on
-OCR / MANUAL_TEXT / VIDEO writers must use ``apply_legacy_author_name`` in the
-same transaction unless they pass staff ``author_ids`` / ``new_author_name``,
-which use ``apply_staff_archive_item_authors``. PHOTO writers do not dual-write.
-``apply_legacy_author_name`` does not split commas. ``rename_author`` renames one
-Author globally and rebuilds every affected ``author_name`` from its ordered links.
+OCR / MANUAL_TEXT / VIDEO / PHOTO writers must use ``apply_legacy_author_name``
+in the same transaction unless they pass staff ``author_ids`` /
+``new_author_name``, which use ``apply_staff_archive_item_authors``. PHOTO
+authorship is ArchiveItem-level only (not PhotoContent). ``apply_legacy_author_name``
+does not split commas. ``rename_author`` renames one Author globally and rebuilds
+every affected ``author_name`` from its ordered links.
 """
 
 from __future__ import annotations

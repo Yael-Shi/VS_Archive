@@ -15,6 +15,7 @@ from documents.models import (
     ArchiveItem,
     ArchiveItemAuthor,
     Author,
+    PhotoContent,
 )
 from documents.services.archive_advanced_search import (
     archive_advanced_filter_choice_context,
@@ -91,6 +92,30 @@ class ArchiveAdvancedAuthorFilterTests(TestCase):
         resp = self.client.get(self.url, {"author": str(first.id), "advanced": "1"})
         self.assertEqual(resp.context["total_count"], 1)
         self.assertEqual([item.pk for item in resp.context["items"]], [match.pk])
+
+    def test_renderable_photo_aia_matches_author_filter(self):
+        author = Author.objects.create(name="Photo Advanced Author")
+        item = ArchiveItem.objects.create(
+            item_type=ArchiveItem.ItemType.PHOTO,
+            title="Photo advanced album",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        PhotoContent.objects.create(
+            archive_item=item,
+            position=1,
+            original_file_key="photos/adv/original.jpg",
+            original_filename="photo.jpg",
+            original_mime_type="image/jpeg",
+            original_size_bytes=1024,
+            upload_status=PhotoContent.UploadStatus.UPLOADED,
+        )
+        _link(item, author, position=0)
+        other = _public_manual("Not this photo author")
+        resp = self.client.get(self.url, {"author": str(author.id), "advanced": "1"})
+        self.assertEqual(resp.context["total_count"], 1)
+        self.assertEqual([row.pk for row in resp.context["items"]], [item.pk])
+        self.assertContains(resp, "Photo advanced album")
+        self.assertNotContains(resp, other.title)
 
     def test_duplicate_author_names_remain_distinct_filter_identities(self):
         earlier = Author.objects.create(name="Same Filter Name")
