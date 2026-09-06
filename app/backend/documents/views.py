@@ -296,7 +296,9 @@ from documents.services.author_public import (
     public_author_archive_items_queryset,
 )
 from documents.services.person_public import (
+    apply_matching_photo_presentation_to_cards,
     build_person_public_item_cards,
+    matching_photo_ids_for_selected_persons,
     public_person_archive_items_queryset,
 )
 from documents.services.public_people_directory import (
@@ -5331,6 +5333,17 @@ def archive_list_page(request):
         page_items,
         search_query=search_query,
     )
+    if advanced_filters.person_ids:
+        photo_id_by_item_id = matching_photo_ids_for_selected_persons(
+            [item.pk for item in page_items],
+            advanced_filters.person_ids,
+        )
+        browse_cards = apply_matching_photo_presentation_to_cards(
+            browse_cards,
+            photo_id_by_item_id,
+            bucket=getattr(settings, "UPLOADS_BUCKET_NAME", ""),
+            expires_in=PRESIGNED_GET_EXPIRY_SECONDS,
+        )
     # PR4: snippets/match-source only for the authorized page slice (no N+1).
     browse_cards = apply_archive_search_match_presentation_to_cards(
         browse_cards,
