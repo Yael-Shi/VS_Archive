@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import replace
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime, timedelta, timezone as dt_timezone
 from io import StringIO
 from typing import TypedDict
 from unittest.mock import patch
@@ -13,6 +14,8 @@ from django.utils import timezone
 
 from documents.management.commands.run_worker import Command as RunWorkerCommand
 from documents.models import (
+    ArabicPrintedOcrAttempt,
+    ArabicPrintedOcrPageCheckpoint,
     Document,
     DocumentTextResult,
     GeminiOcrAttempt,
@@ -21,7 +24,33 @@ from documents.models import (
     TranskribusRun,
 )
 from documents.services.archive_items import create_ocr_document
+from documents.services.arabic_printed_banded_document_ocr import (
+    ArabicPrintedDocumentPageInput,
+    process_arabic_printed_banded_document,
+)
+from documents.services.arabic_printed_banded_ocr import (
+    AMBIGUOUS_BAND_FAILURE_CODES,
+    BAND_FAILURE_PRIMARY_AMBIGUOUS,
+    OUTCOME_FAILED,
+    PAGE_FAILURE_VISION_AMBIGUOUS,
+    ArabicPrintedBandedPageResult,
+)
+from documents.services.arabic_printed_page_checkpoints import (
+    ArabicPrintedBandPlan,
+    ArabicPrintedPageSource,
+    build_arabic_printed_attempt_identity,
+    claim_arabic_printed_page,
+    ensure_arabic_printed_page_checkpoints,
+    get_or_create_arabic_printed_attempt,
+    persist_arabic_printed_band_failure,
+    persist_arabic_printed_page_failure,
+    persist_arabic_printed_vision_plan,
+    reserve_arabic_printed_primary_create,
+    reserve_arabic_printed_vision_call,
+)
+from documents.services.cloud_vision_document_text import ArabicPrintedWorkingImage
 from documents.services.env_validation import WorkerEnvConfig
+from documents.services import ocr_reprocess as ocr_reprocess_service
 from documents.services.gemini_engine import GeminiResult
 from documents.services.htr_adapters.base import HtrResult
 from documents.services.ocr_reprocess import (
@@ -752,6 +781,381 @@ class AntigravityPartialOcrReprocessTests(TransactionTestCase):
             ProcessDocumentRequest.OcrRetryMode.NORMAL_REENQUEUE,
         )
         mock_enqueue.assert_called_once_with(request.pk)
+
+
+_AR_PAGE_WIDTH = 1000
+_AR_PAGE_HEIGHT = 2000
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _arabic_printed_page_sources(*labels: bytes) -> list[ArabicPrintedPageSource]:
+    pages: list[ArabicPrintedPageSource] = []
+    for index, label in enumerate(labels):
+        pages.append(
+            ArabicPrintedPageSource(
+                page_index=index,
+                mime_type="image/jpeg",
+                source_identity="document.pdf",
+                source_content_fingerprint=_sha256_bytes(label),
+                oriented_image_sha256=_sha256_bytes(label + b"-oriented"),
+                oriented_image_width=_AR_PAGE_WIDTH,
+                oriented_image_height=_AR_PAGE_HEIGHT,
+            )
+        )
+    return pages
+
+
+class ArabicPrintedBandedPartialOcrReprocessTests(TransactionTestCase):
+    def _partial_arabic_printed_document(self) -> Document:
+        return create_ocr_document(
+            title="Arabic printed banded PARTIAL without SOURCE_TEXT",
+            doc_type=Document.DocType.PDF,
+            language=Document.Language.ARABIC,
+            text_input_type=Document.TextInputType.PRINTED,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.PARTIAL,
+            file_s3_key="documents/banded-partial/source/0.jpeg",
+            mime_type="image/jpeg",
+        )
+
+    def _seed_attempt(self, doc: Document, *labels: bytes):
+        pages = _arabic_printed_page_sources(*labels)
+        identity = build_arabic_printed_attempt_identity(
+            pages=pages,
+            language_hint=Document.Language.ARABIC,
+            text_input_type=Document.TextInputType.PRINTED,
+            engine_key="ANTIGRAVITY",
+            prompt_variant="printed",
+        )
+        attempt = get_or_create_arabic_printed_attempt(
+            document_id=doc.id,
+            identity=identity,
+        )
+        ensure_arabic_printed_page_checkpoints(
+            attempt_id=attempt.id,
+            identity=identity,
+        )
+        return identity, attempt, pages
+
+    def _claim_page(self, attempt, identity, page_index: int):
+        return claim_arabic_printed_page(
+            attempt_id=attempt.id,
+            page_index=page_index,
+            page_fingerprint=identity.page_fingerprints[page_index],
+            source_content_fingerprint=identity.source_content_fingerprints[page_index],
+            oriented_image_sha256=identity.oriented_image_sha256s[page_index],
+        )
+
+    def _fail_page_deadline(self, attempt, identity, page_index: int = 0):
+        claim = self._claim_page(attempt, identity, page_index)
+        persist_arabic_printed_page_failure(
+            checkpoint_id=claim.checkpoint_id,
+            lease_token=claim.lease_token,
+            failure_code="ARABIC_PRINTED_DOCUMENT_DEADLINE",
+            failure_message=f"insufficient page start budget page_index={page_index}",
+        )
+        return claim
+
+    def _fence_vision_ambiguous(self, attempt, identity, page_index: int = 0):
+        claim = self._claim_page(attempt, identity, page_index)
+        reserve_arabic_printed_vision_call(
+            checkpoint_id=claim.checkpoint_id,
+            lease_token=claim.lease_token,
+        )
+        persist_arabic_printed_page_failure(
+            checkpoint_id=claim.checkpoint_id,
+            lease_token=claim.lease_token,
+            failure_code=PAGE_FAILURE_VISION_AMBIGUOUS,
+            failure_message="vision reserved without a durable plan",
+        )
+        return claim
+
+    def test_fence_code_constants_match_banded_orchestrator(self):
+        self.assertEqual(
+            ocr_reprocess_service._ARABIC_PRINTED_VISION_AMBIGUOUS,
+            PAGE_FAILURE_VISION_AMBIGUOUS,
+        )
+        self.assertEqual(
+            ocr_reprocess_service._ARABIC_PRINTED_AMBIGUOUS_BAND_FAILURE_CODES,
+            AMBIGUOUS_BAND_FAILURE_CODES,
+        )
+
+    def test_partial_without_source_and_resumable_checkpoints_is_eligible(self):
+        doc = self._partial_arabic_printed_document()
+        identity, attempt, _pages = self._seed_attempt(doc, b"page-a", b"page-b")
+        self._fail_page_deadline(attempt, identity, 0)
+
+        self.assertFalse(DocumentTextResult.objects.filter(document=doc).exists())
+        self.assertTrue(is_ocr_reprocess_ui_eligible(doc))
+
+        assessment = assess_ocr_reprocess(
+            doc.id,
+            collection_id=COLLECTION_ID,
+            model_id=MODEL_ID,
+        )
+        self.assertEqual(assessment.retry_mode, OcrRetryMode.NORMAL_REENQUEUE)
+        self.assertIsNone(assessment.source_transkribus_run_id)
+
+    def test_partial_without_source_or_arabic_resume_evidence_is_ineligible(self):
+        doc = self._partial_arabic_printed_document()
+
+        self.assertFalse(DocumentTextResult.objects.filter(document=doc).exists())
+        self.assertFalse(is_ocr_reprocess_ui_eligible(doc))
+        with self.assertRaises(OcrReprocessError) as ctx:
+            assess_ocr_reprocess(
+                doc.id,
+                collection_id=COLLECTION_ID,
+                model_id=MODEL_ID,
+            )
+        self.assertIn("not eligible for OCR reprocess", str(ctx.exception))
+
+    def test_partial_vision_ambiguous_only_is_not_resumable(self):
+        doc = self._partial_arabic_printed_document()
+        identity, attempt, _pages = self._seed_attempt(doc, b"only")
+        self._fence_vision_ambiguous(attempt, identity, 0)
+
+        self.assertFalse(is_ocr_reprocess_ui_eligible(doc))
+        with self.assertRaises(OcrReprocessError):
+            assess_ocr_reprocess(
+                doc.id,
+                collection_id=COLLECTION_ID,
+                model_id=MODEL_ID,
+            )
+
+    def test_partial_mixed_fenced_and_planning_pages_is_eligible(self):
+        doc = self._partial_arabic_printed_document()
+        identity, attempt, _pages = self._seed_attempt(doc, b"page-a", b"page-b")
+        self._fence_vision_ambiguous(attempt, identity, 0)
+
+        self.assertTrue(is_ocr_reprocess_ui_eligible(doc))
+
+    def test_partial_ambiguous_band_only_is_not_resumable(self):
+        doc = self._partial_arabic_printed_document()
+        identity, attempt, _pages = self._seed_attempt(doc, b"only")
+        claim = self._claim_page(attempt, identity, 0)
+        reserve_arabic_printed_vision_call(
+            checkpoint_id=claim.checkpoint_id,
+            lease_token=claim.lease_token,
+        )
+        draft = "مسودة"
+        persist_arabic_printed_vision_plan(
+            checkpoint_id=claim.checkpoint_id,
+            lease_token=claim.lease_token,
+            cloud_vision_response_sha256=_sha256_bytes(b"vision-response"),
+            bands=[
+                ArabicPrintedBandPlan(
+                    band_index=0,
+                    rect_x=0,
+                    rect_y=0,
+                    rect_width=_AR_PAGE_WIDTH,
+                    rect_height=40,
+                    crop_mime="image/jpeg",
+                    crop_byte_length=12,
+                    crop_sha256=_sha256_bytes(b"crop-0"),
+                    vision_draft_text=draft,
+                    vision_draft_byte_length=len(draft.encode("utf-8")),
+                    vision_draft_sha256=hashlib.sha256(
+                        draft.encode("utf-8")
+                    ).hexdigest(),
+                )
+            ],
+        )
+        reserve_arabic_printed_primary_create(
+            checkpoint_id=claim.checkpoint_id,
+            lease_token=claim.lease_token,
+            band_index=0,
+        )
+        persist_arabic_printed_band_failure(
+            checkpoint_id=claim.checkpoint_id,
+            lease_token=claim.lease_token,
+            band_index=0,
+            failure_code=BAND_FAILURE_PRIMARY_AMBIGUOUS,
+            failure_message="primary reserved without an interaction id",
+        )
+        persist_arabic_printed_page_failure(
+            checkpoint_id=claim.checkpoint_id,
+            lease_token=claim.lease_token,
+            failure_code="ARABIC_PRINTED_BANDS_UNRESOLVED",
+            failure_message="band_index=0 did not reach success",
+        )
+
+        self.assertFalse(is_ocr_reprocess_ui_eligible(doc))
+
+    def test_stale_prompt_contract_attempt_is_not_eligible(self):
+        doc = self._partial_arabic_printed_document()
+        pages = _arabic_printed_page_sources(b"stale")
+        identity = build_arabic_printed_attempt_identity(
+            pages=pages,
+            language_hint=Document.Language.ARABIC,
+            text_input_type=Document.TextInputType.PRINTED,
+            engine_key="ANTIGRAVITY",
+            prompt_variant="printed",
+            prompt_contract_version="arabic-printed-banded-prompt-stale",
+        )
+        attempt = get_or_create_arabic_printed_attempt(
+            document_id=doc.id,
+            identity=identity,
+        )
+        ensure_arabic_printed_page_checkpoints(
+            attempt_id=attempt.id,
+            identity=identity,
+        )
+        self._fail_page_deadline(attempt, identity, 0)
+
+        self.assertFalse(is_ocr_reprocess_ui_eligible(doc))
+
+    def test_older_source_attempt_does_not_override_latest_fenced_attempt(self):
+        doc = self._partial_arabic_printed_document()
+        old_identity, old_attempt, _old_pages = self._seed_attempt(doc, b"older-source")
+        self._fail_page_deadline(old_attempt, old_identity, 0)
+        new_identity, new_attempt, _new_pages = self._seed_attempt(doc, b"newer-source")
+        self._fence_vision_ambiguous(new_attempt, new_identity, 0)
+
+        self.assertGreater(new_attempt.pk, old_attempt.pk)
+        self.assertFalse(is_ocr_reprocess_ui_eligible(doc))
+
+    def test_current_contract_attempt_remains_eligible_when_older_stale_exists(self):
+        doc = self._partial_arabic_printed_document()
+        stale_pages = _arabic_printed_page_sources(b"stale")
+        stale_identity = build_arabic_printed_attempt_identity(
+            pages=stale_pages,
+            language_hint=Document.Language.ARABIC,
+            text_input_type=Document.TextInputType.PRINTED,
+            engine_key="ANTIGRAVITY",
+            prompt_variant="printed",
+            prompt_contract_version="arabic-printed-banded-prompt-stale",
+        )
+        stale_attempt = get_or_create_arabic_printed_attempt(
+            document_id=doc.id,
+            identity=stale_identity,
+        )
+        ensure_arabic_printed_page_checkpoints(
+            attempt_id=stale_attempt.id,
+            identity=stale_identity,
+        )
+        self._fence_vision_ambiguous(stale_attempt, stale_identity, 0)
+
+        current_identity, current_attempt, _pages = self._seed_attempt(
+            doc, b"current-source"
+        )
+        self._fail_page_deadline(current_attempt, current_identity, 0)
+
+        self.assertTrue(is_ocr_reprocess_ui_eligible(doc))
+
+    def test_actively_leased_running_page_is_not_eligible(self):
+        doc = self._partial_arabic_printed_document()
+        identity, attempt, _pages = self._seed_attempt(doc, b"only")
+        claim = self._claim_page(attempt, identity, 0)
+        page = ArabicPrintedOcrPageCheckpoint.objects.get(pk=claim.checkpoint_id)
+        self.assertEqual(page.status, ArabicPrintedOcrPageCheckpoint.Status.RUNNING)
+        self.assertGreater(page.lease_expires_at, timezone.now())
+
+        self.assertFalse(is_ocr_reprocess_ui_eligible(doc))
+
+    def test_expired_running_page_is_eligible(self):
+        doc = self._partial_arabic_printed_document()
+        identity, attempt, _pages = self._seed_attempt(doc, b"only")
+        claim = self._claim_page(attempt, identity, 0)
+        ArabicPrintedOcrPageCheckpoint.objects.filter(pk=claim.checkpoint_id).update(
+            lease_expires_at=timezone.now() - timedelta(seconds=1)
+        )
+
+        self.assertTrue(is_ocr_reprocess_ui_eligible(doc))
+
+    @patch(
+        "documents.services.process_document_request_enqueue."
+        "send_process_document_request_message"
+    )
+    @patch(
+        "documents.services.arabic_printed_banded_document_ocr."
+        "process_claimed_arabic_printed_page"
+    )
+    def test_reprocess_reuses_worker_selected_attempt(
+        self, mock_claimed, mock_enqueue
+    ):
+        doc = self._partial_arabic_printed_document()
+        identity, attempt, pages = self._seed_attempt(doc, b"page-a", b"page-b")
+        self._fail_page_deadline(attempt, identity, 0)
+        page_ids = list(
+            ArabicPrintedOcrPageCheckpoint.objects.filter(attempt=attempt)
+            .order_by("page_index")
+            .values_list("pk", flat=True)
+        )
+
+        apply_ocr_reprocess(
+            doc.id,
+            collection_id=COLLECTION_ID,
+            model_id=MODEL_ID,
+        )
+
+        def _fake_claimed(*, claim, **_kwargs):
+            checkpoint = ArabicPrintedOcrPageCheckpoint.objects.get(
+                pk=claim.checkpoint_id
+            )
+            return ArabicPrintedBandedPageResult(
+                checkpoint_id=checkpoint.id,
+                page_index=checkpoint.page_index,
+                outcome=OUTCOME_FAILED,
+                assembled_text="",
+                page_quality="",
+                runtime_engine_marker="",
+                failure_code="ARABIC_PRINTED_DOCUMENT_DEADLINE",
+            )
+
+        mock_claimed.side_effect = _fake_claimed
+        page_inputs = [
+            ArabicPrintedDocumentPageInput(
+                page_index=page.page_index,
+                mime_type=page.mime_type,
+                source_identity=page.source_identity,
+                source_content_fingerprint=page.source_content_fingerprint,
+                oriented_image_sha256=page.oriented_image_sha256,
+                oriented_image_width=page.oriented_image_width,
+                oriented_image_height=page.oriented_image_height,
+            )
+            for page in pages
+        ]
+        working = {
+            page.page_index: ArabicPrintedWorkingImage(
+                width=page.oriented_image_width,
+                height=page.oriented_image_height,
+                jpeg_bytes=b"",
+                mime_type="image/jpeg",
+                sha256=page.oriented_image_sha256,
+                byte_length=0,
+                rgb_pixels=b"",
+            )
+            for page in pages
+        }
+
+        result = process_arabic_printed_banded_document(
+            document_id=doc.id,
+            pages=page_inputs,
+            load_working_image=working.__getitem__,
+            gemini_api_key="gemini-test-key-DO-NOT-LEAK",
+            cloud_vision_api_key="vision-test-key-DO-NOT-LEAK",
+            absolute_deadline_monotonic=10_000.0,
+            language_hint=Document.Language.ARABIC,
+            text_input_type=Document.TextInputType.PRINTED,
+            engine_key="ANTIGRAVITY",
+            prompt_variant="printed",
+        )
+
+        self.assertEqual(result.attempt_id, attempt.id)
+        self.assertEqual(ArabicPrintedOcrAttempt.objects.filter(document=doc).count(), 1)
+        self.assertEqual(
+            list(
+                ArabicPrintedOcrPageCheckpoint.objects.filter(attempt_id=attempt.id)
+                .order_by("page_index")
+                .values_list("pk", flat=True)
+            ),
+            page_ids,
+        )
+        mock_enqueue.assert_called_once()
+        self.assertFalse(DocumentTextResult.objects.filter(document=doc).exists())
 
 
 class GeminiPartialOcrReprocessTests(TransactionTestCase):
