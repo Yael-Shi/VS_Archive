@@ -6,7 +6,7 @@ Author with public ArchiveItemAuthor membership. Name equality is not identity.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from django.db.models import Exists, OuterRef, Q, QuerySet, Subquery
@@ -276,6 +276,66 @@ def _first_matching_photo_id(archive_item: ArchiveItem) -> int | None:
     return photo_id
 
 
+def matching_photo_ids_for_selected_persons(
+    item_ids: Iterable[int],
+    person_ids: Sequence[int],
+) -> dict[int, int]:
+    """Map page ArchiveItem id → presentation PhotoContent id for ``person=``.
+
+    One batched ``PhotoPerson`` query over the given item ids, selected Person
+    ids, and renderable ``PhotoContent`` only. Does not infer ArchiveItemPerson,
+    does not read ``people_present``, and does not change filter membership.
+
+    ``|S| == 1``: earliest renderable photo containing that Person, by
+    ``(position, id)``.
+    ``|S| >= 2``: earliest renderable photo whose PhotoPerson set among the
+    selected ids is a superset of S; omit the item when no such photo exists.
+    """
+    selected = tuple(
+        person_id for person_id in (int(value) for value in person_ids) if person_id >= 1
+    )
+    page_ids = [
+        item_id for item_id in (int(value) for value in item_ids) if item_id >= 1
+    ]
+    if not selected or not page_ids:
+        return {}
+
+    selected_set = set(selected)
+    rows = PhotoPerson.objects.filter(
+        person_id__in=selected,
+        photo_content__archive_item_id__in=page_ids,
+        photo_content__in=renderable_photo_contents_queryset(),
+    ).values_list(
+        "photo_content__archive_item_id",
+        "person_id",
+        "photo_content_id",
+        "photo_content__position",
+    )
+
+    photos: dict[tuple[int, int], tuple[int, set[int]]] = {}
+    for item_id, person_id, photo_id, position in rows:
+        key = (int(item_id), int(photo_id))
+        if key not in photos:
+            photos[key] = (int(position), set())
+        photos[key][1].add(int(person_id))
+
+    require_all = len(selected_set) > 1
+    candidates_by_item: dict[int, list[tuple[int, int]]] = {}
+    for (item_id, photo_id), (position, persons) in photos.items():
+        if require_all:
+            if not selected_set <= persons:
+                continue
+        elif selected_set.isdisjoint(persons):
+            continue
+        candidates_by_item.setdefault(item_id, []).append((position, photo_id))
+
+    chosen: dict[int, int] = {}
+    for item_id, candidates in candidates_by_item.items():
+        candidates.sort()
+        chosen[item_id] = candidates[0][1]
+    return chosen
+
+
 def person_public_item_detail_url(
     *,
     archive_item_id: int,
@@ -285,6 +345,58 @@ def person_public_item_detail_url(
     if first_matching_photo_id is not None:
         return public_photo_detail_url(archive_item_id, first_matching_photo_id)
     return public_photo_detail_url(archive_item_id)
+
+
+def apply_matching_photo_presentation_to_cards(
+    cards: Sequence[ArchiveBrowseCard],
+    photo_id_by_item_id: Mapping[int, int],
+    *,
+    bucket: str,
+    expires_in: int = 3600,
+) -> list[ArchiveBrowseCard]:
+    """Override card href and thumbnail from a page-slice photo-id map.
+
+    Used by Person detail and advanced ``person=`` archive-list presentation.
+    Matching PhotoContent rows are loaded in one query. A missing thumbnail
+    key yields ``thumbnail_url=None`` even when the primary photo had a thumb
+    (same as Person detail).
+    """
+    if not photo_id_by_item_id:
+        return list(cards)
+
+    photo_ids = [
+        photo_id for photo_id in photo_id_by_item_id.values() if int(photo_id) >= 1
+    ]
+    photos_by_id = {
+        photo.pk: photo for photo in PhotoContent.objects.filter(pk__in=photo_ids)
+    }
+    built: list[ArchiveBrowseCard] = []
+    for card in cards:
+        raw_photo_id = photo_id_by_item_id.get(card.item.pk)
+        if raw_photo_id is None:
+            built.append(card)
+            continue
+        photo_id = int(raw_photo_id)
+        if photo_id < 1:
+            built.append(card)
+            continue
+        photo = photos_by_id.get(photo_id)
+        thumbnail_url = None
+        if photo is not None:
+            thumbnail_url = presign_photo_thumbnail_url(
+                photo, bucket=bucket, expires_in=expires_in
+            )
+        built.append(
+            replace(
+                card,
+                detail_url=person_public_item_detail_url(
+                    archive_item_id=card.item.pk,
+                    first_matching_photo_id=photo_id,
+                ),
+                thumbnail_url=thumbnail_url,
+            )
+        )
+    return built
 
 
 def build_person_public_item_cards(
@@ -306,34 +418,14 @@ def build_person_public_item_cards(
     cards = apply_document_thumbnail_urls_to_browse_cards(
         cards, bucket=bucket, expires_in=expires_in
     )
-    photo_ids = [
-        photo_id
-        for photo_id in (_first_matching_photo_id(item) for item in items)
-        if photo_id is not None
-    ]
-    photos_by_id = {
-        photo.pk: photo for photo in PhotoContent.objects.filter(pk__in=photo_ids)
-    }
-    built: list[ArchiveBrowseCard] = []
-    for item, card in zip(items, cards, strict=True):
+    photo_id_by_item_id: dict[int, int] = {}
+    for item in items:
         photo_id = _first_matching_photo_id(item)
-        if photo_id is None:
-            built.append(card)
-            continue
-        photo = photos_by_id.get(photo_id)
-        thumbnail_url = None
-        if photo is not None:
-            thumbnail_url = presign_photo_thumbnail_url(
-                photo, bucket=bucket, expires_in=expires_in
-            )
-        built.append(
-            replace(
-                card,
-                detail_url=person_public_item_detail_url(
-                    archive_item_id=item.pk,
-                    first_matching_photo_id=photo_id,
-                ),
-                thumbnail_url=thumbnail_url,
-            )
-        )
-    return built
+        if photo_id is not None:
+            photo_id_by_item_id[item.pk] = photo_id
+    return apply_matching_photo_presentation_to_cards(
+        cards,
+        photo_id_by_item_id,
+        bucket=bucket,
+        expires_in=expires_in,
+    )

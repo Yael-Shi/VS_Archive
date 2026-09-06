@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import parse_qs
 
 from django.contrib.auth.models import Group, Permission, User
 from django.contrib.contenttypes.models import ContentType
 from django.db import connection
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import NoReverseMatch, reverse
 
@@ -46,6 +47,10 @@ from documents.services.archive_items import (
     create_video_archive_item,
     update_archive_item_discovery_metadata,
 )
+from documents.services.archive_search_index import rebuild_archive_item_search_index
+from documents.services.archive_search_snippets import MATCH_SOURCE_ITEM_DETAILS
+from documents.services.person_public import matching_photo_ids_for_selected_persons
+from documents.services.photo_gallery import public_photo_detail_url
 from documents.test_archive_item import create_viewable_ocr_document
 from documents.test_historical_person_tag_reuse import _create_tag
 
@@ -87,6 +92,7 @@ def _add_photo(
     position: int = 1,
     upload_status: str = PhotoContent.UploadStatus.UPLOADED,
     original_file_key: str | None = None,
+    thumbnail_file_key: str = "",
 ) -> PhotoContent:
     key = (
         f"photos/{item.pk}-{position}/original.jpg"
@@ -102,6 +108,7 @@ def _add_photo(
         original_size_bytes=1024,
         upload_status=upload_status,
         upload_error="",
+        thumbnail_file_key=thumbnail_file_key,
     )
 
 
@@ -117,6 +124,17 @@ def _grant_restricted_permission(user: User) -> User:
     if hasattr(user, "_user_perm_cache"):
         delattr(user, "_user_perm_cache")
     return user
+
+
+def _photoperson_select_count(captured_queries) -> int:
+    count = 0
+    for query in captured_queries:
+        sql = query["sql"].lower().replace('"', "")
+        if not sql.lstrip().startswith("select"):
+            continue
+        if "documents_photoperson" in sql:
+            count += 1
+    return count
 
 
 def _person_related_query_count(captured_queries) -> int:
@@ -1206,6 +1224,334 @@ class ArchiveAdvancedPersonFilterUiTests(TestCase):
         same_ids = [pk for name, pk in names_and_ids if name == "Same"]
         self.assertEqual(same_ids, sorted(same_ids))
         self.assertEqual(same_ids, [same_a.pk, same_b.pk])
+
+
+@override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
+class ArchiveAdvancedPersonFilterPhotoPresentationTests(TestCase):
+    def setUp(self):
+        self.url = reverse("archive-list")
+
+    def _list_cards(self, *person_ids: int, extra: list[tuple[str, str]] | None = None):
+        params: list[tuple[str, str]] = [("person", str(person_id)) for person_id in person_ids]
+        if extra:
+            params.extend(extra)
+        with patch(
+            "documents.services.photo_archive_urls.create_presigned_get",
+            side_effect=lambda bucket, key, expires_in: f"https://s3.example/{key}",
+        ):
+            resp = self.client.get(self.url, params)
+        self.assertEqual(resp.status_code, 200)
+        return resp
+
+    def test_aip_only_photo_keeps_item_url_and_primary_thumbnail(self):
+        person = Person.objects.create(name="AIP Only Photo")
+        item = _create_photo_item(title="AIP only album")
+        primary = _add_photo(
+            item, position=1, thumbnail_file_key="photos/aip/primary.jpg"
+        )
+        _add_photo(item, position=2, thumbnail_file_key="photos/aip/other.jpg")
+        ArchiveItemPerson.objects.create(archive_item=item, person=person)
+
+        resp = self._list_cards(person.id)
+        self.assertEqual(len(resp.context["browse_cards"]), 1)
+        card = resp.context["browse_cards"][0]
+        self.assertEqual(
+            card.detail_url, reverse("archive-detail", kwargs={"item_id": item.id})
+        )
+        self.assertNotIn("photo=", card.detail_url)
+        self.assertEqual(
+            card.thumbnail_url, f"https://s3.example/{primary.thumbnail_file_key}"
+        )
+
+    def test_photoperson_only_uses_matching_photo_url_and_thumbnail(self):
+        person = Person.objects.create(name="PP Only")
+        item = _create_photo_item(title="PP only album")
+        photo = _add_photo(
+            item, position=1, thumbnail_file_key="photos/pp-only/match.jpg"
+        )
+        PhotoPerson.objects.create(photo_content=photo, person=person)
+
+        resp = self._list_cards(person.id)
+        card = resp.context["browse_cards"][0]
+        self.assertEqual(card.detail_url, public_photo_detail_url(item.id, photo.id))
+        self.assertEqual(
+            card.thumbnail_url, f"https://s3.example/{photo.thumbnail_file_key}"
+        )
+
+    def test_aip_and_photoperson_still_one_card_with_matching_photo(self):
+        person = Person.objects.create(name="Both Relations Card")
+        item = _create_photo_item(title="Dual relation album")
+        photo = _add_photo(item, thumbnail_file_key="photos/dual/match.jpg")
+        PhotoPerson.objects.create(photo_content=photo, person=person)
+        ArchiveItemPerson.objects.create(archive_item=item, person=person)
+
+        resp = self._list_cards(person.id)
+        self.assertEqual(len(resp.context["browse_cards"]), 1)
+        self.assertEqual(resp.context["total_count"], 1)
+        card = resp.context["browse_cards"][0]
+        self.assertEqual(card.detail_url, public_photo_detail_url(item.id, photo.id))
+
+    def test_several_matching_photos_use_earliest_position_then_id(self):
+        person = Person.objects.create(name="Several Photos")
+        item = _create_photo_item(title="Several matching photos")
+        first = _add_photo(item, position=1, thumbnail_file_key="photos/several/1.jpg")
+        second = _add_photo(item, position=2, thumbnail_file_key="photos/several/2.jpg")
+        PhotoPerson.objects.create(photo_content=first, person=person)
+        PhotoPerson.objects.create(photo_content=second, person=person)
+
+        resp = self._list_cards(person.id)
+        card = resp.context["browse_cards"][0]
+        self.assertEqual(card.detail_url, public_photo_detail_url(item.id, first.id))
+        self.assertEqual(
+            card.thumbnail_url, f"https://s3.example/{first.thumbnail_file_key}"
+        )
+        self.assertNotEqual(
+            card.detail_url, public_photo_detail_url(item.id, second.id)
+        )
+
+    def test_earlier_non_renderable_match_loses_to_later_renderable_match(self):
+        person = Person.objects.create(name="Skip Pending Match")
+        item = _create_photo_item(title="Pending then renderable")
+        _add_photo(item, position=1, thumbnail_file_key="photos/skip/primary.jpg")
+        pending = _add_photo(
+            item,
+            position=2,
+            upload_status=PhotoContent.UploadStatus.PENDING,
+            original_file_key="",
+            thumbnail_file_key="photos/skip/pending.jpg",
+        )
+        later = _add_photo(item, position=3, thumbnail_file_key="photos/skip/later.jpg")
+        PhotoPerson.objects.create(photo_content=pending, person=person)
+        PhotoPerson.objects.create(photo_content=later, person=person)
+
+        resp = self._list_cards(person.id)
+        card = resp.context["browse_cards"][0]
+        self.assertEqual(card.detail_url, public_photo_detail_url(item.id, later.id))
+        self.assertEqual(
+            card.thumbnail_url, f"https://s3.example/{later.thumbnail_file_key}"
+        )
+
+    def test_matching_photoperson_overrides_primary_photo_thumbnail(self):
+        person = Person.objects.create(name="Not Primary")
+        item = _create_photo_item(title="Match is later photo")
+        primary = _add_photo(item, position=1, thumbnail_file_key="photos/np/primary.jpg")
+        matching = _add_photo(item, position=2, thumbnail_file_key="photos/np/match.jpg")
+        PhotoPerson.objects.create(photo_content=matching, person=person)
+
+        resp = self._list_cards(person.id)
+        card = resp.context["browse_cards"][0]
+        self.assertEqual(card.detail_url, public_photo_detail_url(item.id, matching.id))
+        self.assertEqual(
+            card.thumbnail_url, f"https://s3.example/{matching.thumbnail_file_key}"
+        )
+        self.assertNotEqual(
+            card.thumbnail_url, f"https://s3.example/{primary.thumbnail_file_key}"
+        )
+
+    def test_two_people_on_different_photos_keep_album_url(self):
+        ada = Person.objects.create(name="Ada Split")
+        charles = Person.objects.create(name="Charles Split")
+        item = _create_photo_item(title="Split appearances")
+        primary = _add_photo(item, position=1, thumbnail_file_key="photos/split/1.jpg")
+        second = _add_photo(item, position=2, thumbnail_file_key="photos/split/2.jpg")
+        PhotoPerson.objects.create(photo_content=primary, person=ada)
+        PhotoPerson.objects.create(photo_content=second, person=charles)
+
+        resp = self._list_cards(ada.id, charles.id)
+        self.assertEqual(resp.context["total_count"], 1)
+        card = resp.context["browse_cards"][0]
+        self.assertEqual(
+            card.detail_url, reverse("archive-detail", kwargs={"item_id": item.id})
+        )
+        self.assertNotIn("photo=", card.detail_url)
+        self.assertEqual(
+            card.thumbnail_url, f"https://s3.example/{primary.thumbnail_file_key}"
+        )
+
+    def test_two_people_on_same_photo_deep_link_that_photo(self):
+        ada = Person.objects.create(name="Ada Together")
+        charles = Person.objects.create(name="Charles Together")
+        item = _create_photo_item(title="Shared appearance")
+        _add_photo(item, position=1, thumbnail_file_key="photos/shared/primary.jpg")
+        shared = _add_photo(item, position=2, thumbnail_file_key="photos/shared/both.jpg")
+        PhotoPerson.objects.create(photo_content=shared, person=ada)
+        PhotoPerson.objects.create(photo_content=shared, person=charles)
+
+        resp = self._list_cards(ada.id, charles.id)
+        card = resp.context["browse_cards"][0]
+        self.assertEqual(card.detail_url, public_photo_detail_url(item.id, shared.id))
+        self.assertEqual(
+            card.thumbnail_url, f"https://s3.example/{shared.thumbnail_file_key}"
+        )
+
+    def test_multiple_shared_photos_use_earliest_shared(self):
+        ada = Person.objects.create(name="Ada Multi Shared")
+        charles = Person.objects.create(name="Charles Multi Shared")
+        item = _create_photo_item(title="Two shared photos")
+        _add_photo(item, position=1, thumbnail_file_key="photos/ms/primary.jpg")
+        first_shared = _add_photo(
+            item, position=2, thumbnail_file_key="photos/ms/shared-a.jpg"
+        )
+        second_shared = _add_photo(
+            item, position=3, thumbnail_file_key="photos/ms/shared-b.jpg"
+        )
+        for photo in (first_shared, second_shared):
+            PhotoPerson.objects.create(photo_content=photo, person=ada)
+            PhotoPerson.objects.create(photo_content=photo, person=charles)
+
+        resp = self._list_cards(ada.id, charles.id)
+        card = resp.context["browse_cards"][0]
+        self.assertEqual(
+            card.detail_url, public_photo_detail_url(item.id, first_shared.id)
+        )
+        self.assertNotEqual(
+            card.detail_url, public_photo_detail_url(item.id, second_shared.id)
+        )
+
+    def test_or_match_for_one_person_does_not_deep_link_when_other_is_absent(self):
+        ada = Person.objects.create(name="Ada Present")
+        charles = Person.objects.create(name="Charles Absent")
+        item = _create_photo_item(title="Only Ada appears")
+        photo = _add_photo(item, thumbnail_file_key="photos/or/ada.jpg")
+        PhotoPerson.objects.create(photo_content=photo, person=ada)
+
+        resp = self._list_cards(ada.id, charles.id)
+        self.assertEqual(resp.context["total_count"], 1)
+        card = resp.context["browse_cards"][0]
+        self.assertEqual(
+            card.detail_url, reverse("archive-detail", kwargs={"item_id": item.id})
+        )
+        self.assertNotIn("photo=", card.detail_url)
+
+    def test_aip_for_one_person_and_photoperson_for_other_keeps_album_url(self):
+        ada = Person.objects.create(name="Ada AIP Mixed")
+        charles = Person.objects.create(name="Charles PP Mixed")
+        item = _create_photo_item(title="AIP plus other photo")
+        primary = _add_photo(item, position=1, thumbnail_file_key="photos/mix/1.jpg")
+        charles_photo = _add_photo(
+            item, position=2, thumbnail_file_key="photos/mix/charles.jpg"
+        )
+        ArchiveItemPerson.objects.create(archive_item=item, person=ada)
+        PhotoPerson.objects.create(photo_content=charles_photo, person=charles)
+
+        resp = self._list_cards(ada.id, charles.id)
+        card = resp.context["browse_cards"][0]
+        self.assertEqual(
+            card.detail_url, reverse("archive-detail", kwargs={"item_id": item.id})
+        )
+        self.assertNotIn("photo=", card.detail_url)
+        self.assertEqual(
+            card.thumbnail_url, f"https://s3.example/{primary.thumbnail_file_key}"
+        )
+
+    def test_non_photo_aip_match_has_no_photo_deep_link(self):
+        person = Person.objects.create(name="Letter Person")
+        item = _public_manual("AIP letter")
+        ArchiveItemPerson.objects.create(archive_item=item, person=person)
+
+        resp = self._list_cards(person.id)
+        card = resp.context["browse_cards"][0]
+        self.assertEqual(
+            card.detail_url, reverse("archive-detail", kwargs={"item_id": item.id})
+        )
+        self.assertNotIn("photo=", card.detail_url)
+        self.assertIsNone(card.thumbnail_url)
+
+    def test_private_photoperson_deep_link_is_authorization_gated(self):
+        person = Person.objects.create(name="Private PP Card")
+        item = _create_photo_item(
+            title="Private PP album",
+            visibility=ArchiveItem.Visibility.PRIVATE,
+        )
+        photo = _add_photo(item, thumbnail_file_key="photos/priv/match.jpg")
+        PhotoPerson.objects.create(photo_content=photo, person=person)
+        family_group, _ = Group.objects.get_or_create(name=ARCHIVE_FAMILY_GROUP_NAME)
+        family = User.objects.create_user(username="pp-card-family", password="x")
+        family.groups.add(family_group)
+
+        anon = self._list_cards(person.id)
+        self.assertEqual(anon.context["total_count"], 0)
+        self.assertEqual(anon.context["browse_cards"], [])
+
+        self.client.force_login(family)
+        family_resp = self._list_cards(person.id)
+        self.assertEqual(family_resp.context["total_count"], 1)
+        card = family_resp.context["browse_cards"][0]
+        self.assertEqual(card.detail_url, public_photo_detail_url(item.id, photo.id))
+
+    def test_q_plus_person_snippet_does_not_clobber_matching_photo_href(self):
+        person = Person.objects.create(name="Snippet Person")
+        item = _create_photo_item(title="Snippet album")
+        photo = _add_photo(item, thumbnail_file_key="photos/q/match.jpg")
+        photo.description = "UniquePhotoSnippetTokenXYZ"
+        photo.save(update_fields=["description", "updated_at"])
+        PhotoPerson.objects.create(photo_content=photo, person=person)
+        rebuild_archive_item_search_index(item)
+
+        resp = self._list_cards(
+            person.id, extra=[("q", "UniquePhotoSnippetTokenXYZ")]
+        )
+        card = resp.context["browse_cards"][0]
+        self.assertEqual(card.detail_url, public_photo_detail_url(item.id, photo.id))
+        self.assertEqual(
+            card.thumbnail_url, f"https://s3.example/{photo.thumbnail_file_key}"
+        )
+        self.assertEqual(card.search_match_source_label, MATCH_SOURCE_ITEM_DETAILS)
+
+    def test_matching_photo_lookup_is_one_bounded_photoperson_query(self):
+        people = [Person.objects.create(name=f"Bound Person {i}") for i in range(3)]
+        items = []
+        for index in range(3):
+            item = _create_photo_item(title=f"Bound album {index}")
+            photo = _add_photo(item, thumbnail_file_key=f"photos/bound/{index}.jpg")
+            PhotoPerson.objects.create(photo_content=photo, person=people[index])
+            items.append(item)
+
+        with CaptureQueriesContext(connection) as one_ctx:
+            matching_photo_ids_for_selected_persons(
+                [items[0].pk], [people[0].id]
+            )
+        with CaptureQueriesContext(connection) as many_ctx:
+            matching_photo_ids_for_selected_persons(
+                [item.pk for item in items], [person.id for person in people]
+            )
+        self.assertEqual(_photoperson_select_count(one_ctx), 1)
+        self.assertEqual(_photoperson_select_count(many_ctx), 1)
+        self.assertEqual(
+            _photoperson_select_count(one_ctx), _photoperson_select_count(many_ctx)
+        )
+
+    def test_list_photoperson_query_count_does_not_scale_with_cards_or_people(self):
+        ada = Person.objects.create(name="Query Ada")
+        charles = Person.objects.create(name="Query Charles")
+        grace = Person.objects.create(name="Query Grace")
+        few_item = _create_photo_item(title="Query few album")
+        PhotoPerson.objects.create(
+            photo_content=_add_photo(
+                few_item, thumbnail_file_key="photos/query/few.jpg"
+            ),
+            person=ada,
+        )
+
+        with CaptureQueriesContext(connection) as few_ctx:
+            self._list_cards(ada.id)
+
+        for index, person in enumerate((charles, grace), start=1):
+            item = _create_photo_item(title=f"Query extra {index}")
+            PhotoPerson.objects.create(
+                photo_content=_add_photo(
+                    item, thumbnail_file_key=f"photos/query/extra-{index}.jpg"
+                ),
+                person=person,
+            )
+
+        with CaptureQueriesContext(connection) as many_ctx:
+            self._list_cards(ada.id, charles.id, grace.id)
+
+        self.assertEqual(
+            _photoperson_select_count(few_ctx), _photoperson_select_count(many_ctx)
+        )
+        self.assertGreaterEqual(_photoperson_select_count(few_ctx), 1)
 
 
 class ArchivePersonFilterChipCssTests(SimpleTestCase):
