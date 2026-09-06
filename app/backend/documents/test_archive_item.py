@@ -27,6 +27,7 @@ from documents.models import (
     ArchiveCategory,
     ArchiveEvent,
     ArchiveItem,
+    Author,
     CorrectionRequest,
     Document,
     DocumentMetadata,
@@ -62,6 +63,7 @@ from documents.services.archive_item_presentation import (
     ARCHIVE_BROWSE_OCR_PREVIEW,
     ARCHIVE_BROWSE_PREVIEW_EMPTY,
     archive_browse_displayable_text_results_prefetch,
+    archive_item_author_links_prefetch,
     archive_item_has_discovery_metadata,
     archive_item_type_label,
     archive_metadata_status_label,
@@ -4255,6 +4257,7 @@ class ArchiveBrowseCardPresentationTests(TestCase):
                 "events",
                 "tags",
                 "people",
+                archive_item_author_links_prefetch(),
                 archive_browse_displayable_text_results_prefetch(),
             )
             .get(pk=item_id)
@@ -4377,8 +4380,15 @@ class ArchiveBrowseCardPresentationTests(TestCase):
             author_name="רחל כהן",
             visibility=ArchiveItem.Visibility.PUBLIC,
         )
-        card = build_archive_browse_card(item)
-        self.assertEqual(card.author_display, "רחל כהן")
+        card = build_archive_browse_card(self._browse_item(item.id))
+        author = Author.objects.get(name="רחל כהן")
+        self.assertEqual(card.author_display, "")
+        self.assertEqual(len(card.author_links), 1)
+        self.assertEqual(card.author_links[0].name, "רחל כהן")
+        self.assertEqual(
+            card.author_links[0].href,
+            reverse("archive-author-detail", kwargs={"author_id": author.id}),
+        )
 
     def test_browse_card_omits_author_when_absent(self):
         item = create_manual_text_archive_item(
@@ -4389,19 +4399,26 @@ class ArchiveBrowseCardPresentationTests(TestCase):
         )
         card = build_archive_browse_card(item)
         self.assertEqual(card.author_display, "")
+        self.assertEqual(card.author_links, ())
 
     def test_archive_list_renders_author_on_card_when_present(self):
-        create_manual_text_archive_item(
+        item = create_manual_text_archive_item(
             title="Public author card item",
             body="Body text",
             author_name="Card author name",
             visibility=ArchiveItem.Visibility.PUBLIC,
         )
+        author = Author.objects.get(name="Card author name")
         resp = self.client.get(reverse("archive-list"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "מחבר/ת:")
         self.assertContains(resp, "Card author name")
         self.assertContains(resp, "archive-browse-card__author")
+        self.assertContains(
+            resp,
+            reverse("archive-author-detail", kwargs={"author_id": author.id}),
+        )
+        self.assertEqual(item.author_name, "Card author name")
 
     def test_archive_list_omits_author_on_card_when_absent(self):
         create_manual_text_archive_item(

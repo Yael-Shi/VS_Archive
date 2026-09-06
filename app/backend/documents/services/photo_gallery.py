@@ -12,6 +12,7 @@ from django.urls import reverse
 from documents.models import ArchiveItem, PhotoContent, PhotoPerson
 from documents.services.archive_item_presentation import (
     ArchiveBrowseCard,
+    archive_item_author_links_prefetch,
     build_archive_browse_card,
     person_public_page_url,
 )
@@ -292,6 +293,9 @@ def photo_person_appearances_queryset(
             "photo_content__archive_item__events",
             "photo_content__archive_item__tags",
             "photo_content__archive_item__people",
+            archive_item_author_links_prefetch(
+                lookup="photo_content__archive_item__author_links"
+            ),
         )
         .order_by(
             "-photo_content__archive_item__created_at",

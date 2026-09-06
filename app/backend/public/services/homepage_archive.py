@@ -8,6 +8,7 @@ from documents.services.archive_item_access import (
 )
 from documents.services.archive_item_presentation import (
     archive_browse_displayable_text_results_prefetch,
+    archive_item_author_links_prefetch,
     build_archive_browse_cards,
 )
 from documents.services.document_archive_urls import (
@@ -38,6 +39,7 @@ def homepage_archive_cards():
             "events",
             "tags",
             "people",
+            archive_item_author_links_prefetch(),
             archive_browse_displayable_text_results_prefetch(),
         )
     )
