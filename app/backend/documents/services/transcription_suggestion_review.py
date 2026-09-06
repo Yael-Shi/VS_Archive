@@ -38,8 +38,10 @@ def _apply_approved_suggestion_text(
                 "חסרה תוצאת טקסט מקור או עברי מקושרת; לא ניתן לאשר את ההצעה."
             )
 
-        rows = DocumentTextResult.objects.select_for_update().filter(
-            pk__in=[source.pk, hebrew.pk]
+        rows = (
+            DocumentTextResult.objects.select_for_update()
+            .filter(pk__in=[source.pk, hebrew.pk])
+            .order_by("id")
         )
         locked = {row.pk: row for row in rows}
         source = locked[source.pk]
@@ -115,6 +117,9 @@ def approve_suggestion(
         raise TranscriptionSuggestionReviewError("יש להזין טקסט מאושר.")
 
     with transaction.atomic():
+        # Lock order vs OCR persist fence: Document before any DTR that may
+        # become VERIFIED. The suggestion row is locked first (suggestion
+        # uniqueness), then Document, then the displayed text result.
         suggestion = (
             TranscriptionEditSuggestion.objects.select_for_update()
             .select_related("document")
@@ -123,7 +128,7 @@ def approve_suggestion(
         if suggestion.status != TranscriptionEditSuggestion.Status.PENDING:
             raise TranscriptionSuggestionReviewError("ההצעה כבר נבדקה.")
 
-        doc = suggestion.document
+        doc = Document.objects.select_for_update().get(pk=suggestion.document_id)
         target = resolve_displayed_transcription_result(doc)
         if target is None:
             raise TranscriptionSuggestionReviewError("אין תעתוק להצגה לעדכון.")

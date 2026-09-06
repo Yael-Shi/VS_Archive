@@ -336,6 +336,16 @@ Future reprocessing must be explicit and separately designed.
 
 Do not overwrite `VERIFIED` OCR/HTR results without explicit approval.
 
+Enqueue/assessment already blocks OCR reprocess when any `DocumentTextResult`
+is `VERIFIED`. Successful automated OCR persistence also applies a write-time
+fence: inside the persist transaction, after locking the `Document`, lock all
+text-result rows and skip automated `SOURCE_TEXT` / paired automatic
+`HEBREW_TEXT` writes and search-index replacement when any row is `VERIFIED`.
+Treat that as a superseded/stale run (ack), not an OCR failure. Restore the
+pre-run `processing_state_user`; do not roll up from the unused runtime engine
+or from one VERIFIED row's engine. `REJECTED` is not a fence. Do not copy
+`verification_status` across engines.
+
 ## Architecture change rules
 
 Before editing architecture-sensitive code:
