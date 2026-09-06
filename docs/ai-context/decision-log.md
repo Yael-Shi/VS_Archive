@@ -1,5 +1,47 @@
 # VS-Archive Decision Log
 
+## Public Author catalog and Author detail
+
+**Decision / implemented:** Public Author browsing exists at
+**`/archive/authors/`** (`archive-authors-index`) and
+**`/archive/authors/<author_id>/`** (`archive-author-detail`). Membership is
+**`ArchiveItemAuthor` only**. **`Author`** remains fully separate from
+**`Person`**. This supersedes the deferred “public Author browsing / pages”
+notes on the staff Author index and Author merge entries.
+
+**Current behavior:**
+
+- Catalog membership is Authors with at least one authorized +
+  browse-renderable linked **`ArchiveItem`** via **`ArchiveItemAuthor`**.
+  Authorization is **`archive_browse_queryset_for_user`**. Unlinked Authors,
+  **`author_name`-only items**, Person links, and inaccessible /
+  non-renderable-only links are omitted. Detail 404s in those cases.
+- Index order is **`Author.name`, then `id`**. Pagination is fixed **48**.
+  Optional GET **`q`** is a case-insensitive substring on **`Author.name`**
+  only (no aliases, Person, or **`ArchiveItem.author_name`**). Duplicate
+  names stay separate Author IDs and URLs.
+- Each index row shows **`Author.name`** and a DISTINCT linked item count
+  (Hebrew **`1 פריט` / `N פריטים`**). Counts are one page-restricted
+  **`ArchiveItemAuthor`** aggregate (`Count(..., distinct=True)`), not
+  per-row queries.
+- Author detail H1 is **`Author.name`**, heading **פריטים קשורים**, then
+  DISTINCT authorized+renderable linked ArchiveItems. Cards use the shared
+  browse-card path (`build_archive_browse_cards` + thumbnail helpers) and
+  **normal item detail URLs** (no Person-style photo deep-links). Order is
+  **`-created_at`, `pk`**. Pagination is fixed **48**.
+- PHOTO structured Author staff UI is unchanged and still out of scope.
+  Existing **`ArchiveItemAuthor`** rows on renderable PHOTO items still
+  count.
+
+**Unchanged / still deferred:** public **`author_name`** display on cards and
+source metadata; global **`q`** indexing of Author relations; advanced
+author filter cutover from **`author_name`**; public navigation links to
+these routes; staff Author edit/merge behavior; PHOTO author UI; schema.
+
+**Tests:** `documents/test_archive_authors_public_index.py`,
+`documents/test_archive_author_public_page.py`; updated route expectation in
+`documents/test_author_staff_index.py`. No migration.
+
 ## Gemini Hebrew translation — short-chunk length floor is not truncation
 
 **Decision / implemented:** Hebrew translation truncation detection must not
@@ -352,9 +394,10 @@ name matching. Logic lives in **`documents/services/author_merge.py`**.
   The staff Author index remains find/open only (no per-row merge buttons).
 
 **Out of scope / deferred:** standalone Author delete; merge from the Author
-index; name-based merge; public Author pages; PHOTO author UI; unique
-**`Author.name`**; public display/search/filter cutover from **`author_name`**
-to Author relations; Django Admin Author tools.
+index; name-based merge; public **`author_name`** display/search/filter
+cutover to Author relations; PHOTO author UI; unique **`Author.name`**;
+Django Admin Author tools. Public Author catalog/detail is implemented
+separately (see **Public Author catalog and Author detail**).
 
 **Tests:** `documents/test_author_merge.py`,
 `documents/test_author_merge_staff_ui.py`.
@@ -869,11 +912,10 @@ collision with another **`Author`** is **rejected, never merged**.
   **`apply_staff_archive_item_authors`** and **`rename_author`**.
 
 **Out of scope / deferred:** Author delete; PHOTO author UI; unique
-**`Author.name`** constraint; public display/search/filter cutover from
-**`author_name`** to the **`Author`** relations; optimistic-concurrency token
-between preview and save. Author merge is implemented separately (see
-**Staff Author merge**). The staff Author index is implemented separately
-(see **Staff Author index**).
+**`Author.name`** constraint; public **`author_name`** display/search/filter
+cutover to Author relations; optimistic-concurrency token between preview
+and save. Author merge, staff Author index, and public Author catalog/detail
+are implemented separately.
 
 **Tests:** `documents/test_author_name_edit.py`.
 
@@ -899,12 +941,14 @@ staff catalog/index only. **`Author`** remains separate from **`Person`**.
   **`ArchiveItemAuthor`** count (**`Count("archive_item_links")`**), and
   **עריכה** to existing **`archive-manage-author-edit`**. Merge is reached
   from the edit page, not from this index.
-- No standalone Author create, delete, aliases, public Author pages,
-  Person integration, PHOTO author UI, or schema changes.
+- No standalone Author create, delete, aliases, Person integration, PHOTO
+  author UI, or schema changes. Public Author catalog/detail is implemented
+  separately (see **Public Author catalog and Author detail**).
 
-**Out of scope / deferred:** standalone Author delete; public Author browsing;
-PHOTO author support. Author merge is implemented separately (see
-**Staff Author merge**).
+**Out of scope / deferred:** standalone Author delete; PHOTO author support.
+Author merge is implemented separately (see **Staff Author merge**). Public
+Author browsing is implemented separately (see **Public Author catalog and
+Author detail**).
 
 **Tests:** `documents/test_author_staff_index.py`; route expectation in
 `documents/test_author_name_edit.py`.

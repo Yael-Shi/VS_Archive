@@ -1,0 +1,29 @@
+<nav class="archive-list-pagination" aria-label="דפדוף בארכיון">
+  <div class="archive-list-pagination__pages" role="group" aria-label="מספרי עמודים">
+    {% if page > 1 %}
+      <a class="archive-list-pagination__nav-link" href="{% url 'archive-author-detail' author_id=author.id %}{{ prev_href_suffix }}">הקודם</a>
+    {% endif %}
+
+    <div class="archive-list-pagination__page-list">
+      {% for item in page_number_items %}
+        {% if item.kind == "ellipsis" %}
+          <span class="archive-list-pagination__ellipsis" aria-hidden="true">…</span>
+        {% elif item.is_current %}
+          <span class="archive-list-pagination__page-number is-current" aria-current="page">{{ item.page }}</span>
+        {% else %}
+          <a
+            class="archive-list-pagination__page-number"
+            href="{% url 'archive-author-detail' author_id=author.id %}{{ item.href_suffix }}"
+            aria-label="עמוד {{ item.page }}"
+          >{{ item.page }}</a>
+        {% endif %}
+      {% endfor %}
+    </div>
+
+    {% if next_href_suffix %}
+      <a class="archive-list-pagination__nav-link" href="{% url 'archive-author-detail' author_id=author.id %}{{ next_href_suffix }}">הבא</a>
+    {% endif %}
+  </div>
+
+  <a class="archive-list-pagination__top-link" href="#archive-top">חזרה לראש העמוד</a>
+</nav>
