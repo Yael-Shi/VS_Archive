@@ -26,7 +26,7 @@ from django.db.models.functions import Coalesce
 from django.urls import reverse
 
 from documents.historical_person_tag_map import historical_person_name_tag_ids
-from documents.models import ArchiveItem, Document
+from documents.models import ArchiveItem, ArchiveItemAuthor, Document
 from documents.services.archive_advanced_search import (
     ARCHIVE_ADVANCED_PANEL_PARAM,
     ARCHIVE_ADVANCED_PANEL_VALUE,
@@ -38,6 +38,7 @@ from documents.services.archive_advanced_search import (
     build_archive_advanced_filter_summary_items,
 )
 from documents.services.archive_search_index import SEARCH_VECTOR_CONFIG
+from documents.services.author_public import author_public_page_url
 from documents.services.document_date import format_document_date
 from documents.services.text_presentation import (
     archive_item_displayable_text_results_prefetch,
@@ -993,6 +994,7 @@ class ArchiveBrowseCard:
     category_links: tuple[ArchiveBrowseLink, ...]
     related_links: tuple[ArchiveBrowseLink, ...]
     person_links: tuple[ArchiveBrowseLink, ...] = ()
+    author_links: tuple[ArchiveBrowseLink, ...] = ()
     thumbnail_url: str | None = None
     # Local 160px visual when no image thumbnail: "pdf" | "manual" | "video" | "".
     fallback_preview: str = ""
@@ -1099,8 +1101,61 @@ def _fallback_preview_for_item(archive_item: ArchiveItem) -> str:
     return ""
 
 
-def _author_display_for_archive_item(archive_item: ArchiveItem) -> str:
-    return (archive_item.author_name or "").strip()
+def archive_item_author_links_prefetch(*, lookup: str = "author_links") -> Prefetch:
+    """Prefetch ordered ``ArchiveItemAuthor`` rows with ``Author`` (avoids N+1)."""
+    return Prefetch(
+        lookup,
+        queryset=ArchiveItemAuthor.objects.select_related("author").order_by(
+            "position", "id"
+        ),
+    )
+
+
+def _ordered_author_links(archive_item: ArchiveItem) -> list[ArchiveItemAuthor]:
+    """Return this item's author links in position order.
+
+    Uses the ``author_links`` prefetch cache when present. Does not read
+    ``author_name``.
+    """
+    cache = getattr(archive_item, "_prefetched_objects_cache", None)
+    if cache is not None and "author_links" in cache:
+        return sorted(
+            cache["author_links"],
+            key=lambda link: (link.position, link.id),
+        )
+    return list(
+        archive_item.author_links.select_related("author").order_by("position", "id")
+    )
+
+
+def author_links_for_item(archive_item: ArchiveItem) -> tuple[ArchiveBrowseLink, ...]:
+    """Ordered ``ArchiveItemAuthor`` names linking to public Author pages.
+
+    Identity is ``Author.id``. Duplicate names stay distinct. Does not read,
+    split, or infer Authors from ``author_name``.
+    """
+    return tuple(
+        ArchiveBrowseLink(
+            name=link.author.name,
+            href=author_public_page_url(link.author_id),
+        )
+        for link in _ordered_author_links(archive_item)
+    )
+
+
+def author_presentation_for_item(
+    archive_item: ArchiveItem,
+) -> tuple[tuple[ArchiveBrowseLink, ...], str]:
+    """Structured Author links, else trimmed ``author_name`` fallback text.
+
+    If any ``ArchiveItemAuthor`` row exists, those names/URLs are used and
+    ``author_name`` is ignored (including drifted or empty values). If none
+    exist, return the current stripped ``author_name`` string unchanged.
+    """
+    links = author_links_for_item(archive_item)
+    if links:
+        return links, ""
+    return (), (archive_item.author_name or "").strip()
 
 
 def _prefetched_relation(archive_item: ArchiveItem, relation: str) -> Iterable:
@@ -1108,7 +1163,8 @@ def _prefetched_relation(archive_item: ArchiveItem, relation: str) -> Iterable:
 
     Falls back to ``relation.all()`` (one query per item). Archive browse views
     should call ``prefetch_related("categories", "events", "tags", "people")``
-    before ``build_archive_browse_cards``.
+    and ``archive_item_author_links_prefetch()`` before
+    ``build_archive_browse_cards``.
     """
     cache = getattr(archive_item, "_prefetched_objects_cache", None)
     if cache is not None and relation in cache:
@@ -1198,12 +1254,20 @@ def person_links_for_item(archive_item: ArchiveItem) -> tuple[ArchiveBrowseLink,
 
 
 def public_discovery_context(archive_item: ArchiveItem | None) -> dict:
-    """Template context for public discovery Tags and Person links."""
+    """Template context for public discovery Tags, Person links, and Authors."""
     if archive_item is None:
-        return {"public_tags": (), "person_links": ()}
+        return {
+            "public_tags": (),
+            "person_links": (),
+            "author_links": (),
+            "author_display": "",
+        }
+    author_links, author_display = author_presentation_for_item(archive_item)
     return {
         "public_tags": public_discovery_tags(archive_item),
         "person_links": person_links_for_item(archive_item),
+        "author_links": author_links,
+        "author_display": author_display,
     }
 
 
@@ -1238,18 +1302,20 @@ def build_archive_browse_card(
     if search_query and archive_item.item_type == ArchiveItem.ItemType.OCR_DOCUMENT:
         detail_url = f"{detail_url}?{urlencode({'q': search_query})}"
 
+    author_links, author_display = author_presentation_for_item(archive_item)
     return ArchiveBrowseCard(
         item=archive_item,
         title=archive_item.title,
         type_label=archive_item_type_label(archive_item.item_type),
         type_marker=_type_marker_for_item(archive_item),
         date_display=format_document_date(archive_item),
-        author_display=_author_display_for_archive_item(archive_item),
+        author_display=author_display,
         detail_url=detail_url,
         preview_text=_preview_text_for_archive_item(archive_item),
         category_links=_category_links_for_item(archive_item),
         related_links=_related_links_for_item(archive_item),
         person_links=person_links_for_item(archive_item),
+        author_links=author_links,
         fallback_preview=_fallback_preview_for_item(archive_item),
     )
 
@@ -1262,8 +1328,9 @@ def build_archive_browse_cards(
     """Build public browse cards for archive list and discovery browse pages.
 
     Callers should pass items from ``_archive_browse_select_related`` (or
-    equivalent) so ``categories``, ``events``, ``tags``, ``people``, and
-    displayable OCR ``DocumentTextResult`` rows are prefetched.
+    equivalent) so ``categories``, ``events``, ``tags``, ``people``,
+    ``author_links``, and displayable OCR ``DocumentTextResult`` rows are
+    prefetched.
     """
     return [
         build_archive_browse_card(item, search_query=search_query) for item in items

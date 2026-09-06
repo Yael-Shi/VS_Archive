@@ -74,10 +74,14 @@
                 <a href="{{ card.detail_url }}">{{ card.title }}</a>
               </h2>
               <div class="archive-browse-card__meta">
-                {% if card.author_display %}
+                {% if card.author_links or card.author_display %}
                   <span class="archive-browse-card__author">
                     <span class="archive-browse-card__meta-label">מחבר/ת:</span>
-                    {{ card.author_display }}
+                    {% if card.author_links %}
+                      {% for link in card.author_links %}<a href="{{ link.href }}">{{ link.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
+                    {% else %}
+                      {{ card.author_display }}
+                    {% endif %}
                   </span>
                   <span class="archive-browse-card__meta-sep"> · </span>
                 {% endif %}

@@ -270,6 +270,7 @@ from documents.services.archive_item_presentation import (
     ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
     aggregate_archive_public_list_type_counts,
     archive_browse_displayable_text_results_prefetch,
+    archive_item_author_links_prefetch,
     archive_manage_item_type_ui_choices,
     archive_metadata_status_ui_choices,
     archive_public_list_active_filter_summary_context,
@@ -3430,6 +3431,7 @@ def document_detail_page(request, doc_id: int):
         "archive_item__events",
         "archive_item__tags",
         "archive_item__people",
+        archive_item_author_links_prefetch(lookup="archive_item__author_links"),
     )
     doc = get_viewable_document(
         request.user,
@@ -5054,6 +5056,7 @@ def _archive_browse_select_related(queryset):
         "events",
         "tags",
         "people",
+        archive_item_author_links_prefetch(),
         archive_browse_displayable_text_results_prefetch(),
     )
 
@@ -5407,7 +5410,11 @@ def archive_list_page(request):
 
 def archive_detail_page(request, item_id: int):
     detail_qs = ArchiveItem.objects.prefetch_related(
-        "categories", "events", "tags", "people"
+        "categories",
+        "events",
+        "tags",
+        "people",
+        archive_item_author_links_prefetch(),
     )
     item = get_viewable_archive_item(request.user, item_id, queryset=detail_qs)
     discovery_context = public_discovery_context(item)

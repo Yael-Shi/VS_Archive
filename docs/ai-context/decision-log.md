@@ -33,14 +33,31 @@ notes on the staff Author index and Author merge entries.
   Existing **`ArchiveItemAuthor`** rows on renderable PHOTO items still
   count.
 
-**Unchanged / still deferred:** public **`author_name`** display on cards and
-source metadata; global **`q`** indexing of Author relations; advanced
-author filter cutover from **`author_name`**; public navigation links to
-these routes; staff Author edit/merge behavior; PHOTO author UI; schema.
+**Unchanged / still deferred:** global **`q`** indexing of Author relations;
+advanced author filter cutover from **`author_name`**; public navigation
+links to these routes; staff Author edit/merge behavior; PHOTO author UI;
+schema.
+
+**Public item Author presentation (cards / source metadata):** when an item
+has one or more **`ArchiveItemAuthor`** rows, public cards and non-PHOTO
+source metadata render those **`Author.name`** values in **`position`**
+order as links to **`/archive/authors/<author_id>/`**. Duplicate names stay
+distinct IDs/URLs. Structured links take precedence over
+**`ArchiveItem.author_name`** (including stale/drifted or empty strings).
+When there are **no** structured links, the existing trimmed
+**`author_name`** text is shown unchanged (detail still applies the
+placeholder-metadata filter). **`author_name` is never parsed or used to
+infer Author links.** PHOTO **detail** still has no Author/source-metadata
+surface. PHOTO **cards** already showed **`author_name`** and now use the
+same structured-vs-fallback rule. Prefetch is ordered
+**`author_links` + `select_related("author")`** on browse and public
+detail querysets (no template queries).
 
 **Tests:** `documents/test_archive_authors_public_index.py`,
-`documents/test_archive_author_public_page.py`; updated route expectation in
-`documents/test_author_staff_index.py`. No migration.
+`documents/test_archive_author_public_page.py`,
+`documents/test_archive_item_author_public_display.py`; updated route
+expectation in `documents/test_author_staff_index.py` and browse-card
+author assertions in `documents/test_archive_item.py`. No migration.
 
 ## Checkpoint-backed Arabic printed banded PARTIAL documents remain reprocessable
 
@@ -431,10 +448,11 @@ name matching. Logic lives in **`documents/services/author_merge.py`**.
   The staff Author index remains find/open only (no per-row merge buttons).
 
 **Out of scope / deferred:** standalone Author delete; merge from the Author
-index; name-based merge; public **`author_name`** display/search/filter
-cutover to Author relations; PHOTO author UI; unique **`Author.name`**;
-Django Admin Author tools. Public Author catalog/detail is implemented
-separately (see **Public Author catalog and Author detail**).
+index; name-based merge; global **`q`** / advanced author filter cutover to
+Author relations; PHOTO author UI; unique **`Author.name`**;
+Django Admin Author tools. Public Author catalog/detail and public item
+Author link presentation are implemented separately (see **Public Author
+catalog and Author detail**).
 
 **Tests:** `documents/test_author_merge.py`,
 `documents/test_author_merge_staff_ui.py`.

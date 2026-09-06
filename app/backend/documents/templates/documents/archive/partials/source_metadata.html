@@ -1,11 +1,18 @@
 {% load archive_labels %}
-{% with author=item.author_name|meaningful_archive_metadata source=item.source_title|meaningful_archive_metadata %}
-  {% if author or source %}
+{% with author_fallback=author_display|meaningful_archive_metadata source=item.source_title|meaningful_archive_metadata %}
+  {% if author_links or author_fallback or source %}
     <div class="archive-detail-meta-block archive-detail-meta-block--source">
-      {% if author %}
+      {% if author_links %}
         <div class="archive-detail-meta-row">
           <strong class="archive-detail-meta-label">מחבר/ת:</strong>
-          <span class="archive-detail-meta-value">{{ author }}</span>
+          <span class="archive-detail-meta-value">
+            {% for link in author_links %}<a href="{{ link.href }}">{{ link.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
+          </span>
+        </div>
+      {% elif author_fallback %}
+        <div class="archive-detail-meta-row">
+          <strong class="archive-detail-meta-label">מחבר/ת:</strong>
+          <span class="archive-detail-meta-value">{{ author_fallback }}</span>
         </div>
       {% endif %}
       {% if source %}
