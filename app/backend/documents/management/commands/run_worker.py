@@ -580,6 +580,32 @@ class Command(BaseCommand):
             doc.refresh_from_db(fields=["processing_state_user"])
             return _outcome_for_final_processing_state(doc.processing_state_user)
 
+        # Provider I/O must not run inside the persist transaction below.
+        # Hebrew-translation retry already calls Gemini, then persists. The
+        # initial OCR success path does the same: translate first, then persist
+        # SOURCE_TEXT + HEBREW_TEXT + processing-state + search index together.
+        pending_translation = None
+        pending_translation_error: Optional[Exception] = None
+        if (
+            not error
+            and htr_result is not None
+            and route is not None
+            and not _is_hebrew_language(doc.language)
+        ):
+            try:
+                pending_translation = translate_text_to_hebrew_with_gemini(
+                    htr_result.text,
+                    doc.language,
+                    model_name=DEFAULT_GEMINI_MODEL,
+                    min_text_length=self._cfg.min_text_length,
+                    temperature=self._cfg.gemini_temperature,
+                    top_k=self._cfg.gemini_top_k,
+                    top_p=self._cfg.gemini_top_p,
+                    max_output_tokens=self._cfg.gemini_max_output_tokens,
+                )
+            except Exception as exc:
+                pending_translation_error = exc
+
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
@@ -599,6 +625,18 @@ class Command(BaseCommand):
                             "Internal error: OCR success path missing route or HTR result"
                         )
                     self._save_htr_results(doc, final_engine, is_he, htr_result, route)
+                    if not is_he:
+                        persist_hebrew_translation_result(
+                            doc,
+                            final_engine,
+                            translation=(
+                                pending_translation
+                                if pending_translation_error is None
+                                else None
+                            ),
+                            error=pending_translation_error,
+                            min_text_length=self._cfg.min_text_length,
+                        )
 
                 self._update_processing_state(doc, final_engine)
                 doc.save(update_fields=["processing_state_user"])
@@ -723,9 +761,6 @@ class Command(BaseCommand):
                 defaults=defaults,
             )
 
-        if not is_he:
-            self._save_non_hebrew_hebrew_translation(doc, engine, htr.text)
-
     def _save_non_hebrew_hebrew_translation(
         self,
         doc: Document,
@@ -745,8 +780,10 @@ class Command(BaseCommand):
             )
         except Exception as e:
             # Intentional broad catch: any Hebrew-translation failure is persisted as a
-            # failed HEBREW_TEXT row and must not fail the already-successful SOURCE_TEXT
-            # OCR persistence (this runs inside the Phase 3 save transaction). See
+            # failed HEBREW_TEXT row and must not fail already-successful SOURCE_TEXT
+            # OCR persistence. Worker OCR success calls Gemini before Phase 3, then
+            # persists both rows in that transaction. This helper remains for tests
+            # and still isolates translation errors from OCR row failure. See
             # architecture.mdc / docs/ocr-routing-reference.md (non-Hebrew translation
             # failure -> HEBREW_TRANSLATION_FAILED, not an OCR failure).
             persist_hebrew_translation_result(

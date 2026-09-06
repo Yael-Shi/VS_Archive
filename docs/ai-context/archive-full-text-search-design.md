@@ -269,7 +269,7 @@ Required order (short form): **PR1 migrate/backfill → PR2a sync → PR2b-1 syn
 
 | | |
 |--|--|
-| **Scope** | Explicit sync at parent automated write boundaries that can change displayed transcription body: worker Phase 3 OCR/HTR success/failure (+ nested non-Hebrew translation), Transkribus local completion write path, Hebrew translation-retry persist TX |
+| **Scope** | Explicit sync at parent automated write boundaries that can change displayed transcription body: worker Phase 3 OCR/HTR success/failure (non-Hebrew Hebrew-translation persist in the same TX after Gemini runs outside that TX), Transkribus local completion write path, Hebrew translation-retry persist TX |
 | **Likely files** | `run_worker.py` Phase 3; `transkribus_local_completion.py`; `hebrew_translation_retry.py`; tests; design/decision-log |
 | **Migrations** | None expected |
 | **Tests** | Worker success (EN SOURCE / HE Hebrew selector); OCR failure demotion rebuild; local completion write vs early no-overwrite skip; translation retry single sync / duplicate no-resync; same-TX rollback; public `icontains` unchanged; PR2a/PR2b-1 intact |
