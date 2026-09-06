@@ -25,6 +25,10 @@ from documents.services.antigravity_defaults import (
     INTERACTIONS_API_REVISION,
     INTERACTIONS_BASE_URL,
 )
+from documents.services.antigravity_interaction_id import (
+    ANTIGRAVITY_INTERACTION_ID_ENGINE_MAX_LEN,
+    is_antigravity_interaction_id,
+)
 from documents.services.arabic_printed_ocr_contract import (
     COMPLETION_MARKER,
     evaluate_arabic_printed_band_output,
@@ -80,7 +84,6 @@ _KNOWN_STEP_TYPES = frozenset(
 _KNOWN_CONTENT_TYPES = frozenset({"text", "image", "audio", "video", "document"})
 _KNOWN_MODALITIES = frozenset({"text", "image", "audio", "video", "document"})
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
-_INTERACTION_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,512}$")
 _POLL_RETRYABLE_HTTP_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
 _POLL_HTTP_RETRY_BASE_SECONDS = 1.0
 _POLL_HTTP_RETRY_MAX_SECONDS = 30.0
@@ -289,7 +292,9 @@ def _poll_http_retry_delay_seconds(
 def _sanitize_interaction_id(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
-    if _INTERACTION_ID_RE.fullmatch(value):
+    if is_antigravity_interaction_id(
+        value, max_length=ANTIGRAVITY_INTERACTION_ID_ENGINE_MAX_LEN
+    ):
         return value
     return INVALID_LOG_VALUE
 
@@ -1350,7 +1355,9 @@ def _band_require_api_key(api_key: object) -> str | None:
 def _band_interaction_id(value: object) -> str | None:
     if type(value) is not str:
         return None
-    if _INTERACTION_ID_RE.fullmatch(value):
+    if is_antigravity_interaction_id(
+        value, max_length=ANTIGRAVITY_INTERACTION_ID_ENGINE_MAX_LEN
+    ):
         return value
     return None
 

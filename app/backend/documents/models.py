@@ -1141,6 +1141,14 @@ class ArabicPrintedOcrPageCheckpoint(models.Model):
     antigravity_create_count = models.PositiveSmallIntegerField(default=0)
     failure_code = models.CharField(max_length=64, blank=True, default="")
     failure_message = models.CharField(max_length=512, blank=True, default="")
+    operator_resolution_audit = models.JSONField(
+        default=dict,
+        help_text=(
+            "Durable operator fence-resolution audit "
+            "(arabic-printed-operator-fence-resolution-v1). "
+            "Worker claim/reclaim/success/failure must not clear this field."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     started_at = models.DateTimeField(null=True, blank=True)

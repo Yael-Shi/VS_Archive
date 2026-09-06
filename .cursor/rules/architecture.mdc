@@ -305,6 +305,29 @@ Current worker/SQS policy:
 
 Do not redesign retry, backoff, DLQ, or failure handling opportunistically.
 
+Arabic printed ambiguous Vision/create fences stay fail-closed on automatic
+reclaim (no counter reset, no second create, no poll/cancel/LQ). An operator
+may resolve an **exact** fence with `resolve_arabic_printed_ambiguous_fence`
+(`documents/services/arabic_printed_ambiguous_fence_resolution.py`). Default
+is dry-run; `--apply` writes. Apply re-evaluates every precondition from rows
+locked in one transaction: **Document**, then **DocumentTextResult** by id,
+then the current-contract **ArabicPrintedOcrAttempt**, then that attempt's
+**page checkpoints** by id (live-lease check), then the target page's **band
+checkpoints** by id. Dry-run is ordinary reads only. Modes: **`no-provider-call`**
+(externally verified that the reserved Vision or Antigravity create was never
+sent; Vision may set `cloud_vision_call_count` 1→0 only after those locked
+checks, and records a durable `operator_resolution_audit` JSON event that
+worker claim/reclaim must not clear) and **`bind-interaction`** (persist a
+known primary/fallback interaction id matching
+`documents.services.antigravity_interaction_id`; the worker later polls; the
+command must not create or poll). Fail closed on current-contract mismatch,
+live page lease, wrong document/page/band, shape/counter mismatch, conflicting
+or invalid interaction id, `SUCCEEDED` page/band, or any `VERIFIED`
+`DocumentTextResult`. The command must not call Cloud Vision, Gemini/Antigravity,
+SQS, OCR, or search index, must not delete checkpoints, and must not reset
+source/route/prompt/config/oriented-image fingerprints. See
+`docs/ai-context/arabic-printed-ambiguous-fence-runbook.md`.
+
 ## Processing result policy
 
 ### Hebrew documents — persistence vs rollup (current accepted behavior)
