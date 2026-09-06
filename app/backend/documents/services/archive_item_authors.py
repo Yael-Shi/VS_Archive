@@ -80,6 +80,28 @@ def ordered_author_links(archive_item: ArchiveItem) -> list[ArchiveItemAuthor]:
     )
 
 
+def searchable_author_names_for_item(archive_item: ArchiveItem) -> tuple[str, ...]:
+    """Author strings for public ``q`` indexing and match-source attribution.
+
+    When any ``ArchiveItemAuthor`` row exists, return those ``Author.name``
+    values in ``(position, id)`` order. ``author_name`` is ignored then,
+    including stale or empty values. When there are zero links, return the
+    trimmed ``author_name`` when nonempty.
+    """
+    cache = getattr(archive_item, "_prefetched_objects_cache", None)
+    if cache is not None and "author_links" in cache:
+        links = sorted(
+            cache["author_links"],
+            key=lambda link: (link.position, link.id),
+        )
+    else:
+        links = ordered_author_links(archive_item)
+    if links:
+        return tuple(link.author.name for link in links)
+    fallback = (archive_item.author_name or "").strip()
+    return (fallback,) if fallback else ()
+
+
 def ordered_authors(archive_item: ArchiveItem) -> list[Author]:
     """Return this item's authors in position order."""
     return [link.author for link in ordered_author_links(archive_item)]

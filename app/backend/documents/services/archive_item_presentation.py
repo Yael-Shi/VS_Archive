@@ -709,6 +709,7 @@ def archive_public_list_active_filter_summary_context(
     event_choices: Sequence[object] = (),
     tag_choices: Sequence[object] = (),
     person_choices: Sequence[object] = (),
+    author_choices: Sequence[object] = (),
 ) -> dict[str, object]:
     """Compact active-filter chips with canonical remove/edit/clear links."""
     from dataclasses import replace
@@ -721,6 +722,7 @@ def archive_public_list_active_filter_summary_context(
         event_choices=event_choices,
         tag_choices=tag_choices,
         person_choices=person_choices,
+        author_choices=author_choices,
     )
     chips: list[dict[str, object]] = []
     person_name_by_id = {

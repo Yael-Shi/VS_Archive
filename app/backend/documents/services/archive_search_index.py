@@ -24,6 +24,7 @@ from django.db.models.expressions import CombinedExpression
 
 from documents.models import (
     ArchiveItem,
+    ArchiveItemAuthor,
     ArchiveItemPerson,
     ArchiveItemSearchIndex,
     Person,
@@ -31,6 +32,7 @@ from documents.models import (
     PhotoContent,
     PhotoPerson,
 )
+from documents.services.archive_item_authors import searchable_author_names_for_item
 from documents.services.photo_metadata_validation import PHOTO_METADATA_FIELD_NAMES
 from documents.services.photo_presentation import photo_is_archive_renderable
 from documents.services.text_presentation import (
@@ -90,7 +92,8 @@ def archive_items_for_search_index_build(
     PHOTO items prefetch every ``PhotoContent`` plus identified ``people``
     and each person's ``aliases``, ordered by ``(position, id)`` then
     Person ``(name, id)``. Item-level ``ArchiveItem.people`` (ArchiveItemPerson)
-    is prefetched the same way for every item type. This alias prefetch is
+    is prefetched the same way for every item type. Ordered ``author_links``
+    (with ``Author``) feed public author discovery text. This alias prefetch is
     search-index only; public gallery/access querysets must not load aliases.
     The builder then keeps only PhotoContent rows that pass
     ``photo_is_archive_renderable`` (same public-gallery contract).
@@ -103,6 +106,12 @@ def archive_items_for_search_index_build(
         "categories",
         "events",
         "tags",
+        Prefetch(
+            "author_links",
+            queryset=ArchiveItemAuthor.objects.select_related("author").order_by(
+                "position", "id"
+            ),
+        ),
         _search_people_prefetch(),
         archive_item_displayable_text_results_prefetch(),
         Prefetch(
@@ -295,8 +304,10 @@ def build_archive_item_search_content(
     names from public-renderable photos are appended to ``metadata_text``
     (weight B, substring) after ArchiveItem discovery fields and
     ``ArchiveItemPerson`` identities. PHOTO ``body_text`` stays empty.
-    ``ArchiveItemPerson`` canonical names and aliases apply to every item
-    type and do not depend on photo renderability.
+    Author discovery uses ordered ``ArchiveItemAuthor`` names when any links
+    exist, else trimmed ``author_name``. ``ArchiveItemPerson`` canonical names
+    and aliases apply to every item type and do not depend on photo
+    renderability.
     """
     if archive_item.pk is None:
         raise ValueError("archive_item must be saved before building search content")
@@ -305,7 +316,10 @@ def build_archive_item_search_content(
     metadata_text = _join_segments(
         _unique_normalized_segments(
             [
-                _normalize_segment(archive_item.author_name),
+                *[
+                    _normalize_segment(name)
+                    for name in searchable_author_names_for_item(archive_item)
+                ],
                 _normalize_segment(archive_item.source_title),
                 *_sorted_relation_names(archive_item, "categories"),
                 *_sorted_relation_names(archive_item, "events"),

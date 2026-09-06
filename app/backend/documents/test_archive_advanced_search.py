@@ -14,6 +14,7 @@ from documents.models import (
     ArchiveCategory,
     ArchiveEvent,
     ArchiveItem,
+    ArchiveItemAuthor,
     ArchiveItemPerson,
     Person,
     PersonAlias,
@@ -47,6 +48,10 @@ from documents.services.archive_search_index import (
 from documents.test_historical_person_tag_reuse import _create_tag
 
 User = get_user_model()
+
+
+def _author_id(item: ArchiveItem) -> int:
+    return ArchiveItemAuthor.objects.get(archive_item=item).author_id
 
 
 def _ids(queryset) -> list[int]:
@@ -92,25 +97,31 @@ def _public_item(
 
 
 class ArchiveAdvancedFilterNormalizationTests(SimpleTestCase):
-    def test_author_is_trimmed_single_value(self):
-        filters = normalize_archive_advanced_filters({"author": "  Alice  "})
-        self.assertEqual(filters.author, "Alice")
+    def test_author_is_single_positive_id(self):
+        filters = normalize_archive_advanced_filters({"author": "  12  "})
+        self.assertEqual(filters.author_id, 12)
 
-    def test_repeatable_author_params_keep_first_nonempty_only(self):
+    def test_repeatable_author_params_keep_first_positive_id_only(self):
         filters = normalize_archive_advanced_filters(
             [
                 ("author", "  "),
-                ("author", "Alice"),
-                ("author", "Bob"),
+                ("author", "abc"),
+                ("author", "12"),
+                ("author", "13"),
             ]
         )
-        self.assertEqual(filters.author, "Alice")
+        self.assertEqual(filters.author_id, 12)
         self.assertEqual(
             normalize_archive_advanced_filters(
-                [("author", "Alice"), ("author", "Bob")]
+                [("author", "12"), ("author", "13")]
             ).query_param_pairs(),
-            [("author", "Alice")],
+            [("author", "12")],
         )
+
+    def test_author_name_strings_are_inactive(self):
+        filters = normalize_archive_advanced_filters({"author": "Alice"})
+        self.assertIsNone(filters.author_id)
+        self.assertFalse(filters.is_active())
 
     def test_repeatable_ids_preserve_order_and_dedupe(self):
         filters = normalize_archive_advanced_filters(
@@ -167,7 +178,7 @@ class ArchiveAdvancedFilterNormalizationTests(SimpleTestCase):
 
     def test_query_param_pairs_round_trip_repeatables(self):
         filters = ArchiveAdvancedFilters(
-            author="Alice",
+            author_id=12,
             category_ids=(2, 7),
             event_ids=(4,),
             tag_ids=(8, 9),
@@ -185,7 +196,7 @@ class ArchiveAdvancedFilterNormalizationTests(SimpleTestCase):
         parsed = parse_qs(query, keep_blank_values=True)
         self.assertEqual(parsed["q"], ["hello"])
         self.assertEqual(parsed["item_type"], ["photo"])
-        self.assertEqual(parsed["author"], ["Alice"])
+        self.assertEqual(parsed["author"], ["12"])
         self.assertEqual(parsed["category"], ["2", "7"])
         self.assertEqual(parsed["event"], ["4"])
         self.assertEqual(parsed["tag"], ["8", "9"])
@@ -197,11 +208,13 @@ class ArchiveAdvancedFilterNormalizationTests(SimpleTestCase):
 
 
 class ArchiveAdvancedFilterQuerysetTests(TestCase):
-    def test_author_filter_exact_match(self):
+    def test_author_filter_structured_id_match(self):
         match = _public_item(title="Author match", author_name="Exact Author")
         _public_item(title="Author other", author_name="Other Author")
         _public_item(title="Author blank", author_name="")
-        filters = normalize_archive_advanced_filters({"author": "Exact Author"})
+        filters = normalize_archive_advanced_filters(
+            {"author": str(_author_id(match))}
+        )
         ids = _ids(
             filter_archive_items_by_advanced_filters(ArchiveItem.objects.all(), filters)
         )
@@ -540,7 +553,8 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
         anon_qs = archive_browse_queryset_for_user(None)
         anon_choices = archive_advanced_filter_choice_context(anon_qs)
         self.assertEqual(
-            anon_choices["advanced_filter_author_choices"], ("Public Author",)
+            [a.name for a in anon_choices["advanced_filter_author_choices"]],
+            ["Public Author"],
         )
         self.assertEqual(
             [c.pk for c in anon_choices["advanced_filter_category_choices"]],
@@ -568,7 +582,7 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
         family_qs = archive_browse_queryset_for_user(self.family)
         family_choices = archive_advanced_filter_choice_context(family_qs)
         self.assertEqual(
-            set(family_choices["advanced_filter_author_choices"]),
+            {a.name for a in family_choices["advanced_filter_author_choices"]},
             {"Public Author", "Private Author"},
         )
         self.assertEqual(
@@ -616,7 +630,7 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
         resp = self.client.get(
             reverse("archive-list"),
             {
-                "author": "Secret Author",
+                "author": str(_author_id(private_item)),
                 "category": str(cat.id),
                 "year": "1953",
             },
@@ -630,7 +644,7 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
         # authorized choice context must not expose private-only metadata.
         self.assertNotIn(
             "Secret Author",
-            resp.context["advanced_filter_author_choices"],
+            [a.name for a in resp.context["advanced_filter_author_choices"]],
         )
         self.assertNotIn(
             cat.pk,
@@ -645,8 +659,19 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
         cat = ArchiveCategory.objects.create(name="Page Cat", slug="page-cat")
         event = ArchiveEvent.objects.create(name="Page Event", slug="page-event")
         tag = Tag.objects.create(name="Page Tag")
+        first = _public_item(
+            title="ADVPAGE-00",
+            author_name="Page Author",
+            category_names=["Page Cat"],
+            event_names=["Page Event"],
+            tag_names=["Page Tag"],
+            date_start=date(1952, 1, 1),
+            date_end=date(1952, 12, 31),
+            date_precision=ArchiveItem.DatePrecision.YEAR,
+        )
+        author_id = _author_id(first)
         filters = ArchiveAdvancedFilters(
-            author="Page Author",
+            author_id=author_id,
             category_ids=(cat.id,),
             event_ids=(event.id,),
             tag_ids=(tag.id,),
@@ -654,7 +679,7 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
             year=1950,
             year_to=1955,
         )
-        for index in range(50):
+        for index in range(1, 50):
             _public_item(
                 title=f"ADVPAGE-{index:02d}",
                 author_name="Page Author",
@@ -678,7 +703,7 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
         prev_href = str(pagination["prev_href_suffix"])
         for href in (next_href, prev_href):
             parsed = parse_qs(href.lstrip("?"))
-            self.assertEqual(parsed["author"], ["Page Author"])
+            self.assertEqual(parsed["author"], [str(author_id)])
             self.assertEqual(parsed["category"], [str(cat.id)])
             self.assertEqual(parsed["event"], [str(event.id)])
             self.assertEqual(parsed["tag"], [str(tag.id)])
@@ -700,7 +725,7 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
             if link["label"] == "תמונות"
         )
         photo_parsed = parse_qs(str(photo_link["href_suffix"]).lstrip("?"))
-        self.assertEqual(photo_parsed["author"], ["Page Author"])
+        self.assertEqual(photo_parsed["author"], [str(author_id)])
         self.assertEqual(photo_parsed["category"], [str(cat.id)])
         self.assertEqual(photo_parsed["event"], [str(event.id)])
         self.assertEqual(photo_parsed["tag"], [str(tag.id)])
@@ -712,7 +737,7 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
             [
                 ("q", "ADVPAGE"),
                 ("item_type", "documents_and_texts"),
-                ("author", "Page Author"),
+                ("author", str(author_id)),
                 ("category", str(cat.id)),
                 ("event", str(event.id)),
                 ("tag", str(tag.id)),
@@ -725,7 +750,7 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode("utf-8")
-        self.assertIn('name="author" value="Page Author"', html)
+        self.assertIn(f'name="author" value="{author_id}"', html)
         self.assertIn(f'name="category" value="{cat.id}"', html)
         self.assertIn(f'name="event" value="{event.id}"', html)
         self.assertIn(f'name="tag" value="{tag.id}"', html)
@@ -733,7 +758,7 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
         self.assertIn('name="year" value="1950"', html)
         self.assertIn('name="year_to" value="1955"', html)
         self.assertNotIn('name="page"', html)
-        self.assertIn("author=Page+Author", html)
+        self.assertIn(f"author={author_id}", html)
         self.assertIn(f"category={cat.id}", html)
         self.assertIn("item_type=photo", html)
 
@@ -764,7 +789,7 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
         resp = self.client.get(
             reverse("archive-list"),
             {
-                "author": "View Author",
+                "author": str(_author_id(match)),
                 "category": str(cat.id),
                 "year": "1953",
             },

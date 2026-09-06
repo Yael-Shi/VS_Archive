@@ -11,14 +11,16 @@ from dataclasses import dataclass, replace
 from datetime import date
 from typing import Any, Mapping, Sequence
 
-from django.db.models import Exists, OuterRef, QuerySet
+from django.db.models import Exists, OuterRef, Q, QuerySet
 
 from documents.historical_person_tag_map import historical_person_name_tag_ids
 from documents.models import (
     ArchiveCategory,
     ArchiveEvent,
     ArchiveItem,
+    ArchiveItemAuthor,
     ArchiveItemPerson,
+    Author,
     Person,
     PhotoPerson,
     Tag,
@@ -64,7 +66,7 @@ EMPTY_ARCHIVE_ADVANCED_FILTER_CHOICE_CONTEXT: dict[str, object] = {
 class ArchiveAdvancedFilters:
     """Normalized advanced filters for the public archive list."""
 
-    author: str = ""
+    author_id: int | None = None
     category_ids: tuple[int, ...] = ()
     event_ids: tuple[int, ...] = ()
     tag_ids: tuple[int, ...] = ()
@@ -74,7 +76,7 @@ class ArchiveAdvancedFilters:
 
     def is_active(self) -> bool:
         return bool(
-            self.author
+            self.author_id is not None
             or self.category_ids
             or self.event_ids
             or self.tag_ids
@@ -85,8 +87,10 @@ class ArchiveAdvancedFilters:
     def query_param_pairs(self) -> list[tuple[str, str]]:
         """Stable GET pairs for URL construction (repeatable M2M params)."""
         params: list[tuple[str, str]] = []
-        if self.author:
-            params.append((ARCHIVE_ADVANCED_FILTER_PARAM_AUTHOR, self.author))
+        if self.author_id is not None:
+            params.append(
+                (ARCHIVE_ADVANCED_FILTER_PARAM_AUTHOR, str(self.author_id))
+            )
         for category_id in self.category_ids:
             params.append((ARCHIVE_ADVANCED_FILTER_PARAM_CATEGORY, str(category_id)))
         for event_id in self.event_ids:
@@ -175,7 +179,8 @@ def normalize_archive_advanced_filters(
     """
     Parse public archive advanced-filter GET parameters.
 
-    - ``author``: single trimmed exact value (empty → inactive).
+    - ``author``: one positive Author primary key (empty/malformed →
+      inactive). Never an author-name string.
     - ``category`` / ``event`` / ``tag`` / ``person``: repeatable positive
       integer ids; malformed values skipped; order of first occurrence
       preserved. ``person`` is a Person primary key, never a name or alias.
@@ -189,12 +194,10 @@ def normalize_archive_advanced_filters(
     if params is None:
         return EMPTY_ARCHIVE_ADVANCED_FILTERS
 
-    author_values = _raw_values(params, ARCHIVE_ADVANCED_FILTER_PARAM_AUTHOR)
-    author = ""
-    for raw in author_values:
-        author = _normalize_single_string(raw)
-        if author:
-            break
+    author_ids = _parse_positive_int_ids(
+        _raw_values(params, ARCHIVE_ADVANCED_FILTER_PARAM_AUTHOR)
+    )
+    author_id = author_ids[0] if author_ids else None
 
     category_ids = _parse_positive_int_ids(
         _raw_values(params, ARCHIVE_ADVANCED_FILTER_PARAM_CATEGORY)
@@ -226,7 +229,7 @@ def normalize_archive_advanced_filters(
     # year_to alone (no valid year) is ignored.
 
     return ArchiveAdvancedFilters(
-        author=author,
+        author_id=author_id,
         category_ids=category_ids,
         event_ids=event_ids,
         tag_ids=tag_ids,
@@ -249,8 +252,9 @@ def filter_archive_items_by_advanced_filters(
 
     Within each multi-value M2M group values are OR'd; groups AND together.
     M2M filtering uses ``pk__in`` subqueries so join fan-out cannot duplicate
-    ``ArchiveItem`` rows. Person filtering uses correlated ``Exists``
-    (ArchiveItemPerson OR renderable PhotoPerson) for the same reason.
+    ``ArchiveItem`` rows. Author and Person filtering use correlated
+    ``Exists`` so join fan-out cannot duplicate ``ArchiveItem`` rows. Person
+    is ArchiveItemPerson OR renderable PhotoPerson.
     Date filtering requires a known archival date (non-``UNKNOWN`` precision
     with both bounds) and uses interval overlap.
     """
@@ -259,8 +263,13 @@ def filter_archive_items_by_advanced_filters(
 
     filtered = queryset
 
-    if filters.author:
-        filtered = filtered.filter(author_name=filters.author)
+    if filters.author_id is not None:
+        filtered = filtered.filter(
+            _author_membership_q(
+                filters.author_id,
+                authorized_queryset=queryset,
+            )
+        )
 
     if filters.category_ids:
         filtered = filtered.filter(
@@ -315,6 +324,51 @@ def filter_archive_items_by_advanced_filters(
     return filtered
 
 
+def _author_name_is_globally_unique(author_id: int, author_name: str) -> bool:
+    return not Author.objects.filter(name=author_name).exclude(pk=author_id).exists()
+
+
+def _author_membership_q(
+    author_id: int,
+    *,
+    authorized_queryset: QuerySet[ArchiveItem],
+) -> Q:
+    """Structured ArchiveItemAuthor membership, plus fail-closed legacy fallback.
+
+    Structured links match ``author_id`` via correlated ``Exists``.
+    ``author_name`` is consulted only for items with zero
+    ``ArchiveItemAuthor`` rows, and only when the selected ``Author.name``
+    is globally unique **and** that Author already has structured
+    ``ArchiveItemAuthor`` membership in ``authorized_queryset``. An Author
+    id with no membership in that queryset cannot enable leftover
+    ``author_name`` matches. Ambiguous duplicate Author names never infer a
+    legacy ``author_name`` onto one of those identities.
+    """
+    structured = Exists(
+        ArchiveItemAuthor.objects.filter(
+            author_id=author_id,
+            archive_item_id=OuterRef("pk"),
+        )
+    )
+    authorized_item_pks = authorized_queryset.order_by().values("pk")
+    if not ArchiveItemAuthor.objects.filter(
+        author_id=author_id,
+        archive_item_id__in=authorized_item_pks,
+    ).exists():
+        return structured
+    selected_name = (
+        Author.objects.filter(pk=author_id).values_list("name", flat=True).first()
+    )
+    if selected_name is None or not _author_name_is_globally_unique(
+        author_id, selected_name
+    ):
+        return structured
+    zero_links = ~Exists(
+        ArchiveItemAuthor.objects.filter(archive_item_id=OuterRef("pk"))
+    )
+    return structured | (zero_links & Q(author_name=selected_name))
+
+
 def archive_advanced_filter_choice_context(
     authorized_queryset: QuerySet[ArchiveItem],
 ) -> dict[str, object]:
@@ -322,17 +376,23 @@ def archive_advanced_filter_choice_context(
     Discovery/author choices for advanced filters.
 
     Derived only from ``authorized_queryset`` so private/restricted metadata
-    cannot leak to unauthorized viewers. Person choices use the same AIP-or-
-    renderable-PhotoPerson membership as the public People index.
+    cannot leak to unauthorized viewers. Author choices are Author rows with
+    at least one ``ArchiveItemAuthor`` link to that queryset (not
+    ``author_name``). Person choices use the same AIP-or-renderable-PhotoPerson
+    membership as the public People index.
     """
     from documents.services.person_public import person_public_membership_q_for_item_pks
 
     item_pks = authorized_queryset.order_by().values("pk")
-    author_names = tuple(
-        authorized_queryset.exclude(author_name="")
-        .order_by("author_name")
-        .values_list("author_name", flat=True)
-        .distinct()
+    authors = tuple(
+        Author.objects.filter(
+            Exists(
+                ArchiveItemAuthor.objects.filter(
+                    author_id=OuterRef("pk"),
+                    archive_item_id__in=item_pks,
+                )
+            )
+        ).order_by("name", "id")
     )
     categories = tuple(
         ArchiveCategory.objects.filter(archive_items__pk__in=item_pks)
@@ -356,7 +416,7 @@ def archive_advanced_filter_choice_context(
         ).order_by("name", "id")
     )
     return {
-        "advanced_filter_author_choices": author_names,
+        "advanced_filter_author_choices": authors,
         "advanced_filter_category_choices": categories,
         "advanced_filter_event_choices": events,
         "advanced_filter_tag_choices": tags,
@@ -370,7 +430,7 @@ def archive_advanced_filter_template_context(
     """Template/query-preservation context for active advanced filters."""
     return {
         "advanced_filters": filters,
-        "advanced_filter_author": filters.author,
+        "advanced_filter_author": filters.author_id,
         "advanced_filter_category_ids": filters.category_ids,
         "advanced_filter_event_ids": filters.event_ids,
         "advanced_filter_tag_ids": filters.tag_ids,
@@ -506,7 +566,7 @@ def archive_advanced_year_form_values(
 def archive_advanced_filters_without_author(
     filters: ArchiveAdvancedFilters,
 ) -> ArchiveAdvancedFilters:
-    return replace(filters, author="")
+    return replace(filters, author_id=None)
 
 
 def archive_advanced_filters_without_category(
@@ -572,6 +632,7 @@ def build_archive_advanced_filter_summary_items(
     event_choices: Sequence[Any] = (),
     tag_choices: Sequence[Any] = (),
     person_choices: Sequence[Any] = (),
+    author_choices: Sequence[Any] = (),
 ) -> list[dict[str, object]]:
     """
     Compact active-filter summary descriptors (labels/values only).
@@ -587,12 +648,12 @@ def build_archive_advanced_filter_summary_items(
                 "value": q,
             }
         )
-    if filters.author:
+    if filters.author_id is not None:
         items.append(
             {
                 "kind": "author",
                 "label": "מחבר/ת",
-                "value": filters.author,
+                "value": _choice_name_by_id(author_choices, filters.author_id),
             }
         )
     if filters.category_ids:

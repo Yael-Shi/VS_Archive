@@ -17,6 +17,7 @@ from documents.models import (
     ArchiveCategory,
     ArchiveEvent,
     ArchiveItem,
+    ArchiveItemAuthor,
     ArchiveItemPerson,
     Document,
     Person,
@@ -53,6 +54,10 @@ YOUTUBE_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
 def _ids(queryset) -> list[int]:
     return list(queryset.values_list("pk", flat=True))
+
+
+def _author_id(item: ArchiveItem) -> int:
+    return ArchiveItemAuthor.objects.get(archive_item=item).author_id
 
 
 def _public_manual(title: str, **kwargs) -> ArchiveItem:
@@ -727,10 +732,11 @@ class ArchiveAdvancedPersonFilterUiTests(TestCase):
         )
         ArchiveItemPerson.objects.create(archive_item=item, person=ada)
         ArchiveItemPerson.objects.create(archive_item=item, person=charles)
+        author_id = _author_id(item)
 
         filters = normalize_archive_advanced_filters(
             [
-                ("author", "Keep Author"),
+                ("author", str(author_id)),
                 ("category", str(cat.id)),
                 ("event", str(event.id)),
                 ("tag", str(tag.id)),
@@ -758,7 +764,7 @@ class ArchiveAdvancedPersonFilterUiTests(TestCase):
         parsed = parse_qs(str(ada_chip["remove_href_suffix"]).lstrip("?"))
         self.assertEqual(parsed["person"], [str(charles.id)])
         self.assertEqual(parsed["q"], ["KeepQuery"])
-        self.assertEqual(parsed["author"], ["Keep Author"])
+        self.assertEqual(parsed["author"], [str(author_id)])
         self.assertEqual(parsed["category"], [str(cat.id)])
         self.assertEqual(parsed["event"], [str(event.id)])
         self.assertEqual(parsed["tag"], [str(tag.id)])
@@ -773,7 +779,7 @@ class ArchiveAdvancedPersonFilterUiTests(TestCase):
             self.url,
             [
                 ("q", "KeepQuery"),
-                ("author", "Keep Author"),
+                ("author", str(author_id)),
                 ("category", str(cat.id)),
                 ("event", str(event.id)),
                 ("tag", str(tag.id)),
@@ -794,7 +800,7 @@ class ArchiveAdvancedPersonFilterUiTests(TestCase):
         live_parsed = parse_qs(str(live_chip["remove_href_suffix"]).lstrip("?"))
         self.assertEqual(live_parsed["person"], [str(charles.id)])
         self.assertEqual(live_parsed["q"], ["KeepQuery"])
-        self.assertEqual(live_parsed["author"], ["Keep Author"])
+        self.assertEqual(live_parsed["author"], [str(author_id)])
         self.assertEqual(live_parsed["category"], [str(cat.id)])
         self.assertEqual(live_parsed["event"], [str(event.id)])
         self.assertEqual(live_parsed["tag"], [str(tag.id)])
@@ -867,12 +873,13 @@ class ArchiveAdvancedPersonFilterUiTests(TestCase):
         )
         ArchiveItemPerson.objects.create(archive_item=item, person=ada)
         ArchiveItemPerson.objects.create(archive_item=item, person=charles)
+        author_id = _author_id(item)
 
         resp = self.client.get(
             self.url,
             [
                 ("q", "ChipQuery"),
-                ("author", "Chip Author"),
+                ("author", str(author_id)),
                 ("category", str(cat_a.id)),
                 ("category", str(cat_b.id)),
                 ("event", str(event.id)),

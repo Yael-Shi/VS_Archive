@@ -11,6 +11,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from documents.models import ArchiveItem, ArchiveItemSearchIndex
+from documents.services.archive_item_authors import searchable_author_names_for_item
 from documents.services.archive_item_presentation import (
     ARCHIVE_LIST_SEARCH_SEARCH,
     ArchiveBrowseCard,
@@ -264,7 +265,10 @@ def resolve_metadata_match_source_label(
     the generic item-details label when any metadata source matches.
     """
     hits: list[str] = []
-    if short_field_contains_any_term(archive_item.author_name, terms):
+    if any(
+        short_field_contains_any_term(name, terms)
+        for name in searchable_author_names_for_item(archive_item)
+    ):
         hits.append(MATCH_SOURCE_AUTHOR)
     if short_field_contains_any_term(archive_item.source_title, terms):
         hits.append(MATCH_SOURCE_SOURCE_TITLE)

@@ -671,7 +671,7 @@ class AuthorCompatibilityBehaviorTests(TestCase):
         self.assertContains(resp, "Visible Author")
         self.assertNotContains(resp, "Hidden Author")
 
-    def test_q_search_still_uses_author_name(self):
+    def test_q_search_indexes_structured_author_names(self):
         item = create_manual_text_archive_item(
             title="Search author item",
             body="body",
@@ -692,7 +692,7 @@ class AuthorCompatibilityBehaviorTests(TestCase):
         self.assertIn("uniqauthorfoundationtoken", content.metadata_text)
         self.assertNotIn("uniqhiddenauthortoken", content.metadata_text)
 
-    def test_advanced_author_filter_still_matches_author_name_exactly(self):
+    def test_advanced_author_filter_matches_structured_author_id(self):
         match = create_manual_text_archive_item(
             title="Author match",
             body="body",
@@ -705,7 +705,9 @@ class AuthorCompatibilityBehaviorTests(TestCase):
             visibility=ArchiveItem.Visibility.PUBLIC,
             author_name="Other Author",
         )
-        filters = normalize_archive_advanced_filters({"author": "Exact Author"})
+        filters = normalize_archive_advanced_filters(
+            {"author": str(match.author_links.get().author_id)}
+        )
         ids = list(
             filter_archive_items_by_advanced_filters(
                 ArchiveItem.objects.all(), filters
