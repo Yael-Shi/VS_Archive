@@ -746,8 +746,10 @@ class Command(BaseCommand):
             }
             # Only scoring engines set HtrResult.quality. Omit the field when
             # unset so a non-scoring rerun cannot overwrite an existing value
-            # (new rows still default to UNKNOWN). Apply to SOURCE_TEXT only;
-            # HEBREW_TEXT quality is unchanged (translation inheritance deferred).
+            # (new rows still default to UNKNOWN). Apply to SOURCE_TEXT only.
+            # Hebrew-native HEBREW_TEXT is an OCR mirror and does not copy
+            # HtrResult.quality. Non-Hebrew Gemini translation quality is
+            # inherited later in persist_hebrew_translation_result.
             if (
                 r_type == DocumentTextResult.ResultType.SOURCE_TEXT
                 and htr.quality is not None

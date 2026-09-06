@@ -83,15 +83,17 @@ def capped_inherited_base_quality(
     source_quality: str | None,
     candidate_quality: str | None = None,
 ) -> str:
-    """Hook for a later HEBREW_TEXT writer: inherit/cap from SOURCE_TEXT.
+    """Inherit/cap persisted HEBREW_TEXT base quality from SOURCE_TEXT.
 
-    Not called from ``persist_hebrew_translation_result`` yet (no independent
-    translation scoring in this PR). Future persist should set
-    ``defaults["quality"]`` from this helper:
+    ``persist_hebrew_translation_result`` uses this for successful Gemini
+    Hebrew translations of non-Hebrew OCR. There is no independent translation
+    score yet, so the writer omits ``candidate_quality`` and inherits the
+    source persisted base quality.
 
     - ``candidate_quality`` UNKNOWN/omitted → inherit source base quality
     - otherwise → min(source, candidate) on the persisted ordinal
-    - HUMAN_VERIFIED is not a persisted value and is treated as UNKNOWN
+    - HUMAN_VERIFIED / NEEDS_CORRECTION are not persisted values and are
+      treated as UNKNOWN
     """
     source = _persisted_base_quality(source_quality)
     candidate = _persisted_base_quality(candidate_quality)

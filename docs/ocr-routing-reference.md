@@ -217,7 +217,7 @@ Separate from OCR route selection.
 - Hebrew documents: only `HEBREW_TEXT` required for `READY`.
 - Non-Hebrew documents: both `SOURCE_TEXT` and `HEBREW_TEXT` expected. Missing translation keeps the document `PARTIAL` (intentional until translation succeeds).
 
-Translation failure persists a failed `HEBREW_TEXT` row (`HEBREW_TRANSLATION_FAILED`); it does not fail the OCR row. The Gemini translation **call** on the initial OCR success path runs outside the Phase 3 persist transaction; SOURCE + HEBREW persist remain in that transaction. Manual re-translation is available via `hebrew_translation_retry` (separate worker operation; Gemini already ran outside its persist TX).
+Translation failure persists a failed `HEBREW_TEXT` row (`HEBREW_TRANSLATION_FAILED`); it does not fail the OCR row. The Gemini translation **call** on the initial OCR success path runs outside the Phase 3 persist transaction; SOURCE + HEBREW persist remain in that transaction. Manual re-translation is available via `hebrew_translation_retry` (separate worker operation; Gemini already ran outside its persist TX). Successful translation persist (initial OCR path and retry) writes `HEBREW_TEXT.quality` from same-engine SOURCE_TEXT persisted base quality via `capped_inherited_base_quality` (no independent translation score; `verification_status` is ignored; missing SOURCE fails closed to `UNKNOWN`). Hebrew-native `HEBREW_TEXT` is not translated and does not use this inheritance. Failed translation rows are unchanged. Existing rows are not backfilled.
 
 **Out of scope / not implemented:** no automatic non-Hebrew→other-language translation; no OCR-route-driven translation; Hebrew OCR does not run a second translation pass.
 

@@ -63,6 +63,40 @@ string source.
 `test_archive_item_author_public_display.py`, `test_author.py`,
 `test_archive_item_author_staff_ux.py`. No migration.
 
+## Text quality — SOURCE_TEXT → HEBREW_TEXT inheritance for Gemini translations
+
+**Decision / implemented:** Successful Gemini Hebrew translations of
+**non-Hebrew** OCR documents persist `HEBREW_TEXT.quality` as the inherited
+same-engine `SOURCE_TEXT` persisted base quality. The writer is
+`persist_hebrew_translation_result`; it calls
+`capped_inherited_base_quality(source.quality)` with no candidate score.
+There is no independent translation quality score.
+
+**Current behavior:**
+
+- Applies to successful initial OCR translation persist and successful
+  Hebrew-translation retry (both already call the shared persist helper).
+- Inheritance uses persisted `SOURCE_TEXT.quality` only (`UNKNOWN` / `LOW` /
+  `MEDIUM` / `GOOD`). `verification_status` and effective/public quality are
+  not used. `HUMAN_VERIFIED` / `NEEDS_CORRECTION` are never persisted.
+- Missing same-engine SOURCE_TEXT fails closed: persist still succeeds,
+  `based_on_source_revision` stays `None`, quality is `UNKNOWN`.
+- Failed translation persist is unchanged (no quality inheritance).
+- Hebrew-native `HEBREW_TEXT` (including Transkribus OCR mirror via
+  `_save_htr_results`) is unchanged: it is not a translation and does not
+  copy `HtrResult.quality`.
+- No backfill/migration. Existing translation rows keep stored quality until
+  a successful re-persist.
+
+**Supersedes:** unwired-inheritance notes on Text quality PR1 / PR2 / PR3
+(`capped_inherited_base_quality` remains unwired; translation `HEBREW_TEXT`
+quality unchanged).
+
+**Tests:** `documents/test_text_quality.py`
+(`TextQualityTranslationInheritanceTests`); retry coverage in
+`documents/test_hebrew_translation_retry.py`; Hebrew-native / Transkribus
+unchanged in `documents/test_arabic_printed_text_quality.py`.
+
 ## Worker Hebrew translation runs outside the OCR persist transaction
 
 **Decision / implemented:** On the initial non-Hebrew OCR success path,
@@ -74,8 +108,9 @@ sync. The Gemini call is no longer nested inside that persist transaction.
 **Unchanged:** Translation failure still persists `HEBREW_TEXT` as
 `HEBREW_TRANSLATION_FAILED` and does not fail the OCR row. Index-sync failure
 still rolls back SOURCE + translation together. Hebrew-translation retry
-already called Gemini outside its persist TX. Routing, models, and
-`persist_hebrew_translation_result` are unchanged.
+already called Gemini outside its persist TX. Routing and models are unchanged.
+`persist_hebrew_translation_result` is extended separately by the later
+SOURCE_TEXT → HEBREW_TEXT quality-inheritance decision above.
 
 **Tests:** `RunWorkerBehaviorTests.test_non_hebrew_translation_gemini_call_sees_no_persisted_text_rows`
 in `documents/tests.py`; existing
