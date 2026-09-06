@@ -1,5 +1,33 @@
 # VS-Archive Decision Log
 
+## Worker Hebrew translation runs outside the OCR persist transaction
+
+**Decision / implemented:** On the initial non-Hebrew OCR success path,
+`translate_text_to_hebrew_with_gemini` runs **after** Transkribus local
+completion (if any) and **before** the Phase 3 `transaction.atomic()` that
+persists `SOURCE_TEXT`, `HEBREW_TEXT`, processing-state rollup, and search-index
+sync. The Gemini call is no longer nested inside that persist transaction.
+
+**Unchanged:** Translation failure still persists `HEBREW_TEXT` as
+`HEBREW_TRANSLATION_FAILED` and does not fail the OCR row. Index-sync failure
+still rolls back SOURCE + translation together. Hebrew-translation retry
+already called Gemini outside its persist TX. Routing, models, and
+`persist_hebrew_translation_result` are unchanged.
+
+**Tests:** `RunWorkerBehaviorTests.test_non_hebrew_translation_gemini_call_sees_no_persisted_text_rows`
+in `documents/tests.py`; existing
+`test_worker_sync_failure_rolls_back_ocr_and_translation`.
+
+## Arabic printed ambiguous Vision / provider-create fences (runbook)
+
+**Decision / documented:** Fail-closed Vision and Antigravity create fences are
+intentional. Operators must diagnose read-only and must not reset reservation
+counters. Runbook:
+`docs/ai-context/arabic-printed-ambiguous-fence-runbook.md`.
+
+**Unchanged:** reclaim/reprocess eligibility, page budget, cancel recovery,
+quality scoring.
+
 ## Public Author catalog and Author detail
 
 **Decision / implemented:** Public Author browsing exists at
@@ -5279,7 +5307,7 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 ## Archive full-text search — PR2b-2 automated displayed-text sync (implemented)
 
-**Decision / implemented:** **PR2b-2** covers automated displayed-text mutation sync. Hooks are at **parent transaction boundaries** only (one sync per logical automated operation). Shared **`persist_hebrew_translation_result`** is intentionally **not** hooked (worker Phase 3 already syncs after nested translation).
+**Decision / implemented:** **PR2b-2** covers automated displayed-text mutation sync. Hooks are at **parent transaction boundaries** only (one sync per logical automated operation). Shared **`persist_hebrew_translation_result`** is intentionally **not** hooked (worker Phase 3 already syncs after translation persist). The Gemini translation **call** runs outside that Phase 3 transaction; SOURCE + HEBREW persist + sync remain in one TX.
 
 **Introduced:**
 

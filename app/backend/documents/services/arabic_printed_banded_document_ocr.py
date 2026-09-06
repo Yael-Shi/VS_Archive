@@ -3,8 +3,9 @@
 This module sits above the Phase 5A single-page orchestrator. It creates or
 reuses a durable ArabicPrinted attempt, claims pages in 0-based order, and
 calls ``process_claimed_arabic_printed_page`` once per claimed page. It does
-not extract PDFs, talk to S3, route documents, persist ``DocumentTextResult``,
-or get imported by production adapters/workers.
+not extract PDFs, talk to S3, route documents, or persist
+``DocumentTextResult``. ``AntigravityAdapter`` imports this coordinator for
+the worker-only banded execution path.
 
 Working images are loaded only for EXECUTE claims. REUSE reads the persisted
 page through Phase 5A with a checkpoint-derived stub image and never calls the

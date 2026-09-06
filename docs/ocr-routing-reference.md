@@ -49,12 +49,17 @@ Route activation is env-gated in `select_ocr_route` via `_env_bool` (same patter
 - The requested Interactions model is the code constant `ANTIGRAVITY_REQUESTED_MODEL` (`gemini-3.7-flash`). There is no model environment-variable override.
 - Auth uses the existing **`GEMINI_API_KEY`** (Interactions API).
 
-**Production rollout (two phases):**
+**Production rollout (current):**
 
-1. Deploy code/migration with **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED=false`** (or unset). Default behavior is unchanged.
-2. Enable the flag only for a **controlled Arabic printed OCR test** once wiring and credentials are ready.
-
-There is **no** Gemini↔Antigravity fallback in code.
+- Routing-code default when `ENABLE_ANTIGRAVITY_ARABIC_PRINTED` is absent is
+  **false** (`ar` + `PRINTED` stays on Gemini).
+- Current worker CDK (`app_stack.py`) sets **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED=true`**
+  and **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED=true`** on the worker task only.
+  Web omits both flags and omits `GOOGLE_CLOUD_VISION_API_KEY`. That web
+  omission is intentional: routing and banded execution run in the worker;
+  staff reprocess eligibility does not require the Antigravity flag on web.
+- Desired CDK values are effective in runtime after deployment; verify
+  deployed ECS separately. There is **no** Gemini↔Antigravity fallback in code.
 
 **Future cleanup:** OCR routing feature gates may be centralized through `WorkerEnvConfig` passed into `select_ocr_route`, but any such change should migrate **all** env-gated OCR routes together (Hebrew handwritten, Arabic printed, etc.), not Arabic Antigravity alone.
 
@@ -212,12 +217,13 @@ Separate from OCR route selection.
 - Hebrew documents: only `HEBREW_TEXT` required for `READY`.
 - Non-Hebrew documents: both `SOURCE_TEXT` and `HEBREW_TEXT` expected. Missing translation keeps the document `PARTIAL` (intentional until translation succeeds).
 
-Translation failure persists a failed `HEBREW_TEXT` row (`HEBREW_TRANSLATION_FAILED`); it does not fail the OCR row. Manual re-translation is available via `hebrew_translation_retry` (separate worker operation).
+Translation failure persists a failed `HEBREW_TEXT` row (`HEBREW_TRANSLATION_FAILED`); it does not fail the OCR row. The Gemini translation **call** on the initial OCR success path runs outside the Phase 3 persist transaction; SOURCE + HEBREW persist remain in that transaction. Manual re-translation is available via `hebrew_translation_retry` (separate worker operation; Gemini already ran outside its persist TX).
 
 **Out of scope / not implemented:** no automatic non-Hebrew→other-language translation; no OCR-route-driven translation; Hebrew OCR does not run a second translation pass.
 
 ## Operational notes
 
+- Ambiguous Vision / Antigravity create fences are fail-closed. Do not reset reservation counters. Runbook: `docs/ai-context/arabic-printed-ambiguous-fence-runbook.md`.
 - Do **not** change routing casually. New `(language, text_input_type)` pairs require explicit `OCR_ROUTES` (or approved special-case) entries, adapter/registry wiring, tests, and a decision-log update.
 - Keep **routing metadata** (`engine_key`, `prompt_variant`) separate from
   **runtime engine identity** (`DocumentTextResult.engine`, e.g. a concrete

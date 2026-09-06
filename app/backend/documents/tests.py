@@ -2703,6 +2703,45 @@ class RunWorkerBehaviorTests(TestCase):
     @patch("documents.management.commands.run_worker.get_object_bytes")
     @patch("documents.management.commands.run_worker.extract_pages")
     @patch("documents.management.commands.run_worker.transcribe_pages")
+    def test_non_hebrew_translation_gemini_call_sees_no_persisted_text_rows(
+        self,
+        mock_transcribe,
+        mock_extract_pages,
+        mock_get_object_bytes,
+    ):
+        mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
+        mock_transcribe.return_value = HtrResult(
+            text="recognized text",
+            needs_review=False,
+            engine_name="gemini-2.0-flash",
+            review_reasons=[],
+        )
+        rows_during_translate = []
+
+        def _translate_before_persist(*args, **kwargs):
+            rows_during_translate.append(
+                DocumentTextResult.objects.filter(document=self.doc).count()
+            )
+            return GeminiResult(
+                text="translated hebrew text long enough",
+                engine_name="gemini-2.0-flash",
+            )
+
+        self.mock_translate.side_effect = _translate_before_persist
+
+        self.assertTrue(self.command._process_message(self._message()))
+
+        self.assertEqual(rows_during_translate, [0])
+        self.assertEqual(
+            DocumentTextResult.objects.filter(document=self.doc).count(), 2
+        )
+
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    @patch("documents.management.commands.run_worker.transcribe_pages")
     def test_gemini_success_adapter_needs_review_adds_needs_review_flag(
         self,
         mock_transcribe,
