@@ -13,7 +13,9 @@ Related code: `reserve_arabic_printed_vision_call`,
 `reserve_arabic_printed_primary_create`,
 `reserve_arabic_printed_fallback_create`,
 `process_claimed_arabic_printed_page`,
-`ocr_reprocess._arabic_printed_page_is_permanently_fenced`.
+`ocr_reprocess._arabic_printed_page_is_permanently_fenced`,
+`arabic_printed_ambiguous_fence_resolution` /
+`resolve_arabic_printed_ambiguous_fence`.
 Staff reprocess eligibility: `docs/ai-context/decision-log.md`
 (“Checkpoint-backed Arabic printed banded PARTIAL documents remain
 reprocessable”). Request delivery repair (not fence reset):
@@ -87,7 +89,8 @@ present resume as available.
 
 ## What must never be blindly reset
 
-Do not UPDATE or DELETE any of the following to “unblock” a document:
+Do not UPDATE or DELETE any of the following to “unblock” a document
+outside the reviewed operator command below:
 
 - `cloud_vision_call_count`
 - `cloud_vision_response_sha256`, `band_count`, band plan identity fields
@@ -97,7 +100,64 @@ Do not UPDATE or DELETE any of the following to “unblock” a document:
 - identity fingerprints (source, route, prompt, config, oriented image)
 - a still-valid page lease token / `lease_expires_at`
 
-Resetting those counters is how a second provider call happens.
+Resetting those counters on the automatic path is how a second provider
+call happens.
+
+## Operator command (reviewed, fail-closed)
+
+`python manage.py resolve_arabic_printed_ambiguous_fence` is dry-run by
+default. Pass `--apply` to write. It does not call Cloud Vision, Gemini,
+Antigravity, SQS, or OCR, and it does not modify the search index.
+
+Dry-run uses ordinary reads. `--apply` re-evaluates every precondition from
+rows locked in one transaction, in this order: Document; DocumentTextResult
+rows by id (reject VERIFIED); current-contract ArabicPrintedOcrAttempt
+(matching attempts locked by id, then the latest updated/pk is selected);
+that attempt's page checkpoints by id (reject any live lease); the target
+page's band checkpoints by id. It does not apply an unlocked dry-run plan.
+
+Preconditions (all must match exactly or the command fails closed):
+
+- worker-reusable current-contract attempt
+- no live page lease on that attempt
+- exact document / page / band
+- exact `--expected-failure-code` and counter/status shape
+- no conflicting persisted interaction id
+- page/band not `SUCCEEDED`
+- no `VERIFIED` `DocumentTextResult`
+
+Modes:
+
+1. **`--mode no-provider-call`** — use only after external verification that
+   the reserved call was never created or sent.
+   - Vision (`ARABIC_PRINTED_VISION_AMBIGUOUS`, count=1, no band rows, no
+     plan hash): after the locked checks, set `cloud_vision_call_count=0` and
+     replace the fence code with `ARABIC_PRINTED_OPERATOR_RESOLVED` so the
+     existing worker path may reserve Vision once. Append a bounded JSON
+     event to `operator_resolution_audit` (schema
+     `arabic-printed-operator-fence-resolution-v1`: mode, target, reason,
+     expected failure code, prior Vision count, page index). Worker
+     claim/reclaim/success/failure must not clear that field. Dry-run prints
+     the planned audit write. `failure_message` is not the audit trail.
+   - Primary (`ARABIC_PRINTED_PRIMARY_AMBIGUOUS`, `FAILED`, count=1, empty
+     primary id): restore `PENDING` and `create_call_count=0`.
+   - Fallback (`ARABIC_PRINTED_FALLBACK_AMBIGUOUS`, `FAILED`, count=2, empty
+     fallback id, persisted primary id): restore `create_call_count=1` and
+     `ARABIC_PRINTED_PRIMARY_FAILED` so the worker may reserve fallback once.
+   - Band audit appends to `primary_safe_diagnostics` /
+     `fallback_safe_diagnostics` (survives later page claim).
+   - Unsafe when an interaction id is already persisted for that slot.
+
+2. **`--mode bind-interaction --interaction-id …`** — for ambiguous
+   primary/fallback create when the exact provider interaction id has been
+   identified. The id must match the shared Antigravity contract
+   (`A-Za-z0-9._:-`) and the persisted field max length 128. Persists that id
+   on the empty slot and restores `PRIMARY_RUNNING` / `FALLBACK_RUNNING`.
+   Does not create or poll. Later worker reclaim polls/reconciles it.
+
+The command does not enqueue reprocess. After a successful apply, use the
+existing staff OCR reprocess / worker path if the page is otherwise
+resumable.
 
 ## What to verify before any manual intervention
 
@@ -125,13 +185,23 @@ Safe to resume via existing staff OCR reprocess / worker reclaim:
 - stale `CANCEL_PENDING` with a known interaction id, using the existing
   recovery poll (not a new create); see the CANCEL_PENDING decision-log entry
 
-Not recoverable by resume (needs a separately designed, explicit intervention
-if product ever allows it):
+Needs the operator command above (not automatic reclaim, not a SQL counter
+reset):
 
-- Vision ambiguous / reserved without plan
-- ambiguous primary or fallback create
-- every unfinished page on the current-contract attempt fenced
+- Vision ambiguous / reserved without plan, after verifying the Vision call
+  was never sent (`no-provider-call`)
+- ambiguous primary or fallback create, after verifying the create was never
+  sent (`no-provider-call`) or after identifying the exact interaction id
+  (`bind-interaction`)
+
+Still not recoverable by this command:
+
+- every unfinished page fenced until each fence is resolved separately
 - live lease still held
+- partial Vision plans (band rows present without a trusted plan); this
+  command does not delete checkpoints
+- `SUCCEEDED` pages/bands
+- `VERIFIED` text results
 
 Hebrew translation retry is a different operation. It does not clear Arabic
 page fences. Usable `SOURCE_TEXT` with failed/missing `HEBREW_TEXT` is

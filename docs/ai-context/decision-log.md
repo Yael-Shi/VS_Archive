@@ -1,5 +1,58 @@
 # VS-Archive Decision Log
 
+## Arabic printed banded OCR — operator ambiguous-fence resolution
+
+**Decision / implemented:** Automatic reclaim remains fail-closed for Vision
+reserved-without-plan and ambiguous primary/fallback Antigravity create.
+Stale `CANCEL_PENDING` with a known interaction id is unchanged (existing
+recovery poll). Operators may resolve the remaining ambiguous fences only
+through `resolve_arabic_printed_ambiguous_fence`, after external review.
+
+**Current behavior:**
+
+- Command is dry-run by default. `--apply` writes. No Cloud Vision, Gemini,
+  Antigravity, SQS, OCR, or search-index calls.
+- Service: `documents/services/arabic_printed_ambiguous_fence_resolution.py`.
+- Target is the worker-reusable current-contract `ArabicPrintedOcrAttempt`
+  (same route/prompt/config fingerprint rule as staff reprocess eligibility).
+- Fail closed unless: that attempt exists; no live page lease on it; exact
+  document/page/band; exact failure code and counter/status shape; no
+  conflicting persisted interaction id; page/band not `SUCCEEDED`; no
+  `VERIFIED` `DocumentTextResult`.
+- **`no-provider-call`:** operator has verified the reserved call was never
+  sent. Apply reloads every precondition from rows locked in one transaction
+  (Document, then `DocumentTextResult` by id, current-contract attempt,
+  attempt pages by id, then the page's bands by id). Dry-run uses ordinary
+  reads only.
+  Vision: `cloud_vision_call_count` 1→0, replace
+  `ARABIC_PRINTED_VISION_AMBIGUOUS` with `ARABIC_PRINTED_OPERATOR_RESOLVED`
+  so reclaim is unfenced, and append a bounded JSON event to
+  `ArabicPrintedOcrPageCheckpoint.operator_resolution_audit`
+  (`arabic-printed-operator-fence-resolution-v1`: mode, target, reason,
+  expected failure code, prior Vision count, page index). Worker
+  claim/reclaim/success/failure does not write that field. Primary: restore
+  `PENDING` and `create_call_count=0`. Fallback: restore `create_call_count=1`
+  and `ARABIC_PRINTED_PRIMARY_FAILED` so the existing worker may reserve
+  fallback once. Band audit appends to `primary_safe_diagnostics` /
+  `fallback_safe_diagnostics` (those fields survive page claim). Identity
+  fingerprints, the other interaction id, provenance, leases, and unrelated
+  counters are preserved.
+- **`bind-interaction`:** persist a reviewed interaction id that matches the
+  shared Antigravity charset `A-Za-z0-9._:-` and the stored field max length
+  128 (`documents.services.antigravity_interaction_id`; engine poll still
+  allows up to 512). Restore `PRIMARY_RUNNING` / `FALLBACK_RUNNING` so later
+  worker reclaim can poll. The command does not create or poll.
+- This is not staff OCR reprocess and does not enqueue `PROCESS_DOCUMENT`.
+
+**Unchanged:** automatic retry/reclaim; `CANCEL_PENDING` recovery; no
+provider fallback.
+
+**Schema:** migration `0064_arabic_printed_page_operator_resolution_audit`
+adds `operator_resolution_audit` JSONField (default empty object) on
+`ArabicPrintedOcrPageCheckpoint`.
+
+**Tests:** `documents/test_arabic_printed_ambiguous_fence_resolution.py`.
+
 ## Photo-aware presentation for advanced `person=` ArchiveItem results
 
 **Decision / implemented:** Public `/archive/?person=<Person.id>` membership

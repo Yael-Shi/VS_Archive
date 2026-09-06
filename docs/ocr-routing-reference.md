@@ -223,7 +223,10 @@ Translation failure persists a failed `HEBREW_TEXT` row (`HEBREW_TRANSLATION_FAI
 
 ## Operational notes
 
-- Ambiguous Vision / Antigravity create fences are fail-closed. Do not reset reservation counters. Runbook: `docs/ai-context/arabic-printed-ambiguous-fence-runbook.md`.
+- Ambiguous Vision / Antigravity create fences are fail-closed on automatic
+  reclaim (do not reset reservation counters). Reviewed operator resolution is
+  `resolve_arabic_printed_ambiguous_fence` only. Runbook:
+  `docs/ai-context/arabic-printed-ambiguous-fence-runbook.md`.
 - Do **not** change routing casually. New `(language, text_input_type)` pairs require explicit `OCR_ROUTES` (or approved special-case) entries, adapter/registry wiring, tests, and a decision-log update.
 - Keep **routing metadata** (`engine_key`, `prompt_variant`) separate from
   **runtime engine identity** (`DocumentTextResult.engine`, e.g. a concrete
