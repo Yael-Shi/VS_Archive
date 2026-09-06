@@ -91,6 +91,8 @@ def _usable_source(
     *,
     text: str = "recognized source text",
     engine: str = ENGINE,
+    quality: str = DocumentTextResult.Quality.UNKNOWN,
+    verification_status: str = DocumentTextResult.VerificationStatus.UNVERIFIED,
 ) -> DocumentTextResult:
     return DocumentTextResult.objects.create(
         document=doc,
@@ -99,9 +101,10 @@ def _usable_source(
         engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
         prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
         status=DocumentTextResult.Status.NEEDS_REVIEW,
-        verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+        verification_status=verification_status,
         text=text,
         source_revision=3,
+        quality=quality,
     )
 
 
@@ -142,7 +145,11 @@ class HebrewTranslationRetryWorkerTests(TestCase):
         self, mock_translate
     ):
         doc = _non_hebrew_doc()
-        source = _usable_source(doc, text="keep this source exactly")
+        source = _usable_source(
+            doc,
+            text="keep this source exactly",
+            quality=DocumentTextResult.Quality.GOOD,
+        )
         _failed_hebrew(doc)
         mock_translate.return_value = GeminiResult(
             text="translated hebrew text long enough",
@@ -161,6 +168,7 @@ class HebrewTranslationRetryWorkerTests(TestCase):
         self.assertTrue(outcome.should_ack)
         source.refresh_from_db()
         self.assertEqual(source.text, "keep this source exactly")
+        self.assertEqual(source.quality, DocumentTextResult.Quality.GOOD)
         hebrew = DocumentTextResult.objects.get(
             document=doc,
             result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
@@ -168,8 +176,54 @@ class HebrewTranslationRetryWorkerTests(TestCase):
         )
         self.assertEqual(hebrew.status, DocumentTextResult.Status.NEEDS_REVIEW)
         self.assertEqual(hebrew.text, "translated hebrew text long enough")
+        self.assertEqual(hebrew.quality, DocumentTextResult.Quality.GOOD)
+        self.assertEqual(hebrew.based_on_source_revision, source.source_revision)
+        self.assertEqual(
+            hebrew.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.READY)
+
+    @patch(
+        "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
+    )
+    def test_successful_retry_inherits_verified_source_persisted_quality_not_human_verified(
+        self, mock_translate
+    ):
+        doc = _non_hebrew_doc()
+        source = _usable_source(
+            doc,
+            quality=DocumentTextResult.Quality.LOW,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        _failed_hebrew(doc)
+        mock_translate.return_value = GeminiResult(
+            text="translated hebrew text long enough",
+            engine_name=ENGINE,
+        )
+
+        outcome = execute_hebrew_translation_retry(
+            doc.id,
+            worker_env=self.worker_env,
+        )
+
+        self.assertEqual(
+            outcome.disposition,
+            ProcessDocumentDisposition.COMPLETED,
+        )
+        source.refresh_from_db()
+        self.assertEqual(source.quality, DocumentTextResult.Quality.LOW)
+        hebrew = DocumentTextResult.objects.get(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine=ENGINE,
+        )
+        self.assertEqual(hebrew.quality, DocumentTextResult.Quality.LOW)
+        self.assertEqual(
+            hebrew.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
 
     @patch(
         "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"

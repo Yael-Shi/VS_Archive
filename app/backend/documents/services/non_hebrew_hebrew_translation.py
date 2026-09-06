@@ -12,6 +12,7 @@ from documents.services.review_reasons import (
     MIN_TEXT_LENGTH,
     NEEDS_REVIEW_FLAG,
 )
+from documents.services.text_quality import capped_inherited_base_quality
 
 if TYPE_CHECKING:
     from documents.services.gemini_engine import GeminiResult
@@ -95,15 +96,26 @@ def persist_hebrew_translation_result(
         min_text_length=min_text_length,
         include_automatic_policy=True,
     )
-    source_revision = (
+    source_row = (
         DocumentTextResult.objects.filter(
             document=doc,
             result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
             engine=engine,
         )
-        .values_list("source_revision", flat=True)
+        .values("source_revision", "quality")
         .first()
     )
+    if source_row is None:
+        source_revision = None
+        source_quality = None
+    else:
+        source_revision = source_row["source_revision"]
+        source_quality = source_row["quality"]
+    # No independent translation score: inherit persisted SOURCE_TEXT base
+    # quality. Missing/invalid source fails closed to UNKNOWN, not a new
+    # persistence failure. Do not use verification_status / effective public
+    # quality (HUMAN_VERIFIED / NEEDS_CORRECTION are never persisted).
+    inherited_quality = capped_inherited_base_quality(source_quality)
     DocumentTextResult.objects.update_or_create(
         document=doc,
         result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
@@ -118,5 +130,6 @@ def persist_hebrew_translation_result(
             "error_details": None,
             "review_reasons": json.dumps(review_reasons),
             "based_on_source_revision": source_revision,
+            "quality": inherited_quality,
         },
     )

@@ -11,6 +11,10 @@ from documents.services.archive_items import (
     create_manual_text_archive_item,
     create_ocr_document,
 )
+from documents.services.gemini_engine import GeminiResult
+from documents.services.non_hebrew_hebrew_translation import (
+    persist_hebrew_translation_result,
+)
 from documents.services.text_quality import (
     HUMAN_VERIFIED,
     NEEDS_CORRECTION,
@@ -260,3 +264,129 @@ class TextQualityFoundationTests(TestCase):
             ),
             DocumentTextResult.Quality.UNKNOWN,
         )
+
+
+@override_settings(UPLOADS_BUCKET_NAME="")
+class TextQualityTranslationInheritanceTests(TestCase):
+    ENGINE = "gemini-2.0-flash"
+
+    def _create_doc(self) -> Document:
+        return create_ocr_document(
+            title="Translation quality inherit doc",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            visibility=Document.Visibility.PUBLIC,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.PARTIAL,
+            file_s3_key="documents/quality/translation.jpg",
+            mime_type="image/jpeg",
+        )
+
+    def _create_source(
+        self,
+        doc: Document,
+        *,
+        quality: str = DocumentTextResult.Quality.UNKNOWN,
+        verification_status: str = DocumentTextResult.VerificationStatus.UNVERIFIED,
+        source_revision: int = 3,
+    ) -> DocumentTextResult:
+        return DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine=self.ENGINE,
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=verification_status,
+            text="recognized source text long enough",
+            quality=quality,
+            source_revision=source_revision,
+        )
+
+    def _persist_success(self, doc: Document) -> DocumentTextResult:
+        persist_hebrew_translation_result(
+            doc,
+            self.ENGINE,
+            translation=GeminiResult(
+                text="translated hebrew text long enough",
+                engine_name=self.ENGINE,
+            ),
+            min_text_length=5,
+        )
+        return DocumentTextResult.objects.get(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine=self.ENGINE,
+        )
+
+    def test_successful_translation_inherits_unknown_low_medium_and_good(self):
+        for quality in (
+            DocumentTextResult.Quality.UNKNOWN,
+            DocumentTextResult.Quality.LOW,
+            DocumentTextResult.Quality.MEDIUM,
+            DocumentTextResult.Quality.GOOD,
+        ):
+            with self.subTest(quality=quality):
+                doc = self._create_doc()
+                source = self._create_source(doc, quality=quality)
+                hebrew = self._persist_success(doc)
+                self.assertEqual(hebrew.quality, quality)
+                self.assertEqual(
+                    hebrew.based_on_source_revision,
+                    source.source_revision,
+                )
+                self.assertEqual(
+                    hebrew.status,
+                    DocumentTextResult.Status.NEEDS_REVIEW,
+                )
+                self.assertEqual(
+                    hebrew.verification_status,
+                    DocumentTextResult.VerificationStatus.UNVERIFIED,
+                )
+                self.assertNotIn(hebrew.quality, (HUMAN_VERIFIED, NEEDS_CORRECTION))
+
+    def test_verified_source_does_not_promote_persisted_translation_quality(self):
+        doc = self._create_doc()
+        self._create_source(
+            doc,
+            quality=DocumentTextResult.Quality.GOOD,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        hebrew = self._persist_success(doc)
+        self.assertEqual(hebrew.quality, DocumentTextResult.Quality.GOOD)
+        self.assertEqual(
+            hebrew.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
+        self.assertEqual(
+            effective_public_text_quality_for_result(hebrew),
+            DocumentTextResult.Quality.GOOD,
+        )
+        self.assertNotEqual(
+            effective_public_text_quality_for_result(hebrew),
+            HUMAN_VERIFIED,
+        )
+
+    def test_rejected_source_does_not_persist_needs_correction_on_translation(self):
+        doc = self._create_doc()
+        self._create_source(
+            doc,
+            quality=DocumentTextResult.Quality.MEDIUM,
+            verification_status=DocumentTextResult.VerificationStatus.REJECTED,
+        )
+        hebrew = self._persist_success(doc)
+        self.assertEqual(hebrew.quality, DocumentTextResult.Quality.MEDIUM)
+        self.assertNotEqual(hebrew.quality, NEEDS_CORRECTION)
+        self.assertEqual(
+            hebrew.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
+
+    def test_missing_source_fails_closed_to_unknown_without_persistence_failure(self):
+        doc = self._create_doc()
+        hebrew = self._persist_success(doc)
+        self.assertEqual(hebrew.quality, DocumentTextResult.Quality.UNKNOWN)
+        self.assertIsNone(hebrew.based_on_source_revision)
+        self.assertEqual(hebrew.status, DocumentTextResult.Status.NEEDS_REVIEW)
+        self.assertEqual(hebrew.text, "translated hebrew text long enough")

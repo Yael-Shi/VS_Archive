@@ -15,6 +15,9 @@ from documents.services.arabic_printed_text_quality import (
 )
 from documents.services.gemini_engine import GeminiResult
 from documents.services.htr_adapters.base import HtrResult
+from documents.services.non_hebrew_hebrew_translation import (
+    persist_hebrew_translation_result,
+)
 from documents.services.ocr_routing import OcrRouteConfig
 from documents.services.text_quality import HUMAN_VERIFIED, NEEDS_CORRECTION
 
@@ -324,7 +327,24 @@ class ArabicPrintedBandedQualityPersistenceTests(TestCase):
         self.assertEqual(self._source(doc, _TRANSKRIBUS_ENGINE).quality, UNKNOWN)
         self.assertEqual(self._hebrew(doc, _TRANSKRIBUS_ENGINE).quality, UNKNOWN)
 
-    def test_hebrew_text_remains_unknown_when_source_is_scored(self):
+    def test_hebrew_native_scored_source_does_not_copy_quality_onto_hebrew_text(self):
+        doc = self._hebrew_doc()
+        self._save(
+            doc,
+            HtrResult(
+                text="hebrew native transcript long enough",
+                needs_review=False,
+                engine_name=_TRANSKRIBUS_ENGINE,
+                quality=GOOD,
+            ),
+            is_he=True,
+            route=_TRANSKRIBUS_ROUTE,
+        )
+        self.assertEqual(self._source(doc, _TRANSKRIBUS_ENGINE).quality, GOOD)
+        self.assertEqual(self._hebrew(doc, _TRANSKRIBUS_ENGINE).quality, UNKNOWN)
+        self.mock_translate.assert_not_called()
+
+    def test_non_hebrew_translation_inherits_scored_source_quality(self):
         doc = self._arabic_doc()
         self._save(
             doc,
@@ -335,9 +355,26 @@ class ArabicPrintedBandedQualityPersistenceTests(TestCase):
                 quality=GOOD,
             ),
         )
+        persist_hebrew_translation_result(
+            doc,
+            _BANDED_ENGINE,
+            translation=GeminiResult(
+                text="translated hebrew text long enough",
+                engine_name=_BANDED_ENGINE,
+            ),
+            min_text_length=5,
+        )
         self.assertEqual(self._source(doc, _BANDED_ENGINE).quality, GOOD)
-        self.assertEqual(self._hebrew(doc, _BANDED_ENGINE).quality, UNKNOWN)
-        self.mock_translate.assert_called_once()
+        hebrew = self._hebrew(doc, _BANDED_ENGINE)
+        self.assertEqual(hebrew.quality, GOOD)
+        self.assertEqual(
+            hebrew.prompt_variant,
+            DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+        )
+        self.assertEqual(
+            hebrew.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
 
     def test_human_verified_and_needs_correction_are_never_persisted(self):
         doc = self._arabic_doc()
