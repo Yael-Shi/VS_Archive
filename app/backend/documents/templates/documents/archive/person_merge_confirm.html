@@ -38,6 +38,7 @@
       </p>
       <p class="muted">קשר לפריטים: {{ preview.archive_item_person_count_keeper }}</p>
       <p class="muted">הופעות בתמונות: {{ preview.photo_person_count_keeper }}</p>
+      <p class="muted">זהויות מחבר/ת מקושרות: {{ preview.author_identity_count_keeper }}</p>
 
       <div class="spacer"></div>
       <h2>רשומה שתימחק</h2>
@@ -54,6 +55,15 @@
       </p>
       <p class="muted">קשר לפריטים: {{ preview.archive_item_person_count_duplicate }}</p>
       <p class="muted">הופעות בתמונות: {{ preview.photo_person_count_duplicate }}</p>
+      <p class="muted">זהויות מחבר/ת מקושרות: {{ preview.author_identity_count_duplicate }}</p>
+      {% if preview.duplicate_author_identities %}
+        <p class="muted">
+          רשומות מחבר/ת שיועברו לרשומה שתישאר:
+          {% for identity in preview.duplicate_author_identities %}
+            {{ identity.author_name }} (מזהה {{ identity.author_id }}){% if not forloop.last %}, {% endif %}
+          {% endfor %}
+        </p>
+      {% endif %}
       <p class="muted">הצעות אדם: {{ preview.suggestion_count }} (מתוכן ממתינות: {{ preview.pending_suggestion_count }})</p>
 
       {% if preview.duplicate_canonical_becomes_alias %}

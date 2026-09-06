@@ -439,22 +439,28 @@ class AuthorRenameSuccessTests(TestCase):
 
     def test_advanced_author_filter_uses_the_new_name(self):
         rename_author(self.author, name="FilterAuthorToken")
-        filters = normalize_archive_advanced_filters({"author": "FilterAuthorToken"})
+        self.author.refresh_from_db()
+        self.assertEqual(self.author.name, "FilterAuthorToken")
+
+        filters = normalize_archive_advanced_filters(
+            {"author": str(self.author.id)}
+        )
+        self.assertEqual(filters.author_id, self.author.id)
         matched = filter_archive_items_by_advanced_filters(
             ArchiveItem.objects.all(), filters
         )
-        self.assertEqual(
-            list(matched.values_list("pk", flat=True)), [self.solo_item.pk]
+        self.assertCountEqual(
+            list(matched.values_list("pk", flat=True)),
+            [self.solo_item.pk, self.multi_item.pk],
         )
-
-        stale = normalize_archive_advanced_filters({"author": "OldAuthorToken"})
-        self.assertEqual(
-            list(
-                filter_archive_items_by_advanced_filters(
-                    ArchiveItem.objects.all(), stale
-                ).values_list("pk", flat=True)
-            ),
-            [],
+        self.assertNotIn(
+            self.unrelated_item.pk,
+            matched.values_list("pk", flat=True),
+        )
+        self.assertIsNone(
+            normalize_archive_advanced_filters(
+                {"author": "FilterAuthorToken"}
+            ).author_id
         )
 
     def test_view_redirects_after_success(self):

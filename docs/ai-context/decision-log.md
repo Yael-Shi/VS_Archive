@@ -1,5 +1,42 @@
 # VS-Archive Decision Log
 
+## Author → Person explicit link foundation (PR1)
+
+**Decision / implemented:** Person and Author remain distinct identities.
+`Author` may optionally reference at most one `Person` through an explicit
+nullable FK (`Author.person`, `on_delete=SET_NULL`, related_name
+`author_identities`). One Person may have multiple bibliographic Author
+identities. Linkage is staff-explicit only and is never inferred from
+names, including exact-name equality (review candidate only, never
+identity evidence). Public People/Author catalog, detail, and navigation
+unification is deferred to PR2.
+
+**Current behavior:**
+
+- Schema migration `0063_author_person_link` is additive and nullable.
+  There is no name-based data backfill.
+- Staff Author edit can show the linked Person, link by `Person.id`
+  (staff Person picker options; ids are identity), or unlink. It does
+  not create Person rows.
+- Author merge: neither linked → unchanged; exactly one linked → keeper
+  retains that Person; both linked to the same Person → allowed; both
+  linked to different Persons → fail closed before writes
+  (`AUTHOR_MERGE_PERSON_CONFLICT_ERROR`). Existing transactional lock
+  order is unchanged; Person is copied onto the keeper before duplicate
+  Author delete when needed.
+- Person merge repoints Authors whose `person_id` is the duplicate onto
+  the keeper (relation repointing, not inference). Preview/result expose
+  affected Author-identity counts and the duplicate’s linked Authors.
+  Duplicate Person delete remains last. Unlinked Authors stay unlinked.
+
+**Deferred:** public unification of People/Author catalog and detail;
+public navigation; automatic or name-based linking.
+
+**Tests:** `documents/test_author_person_link.py`, plus Author/Person
+merge cases in `documents/test_author_merge.py`,
+`documents/test_author_merge_staff_ui.py`, and
+`documents/test_person_merge.py`.
+
 ## Public structured-Author search and advanced Author filter
 
 **Decision / implemented:** Public `/archive/` `q` discovery and the advanced
@@ -527,6 +564,8 @@ do not derive quality.
 **`Author`** INTO another. This is merge by explicit **`Author.id`**, not
 name matching. Logic lives in **`documents/services/author_merge.py`**.
 **`Author`** remains separate from **`Person`**. There are no Author aliases.
+An Author may explicitly reference at most one Person; that is not part of
+name matching.
 
 **Current behavior:**
 
@@ -565,6 +604,10 @@ name matching. Logic lives in **`documents/services/author_merge.py`**.
   the entire merge. Search-index fan-out remains duplicate-linked items
   only; indexed author text now follows the structured-Author `q` contract
   (see **Public structured-Author search and advanced Author filter**).
+- Explicit **`Author.person`**: if neither Author is linked, the keeper stays
+  unlinked; if exactly one is linked, the keeper retains that Person; if
+  both are linked to the same Person, merge is allowed; if they are linked
+  to different Persons, merge fails closed before writes.
 - Staff UI: from **`/archive/manage/authors/<keeper_id>/edit/`**, enter the
   duplicate id and GET **`/archive/manage/authors/<keeper_id>/merge/`**
   (**`archive-manage-author-merge`**). GET without **`duplicate_id`** shows
@@ -789,8 +832,9 @@ migration.
 
 **Decision / implemented:** Controlled staff merge of one `Person` INTO
 another. This is identity merge by explicit `Person.id`, not name
-matching. `Person` and `Author` remain completely separate. Merge logic
-lives in `documents/services/person_merge.py`, not in the view.
+**`Person` and `Author` remain completely separate identities.** Merge logic
+lives in `documents/services/person_merge.py`, not in the view. Authors
+explicitly linked to the duplicate Person are repointed to the keeper.
 
 **Current behavior:**
 
@@ -799,8 +843,9 @@ lives in `documents/services/person_merge.py`, not in the view.
   `Person.name` are unchanged. Duplicate is deleted only after dependents
   are handled. The whole merge is `transaction.atomic` and fail-closed.
 - Person rows are locked with `select_for_update` in deterministic id
-  order. Dependent alias, `ArchiveItemPerson`, `PhotoPerson`, and
-  `ArchiveItemPersonSuggestion` rows are locked before mutation.
+  order. Dependent alias, `ArchiveItemPerson`, `PhotoPerson`,
+  `ArchiveItemPersonSuggestion`, `ReviewedPersonImportBinding`, and
+  explicitly linked `Author` rows are locked before mutation.
   Fail-closed checks run before destructive writes.
 - Frozen historical Person ids from
   `HISTORICAL_PERSON_NAME_TAG_RECORDS` may be the keeper. They must never
@@ -816,6 +861,9 @@ lives in `documents/services/person_merge.py`, not in the view.
 - `ArchiveItemPerson` and `PhotoPerson` are moved independently. Collision
   on the same item/photo keeps one keeper row and deletes the duplicate
   row. Neither relation is inferred from the other.
+- Authors with `Author.person_id` equal to the duplicate are repointed to
+  the keeper before duplicate delete. Unlinked Authors are unchanged.
+  Exact-name equality between Author and Person is not used.
 - `ArchiveItemPersonSuggestion.person` is PROTECT, so suggestions are
   repointed to keeper. Two PENDING suggestions for the same
   `(archive_item, action)` fail the entire merge. Reviewed

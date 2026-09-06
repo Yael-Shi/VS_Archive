@@ -83,6 +83,11 @@ from documents.services.author_merge import (
     parse_author_merge_id,
     preview_author_merge,
 )
+from documents.services.author_person_link import (
+    AUTHOR_PERSON_LINK_UPDATED_MSG,
+    parse_author_person_id,
+    set_author_person,
+)
 from documents.services.archive_item_people import (
     ArchiveItemPersonError,
     archive_item_people_form_data_from_item,
@@ -5978,12 +5983,22 @@ def _author_edit_form_context(
     author_name: str,
 ) -> dict:
     affected_items = affected_archive_items_for_author(author)
+    selected_ids = [author.person_id] if author.person_id is not None else []
+    person_choices, _ = build_staff_person_choices(
+        selected_person_ids=selected_ids
+    )
+    linked_person = next(
+        (choice for choice in person_choices if choice.id == author.person_id),
+        None,
+    )
     return {
         "author": author,
         "author_name": author_name,
         "affected_items": affected_items,
         "affected_item_count": len(affected_items),
         "form_errors": form_errors,
+        "person_choices": person_choices,
+        "linked_person": linked_person,
         "page_title": "עריכת מחבר/ת",
     }
 
@@ -6019,15 +6034,26 @@ def archive_manage_author_edit_page(request, author_id: int):
     author_name = author.name
 
     if request.method == "POST":
-        submitted_name = request.POST.get("name") or ""
-        try:
-            author = rename_author(author, name=submitted_name)
-        except ArchiveItemAuthorError as exc:
-            form_errors = [exc.message]
-            author_name = submitted_name
+        action = (request.POST.get("action") or "").strip()
+        if action == "update_person_link":
+            try:
+                person_id = parse_author_person_id(request.POST.get("person_id"))
+                author = set_author_person(author=author, person_id=person_id)
+            except ArchiveItemAuthorError as exc:
+                form_errors = [exc.message]
+            else:
+                messages.success(request, AUTHOR_PERSON_LINK_UPDATED_MSG)
+                return redirect("archive-manage-author-edit", author_id=author.id)
         else:
-            messages.success(request, AUTHOR_NAME_UPDATED_MSG)
-            return redirect("archive-manage-author-edit", author_id=author.id)
+            submitted_name = request.POST.get("name") or ""
+            try:
+                author = rename_author(author, name=submitted_name)
+            except ArchiveItemAuthorError as exc:
+                form_errors = [exc.message]
+                author_name = submitted_name
+            else:
+                messages.success(request, AUTHOR_NAME_UPDATED_MSG)
+                return redirect("archive-manage-author-edit", author_id=author.id)
 
         author = get_object_or_404(Author, pk=author_id)
 

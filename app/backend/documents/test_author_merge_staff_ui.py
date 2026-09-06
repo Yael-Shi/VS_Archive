@@ -6,12 +6,13 @@ from django.contrib.auth.models import Group, User
 from django.test import TestCase
 from django.urls import Resolver404, resolve, reverse
 
-from documents.models import ArchiveItem, ArchiveItemAuthor, Author
+from documents.models import ArchiveItem, ArchiveItemAuthor, Author, Person
 from documents.services.archive_item_access import ARCHIVE_FAMILY_GROUP_NAME
 from documents.services.archive_item_authors import AUTHOR_NOT_FOUND_ERROR
 from documents.services.archive_items import create_manual_text_archive_item
 from documents.services.author_merge import (
     AUTHOR_MERGE_ID_REQUIRED_ERROR,
+    AUTHOR_MERGE_PERSON_CONFLICT_ERROR,
     AUTHOR_MERGE_SAME_ID_ERROR,
 )
 from documents.views import AUTHOR_MERGED_MSG
@@ -225,3 +226,33 @@ class AuthorMergeStaffFlowTests(TestCase):
         self.assertNotContains(public_detail, merge_path)
         self.assertNotContains(public_list, "אישור מיזוג רשומת מחבר/ת")
         self.assertNotContains(public_detail, "אישור מיזוג רשומת מחבר/ת")
+
+    def test_conflicting_person_links_are_rejected_in_staff_ui(self):
+        keeper_person = Person.objects.create(name="Keeper Person UI")
+        duplicate_person = Person.objects.create(name="Duplicate Person UI")
+        self.keeper.person = keeper_person
+        self.keeper.save(update_fields=["person"])
+        self.duplicate.person = duplicate_person
+        self.duplicate.save(update_fields=["person"])
+
+        preview = self.client.get(
+            _merge_url(self.keeper), data={"duplicate_id": str(self.duplicate.id)}
+        )
+        self.assertEqual(preview.status_code, 200)
+        self.assertContains(preview, AUTHOR_MERGE_PERSON_CONFLICT_ERROR)
+        self.assertNotContains(preview, 'name="confirm_merge"')
+
+        confirm = self.client.post(
+            _merge_url(self.keeper),
+            data={
+                "duplicate_id": str(self.duplicate.id),
+                "confirm_merge": "1",
+            },
+        )
+        self.assertEqual(confirm.status_code, 200)
+        self.assertContains(confirm, AUTHOR_MERGE_PERSON_CONFLICT_ERROR)
+        self.assertTrue(Author.objects.filter(pk=self.duplicate.pk).exists())
+        self.keeper.refresh_from_db()
+        self.duplicate.refresh_from_db()
+        self.assertEqual(self.keeper.person_id, keeper_person.pk)
+        self.assertEqual(self.duplicate.person_id, duplicate_person.pk)

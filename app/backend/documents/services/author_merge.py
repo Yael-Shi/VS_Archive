@@ -1,7 +1,9 @@
 """Controlled staff Author merge: duplicate INTO keeper.
 
 Keeper and duplicate are explicit Author ids. This is not name matching.
-Author remains bibliographic and separate from Person. No aliases.
+Author remains bibliographic and separate from Person. An Author may
+explicitly reference at most one Person; that link is never inferred
+from names. No aliases.
 """
 
 from __future__ import annotations
@@ -29,6 +31,9 @@ AUTHOR_MERGE_ID_REQUIRED_ERROR = "יש להזין מזהה של רשומת המ�
 AUTHOR_MERGE_ID_INVALID_ERROR = "מזהה המחבר/ת חייב להיות מספר שלם חיובי."
 AUTHOR_MERGE_SAME_ID_ERROR = "לא ניתן למזג רשומת מחבר/ת עם עצמה."
 AUTHOR_MERGE_CONCURRENCY_ERROR = "המיזוג נכשל בגלל שינוי מקביל. נסו שוב."
+AUTHOR_MERGE_PERSON_CONFLICT_ERROR = (
+    "לא ניתן למזג: הרשומות מקושרות לאנשים שונים."
+)
 
 
 class AuthorMergeError(ArchiveItemAuthorError):
@@ -52,6 +57,8 @@ class AuthorMergePreview:
     duplicate_id: int
     duplicate_name: str
     names_differ: bool
+    keeper_person_id: int | None
+    duplicate_person_id: int | None
     affected_items: tuple[AuthorMergeItemPreview, ...]
     links_moved: int
     links_deduped: int
@@ -89,6 +96,20 @@ def parse_author_merge_id(raw: object) -> int:
 def _raise_if_same_author(keeper: Author, duplicate: Author) -> None:
     if keeper.pk == duplicate.pk:
         raise AuthorMergeError(AUTHOR_MERGE_SAME_ID_ERROR)
+
+
+def _linked_person_conflict(keeper: Author, duplicate: Author) -> bool:
+    return (
+        keeper.person_id is not None
+        and duplicate.person_id is not None
+        and keeper.person_id != duplicate.person_id
+    )
+
+
+def _resulting_person_id(keeper: Author, duplicate: Author) -> int | None:
+    if _linked_person_conflict(keeper, duplicate):
+        raise AuthorMergeError(AUTHOR_MERGE_PERSON_CONFLICT_ERROR)
+    return keeper.person_id or duplicate.person_id
 
 
 def _author_label(author: Author) -> str:
@@ -187,12 +208,17 @@ def preview_author_merge(*, keeper: Author, duplicate: Author) -> AuthorMergePre
         if len(joined) > AUTHOR_NAME_MAX_LENGTH and AUTHOR_JOINED_TOO_LONG_ERROR not in blockers:
             blockers.append(AUTHOR_JOINED_TOO_LONG_ERROR)
 
+    if _linked_person_conflict(keeper, duplicate):
+        blockers.append(AUTHOR_MERGE_PERSON_CONFLICT_ERROR)
+
     return AuthorMergePreview(
         keeper_id=keeper.pk,
         keeper_name=keeper.name,
         duplicate_id=duplicate.pk,
         duplicate_name=duplicate.name,
         names_differ=(keeper.name != duplicate.name),
+        keeper_person_id=keeper.person_id,
+        duplicate_person_id=duplicate.person_id,
         affected_items=tuple(affected),
         links_moved=moved,
         links_deduped=deduped,
@@ -264,6 +290,8 @@ def merge_author(*, keeper: Author, duplicate: Author) -> AuthorMergeResult:
     if locked_keeper is None or locked_duplicate is None:
         raise AuthorMergeError(AUTHOR_NOT_FOUND_ERROR)
 
+    resulting_person_id = _resulting_person_id(locked_keeper, locked_duplicate)
+
     current_duplicate_ids = affected_archive_item_ids_for_author(locked_duplicate)
     if any(item_id not in locked_items for item_id in current_duplicate_ids):
         raise AuthorMergeError(AUTHOR_LINKS_CHANGED_RETRY_ERROR)
@@ -279,6 +307,9 @@ def merge_author(*, keeper: Author, duplicate: Author) -> AuthorMergeResult:
     )
 
     try:
+        if locked_keeper.person_id != resulting_person_id:
+            locked_keeper.person_id = resulting_person_id
+            locked_keeper.save(update_fields=["person_id", "updated_at"])
         for item_id in mutated_ids:
             locked_item = locked_items[item_id]
             _replace_author_links(locked_item, planned_authors_by_item[item_id])

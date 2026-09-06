@@ -377,6 +377,13 @@ class Author(models.Model):
     """Bibliographic author name. Not a Person and never inferred from Person."""
 
     name = models.CharField(max_length=255)
+    person = models.ForeignKey(
+        Person,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="author_identities",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
