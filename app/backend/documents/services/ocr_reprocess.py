@@ -5,14 +5,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from django.utils import timezone
+
 from documents.models import (
     ArchiveItem,
+    ArabicPrintedOcrAttempt,
+    ArabicPrintedOcrPageCheckpoint,
     Document,
     DocumentTextResult,
     GeminiOcrPageCheckpoint,
     TranskribusRun,
 )
 from documents.services import transkribus_run_persistence as trp
+from documents.services.arabic_printed_page_checkpoints import (
+    ArabicPrintedPageSource,
+    build_arabic_printed_attempt_identity,
+)
 from documents.services.ocr_routing import OcrRouteConfig, select_ocr_route
 
 
@@ -27,6 +35,17 @@ class OcrRetryMode(str, Enum):
 
 OCR_RETRY_MODE_PAYLOAD_KEY = "ocr_retry_mode"
 SOURCE_TRANSKRIBUS_RUN_ID_PAYLOAD_KEY = "source_transkribus_run_id"
+
+# Keep these string-equal to arabic_printed_banded_ocr. Do not import that
+# module here: staff reprocess runs in web processes that must not load
+# Antigravity/Gemini provider engines.
+_ARABIC_PRINTED_VISION_AMBIGUOUS = "ARABIC_PRINTED_VISION_AMBIGUOUS"
+_ARABIC_PRINTED_AMBIGUOUS_BAND_FAILURE_CODES = frozenset(
+    {
+        "ARABIC_PRINTED_PRIMARY_AMBIGUOUS",
+        "ARABIC_PRINTED_FALLBACK_AMBIGUOUS",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -90,6 +109,135 @@ def _source_text_row_is_failed_ocr(row: DocumentTextResult) -> bool:
     )
 
 
+def _arabic_printed_page_has_durable_vision_plan(
+    page: ArabicPrintedOcrPageCheckpoint,
+) -> bool:
+    return (
+        page.cloud_vision_call_count == 1
+        and page.band_count >= 1
+        and bool(page.cloud_vision_response_sha256)
+        and bool(page.band_checkpoints.all())
+    )
+
+
+def _arabic_printed_page_is_permanently_fenced(
+    page: ArabicPrintedOcrPageCheckpoint,
+) -> bool:
+    """True when reclaim cannot safely create, poll, cancel, or select LQ."""
+    if page.failure_code == _ARABIC_PRINTED_VISION_AMBIGUOUS:
+        return True
+    if (
+        page.cloud_vision_call_count != 0
+        and not _arabic_printed_page_has_durable_vision_plan(page)
+    ):
+        return True
+    return any(
+        band.failure_code in _ARABIC_PRINTED_AMBIGUOUS_BAND_FAILURE_CODES
+        for band in page.band_checkpoints.all()
+    )
+
+
+def _arabic_printed_page_has_active_lease(
+    page: ArabicPrintedOcrPageCheckpoint,
+    *,
+    now,
+) -> bool:
+    return (
+        page.status == ArabicPrintedOcrPageCheckpoint.Status.RUNNING
+        and page.lease_expires_at is not None
+        and page.lease_expires_at > now
+    )
+
+
+def _current_arabic_printed_contract_fingerprints(
+    doc: Document,
+) -> tuple[str, str, str]:
+    """Route/prompt/config fingerprints the banded worker uses for this document.
+
+    Source-byte fingerprints are omitted: staff eligibility must not load S3 or
+    prepare images. Worker reuse still keys the full identity, including source.
+    Attempts whose route/prompt/config no longer match current code are skipped.
+    """
+    placeholder = "0" * 64
+    identity = build_arabic_printed_attempt_identity(
+        pages=[
+            ArabicPrintedPageSource(
+                page_index=0,
+                mime_type="image/jpeg",
+                source_identity="staff-reprocess-eligibility",
+                source_content_fingerprint=placeholder,
+                oriented_image_sha256=placeholder,
+                oriented_image_width=1,
+                oriented_image_height=1,
+            )
+        ],
+        language_hint=doc.language,
+        text_input_type=doc.text_input_type or Document.TextInputType.PRINTED,
+        engine_key=DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+        prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+    )
+    return (
+        identity.route_fingerprint,
+        identity.prompt_fingerprint,
+        identity.config_fingerprint,
+    )
+
+
+def _reusable_arabic_printed_attempt(
+    doc: Document,
+) -> ArabicPrintedOcrAttempt | None:
+    """Latest attempt the current banded contract would still look up.
+
+    Worker selection is get_or_create(document, identity_fingerprint) from
+    current pages + current route/prompt/banding constants. Older identities
+    (source or contract changes) remain in the table but are not reused.
+    When several source identities share the current contract, the latest
+    updated attempt is the last worker-touched identity under that contract.
+    """
+    route_fp, prompt_fp, config_fp = _current_arabic_printed_contract_fingerprints(doc)
+    return (
+        ArabicPrintedOcrAttempt.objects.filter(
+            document_id=doc.id,
+            route_fingerprint=route_fp,
+            prompt_fingerprint=prompt_fp,
+            config_fingerprint=config_fp,
+        )
+        .order_by("-updated_at", "-pk")
+        .first()
+    )
+
+
+def _has_resumable_arabic_printed_checkpoint_evidence(doc: Document) -> bool:
+    """True when the worker-reusable attempt has reclaimable unfinished pages."""
+    attempt = _reusable_arabic_printed_attempt(doc)
+    if attempt is None:
+        return False
+
+    pages = list(
+        ArabicPrintedOcrPageCheckpoint.objects.filter(attempt_id=attempt.id)
+        .prefetch_related("band_checkpoints")
+    )
+    if not pages:
+        return False
+
+    now = timezone.now()
+    if any(_arabic_printed_page_has_active_lease(page, now=now) for page in pages):
+        return False
+
+    return any(
+        page.status != ArabicPrintedOcrPageCheckpoint.Status.SUCCEEDED
+        and not _arabic_printed_page_is_permanently_fenced(page)
+        for page in pages
+    )
+
+
+def _has_failed_gemini_page_checkpoint(document_id: int) -> bool:
+    return GeminiOcrPageCheckpoint.objects.filter(
+        attempt__document_id=document_id,
+        status=GeminiOcrPageCheckpoint.Status.FAILED,
+    ).exists()
+
+
 def _is_recoverable_partial_ocr_failure(doc: Document) -> bool:
     """Latest SOURCE_TEXT is a failed source OCR on a supported recoverable PARTIAL route."""
     if doc.processing_state_user != Document.ProcessingState.PARTIAL:
@@ -104,13 +252,15 @@ def _is_recoverable_partial_ocr_failure(doc: Document) -> bool:
 
     latest_source = _latest_source_text_row(doc)
     if latest_source is None:
-        # Checkpoint-backed Gemini OCR can fail before a DocumentTextResult exists.
-        # A failed page checkpoint is durable source-OCR failure evidence and must
-        # not leave a PARTIAL document without an intentional reprocess path.
-        return GeminiOcrPageCheckpoint.objects.filter(
-            attempt__document_id=doc.id,
-            status=GeminiOcrPageCheckpoint.Status.FAILED,
-        ).exists()
+        # Checkpoint-backed Gemini or Arabic printed banded OCR can stop as
+        # PARTIAL before a DocumentTextResult exists. Failed Gemini pages, or
+        # unfinished Arabic pages that are not permanently fenced, are durable
+        # resume evidence. Do not require the Antigravity routing flag here:
+        # staff UI may assess on web (flag unset) while the worker resumes
+        # banded checkpoints.
+        return _has_failed_gemini_page_checkpoint(
+            doc.id
+        ) or _has_resumable_arabic_printed_checkpoint_evidence(doc)
 
     if _source_text_row_is_usable(latest_source):
         return False

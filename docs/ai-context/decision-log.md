@@ -42,6 +42,43 @@ these routes; staff Author edit/merge behavior; PHOTO author UI; schema.
 `documents/test_archive_author_public_page.py`; updated route expectation in
 `documents/test_author_staff_index.py`. No migration.
 
+## Checkpoint-backed Arabic printed banded PARTIAL documents remain reprocessable
+
+**Decision / implemented:** Arabic printed banded OCR can terminate a document
+as `PARTIAL` before any `DocumentTextResult(SOURCE_TEXT)` row exists. Staff OCR
+reprocess eligibility now treats unfinished pages on the **worker-reusable**
+`ArabicPrintedOcrAttempt` as durable resume evidence.
+
+**Attempt selection:** Multiple attempts can exist for one document
+(`uniq_ar_pr_ocr_attempt_identity` is `(document, identity_fingerprint)`). The
+worker reuses `get_or_create(document, identity_fingerprint)` built from current
+pages plus current route/prompt/banding constants. Staff eligibility does not
+load S3/images; it selects the latest attempt (`-updated_at, -pk`) whose
+`route_fingerprint` / `prompt_fingerprint` / `config_fingerprint` match those
+current constants (Antigravity printed Arabic). Older source identities and
+stale prompt/config contracts cannot open resume.
+
+**Resumable on that attempt:** `PLANNING`, expired `RUNNING` (lease in the
+past), or unfenced `FAILED` pages (durable Vision plan or no Vision call yet,
+and no `ARABIC_PRINTED_PRIMARY_AMBIGUOUS` / `ARABIC_PRINTED_FALLBACK_AMBIGUOUS`
+bands). Reprocess is `NORMAL_REENQUEUE`. SUCCEEDED pages stay `REUSE`.
+
+**Not resumable:** no matching current-contract attempt; the selected attempt
+has any actively leased `RUNNING` page (`lease_expires_at` in the future);
+or every unfinished page on that attempt is fail-closed
+(`ARABIC_PRINTED_VISION_AMBIGUOUS`, Vision reserved without a durable plan, or
+an ambiguous band create). Live leases are treated as busy, matching
+`claim_arabic_printed_page`.
+
+**Unchanged:** Gemini checkpoint-only resume (`FAILED` `GeminiOcrPageCheckpoint`);
+ordinary `SOURCE_TEXT` `FAILED/OCR_FAILED` reprocess; VERIFIED overwrite guard;
+no DTR row is created merely to enable the button; checkpoints are not reset.
+Eligibility does not require `ENABLE_ANTIGRAVITY_ARABIC_PRINTED` on the web
+process: staff UI may assess while the worker still resumes banded checkpoints.
+
+**Tests:** `documents/test_ocr_reprocess.py`
+(`ArabicPrintedBandedPartialOcrReprocessTests`).
+
 ## Gemini Hebrew translation — short-chunk length floor is not truncation
 
 **Decision / implemented:** Hebrew translation truncation detection must not
