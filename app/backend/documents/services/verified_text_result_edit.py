@@ -88,7 +88,11 @@ def is_hebrew_translation_stale(
 
 
 def _lock_rows(row_ids: list[int]) -> dict[int, DocumentTextResult]:
-    rows = DocumentTextResult.objects.select_for_update().filter(pk__in=row_ids)
+    rows = (
+        DocumentTextResult.objects.select_for_update()
+        .filter(pk__in=row_ids)
+        .order_by("id")
+    )
     return {row.pk: row for row in rows}
 
 
@@ -255,11 +259,11 @@ def edit_verified_text_result(
         raise VerifiedTextResultEditError("יש להזין טקסט.")
 
     with transaction.atomic():
+        peek = DocumentTextResult.objects.get(pk=result_id)
+        doc = Document.objects.select_for_update().get(pk=peek.document_id)
         target = DocumentTextResult.objects.select_for_update().get(pk=result_id)
         if not is_verified_editable_text_result(target):
             raise VerifiedTextResultEditError("תוצאה זו אינה זמינה לעריכה מאושרת.")
-
-        doc = Document.objects.select_for_update().get(pk=target.document_id)
 
         if not _submitted_text_differs_from_current(target, doc, normalized):
             raise VerifiedTextResultEditError("לא בוצעו שינויים בטקסט.")
@@ -297,13 +301,13 @@ def edit_pending_text_result(
         raise PendingTextResultEditError("text is required and must be non-empty")
 
     with transaction.atomic():
+        peek = DocumentTextResult.objects.get(pk=result_id)
+        doc = Document.objects.select_for_update().get(pk=peek.document_id)
         target = DocumentTextResult.objects.select_for_update().get(pk=result_id)
         if not is_review_editable_text_result(target):
             raise PendingTextResultEditError(
                 "transcription result is not eligible for review action"
             )
-
-        doc = Document.objects.select_for_update().get(pk=target.document_id)
 
         if not _submitted_text_differs_from_current(target, doc, normalized):
             return PendingTextResultEditResult(row=target, text_saved=False)
@@ -340,7 +344,12 @@ def verify_pending_text_result(
     new_text: str,
     editor,
 ) -> PendingTextResultVerifyResult:
-    """Save-if-changed via pending-edit semantics, then mark VERIFIED atomically."""
+    """Save-if-changed via pending-edit semantics, then mark VERIFIED atomically.
+
+    Lock order vs OCR persist fence: ``edit_pending_text_result`` locks
+    ``Document`` before the text row; this then re-locks the row while that
+    outer transaction still holds the document lock.
+    """
     with transaction.atomic():
         edit_outcome = edit_pending_text_result(
             result_id=result_id,

@@ -49,6 +49,9 @@ from documents.services.ocr_reprocess import (
     OcrRetryMode,
     SOURCE_TRANSKRIBUS_RUN_ID_PAYLOAD_KEY,
 )
+from documents.services.ocr_verified_write_fence import (
+    inspect_automated_ocr_verified_write_fence,
+)
 from documents.services.ocr_routing import OcrRouteConfig, select_ocr_route
 from documents.services.process_document_outcome import (
     ProcessDocumentDisposition,
@@ -387,12 +390,17 @@ class Command(BaseCommand):
                 failure_message=recognition_only_error,
             )
 
-        # Phase 1: Mark PROCESSING
+        # Phase 1: Mark PROCESSING. Capture the committed pre-run rollup so a
+        # later VERIFIED write-fence can restore it. Phase 1 overwrites the DB
+        # value with PROCESSING; the in-memory capture is the only remaining
+        # copy. Verification does not change processing_state_user.
+        prior_processing_state: Optional[str] = None
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
                 if doc.upload_status != Document.UploadStatus.UPLOADED:
                     return ProcessDocumentOutcome(ProcessDocumentDisposition.NOOP)
+                prior_processing_state = doc.processing_state_user
                 doc.processing_state_user = Document.ProcessingState.PROCESSING
                 doc.save(update_fields=["processing_state_user", "updated_at"])
         except Document.DoesNotExist:
@@ -576,6 +584,7 @@ class Command(BaseCommand):
                 needs_review=htr_result.needs_review,
                 review_reasons=getattr(htr_result, "review_reasons", None),
                 min_text_length=self._cfg.min_text_length,
+                pre_run_processing_state=prior_processing_state,
             )
             doc.refresh_from_db(fields=["processing_state_user"])
             return _outcome_for_final_processing_state(doc.processing_state_user)
@@ -619,34 +628,64 @@ class Command(BaseCommand):
 
                 if error:
                     self._save_ocr_failure(doc, final_engine, is_he, error)
+                    self._update_processing_state(doc, final_engine)
+                    doc.save(update_fields=["processing_state_user"])
+                    # One sync after final OCR/translation/failure display state.
+                    # Lock order: Document (held) → ArchiveItem (inside sync).
+                    from documents.services.archive_search_index import (
+                        sync_archive_item_search_index,
+                    )
+
+                    sync_archive_item_search_index(doc.archive_item_id)
                 else:
                     if route is None or htr_result is None:
                         raise RuntimeError(
                             "Internal error: OCR success path missing route or HTR result"
                         )
-                    self._save_htr_results(doc, final_engine, is_he, htr_result, route)
-                    if not is_he:
-                        persist_hebrew_translation_result(
-                            doc,
-                            final_engine,
-                            translation=(
-                                pending_translation
-                                if pending_translation_error is None
-                                else None
-                            ),
-                            error=pending_translation_error,
-                            min_text_length=self._cfg.min_text_length,
+                    fence = inspect_automated_ocr_verified_write_fence(doc.pk)
+                    if fence.blocked:
+                        logger.info(
+                            "skipping automated OCR persistence; "
+                            "document has VERIFIED text result",
+                            extra={
+                                "document_id": document_id,
+                                "runtime_engine": final_engine,
+                                "verified_engine": fence.verified_engine,
+                            },
+                        )
+                        # Do not roll up from the unused runtime engine or from
+                        # one VERIFIED row's engine: displayed SOURCE/HEBREW may
+                        # belong to different engines. Restore the pre-Phase-1
+                        # state captured before this run wrote PROCESSING.
+                        if prior_processing_state is not None:
+                            doc.processing_state_user = prior_processing_state
+                            doc.save(update_fields=["processing_state_user"])
+                    else:
+                        self._save_htr_results(
+                            doc, final_engine, is_he, htr_result, route
+                        )
+                        if not is_he:
+                            persist_hebrew_translation_result(
+                                doc,
+                                final_engine,
+                                translation=(
+                                    pending_translation
+                                    if pending_translation_error is None
+                                    else None
+                                ),
+                                error=pending_translation_error,
+                                min_text_length=self._cfg.min_text_length,
+                            )
+
+                        self._update_processing_state(doc, final_engine)
+                        doc.save(update_fields=["processing_state_user"])
+                        # One sync after final OCR/translation display state.
+                        # Lock order: Document (held) → ArchiveItem (inside sync).
+                        from documents.services.archive_search_index import (
+                            sync_archive_item_search_index,
                         )
 
-                self._update_processing_state(doc, final_engine)
-                doc.save(update_fields=["processing_state_user"])
-                # One sync after final OCR/translation/failure display state.
-                # Lock order: Document (held) → ArchiveItem (inside sync).
-                from documents.services.archive_search_index import (
-                    sync_archive_item_search_index,
-                )
-
-                sync_archive_item_search_index(doc.archive_item_id)
+                        sync_archive_item_search_index(doc.archive_item_id)
         except Document.DoesNotExist:
             return ProcessDocumentOutcome(ProcessDocumentDisposition.NOOP)
 

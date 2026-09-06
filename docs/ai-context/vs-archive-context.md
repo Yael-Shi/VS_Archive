@@ -73,6 +73,7 @@ Engine selection is implemented as a small routing layer (`select_ocr_route` →
 - **`verification_status=UNVERIFIED`**
 - **`NEEDS_REVIEW`** = usable/displayable text that still needs human review; **not** a technical failure
 - **`FAILED`** = pipeline/dispatch/routing failures only
+- **Write-time VERIFIED fence:** if any `DocumentTextResult` for the document is **`VERIFIED`** at successful automated persist time, skip creating/updating automated SOURCE/HEBREW rows and do not replace the search-index body with that late result. Restore the pre-run `processing_state_user` (do not roll up from the unused runtime engine or from one VERIFIED row’s engine). `REJECTED` does not fence. Ordinary `UNVERIFIED` reruns and cross-engine writes remain allowed when no row is `VERIFIED`.
 
 **Human ground truth:** **`verification_status=VERIFIED`** is the human-approved layer. Row **`status`** does not replace that.
 

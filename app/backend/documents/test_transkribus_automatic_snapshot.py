@@ -610,6 +610,134 @@ class AutomaticSnapshotLifecycleTests(TestCase):
         self.assertEqual(src_bind.bound_text_sha256, snap.canonical_text_sha256)
         self.assertEqual(he_bind.snapshot_id, snap.id)
 
+    def test_verified_other_engine_fences_late_automatic_dtr_and_search_index(
+        self,
+    ):
+        doc = _create_he_doc()
+        verified_text = "human verified gemini text"
+        source = DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="gemini-2.0-flash",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+            text=verified_text,
+            source_revision=1,
+        )
+        hebrew = DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="gemini-2.0-flash",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+            text=verified_text,
+            based_on_source_revision=1,
+        )
+        run = self._recognition_started_run(doc)
+        snap = _ready_snapshot(document=doc, run=run, text="late transkribus text")
+        with patch(
+            "documents.services.archive_search_index.sync_archive_item_search_index"
+        ) as mock_sync:
+            complete_transkribus_local_success(
+                document_id=doc.id,
+                run_id=run.id,
+                snapshot_id=snap.id,
+                text="late transkribus text",
+                engine="transkribus-pylaia:42",
+                route=_route(),
+                needs_review=False,
+                review_reasons=[],
+                min_text_length=1,
+            )
+        mock_sync.assert_not_called()
+        run.refresh_from_db()
+        self.assertEqual(run.status, TranskribusRun.Status.SUCCEEDED)
+        self.assertFalse(
+            DocumentTextResult.objects.filter(
+                document=doc,
+                engine="transkribus-pylaia:42",
+            ).exists()
+        )
+        source.refresh_from_db()
+        hebrew.refresh_from_db()
+        self.assertEqual(source.text, verified_text)
+        self.assertEqual(hebrew.text, verified_text)
+        self.assertEqual(
+            source.verification_status,
+            DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        self.assertEqual(
+            hebrew.verification_status,
+            DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        self.assertEqual(source.status, DocumentTextResult.Status.NEEDS_REVIEW)
+        self.assertFalse(TranskribusTextResultBinding.objects.exists())
+
+    def test_mixed_engine_verified_source_does_not_downgrade_ready(self):
+        doc = _create_he_doc(processing_state_user=Document.ProcessingState.READY)
+        source_a = DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="gemini-engine-a",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
+            text="verified source on engine A",
+            source_revision=1,
+        )
+        hebrew_b = DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="gemini-engine-b",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="usable hebrew on engine B",
+            based_on_source_revision=1,
+        )
+        run = self._recognition_started_run(doc)
+        snap = _ready_snapshot(document=doc, run=run, text="late transkribus text")
+        complete_transkribus_local_success(
+            document_id=doc.id,
+            run_id=run.id,
+            snapshot_id=snap.id,
+            text="late transkribus text",
+            engine="transkribus-pylaia:42",
+            route=_route(),
+            needs_review=False,
+            review_reasons=[],
+            min_text_length=1,
+            pre_run_processing_state=Document.ProcessingState.READY,
+        )
+        run.refresh_from_db()
+        self.assertEqual(run.status, TranskribusRun.Status.SUCCEEDED)
+        self.assertFalse(
+            DocumentTextResult.objects.filter(
+                document=doc,
+                engine="transkribus-pylaia:42",
+            ).exists()
+        )
+        source_a.refresh_from_db()
+        hebrew_b.refresh_from_db()
+        self.assertEqual(source_a.text, "verified source on engine A")
+        self.assertEqual(hebrew_b.text, "usable hebrew on engine B")
+        self.assertEqual(
+            source_a.verification_status,
+            DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        self.assertEqual(
+            hebrew_b.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
+        doc.refresh_from_db()
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.READY)
+
     def test_duplicate_delivery_does_not_overwrite_human_edit(self):
         doc = _create_he_doc()
         run = self._recognition_started_run(doc)

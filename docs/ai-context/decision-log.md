@@ -37,6 +37,47 @@ merge cases in `documents/test_author_merge.py`,
 `documents/test_author_merge_staff_ui.py`, and
 `documents/test_person_merge.py`.
 
+## Write-time VERIFIED fence for automated OCR persistence
+
+**Decision / implemented:** Successful automated OCR persistence must not create
+or update text results after any `DocumentTextResult` on the document has
+become **`VERIFIED`**. Enqueue/assessment already blocked a *new* reprocess in
+that case. This fence closes the race where a run started while rows were
+still unverified and a human verified before the worker persisted.
+
+**Current behavior:**
+
+- Shared helper `inspect_automated_ocr_verified_write_fence` runs inside the
+  persist transaction after locking `Document`, then locks all
+  `DocumentTextResult` rows in `id` order.
+- Used by worker Phase 3 success (`run_worker`) and Transkribus
+  `complete_transkribus_local_success`.
+- When blocked: no automated `SOURCE_TEXT` create/update; no paired automatic
+  `HEBREW_TEXT` from that OCR result (Hebrew OCR mirror or non-Hebrew
+  translation persist); no search-index replacement with the late result;
+  verified rows unchanged. Processing state is **restored to the pre-Phase-1
+  `processing_state_user`** captured before this run wrote `PROCESSING`. The
+  unused runtime engine is not used for rollup, and a VERIFIED row’s `engine`
+  is not treated as a complete engine-local expected-output set (displayed
+  SOURCE/HEBREW may belong to different engines). SQS ack is unchanged
+  (benign superseded run, not `_save_ocr_failure`).
+- Verification writers lock `Document` before the target text row so they
+  cannot commit `VERIFIED` past an in-flight persist transaction.
+- **`REJECTED` is not a fence.** Same-engine unverified reruns and
+  cross-engine writes remain allowed when no `VERIFIED` row exists.
+- Does **not** change DTR identity `(document, result_type, engine)`, engine
+  markers, `source_revision`, public resolver precedence, translation-quality
+  inheritance, or Transkribus corrected/current activation.
+
+**Why:** Runtime engine markers are provenance and may change between runs.
+Public display can select a newer automated row. Verification status must not
+be copied across engines, so the only safe persist-time rule is “any VERIFIED
+row on this document fences later automated OCR writes.”
+
+**Tests:** `documents/test_ocr_reprocess.py`
+(`RunWorkerVerifiedWriteFenceTests`),
+`documents/test_transkribus_automatic_snapshot.py`. No migration.
+
 ## Public structured-Author search and advanced Author filter
 
 **Decision / implemented:** Public `/archive/` `q` discovery and the advanced
@@ -3977,6 +4018,11 @@ Does **not** include legacy `SUCCEEDED` + `UNVERIFIED` rows. Does **not** reuse 
 
 - **`DocumentTextResult.status=NEEDS_REVIEW`** for all successful automatic OCR/HTR persistence (Gemini, Transkribus, any worker success path).
 - **`verification_status=UNVERIFIED`** on that path.
+- **Write-time VERIFIED fence** (see the dedicated decision-log entry): late
+  automated OCR success does not persist SOURCE/HEBREW or replace search-index
+  body when any text result is already **`VERIFIED`**. Restore pre-run
+  `processing_state_user`; do not roll up from the unused runtime engine.
+  **`REJECTED`** does not fence.
 - **`NEEDS_REVIEW`** = usable/displayable text requiring human review before ground-truth use; **not** a technical failure (distinct from **`FAILED`**).
 - **`FAILED`** remains for pipeline/dispatch/routing failures.
 

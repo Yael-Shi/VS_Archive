@@ -59,11 +59,13 @@ from documents.services.ocr_reprocess import (
     assess_ocr_reprocess,
     is_ocr_reprocess_ui_eligible,
 )
+from documents.services.archive_search_index import sync_archive_item_search_index
 from documents.services.page_extraction import PageImage
 from documents.services.process_document_ocr_reprocess_enqueue import (
     apply_ocr_reprocess,
 )
 from documents.services.process_document_outcome import ProcessDocumentDisposition
+from documents.services.text_presentation import get_displayed_transcription_text
 
 COLLECTION_ID = "col"
 MODEL_ID = "42"
@@ -1921,3 +1923,491 @@ class RunWorkerOcrRetryModeTests(TestCase):
         self.assertEqual(
             self.doc.processing_state_user, Document.ProcessingState.FAILED
         )
+
+
+class RunWorkerVerifiedWriteFenceTests(TestCase):
+    def setUp(self):
+        self.command = RunWorkerCommand()
+        self.command._cfg = WorkerEnvConfig(
+            gemini_api_key="key",
+            gemini_confidence_threshold=0.7,
+            min_text_length=5,
+            max_retries=3,
+            retry_delay_seconds_1=30,
+            retry_delay_seconds_2=300,
+            report_window_start="00:00",
+            report_send_time="08:00",
+            free_tier_alert_pct=80,
+            gemini_free_daily_request_limit=1500,
+            gemini_free_daily_image_limit=1000,
+            transkribus_free_monthly_credits=500,
+            enable_hybrid_htr=False,
+            enable_daily_report=False,
+            smtp_host=None,
+            smtp_port=None,
+            smtp_username=None,
+            smtp_password=None,
+            default_from_email=None,
+            gemini_temperature=0.2,
+            gemini_top_k=40,
+            gemini_top_p=0.95,
+            gemini_max_output_tokens=2048,
+            gemini_double_pass=False,
+            gemini_consistency_min_ratio=0.7,
+            transkribus_recognition_only_retry=False,
+            **_TRANSKRIBUS_WORKER_ENV_FIELDS,
+        )
+        self.doc = create_ocr_document(
+            title="Verified write fence doc",
+            doc_type=Document.DocType.PDF,
+            language=Document.Language.ENGLISH,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.READY,
+            file_s3_key="fence.pdf",
+            mime_type="application/pdf",
+        )
+        self._translation_patcher = patch(
+            "documents.management.commands.run_worker.translate_text_to_hebrew_with_gemini",
+            return_value=GeminiResult(
+                text="late automatic hebrew translation",
+                engine_name="gemini-2.0-flash",
+            ),
+        )
+        self.mock_translate = self._translation_patcher.start()
+        self.addCleanup(self._translation_patcher.stop)
+
+    def _message(self) -> dict:
+        return {
+            "Body": json.dumps({"type": "PROCESS_DOCUMENT", "document_id": self.doc.id})
+        }
+
+    def _seed_pair(
+        self,
+        *,
+        engine: str,
+        text: str,
+        verification: str,
+        hebrew_text: str | None = None,
+    ) -> tuple[DocumentTextResult, DocumentTextResult]:
+        source = DocumentTextResult.objects.create(
+            document=self.doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine=engine,
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=verification,
+            text=text,
+            source_revision=1,
+        )
+        hebrew = DocumentTextResult.objects.create(
+            document=self.doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine=engine,
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=verification,
+            text=hebrew_text if hebrew_text is not None else f"hebrew {text}",
+            based_on_source_revision=1,
+        )
+        return source, hebrew
+
+    def _index_body(self) -> str:
+        from documents.models import ArchiveItemSearchIndex
+
+        return ArchiveItemSearchIndex.objects.get(
+            archive_item_id=self.doc.archive_item_id
+        ).body_text
+
+    def _hebrew_index(self) -> str:
+        from documents.models import ArchiveItemSearchIndex
+
+        return ArchiveItemSearchIndex.objects.get(
+            archive_item_id=self.doc.archive_item_id
+        ).hebrew_translation_text
+
+    def _process_with_htr(
+        self,
+        mock_transcribe,
+        mock_extract_pages,
+        mock_get_object_bytes,
+        *,
+        engine: str,
+        text: str,
+        transcribe_side_effect=None,
+    ):
+        mock_get_object_bytes.return_value = (b"%PDF-1.4", "application/pdf")
+        mock_extract_pages.return_value = [
+            PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
+        ]
+        htr = HtrResult(
+            text=text,
+            needs_review=False,
+            engine_name=engine,
+            review_reasons=[],
+        )
+        if transcribe_side_effect is not None:
+            mock_transcribe.side_effect = transcribe_side_effect
+        else:
+            mock_transcribe.return_value = htr
+        return self.command._execute_process_document_payload(
+            json.loads(self._message()["Body"])
+        )
+
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    def test_late_different_engine_persist_is_fenced_after_verify(
+        self,
+        mock_transcribe,
+        mock_extract_pages,
+        mock_get_object_bytes,
+    ):
+        verified_source_text = "human reviewed source"
+        verified_hebrew_text = "human reviewed hebrew"
+        source, hebrew = self._seed_pair(
+            engine="gemini-2.0-flash",
+            text=verified_source_text,
+            verification=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            hebrew_text=verified_hebrew_text,
+        )
+        sync_archive_item_search_index(self.doc.archive_item_id)
+        prior_body = self._index_body()
+        prior_hebrew_index = self._hebrew_index()
+        late_engine = "gemini-2.5-flash"
+        late_text = "late automated source that would win display"
+
+        def transcribe_then_verify(*_args, **_kwargs):
+            source.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
+            source.save(update_fields=["verification_status", "updated_at"])
+            hebrew.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
+            hebrew.save(update_fields=["verification_status", "updated_at"])
+            return HtrResult(
+                text=late_text,
+                needs_review=False,
+                engine_name=late_engine,
+                review_reasons=[],
+            )
+
+        outcome = self._process_with_htr(
+            mock_transcribe,
+            mock_extract_pages,
+            mock_get_object_bytes,
+            engine=late_engine,
+            text=late_text,
+            transcribe_side_effect=transcribe_then_verify,
+        )
+
+        self.assertEqual(outcome.disposition, ProcessDocumentDisposition.COMPLETED)
+        self.assertTrue(outcome.should_ack)
+        self.assertFalse(
+            DocumentTextResult.objects.filter(
+                document=self.doc, engine=late_engine
+            ).exists()
+        )
+        source.refresh_from_db()
+        hebrew.refresh_from_db()
+        self.assertEqual(source.text, verified_source_text)
+        self.assertEqual(hebrew.text, verified_hebrew_text)
+        self.assertEqual(source.status, DocumentTextResult.Status.NEEDS_REVIEW)
+        self.assertEqual(hebrew.status, DocumentTextResult.Status.NEEDS_REVIEW)
+        self.assertEqual(
+            source.verification_status,
+            DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        self.assertEqual(
+            hebrew.verification_status,
+            DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        self.assertEqual(
+            get_displayed_transcription_text(self.doc),
+            verified_source_text,
+        )
+        self.assertEqual(self._index_body(), prior_body)
+        self.assertEqual(self._hebrew_index(), prior_hebrew_index)
+        self.assertNotEqual(self._index_body(), late_text)
+        self.assertNotEqual(
+            self._hebrew_index(),
+            "late automatic hebrew translation",
+        )
+        self.doc.refresh_from_db()
+        self.assertEqual(self.doc.processing_state_user, Document.ProcessingState.READY)
+
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    def test_late_same_engine_persist_is_fenced_after_verify(
+        self,
+        mock_transcribe,
+        mock_extract_pages,
+        mock_get_object_bytes,
+    ):
+        engine = "gemini-2.0-flash"
+        verified_source_text = "same-engine verified source"
+        verified_hebrew_text = "same-engine verified hebrew"
+        source, hebrew = self._seed_pair(
+            engine=engine,
+            text=verified_source_text,
+            verification=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            hebrew_text=verified_hebrew_text,
+        )
+        sync_archive_item_search_index(self.doc.archive_item_id)
+        prior_body = self._index_body()
+        late_text = "late same-engine automated overwrite"
+
+        def transcribe_then_verify(*_args, **_kwargs):
+            source.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
+            source.save(update_fields=["verification_status", "updated_at"])
+            return HtrResult(
+                text=late_text,
+                needs_review=False,
+                engine_name=engine,
+                review_reasons=[],
+            )
+
+        outcome = self._process_with_htr(
+            mock_transcribe,
+            mock_extract_pages,
+            mock_get_object_bytes,
+            engine=engine,
+            text=late_text,
+            transcribe_side_effect=transcribe_then_verify,
+        )
+
+        self.assertEqual(outcome.disposition, ProcessDocumentDisposition.COMPLETED)
+        source.refresh_from_db()
+        hebrew.refresh_from_db()
+        self.assertEqual(source.text, verified_source_text)
+        self.assertEqual(hebrew.text, verified_hebrew_text)
+        self.assertEqual(
+            source.verification_status,
+            DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        self.assertEqual(
+            hebrew.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
+        self.assertEqual(DocumentTextResult.objects.filter(document=self.doc).count(), 2)
+        self.assertEqual(self._index_body(), prior_body)
+        self.assertNotEqual(self._index_body(), late_text)
+        self.assertEqual(
+            get_displayed_transcription_text(self.doc),
+            verified_source_text,
+        )
+
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    def test_mixed_engine_verified_source_does_not_downgrade_ready(
+        self,
+        mock_transcribe,
+        mock_extract_pages,
+        mock_get_object_bytes,
+    ):
+        engine_a = "gemini-2.0-flash"
+        engine_b = "gemini-2.0-flash-lite"
+        late_engine = "gemini-2.5-flash"
+        source_a, _unused_hebrew_a = self._seed_pair(
+            engine=engine_a,
+            text="verified source on engine A",
+            verification=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            hebrew_text="unused hebrew on engine A",
+        )
+        _unused_hebrew_a.delete()
+        hebrew_b = DocumentTextResult.objects.create(
+            document=self.doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine=engine_b,
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HEBREW_TRANSLATION,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="usable hebrew on engine B",
+            based_on_source_revision=1,
+        )
+        self.doc.processing_state_user = Document.ProcessingState.READY
+        self.doc.save(update_fields=["processing_state_user"])
+        late_text = "late engine C automated source"
+
+        def transcribe_then_verify(*_args, **_kwargs):
+            source_a.verification_status = (
+                DocumentTextResult.VerificationStatus.VERIFIED
+            )
+            source_a.save(update_fields=["verification_status", "updated_at"])
+            return HtrResult(
+                text=late_text,
+                needs_review=False,
+                engine_name=late_engine,
+                review_reasons=[],
+            )
+
+        outcome = self._process_with_htr(
+            mock_transcribe,
+            mock_extract_pages,
+            mock_get_object_bytes,
+            engine=late_engine,
+            text=late_text,
+            transcribe_side_effect=transcribe_then_verify,
+        )
+
+        self.assertEqual(outcome.disposition, ProcessDocumentDisposition.COMPLETED)
+        self.assertFalse(
+            DocumentTextResult.objects.filter(
+                document=self.doc, engine=late_engine
+            ).exists()
+        )
+        source_a.refresh_from_db()
+        hebrew_b.refresh_from_db()
+        self.assertEqual(source_a.text, "verified source on engine A")
+        self.assertEqual(hebrew_b.text, "usable hebrew on engine B")
+        self.assertEqual(
+            source_a.verification_status,
+            DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        self.assertEqual(
+            hebrew_b.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
+        self.assertEqual(source_a.status, DocumentTextResult.Status.NEEDS_REVIEW)
+        self.assertEqual(hebrew_b.status, DocumentTextResult.Status.NEEDS_REVIEW)
+        self.doc.refresh_from_db()
+        self.assertEqual(
+            self.doc.processing_state_user, Document.ProcessingState.READY
+        )
+        self.assertNotEqual(
+            self.doc.processing_state_user, Document.ProcessingState.PARTIAL
+        )
+        self.assertNotEqual(
+            self.doc.processing_state_user, Document.ProcessingState.PROCESSING
+        )
+
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    def test_rejected_row_does_not_trigger_verified_write_fence(
+        self,
+        mock_transcribe,
+        mock_extract_pages,
+        mock_get_object_bytes,
+    ):
+        engine = "gemini-2.0-flash"
+        source, hebrew = self._seed_pair(
+            engine=engine,
+            text="rejected source",
+            verification=DocumentTextResult.VerificationStatus.REJECTED,
+            hebrew_text="rejected hebrew",
+        )
+        late_text = "rerun after rejection"
+
+        outcome = self._process_with_htr(
+            mock_transcribe,
+            mock_extract_pages,
+            mock_get_object_bytes,
+            engine=engine,
+            text=late_text,
+        )
+
+        self.assertEqual(outcome.disposition, ProcessDocumentDisposition.COMPLETED)
+        source.refresh_from_db()
+        hebrew.refresh_from_db()
+        self.assertEqual(source.text, late_text)
+        self.assertEqual(
+            source.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
+        self.assertEqual(
+            hebrew.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
+        self.assertEqual(hebrew.text, "late automatic hebrew translation")
+        self.assertEqual(get_displayed_transcription_text(self.doc), late_text)
+        self.assertEqual(self._index_body(), late_text)
+
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    def test_unverified_same_engine_rerun_still_persists(
+        self,
+        mock_transcribe,
+        mock_extract_pages,
+        mock_get_object_bytes,
+    ):
+        engine = "gemini-2.0-flash"
+        source, hebrew = self._seed_pair(
+            engine=engine,
+            text="previous unverified source",
+            verification=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            hebrew_text="previous unverified hebrew",
+        )
+        late_text = "ordinary unverified rerun source"
+
+        outcome = self._process_with_htr(
+            mock_transcribe,
+            mock_extract_pages,
+            mock_get_object_bytes,
+            engine=engine,
+            text=late_text,
+        )
+
+        self.assertEqual(outcome.disposition, ProcessDocumentDisposition.COMPLETED)
+        source.refresh_from_db()
+        hebrew.refresh_from_db()
+        self.assertEqual(source.text, late_text)
+        self.assertEqual(
+            source.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
+        self.assertEqual(
+            hebrew.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
+        self.assertEqual(hebrew.text, "late automatic hebrew translation")
+        self.assertEqual(get_displayed_transcription_text(self.doc), late_text)
+        self.assertEqual(self._index_body(), late_text)
+
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    def test_unverified_cross_engine_rerun_still_persists(
+        self,
+        mock_transcribe,
+        mock_extract_pages,
+        mock_get_object_bytes,
+    ):
+        prior_engine = "gemini-2.0-flash"
+        late_engine = "gemini-2.5-flash"
+        self._seed_pair(
+            engine=prior_engine,
+            text="previous unverified source",
+            verification=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            hebrew_text="previous unverified hebrew",
+        )
+        late_text = "cross-engine unverified rerun source"
+
+        outcome = self._process_with_htr(
+            mock_transcribe,
+            mock_extract_pages,
+            mock_get_object_bytes,
+            engine=late_engine,
+            text=late_text,
+        )
+
+        self.assertEqual(outcome.disposition, ProcessDocumentDisposition.COMPLETED)
+        self.assertEqual(
+            DocumentTextResult.objects.filter(document=self.doc).count(),
+            4,
+        )
+        late_source = DocumentTextResult.objects.get(
+            document=self.doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine=late_engine,
+        )
+        self.assertEqual(late_source.text, late_text)
+        self.assertEqual(
+            late_source.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
+        self.assertEqual(get_displayed_transcription_text(self.doc), late_text)
+        self.assertEqual(self._index_body(), late_text)

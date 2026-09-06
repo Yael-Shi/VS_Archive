@@ -6,7 +6,9 @@ Lock order inside the local-success transaction:
 2. ``TranskribusRun`` (``select_for_update``)
 3. ``TranskribusRunAutomaticSnapshot`` association row (``select_for_update``)
 4. ``TranskribusTranscriptSnapshot`` (``select_for_update``)
-5. Existing ``DocumentTextResult`` rows for the runtime engine (ordered by ``id``)
+5. All ``DocumentTextResult`` rows for the document (ordered by ``id``), for
+   the VERIFIED write fence; then existing rows for the runtime engine again
+   when writes proceed
 
 S3 and provider HTTP must stay outside this transaction.
 
@@ -37,6 +39,9 @@ from documents.services.htr_adapters.base import (
     TranskribusLocalPersistenceRetryableError,
 )
 from documents.services.ocr_routing import OcrRouteConfig
+from documents.services.ocr_verified_write_fence import (
+    inspect_automated_ocr_verified_write_fence,
+)
 from documents.services.processing_state import (
     update_document_processing_state_for_engine,
 )
@@ -652,8 +657,14 @@ def complete_transkribus_local_success(
     needs_review: bool,
     review_reasons: Optional[Sequence[str]],
     min_text_length: int,
+    pre_run_processing_state: Optional[str] = None,
 ) -> HtrResult:
-    """Atomically persist DTR + bindings + association check + mark SUCCEEDED."""
+    """Atomically persist DTR + bindings + association check + mark SUCCEEDED.
+
+    ``pre_run_processing_state`` is the worker's processing_state_user from
+    before Phase 1 wrote PROCESSING. A VERIFIED write-fence restores it instead
+    of rolling up from the unused runtime engine.
+    """
     with transaction.atomic():
         doc = Document.objects.select_for_update().get(pk=document_id)
         run = TranskribusRun.objects.select_for_update().get(pk=run_id)
@@ -691,6 +702,34 @@ def complete_transkribus_local_success(
             )
 
         is_hebrew = _is_hebrew_language(doc.language)
+        fence = inspect_automated_ocr_verified_write_fence(doc.pk)
+        if fence.blocked:
+            logger.info(
+                "skipping automated Transkribus OCR persistence; "
+                "document has VERIFIED text result",
+                extra={
+                    "document_id": document_id,
+                    "runtime_engine": engine,
+                    "verified_engine": fence.verified_engine,
+                    "run_id": run.pk,
+                },
+            )
+            # Do not roll up from this unused runtime engine or from one
+            # VERIFIED row's engine. Restore the worker's pre-Phase-1 state
+            # when provided; otherwise leave processing_state_user unchanged.
+            if pre_run_processing_state is not None:
+                doc.processing_state_user = pre_run_processing_state
+                doc.save(update_fields=["processing_state_user"])
+            trp.mark_succeeded(run, engine_runtime=engine)
+            return HtrResult(
+                text=text,
+                needs_review=needs_review,
+                engine_name=engine,
+                review_reasons=list(review_reasons or []),
+                transkribus_run_id=run.pk,
+                transkribus_snapshot_id=snapshot.pk,
+            )
+
         bind_status = inspect_local_completion_bindings(
             document_id=doc.pk,
             engine=engine,

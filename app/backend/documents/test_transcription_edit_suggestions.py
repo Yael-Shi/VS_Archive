@@ -25,6 +25,19 @@ from documents.services.verified_text_result_edit import is_hebrew_translation_s
 from public.services.registration import HONEYPOT_FIELD_NAME
 
 
+def _select_for_update_model_order(captured_queries):
+    order = []
+    for query in captured_queries:
+        if "FOR UPDATE" not in query["sql"].upper():
+            continue
+        sql = query["sql"].replace("`", '"').lower()
+        if "documents_documenttextresult" in sql:
+            order.append("documenttextresult")
+        elif "documents_document" in sql:
+            order.append("document")
+    return order
+
+
 @override_settings(UPLOADS_BUCKET_NAME="")
 class DisplayedTranscriptionTextTests(TestCase):
     def _create_hebrew_doc(self, title: str) -> Document:
@@ -635,6 +648,34 @@ class TranscriptionEditSuggestionReviewTests(TestCase):
             DocumentTextResult.VerificationStatus.VERIFIED,
         )
         self.assertEqual(row.status, DocumentTextResult.Status.NEEDS_REVIEW)
+
+    def test_approve_suggestion_locks_document_before_verified_text_result(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        doc = self._create_english_doc()
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="displayed source",
+        )
+        suggestion = self._create_suggestion(
+            doc,
+            current_text_snapshot="displayed source",
+            suggested_text="approved source",
+        )
+
+        with CaptureQueriesContext(connection) as ctx:
+            approve_suggestion(
+                suggestion.id,
+                approved_text="approved source",
+                reviewer=self.staff,
+            )
+
+        order = _select_for_update_model_order(ctx.captured_queries)
+        self.assertIn("document", order)
+        self.assertIn("documenttextresult", order)
+        self.assertLess(order.index("document"), order.index("documenttextresult"))
 
     def test_partial_approve_stores_approved_text(self):
         doc = self._create_hebrew_doc()

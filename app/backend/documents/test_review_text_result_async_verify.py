@@ -24,6 +24,19 @@ from documents.services.verified_text_result_edit import (
 )
 
 
+def _select_for_update_model_order(captured_queries):
+    order = []
+    for query in captured_queries:
+        if "FOR UPDATE" not in query["sql"].upper():
+            continue
+        sql = query["sql"].replace("`", '"').lower()
+        if "documents_documenttextresult" in sql:
+            order.append("documenttextresult")
+        elif "documents_document" in sql:
+            order.append("document")
+    return order
+
+
 def _async_headers() -> dict[str, str]:
     return {"HTTP_X_REQUESTED_WITH": "XMLHttpRequest"}
 
@@ -149,6 +162,35 @@ class ReviewCombinedVerifyAndAsyncTests(TestCase):
         self.assertEqual(audit.old_text, "before")
         self.assertEqual(audit.new_text, submitted)
         self.assertEqual(audit.editor_id, self.staff.id)
+
+    def test_verify_pending_locks_document_before_text_result(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        doc = self._create_english_doc()
+        source = self._create_pending(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="stable lock-order text",
+            source_revision=1,
+        )
+
+        with CaptureQueriesContext(connection) as ctx:
+            verify_pending_text_result(
+                result_id=source.id,
+                new_text="stable lock-order text",
+                editor=self.staff,
+            )
+
+        order = _select_for_update_model_order(ctx.captured_queries)
+        self.assertIn("document", order)
+        self.assertIn("documenttextresult", order)
+        self.assertLess(order.index("document"), order.index("documenttextresult"))
+        source.refresh_from_db()
+        self.assertEqual(
+            source.verification_status,
+            DocumentTextResult.VerificationStatus.VERIFIED,
+        )
 
     def test_combined_verify_unchanged_text_verifies_without_edit_audit(self):
         doc = self._create_english_doc()
