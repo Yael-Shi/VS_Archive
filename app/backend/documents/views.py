@@ -1946,12 +1946,20 @@ def upload_display_only_page_add(request, doc_id: int):
         key=source_file.file_s3_key,
         content_type=file_meta["mime_type"],
     )
+    complete_url = reverse(
+        "uploads-display-only-page-complete",
+        kwargs={
+            "doc_id": doc.id,
+            "order_index": source_file.order_index,
+        },
+    )
     return JsonResponse(
         {
             "document_id": doc.id,
             "order_index": source_file.order_index,
             "s3_key": source_file.file_s3_key,
             "upload_url": upload_url,
+            "complete_url": complete_url,
             "original_name": file_meta["original_name"],
             "mime_type": file_meta["mime_type"],
             "size_bytes": file_meta["size_bytes"],

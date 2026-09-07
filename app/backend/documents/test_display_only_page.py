@@ -408,6 +408,27 @@ class DisplayOnlyPageUploadTests(TestCase):
         self.assertContains(resp, "הוספת עמוד ללא תעתוק")
         self.assertContains(resp, "לא")
         self.assertContains(resp, "לתעתוק")
+        self.assertNotContains(resp, "data-complete-url-template")
+        self.assertNotContains(resp, "/0/complete/")
+
+    def test_add_plan_returns_server_reversed_complete_url(self):
+        doc = self._ready_multi_image_doc(count=2)
+        add = self._post_add(doc.id)
+        self.assertEqual(add.status_code, 201, add.content)
+        payload = add.json()
+        expected_complete = reverse(
+            "uploads-display-only-page-complete",
+            kwargs={"doc_id": doc.id, "order_index": payload["order_index"]},
+        )
+        self.assertEqual(payload["complete_url"], expected_complete)
+        self.assertEqual(payload["order_index"], 2)
+        self.assertTrue(expected_complete.endswith("/2/complete/"))
+        zero_complete = reverse(
+            "uploads-display-only-page-complete",
+            kwargs={"doc_id": doc.id, "order_index": 0},
+        )
+        self.assertNotEqual(payload["complete_url"], zero_complete)
+        self.assertNotIn("/0/complete/", payload["complete_url"])
 
     def test_existing_finalize_and_ocr_reprocess_routes_still_resolve(self):
         self.assertEqual(
