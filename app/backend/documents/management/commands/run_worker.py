@@ -75,7 +75,11 @@ from documents.services.source_files import (
     get_ordered_source_files_for_processing,
     is_multi_image_document,
 )
-from documents.services.sqs import SYNC_TRANSKRIBUS_CORRECTED_CURRENT
+from documents.services.sqs import (
+    SQS_WORKER_VISIBILITY_TIMEOUT_SECONDS,
+    SYNC_TRANSKRIBUS_CORRECTED_CURRENT,
+    parse_approximate_receive_count,
+)
 from documents.services.transkribus_corrected_current_sync_worker import (
     handle_sync_transkribus_corrected_current,
 )
@@ -204,7 +208,8 @@ class Command(BaseCommand):
                 QueueUrl=queue_url,
                 MaxNumberOfMessages=max(1, min(max_msgs, 10)),
                 WaitTimeSeconds=max(0, min(wait, 20)),
-                VisibilityTimeout=300,
+                VisibilityTimeout=SQS_WORKER_VISIBILITY_TIMEOUT_SECONDS,
+                AttributeNames=["ApproximateReceiveCount"],
             )
             msgs = resp.get("Messages") or []
             return msgs[0] if msgs else None
@@ -269,6 +274,7 @@ class Command(BaseCommand):
         except Exception:
             return True
 
+        receive_count = parse_approximate_receive_count(msg)
         msg_type = payload.get("type")
         if msg_type == SYNC_TRANSKRIBUS_CORRECTED_CURRENT:
             receipt_handle = msg.get("ReceiptHandle")
@@ -280,7 +286,8 @@ class Command(BaseCommand):
             ):
                 logger.error(
                     "SYNC_TRANSKRIBUS_CORRECTED_CURRENT missing SQS context; "
-                    "cannot claim/defer safely"
+                    "cannot claim/defer safely approximate_receive_count=%s",
+                    receive_count,
                 )
                 return False
             return handle_sync_transkribus_corrected_current(
@@ -289,6 +296,7 @@ class Command(BaseCommand):
                 queue_url=queue_url,
                 receipt_handle=receipt_handle,
                 worker_env=self._cfg,
+                approximate_receive_count=receive_count,
             )
 
         if msg_type != "PROCESS_DOCUMENT":
@@ -304,7 +312,8 @@ class Command(BaseCommand):
             ):
                 logger.error(
                     "Request-aware PROCESS_DOCUMENT missing SQS context; "
-                    "cannot claim/defer safely"
+                    "cannot claim/defer safely approximate_receive_count=%s",
+                    receive_count,
                 )
                 return False
 
@@ -314,6 +323,7 @@ class Command(BaseCommand):
                 queue_url=queue_url,
                 receipt_handle=receipt_handle,
                 execute_payload=self._execute_process_document_payload,
+                approximate_receive_count=receive_count,
             )
 
         # Backward compatibility for messages created before durable Requests.

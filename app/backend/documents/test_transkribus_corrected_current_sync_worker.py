@@ -143,12 +143,20 @@ class CorrectedCurrentSyncWorkerTests(TestCase):
             attempt=attempt,
         )
 
-    def _handle(self, request_id: int, *, run_sync=None, receipt: str | None = None):
+    def _handle(
+        self,
+        request_id: int,
+        *,
+        run_sync=None,
+        receipt: str | None = None,
+        approximate_receive_count: int | None = None,
+    ):
         kwargs: dict[str, Any] = dict(
             sqs=self.sqs,
             queue_url=self.queue_url,
             receipt_handle=receipt or self.receipt,
             worker_env=self.worker_env,
+            approximate_receive_count=approximate_receive_count,
         )
         if run_sync is not None:
             kwargs["run_sync"] = run_sync
@@ -230,6 +238,22 @@ class CorrectedCurrentSyncWorkerTests(TestCase):
         req.refresh_from_db()
         self.assertEqual(req.lease_token, token)
         self.assertIsNone(req.attempt_id)
+
+    def test_receive_count_does_not_change_fresh_lease_defer(self):
+        token = uuid.uuid4()
+        req = self._running_request(lease_token=token)
+        run_sync = MagicMock()
+        ack = self._handle(
+            req.pk,
+            run_sync=run_sync,
+            approximate_receive_count=5,
+        )
+        self.assertFalse(ack)
+        run_sync.assert_not_called()
+        self.assertEqual(self._visibility_timeouts(), [FRESH_IN_PROGRESS_DEFER_SECONDS])
+        self.assertEqual(FRESH_IN_PROGRESS_DEFER_SECONDS, 120)
+        req.refresh_from_db()
+        self.assertEqual(req.lease_token, token)
 
     def test_expired_reclaim_before_attempt_rotates_token_and_executes(self):
         old_token = uuid.uuid4()
@@ -666,6 +690,39 @@ class CorrectedCurrentSyncWorkerDispatchTests(TestCase):
         self.assertTrue(ok)
         handler.assert_called_once()
         self.assertEqual(handler.call_args.args[0]["request_id"], req.pk)
+        self.assertIsNone(handler.call_args.kwargs["approximate_receive_count"])
+
+    def test_dispatch_passes_receive_count_without_using_it_for_ack(self):
+        req = TranskribusCorrectedCurrentSyncRequest.objects.create(
+            document=self.doc,
+            initiated_by=self.user,
+            status=TranskribusCorrectedCurrentSyncRequest.Status.COMPLETED,
+            attempt=_completed_attempt(
+                document=self.doc,
+                run=_upload_run(self.doc),
+                user=self.user,
+            ),
+            completed_at=timezone.now(),
+        )
+        msg = {
+            "Body": json.dumps(
+                {
+                    "type": SYNC_TRANSKRIBUS_CORRECTED_CURRENT,
+                    "request_id": req.pk,
+                }
+            ),
+            "ReceiptHandle": "rh-dispatch",
+            "Attributes": {"ApproximateReceiveCount": "nope"},
+        }
+        with patch(
+            "documents.management.commands.run_worker.handle_sync_transkribus_corrected_current",
+            return_value=True,
+        ) as handler:
+            ok = self.command._process_message(
+                msg, sqs=self.sqs, queue_url="https://sqs.example/q"
+            )
+        self.assertTrue(ok)
+        self.assertIsNone(handler.call_args.kwargs["approximate_receive_count"])
 
     def test_unknown_message_type_still_acks(self):
         msg = {"Body": json.dumps({"type": "TOTALLY_UNKNOWN"}), "ReceiptHandle": "r"}

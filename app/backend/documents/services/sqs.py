@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Mapping
 
 import boto3
 
@@ -11,6 +11,30 @@ PROCESS_DOCUMENT_MESSAGE_TYPE = "PROCESS_DOCUMENT"
 # Top-level SQS message type for staff corrected/current sync dispatch.
 # Payload: {"type": SYNC_TRANSKRIBUS_CORRECTED_CURRENT, "request_id": <int>}.
 SYNC_TRANSKRIBUS_CORRECTED_CURRENT = "SYNC_TRANSKRIBUS_CORRECTED_CURRENT"
+
+# Shared worker SQS visibility, aligned to the 45-minute durable execution lease.
+# Used as receive_message VisibilityTimeout and post-claim ChangeMessageVisibility.
+# Queue-level CDK visibility remains 10 minutes and is overridden per receive.
+SQS_WORKER_VISIBILITY_TIMEOUT_SECONDS = 45 * 60
+
+
+def parse_approximate_receive_count(message: Mapping[str, Any] | None) -> int | None:
+    """Return ApproximateReceiveCount for logging only; never raise."""
+    if not isinstance(message, dict):
+        return None
+    try:
+        attributes = message.get("Attributes")
+        if not isinstance(attributes, dict):
+            return None
+        raw = attributes.get("ApproximateReceiveCount")
+        if type(raw) is int:
+            return raw if raw >= 1 else None
+        if type(raw) is str and raw.isdigit():
+            value = int(raw)
+            return value if value >= 1 else None
+        return None
+    except Exception:
+        return None
 
 
 class SqsConfigurationError(RuntimeError):

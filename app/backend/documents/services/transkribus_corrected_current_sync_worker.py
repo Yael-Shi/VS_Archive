@@ -21,6 +21,7 @@ from documents.models import (
     TranskribusCorrectedCurrentSyncRequest,
 )
 from documents.services.env_validation import WorkerEnvConfig
+from documents.services.sqs import SQS_WORKER_VISIBILITY_TIMEOUT_SECONDS
 from documents.services.transkribus_corrected_current_sync import (
     CorrectedCurrentSyncError,
     CorrectedCurrentSyncFailureCode,
@@ -32,8 +33,8 @@ from documents.services.transkribus_corrected_current_sync import (
 logger = logging.getLogger(__name__)
 
 # Conservative v1 defaults for up to ~30-page documents; tune from production timings.
-EXECUTION_LEASE = timedelta(minutes=45)
-SQS_VISIBILITY_AFTER_CLAIM_SECONDS = 45 * 60
+EXECUTION_LEASE = timedelta(seconds=SQS_WORKER_VISIBILITY_TIMEOUT_SECONDS)
+SQS_VISIBILITY_AFTER_CLAIM_SECONDS = SQS_WORKER_VISIBILITY_TIMEOUT_SECONDS
 FRESH_IN_PROGRESS_DEFER_SECONDS = 2 * 60
 STARTED_RECOVERY_REQUIRED = timedelta(minutes=60)
 
@@ -101,13 +102,36 @@ def _change_message_visibility(
         return False
 
 
+def _log_unacked_delivery(
+    *,
+    reason: str,
+    request_id: int | None,
+    approximate_receive_count: int | None,
+) -> None:
+    logger.info(
+        "SQS message left unacked reason=%s request_id=%s "
+        "approximate_receive_count=%s",
+        reason,
+        request_id,
+        approximate_receive_count,
+    )
+
+
 def _defer_in_progress(
     sqs: Any,
     *,
     queue_url: str,
     receipt_handle: str,
+    reason: str,
+    request_id: int | None,
+    approximate_receive_count: int | None,
 ) -> bool:
     """Extend visibility briefly and do not ack (return False)."""
+    _log_unacked_delivery(
+        reason=reason,
+        request_id=request_id,
+        approximate_receive_count=approximate_receive_count,
+    )
     _change_message_visibility(
         sqs,
         queue_url=queue_url,
@@ -454,6 +478,7 @@ def handle_sync_transkribus_corrected_current(
     receipt_handle: str,
     worker_env: WorkerEnvConfig,
     run_sync=run_corrected_current_transkribus_sync,
+    approximate_receive_count: int | None = None,
 ) -> bool:
     """Process one ``SYNC_TRANSKRIBUS_CORRECTED_CURRENT`` message.
 
@@ -474,7 +499,12 @@ def handle_sync_transkribus_corrected_current(
         return True
     if action == "defer":
         return _defer_in_progress(
-            sqs, queue_url=queue_url, receipt_handle=receipt_handle
+            sqs,
+            queue_url=queue_url,
+            receipt_handle=receipt_handle,
+            reason="in_progress_defer",
+            request_id=request_id,
+            approximate_receive_count=approximate_receive_count,
         )
 
     assert action == "execute"
@@ -533,7 +563,12 @@ def handle_sync_transkribus_corrected_current(
             request_id,
         )
         return _defer_in_progress(
-            sqs, queue_url=queue_url, receipt_handle=receipt_handle
+            sqs,
+            queue_url=queue_url,
+            receipt_handle=receipt_handle,
+            reason="fenced_out",
+            request_id=request_id,
+            approximate_receive_count=approximate_receive_count,
         )
     except CorrectedCurrentSyncError as exc:
         if exc.attempt_id is not None:
@@ -551,7 +586,12 @@ def handle_sync_transkribus_corrected_current(
                 )
             # Linked STARTED left in place; do not ack away the only message.
             return _defer_in_progress(
-                sqs, queue_url=queue_url, receipt_handle=receipt_handle
+                sqs,
+                queue_url=queue_url,
+                receipt_handle=receipt_handle,
+                reason="started_attempt_incomplete",
+                request_id=request_id,
+                approximate_receive_count=approximate_receive_count,
             )
 
         failure_code = exc.failure_code or CorrectedCurrentSyncFailureCode.UNEXPECTED
@@ -582,7 +622,12 @@ def handle_sync_transkribus_corrected_current(
                 _apply_terminal_from_attempt(sync_request, attempt, now=timezone.now())
                 return True
         return _defer_in_progress(
-            sqs, queue_url=queue_url, receipt_handle=receipt_handle
+            sqs,
+            queue_url=queue_url,
+            receipt_handle=receipt_handle,
+            reason="unexpected_exception",
+            request_id=request_id,
+            approximate_receive_count=approximate_receive_count,
         )
 
     return _terminalize_request_with_lease(
