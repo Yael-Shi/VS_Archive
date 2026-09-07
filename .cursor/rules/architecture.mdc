@@ -46,6 +46,28 @@ Keep responsibilities separated:
 
 Do not add provider-specific `if/else` logic to `run_worker.py`.
 
+## DocumentSourceFile physical vs OCR set
+
+`DocumentSourceFile` is the physical/display source set. Preview and public
+display use all UPLOADED rows in `order_index` order.
+
+`include_in_ocr` (default `True`) is explicit OCR membership. Do not infer
+exclusion from filename, status, order, metadata, or request history.
+
+Every OCR/reprocess/recovery path must consume only `include_in_ocr=True`
+files via `get_ordered_source_files_for_processing`. The OCR `PageImage` list
+must be contiguous `1..K` after that filter. Gemini/Arabic source fingerprints
+and expected page count use the OCR-included set only.
+
+Staff may append a display-only IMAGE page (`include_in_ocr=False`) to an
+already-finalized OCR IMAGE document. That path must not enqueue
+`PROCESS_DOCUMENT`. V1 is IMAGE-only, post-finalize, append-only. Not for PDF,
+PHOTO items, initial upload, deletion, reorder, replacement, or per-page OCR
+results. Adding a display-only page must not change existing
+`DocumentTextResult` rows, `processing_state_user`, or OCR attempt identity.
+Hebrew translation retry stays on existing `SOURCE_TEXT` and must not fetch
+images.
+
 Normal Django URL/view imports (web/Gunicorn) must not import
 `documents.services.gemini_engine` or `google.genai`. Web code may check
 Hebrew-translation retry eligibility, validate, and enqueue. Actual Gemini

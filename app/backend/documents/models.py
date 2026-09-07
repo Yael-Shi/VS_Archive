@@ -1944,8 +1944,9 @@ class DocumentSourceFile(models.Model):
     """
     One ordered source file belonging to a logical Document.
 
-    V1 product scope (future PRs): multiple IMAGE source files per document only.
-    ``order_index`` is zero-based; UI may display ``order_index + 1`` later.
+    Rows are the physical/display source set (preview uses every UPLOADED file).
+    ``include_in_ocr`` controls membership in the OCR source set. V1 product
+    scope is IMAGE source files; ``order_index`` is zero-based.
     """
 
     class UploadStatus(models.TextChoices):
@@ -1974,6 +1975,13 @@ class DocumentSourceFile(models.Model):
         default=UploadStatus.PENDING,
     )
     upload_error = models.TextField(null=True, blank=True)
+    include_in_ocr = models.BooleanField(
+        default=True,
+        help_text=(
+            "When False, this source file is stored and displayed but is "
+            "excluded from every OCR/reprocess/recovery path."
+        ),
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

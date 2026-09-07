@@ -159,7 +159,7 @@
                 data-archive-search-page-index="{{ item.display_number }}"
               >
                 <div class="muted text-sm source-preview-page__label">
-                  עמוד {{ item.display_number }}
+                  עמוד {{ item.display_number }}{% if is_admin and item.include_in_ocr == False %} · ללא תעתוק{% endif %}
                 </div>
                 {% if item.url %}
                   <div class="viewer document-detail-viewer">

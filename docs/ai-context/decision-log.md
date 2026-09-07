@@ -1,5 +1,60 @@
 # VS-Archive Decision Log
 
+## Display-only IMAGE page (`include_in_ocr`)
+
+**Decision / implemented:** Staff may append one extra IMAGE page to an
+already-finalized OCR IMAGE document that is stored and displayed but never
+sent to OCR/HTR.
+
+**Current behavior:**
+
+- Schema: `DocumentSourceFile.include_in_ocr` BooleanField default `True`
+  (migration `0066`). Existing/normal source files stay included. Exclusion is
+  only this field — not filename, status, order, metadata, or request history.
+- Physical/display set = all `DocumentSourceFile` rows. OCR set =
+  `include_in_ocr=True` only. Physical `order_index` is unchanged. OCR
+  `PageImage` list is contiguous `1..K` after filtering
+  (`get_ordered_source_files_for_processing` +
+  `page_images_from_ocr_source_bytes`).
+- Product scope: `ArchiveItem` type `OCR_DOCUMENT`, `Document.doc_type=IMAGE`,
+  `upload_status=UPLOADED`, post-finalize. Not during initial upload, not PDF,
+  not PHOTO items.
+- Staff action **הוספת עמוד ללא תעתוק** uses a dedicated flow
+  (`/api/uploads/<id>/display-only-pages/add/` and `.../<order_index>/complete/`,
+  UI `/api/ui/documents/<id>/display-only-page/`). Does **not** reuse
+  `/api/uploads/<id>/parts/add/` (that remains incremental-draft-only).
+- New row: `include_in_ocr=False`, next `order_index`, appended at the end.
+  Does not enqueue `PROCESS_DOCUMENT` at plan or complete. Does not rewrite
+  existing `DocumentTextResult` rows, `processing_state_user`, thumbnail
+  (still first page), or search index.
+- Legacy single-image: sync `order_index=0` from existing
+  `Document.file_s3_key` (`include_in_ocr=True`, no re-upload), append the
+  display-only row, set `expected_source_file_count` to the physical count
+  (switches to multi-image preview).
+- Fail closed when the document is `PROCESSING` / `RECOVERY_REQUIRED`, when
+  any active `ProcessDocumentRequest` (`QUEUED` / `RUNNING` /
+  `RECOVERY_REQUIRED` / `ENQUEUE_FAILED`) exists, when the source-file cap is
+  reached, or when the caller is not staff. A failed display-only upload marks
+  only that source row `FAILED`; it must not mark a healthy document `FAILED`.
+- In-flight PENDING/FAILED display-only extras beyond
+  `expected_source_file_count` are ignored by OCR validation so an unfinished
+  add cannot fail the document.
+- Gemini/Arabic attempt identity and expected page count use the OCR-included
+  set only. A display-only append must not change OCR attempt identity. A
+  single remaining OCR page at `order_index=0` matching `Document.file_s3_key`
+  keeps legacy `source_identity=file_s3_key`.
+- Transkribus/Gemini/Antigravity adapters receive only the filtered
+  `PageImage` list. Hebrew translation retry is unchanged (operates on
+  existing `SOURCE_TEXT`; does not fetch images).
+- Public UI shows the extra image normally. Staff preview may show **ללא תעתוק**.
+  Do not expose `include_in_ocr` publicly.
+
+**V1 limitations (intentional):** append-only. No delete, reorder, replace,
+toggle-to-OCR, PDF support, or per-page OCR results.
+
+**Tests:** `documents/test_display_only_page.py`, plus filter cases in
+`documents/tests_source_files.py`.
+
 ## PhotoPerson implies ArchiveItemPerson; public PHOTO album vs selected photo
 
 **Decision / implemented:** The previous “no inference between PhotoPerson and

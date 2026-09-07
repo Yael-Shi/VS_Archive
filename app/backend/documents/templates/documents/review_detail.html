@@ -53,7 +53,7 @@
           {% for item in source_preview_items %}
             <div class="review-source-page">
               <div class="muted review-source-page-label">
-                עמוד {{ item.display_number }}{% if item.original_name %} — {{ item.original_name }}{% endif %}
+                עמוד {{ item.display_number }}{% if item.include_in_ocr == False %} · ללא תעתוק{% endif %}{% if item.original_name %} — {{ item.original_name }}{% endif %}
               </div>
               <div class="viewer">
                 {% if item.url %}

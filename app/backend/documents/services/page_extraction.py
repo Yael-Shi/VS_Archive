@@ -105,9 +105,10 @@ def source_file_bytes_to_page(
     Multi-image V1 supports IMAGE source files only. Bytes are normalized to PNG, matching
     the legacy single-image path (``extract_pages``). Image sources also retain the original
     encoded bytes/MIME; Gemini, Transkribus, checkpoints, and fingerprints still use the
-    normalized PNG fields. ``page_index`` is 1-based and contiguous
-    (``order_index + 1``) to preserve the existing PageImage convention and Transkribus pageNr
-    semantics; the source mapping is ``page_index - 1 == order_index``.
+    normalized PNG fields. ``order_index`` here is the OCR-sequence index
+    (0-based among ``include_in_ocr=True`` files, not necessarily the physical
+    ``DocumentSourceFile.order_index``). ``page_index`` is 1-based and contiguous
+    (``order_index + 1``) for adapter/checkpoint identity.
     """
     mt = (mime_type or "").strip().lower()
     if not mt.startswith("image/"):

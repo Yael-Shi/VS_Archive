@@ -158,6 +158,13 @@ from documents.services.document_thumbnail import (
 from documents.services.photo_s3_cleanup import (
     schedule_photo_s3_cleanup_after_commit,
 )
+from documents.services.display_only_page_upload import (
+    DisplayOnlyPageUploadError,
+    complete_display_only_page_upload,
+    is_display_only_page_add_eligible,
+    prepare_display_only_page_upload,
+    validate_document_for_display_only_page_add,
+)
 from documents.services.source_files import (
     MULTI_IMAGE_MAX_FILES,
     all_expected_source_files_uploaded,
@@ -1020,6 +1027,7 @@ def _create_source_file_presigned_upload(
         mime_type=file_meta["mime_type"],
         size_bytes=file_meta["size_bytes"],
         upload_status=DocumentSourceFile.UploadStatus.PENDING,
+        include_in_ocr=True,
     )
     upload_url = create_presigned_put(
         bucket=bucket,
@@ -1872,6 +1880,278 @@ def upload_finalize(request, doc_id: int):
     return _finalize_response(doc)
 
 
+def _display_only_page_error_response(
+    exc: DisplayOnlyPageUploadError,
+    *,
+    document_id: int,
+    order_index: int | None = None,
+) -> JsonResponse:
+    body: dict = {
+        "error": exc.public_message,
+        "code": exc.code,
+        "document_id": document_id,
+    }
+    if order_index is not None:
+        body["order_index"] = order_index
+    return JsonResponse(body, status=exc.http_status)
+
+
+@login_required
+def upload_display_only_page_add(request, doc_id: int):
+    deny = _require_admin(request)
+    if deny:
+        return deny
+
+    if request.method != "POST":
+        return _bad("POST only")
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return _bad("invalid json")
+
+    try:
+        doc = Document.objects.select_related("archive_item").get(id=doc_id)
+    except Document.DoesNotExist:
+        return JsonResponse({"error": "not found"}, status=404)
+
+    file_meta, parse_err = _parse_image_file_entry(payload, field_prefix="file")
+    if parse_err is not None:
+        return parse_err
+    assert file_meta is not None
+
+    bucket_or_response = _uploads_bucket_or_error()
+    if isinstance(bucket_or_response, JsonResponse):
+        return bucket_or_response
+    bucket = bucket_or_response
+
+    try:
+        with transaction.atomic():
+            locked = (
+                Document.objects.select_for_update()
+                .select_related("archive_item")
+                .get(id=doc.id)
+            )
+            source_file = prepare_display_only_page_upload(
+                document=locked,
+                original_name=file_meta["original_name"],
+                mime_type=file_meta["mime_type"],
+                size_bytes=file_meta["size_bytes"],
+            )
+    except DisplayOnlyPageUploadError as exc:
+        return _display_only_page_error_response(exc, document_id=doc.id)
+
+    upload_url = create_presigned_put(
+        bucket=bucket,
+        key=source_file.file_s3_key,
+        content_type=file_meta["mime_type"],
+    )
+    return JsonResponse(
+        {
+            "document_id": doc.id,
+            "order_index": source_file.order_index,
+            "s3_key": source_file.file_s3_key,
+            "upload_url": upload_url,
+            "original_name": file_meta["original_name"],
+            "mime_type": file_meta["mime_type"],
+            "size_bytes": file_meta["size_bytes"],
+            "include_in_ocr": False,
+        },
+        status=201,
+    )
+
+
+@login_required
+def upload_display_only_page_complete(request, doc_id: int, order_index: int):
+    deny = _require_admin(request)
+    if deny:
+        return deny
+
+    payload, success, err = _parse_upload_success_payload(request)
+    if err is not None:
+        return err
+    assert payload is not None
+    assert success is not None
+
+    try:
+        doc = Document.objects.select_related("archive_item").get(id=doc_id)
+    except Document.DoesNotExist:
+        return JsonResponse({"error": "not found"}, status=404)
+
+    source_file = get_source_file_for_order(doc, order_index)
+    if source_file is None:
+        return JsonResponse(
+            {
+                "error": f"source file missing for order_index={order_index}",
+                "document_id": doc.id,
+            },
+            status=400,
+        )
+
+    if success:
+        file_mime = payload.get("file_mime")
+        if isinstance(file_mime, str):
+            file_mime = file_mime.strip()
+            if file_mime:
+                metadata_err = validate_image_upload_metadata(
+                    mime_type=file_mime,
+                    original_name=source_file.file_original_name or "",
+                )
+                if metadata_err:
+                    return JsonResponse(
+                        {
+                            "error": metadata_err.replace("mime_type", "file_mime"),
+                            "document_id": doc.id,
+                            "order_index": order_index,
+                        },
+                        status=400,
+                    )
+
+        if not source_file.file_s3_key:
+            return JsonResponse(
+                {
+                    "error": "file_s3_key missing",
+                    "document_id": doc.id,
+                    "order_index": order_index,
+                },
+                status=400,
+            )
+
+        bucket_or_response = _uploads_bucket_or_error()
+        if isinstance(bucket_or_response, JsonResponse):
+            return bucket_or_response
+        bucket = bucket_or_response
+
+        payload_file_mime = payload.get("file_mime")
+        if isinstance(payload_file_mime, str) and payload_file_mime.strip():
+            expected_mime = payload_file_mime.strip()
+        else:
+            expected_mime = source_file.mime_type or ""
+
+        s3_err = _verify_uploaded_s3_object_metadata(
+            bucket=bucket,
+            key=source_file.file_s3_key,
+            document_id=doc.id,
+            expected_mime=expected_mime,
+            order_index=order_index,
+        )
+        if s3_err:
+            return s3_err
+
+        norm_result, norm_err = _normalize_uploaded_image_exif_or_error(
+            bucket=bucket,
+            key=source_file.file_s3_key,
+            mime_type=expected_mime,
+            document_id=doc.id,
+            order_index=order_index,
+        )
+        if norm_err:
+            return norm_err
+
+        file_size = payload.get("file_size")
+        if norm_result.rewritten and norm_result.size_bytes is not None:
+            complete_size = norm_result.size_bytes
+        elif isinstance(file_size, int):
+            complete_size = file_size
+        else:
+            complete_size = source_file.size_bytes
+        complete_mime = (
+            file_mime
+            if isinstance(file_mime, str) and file_mime
+            else source_file.mime_type
+        )
+        try:
+            with transaction.atomic():
+                locked = (
+                    Document.objects.select_for_update()
+                    .select_related("archive_item")
+                    .get(id=doc.id)
+                )
+                locked_source = DocumentSourceFile.objects.select_for_update().get(
+                    pk=source_file.pk
+                )
+                source_file = complete_display_only_page_upload(
+                    document=locked,
+                    source_file=locked_source,
+                    success=True,
+                    mime_type=complete_mime,
+                    size_bytes=complete_size,
+                )
+        except DisplayOnlyPageUploadError as exc:
+            return _display_only_page_error_response(
+                exc,
+                document_id=doc.id,
+                order_index=order_index,
+            )
+    else:
+        raw_err = payload.get("error") or "upload failed"
+        upload_err = str(raw_err).strip() or "upload failed"
+        try:
+            with transaction.atomic():
+                locked = (
+                    Document.objects.select_for_update()
+                    .select_related("archive_item")
+                    .get(id=doc.id)
+                )
+                locked_source = DocumentSourceFile.objects.select_for_update().get(
+                    pk=source_file.pk
+                )
+                source_file = complete_display_only_page_upload(
+                    document=locked,
+                    source_file=locked_source,
+                    success=False,
+                    upload_error=upload_err,
+                )
+        except DisplayOnlyPageUploadError as exc:
+            return _display_only_page_error_response(
+                exc,
+                document_id=doc.id,
+                order_index=order_index,
+            )
+
+    doc.refresh_from_db(
+        fields=["upload_status", "processing_state_user", "expected_source_file_count"]
+    )
+    return JsonResponse(
+        {
+            "document_id": doc.id,
+            "order_index": order_index,
+            "upload_status": source_file.upload_status,
+            "include_in_ocr": source_file.include_in_ocr,
+            "document_upload_status": doc.upload_status,
+            "processing_state_user": doc.processing_state_user,
+            "expected_source_file_count": doc.expected_source_file_count,
+        }
+    )
+
+
+@login_required
+def document_display_only_page_add(request, doc_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    doc = get_viewable_document(
+        request.user,
+        doc_id,
+        queryset=Document.objects.select_related("archive_item"),
+    )
+    try:
+        validate_document_for_display_only_page_add(doc)
+    except DisplayOnlyPageUploadError as exc:
+        messages.error(request, exc.public_message)
+        return redirect("documents-detail-page", doc_id=doc.id)
+
+    return render(
+        request,
+        "documents/display_only_page_add.html",
+        context={
+            "doc": doc,
+            "page_title": "הוספת עמוד ללא תעתוק",
+        },
+    )
+
+
 @login_required
 def create_photo_upload(request):
     deny = _require_admin(request)
@@ -2461,6 +2741,7 @@ def review_detail_page(request, doc_id: int):
         "show_transkribus_corrected_current_sync_action": (
             _is_transkribus_corrected_current_sync_ui_eligible(doc)
         ),
+        "show_display_only_page_add_action": is_display_only_page_add_eligible(doc),
     }
 
     logger.info(
@@ -3387,6 +3668,9 @@ def transkribus_paragraph_editor_page(request, doc_id: int):
             "source_is_rtl": editor.source_is_rtl,
             "adoption_suggestions": editor.adoption_suggestions,
             "adoption_intro": editor.adoption_intro,
+            "show_display_only_page_add_action": is_display_only_page_add_eligible(
+                doc
+            ),
         },
     )
 
@@ -3568,6 +3852,8 @@ def document_detail_page(request, doc_id: int):
         "show_ocr_reprocess_action": is_admin and is_ocr_reprocess_ui_eligible(doc),
         "show_hebrew_translation_retry_action": is_admin
         and is_hebrew_translation_retry_ui_eligible(doc),
+        "show_display_only_page_add_action": is_admin
+        and is_display_only_page_add_eligible(doc),
         "paragraph_status": (
             build_paragraph_mapping_staff_status(doc)
             if show_transkribus_action
