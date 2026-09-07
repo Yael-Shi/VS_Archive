@@ -7027,13 +7027,13 @@ JavaScript hover behavior, scrolling, image overlays, or schema changes.
 **Current behavior:**
 
 - Shared constant: `documents.services.sqs.SQS_WORKER_VISIBILITY_TIMEOUT_SECONDS` = 2700.
-- `run_worker._receive_one` uses `VisibilityTimeout=2700` and `AttributeNames=["ApproximateReceiveCount"]`. This overrides the queue CDK default of 10 minutes per receive. Queue-level CDK visibility and DLQ topology were unchanged in this PR. **`maxReceiveCount=5` in this entry is superseded as repository/CDK policy**; CDK-configured `maxReceiveCount` is **100** (see the later “Jobs queue DLQ maxReceiveCount safety net” entry). Last verified live AWS remains **5** until `vs-archive-dev-data-v2` is deployed and verified.
+- `run_worker._receive_one` uses `VisibilityTimeout=2700` and `AttributeNames=["ApproximateReceiveCount"]`. This overrides the queue CDK default of 10 minutes per receive. Queue-level CDK visibility and DLQ topology were unchanged in this PR. **`maxReceiveCount=5` in this entry is superseded as repository/CDK policy**; CDK-configured `maxReceiveCount` is **100** (see the later “Jobs queue DLQ maxReceiveCount safety net” entry). Live AWS was verified **100** after the 2026-09-07 `vs-archive-dev-data-v2` deploy.
 - Post-claim `ChangeMessageVisibility` remains 2700s (explicit claim-time refresh). Competing live-lease defer remains 120s. Execution lease duration, STARTED recovery threshold (60m), provider deadlines, Transkribus retry timing, and Hebrew-translation PROCESSING freshness are unchanged.
 - Invariant: initial receive visibility >= current durable execution lease, and currently equals 2700s.
 - `parse_approximate_receive_count` never raises. Absent or malformed attributes yield `None`. The count is passed into request-aware PROCESS_DOCUMENT and corrected/current handlers for structured logs on DEFER / RETRYABLE / handler-exception / missing-SQS-context paths. It is not used for ACK, retry, DLQ, claim, or request-state decisions.
 - Legacy `{type, document_id}` PROCESS_DOCUMENT execution remains accepted if such a message is received (mixed-version / in-flight safety). A cutoff is deferred until drain/inspection.
 
-**Deferred (next retry/DLQ phase):** heartbeat; changing DLQ topology / queue retention / IAM / ECS desired count; automatic SQS retries / automatic DLQ redrive; rejecting legacy `document_id` PROCESS_DOCUMENT messages. **DB-side expired-lease fencing is implemented** in the later “DB-side expired ProcessDocumentRequest lease fencing” entry. **`maxReceiveCount=5` is superseded as repository/CDK policy** (CDK-configured 100; last verified live AWS remains 5 until data-stack deploy; see the later safety-net entry).
+**Deferred (next retry/DLQ phase):** heartbeat; changing DLQ topology / queue retention / IAM / ECS desired count; automatic SQS retries / automatic DLQ redrive; rejecting legacy `document_id` PROCESS_DOCUMENT messages. **DB-side expired-lease fencing is implemented and deployed** in the later “DB-side expired ProcessDocumentRequest lease fencing” entry. **`maxReceiveCount=5` is superseded as repository/CDK policy** (CDK-configured 100; live AWS verified 100 after the 2026-09-07 data-stack deploy; see the later safety-net entry).
 
 ## Jobs queue DLQ maxReceiveCount safety net (2026-09-07)
 
@@ -7045,7 +7045,7 @@ JavaScript hover behavior, scrolling, image overlays, or schema changes.
 
 - Worker initial receive visibility and post-claim visibility remain **45 minutes** (2700s). Queue CDK default visibility remains **10 minutes**.
 - Source queue retention remains **4 days**; DLQ retention remains **14 days**. The same DLQ stays attached. No new queue.
-- CDK-configured `maxReceiveCount` is **100** (`JOBS_QUEUE_MAX_RECEIVE_COUNT` in `data_stack.py`). This takes effect in live AWS only after deploying `vs-archive-dev-data-v2` and verifying; last verified live AWS remains **5**.
+- CDK-configured `maxReceiveCount` is **100** (`JOBS_QUEUE_MAX_RECEIVE_COUNT` in `data_stack.py`). Live AWS was verified **100** after the 2026-09-07 `vs-archive-dev-data-v2` deploy (same existing jobs DLQ attached).
 - `ApproximateReceiveCount` remains observability only (no ACK/defer/claim/request-state branching).
 - Automatic DLQ redrive is unimplemented and forbidden. DLQ is not authorization for provider replay.
 - `RECOVERY_REQUIRED` remains non-replayable.
@@ -7053,11 +7053,11 @@ JavaScript hover behavior, scrolling, image overlays, or schema changes.
 
 **Unchanged:** worker ACK/defer logic; execution lease; request statuses; provider retries; legacy PROCESS_DOCUMENT acceptance; ECS desired/min/max healthy percentages; queue encryption.
 
-**Deferred:** heartbeat; DLQ consumer / recovery commands; queue split; automatic redrive. **DB-side expired ProcessDocumentRequest fencing is implemented** in the later entry below. Corrected/current DB-side STARTED fencing remains deferred.
+**Deferred:** heartbeat; DLQ consumer / recovery commands; queue split; automatic redrive. **DB-side expired ProcessDocumentRequest fencing is implemented and deployed** in the later entry below. Corrected/current DB-side STARTED fencing remains deferred.
 
 ## DB-side expired ProcessDocumentRequest lease fencing (2026-09-07)
 
-**Decision / implemented:** Operators can fence expired `ProcessDocumentRequest` `RUNNING` rows from the database without an SQS redelivery. Worker claim still fences the same case when a message arrives. Both paths share `fence_locked_expired_running_process_document_request` after Document-then-Request locks.
+**Decision / implemented and deployed:** Operators can fence expired `ProcessDocumentRequest` `RUNNING` rows from the database without an SQS redelivery. This is live after the 2026-09-07 app deploy. Worker claim still fences the same case when a message arrives. Both paths share `fence_locked_expired_running_process_document_request` after Document-then-Request locks.
 
 **Current behavior:**
 
@@ -7069,6 +7069,6 @@ JavaScript hover behavior, scrolling, image overlays, or schema changes.
 - Late retained-token persist/terminalize semantics are unchanged. `RECOVERY_REQUIRED` remains fail-closed and is not authorized by DLQ.
 - `TranskribusCorrectedCurrentSyncRequest` is out of scope (expired unlinked `RUNNING` still reclaims on worker delivery; linked `STARTED` ≥ 60m fencing stays delivery-driven).
 
-**Unchanged:** schema/migrations; CDK; live AWS `maxReceiveCount` (repo/CDK desired 100; last verified live remains 5 until data-stack deploy); heartbeat; automatic redrive.
+**Unchanged:** schema/migrations; CDK (this PR did not change queue policy); heartbeat; automatic redrive. Live jobs-queue `maxReceiveCount` is repository/CDK **100** and was verified live **100** after the 2026-09-07 data-stack deploy.
 
 **Deferred:** staff abandon/retry UI; automatic replay of `RECOVERY_REQUIRED`; corrected/current DB-side STARTED fencing; heartbeat; queue split.
