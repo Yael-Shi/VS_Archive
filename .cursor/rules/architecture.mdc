@@ -321,8 +321,17 @@ Current worker/SQS policy:
   Source retention remains 4 days; DLQ retention remains 14 days; CDK
   queue default visibility remains 10 minutes. Automatic DLQ redrive is
   unimplemented and forbidden. `RECOVERY_REQUIRED` remains non-replayable
-  and is not authorized by DLQ. Heartbeat, DB-side expired-lease
-  fencing/recovery, queue split, and broader retry/backoff redesign remain
+  and is not authorized by DLQ. Operators may fence expired
+  `ProcessDocumentRequest` `RUNNING` leases with
+  `fence_expired_process_document_requests` (dry-run default; `--apply`
+  requires `--request-id`, `--document-id`, or `--all-eligible`). That
+  command uses the same Document-then-Request locked transition as worker
+  claim, never sends SQS, and never authorizes a provider call.
+  `recover_process_document_requests` remains the separate stranded
+  `QUEUED` / `ENQUEUE_FAILED` resend tool and still does not replay
+  `RUNNING` or `RECOVERY_REQUIRED`. Corrected/current sync fencing is
+  unchanged and out of scope for that command. Heartbeat, queue split,
+  automatic DLQ redrive, and broader retry/backoff redesign remain
   deferred. Do not change those opportunistically.
 
 Arabic printed ambiguous Vision/create fences stay fail-closed on automatic
