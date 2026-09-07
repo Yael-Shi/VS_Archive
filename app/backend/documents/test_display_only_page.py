@@ -143,7 +143,7 @@ class DisplayOnlyPageUploadTests(TestCase):
             upload_status=Document.UploadStatus.UPLOADED,
             processing_state_user=Document.ProcessingState.READY,
             expected_source_file_count=count,
-            file_s3_key=f"documents/pending/source/0.jpg",
+            file_s3_key="documents/pending/source/0.jpg",
             mime_type="image/jpeg",
             thumbnail_file_key="documents/pending/thumb_400.jpg",
         )
