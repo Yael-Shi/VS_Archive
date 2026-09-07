@@ -93,7 +93,10 @@ class ReviewedPhotoPersonImportTests(TestCase):
         self.assertTrue(
             PhotoPerson.objects.filter(photo_content=photo, person=person).exists()
         )
-        self.assertEqual(ArchiveItemPerson.objects.count(), 0)
+        self.assertTrue(
+            ArchiveItemPerson.objects.filter(archive_item=item, person=person).exists()
+        )
+        self.assertEqual(ArchiveItemPerson.objects.count(), 1)
 
     def test_create_person_and_local_ref_photo_person(self):
         item = _photo_item()
@@ -123,6 +126,9 @@ class ReviewedPhotoPersonImportTests(TestCase):
         self.assertEqual(binding.person_id, person.pk)
         self.assertEqual(
             PhotoPerson.objects.get(photo_content=photo).person_id, person.pk
+        )
+        self.assertTrue(
+            ArchiveItemPerson.objects.filter(archive_item=item, person=person).exists()
         )
         self.assertEqual(result.operations[1].person_id, person.pk)
 
@@ -325,7 +331,7 @@ class ReviewedPhotoPersonImportTests(TestCase):
         self.assertEqual(second.noop_count, 1)
         self.assertEqual(PersonAlias.objects.filter(person=person).count(), 1)
 
-    def test_photo_person_noop_and_stale_name(self):
+    def test_photo_person_repair_then_noop_and_stale_name(self):
         item = _photo_item()
         photo = _photo(item)
         person = Person.objects.create(name="Ada")
@@ -341,10 +347,20 @@ class ReviewedPhotoPersonImportTests(TestCase):
                 "expected_canonical_name": "Ada",
             }
         )
+        plan = plan_reviewed_photo_person_import(payload)
+        self.assertEqual(plan.repair_count, 1)
+        self.assertEqual(plan.noop_count, 0)
         result = apply_reviewed_photo_person_import(payload)
-        self.assertEqual(result.noop_count, 1)
-        self.assertEqual(PhotoPerson.objects.count(), 1)
-        with self.assertRaises(ReviewedPhotoPersonImportError):
+        self.assertEqual(result.repair_count, 1)
+        self.assertEqual(result.noop_count, 0)
+        self.assertEqual(
+            PhotoPerson.objects.filter(photo_content=photo, person=person).count(),
+            1,
+        )
+        self.assertTrue(
+            ArchiveItemPerson.objects.filter(archive_item=item, person=person).exists()
+        )
+        with self.assertRaises(ReviewedPhotoPersonImportError) as ctx:
             apply_reviewed_photo_person_import(
                 _artifact(
                     {
@@ -358,6 +374,19 @@ class ReviewedPhotoPersonImportTests(TestCase):
                     }
                 )
             )
+        self.assertEqual(str(ctx.exception), CANONICAL_NAME_STALE_ERROR)
+        self.assertEqual(
+            PhotoPerson.objects.filter(photo_content=photo, person=person).count(),
+            1,
+        )
+        self.assertEqual(
+            ArchiveItemPerson.objects.filter(archive_item=item, person=person).count(),
+            1,
+        )
+        again = apply_reviewed_photo_person_import(payload)
+        self.assertEqual(again.noop_count, 1)
+        self.assertEqual(again.repair_count, 0)
+        self.assertEqual(PhotoPerson.objects.count(), 1)
 
     def test_stale_original_file_key(self):
         item = _photo_item()
@@ -467,13 +496,11 @@ class ReviewedPhotoPersonImportTests(TestCase):
             )
         self.assertEqual(str(failed_ctx.exception), PHOTO_NOT_RENDERABLE_ERROR)
 
-    def test_no_aip_writes_and_people_present_unchanged(self):
+    def test_no_aip_from_people_present_and_existing_item_person_preserved(self):
         item = _photo_item()
         photo = _photo(item, people_present="שלמה")
-        ArchiveItemPerson.objects.create(
-            archive_item=item, person=Person.objects.create(name="Item Person")
-        )
-        aip_ids = set(ArchiveItemPerson.objects.values_list("pk", flat=True))
+        item_person = Person.objects.create(name="Item Person")
+        ArchiveItemPerson.objects.create(archive_item=item, person=item_person)
         payload = _artifact(
             {
                 "id": "create-1",
@@ -492,10 +519,17 @@ class ReviewedPhotoPersonImportTests(TestCase):
         )
         apply_reviewed_photo_person_import(payload)
         photo.refresh_from_db()
+        created = Person.objects.get(name="Photo Only")
         self.assertEqual(photo.people_present, "שלמה")
-        self.assertEqual(
-            set(ArchiveItemPerson.objects.values_list("pk", flat=True)), aip_ids
+        self.assertTrue(
+            ArchiveItemPerson.objects.filter(
+                archive_item=item, person=item_person
+            ).exists()
         )
+        self.assertTrue(
+            ArchiveItemPerson.objects.filter(archive_item=item, person=created).exists()
+        )
+        self.assertEqual(ArchiveItemPerson.objects.filter(archive_item=item).count(), 2)
 
     def test_dry_run_zero_writes_including_bindings(self):
         item = _photo_item()
@@ -603,7 +637,32 @@ class ReviewedPhotoPersonImportTests(TestCase):
             apply_reviewed_photo_person_import(payload)
         self.assertEqual(refreshed, [[first.pk]])
 
-    def test_pure_reapply_noop_does_not_refresh(self):
+    def test_pure_reapply_noop_does_not_refresh_when_aip_already_present(self):
+        item = _photo_item()
+        photo = _photo(item)
+        person = Person.objects.create(name="Ada")
+        PhotoPerson.objects.create(photo_content=photo, person=person)
+        ArchiveItemPerson.objects.create(archive_item=item, person=person)
+        payload = _artifact(
+            {
+                "id": "pp-1",
+                "op": "add_photo_person",
+                "archive_item_id": item.pk,
+                "photo_content_id": photo.pk,
+                "expected_original_file_key": photo.original_file_key,
+                "person_id": person.pk,
+                "expected_canonical_name": "Ada",
+            }
+        )
+        with patch(
+            "documents.services.photo_person_reviewed_import.sync_archive_item_search_indexes"
+        ) as mocked:
+            result = apply_reviewed_photo_person_import(payload)
+        mocked.assert_not_called()
+        self.assertEqual(result.noop_count, 1)
+        self.assertEqual(result.repair_count, 0)
+
+    def test_legacy_photo_person_without_aip_is_reported_as_repair(self):
         item = _photo_item()
         photo = _photo(item)
         person = Person.objects.create(name="Ada")
@@ -619,11 +678,26 @@ class ReviewedPhotoPersonImportTests(TestCase):
                 "expected_canonical_name": "Ada",
             }
         )
+        plan = plan_reviewed_photo_person_import(payload)
+        self.assertEqual(plan.repair_count, 1)
+        self.assertEqual(plan.noop_count, 0)
+        self.assertFalse(
+            ArchiveItemPerson.objects.filter(archive_item=item, person=person).exists()
+        )
         with patch(
             "documents.services.photo_person_reviewed_import.sync_archive_item_search_indexes"
         ) as mocked:
-            apply_reviewed_photo_person_import(payload)
-        mocked.assert_not_called()
+            result = apply_reviewed_photo_person_import(payload)
+        mocked.assert_called_once()
+        self.assertEqual(result.repair_count, 1)
+        self.assertEqual(result.operations[0].status, "REPAIR")
+        self.assertTrue(
+            ArchiveItemPerson.objects.filter(archive_item=item, person=person).exists()
+        )
+        self.assertEqual(
+            PhotoPerson.objects.filter(photo_content=photo, person=person).count(),
+            1,
+        )
 
     def test_command_dry_run_and_apply(self):
         item = _photo_item()

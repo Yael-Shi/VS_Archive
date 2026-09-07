@@ -1,7 +1,11 @@
 """Explicit ArchiveItemPerson create/delete with same-transaction search refresh.
 
-Item-level person links are not photo appearances. Callers that write
-``ArchiveItemPerson`` must use these services; raw model writes are not hooked.
+Item-level person links are broader than photo appearances. PhotoPerson
+writes ensure a matching ArchiveItemPerson (add-only). Item-level REPLACE
+keeps every Person still implied by PhotoPerson on that ArchiveItem.
+Callers that write ``ArchiveItemPerson`` directly must use these services;
+raw model writes are not hooked. These helpers never create PhotoPerson
+from AIP.
 """
 
 from __future__ import annotations
@@ -10,7 +14,7 @@ from typing import Any
 
 from django.db import IntegrityError, transaction
 
-from documents.models import ArchiveItem, ArchiveItemPerson, Person
+from documents.models import ArchiveItem, ArchiveItemPerson, Person, PhotoPerson
 from documents.services.photo_content_management import (
     PERSON_NOT_FOUND_ERROR,
     PhotoContentManagementError,
@@ -143,6 +147,55 @@ def parse_archive_item_people_form(post_data) -> tuple[dict[str, Any], list[str]
     }, errors
 
 
+def person_ids_required_by_photo_people(
+    archive_item: ArchiveItem,
+    *,
+    for_update: bool = False,
+) -> list[int]:
+    """Distinct Person ids that currently appear on photos of this ArchiveItem.
+
+    Order is first-seen ``PhotoPerson.id``. Duplicate appearances collapse to
+    one id. Does not create PhotoPerson or ArchiveItemPerson rows.
+    ``for_update=True`` locks matching PhotoPerson rows; callers must already
+    be in a transaction (``set_archive_item_people``).
+    """
+    seen: set[int] = set()
+    person_ids: list[int] = []
+    queryset = PhotoPerson.objects.filter(
+        photo_content__archive_item_id=archive_item.pk
+    ).order_by("id")
+    if for_update:
+        queryset = queryset.select_for_update()
+    for person_id in queryset.values_list("person_id", flat=True):
+        if person_id in seen:
+            continue
+        seen.add(person_id)
+        person_ids.append(person_id)
+    return person_ids
+
+
+def photo_person_requires_archive_item_person(
+    *,
+    archive_item_id: int,
+    person_id: int,
+) -> bool:
+    """True when at least one PhotoPerson on this item still requires AIP."""
+    return PhotoPerson.objects.filter(
+        photo_content__archive_item_id=archive_item_id,
+        person_id=person_id,
+    ).exists()
+
+
+def _union_person_ids(explicit_ids: list[int], required_ids: list[int]) -> list[int]:
+    merged = list(dict.fromkeys(explicit_ids))
+    seen = set(merged)
+    for person_id in required_ids:
+        if person_id not in seen:
+            seen.add(person_id)
+            merged.append(person_id)
+    return merged
+
+
 def _replace_archive_item_person_rows(
     *,
     archive_item: ArchiveItem,
@@ -189,14 +242,15 @@ def set_archive_item_people(
     refresh_search_index: bool = True,
     force_create_person_keys: list[str] | None = None,
 ) -> list[ArchiveItemPerson]:
-    """Replace ArchiveItemPerson links to match ``person_ids`` in one transaction.
+    """Replace ArchiveItemPerson links in one transaction.
 
-    Optional ``new_person_name`` may be comma-separated. Each token creates a
-    new canonical Person and appends it unless an existing canonical/alias
-    match requires per-token force-create. Does not create aliases,
-    PhotoPerson rows, or Tags. Does not merge by name. Unknown Person ids
-    are rejected. One search-index refresh when links change and
-    ``refresh_search_index`` is true.
+    The persisted set is the explicit ``person_ids`` (plus any newly created
+    names) unioned with Person ids implied by current PhotoPerson rows on
+    this ArchiveItem. Staff may omit a photo-appearance Person from the
+    form; save still keeps or restores that AIP. Does not create
+    PhotoPerson from AIP, aliases, or Tags. Does not merge by name.
+    Unknown Person ids are rejected. One search-index refresh when links
+    change and ``refresh_search_index`` is true.
 
     Callers that already refresh this item in the same transaction (staff
     metadata save) may pass ``refresh_search_index=False`` so the later sync
@@ -223,6 +277,11 @@ def set_archive_item_people(
         resolved_ids.append(created.pk)
         created_person = True
 
+    required_ids = person_ids_required_by_photo_people(
+        locked_item, for_update=True
+    )
+    resolved_ids = _union_person_ids(resolved_ids, required_ids)
+
     links, changed = _replace_archive_item_person_rows(
         archive_item=locked_item,
         person_ids=resolved_ids,
@@ -234,6 +293,80 @@ def set_archive_item_people(
 
         sync_archive_item_search_index(locked_item.pk)
     return links
+
+
+def ensure_archive_item_person(
+    *,
+    archive_item: ArchiveItem,
+    person: Person,
+    refresh_search_index: bool = False,
+) -> tuple[ArchiveItemPerson, bool]:
+    """Ensure an item-level person link exists (add-only).
+
+    Existing ``(archive_item, person)`` is a NOOP and preserves the unique
+    constraint. Does not create PhotoPerson rows, Tags, or aliases. Does not
+    delete anything. Callers that already refresh this item in the same
+    transaction should pass ``refresh_search_index=False``.
+    """
+    existing = ArchiveItemPerson.objects.filter(
+        archive_item_id=archive_item.pk,
+        person_id=person.pk,
+    ).first()
+    if existing is not None:
+        return existing, False
+    try:
+        # Nested savepoint: IntegrityError on the unique constraint must not
+        # mark the caller's outer transaction atomic block rollback-only.
+        with transaction.atomic():
+            link = ArchiveItemPerson.objects.create(
+                archive_item=archive_item,
+                person=person,
+            )
+    except IntegrityError:
+        link = ArchiveItemPerson.objects.get(
+            archive_item_id=archive_item.pk,
+            person_id=person.pk,
+        )
+        return link, False
+    if refresh_search_index:
+        from documents.services.archive_search_index import (
+            sync_archive_item_search_index,
+        )
+
+        sync_archive_item_search_index(archive_item.pk)
+    return link, True
+
+
+def ensure_archive_item_people_for_photo_content(
+    photo_content,
+    *,
+    persons: list[Person],
+    refresh_search_index: bool = False,
+) -> int:
+    """Ensure ArchiveItemPerson for each Person appearing on this photo.
+
+    PhotoPerson is sufficient evidence that the Person is related to the
+    containing ArchiveItem. Returns the number of AIP rows created.
+    """
+    archive_item = photo_content.archive_item
+    if archive_item is None:
+        raise ArchiveItemPersonError("photo content is missing its archive item")
+    created_count = 0
+    for person in persons:
+        _link, created = ensure_archive_item_person(
+            archive_item=archive_item,
+            person=person,
+            refresh_search_index=False,
+        )
+        if created:
+            created_count += 1
+    if refresh_search_index and created_count:
+        from documents.services.archive_search_index import (
+            sync_archive_item_search_index,
+        )
+
+        sync_archive_item_search_index(archive_item.pk)
+    return created_count
 
 
 @transaction.atomic
@@ -262,11 +395,23 @@ def create_archive_item_person(
 
 
 @transaction.atomic
-def delete_archive_item_person(link: ArchiveItemPerson) -> None:
-    """Delete an item-level person link and refresh that item's search index."""
+def delete_archive_item_person(link: ArchiveItemPerson) -> bool:
+    """Delete an item-level person link unless PhotoPerson still requires it.
+
+    Returns True when the AIP row was deleted. If a PhotoPerson on the same
+    ArchiveItem still names this Person, this is a NOOP (AIP kept, no index
+    refresh, no PhotoPerson change).
+    """
     archive_item_id = link.archive_item_id
+    person_id = link.person_id
+    if photo_person_requires_archive_item_person(
+        archive_item_id=archive_item_id,
+        person_id=person_id,
+    ):
+        return False
     link.delete()
 
     from documents.services.archive_search_index import sync_archive_item_search_index
 
     sync_archive_item_search_index(archive_item_id)
+    return True

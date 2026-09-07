@@ -18,9 +18,6 @@
           </div>
 
           <div class="archive-detail-meta document-detail-meta archive-detail-photo-meta">
-            {% if not photo_gallery.show_gallery %}
-              {% include "documents/archive/partials/photo_metadata_display.html" with photo_content=photo_content identified_people=photo_gallery.identified_people photo_date_label=photo_gallery.photo_date_label %}
-            {% endif %}
             {% include "documents/archive/partials/source_metadata.html" with item=item %}
             {% include "documents/archive/partials/discovery_metadata.html" with item=item %}
             {% include "documents/archive/partials/public_note_display.html" with item=item %}
@@ -176,11 +173,31 @@
       <div class="archive-detail-manual-text-signature" aria-hidden="true"></div>
     {% endif %}
     {% if item.item_type == "PHOTO" %}
-      {% if photo_gallery.show_gallery %}
-        <section class="photo-gallery" aria-label="גלריית תמונות">
-          {% include "documents/archive/partials/photo_gallery.html" %}
+      {% if photo_gallery.is_album_view %}
+        <section class="photo-gallery photo-gallery--album" aria-label="כל התמונות">
+          {% include "documents/archive/partials/photo_album_grid.html" %}
+        </section>
+      {% elif photo_gallery.show_gallery %}
+        <section class="photo-gallery photo-gallery--selected" aria-label="תמונה נבחרת">
+          <p class="photo-gallery__back">
+            <a class="btn" href="{{ photo_gallery.album_url }}">חזרה לכל התמונות</a>
+          </p>
+          {% include "documents/archive/partials/photo_metadata_display.html" with photo_content=photo_content identified_people=photo_gallery.identified_people photo_date_label=photo_gallery.photo_date_label %}
+          {% if photo_url %}
+            <figure class="photo-detail archive-detail-photo">
+              <img
+                class="photo-detail__image"
+                src="{{ photo_url }}"
+                alt="{{ photo_gallery.selected_alt_text }}"
+              >
+            </figure>
+          {% else %}
+            <p class="muted">התמונה אינה זמינה כרגע.</p>
+          {% endif %}
+          {% include "documents/archive/partials/photo_gallery_nav.html" %}
         </section>
       {% elif photo_url %}
+        {% include "documents/archive/partials/photo_metadata_display.html" with photo_content=photo_content identified_people=photo_gallery.identified_people photo_date_label=photo_gallery.photo_date_label %}
         <figure class="photo-detail archive-detail-photo">
           <img
             class="photo-detail__image"
@@ -189,6 +206,7 @@
           >
         </figure>
       {% else %}
+        {% include "documents/archive/partials/photo_metadata_display.html" with photo_content=photo_content identified_people=photo_gallery.identified_people photo_date_label=photo_gallery.photo_date_label %}
         <p class="muted">התמונה אינה זמינה כרגע.</p>
       {% endif %}
     {% endif %}

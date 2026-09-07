@@ -878,7 +878,7 @@ class ArchiveItemPersonSuggestionStaffReviewTests(ArchiveItemPersonSuggestionUiH
             PhotoPerson.objects.filter(photo_content=photo, person=appearance).exists()
         )
 
-    def test_approve_photo_remove_leaves_photoperson_intact(self):
+    def test_approve_photo_remove_is_protected_while_photo_person_exists(self):
         item, photo = _create_photo_item(
             title="Photo remove isolation",
             visibility=ArchiveItem.Visibility.PUBLIC,
@@ -893,8 +893,12 @@ class ArchiveItemPersonSuggestionStaffReviewTests(ArchiveItemPersonSuggestionUiH
             submitter_name="מציע/ה",
         )
         self.client.force_login(self.staff)
-        self.client.post(self._approve_url(row.id))
-        self.assertFalse(
+        resp = self.client.post(self._approve_url(row.id))
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn(PERSON_SUGGESTION_STALE_REMOVE_MSG, self._messages(resp))
+        row.refresh_from_db()
+        self.assertEqual(row.status, ArchiveItemPersonSuggestion.Status.APPROVED)
+        self.assertTrue(
             ArchiveItemPerson.objects.filter(archive_item=item, person=person).exists()
         )
         self.assertTrue(

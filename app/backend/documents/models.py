@@ -344,7 +344,11 @@ class PersonAlias(models.Model):
 
 
 class ArchiveItemPerson(models.Model):
-    """Person generally related to an archival item (not a photo appearance or role)."""
+    """Person generally related to an archival item (not a photo appearance or role).
+
+    Broader than PhotoPerson. A PhotoPerson appearance is sufficient evidence
+    for this link; this link is not sufficient evidence for PhotoPerson.
+    """
 
     archive_item = models.ForeignKey(
         ArchiveItem,
@@ -431,7 +435,12 @@ class ArchiveItemAuthor(models.Model):
 
 
 class PhotoPerson(models.Model):
-    """Identified person who appears in a specific photo."""
+    """Identified person who appears in a specific photo.
+
+    A PhotoPerson row is sufficient evidence that the Person is also related
+    to the containing ArchiveItem via ArchiveItemPerson (add-only
+    propagation). ArchiveItemPerson does not imply PhotoPerson.
+    """
 
     photo_content = models.ForeignKey(
         PhotoContent,

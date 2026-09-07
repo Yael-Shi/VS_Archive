@@ -911,7 +911,7 @@ class ArchiveItemPersonStaffUiTests(ArchiveItemPersonStaffUiHarness, TestCase):
             _edit_url(item),
             data=self._payload_for(item),
         )
-        self.assertFalse(
+        self.assertTrue(
             ArchiveItemPerson.objects.filter(archive_item=item, person=person).exists()
         )
         self.assertTrue(

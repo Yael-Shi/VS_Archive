@@ -1,0 +1,23 @@
+<nav class="photo-gallery__selector" aria-label="בחירת תמונה">
+  <ul class="photo-gallery__thumbs photo-gallery__thumbs--album">
+    {% for row in photo_gallery.selector_items %}
+      <li>
+        <a
+          class="photo-gallery__thumb photo-gallery__thumb--album"
+          href="{{ row.selection_url }}"
+          aria-label="{{ row.selector_label }}"
+        >
+          {% if row.thumbnail_url %}
+            <img
+              class="photo-gallery__thumb-image"
+              src="{{ row.thumbnail_url }}"
+              alt=""
+            >
+          {% else %}
+            <span class="photo-gallery__thumb-fallback" aria-hidden="true">{{ row.display_index }}</span>
+          {% endif %}
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+</nav>

@@ -95,8 +95,7 @@ def _apply_remove_delta(suggestion: ArchiveItemPersonSuggestion) -> bool:
     ).first()
     if link is None:
         return False
-    delete_archive_item_person(link)
-    return True
+    return delete_archive_item_person(link)
 
 
 def approve_suggestion(

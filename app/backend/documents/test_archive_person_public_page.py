@@ -855,19 +855,26 @@ class PersonPublicPageLinkRetargetTests(TestCase):
         self.assertContains(resp, "אנשים קשורים")
         self.assertContains(resp, "Item Related Person")
         self.assertContains(resp, related_href)
-        identified_idx = html.index("אנשים מזוהים:")
-        related_idx = html.index("אנשים קשורים")
-        self.assertLess(identified_idx, related_idx)
-        identified_block = html[identified_idx:related_idx]
-        related_block = html[related_idx:]
-        self.assertIn(identified_href, identified_block)
-        self.assertIn("Photo Identified Person", identified_block)
-        self.assertNotIn("Item Related Person", identified_block)
-        self.assertNotIn(related_href, identified_block)
-        self.assertIn(related_href, related_block)
-        self.assertIn("Item Related Person", related_block)
-        self.assertNotIn("Photo Identified Person", related_block)
-        self.assertNotIn(identified_href, related_block)
+        header = html[
+            html.index("archive-detail-photo-header") : html.index("</header>")
+        ]
+        self.assertIn("אנשים קשורים", header)
+        self.assertIn("Item Related Person", header)
+        self.assertIn(related_href, header)
+        self.assertNotIn("אנשים מזוהים:", header)
+        self.assertNotIn("Photo Identified Person", header)
+        self.assertLess(html.index("אנשים מזוהים:"), html.index("photo-detail__image"))
+        self.assertEqual(html.count("אנשים מזוהים:"), 1)
+        self.assertEqual(html.count("Photo Identified Person"), 1)
+        appearance = html[
+            html.index("archive-detail-meta-block--photo") : html.index(
+                "photo-detail__image"
+            )
+        ]
+        self.assertIn(identified_href, appearance)
+        self.assertIn("Photo Identified Person", appearance)
+        self.assertNotIn("Item Related Person", appearance)
+        self.assertNotIn(related_href, appearance)
 
 
 class PersonPublicPageQueryCountTests(TestCase):

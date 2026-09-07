@@ -39,6 +39,7 @@ from documents.services.photo_content_management import (
     next_photo_position,
     reorder_photo_contents,
 )
+from documents.services.photo_gallery import public_photo_detail_url
 from documents.services.photo_upload import create_additional_photo_upload_plan
 
 
@@ -432,7 +433,7 @@ class PhotoAddUploadTests(TestCase):
         )
         self.assertEqual(resp.status_code, 400)
 
-    def test_add_with_existing_person_creates_photo_person_only(self):
+    def test_add_with_existing_person_creates_photo_person_and_keeps_item_person(self):
         existing = Person.objects.create(name="Ada")
         ArchiveItemPerson.objects.create(archive_item=self.item, person=existing)
         before_item_people = ArchiveItemPerson.objects.filter(
@@ -459,7 +460,7 @@ class PhotoAddUploadTests(TestCase):
         self.assertEqual(Person.objects.count(), 1)
         self.assertEqual(self.first.people.count(), 0)
 
-    def test_add_combines_selected_and_new_people_as_photo_person_only(self):
+    def test_add_combines_selected_and_new_people_on_the_new_photo(self):
         existing = Person.objects.create(name="Selected")
         resp = self.client.post(
             self.ADD_URL,
@@ -478,8 +479,9 @@ class PhotoAddUploadTests(TestCase):
             set(photo.people.values_list("id", flat=True)),
             {existing.id, created.id},
         )
-        self.assertFalse(
-            ArchiveItemPerson.objects.filter(archive_item=self.item).exists()
+        self.assertEqual(
+            set(self.item.people.values_list("id", flat=True)),
+            {existing.id, created.id},
         )
         self.assertEqual(self.first.people.count(), 0)
 
@@ -512,12 +514,15 @@ class PhotoAddUploadTests(TestCase):
             self.assertTrue(
                 PhotoPerson.objects.filter(photo_content=photo, person=person).exists()
             )
-            self.assertFalse(
+            self.assertTrue(
                 ArchiveItemPerson.objects.filter(
                     archive_item=self.item, person=person
                 ).exists()
             )
+            self.assertEqual(person.aliases.count(), 0)
         self.assertEqual(self.first.people.count(), 0)
+
+        self.assertEqual(photo.people_present, "crowd")
 
     def test_add_duplicate_name_returns_candidates_before_rows(self):
         existing = Person.objects.create(name="רחל כהן")
@@ -574,7 +579,7 @@ class PhotoAddUploadTests(TestCase):
             self.assertTrue(
                 PhotoPerson.objects.filter(photo_content=photo, person=person).exists()
             )
-            self.assertFalse(
+            self.assertTrue(
                 ArchiveItemPerson.objects.filter(
                     archive_item=self.item, person=person
                 ).exists()
@@ -582,7 +587,7 @@ class PhotoAddUploadTests(TestCase):
             self.assertEqual(person.aliases.count(), 0)
         self.assertEqual(
             set(self.item.people.values_list("id", flat=True)),
-            {existing.id},
+            {existing.id, *[person.id for person in created]},
         )
         self.assertEqual(self.first.people.count(), 0)
 
@@ -599,7 +604,10 @@ class PhotoAddUploadTests(TestCase):
             ["Ada", "ada"],
         )
         self.assertEqual(Person.objects.filter(name__in=["Ada", "ada"]).count(), 2)
-        self.assertFalse(ArchiveItemPerson.objects.exists())
+        self.assertEqual(
+            set(self.item.people.values_list("name", flat=True)),
+            {"Ada", "ada"},
+        )
 
     def test_add_rejects_commas_only_and_overlong_new_names_without_rows(self):
         before_photos = PhotoContent.objects.count()
@@ -840,7 +848,7 @@ class PhotoComponentEditTests(TestCase):
             ).exists()
         )
 
-    def test_minimal_person_create_links_only_the_photo(self):
+    def test_minimal_person_create_links_photo_and_ensures_item_person(self):
         resp = self.client.post(
             self._edit_url(self.second),
             data={
@@ -857,14 +865,25 @@ class PhotoComponentEditTests(TestCase):
                 photo_content=self.second, person=person
             ).exists()
         )
-        self.assertFalse(
+        self.assertTrue(
             ArchiveItemPerson.objects.filter(
                 archive_item=self.item, person=person
             ).exists()
         )
+        self.assertEqual(
+            ArchiveItemPerson.objects.filter(
+                archive_item=self.item, person=person
+            ).count(),
+            1,
+        )
+        self.assertFalse(
+            PhotoPerson.objects.filter(
+                photo_content=self.first, person=person
+            ).exists()
+        )
         self.assertEqual(self.second.people_present, "crowd")
 
-    def test_comma_separated_new_names_link_only_the_photo(self):
+    def test_comma_separated_new_names_link_photo_and_ensure_item_people(self):
         resp = self.client.post(
             self._edit_url(self.second),
             data={
@@ -889,9 +908,20 @@ class PhotoComponentEditTests(TestCase):
             ["Unique Photo One", "Unique Photo Two"],
         )
         for person in created:
-            self.assertFalse(
+            self.assertTrue(
                 ArchiveItemPerson.objects.filter(
                     archive_item=self.item, person=person
+                ).exists()
+            )
+            self.assertEqual(
+                ArchiveItemPerson.objects.filter(
+                    archive_item=self.item, person=person
+                ).count(),
+                1,
+            )
+            self.assertFalse(
+                PhotoPerson.objects.filter(
+                    photo_content=self.first, person=person
                 ).exists()
             )
         self.assertEqual(self.first.people.count(), 0)
@@ -945,9 +975,20 @@ class PhotoComponentEditTests(TestCase):
                     photo_content=self.second, person=person
                 ).exists()
             )
-            self.assertFalse(
+            self.assertTrue(
                 ArchiveItemPerson.objects.filter(
                     archive_item=self.item, person=person
+                ).exists()
+            )
+            self.assertEqual(
+                ArchiveItemPerson.objects.filter(
+                    archive_item=self.item, person=person
+                ).count(),
+                1,
+            )
+            self.assertFalse(
+                PhotoPerson.objects.filter(
+                    photo_content=self.first, person=person
                 ).exists()
             )
         self.assertEqual(self.first.people.count(), 0)
@@ -1006,7 +1047,7 @@ class PhotoComponentEditTests(TestCase):
             ["a" * 200, "b" * 200],
         )
         self.assertEqual(
-            ArchiveItemPerson.objects.filter(archive_item=self.item).count(), 0
+            ArchiveItemPerson.objects.filter(archive_item=self.item).count(), 2
         )
         self.assertEqual(self.first.people_present, "maybe uncle")
 
@@ -1202,7 +1243,7 @@ class PhotoUnifiedInlineEditTests(TestCase):
                 photo_content=self.second, person=created
             ).exists()
         )
-        self.assertFalse(
+        self.assertTrue(
             ArchiveItemPerson.objects.filter(
                 archive_item=self.item, person=created
             ).exists()
@@ -1502,17 +1543,24 @@ class PhotoMultiPublicCompatibilityTests(TestCase):
         self.first = _add_photo(self.item, position=1, filename="first.jpg")
         self.second = _add_photo(self.item, position=2, filename="second.jpg")
 
-    @patch("documents.views.create_presigned_get", return_value="https://img/first")
-    def test_public_detail_still_uses_primary_photo(self, mock_presign):
+    @patch("documents.views.create_presigned_get")
+    def test_public_detail_root_renders_album_grid(self, mock_presign):
         resp = self.client.get(
             reverse("archive-detail", kwargs={"item_id": self.item.id})
         )
         self.assertEqual(resp.status_code, 200)
-        mock_presign.assert_called()
-        self.assertEqual(
-            mock_presign.call_args.kwargs["key"], self.first.original_file_key
+        mock_presign.assert_not_called()
+        self.assertContains(resp, "photo-gallery--album")
+        self.assertContains(resp, "photo-gallery__thumbs--album")
+        self.assertContains(
+            resp, public_photo_detail_url(self.item.id, self.first.id)
         )
-        self.assertNotIn("second.jpg", resp.content.decode())
+        self.assertContains(
+            resp, public_photo_detail_url(self.item.id, self.second.id)
+        )
+        self.assertNotContains(resp, 'class="photo-detail__image"')
+        self.assertNotContains(resp, "photo-gallery--selected")
+        self.assertNotContains(resp, "חזרה לכל התמונות")
 
     def test_browse_eligibility_still_uses_first_photo_upload_state(self):
         self.first.upload_status = PhotoContent.UploadStatus.PENDING

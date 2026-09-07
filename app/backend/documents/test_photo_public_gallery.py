@@ -129,18 +129,8 @@ class PublicPhotoSelectorUnitTests(SimpleTestCase):
         self.assertIsNone(parse_public_photo_selector("0"))
         self.assertIsNone(parse_public_photo_selector("-3"))
 
-    def test_alt_text_prefers_description_and_omits_ids(self):
+    def test_alt_text_uses_title_status_and_omits_ids(self):
         photo = PhotoContent(description="Picnic", id=99)
-        self.assertEqual(
-            public_photo_alt_text(
-                photo,
-                item_title="Album",
-                display_index=2,
-                total=5,
-            ),
-            "Picnic",
-        )
-        photo.description = ""
         alt = public_photo_alt_text(
             photo,
             item_title="Album",
@@ -148,7 +138,18 @@ class PublicPhotoSelectorUnitTests(SimpleTestCase):
             total=5,
         )
         self.assertEqual(alt, "Album — תמונה 2 מתוך 5")
+        self.assertNotIn("Picnic", alt)
         self.assertNotIn("99", alt)
+        photo.description = ""
+        self.assertEqual(
+            public_photo_alt_text(
+                photo,
+                item_title="Album",
+                display_index=2,
+                total=5,
+            ),
+            "Album — תמונה 2 מתוך 5",
+        )
 
 
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
@@ -291,15 +292,26 @@ class PhotoPublicGalleryTests(TestCase):
         self.assertNotContains(resp, "photo-gallery__nav")
         self.assertContains(resp, "חזרה לארכיון")
         self.assertContains(resp, "הוספת מידע על הפריט")
+        self.assertNotContains(resp, "חזרה לכל התמונות")
+        html = resp.content.decode("utf-8")
+        self.assertLess(html.index("Only photo caption"), html.index("photo-detail__image"))
+        self.assertEqual(html.count("Only photo caption"), 1)
 
     def test_multi_photo_renders_renderable_photos_in_position_id_order(self):
         resp = self._detail()
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode("utf-8")
         self.assertContains(resp, "photo-gallery")
-        self.assertContains(resp, "1 מתוך 3")
-        self.assertContains(resp, "הבאה")
+        self.assertContains(resp, "photo-gallery--album")
+        self.assertNotContains(resp, 'class="photo-gallery__status"')
+        self.assertNotContains(resp, "photo-gallery__nav")
+        self.assertNotContains(resp, "photo-gallery--selected")
+        self.assertContains(resp, 'aria-label="תמונה 1 מתוך 3"')
+        self.assertContains(resp, 'aria-label="תמונה 2 מתוך 3"')
+        self.assertContains(resp, 'aria-label="תמונה 3 מתוך 3"')
+        self.assertNotContains(resp, "הבאה")
         self.assertNotContains(resp, ">הקודמת</a>")
+        self.assertNotContains(resp, "חזרה לכל התמונות")
         thumbs_start = html.index("photo-gallery__thumbs")
         thumbs_html = html[thumbs_start:]
         first_href = public_photo_detail_url(self.item.id, self.p1.id)
@@ -307,21 +319,28 @@ class PhotoPublicGalleryTests(TestCase):
         third_href = public_photo_detail_url(self.item.id, self.p3.id)
         self.assertLess(thumbs_html.index(first_href), thumbs_html.index(second_href))
         self.assertLess(thumbs_html.index(second_href), thumbs_html.index(third_href))
-        self.assertContains(resp, "First picnic")
+        self.assertContains(resp, first_href)
+        self.assertContains(resp, second_href)
+        self.assertContains(resp, third_href)
+        self.assertNotContains(resp, "First picnic")
         self.assertNotContains(resp, "Second outing")
         self.assertNotContains(resp, "Pending should stay hidden")
         self.assertNotContains(resp, "Failed should stay hidden")
         self.assertNotContains(resp, "Empty key should stay hidden")
+        self.assertNotContains(resp, 'class="photo-detail__image"')
 
     def test_selected_photo_can_be_changed_and_prev_next_resolve(self):
         resp = self._detail(photo=self.p2.id)
         self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
         self.assertContains(resp, "2 מתוך 3")
         self.assertContains(resp, "Second outing")
         self.assertContains(resp, "After the ceremony")
         self.assertContains(resp, "From box 4")
         self.assertNotContains(resp, "First picnic")
         self.assertNotContains(resp, "Third gathering")
+        self.assertContains(resp, "חזרה לכל התמונות")
+        self.assertContains(resp, public_photo_detail_url(self.item.id))
         self.assertContains(resp, public_photo_detail_url(self.item.id, self.p1.id))
         self.assertContains(resp, public_photo_detail_url(self.item.id, self.p3.id))
         self.assertContains(resp, ">הקודמת</a>")
@@ -333,12 +352,15 @@ class PhotoPublicGalleryTests(TestCase):
             resp,
             _presign_url(bucket="x", key=self.p1.original_file_key),
         )
+        self.assertLess(html.index("Second outing"), html.index("photo-detail__image"))
+        self.assertEqual(html.count("Second outing"), 1)
+        self.assertNotContains(resp, "photo-gallery__thumbs")
 
         last = self._detail(photo=self.p3.id)
         self.assertContains(last, "3 מתוך 3")
         self.assertContains(last, ">הקודמת</a>")
         self.assertNotContains(last, ">הבאה</a>")
-        self.assertContains(last, "photo-gallery__thumb-fallback")
+        self.assertNotContains(last, "photo-gallery__thumb-fallback")
 
     def test_shared_metadata_shown_once_and_stays_in_header(self):
         resp = self._detail(photo=self.p2.id)
@@ -358,7 +380,7 @@ class PhotoPublicGalleryTests(TestCase):
     def test_public_detail_shows_canonical_person_names_not_aliases(self):
         PersonAlias.objects.create(person=self.ada, name="Ada Lovelace")
         PersonAlias.objects.create(person=self.rivka, name="Rivka Cohen")
-        resp = self._detail()
+        resp = self._detail(photo=self.p1.id)
         self.assertContains(
             resp,
             f"{_identified_person_link_html(self.ada)}, {_identified_person_link_html(self.rivka)}",
@@ -371,6 +393,7 @@ class PhotoPublicGalleryTests(TestCase):
         )
 
         url = reverse("archive-detail", kwargs={"item_id": self.item.id})
+        url = f"{url}?{PUBLIC_PHOTO_QUERY_PARAM}={self.p1.id}"
         with CaptureQueriesContext(connection) as ctx:
             detail = self.client.get(url)
         self.assertEqual(detail.status_code, 200)
@@ -382,7 +405,12 @@ class PhotoPublicGalleryTests(TestCase):
         self.assertEqual(alias_sql, [])
 
     def test_identified_people_and_people_present_stay_separate(self):
-        resp = self._detail()
+        album = self._detail()
+        self.assertNotContains(album, "אנשים מזוהים:")
+        self.assertNotContains(album, "נוכחים:")
+        self.assertNotContains(album, "someone in the back")
+
+        resp = self._detail(photo=self.p1.id)
         self.assertContains(resp, "אנשים מזוהים:")
         ada_html = _identified_person_link_html(self.ada)
         rivka_html = _identified_person_link_html(self.rivka)
@@ -455,7 +483,12 @@ class PhotoPublicGalleryTests(TestCase):
         outsider = Person.objects.create(name="Item-only person")
         ArchiveItemPerson.objects.create(archive_item=self.item, person=outsider)
         outsider_href = person_public_page_url(outsider.pk)
-        resp = self._detail()
+        album = self._detail()
+        self.assertContains(album, "אנשים קשורים")
+        self.assertContains(album, "Item-only person")
+        self.assertContains(album, outsider_href)
+        self.assertNotContains(album, "אנשים מזוהים:")
+        resp = self._detail(photo=self.p1.id)
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "אנשים קשורים")
         self.assertContains(resp, "Item-only person")
@@ -475,7 +508,9 @@ class PhotoPublicGalleryTests(TestCase):
         self.assertIn(outsider_href, related_block)
 
     def test_per_photo_dates_render_with_archive_formatting(self):
-        resp = self._detail()
+        album = self._detail()
+        self.assertNotContains(album, "תאריך התמונה:")
+        resp = self._detail(photo=self.p1.id)
         self.assertContains(resp, "תאריך התמונה:")
         self.assertContains(resp, "1950")
         second = self._detail(photo=self.p2.id)
@@ -534,8 +569,11 @@ class PhotoPublicGalleryTests(TestCase):
         self.client.force_login(self.family_user)
         family = self._detail(item=private_item)
         self.assertEqual(family.status_code, 200)
-        self.assertContains(family, "Secret first")
-        self.assertContains(family, "photo-gallery")
+        self.assertContains(family, "Private album")
+        self.assertContains(family, "photo-gallery--album")
+        self.assertNotContains(family, "Secret first")
+        selected = self._detail(item=private_item, photo=private_item.photo_contents.order_by("position", "id").first().id)
+        self.assertContains(selected, "Secret first")
 
     def test_browse_card_still_uses_primary_photo_only(self):
         second_thumb = "photos/unique-second-thumb/thumb_400.jpg"
@@ -650,8 +688,9 @@ class PhotoPublicGalleryTests(TestCase):
         resp = self._detail(photo=self.p3.id)
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Third gathering")
-        self.assertContains(resp, 'aria-current="true"')
-        self.assertContains(resp, "photo-gallery__thumb-fallback")
+        self.assertContains(resp, 'class="photo-detail__image"')
+        album = self._detail()
+        self.assertContains(album, "photo-gallery__thumb-fallback")
 
     def test_builder_does_not_presign_originals_for_unselected_photos(self):
         with patch(
@@ -666,9 +705,26 @@ class PhotoPublicGalleryTests(TestCase):
         self.assertIsNotNone(gallery)
         assert gallery is not None
         self.assertEqual(gallery.selected.id, self.p2.id)
-        self.assertEqual(mock_thumb.call_count, 3)
+        self.assertFalse(gallery.is_album_view)
+        self.assertEqual(mock_thumb.call_count, 0)
+        self.assertEqual(gallery.selector_items, [])
+
+        with patch(
+            "documents.services.photo_gallery.presign_photo_thumbnail_url",
+            return_value="https://s3.example/thumb-only",
+        ) as mock_album:
+            album = build_public_photo_gallery(
+                self.item,
+                selected_photo_param=None,
+                bucket="test-uploads-bucket",
+            )
+        self.assertIsNotNone(album)
+        assert album is not None
+        self.assertTrue(album.is_album_view)
+        self.assertIsNone(album.selected)
+        self.assertEqual(mock_album.call_count, 3)
         self.assertEqual(
-            [item.photo.id for item in gallery.selector_items],
+            [item.photo.id for item in album.selector_items],
             [self.p1.id, self.p2.id, self.p3.id],
         )
 
@@ -687,3 +743,12 @@ class PhotoPublicGalleryStyleTests(SimpleTestCase):
         thumb_block = css[thumb_start : css.index("}", thumb_start) + 1]
         self.assertIn("min-width: 44px", thumb_block)
         self.assertIn("min-height: 44px", thumb_block)
+        album_start = css.index(".photo-gallery__thumbs--album {")
+        album_block = css[album_start : css.index("}", album_start) + 1]
+        self.assertIn("grid-template-columns", album_block)
+        album_thumb_start = css.index(".photo-gallery__thumb--album {")
+        album_thumb_block = css[
+            album_thumb_start : css.index("}", album_thumb_start) + 1
+        ]
+        self.assertIn("min-width: 44px", album_thumb_block)
+        self.assertIn("min-height: 44px", album_thumb_block)

@@ -50,6 +50,7 @@ from documents.services.archive_search_snippets import (
     MATCH_SOURCE_ITEM_DETAILS,
     build_archive_search_match_presentation,
 )
+from documents.services.archive_item_people import delete_archive_item_person
 from documents.services.photo_content_management import (
     delete_one_photo_content,
     reorder_photo_contents,
@@ -725,7 +726,7 @@ class PhotoSearchIndexRefreshTests(TestCase):
             [],
         )
 
-    def test_adding_and_removing_photo_person_updates_search(self):
+    def test_removing_photo_person_keeps_item_person_searchable(self):
         item = _create_photo_item(title="Person links")
         photo = _add_photo(item, position=1)
         person = Person.objects.create(name="LinkedPersonToken")
@@ -734,8 +735,26 @@ class PhotoSearchIndexRefreshTests(TestCase):
             photo,
             **_metadata_update_kwargs(person_ids=[person.pk]),
         )
+        self.assertTrue(
+            PhotoPerson.objects.filter(photo_content=photo, person=person).exists()
+        )
+        self.assertTrue(
+            ArchiveItemPerson.objects.filter(archive_item=item, person=person).exists()
+        )
         self.assertIn("LinkedPersonToken", _index_for(item.pk).metadata_text)
         update_photo_content_metadata(photo, **_metadata_update_kwargs(person_ids=[]))
+        self.assertFalse(
+            PhotoPerson.objects.filter(photo_content=photo, person=person).exists()
+        )
+        self.assertTrue(
+            ArchiveItemPerson.objects.filter(archive_item=item, person=person).exists()
+        )
+        self.assertIn("LinkedPersonToken", _index_for(item.pk).metadata_text)
+        link = ArchiveItemPerson.objects.get(archive_item=item, person=person)
+        delete_archive_item_person(link)
+        self.assertFalse(
+            ArchiveItemPerson.objects.filter(archive_item=item, person=person).exists()
+        )
         self.assertNotIn("LinkedPersonToken", _index_for(item.pk).metadata_text)
 
     def test_renaming_person_refreshes_all_linked_photo_items_once_each(self):

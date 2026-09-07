@@ -1,5 +1,75 @@
 # VS-Archive Decision Log
 
+## PhotoPerson implies ArchiveItemPerson; public PHOTO album vs selected photo
+
+**Decision / implemented:** The previous “no inference between PhotoPerson and
+ArchiveItemPerson” rule is reversed in one direction only.
+
+**Current behavior:**
+
+- `PhotoPerson` = identified Person appearing in one specific `PhotoContent`.
+- `ArchiveItemPerson` = Person related to the ArchiveItem as a whole.
+- `people_present` remains free-text for unidentified/legacy descriptions.
+- Creating `PhotoPerson(photo_content=C, person=P)` ensures
+  `ArchiveItemPerson(archive_item=C.archive_item, person=P)` (add-only).
+  Existing matching AIP is a NOOP (no duplicate; unique constraint preserved).
+- `ArchiveItemPerson` does **not** imply `PhotoPerson`. Staff/item AIP writers
+  never create photo appearances. Never fan AIP onto every photo.
+- Removing a PhotoPerson does **not** automatically remove AIP (another photo
+  or an item-level relationship may still justify it).
+- Item-level REPLACE (`set_archive_item_people`) persists
+  `explicitly_selected ∪ PhotoPerson-implied` people for that ArchiveItem.
+  Staff may deselect a person who still appears in a photo; save keeps or
+  restores AIP. Direct `delete_archive_item_person` is a NOOP while any
+  PhotoPerson on that item still names the Person. Neither path creates
+  PhotoPerson from AIP. One search-index refresh when AIP rows actually
+  change.
+- Production PhotoPerson writes go through `set_photo_people` (staff photo
+  create/edit/add-photo), reviewed `add_photo_person` import, and Person merge
+  (after PhotoPerson rows belong to the keeper). Raw `PhotoPerson.objects.create`
+  in tests/legacy rows is **not** hooked.
+- Search: AIP names land on the owning ArchiveItem `metadata_text` like other
+  item-level people. Callers that already sync the item once after PhotoPerson
+  writes keep a single final refresh (`refresh_search_index=False` on ensure).
+  Public Person membership remains one Person row (AIP ∪ renderable PhotoPerson
+  ∪ linked-Author AIA); this does not duplicate identities.
+- Reviewed importer: an ADD creates PhotoPerson **and** ensures AIP. If
+  PhotoPerson already exists and AIP exists → `NOOP`. If PhotoPerson exists
+  and AIP is missing (legacy) → explicit `REPAIR` (writes AIP only; reported
+  in plan/apply; not a silent NOOP). Does not create PhotoPerson from AIP.
+- Existing LIVE PhotoPerson rows created before this rule stay missing AIP
+  until the operational command
+  `backfill_archive_item_person_from_photo_person` (dry-run default; `--apply`
+  in one transaction). Not a schema migration. Idempotent. Does not mutate
+  PhotoPerson / Person / Author / `people_present`.
+- Public PHOTO UX (same `/archive/<id>/` + `?photo=` contract):
+  - multi-photo item with **no** `photo` query → album **grid** of authorized
+    renderable photos in `(position, id)` order; tiles deep-link
+    `/archive/<id>/?photo=<photo_id>`; no per-photo metadata dump on tiles;
+  - `?photo=<id>` for an authorized renderable photo → selected-photo view
+    with **photo-specific metadata above the image**, “חזרה לכל התמונות”
+    on multi-photo items, prev/next below;
+  - single renderable photo → selected layout without a one-tile grid or
+    back-to-album control;
+  - invalid/foreign/non-renderable `?photo=` still falls back to the first
+    renderable photo (no existence leak). PhotoPerson names on the selected
+    photo remain appearance-only; AIP stays under **אנשים קשורים**.
+
+**Supersedes:** statements that PhotoPerson and ArchiveItemPerson are never
+inferred from each other, including importer “no AIP writes”, add-photo
+“PhotoPerson only”, Person merge “neither relation is inferred from the
+other”, and deferred “automatic ArchiveItemPerson from PhotoPerson”.
+The reverse implication (AIP → PhotoPerson) remains forbidden.
+
+**Tests:** `documents/test_photo_person_archive_item_person_propagation.py`,
+`documents/test_photo_person_reviewed_import.py`,
+`documents/test_photo_public_gallery.py`, plus staff add/edit, search, and
+merge assertions in `test_photo_multi_manage.py` / `test_person_merge.py` /
+`test_archive_item_person_staff_ui.py` /
+`test_archive_search_archive_item_person.py`.
+
+**Schema:** no migration. Operational backfill after deploy.
+
 ## PHOTO structured ArchiveItem Author staff UX
 
 **Decision / implemented:** PHOTO ArchiveItems use the same structured

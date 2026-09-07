@@ -594,7 +594,7 @@ class ArchiveItemPersonSuggestionReviewTests(
         mocked.assert_not_called()
 
 
-class ArchiveItemPersonSuggestionPhotoIsolationTests(
+class ArchiveItemPersonSuggestionPhotoPersonInvariantTests(
     ArchiveItemPersonSuggestionHarness, TestCase
 ):
     def test_add_approval_on_photo_creates_archive_item_person_only(self):
@@ -609,7 +609,7 @@ class ArchiveItemPersonSuggestionPhotoIsolationTests(
         self.assertEqual(PhotoPerson.objects.count(), 0)
         self.assertEqual(photo.person_links.count(), 0)
 
-    def test_remove_approval_on_photo_leaves_photo_person_untouched(self):
+    def test_remove_approval_keeps_aip_while_photo_person_exists(self):
         item, photo = _create_photo_item(title="PHOTO both relations")
         person = Person.objects.create(name="Ada")
         PhotoPerson.objects.create(photo_content=photo, person=person)
@@ -621,10 +621,16 @@ class ArchiveItemPersonSuggestionPhotoIsolationTests(
             item, person, action=ArchiveItemPersonSuggestion.Action.REMOVE
         )
         result = approve_suggestion(suggestion.pk, reviewer=self.reviewer)
-        self.assertTrue(result.relationship_changed)
-        self.assertEqual(_person_ids(item), [])
+        self.assertFalse(result.relationship_changed)
+        self.assertEqual(
+            result.suggestion.status, ArchiveItemPersonSuggestion.Status.APPROVED
+        )
+        self.assertEqual(_person_ids(item), [person.pk])
         self.assertEqual(PhotoPerson.objects.count(), 1)
         self.assertTrue(
             PhotoPerson.objects.filter(photo_content=photo, person=person).exists()
+        )
+        self.assertTrue(
+            ArchiveItemPerson.objects.filter(archive_item=item, person=person).exists()
         )
         self.assertTrue(Person.objects.filter(pk=person.pk).exists())

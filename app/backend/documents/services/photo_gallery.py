@@ -52,10 +52,12 @@ class PublicIdentifiedPersonLink:
 class PublicPhotoGallery:
     """Server-rendered public presentation for one PHOTO ArchiveItem."""
 
-    selected: PhotoContent
+    selected: PhotoContent | None
     selected_index: int
     photo_count: int
     show_gallery: bool
+    is_album_view: bool
+    album_url: str
     previous_url: str | None
     next_url: str | None
     status_label: str
@@ -140,10 +142,13 @@ def public_photo_alt_text(
     display_index: int,
     total: int,
 ) -> str:
-    """Image alt from description or title; never includes internal ids."""
-    description = meaningful_metadata_value(photo_content.description)
-    if description:
-        return description
+    """Image alt from title/status only; never includes internal ids.
+
+    Photo description is public metadata rendered next to the selected image.
+    Repeating it as ``alt`` duplicates that caption in the page HTML.
+    ``photo_content`` is accepted so callers can keep a stable signature.
+    """
+    _ = photo_content
     title = (item_title or "").strip()
     if total > 1:
         status = f"תמונה {display_index} מתוך {total}"
@@ -151,6 +156,13 @@ def public_photo_alt_text(
             return f"{title} — {status}"
         return status
     return title or "תמונה"
+
+
+def _photo_query_requests_selection(raw_value: str | None) -> bool:
+    """True when the request asked for a specific photo (including invalid ids)."""
+    if raw_value is None:
+        return False
+    return bool(str(raw_value).strip())
 
 
 def _select_public_gallery_photo(
@@ -173,8 +185,11 @@ def build_public_photo_gallery(
 ) -> PublicPhotoGallery | None:
     """Build the public PHOTO detail gallery, or ``None`` when nothing is renderable.
 
-    Invalid, foreign, or non-renderable ``?photo=`` values fall back to the first
-    renderable photo. Selection never loads photos from another ArchiveItem.
+    Multi-photo items with no ``?photo=`` show the album grid. A present
+    ``?photo=`` value selects that photo when it is authorized and renderable
+    on this item. Invalid, foreign, or non-renderable values fall back to the
+    first renderable photo. Selection never loads photos from another
+    ArchiveItem. Single-photo items skip the album grid.
     """
     if archive_item.item_type != ArchiveItem.ItemType.PHOTO:
         return None
@@ -183,34 +198,53 @@ def build_public_photo_gallery(
     if not photos:
         return None
 
-    selected = _select_public_gallery_photo(
-        photos,
-        parse_public_photo_selector(selected_photo_param),
-    )
-    selected_index = next(
-        index for index, photo in enumerate(photos, start=1) if photo.pk == selected.pk
-    )
     total = len(photos)
     show_gallery = total > 1
+    requested_selection = _photo_query_requests_selection(selected_photo_param)
+    parsed_id = parse_public_photo_selector(selected_photo_param)
+    is_album_view = show_gallery and not requested_selection
+    album_url = public_photo_detail_url(archive_item.pk)
+
+    selected: PhotoContent | None = None
+    selected_index = 0
     previous_url = None
     next_url = None
-    if show_gallery and selected_index > 1:
-        previous_url = public_photo_detail_url(
-            archive_item.pk,
-            photos[selected_index - 2].pk,
+    identified_people: list[PublicIdentifiedPersonLink] = []
+    photo_date_label = ""
+    selected_alt_text = archive_item.title or "תמונה"
+    status_label = f"{total} תמונות" if show_gallery else ""
+
+    if not is_album_view:
+        selected = _select_public_gallery_photo(photos, parsed_id)
+        selected_index = next(
+            index
+            for index, photo in enumerate(photos, start=1)
+            if photo.pk == selected.pk
         )
-    if show_gallery and selected_index < total:
-        next_url = public_photo_detail_url(
-            archive_item.pk,
-            photos[selected_index].pk,
+        status_label = f"{selected_index} מתוך {total}"
+        if show_gallery and selected_index > 1:
+            previous_url = public_photo_detail_url(
+                archive_item.pk,
+                photos[selected_index - 2].pk,
+            )
+        if show_gallery and selected_index < total:
+            next_url = public_photo_detail_url(
+                archive_item.pk,
+                photos[selected_index].pk,
+            )
+        identified_people = identified_people_links(selected)
+        photo_date_label = public_photo_date_label(selected)
+        selected_alt_text = public_photo_alt_text(
+            selected,
+            item_title=archive_item.title,
+            display_index=selected_index,
+            total=total,
         )
 
     selector_items: list[PublicPhotoGalleryItem] = []
-    if show_gallery:
+    if is_album_view:
         for display_index, photo in enumerate(photos, start=1):
             selector_label = f"תמונה {display_index} מתוך {total}"
-            if photo.pk == selected.pk:
-                selector_label = f"{selector_label}, מוצגת כעת"
             selector_items.append(
                 PublicPhotoGalleryItem(
                     photo=photo,
@@ -221,7 +255,7 @@ def build_public_photo_gallery(
                         expires_in=expires_in,
                     ),
                     selection_url=public_photo_detail_url(archive_item.pk, photo.pk),
-                    is_selected=photo.pk == selected.pk,
+                    is_selected=False,
                     selector_label=selector_label,
                     alt_text=public_photo_alt_text(
                         photo,
@@ -232,24 +266,20 @@ def build_public_photo_gallery(
                 )
             )
 
-    identified_people = identified_people_links(selected)
     return PublicPhotoGallery(
         selected=selected,
         selected_index=selected_index,
         photo_count=total,
         show_gallery=show_gallery,
+        is_album_view=is_album_view,
+        album_url=album_url,
         previous_url=previous_url,
         next_url=next_url,
-        status_label=f"{selected_index} מתוך {total}",
-        selected_alt_text=public_photo_alt_text(
-            selected,
-            item_title=archive_item.title,
-            display_index=selected_index,
-            total=total,
-        ),
+        status_label=status_label,
+        selected_alt_text=selected_alt_text,
         identified_people=identified_people,
         identified_people_names=[link.name for link in identified_people],
-        photo_date_label=public_photo_date_label(selected),
+        photo_date_label=photo_date_label,
         selector_items=selector_items,
     )
 

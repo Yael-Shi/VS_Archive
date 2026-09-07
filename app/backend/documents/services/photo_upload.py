@@ -213,9 +213,10 @@ def create_additional_photo_upload_plan(
     Allocates the next position under an ArchiveItem row lock. Does not create a
     Document, enqueue SQS, or modify shared ArchiveItem metadata.
 
-    Optional ``person_ids`` / ``new_person_name`` write ``PhotoPerson`` only.
-    Callers must validate those fields before this create. Does not write
-    ``ArchiveItemPerson``.
+    Optional ``person_ids`` / ``new_person_name`` write ``PhotoPerson`` and
+    ensure matching ``ArchiveItemPerson`` on this item (add-only). Callers
+    must validate those fields before this create. Does not create
+    ``PhotoPerson`` from item-level people, and does not delete AIP.
 
     The new row is ``PENDING`` and is not public-renderable, so its descriptive
     metadata is omitted from search even though this path still syncs the

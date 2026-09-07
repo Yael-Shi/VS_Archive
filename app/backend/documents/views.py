@@ -4782,6 +4782,7 @@ ARCHIVE_ITEM_PEOPLE_HINT = (
 )
 PHOTO_ARCHIVE_ITEM_PEOPLE_HINT = (
     "קשר ברמת פריט הארכיון, לא הופעה בתמונה. "
+    "אדם שמופיע בתמונה נשאר קשור לפריט גם אם יוסר מכאן. "
     "אנשים מזוהים בתמונה נשמרים על התמונה עצמה ואינם מועתקים מכאן."
 )
 
@@ -5457,7 +5458,11 @@ def archive_detail_page(request, item_id: int):
 
         photo_content = photo_gallery.selected
         photo_url = None
-        if bucket:
+        if (
+            not photo_gallery.is_album_view
+            and photo_content is not None
+            and bucket
+        ):
             photo_url = create_presigned_get(
                 bucket=bucket,
                 key=photo_content.original_file_key,

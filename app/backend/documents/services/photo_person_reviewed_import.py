@@ -1,8 +1,13 @@
 """Reviewed PhotoPerson import: parse/validate/plan/apply with binding idempotency.
 
-ADD-only. Does not write ArchiveItemPerson, Author, or people_present.
-create_person identity on re-apply is ReviewedPersonImportBinding.operation_id
-only — never Person.name.
+ADD-only for PhotoPerson. An actual add_photo_person ADD also ensures the
+containing ArchiveItemPerson (add-only). Does not create PhotoPerson from
+AIP, Author, or people_present. create_person identity on re-apply is
+ReviewedPersonImportBinding.operation_id only — never Person.name.
+
+If PhotoPerson already exists but ArchiveItemPerson is missing (legacy),
+plan/apply report REPAIR and write only the missing AIP. A true NOOP
+performs no writes.
 """
 
 from __future__ import annotations
@@ -14,12 +19,14 @@ from django.db import IntegrityError, transaction
 
 from documents.models import (
     ArchiveItem,
+    ArchiveItemPerson,
     Person,
     PersonAlias,
     PhotoContent,
     PhotoPerson,
     ReviewedPersonImportBinding,
 )
+from documents.services.archive_item_people import ensure_archive_item_person
 from documents.services.archive_search_index import (
     archive_item_ids_for_person_search_refresh,
     sync_archive_item_search_indexes,
@@ -45,6 +52,7 @@ SUPPORTED_OPS = frozenset({OP_CREATE_PERSON, OP_ADD_ALIAS, OP_ADD_PHOTO_PERSON})
 
 STATUS_CREATE = "CREATE"
 STATUS_ADD = "ADD"
+STATUS_REPAIR = "REPAIR"
 STATUS_NOOP = "NOOP"
 STATUS_ERROR = "ERROR"
 
@@ -118,6 +126,10 @@ class ImportPlan:
     @property
     def add_count(self) -> int:
         return sum(1 for row in self.operations if row.status == STATUS_ADD)
+
+    @property
+    def repair_count(self) -> int:
+        return sum(1 for row in self.operations if row.status == STATUS_REPAIR)
 
     @property
     def noop_count(self) -> int:
@@ -407,6 +419,12 @@ def _photo_person_exists(photo_id: int, person_id: int) -> bool:
     ).exists()
 
 
+def _archive_item_person_exists(archive_item_id: int, person_id: int) -> bool:
+    return ArchiveItemPerson.objects.filter(
+        archive_item_id=archive_item_id, person_id=person_id
+    ).exists()
+
+
 def _plan_later_operation(
     row: dict[str, Any],
     *,
@@ -439,11 +457,22 @@ def _plan_later_operation(
 
     photo = _load_renderable_photo(row)
     if person is not None and _photo_person_exists(photo.pk, person.pk):
+        if _archive_item_person_exists(photo.archive_item_id, person.pk):
+            return PlannedOperation(
+                operation_id=row["id"],
+                op=row["op"],
+                status=STATUS_NOOP,
+                reason="PhotoPerson already exists",
+                person_id=person.pk,
+                local_person_ref=row.get("local_person_ref"),
+                archive_item_id=photo.archive_item_id,
+                photo_content_id=photo.pk,
+            )
         return PlannedOperation(
             operation_id=row["id"],
             op=row["op"],
-            status=STATUS_NOOP,
-            reason="PhotoPerson already exists",
+            status=STATUS_REPAIR,
+            reason="ensure ArchiveItemPerson for existing PhotoPerson",
             person_id=person.pk,
             local_person_ref=row.get("local_person_ref"),
             archive_item_id=photo.archive_item_id,
@@ -453,7 +482,7 @@ def _plan_later_operation(
         operation_id=row["id"],
         op=row["op"],
         status=STATUS_ADD,
-        reason="add PhotoPerson",
+        reason="add PhotoPerson and ArchiveItemPerson",
         person_id=None if person is None else person.pk,
         local_person_ref=row.get("local_person_ref"),
         archive_item_id=photo.archive_item_id,
@@ -591,7 +620,32 @@ def apply_reviewed_photo_person_import(payload: dict[str, Any]) -> ImportPlan:
                 )
                 continue
             photo = _load_renderable_photo(row)
+            if planned_op.status == STATUS_REPAIR:
+                ensure_archive_item_person(
+                    archive_item=photo.archive_item,
+                    person=person,
+                    refresh_search_index=False,
+                )
+                refresh_ids.add(photo.archive_item_id)
+                applied.append(
+                    PlannedOperation(
+                        operation_id=planned_op.operation_id,
+                        op=planned_op.op,
+                        status=STATUS_REPAIR,
+                        reason=planned_op.reason,
+                        person_id=person.pk,
+                        local_person_ref=planned_op.local_person_ref,
+                        archive_item_id=photo.archive_item_id,
+                        photo_content_id=photo.pk,
+                    )
+                )
+                continue
             PhotoPerson.objects.create(photo_content=photo, person=person)
+            ensure_archive_item_person(
+                archive_item=photo.archive_item,
+                person=person,
+                refresh_search_index=False,
+            )
             refresh_ids.add(photo.archive_item_id)
             applied.append(
                 PlannedOperation(

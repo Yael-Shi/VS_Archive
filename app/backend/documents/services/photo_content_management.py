@@ -390,13 +390,37 @@ def delete_person_alias(alias: PersonAlias) -> None:
 
 
 def set_photo_people(photo_content: PhotoContent, person_ids: list[int]) -> None:
-    """Replace PhotoPerson links only. Does not create ArchiveItemPerson rows."""
+    """Replace PhotoPerson links and ensure matching ArchiveItemPerson rows.
+
+    Creating or keeping a PhotoPerson is sufficient evidence that the Person
+    is related to the containing ArchiveItem. Matching AIP rows are ensured
+    add-only (existing rows are left unchanged). Removing a PhotoPerson does
+    not delete ArchiveItemPerson. Does not create PhotoPerson from AIP.
+    Callers that already refresh this item in the same transaction should
+    keep doing a single final search-index sync.
+    """
     unique_ids = list(dict.fromkeys(person_ids))
     persons = list(Person.objects.filter(pk__in=unique_ids))
     if len(persons) != len(unique_ids):
         raise PhotoContentManagementError(PERSON_NOT_FOUND_ERROR)
     by_id = {person.pk: person for person in persons}
-    photo_content.people.set([by_id[person_id] for person_id in unique_ids])
+    ordered_persons = [by_id[person_id] for person_id in unique_ids]
+    photo_content.people.set(ordered_persons)
+    if not ordered_persons:
+        return
+    from documents.services.archive_item_people import (
+        ArchiveItemPersonError,
+        ensure_archive_item_people_for_photo_content,
+    )
+
+    try:
+        ensure_archive_item_people_for_photo_content(
+            photo_content,
+            persons=ordered_persons,
+            refresh_search_index=False,
+        )
+    except ArchiveItemPersonError as exc:
+        raise PhotoContentManagementError(exc.message) from exc
 
 
 def missing_person_ids_error(person_ids: list[int]) -> str | None:
@@ -430,8 +454,10 @@ def update_photo_content_metadata(
 
     Optional ``new_person_name`` may be comma-separated. Each token creates a
     new Person via ``create_identified_person`` and is linked as PhotoPerson
-    only unless an existing canonical/alias match requires per-token
-    force-create. Does not merge by name, and does not write ArchiveItemPerson.
+    unless an existing canonical/alias match requires per-token force-create.
+    Each resulting PhotoPerson also ensures ArchiveItemPerson on the owning
+    item (add-only). Does not merge by name. Does not create PhotoPerson from
+    ArchiveItemPerson. Removing a PhotoPerson here does not delete AIP.
     """
     locked_item = lock_photo_archive_item(photo_content.archive_item_id)
     locked_photos = lock_photo_contents_for_item(locked_item)

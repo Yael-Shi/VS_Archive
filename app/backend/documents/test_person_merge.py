@@ -211,11 +211,21 @@ class PersonMergeServiceTests(TestCase):
             ).count(),
             1,
         )
-        self.assertFalse(
-            ArchiveItemPerson.objects.filter(archive_item=shared_item).exists()
+        self.assertTrue(
+            ArchiveItemPerson.objects.filter(
+                archive_item=shared_item, person=keeper
+            ).exists()
         )
-        self.assertFalse(
-            ArchiveItemPerson.objects.filter(archive_item=only_item).exists()
+        self.assertTrue(
+            ArchiveItemPerson.objects.filter(
+                archive_item=only_item, person=keeper
+            ).exists()
+        )
+        self.assertEqual(
+            ArchiveItemPerson.objects.filter(
+                archive_item=shared_item, person=keeper
+            ).count(),
+            1,
         )
 
     def test_no_cross_inference_between_relation_types(self):
@@ -236,14 +246,14 @@ class PersonMergeServiceTests(TestCase):
         self.assertTrue(
             PhotoPerson.objects.filter(photo_content=photo, person=keeper).exists()
         )
-        self.assertFalse(
-            PhotoPerson.objects.filter(
-                photo_content__archive_item=item_only, person=keeper
+        self.assertTrue(
+            ArchiveItemPerson.objects.filter(
+                archive_item=photo_item, person=keeper
             ).exists()
         )
         self.assertFalse(
-            ArchiveItemPerson.objects.filter(
-                archive_item=photo_item, person=keeper
+            PhotoPerson.objects.filter(
+                photo_content__archive_item=item_only, person=keeper
             ).exists()
         )
 

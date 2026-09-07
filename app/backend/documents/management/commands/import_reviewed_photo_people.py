@@ -16,7 +16,9 @@ class Command(BaseCommand):
     help = (
         "Import a reviewed photo-person-reviewed-import-v1 artifact. "
         "Default is dry-run (no writes). Pass --apply to create Person rows, "
-        "import bindings, aliases, and PhotoPerson links in one transaction."
+        "import bindings, aliases, PhotoPerson links, and matching "
+        "ArchiveItemPerson rows in one transaction. Legacy PhotoPerson "
+        "without AIP is reported as REPAIR, not a silent NOOP."
     )
 
     def add_arguments(self, parser):
@@ -50,6 +52,7 @@ class Command(BaseCommand):
             self.stdout.write(f"mode: {'apply' if apply_mode else 'dry-run'}")
             self.stdout.write("CREATE: 0")
             self.stdout.write("ADD: 0")
+            self.stdout.write("REPAIR: 0")
             self.stdout.write("NOOP: 0")
             self.stdout.write("ERROR: 1")
             op_id = exc.operation_id or "-"
@@ -60,6 +63,7 @@ class Command(BaseCommand):
         self.stdout.write(f"mode: {'apply' if apply_mode else 'dry-run'}")
         self.stdout.write(f"CREATE: {plan.create_count}")
         self.stdout.write(f"ADD: {plan.add_count}")
+        self.stdout.write(f"REPAIR: {plan.repair_count}")
         self.stdout.write(f"NOOP: {plan.noop_count}")
         self.stdout.write(f"ERROR: {plan.error_count}")
         for row in plan.operations:

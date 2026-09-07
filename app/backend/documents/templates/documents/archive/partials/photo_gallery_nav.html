@@ -1,0 +1,21 @@
+<nav class="photo-gallery__nav" aria-label="מעבר בין תמונות">
+  <div class="photo-gallery__nav-prev">
+    {% if photo_gallery.previous_url %}
+      <a
+        class="btn"
+        href="{{ photo_gallery.previous_url }}"
+        aria-label="התמונה הקודמת, {{ photo_gallery.selected_index|add:"-1" }} מתוך {{ photo_gallery.photo_count }}"
+      >הקודמת</a>
+    {% endif %}
+  </div>
+  <p class="photo-gallery__status" aria-live="polite">{{ photo_gallery.status_label }}</p>
+  <div class="photo-gallery__nav-next">
+    {% if photo_gallery.next_url %}
+      <a
+        class="btn"
+        href="{{ photo_gallery.next_url }}"
+        aria-label="התמונה הבאה, {{ photo_gallery.selected_index|add:"1" }} מתוך {{ photo_gallery.photo_count }}"
+      >הבאה</a>
+    {% endif %}
+  </div>
+</nav>

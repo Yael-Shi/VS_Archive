@@ -565,6 +565,9 @@ class ArchiveItemPersonSearchRefreshTests(TestCase):
         delete_archive_item_person(link)
         self.assertIn("KeepPhotoPersonToken", _index_for(item.pk).metadata_text)
         self.assertTrue(PhotoPerson.objects.filter(photo_content=photo).exists())
+        self.assertTrue(
+            ArchiveItemPerson.objects.filter(archive_item=item, person=person).exists()
+        )
 
     def test_duplicate_create_raises_without_second_row(self):
         item = create_manual_text_archive_item(

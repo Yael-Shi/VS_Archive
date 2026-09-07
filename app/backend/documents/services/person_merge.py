@@ -2,7 +2,9 @@
 
 Keeper id and duplicate id are explicit. This is not name matching.
 Person and Author remain separate identities. ArchiveItemPerson and
-PhotoPerson are moved independently with no cross-inference.
+PhotoPerson are moved independently. After PhotoPerson rows belong to
+the keeper, matching ArchiveItemPerson rows are ensured (add-only).
+ArchiveItemPerson still does not create PhotoPerson.
 ReviewedPersonImportBinding rows on the duplicate are repointed to the
 keeper. Authors explicitly linked to the duplicate Person are repointed
 to the keeper; this is relation repointing, not name inference.
@@ -24,6 +26,7 @@ from documents.models import (
     PhotoPerson,
     ReviewedPersonImportBinding,
 )
+from documents.services.archive_item_people import ensure_archive_item_person
 from documents.services.archive_search_index import (
     archive_item_ids_for_person_search_refresh,
     sync_archive_item_search_indexes,
@@ -415,6 +418,27 @@ def _merge_photo_people(keeper: Person, duplicate: Person) -> tuple[int, int]:
     return moved, deduped
 
 
+def _ensure_archive_item_people_for_keeper_photo_people(keeper: Person) -> None:
+    """PhotoPerson implies ArchiveItemPerson. Add-only. Does not create PhotoPerson."""
+    rows = (
+        PhotoPerson.objects.filter(person_id=keeper.pk)
+        .select_related("photo_content", "photo_content__archive_item")
+        .order_by("id")
+    )
+    for link in rows:
+        photo = link.photo_content
+        archive_item = photo.archive_item
+        if archive_item is None:
+            raise PersonMergeError(
+                "photo person is missing its archive item during merge"
+            )
+        ensure_archive_item_person(
+            archive_item=archive_item,
+            person=keeper,
+            refresh_search_index=False,
+        )
+
+
 def _repoint_suggestions(keeper: Person, duplicate: Person) -> int:
     count = ArchiveItemPersonSuggestion.objects.filter(person_id=duplicate.pk).count()
     ArchiveItemPersonSuggestion.objects.filter(person_id=duplicate.pk).update(
@@ -465,6 +489,7 @@ def merge_persons(*, keeper_id: int, duplicate_id: int) -> PersonMergeResult:
         )
         aip_moved, aip_deduped = _merge_archive_item_people(keeper, duplicate)
         photo_moved, photo_deduped = _merge_photo_people(keeper, duplicate)
+        _ensure_archive_item_people_for_keeper_photo_people(keeper)
         suggestions_repointed = _repoint_suggestions(keeper, duplicate)
         import_bindings_repointed = _repoint_import_bindings(keeper, duplicate)
         author_identities_repointed = _repoint_author_identities(keeper, duplicate)
