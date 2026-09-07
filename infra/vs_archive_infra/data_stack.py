@@ -8,6 +8,11 @@ from aws_cdk import aws_ec2 as ec2
 from typing import cast
 from .config import EnvConfig
 
+# SQS delivery/handler safety net only — not a provider/OCR retry budget.
+# Low values conflict with legitimate DEFER/redelivery (e.g. 120s competing
+# live-lease defer) and can dead-letter a valid long-running Request.
+JOBS_QUEUE_MAX_RECEIVE_COUNT = 100
+
 
 class VsArchiveDataStack(Stack):
     def __init__(
@@ -76,7 +81,7 @@ class VsArchiveDataStack(Stack):
             visibility_timeout=Duration.minutes(10),
             retention_period=Duration.days(4),
             dead_letter_queue=sqs.DeadLetterQueue(
-                max_receive_count=5,
+                max_receive_count=JOBS_QUEUE_MAX_RECEIVE_COUNT,
                 queue=self.jobs_dead_letter_queue,
             ),
         )

@@ -6957,10 +6957,30 @@ JavaScript hover behavior, scrolling, image overlays, or schema changes.
 **Current behavior:**
 
 - Shared constant: `documents.services.sqs.SQS_WORKER_VISIBILITY_TIMEOUT_SECONDS` = 2700.
-- `run_worker._receive_one` uses `VisibilityTimeout=2700` and `AttributeNames=["ApproximateReceiveCount"]`. This overrides the queue CDK default of 10 minutes per receive. Queue-level CDK visibility, DLQ, and `maxReceiveCount=5` are unchanged.
+- `run_worker._receive_one` uses `VisibilityTimeout=2700` and `AttributeNames=["ApproximateReceiveCount"]`. This overrides the queue CDK default of 10 minutes per receive. Queue-level CDK visibility and DLQ topology were unchanged in this PR. **`maxReceiveCount=5` in this entry is superseded as repository/CDK policy**; CDK-configured `maxReceiveCount` is **100** (see the later “Jobs queue DLQ maxReceiveCount safety net” entry). Last verified live AWS remains **5** until `vs-archive-dev-data-v2` is deployed and verified.
 - Post-claim `ChangeMessageVisibility` remains 2700s (explicit claim-time refresh). Competing live-lease defer remains 120s. Execution lease duration, STARTED recovery threshold (60m), provider deadlines, Transkribus retry timing, and Hebrew-translation PROCESSING freshness are unchanged.
 - Invariant: initial receive visibility >= current durable execution lease, and currently equals 2700s.
 - `parse_approximate_receive_count` never raises. Absent or malformed attributes yield `None`. The count is passed into request-aware PROCESS_DOCUMENT and corrected/current handlers for structured logs on DEFER / RETRYABLE / handler-exception / missing-SQS-context paths. It is not used for ACK, retry, DLQ, claim, or request-state decisions.
 - Legacy `{type, document_id}` PROCESS_DOCUMENT execution remains accepted if such a message is received (mixed-version / in-flight safety). A cutoff is deferred until drain/inspection.
 
-**Deferred (next retry/DLQ phase):** heartbeat; changing live CDK `maxReceiveCount=5` / DLQ topology / queue retention / IAM / ECS desired count; automatic SQS retries; rejecting legacy `document_id` PROCESS_DOCUMENT messages.
+**Deferred (next retry/DLQ phase):** heartbeat; changing DLQ topology / queue retention / IAM / ECS desired count; automatic SQS retries / automatic DLQ redrive; rejecting legacy `document_id` PROCESS_DOCUMENT messages; DB-side expired-lease fencing/recovery. **`maxReceiveCount=5` is superseded as repository/CDK policy** (CDK-configured 100; last verified live AWS remains 5 until data-stack deploy; see the later safety-net entry).
+
+## Jobs queue DLQ maxReceiveCount safety net (2026-09-07)
+
+**Decision / implemented:** Keep the existing shared jobs queue and attached DLQ. Raise CDK `maxReceiveCount` from **5** to **100**. SQS receive count is a delivery/handler safety net, not the OCR/provider retry budget.
+
+**Why:** Last verified live AWS `maxReceiveCount=5` could dead-letter a valid long-running Request through ordinary DEFER / redelivery (competing live-lease defer is 120s). Provider/adapters/checkpoints already own retry semantics. Malformed/permanent failures are normally ACKed and do not rely on a low DLQ threshold. CDK-configured 100 is still a finite bound against a permanently unacked message and is far beyond the 45-minute lease/recovery window at 120s defer.
+
+**Current behavior:**
+
+- Worker initial receive visibility and post-claim visibility remain **45 minutes** (2700s). Queue CDK default visibility remains **10 minutes**.
+- Source queue retention remains **4 days**; DLQ retention remains **14 days**. The same DLQ stays attached. No new queue.
+- CDK-configured `maxReceiveCount` is **100** (`JOBS_QUEUE_MAX_RECEIVE_COUNT` in `data_stack.py`). This takes effect in live AWS only after deploying `vs-archive-dev-data-v2` and verifying; last verified live AWS remains **5**.
+- `ApproximateReceiveCount` remains observability only (no ACK/defer/claim/request-state branching).
+- Automatic DLQ redrive is unimplemented and forbidden. DLQ is not authorization for provider replay.
+- `RECOVERY_REQUIRED` remains non-replayable.
+- No IAM change is required for this queue-policy update.
+
+**Unchanged:** worker ACK/defer logic; execution lease; request statuses; provider retries; legacy PROCESS_DOCUMENT acceptance; ECS desired/min/max healthy percentages; queue encryption.
+
+**Deferred:** heartbeat; DB-side expired-lease fencing/recovery; DLQ consumer / recovery commands; queue split; automatic redrive.
