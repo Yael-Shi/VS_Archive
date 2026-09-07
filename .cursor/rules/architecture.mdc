@@ -271,6 +271,8 @@ A document may validly be **`processing_state_user=READY`** while text results a
 
 **`PARTIAL`** primarily means expected outputs are **missing**, **incomplete**, **failed**, or **unusable** — not merely “review pending.” **`NEEDS_REVIEW` alone does not force `PARTIAL`** when expected usable rows exist.
 
+**`RECOVERY_REQUIRED`** is a request-lifecycle overlay, not a DTR rollup value. When a `RUNNING` `ProcessDocumentRequest` lease expires, the request is fenced to `RECOVERY_REQUIRED` and a related Document that is still `PROCESSING` is updated to `RECOVERY_REQUIRED` in the same transaction. Existing engine-scoped rollup (`READY` / `PARTIAL` / `FAILED`) is unchanged. Do not infer this state by scanning all `DocumentTextResult` rows or choosing an arbitrary engine. Staff UI shows **`נדרש טיפול בעיבוד`**. Automatic re-enqueue remains blocked by the active request. `RECOVERY_REQUIRED` does **not** authorize a new OCR or Hebrew-translation provider call. An already-running retained lease holder may finish persistence and then engine-scoped rollup. Terminalization from `ProcessDocumentRequest.RECOVERY_REQUIRED` is allowed only after the Document is `READY` / `PARTIAL` / `FAILED`; if the Document overlay is still `RECOVERY_REQUIRED`, refuse to terminalize. Lock order for claim, enqueue, and terminalize is Document then Request.
+
 ## Current operational boundary (Transkribus)
 
 Broader Transkribus use (beyond the approved Hebrew handwritten route) should **not** proceed until explicit decisions (and follow-up PRs) on:

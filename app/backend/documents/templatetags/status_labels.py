@@ -32,6 +32,10 @@ register = template.Library()
 _PROCESSING_STATE: dict[str, Tuple[str, str]] = {
     Document.ProcessingState.READY.value: ("מוכן לצפייה", "badge-ok"),
     Document.ProcessingState.PROCESSING.value: ("בעיבוד", "badge-warn"),
+    Document.ProcessingState.RECOVERY_REQUIRED.value: (
+        "נדרש טיפול בעיבוד",
+        "badge-bad",
+    ),
     Document.ProcessingState.PARTIAL.value: ("חלקי", ""),
     Document.ProcessingState.FAILED.value: ("עיבוד נכשל", "badge-bad"),
 }

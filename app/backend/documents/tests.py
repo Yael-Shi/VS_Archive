@@ -10892,6 +10892,10 @@ class StatusLabelFilterTests(SimpleTestCase):
         from documents.templatetags.status_labels import processing_state_label
 
         self.assertEqual(processing_state_label("PROCESSING"), "בעיבוד")
+        self.assertEqual(
+            processing_state_label("RECOVERY_REQUIRED"),
+            "נדרש טיפול בעיבוד",
+        )
         self.assertEqual(processing_state_label("PARTIAL"), "חלקי")
         self.assertEqual(processing_state_label("FAILED"), "עיבוד נכשל")
 

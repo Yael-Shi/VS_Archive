@@ -231,7 +231,12 @@ lock-time reassessment and cooldown reservation. That reassessment reruns the
 origin-specific upload, OCR-reprocess, or Hebrew-translation safety contract
 and rejects changed request payloads. Apply mode requires an explicit
 Request/Document scope or `--all-eligible`; running, terminal, and
-`RECOVERY_REQUIRED` work is never replayed.
+`RECOVERY_REQUIRED` work is never replayed. When that Request fence is written,
+a related Document that is still `PROCESSING` is moved to
+`Document.processing_state_user=RECOVERY_REQUIRED` in the same transaction.
+A late fenced worker may terminalize that Request only after the Document is
+`READY` / `PARTIAL` / `FAILED`. `RECOVERY_REQUIRED` does not authorize a new
+provider execution.
 
 ---
 

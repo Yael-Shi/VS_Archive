@@ -34,6 +34,7 @@ This says nothing about OCR/HTR, translation, text quality, Transkribus state, o
 User-visible processing/readiness state.
 
 - `PROCESSING`: worker is still processing.
+- `RECOVERY_REQUIRED`: the durable `ProcessDocumentRequest` was fenced after its execution lease expired. This is **not** engine-scoped DTR rollup. Automatic replay is still blocked. An already-running retained lease holder may finish persistence and replace this with `READY` / `PARTIAL` / `FAILED`. `RECOVERY_REQUIRED` itself does not authorize a new provider call. The Request stays `RECOVERY_REQUIRED` until that ordinary result state is written; NOOP/FAILED terminalization is refused while the Document overlay remains.
 - `READY`: all expected outputs exist and are usable/displayable.
 - `PARTIAL`: one or more expected outputs are missing, failed, blank, or unusable.
 - `FAILED`: no required usable output / expected outputs failed.

@@ -28,6 +28,7 @@ from documents.services.non_hebrew_hebrew_translation import (
     persist_hebrew_translation_result,
 )
 from documents.services.processing_state import (
+    apply_verified_fence_processing_state_restore,
     update_document_processing_state_for_engine,
 )
 from documents.services.gemini_models import DEFAULT_GEMINI_MODEL
@@ -401,6 +402,13 @@ class Command(BaseCommand):
                 if doc.upload_status != Document.UploadStatus.UPLOADED:
                     return ProcessDocumentOutcome(ProcessDocumentDisposition.NOOP)
                 prior_processing_state = doc.processing_state_user
+                # A fenced overlay must not authorize a new provider run.
+                # Already-started workers passed this Phase 1 before fencing.
+                if (
+                    doc.processing_state_user
+                    == Document.ProcessingState.RECOVERY_REQUIRED
+                ):
+                    return ProcessDocumentOutcome(ProcessDocumentDisposition.NOOP)
                 doc.processing_state_user = Document.ProcessingState.PROCESSING
                 doc.save(update_fields=["processing_state_user", "updated_at"])
         except Document.DoesNotExist:
@@ -656,9 +664,12 @@ class Command(BaseCommand):
                         # Do not roll up from the unused runtime engine or from
                         # one VERIFIED row's engine: displayed SOURCE/HEBREW may
                         # belong to different engines. Restore the pre-Phase-1
-                        # state captured before this run wrote PROCESSING.
-                        if prior_processing_state is not None:
-                            doc.processing_state_user = prior_processing_state
+                        # state captured before this run wrote PROCESSING, but
+                        # do not re-stick PROCESSING over the recovery overlay.
+                        if apply_verified_fence_processing_state_restore(
+                            doc,
+                            prior_processing_state,
+                        ):
                             doc.save(update_fields=["processing_state_user"])
                     else:
                         self._save_htr_results(

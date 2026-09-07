@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.contrib.messages import get_messages
+from django.db import transaction
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -21,7 +22,13 @@ from documents.services.hebrew_translation_retry import (
     STALE_TRANSLATION_RETRY_PROCESSING_THRESHOLD,
     HebrewTranslationRetryError,
     execute_hebrew_translation_retry,
+    is_hebrew_translation_retry_ui_eligible,
     run_hebrew_translation_retry,
+    validate_document_for_hebrew_translation_retry,
+    validate_document_for_hebrew_translation_retry_persistence,
+)
+from documents.services.non_hebrew_hebrew_translation import (
+    persist_hebrew_translation_result,
 )
 from documents.services.page_extraction import PageImage
 from documents.services.process_document_hebrew_translation_retry_enqueue import (
@@ -29,6 +36,9 @@ from documents.services.process_document_hebrew_translation_retry_enqueue import
 )
 from documents.services.process_document_outcome import (
     ProcessDocumentDisposition,
+)
+from documents.services.processing_state import (
+    update_document_processing_state_for_engine,
 )
 from documents.services.sqs import SqsConfigurationError
 
@@ -184,6 +194,147 @@ class HebrewTranslationRetryWorkerTests(TestCase):
         )
         doc.refresh_from_db()
         self.assertEqual(doc.processing_state_user, Document.ProcessingState.READY)
+
+    @patch(
+        "documents.services.process_document_request_enqueue."
+        "send_process_document_request_message"
+    )
+    @patch(
+        "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
+    )
+    def test_recovery_required_does_not_authorize_new_gemini_call(
+        self, mock_translate, mock_send
+    ):
+        doc = _non_hebrew_doc(
+            processing_state_user=Document.ProcessingState.RECOVERY_REQUIRED
+        )
+        _usable_source(doc)
+        _failed_hebrew(doc)
+
+        outcome = execute_hebrew_translation_retry(
+            doc.id,
+            worker_env=self.worker_env,
+        )
+
+        self.assertEqual(outcome.disposition, ProcessDocumentDisposition.NOOP)
+        mock_translate.assert_not_called()
+        mock_send.assert_not_called()
+        doc.refresh_from_db()
+        self.assertEqual(
+            doc.processing_state_user,
+            Document.ProcessingState.RECOVERY_REQUIRED,
+        )
+
+    @patch(
+        "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
+    )
+    def test_late_worker_can_persist_after_document_fenced_during_gemini(
+        self, mock_translate
+    ):
+        doc = _non_hebrew_doc()
+        _usable_source(doc)
+        _failed_hebrew(doc)
+
+        def _fence_then_translate(*args, **kwargs):
+            doc.refresh_from_db()
+            self.assertEqual(
+                doc.processing_state_user,
+                Document.ProcessingState.PROCESSING,
+            )
+            doc.processing_state_user = Document.ProcessingState.RECOVERY_REQUIRED
+            doc.save(update_fields=["processing_state_user", "updated_at"])
+            return GeminiResult(
+                text="translated hebrew text long enough",
+                engine_name=ENGINE,
+            )
+
+        mock_translate.side_effect = _fence_then_translate
+
+        outcome = execute_hebrew_translation_retry(
+            doc.id,
+            worker_env=self.worker_env,
+        )
+
+        self.assertEqual(
+            outcome.disposition,
+            ProcessDocumentDisposition.COMPLETED,
+        )
+        mock_translate.assert_called_once()
+        doc.refresh_from_db()
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.READY)
+        hebrew = DocumentTextResult.objects.get(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine=ENGINE,
+        )
+        self.assertEqual(hebrew.text, "translated hebrew text long enough")
+
+    def test_persistence_boundary_allows_recovery_required_without_new_provider_call(
+        self,
+    ):
+        doc = _non_hebrew_doc(
+            processing_state_user=Document.ProcessingState.RECOVERY_REQUIRED
+        )
+        source = _usable_source(doc)
+        _failed_hebrew(doc)
+        translation = GeminiResult(
+            text="translated hebrew text long enough",
+            engine_name=ENGINE,
+        )
+
+        with transaction.atomic():
+            locked = Document.objects.select_for_update().get(pk=doc.pk)
+            validate_document_for_hebrew_translation_retry_persistence(
+                locked,
+                expected_engine=ENGINE,
+                expected_source_text=source.text,
+            )
+            persist_hebrew_translation_result(
+                locked,
+                ENGINE,
+                translation=translation,
+                min_text_length=5,
+            )
+            update_document_processing_state_for_engine(locked, ENGINE)
+            locked.save(update_fields=["processing_state_user", "updated_at"])
+
+        doc.refresh_from_db()
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.READY)
+
+    def test_recovery_required_blocks_new_translation_retry_eligibility(self):
+        doc = _non_hebrew_doc(
+            processing_state_user=Document.ProcessingState.RECOVERY_REQUIRED
+        )
+        _usable_source(doc)
+        _failed_hebrew(doc)
+
+        with self.assertRaises(HebrewTranslationRetryError) as ctx:
+            validate_document_for_hebrew_translation_retry(doc)
+        self.assertIn("requires processing recovery", str(ctx.exception))
+        self.assertFalse(is_hebrew_translation_retry_ui_eligible(doc))
+
+    @patch(
+        "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
+    )
+    def test_recovery_required_ineligible_claim_is_noop_and_keeps_overlay(
+        self, mock_translate
+    ):
+        doc = _non_hebrew_doc(
+            processing_state_user=Document.ProcessingState.RECOVERY_REQUIRED
+        )
+
+        outcome = execute_hebrew_translation_retry(
+            doc.id,
+            worker_env=self.worker_env,
+        )
+
+        self.assertEqual(outcome.disposition, ProcessDocumentDisposition.NOOP)
+        mock_translate.assert_not_called()
+        doc.refresh_from_db()
+        self.assertEqual(
+            doc.processing_state_user,
+            Document.ProcessingState.RECOVERY_REQUIRED,
+        )
 
     @patch(
         "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"
@@ -774,6 +925,43 @@ class HebrewTranslationRetryWorkerMessageTests(TestCase):
         mock_extract_pages.assert_called_once()
         mock_transcribe.assert_called_once()
         mock_translate.assert_called_once()
+
+    @patch(
+        "documents.services.process_document_request_enqueue."
+        "send_process_document_request_message"
+    )
+    @patch(
+        "documents.management.commands.run_worker.translate_text_to_hebrew_with_gemini"
+    )
+    @patch("documents.management.commands.run_worker.transcribe_pages")
+    @patch("documents.management.commands.run_worker.extract_pages")
+    @patch("documents.management.commands.run_worker.get_object_bytes")
+    def test_ocr_recovery_required_does_not_start_provider_work(
+        self,
+        mock_get_object_bytes,
+        mock_extract_pages,
+        mock_transcribe,
+        mock_translate,
+        mock_send,
+    ):
+        self.doc.processing_state_user = Document.ProcessingState.RECOVERY_REQUIRED
+        self.doc.save(update_fields=["processing_state_user", "updated_at"])
+
+        outcome = self.command._execute_process_document_payload(
+            {"type": "PROCESS_DOCUMENT", "document_id": self.doc.id}
+        )
+
+        self.assertEqual(outcome.disposition, ProcessDocumentDisposition.NOOP)
+        mock_get_object_bytes.assert_not_called()
+        mock_extract_pages.assert_not_called()
+        mock_transcribe.assert_not_called()
+        mock_translate.assert_not_called()
+        mock_send.assert_not_called()
+        self.doc.refresh_from_db()
+        self.assertEqual(
+            self.doc.processing_state_user,
+            Document.ProcessingState.RECOVERY_REQUIRED,
+        )
 
     @patch(
         "documents.management.commands.run_worker.translate_text_to_hebrew_with_gemini"

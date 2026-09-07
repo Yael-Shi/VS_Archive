@@ -90,3 +90,11 @@ eligible, handled, skipped, and send-failure counts.
 
 `BLOCKED_RECOVERY_REQUIRED` is not authorization to replay execution. It means
 the Request remains fenced for separate execution recovery work.
+
+When a `RUNNING` Request is fenced to `RECOVERY_REQUIRED`, a related Document
+that is still `PROCESSING` is updated to `RECOVERY_REQUIRED` in the same
+transaction. That Document state is a request-lifecycle overlay, not a
+substitute for engine-scoped DTR rollup. A late fenced worker may terminalize
+the Request only after the Document is `READY` / `PARTIAL` / `FAILED`.
+`RECOVERY_REQUIRED` does not authorize a new provider execution. This
+command still does not replay `RECOVERY_REQUIRED` execution.

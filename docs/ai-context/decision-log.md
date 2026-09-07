@@ -6876,3 +6876,27 @@ JavaScript hover behavior, scrolling, image overlays, or schema changes.
 **Must not change:** `DocumentTextResult.text`, snapshot canonical text, snapshot lines, geometry, char offsets, hover IDs, search offsets, bindings, public currentness/rendering, ordinary manual-save behavior.
 
 **Explicit non-goals:** automatic inheritance/adoption; fuzzy matching; AI paragraph inference; Gemini/general-provider paragraph mappings; transcription editing; dehyphenation; canonical-text rewriting; overwrite-via-adoption / overwrite confirmation.
+
+## Document `RECOVERY_REQUIRED` overlay for expired PROCESS_DOCUMENT leases
+
+**Decision / implemented:** `ProcessDocumentRequest` remains the execution source of truth. When claim observes an expired `RUNNING` lease, the Request is fenced to `RECOVERY_REQUIRED` (old `lease_token` retained, `lease_expires_at` cleared, message ACKed, no provider replay). If the related `Document.processing_state_user` is still `PROCESSING`, the same transaction writes `Document.ProcessingState.RECOVERY_REQUIRED`. Any other Document state is left unchanged.
+
+**Why:** After fencing, the Document previously stayed `PROCESSING` indefinitely, which was a false “still running” signal. Replacing that with engine-scoped DTR rollup would pick an arbitrary engine and is rejected.
+
+**Current behavior:**
+
+- Fresh `RUNNING` leases still defer; Document stays `PROCESSING`.
+- Staff/filter labels use **נדרש טיפול בעיבוד** (not **בעיבוד**).
+- Active `ProcessDocumentRequest.RECOVERY_REQUIRED` still blocks automatic re-enqueue (`BLOCKED_RECOVERY_REQUIRED`).
+- OCR reprocess eligibility does not treat Document `RECOVERY_REQUIRED` as `FAILED` / `READY` / recoverable `PARTIAL`.
+- New Hebrew-translation retry enqueue/UI is blocked while the Document is `RECOVERY_REQUIRED`. Pre-provider `_claim_translation_retry` is fail-closed for that overlay (no new Gemini call). Post-provider persistence may still accept `RECOVERY_REQUIRED` so an already-running retained holder can write results and engine-scoped rollup. Abort/no-op restore does not clear the overlay.
+- OCR Phase 1 returns `NOOP` without S3/OCR when the Document is already `RECOVERY_REQUIRED`. An already-started OCR worker that passed Phase 1 before fencing may still persist. `RECOVERY_REQUIRED` itself never authorizes a fresh provider run.
+- A retained late lease holder may terminalize a `RECOVERY_REQUIRED` Request **only after** the Document overlay has been replaced with `READY` / `PARTIAL` / `FAILED`. If both are still `RECOVERY_REQUIRED`, terminalization is refused (NOOP/FAILED cannot leave a terminal Request with a Document overlay). `RUNNING` → terminal is unchanged. Wrong tokens remain fenced. Lock order is Document then Request.
+- VERIFIED-fence restore will not put `PROCESSING` back over Document `RECOVERY_REQUIRED`; it may restore a captured ordinary result state.
+- Hebrew translation abort-restore does not roll up from Document `RECOVERY_REQUIRED`.
+- Claim and terminalize lock Document then Request to match enqueue lock order.
+- `updated_at` is not used as a synthetic execution lease for this overlay.
+
+**Unchanged:** provider/SQS-send/OCR/retry-policy/routing/search-index behavior; VERIFIED write-fences; existing `READY`/`PARTIAL`/`FAILED` rollup.
+
+**Deferred:** staff abandon/retry UI for `RECOVERY_REQUIRED` Requests; automatic replay.
