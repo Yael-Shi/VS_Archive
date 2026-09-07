@@ -21,6 +21,10 @@ from documents.services.process_document_outcome import (
     ProcessDocumentDisposition,
     ProcessDocumentOutcome,
 )
+from documents.services.process_document_request_persist import (
+    ProcessDocumentExecutionIdentity,
+    automated_process_document_persist_is_allowed,
+)
 from documents.services.text_presentation import resolve_displayed_transcription_result
 
 logger = logging.getLogger(__name__)
@@ -300,12 +304,25 @@ def execute_hebrew_translation_retry(
     document_id: int,
     *,
     worker_env: WorkerEnvConfig,
+    execution_identity: ProcessDocumentExecutionIdentity | None = None,
 ) -> ProcessDocumentOutcome:
     """Execute translation-only retry and return its semantic worker outcome."""
+    identity = execution_identity or ProcessDocumentExecutionIdentity.legacy()
     now = timezone.now()
     try:
         with transaction.atomic():
             doc = Document.objects.select_for_update().get(pk=document_id)
+            if not automated_process_document_persist_is_allowed(
+                document=doc,
+                identity=identity,
+            ):
+                logger.info(
+                    "Skipping Hebrew translation retry; request lease "
+                    "no longer holds document_id=%s request_id=%s",
+                    document_id,
+                    identity.request_id,
+                )
+                return ProcessDocumentOutcome(ProcessDocumentDisposition.NOOP)
             claim = _claim_translation_retry(doc, document_id=document_id, now=now)
             if claim is False:
                 return ProcessDocumentOutcome(ProcessDocumentDisposition.DEFERRED)
@@ -338,6 +355,18 @@ def execute_hebrew_translation_retry(
     try:
         with transaction.atomic():
             doc = Document.objects.select_for_update().get(pk=document_id)
+            if not automated_process_document_persist_is_allowed(
+                document=doc,
+                identity=identity,
+            ):
+                logger.info(
+                    "Skipping Hebrew translation retry persist; request lease "
+                    "no longer holds document_id=%s request_id=%s",
+                    document_id,
+                    identity.request_id,
+                )
+                return ProcessDocumentOutcome(ProcessDocumentDisposition.NOOP)
+
             validate_document_for_hebrew_translation_retry_persistence(
                 doc,
                 expected_engine=engine,

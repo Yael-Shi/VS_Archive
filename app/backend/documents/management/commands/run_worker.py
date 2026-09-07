@@ -58,6 +58,10 @@ from documents.services.process_document_outcome import (
     ProcessDocumentDisposition,
     ProcessDocumentOutcome,
 )
+from documents.services.process_document_request_persist import (
+    automated_process_document_persist_is_allowed,
+    resolve_process_document_execution_identity,
+)
 from documents.services.process_document_request_worker import (
     LEASE_EXPIRES_AT_PAYLOAD_KEY,
     PROCESS_DOCUMENT_REQUEST_ID_PAYLOAD_KEY,
@@ -338,11 +342,14 @@ class Command(BaseCommand):
         if not isinstance(document_id, int):
             return ProcessDocumentOutcome(ProcessDocumentDisposition.NOOP)
 
+        execution_identity = resolve_process_document_execution_identity(payload)
+
         operation = payload.get(PROCESS_DOCUMENT_OPERATION_KEY)
         if operation == RETRY_HEBREW_TRANSLATION_OPERATION:
             return execute_hebrew_translation_retry(
                 document_id,
                 worker_env=self._cfg,
+                execution_identity=execution_identity,
             )
         if operation is not None:
             self.stderr.write(
@@ -410,6 +417,17 @@ class Command(BaseCommand):
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
+                if not automated_process_document_persist_is_allowed(
+                    document=doc,
+                    identity=execution_identity,
+                ):
+                    logger.info(
+                        "Skipping PROCESS_DOCUMENT Phase 1; request lease "
+                        "no longer holds document_id=%s request_id=%s",
+                        document_id,
+                        execution_identity.request_id,
+                    )
+                    return ProcessDocumentOutcome(ProcessDocumentDisposition.NOOP)
                 if doc.upload_status != Document.UploadStatus.UPLOADED:
                     return ProcessDocumentOutcome(ProcessDocumentDisposition.NOOP)
                 prior_processing_state = doc.processing_state_user
@@ -551,6 +569,16 @@ class Command(BaseCommand):
             try:
                 with transaction.atomic():
                     doc = Document.objects.select_for_update().get(id=document_id)
+                    if not automated_process_document_persist_is_allowed(
+                        document=doc,
+                        identity=execution_identity,
+                    ):
+                        logger.info(
+                            "Skipping PROCESS_DOCUMENT page-incomplete persist; "
+                            "request lease no longer holds document_id=%s",
+                            document_id,
+                        )
+                        return ProcessDocumentOutcome(ProcessDocumentDisposition.NOOP)
                     doc.processing_state_user = Document.ProcessingState.PARTIAL
                     doc.save(update_fields=["processing_state_user", "updated_at"])
             except Document.DoesNotExist:
@@ -593,7 +621,7 @@ class Command(BaseCommand):
         ):
             # Transkribus automatic snapshot: DTR + bindings + mark_succeeded in one
             # dedicated transaction (no S3/HTTP). Failures propagate → no SQS ack.
-            complete_transkribus_local_success(
+            completed = complete_transkribus_local_success(
                 document_id=document_id,
                 run_id=htr_result.transkribus_run_id,
                 snapshot_id=htr_result.transkribus_snapshot_id,
@@ -604,7 +632,10 @@ class Command(BaseCommand):
                 review_reasons=getattr(htr_result, "review_reasons", None),
                 min_text_length=self._cfg.min_text_length,
                 pre_run_processing_state=prior_processing_state,
+                execution_identity=execution_identity,
             )
+            if completed is None:
+                return ProcessDocumentOutcome(ProcessDocumentDisposition.NOOP)
             doc.refresh_from_db(fields=["processing_state_user"])
             return _outcome_for_final_processing_state(doc.processing_state_user)
 
@@ -637,6 +668,16 @@ class Command(BaseCommand):
         try:
             with transaction.atomic():
                 doc = Document.objects.select_for_update().get(id=document_id)
+                if not automated_process_document_persist_is_allowed(
+                    document=doc,
+                    identity=execution_identity,
+                ):
+                    logger.info(
+                        "Skipping automated PROCESS_DOCUMENT persist; "
+                        "request lease no longer holds document_id=%s",
+                        document_id,
+                    )
+                    return ProcessDocumentOutcome(ProcessDocumentDisposition.NOOP)
                 if htr_result:
                     final_engine = htr_result.engine_name
                 elif isinstance(processing_exc, UnsupportedEngineError):

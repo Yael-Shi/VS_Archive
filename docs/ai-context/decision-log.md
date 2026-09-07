@@ -7087,7 +7087,7 @@ JavaScript hover behavior, scrolling, image overlays, or schema changes.
 
 **Unchanged:** provider/SQS-send/OCR/retry-policy/routing/search-index behavior; VERIFIED write-fences; existing `READY`/`PARTIAL`/`FAILED` rollup.
 
-**Deferred:** staff abandon/retry UI for `RECOVERY_REQUIRED` Requests; automatic replay.
+**Deferred:** staff abandon/retry **UI** for `RECOVERY_REQUIRED` Requests (abandon **service** is implemented; see later persist-token/abandon-service PR1); automatic replay.
 
 ## Worker SQS receive visibility / ApproximateReceiveCount observability (2026-09-07)
 
@@ -7140,4 +7140,50 @@ JavaScript hover behavior, scrolling, image overlays, or schema changes.
 
 **Unchanged:** schema/migrations; CDK (this PR did not change queue policy); heartbeat; automatic redrive. Live jobs-queue `maxReceiveCount` is repository/CDK **100** and was verified live **100** after the 2026-09-07 data-stack deploy.
 
-**Deferred:** staff abandon/retry UI; automatic replay of `RECOVERY_REQUIRED`; corrected/current DB-side STARTED fencing; heartbeat; queue split.
+**Deferred:** staff abandon/retry **UI** and intentional-retry orchestration (abandon **service** and persist token fence are implemented; see later persist-token/abandon-service PR1); automatic replay of `RECOVERY_REQUIRED`; corrected/current DB-side STARTED fencing; heartbeat; queue split.
+
+## PROCESS_DOCUMENT persist token fence and staff abandon service (PR1)
+
+**Decision / implemented:** Automated PROCESS_DOCUMENT OCR and Hebrew-translation
+persistence is request-token-aware. Claim puts `request_id` and `lease_token`
+on the in-process execution payload. Persist (and Hebrew/Transkribus local
+completion) may write automated SOURCE_TEXT / HEBREW_TEXT only when that
+token still equals `ProcessDocumentRequest.lease_token` and status is
+`RUNNING` or `RECOVERY_REQUIRED`. Legacy `{type, document_id}` payloads remain
+allowed for mixed-version drain only when both `request_id` and `lease_token`
+keys are absent. Identity is classified at the payload boundary
+(`resolve_process_document_execution_identity`); present-but-malformed,
+partial, or unparsable identity is fail-closed and must not be treated as
+legacy because parsers map invalid values to `None`.
+
+**Why:** Staff abandon (and any later new Request) clears or rotates the
+lease token. Without a persist fence, a late original worker could still
+write DTRs and search index after the parked Request was released.
+
+**Current behavior:**
+
+- Matching-token persist while `RECOVERY_REQUIRED` remains allowed (retained
+  holder). Overlay replacement then follows existing engine-scoped rollup.
+- Terminal / missing / mismatched / cleared tokens skip DTR writes, skip
+  search-index replacement from that run, and do not roll up from the stale
+  runtime engine. They do not revive `RECOVERY_REQUIRED`.
+- VERIFIED write-fences are unchanged and still win when the token matches.
+- `abandon_process_document_request(request_id, document_id)` (no HTTP UI)
+  locks Document then Request. `RECOVERY_REQUIRED` → `FAILED` with
+  `failure_code=STAFF_ABANDONED`, `lease_token` cleared, `completed_at` set.
+  Overlay `RECOVERY_REQUIRED` is replaced using displayed SOURCE_TEXT engine
+  rollup when usable; else recoverable OCR checkpoint/failed-source evidence
+  → Document `PARTIAL`; else Document `FAILED`. Hebrew-translation Requests
+  use the displayed-source rollup helper (ordinary READY/PARTIAL/FAILED).
+  Ordinary Document states are left unchanged. Already-terminal Requests
+  return `ALREADY_TERMINAL` without rewrite. `RUNNING` / `QUEUED` /
+  `ENQUEUE_FAILED` are refused. No SQS, no provider, no DTR/checkpoint
+  mutation, no automatic new Request.
+- Structured `logger.info` `event=staff_abandon_process_document_request`.
+  No new audit JSON field.
+
+**Unchanged:** queue visibility, `maxReceiveCount`, DLQ, heartbeat, automatic
+redrive, `recover_process_document_requests`, expired-lease fence command.
+
+**Deferred:** staff abandon/retry UI; intentional-retry orchestration; automatic
+replay of `RECOVERY_REQUIRED`.

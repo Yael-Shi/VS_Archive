@@ -3,10 +3,11 @@
 Lock order inside the local-success transaction:
 
 1. ``Document`` (``select_for_update``)
-2. ``TranskribusRun`` (``select_for_update``)
-3. ``TranskribusRunAutomaticSnapshot`` association row (``select_for_update``)
-4. ``TranskribusTranscriptSnapshot`` (``select_for_update``)
-5. All ``DocumentTextResult`` rows for the document (ordered by ``id``), for
+2. ``ProcessDocumentRequest`` when a request identity is present (persist fence)
+3. ``TranskribusRun`` (``select_for_update``)
+4. ``TranskribusRunAutomaticSnapshot`` association row (``select_for_update``)
+5. ``TranskribusTranscriptSnapshot`` (``select_for_update``)
+6. All ``DocumentTextResult`` rows for the document (ordered by ``id``), for
    the VERIFIED write fence; then existing rows for the runtime engine again
    when writes proceed
 
@@ -41,6 +42,10 @@ from documents.services.htr_adapters.base import (
 from documents.services.ocr_routing import OcrRouteConfig
 from documents.services.ocr_verified_write_fence import (
     inspect_automated_ocr_verified_write_fence,
+)
+from documents.services.process_document_request_persist import (
+    ProcessDocumentExecutionIdentity,
+    automated_process_document_persist_is_allowed,
 )
 from documents.services.processing_state import (
     apply_verified_fence_processing_state_restore,
@@ -659,15 +664,32 @@ def complete_transkribus_local_success(
     review_reasons: Optional[Sequence[str]],
     min_text_length: int,
     pre_run_processing_state: Optional[str] = None,
-) -> HtrResult:
+    execution_identity: ProcessDocumentExecutionIdentity | None = None,
+) -> HtrResult | None:
     """Atomically persist DTR + bindings + association check + mark SUCCEEDED.
 
     ``pre_run_processing_state`` is the worker's processing_state_user from
     before Phase 1 wrote PROCESSING. A VERIFIED write-fence restores it instead
     of rolling up from the unused runtime engine.
+
+    Returns ``None`` when the PROCESS_DOCUMENT lease no longer holds (stale
+    worker). Caller must not persist, roll up, or index from that result.
     """
     with transaction.atomic():
         doc = Document.objects.select_for_update().get(pk=document_id)
+        identity = execution_identity or ProcessDocumentExecutionIdentity.legacy()
+        if not automated_process_document_persist_is_allowed(
+            document=doc,
+            identity=identity,
+        ):
+            logger.info(
+                "Skipping automated Transkribus OCR persistence; request lease "
+                "no longer holds document_id=%s request_id=%s run_id=%s",
+                document_id,
+                identity.request_id,
+                run_id,
+            )
+            return None
         run = TranskribusRun.objects.select_for_update().get(pk=run_id)
         if run.document_id != doc.pk:
             raise TranskribusLocalCompletionError(

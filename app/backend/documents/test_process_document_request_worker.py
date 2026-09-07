@@ -29,6 +29,8 @@ from documents.services.process_document_request_worker import (
     EXECUTION_LEASE,
     FRESH_IN_PROGRESS_DEFER_SECONDS,
     LEASE_EXPIRES_AT_PAYLOAD_KEY,
+    LEASE_TOKEN_PAYLOAD_KEY,
+    PROCESS_DOCUMENT_REQUEST_ID_PAYLOAD_KEY,
     SQS_VISIBILITY_AFTER_CLAIM_SECONDS,
     ProcessDocumentRequestAction,
     ProcessDocumentRequestClaim,
@@ -108,7 +110,9 @@ class ProcessDocumentRequestWorkerTests(TestCase):
             {
                 "type": "PROCESS_DOCUMENT",
                 "document_id": self.document.id,
+                PROCESS_DOCUMENT_REQUEST_ID_PAYLOAD_KEY: request.id,
                 LEASE_EXPIRES_AT_PAYLOAD_KEY: request.lease_expires_at,
+                LEASE_TOKEN_PAYLOAD_KEY: claim.lease_token,
             },
         )
         self.assertEqual(request.status, ProcessDocumentRequest.Status.RUNNING)
@@ -134,9 +138,11 @@ class ProcessDocumentRequestWorkerTests(TestCase):
             {
                 "type": "PROCESS_DOCUMENT",
                 "document_id": self.document.id,
+                PROCESS_DOCUMENT_REQUEST_ID_PAYLOAD_KEY: request.id,
                 "ocr_retry_mode": "transkribus_recognition_only",
                 "source_transkribus_run_id": run.id,
                 LEASE_EXPIRES_AT_PAYLOAD_KEY: request.lease_expires_at,
+                LEASE_TOKEN_PAYLOAD_KEY: claim.lease_token,
             },
         )
 
@@ -155,8 +161,10 @@ class ProcessDocumentRequestWorkerTests(TestCase):
             {
                 "type": "PROCESS_DOCUMENT",
                 "document_id": self.document.id,
+                PROCESS_DOCUMENT_REQUEST_ID_PAYLOAD_KEY: request.id,
                 "operation": "retry_hebrew_translation",
                 LEASE_EXPIRES_AT_PAYLOAD_KEY: request.lease_expires_at,
+                LEASE_TOKEN_PAYLOAD_KEY: claim.lease_token,
             },
         )
 
@@ -933,7 +941,9 @@ class ProcessDocumentRequestHandlerTests(TestCase):
             {
                 "type": "PROCESS_DOCUMENT",
                 "document_id": self.document.id,
+                PROCESS_DOCUMENT_REQUEST_ID_PAYLOAD_KEY: request.id,
                 LEASE_EXPIRES_AT_PAYLOAD_KEY: persisted_lease["value"],
+                LEASE_TOKEN_PAYLOAD_KEY: payload[LEASE_TOKEN_PAYLOAD_KEY],
             },
         )
         self.assertEqual(

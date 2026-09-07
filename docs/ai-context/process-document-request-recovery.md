@@ -94,10 +94,24 @@ the Request remains fenced for separate execution recovery work.
 When a `RUNNING` Request is fenced to `RECOVERY_REQUIRED`, a related Document
 that is still `PROCESSING` is updated to `RECOVERY_REQUIRED` in the same
 transaction. That Document state is a request-lifecycle overlay, not a
-substitute for engine-scoped DTR rollup. A late fenced worker may terminalize
-the Request only after the Document is `READY` / `PARTIAL` / `FAILED`.
-`RECOVERY_REQUIRED` does not authorize a new provider execution. This
-command still does not replay `RECOVERY_REQUIRED` execution.
+substitute for engine-scoped DTR rollup. A late fenced worker may persist
+automated OCR/Hebrew results only while its `lease_token` still matches and
+the Request is `RUNNING` or `RECOVERY_REQUIRED`. Legacy `{type, document_id}`
+payloads are allowed only when both identity keys are absent; present-but-
+malformed identity is fail-closed. After staff abandon, or any
+other terminal/cleared/mismatched token, those writes are skipped. A late
+fenced worker may terminalize the Request only after the Document is `READY`
+/ `PARTIAL` / `FAILED`. `RECOVERY_REQUIRED` does not authorize a new provider
+execution. This command still does not replay `RECOVERY_REQUIRED` execution.
+
+Staff abandon of a parked Request is service-only
+(`abandon_process_document_request` in
+`documents/services/process_document_request_staff_recovery.py`). It
+terminalizes `RECOVERY_REQUIRED → FAILED` with `failure_code=STAFF_ABANDONED`,
+clears the lease token, and replaces a Document overlay with an ordinary
+result state. It does not send SQS, call a provider, or enqueue retry. Staff
+UI and intentional-retry orchestration are not implemented yet. Do not use
+this recovery command to abandon or replay `RECOVERY_REQUIRED`.
 
 ## Expired RUNNING lease fencing (separate command)
 
