@@ -39,6 +39,19 @@ sent to OCR/HTR.
 - In-flight PENDING/FAILED display-only extras beyond
   `expected_source_file_count` are ignored by OCR validation so an unfinished
   add cannot fail the document.
+- Add/prepare JSON includes `complete_url` from Django `reverse` of
+  `uploads-display-only-page-complete`. The staff add page uses that URL
+  directly and does not string-replace `/0/complete/`.
+- Abandoned extras: operator command
+  `cleanup_abandoned_display_only_page_uploads` (dry-run default; `--commit`;
+  `--stale-hours` default 24). Deletes only uncommitted `include_in_ocr=False`
+  PENDING/FAILED rows with `order_index >=` committed physical count and
+  `updated_at` older than the threshold. Reuses `delete_s3_object`. Does not
+  delete the Document, committed source rows, or change
+  `expected_source_file_count` / `upload_status` / `processing_state_user`.
+  Skips PROCESSING / RECOVERY_REQUIRED and active `ProcessDocumentRequest`.
+  S3 delete failure keeps the DB row. Distinct from
+  `cleanup_abandoned_uploads` (incremental draft documents).
 - Gemini/Arabic attempt identity and expected page count use the OCR-included
   set only. A display-only append must not change OCR attempt identity. A
   single remaining OCR page at `order_index=0` matching `Document.file_s3_key`
@@ -53,7 +66,8 @@ sent to OCR/HTR.
 toggle-to-OCR, PDF support, or per-page OCR results.
 
 **Tests:** `documents/test_display_only_page.py`, plus filter cases in
-`documents/tests_source_files.py`.
+`documents/tests_source_files.py`, and
+`documents/test_cleanup_abandoned_display_only_page_uploads.py`.
 
 ## PhotoPerson implies ArchiveItemPerson; public PHOTO album vs selected photo
 

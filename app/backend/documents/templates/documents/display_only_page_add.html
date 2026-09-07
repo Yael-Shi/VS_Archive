@@ -20,7 +20,6 @@
     <form
       id="displayOnlyPageForm"
       data-add-url="{% url 'uploads-display-only-page-add' doc_id=doc.id %}"
-      data-complete-url-template="{% url 'uploads-display-only-page-complete' doc_id=doc.id order_index=0 %}"
       data-redirect-url="{% url 'documents-detail-page' doc_id=doc.id %}"
     >
       {% csrf_token %}
@@ -47,7 +46,6 @@
     const submitBtn = document.getElementById("submitBtn");
     const fileEl = document.getElementById("file");
     const addUrl = form.dataset.addUrl;
-    const completeUrlTemplate = form.dataset.completeUrlTemplate;
     const redirectUrl = form.dataset.redirectUrl;
     const ALLOWED_IMAGE_EXTENSIONS_BY_MIME = {
       "image/jpeg": [".jpg", ".jpeg"],
@@ -102,10 +100,6 @@
       return data;
     }
 
-    function completeUrlForOrder(orderIndex) {
-      return completeUrlTemplate.replace(/\/0\/complete\/$/, "/" + String(orderIndex) + "/complete/");
-    }
-
     form.addEventListener("submit", async (ev) => {
       ev.preventDefault();
       setMessage("", "");
@@ -132,7 +126,8 @@
         });
         const orderIndex = plan.order_index;
         const uploadUrl = plan.upload_url;
-        if (orderIndex == null || !uploadUrl) {
+        const completeUrl = plan.complete_url;
+        if (orderIndex == null || !uploadUrl || !completeUrl) {
           throw new Error("תשובת השרת חסרה פרטי העלאה.");
         }
         setMessage("ok", "מעלה ל-S3…");
@@ -141,7 +136,6 @@
           headers: {"Content-Type": mimeType},
           body: file,
         });
-        const completeUrl = completeUrlForOrder(orderIndex);
         if (!putRes.ok) {
           try {
             await jsonFetch(completeUrl, {

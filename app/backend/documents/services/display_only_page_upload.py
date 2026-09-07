@@ -48,7 +48,7 @@ class DisplayOnlyPageUploadError(RuntimeError):
         super().__init__(public_message)
 
 
-def _committed_physical_count(document: Document) -> int:
+def committed_physical_source_count(document: Document) -> int:
     if document.expected_source_file_count is not None:
         return document.expected_source_file_count
     if (document.file_s3_key or "").strip():
@@ -119,7 +119,7 @@ def validate_document_for_display_only_page_add(doc: Document) -> None:
             public_message="Document has no original source file to append to.",
             http_status=400,
         )
-    committed = _committed_physical_count(doc)
+    committed = committed_physical_source_count(doc)
     if committed >= MULTI_IMAGE_MAX_FILES:
         raise DisplayOnlyPageUploadError(
             code=DisplayOnlyPageUploadErrorCode.SOURCE_FILE_LIMIT,
@@ -171,7 +171,7 @@ def prepare_display_only_page_upload(
     validate_document_for_display_only_page_add(document)
     _ensure_primary_source_file(document)
     document.refresh_from_db()
-    committed = _committed_physical_count(document)
+    committed = committed_physical_source_count(document)
     next_index = committed
     if next_index >= MULTI_IMAGE_MAX_FILES:
         raise DisplayOnlyPageUploadError(

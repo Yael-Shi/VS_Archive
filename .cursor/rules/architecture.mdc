@@ -66,7 +66,10 @@ PHOTO items, initial upload, deletion, reorder, replacement, or per-page OCR
 results. Adding a display-only page must not change existing
 `DocumentTextResult` rows, `processing_state_user`, or OCR attempt identity.
 Hebrew translation retry stays on existing `SOURCE_TEXT` and must not fetch
-images.
+images. Stale uncommitted display-only extras (PENDING/FAILED outside the
+committed physical count) may be removed by
+`cleanup_abandoned_display_only_page_uploads` (age-gated, dry-run default);
+that command must not delete committed pages or the Document.
 
 Normal Django URL/view imports (web/Gunicorn) must not import
 `documents.services.gemini_engine` or `google.genai`. Web code may check
