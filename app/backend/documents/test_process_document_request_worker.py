@@ -37,6 +37,10 @@ from documents.services.process_document_request_worker import (
     parse_process_document_request_id,
     terminalize_process_document_request,
 )
+from documents.services.sqs import (
+    SQS_WORKER_VISIBILITY_TIMEOUT_SECONDS,
+    parse_approximate_receive_count,
+)
 from documents.services.processing_state import (
     apply_verified_fence_processing_state_restore,
     update_document_processing_state_for_engine,
@@ -848,6 +852,7 @@ class ProcessDocumentRequestHandlerTests(TestCase):
         payload,
         *,
         execute_payload,
+        approximate_receive_count: int | None = None,
     ) -> bool:
         return handle_process_document_request(
             payload,
@@ -855,6 +860,7 @@ class ProcessDocumentRequestHandlerTests(TestCase):
             queue_url=self.queue_url,
             receipt_handle=self.receipt_handle,
             execute_payload=execute_payload,
+            approximate_receive_count=approximate_receive_count,
         )
 
     def _visibility_timeouts(self) -> list[int]:
@@ -971,6 +977,35 @@ class ProcessDocumentRequestHandlerTests(TestCase):
             Document.ProcessingState.PROCESSING,
         )
 
+    def test_receive_count_does_not_change_fresh_running_defer(self):
+        token = uuid.uuid4()
+        request = self._request(
+            status=ProcessDocumentRequest.Status.RUNNING,
+            lease_token=token,
+            lease_expires_at=timezone.now() + timedelta(minutes=1),
+            started_at=timezone.now(),
+        )
+        execute_payload = MagicMock()
+
+        ack = self._handle(
+            {
+                "type": "PROCESS_DOCUMENT",
+                "request_id": request.id,
+            },
+            execute_payload=execute_payload,
+            approximate_receive_count=5,
+        )
+
+        self.assertFalse(ack)
+        execute_payload.assert_not_called()
+        self.assertEqual(
+            self._visibility_timeouts(),
+            [FRESH_IN_PROGRESS_DEFER_SECONDS],
+        )
+        request.refresh_from_db()
+        self.assertEqual(request.status, ProcessDocumentRequest.Status.RUNNING)
+        self.assertEqual(request.lease_token, token)
+
     def test_expired_running_request_acks_without_execution(self):
         token = uuid.uuid4()
         request = self._request(
@@ -1001,6 +1036,33 @@ class ProcessDocumentRequestHandlerTests(TestCase):
         self.assertEqual(
             self.document.processing_state_user,
             Document.ProcessingState.RECOVERY_REQUIRED,
+        )
+
+    def test_receive_count_does_not_replay_expired_running_request(self):
+        token = uuid.uuid4()
+        request = self._request(
+            status=ProcessDocumentRequest.Status.RUNNING,
+            lease_token=token,
+            lease_expires_at=timezone.now() - timedelta(seconds=1),
+            started_at=timezone.now() - timedelta(hours=1),
+        )
+        execute_payload = MagicMock()
+
+        ack = self._handle(
+            {
+                "type": "PROCESS_DOCUMENT",
+                "request_id": request.id,
+            },
+            execute_payload=execute_payload,
+            approximate_receive_count=5,
+        )
+
+        self.assertTrue(ack)
+        execute_payload.assert_not_called()
+        request.refresh_from_db()
+        self.assertEqual(
+            request.status,
+            ProcessDocumentRequest.Status.RECOVERY_REQUIRED,
         )
 
     def test_partial_outcome_terminalizes_partial_and_acks(self):
@@ -1106,6 +1168,7 @@ class RunWorkerProcessDocumentRequestDispatchTests(SimpleTestCase):
             queue_url="https://sqs.example/queue",
             receipt_handle="receipt-17",
             execute_payload=command._execute_process_document_payload,
+            approximate_receive_count=None,
         )
 
     @patch("documents.management.commands.run_worker.handle_process_document_request")
@@ -1125,6 +1188,33 @@ class RunWorkerProcessDocumentRequestDispatchTests(SimpleTestCase):
 
         ack = command._process_message(
             {"Body": json.dumps(payload)},
+        )
+
+        self.assertTrue(ack)
+        execute_payload.assert_called_once_with(payload)
+        mock_handle.assert_not_called()
+
+    @patch("documents.management.commands.run_worker.handle_process_document_request")
+    def test_legacy_payload_with_receive_count_still_uses_document_id_path(
+        self,
+        mock_handle,
+    ):
+        command = Command()
+        execute_payload = MagicMock(
+            return_value=ProcessDocumentOutcome(ProcessDocumentDisposition.COMPLETED)
+        )
+        command._execute_process_document_payload = execute_payload
+        payload = {
+            "type": "PROCESS_DOCUMENT",
+            "document_id": 23,
+        }
+
+        ack = command._process_message(
+            {
+                "Body": json.dumps(payload),
+                "ReceiptHandle": "legacy-rh",
+                "Attributes": {"ApproximateReceiveCount": "5"},
+            },
         )
 
         self.assertTrue(ack)
@@ -1180,3 +1270,142 @@ class RunWorkerProcessDocumentRequestDispatchTests(SimpleTestCase):
         self.assertFalse(ack)
         execute_payload.assert_not_called()
         mock_handle.assert_not_called()
+
+
+class RunWorkerReceiveVisibilityTests(SimpleTestCase):
+    def test_receive_message_uses_lease_aligned_visibility_and_requests_count(
+        self,
+    ):
+        command = Command()
+        sqs = MagicMock()
+        sqs.receive_message.return_value = {}
+
+        command._receive_one(sqs, "https://sqs.example/queue", 1, 20)
+
+        kwargs = sqs.receive_message.call_args.kwargs
+        self.assertEqual(kwargs["VisibilityTimeout"], 2700)
+        self.assertEqual(
+            kwargs["VisibilityTimeout"],
+            SQS_WORKER_VISIBILITY_TIMEOUT_SECONDS,
+        )
+        self.assertEqual(
+            kwargs["VisibilityTimeout"],
+            SQS_VISIBILITY_AFTER_CLAIM_SECONDS,
+        )
+        self.assertEqual(kwargs["AttributeNames"], ["ApproximateReceiveCount"])
+        self.assertNotEqual(kwargs["VisibilityTimeout"], 300)
+
+    def test_lease_and_claim_visibility_remain_forty_five_minutes(self):
+        self.assertEqual(EXECUTION_LEASE, timedelta(minutes=45))
+        self.assertEqual(SQS_VISIBILITY_AFTER_CLAIM_SECONDS, 2700)
+        self.assertGreaterEqual(
+            SQS_WORKER_VISIBILITY_TIMEOUT_SECONDS,
+            int(EXECUTION_LEASE.total_seconds()),
+        )
+
+
+class ApproximateReceiveCountParsingTests(SimpleTestCase):
+    def test_parse_approximate_receive_count_accepts_sqs_string_and_int(self):
+        self.assertEqual(
+            parse_approximate_receive_count(
+                {"Attributes": {"ApproximateReceiveCount": "3"}}
+            ),
+            3,
+        )
+        self.assertEqual(
+            parse_approximate_receive_count(
+                {"Attributes": {"ApproximateReceiveCount": 2}}
+            ),
+            2,
+        )
+
+    def test_parse_approximate_receive_count_tolerates_absent_and_malformed(self):
+        cases = (
+            None,
+            {},
+            {"Attributes": None},
+            {"Attributes": {}},
+            {"Attributes": {"ApproximateReceiveCount": "nope"}},
+            {"Attributes": {"ApproximateReceiveCount": ""}},
+            {"Attributes": {"ApproximateReceiveCount": "0"}},
+            {"Attributes": {"ApproximateReceiveCount": -1}},
+            {"Attributes": {"ApproximateReceiveCount": True}},
+            {"Attributes": {"ApproximateReceiveCount": ["1"]}},
+        )
+        for message in cases:
+            with self.subTest(message=message):
+                self.assertIsNone(parse_approximate_receive_count(message))
+
+
+class RunWorkerReceiveCountDispatchTests(SimpleTestCase):
+    @patch("documents.management.commands.run_worker.handle_process_document_request")
+    def test_missing_receive_count_still_dispatches_request_aware_payload(
+        self,
+        mock_handle,
+    ):
+        command = Command()
+        mock_handle.return_value = True
+        payload = {"type": "PROCESS_DOCUMENT", "request_id": 41}
+
+        ack = command._process_message(
+            {
+                "Body": json.dumps(payload),
+                "ReceiptHandle": "r-41",
+            },
+            sqs=MagicMock(),
+            queue_url="https://sqs.example/queue",
+        )
+
+        self.assertTrue(ack)
+        self.assertEqual(
+            mock_handle.call_args.kwargs["approximate_receive_count"],
+            None,
+        )
+
+    @patch("documents.management.commands.run_worker.handle_process_document_request")
+    def test_malformed_receive_count_does_not_crash_or_change_dispatch(
+        self,
+        mock_handle,
+    ):
+        command = Command()
+        mock_handle.return_value = False
+        payload = {"type": "PROCESS_DOCUMENT", "request_id": 43}
+
+        ack = command._process_message(
+            {
+                "Body": json.dumps(payload),
+                "ReceiptHandle": "r-43",
+                "Attributes": {"ApproximateReceiveCount": "nope"},
+            },
+            sqs=MagicMock(),
+            queue_url="https://sqs.example/queue",
+        )
+
+        self.assertFalse(ack)
+        mock_handle.assert_called_once()
+        self.assertIsNone(mock_handle.call_args.kwargs["approximate_receive_count"])
+
+    @patch("documents.management.commands.run_worker.handle_process_document_request")
+    def test_valid_receive_count_is_passed_and_does_not_choose_ack(
+        self,
+        mock_handle,
+    ):
+        command = Command()
+        mock_handle.return_value = False
+        payload = {"type": "PROCESS_DOCUMENT", "request_id": 47}
+
+        ack = command._process_message(
+            {
+                "Body": json.dumps(payload),
+                "ReceiptHandle": "r-47",
+                "Attributes": {"ApproximateReceiveCount": "4"},
+            },
+            sqs=MagicMock(),
+            queue_url="https://sqs.example/queue",
+        )
+
+        self.assertFalse(ack)
+        self.assertEqual(
+            mock_handle.call_args.kwargs["approximate_receive_count"],
+            4,
+        )

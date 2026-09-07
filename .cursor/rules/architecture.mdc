@@ -303,9 +303,20 @@ Current worker/SQS policy:
   `PARTIAL` outcome with missing page indices, and does
   not persist a misleading whole-document failed text row
 - handled failures are acked from SQS
-- retry/backoff/DLQ redesign is deferred
-
-Do not redesign retry, backoff, DLQ, or failure handling opportunistically.
+- initial `receive_message` VisibilityTimeout is **45 minutes**
+  (`SQS_WORKER_VISIBILITY_TIMEOUT_SECONDS` = 2700), aligned to the durable
+  PROCESS_DOCUMENT / corrected-current execution lease. Post-claim
+  `ChangeMessageVisibility` remains 2700s. Queue CDK default visibility
+  remains 10 minutes and is overridden per receive. Competing live-lease
+  defer remains 120s.
+- `ApproximateReceiveCount` is requested and logged on unusual/non-terminal
+  paths only. It must not affect ACK, defer, claim, retry, DLQ, or request
+  state.
+- Legacy `{type, document_id}` PROCESS_DOCUMENT execution remains accepted
+  temporarily for mixed-version / in-flight safety.
+- Live CDK `maxReceiveCount=5`, DLQ topology, heartbeat, and broader
+  retry/backoff/DLQ redesign remain deferred. Do not change those
+  opportunistically.
 
 Arabic printed ambiguous Vision/create fences stay fail-closed on automatic
 reclaim (no counter reset, no second create, no poll/cancel/LQ). An operator

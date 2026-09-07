@@ -17,6 +17,7 @@ from documents.services.hebrew_translation_retry import (
     PROCESS_DOCUMENT_OPERATION_KEY,
     RETRY_HEBREW_TRANSLATION_OPERATION,
 )
+from documents.services.sqs import SQS_WORKER_VISIBILITY_TIMEOUT_SECONDS
 from documents.services.ocr_reprocess import (
     OCR_RETRY_MODE_PAYLOAD_KEY,
     SOURCE_TRANSKRIBUS_RUN_ID_PAYLOAD_KEY,
@@ -31,8 +32,8 @@ logger = logging.getLogger(__name__)
 
 PROCESS_DOCUMENT_REQUEST_ID_PAYLOAD_KEY = "request_id"
 LEASE_EXPIRES_AT_PAYLOAD_KEY = "lease_expires_at"
-EXECUTION_LEASE = timedelta(minutes=45)
-SQS_VISIBILITY_AFTER_CLAIM_SECONDS = 45 * 60
+EXECUTION_LEASE = timedelta(seconds=SQS_WORKER_VISIBILITY_TIMEOUT_SECONDS)
+SQS_VISIBILITY_AFTER_CLAIM_SECONDS = SQS_WORKER_VISIBILITY_TIMEOUT_SECONDS
 FRESH_IN_PROGRESS_DEFER_SECONDS = 2 * 60
 
 _REQUEST_NOOP = "PROCESS_DOCUMENT_NOOP"
@@ -92,12 +93,35 @@ def _change_message_visibility(
         return False
 
 
+def _log_unacked_delivery(
+    *,
+    reason: str,
+    request_id: int | None,
+    approximate_receive_count: int | None,
+) -> None:
+    logger.info(
+        "SQS message left unacked reason=%s request_id=%s "
+        "approximate_receive_count=%s",
+        reason,
+        request_id,
+        approximate_receive_count,
+    )
+
+
 def _defer_in_progress(
     sqs: Any,
     *,
     queue_url: str,
     receipt_handle: str,
+    reason: str,
+    request_id: int | None,
+    approximate_receive_count: int | None,
 ) -> bool:
+    _log_unacked_delivery(
+        reason=reason,
+        request_id=request_id,
+        approximate_receive_count=approximate_receive_count,
+    )
     _change_message_visibility(
         sqs,
         queue_url=queue_url,
@@ -369,6 +393,7 @@ def handle_process_document_request(
     queue_url: str,
     receipt_handle: str,
     execute_payload: Callable[[dict[str, Any]], ProcessDocumentOutcome],
+    approximate_receive_count: int | None = None,
 ) -> bool:
     """Handle one request-aware PROCESS_DOCUMENT message."""
 
@@ -391,6 +416,9 @@ def handle_process_document_request(
             sqs,
             queue_url=queue_url,
             receipt_handle=receipt_handle,
+            reason="fresh_running_lease",
+            request_id=request_id,
+            approximate_receive_count=approximate_receive_count,
         )
 
     assert claim.action == ProcessDocumentRequestAction.EXECUTE
@@ -416,6 +444,9 @@ def handle_process_document_request(
             sqs,
             queue_url=queue_url,
             receipt_handle=receipt_handle,
+            reason="execution_exception",
+            request_id=request_id,
+            approximate_receive_count=approximate_receive_count,
         )
 
     if outcome.disposition == ProcessDocumentDisposition.DEFERRED:
@@ -423,11 +454,19 @@ def handle_process_document_request(
             sqs,
             queue_url=queue_url,
             receipt_handle=receipt_handle,
+            reason="execution_deferred",
+            request_id=request_id,
+            approximate_receive_count=approximate_receive_count,
         )
 
     if outcome.disposition == ProcessDocumentDisposition.RETRYABLE:
         # Keep the message and current lease. On expiry another delivery fences
         # the request to RECOVERY_REQUIRED instead of repeating provider work.
+        _log_unacked_delivery(
+            reason="retryable",
+            request_id=request_id,
+            approximate_receive_count=approximate_receive_count,
+        )
         return False
 
     try:
@@ -446,6 +485,9 @@ def handle_process_document_request(
             sqs,
             queue_url=queue_url,
             receipt_handle=receipt_handle,
+            reason="terminalization_exception",
+            request_id=request_id,
+            approximate_receive_count=approximate_receive_count,
         )
 
     if terminal:
@@ -455,6 +497,9 @@ def handle_process_document_request(
         sqs,
         queue_url=queue_url,
         receipt_handle=receipt_handle,
+        reason="terminalization_refused",
+        request_id=request_id,
+        approximate_receive_count=approximate_receive_count,
     )
 
 

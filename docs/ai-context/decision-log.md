@@ -4411,10 +4411,10 @@ Returns most recent qualifying row (`-created_at`, `-id`).
 
 - **Worst-case runtime (current defaults `MAX_RETRIES=2`, `RETRY_DELAY_SECONDS_1=60`):** the bounded recognition retry worst-case is **~31 min** (attempt 1 poll ≤ `POLL_MAX_WAIT_SEC`=900s + one `RETRY_DELAY_SECONDS_1`=60s sleep + attempt 2 poll ≤ 900s). Whole-document worst-case, including the upload ingest poll (≤ 900s), is **~46 min dominant**, and potentially higher with per-call HTTP timeouts (`DEFAULT_HTTP_TIMEOUT_SEC`=60s for login, create, each PUT, each metadata/transcript fetch).
 - **At `MAX_RETRIES=2`, `RETRY_DELAY_SECONDS_2` is currently unused** — two attempts means exactly one inter-attempt sleep (`RETRY_DELAY_SECONDS_1`); `RETRY_DELAY_SECONDS_2` would only apply to a third attempt.
-- **Effective SQS visibility timeout is currently 300s** because `run_worker._receive_one` passes `VisibilityTimeout=300` on `receive_message`, which overrides the queue default of 10 minutes (`data_stack.py` `visibility_timeout=Duration.minutes(10)`).
-- **The visibility overrun pre-dates this PR:** a single Transkribus poll can wait up to `POLL_MAX_WAIT_SEC`=900s, already ~3× the 300s visibility window, independent of any retry.
-- **This PR widens the existing window but does not introduce a new concurrent-processing hazard under current infrastructure**, because the worker service is capped at **`max_capacity=1`** (`app_stack.py`). With a single consumer there is no concurrent re-delivery; re-processing only happens sequentially after a worker task dies (spot reclaim / deploy / nightly stop), and that path is guarded by the PR3 duplicate-upload guard.
-- **Before increasing worker `max_capacity` above 1**, add a visibility heartbeat (`ChangeMessageVisibility`) and/or a DLQ / `maxReceiveCount` design first. At >1 worker the visibility overrun becomes a genuine concurrent-duplicate-processing hazard (true with or without this PR). This remains part of the deferred retry/visibility/DLQ redesign.
+- **[Historical, superseded 2026-09-07]** Effective SQS visibility timeout was 300s because `run_worker._receive_one` passed `VisibilityTimeout=300` on `receive_message`, which overrode the queue default of 10 minutes (`data_stack.py` `visibility_timeout=Duration.minutes(10)`). Current worker receive visibility is 2700s; see the later “Worker SQS receive visibility / ApproximateReceiveCount observability” entry.
+- **[Historical]** The visibility overrun pre-dated the PyLaia workdir-retry PR: a single Transkribus poll can wait up to `POLL_MAX_WAIT_SEC`=900s, already ~3× the then-300s visibility window, independent of any retry. Initial receive visibility is now 45 minutes; Transkribus poll constants and queue CDK visibility were not changed in that later receive-visibility PR.
+- **[Historical, superseded / currently inaccurate]** This PR was written as not introducing a new concurrent-processing hazard because the worker was described as capped at **`max_capacity=1`** (`app_stack.py`), with a single consumer and no concurrent re-delivery (re-processing only sequential after a worker task dies: spot reclaim / deploy / nightly stop; PR3 duplicate-upload guard). That Auto Scaling `max_capacity=1` / single-consumer guarantee is not a current infrastructure fact. **Current:** worker `desired_count` is constrained to 0 or 1; there is no Application Auto Scaling `max_capacity=1`; ECS `minimumHealthyPercent=50` / `maximumPercent=200` can briefly overlap two worker tasks during deploy or Fargate Spot replacement (observed live 2026-09-07). See the later “Worker SQS receive visibility / ApproximateReceiveCount observability” entry.
+- **[Historical, superseded / currently inaccurate]** “Before increasing worker `max_capacity` above 1, add a visibility heartbeat and/or a DLQ / `maxReceiveCount` design first” assumed that `max_capacity` cap. Heartbeat and broader retry/DLQ redesign remain deferred; see the same later visibility entry. Do not read this bullet as current-state `max_capacity=1` or a guaranteed single worker consumer.
 
 ---
 
@@ -5839,7 +5839,7 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 **Known limitation:** A process crash after the Request transaction commits but before `SendMessage`, or an unexpected programming exception at send time, can leave a stranded `QUEUED` Request. Matching peers deliberately do not resend it. Explicit recovery/requeue tooling remains a later task.
 
-**Still deferred:** wiring upload finalize, OCR reprocess, and Hebrew translation retry to this service; removing the legacy document-id payload producers; stranded-`QUEUED` reconciliation/requeue tooling; and any caller-specific UI or operational behavior changes.
+**Still deferred (at this service-only PR; caller wiring was implemented in later cutover entries):** removing the legacy document-id payload producers; stranded-`QUEUED` reconciliation/requeue tooling; and any caller-specific UI or operational behavior changes. **[Superseded]** Upload finalize, OCR reprocess, and Hebrew translation retry were later wired to this service; they are not current-state legacy `document_id` producers.
 
 ## PROCESS_DOCUMENT upload-finalize caller cutover
 
@@ -5853,7 +5853,7 @@ Content-Type: `application/xml` via `put_object_bytes`.
 
 **Infrastructure:** The shared ECS task role receives `queue.grant_send_messages(...)` in addition to consume permissions. Any deployment must preserve the explicit live/new image tag and pass a narrowly reviewed CDK diff.
 
-**Still deferred:** OCR reprocess and Hebrew translation retry remain on the legacy document-id payload pending separate caller cutovers. Recovery/requeue tooling for stranded pre-send `QUEUED` Requests also remains deferred.
+**Still deferred (historical at this entry):** Recovery/requeue tooling for stranded pre-send `QUEUED` Requests. **[Superseded]** OCR reprocess and Hebrew translation retry no longer remain on the legacy document-id payload; later cutover entries below wire those callers to request-aware `request_id` messages. The legacy sender/worker path remains only for mixed-version / in-flight compatibility.
 
 ## PROCESS_DOCUMENT OCR-reprocess caller cutover
 
@@ -5879,7 +5879,8 @@ exceptions propagate. Terminal OCR-reprocess history does not block a later
 intentional retry.
 
 **Compatibility and deferrals:** The request-aware worker execution contract is
-unchanged. The legacy document-id sender remains temporarily for Hebrew
+unchanged. **[Historical, superseded by the following Hebrew-translation-retry
+cutover]** The legacy document-id sender remains temporarily for Hebrew
 translation retry. Stranded-`QUEUED` recovery/requeue, async Transkribus resume,
 Gemini page persistence, and deployment remain separate work.
 
@@ -6948,3 +6949,18 @@ JavaScript hover behavior, scrolling, image overlays, or schema changes.
 **Unchanged:** provider/SQS-send/OCR/retry-policy/routing/search-index behavior; VERIFIED write-fences; existing `READY`/`PARTIAL`/`FAILED` rollup.
 
 **Deferred:** staff abandon/retry UI for `RECOVERY_REQUIRED` Requests; automatic replay.
+
+## Worker SQS receive visibility / ApproximateReceiveCount observability (2026-09-07)
+
+**Decision / implemented:** Align the worker’s initial SQS `receive_message` VisibilityTimeout with the durable PROCESS_DOCUMENT / corrected-current execution lease (45 minutes = 2700 seconds). Request `ApproximateReceiveCount` and log it on unusual/non-terminal paths only.
+
+**Current behavior:**
+
+- Shared constant: `documents.services.sqs.SQS_WORKER_VISIBILITY_TIMEOUT_SECONDS` = 2700.
+- `run_worker._receive_one` uses `VisibilityTimeout=2700` and `AttributeNames=["ApproximateReceiveCount"]`. This overrides the queue CDK default of 10 minutes per receive. Queue-level CDK visibility, DLQ, and `maxReceiveCount=5` are unchanged.
+- Post-claim `ChangeMessageVisibility` remains 2700s (explicit claim-time refresh). Competing live-lease defer remains 120s. Execution lease duration, STARTED recovery threshold (60m), provider deadlines, Transkribus retry timing, and Hebrew-translation PROCESSING freshness are unchanged.
+- Invariant: initial receive visibility >= current durable execution lease, and currently equals 2700s.
+- `parse_approximate_receive_count` never raises. Absent or malformed attributes yield `None`. The count is passed into request-aware PROCESS_DOCUMENT and corrected/current handlers for structured logs on DEFER / RETRYABLE / handler-exception / missing-SQS-context paths. It is not used for ACK, retry, DLQ, claim, or request-state decisions.
+- Legacy `{type, document_id}` PROCESS_DOCUMENT execution remains accepted if such a message is received (mixed-version / in-flight safety). A cutoff is deferred until drain/inspection.
+
+**Deferred (next retry/DLQ phase):** heartbeat; changing live CDK `maxReceiveCount=5` / DLQ topology / queue retention / IAM / ECS desired count; automatic SQS retries; rejecting legacy `document_id` PROCESS_DOCUMENT messages.
