@@ -12,7 +12,7 @@ from typing import Any, Callable, Mapping
 from django.db import transaction
 from django.utils import timezone
 
-from documents.models import ProcessDocumentRequest
+from documents.models import Document, ProcessDocumentRequest
 from documents.services.hebrew_translation_retry import (
     PROCESS_DOCUMENT_OPERATION_KEY,
     RETRY_HEBREW_TRANSLATION_OPERATION,
@@ -25,6 +25,7 @@ from documents.services.process_document_outcome import (
     ProcessDocumentDisposition,
     ProcessDocumentOutcome,
 )
+from documents.services.processing_state import ORDINARY_RESULT_PROCESSING_STATES
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +138,21 @@ def _lock_request(request_id: int) -> ProcessDocumentRequest:
     return ProcessDocumentRequest.objects.select_for_update().get(pk=request_id)
 
 
+def _lock_document_then_request(
+    request_id: int,
+) -> tuple[Document, ProcessDocumentRequest]:
+    """Lock Document then Request so claim cannot deadlock with enqueue."""
+    document_id = ProcessDocumentRequest.objects.values_list(
+        "document_id",
+        flat=True,
+    ).get(pk=request_id)
+    document = Document.objects.select_for_update().get(pk=document_id)
+    sync_request = _lock_request(request_id)
+    if sync_request.document_id != document.pk:
+        raise ProcessDocumentRequest.DoesNotExist
+    return document, sync_request
+
+
 def _claim_new_lease(
     sync_request: ProcessDocumentRequest,
     *,
@@ -164,11 +180,18 @@ def _claim_new_lease(
     return token
 
 
-def _mark_recovery_required(sync_request: ProcessDocumentRequest) -> None:
+def _mark_recovery_required(
+    sync_request: ProcessDocumentRequest,
+    document: Document,
+) -> None:
     """Fence stale work without authorizing another provider execution."""
     sync_request.status = ProcessDocumentRequest.Status.RECOVERY_REQUIRED
     sync_request.lease_expires_at = None
     sync_request.save(update_fields=["status", "lease_expires_at", "updated_at"])
+    if document.processing_state_user != Document.ProcessingState.PROCESSING:
+        return
+    document.processing_state_user = Document.ProcessingState.RECOVERY_REQUIRED
+    document.save(update_fields=["processing_state_user", "updated_at"])
 
 
 def claim_process_document_request(
@@ -179,8 +202,8 @@ def claim_process_document_request(
     now = timezone.now()
     with transaction.atomic():
         try:
-            sync_request = _lock_request(request_id)
-        except ProcessDocumentRequest.DoesNotExist:
+            document, sync_request = _lock_document_then_request(request_id)
+        except (ProcessDocumentRequest.DoesNotExist, Document.DoesNotExist):
             logger.info(
                 "Process document request id=%s missing; ack poison message",
                 request_id,
@@ -222,7 +245,7 @@ def claim_process_document_request(
 
             # There is no generic provider Attempt to reconcile or safely replay.
             # Retain the old token so the original late holder may still finish.
-            _mark_recovery_required(sync_request)
+            _mark_recovery_required(sync_request, document)
             return ProcessDocumentRequestClaim(
                 ProcessDocumentRequestAction.ACK,
                 request_id,
@@ -281,7 +304,13 @@ def terminalize_process_document_request(
     lease_token: uuid.UUID,
     outcome: ProcessDocumentOutcome,
 ) -> bool:
-    """Persist a terminal outcome only for the current or retained lease holder."""
+    """Persist a terminal outcome only for the current or retained lease holder.
+
+    A ``RECOVERY_REQUIRED`` Request may become terminal only after the related
+    Document has left the request-lifecycle overlay for an ordinary result
+    state (``READY`` / ``PARTIAL`` / ``FAILED``). Lock order is Document then
+    Request, matching claim and enqueue.
+    """
     terminal = _terminal_status_and_failure(outcome)
     if terminal is None:
         return False
@@ -290,8 +319,8 @@ def terminalize_process_document_request(
     now = timezone.now()
     with transaction.atomic():
         try:
-            sync_request = _lock_request(request_id)
-        except ProcessDocumentRequest.DoesNotExist:
+            document, sync_request = _lock_document_then_request(request_id)
+        except (ProcessDocumentRequest.DoesNotExist, Document.DoesNotExist):
             return False
 
         if sync_request.status in _TERMINAL_REQUEST_STATUSES:
@@ -300,10 +329,17 @@ def terminalize_process_document_request(
         if sync_request.lease_token != lease_token:
             return False
 
-        if sync_request.status not in (
-            ProcessDocumentRequest.Status.RUNNING,
-            ProcessDocumentRequest.Status.RECOVERY_REQUIRED,
-        ):
+        if sync_request.status == ProcessDocumentRequest.Status.RECOVERY_REQUIRED:
+            if document.processing_state_user not in ORDINARY_RESULT_PROCESSING_STATES:
+                logger.info(
+                    "Refusing to terminalize ProcessDocumentRequest id=%s while "
+                    "Document id=%s processing_state_user=%s",
+                    request_id,
+                    document.pk,
+                    document.processing_state_user,
+                )
+                return False
+        elif sync_request.status != ProcessDocumentRequest.Status.RUNNING:
             return False
 
         sync_request.status = target_status

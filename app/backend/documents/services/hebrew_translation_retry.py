@@ -118,23 +118,27 @@ def _validate_usable_source_row(doc: Document) -> DocumentTextResult:
     return source_row
 
 
-def validate_document_for_hebrew_translation_retry(doc: Document) -> DocumentTextResult:
+def _validate_translation_retry_source(doc: Document) -> DocumentTextResult:
     _validate_retry_document_metadata(doc)
-
-    if doc.processing_state_user == Document.ProcessingState.PROCESSING:
-        raise HebrewTranslationRetryError(
-            f"Document id={doc.id} is currently processing; retry is blocked."
-        )
-
     source_row = _validate_usable_source_row(doc)
-
     if _protected_hebrew_text_exists_for_document(doc):
         raise HebrewTranslationRetryError(
             f"Document id={doc.id} already has successful or verified Hebrew translation; "
             "retry is blocked."
         )
-
     return source_row
+
+
+def validate_document_for_hebrew_translation_retry(doc: Document) -> DocumentTextResult:
+    if doc.processing_state_user == Document.ProcessingState.PROCESSING:
+        raise HebrewTranslationRetryError(
+            f"Document id={doc.id} is currently processing; retry is blocked."
+        )
+    if doc.processing_state_user == Document.ProcessingState.RECOVERY_REQUIRED:
+        raise HebrewTranslationRetryError(
+            f"Document id={doc.id} requires processing recovery; retry is blocked."
+        )
+    return _validate_translation_retry_source(doc)
 
 
 def validate_document_for_hebrew_translation_retry_persistence(
@@ -145,10 +149,13 @@ def validate_document_for_hebrew_translation_retry_persistence(
 ) -> DocumentTextResult:
     _validate_retry_document_metadata(doc)
 
-    if doc.processing_state_user != Document.ProcessingState.PROCESSING:
+    if doc.processing_state_user not in (
+        Document.ProcessingState.PROCESSING,
+        Document.ProcessingState.RECOVERY_REQUIRED,
+    ):
         raise HebrewTranslationRetryError(
-            f"Document id={doc.id} is not in expected PROCESSING state "
-            "for translation retry persistence."
+            f"Document id={doc.id} is not in expected PROCESSING or "
+            "RECOVERY_REQUIRED state for translation retry persistence."
         )
 
     source_row = _validate_usable_source_row(doc)
@@ -207,7 +214,13 @@ def _claim_translation_retry(
     document_id: int,
     now,
 ) -> tuple[str, str] | bool:
-    """Return (engine, source_text), False to defer, or True for terminal no-op."""
+    """Return (engine, source_text), False to defer, or True for terminal no-op.
+
+    ``RECOVERY_REQUIRED`` is fail-closed here: it must not authorize a new
+    Gemini call. An already-running holder that passed this claim before
+    fencing may still persist via
+    ``validate_document_for_hebrew_translation_retry_persistence``.
+    """
     if doc.processing_state_user == Document.ProcessingState.PROCESSING:
         if _processing_lease_is_fresh(doc, now=now):
             logger.info(

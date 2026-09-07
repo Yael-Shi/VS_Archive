@@ -669,6 +669,7 @@ class Document(models.Model):
 
     class ProcessingState(models.TextChoices):
         PROCESSING = "PROCESSING", "Processing"
+        RECOVERY_REQUIRED = "RECOVERY_REQUIRED", "Recovery required"
         READY = "READY", "Ready"
         PARTIAL = "PARTIAL", "Partial"
         FAILED = "FAILED", "Failed"

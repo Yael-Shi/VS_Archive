@@ -43,6 +43,7 @@ from documents.services.ocr_verified_write_fence import (
     inspect_automated_ocr_verified_write_fence,
 )
 from documents.services.processing_state import (
+    apply_verified_fence_processing_state_restore,
     update_document_processing_state_for_engine,
 )
 from documents.services.review_reasons import (
@@ -716,9 +717,12 @@ def complete_transkribus_local_success(
             )
             # Do not roll up from this unused runtime engine or from one
             # VERIFIED row's engine. Restore the worker's pre-Phase-1 state
-            # when provided; otherwise leave processing_state_user unchanged.
-            if pre_run_processing_state is not None:
-                doc.processing_state_user = pre_run_processing_state
+            # when it is an ordinary result; do not re-stick PROCESSING over
+            # the recovery overlay.
+            if apply_verified_fence_processing_state_restore(
+                doc,
+                pre_run_processing_state,
+            ):
                 doc.save(update_fields=["processing_state_user"])
             trp.mark_succeeded(run, engine_runtime=engine)
             return HtrResult(

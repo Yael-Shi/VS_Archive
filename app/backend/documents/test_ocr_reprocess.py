@@ -465,6 +465,20 @@ class OcrReprocessServiceTests(TransactionTestCase):
             )
         self.assertIn("not eligible for OCR reprocess", str(ctx.exception))
 
+    def test_recovery_required_document_is_not_eligible_for_ocr_reprocess(self):
+        doc = _failed_ocr_document(
+            processing_state_user=Document.ProcessingState.RECOVERY_REQUIRED
+        )
+
+        with self.assertRaises(OcrReprocessError) as ctx:
+            assess_ocr_reprocess(
+                doc.id,
+                collection_id=COLLECTION_ID,
+                model_id=MODEL_ID,
+            )
+        self.assertIn("not eligible for OCR reprocess", str(ctx.exception))
+        self.assertFalse(is_ocr_reprocess_ui_eligible(doc))
+
 
 def _gemini_partial_failed_source_document(**kwargs) -> Document:
     defaults = {

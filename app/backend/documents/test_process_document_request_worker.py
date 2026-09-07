@@ -11,11 +11,19 @@ from django.test import SimpleTestCase, TestCase, TransactionTestCase
 from django.utils import timezone
 
 from documents.management.commands.run_worker import Command
-from documents.models import Document, ProcessDocumentRequest, TranskribusRun
+from documents.models import (
+    Document,
+    DocumentTextResult,
+    ProcessDocumentRequest,
+    TranskribusRun,
+)
 from documents.services.archive_items import create_ocr_document
 from documents.services.process_document_outcome import (
     ProcessDocumentDisposition,
     ProcessDocumentOutcome,
+)
+from documents.services.process_document_request_enqueue import (
+    enqueue_process_document_request,
 )
 from documents.services.process_document_request_worker import (
     EXECUTION_LEASE,
@@ -28,6 +36,10 @@ from documents.services.process_document_request_worker import (
     handle_process_document_request,
     parse_process_document_request_id,
     terminalize_process_document_request,
+)
+from documents.services.processing_state import (
+    apply_verified_fence_processing_state_restore,
+    update_document_processing_state_for_engine,
 )
 
 
@@ -172,10 +184,24 @@ class ProcessDocumentRequestWorkerTests(TestCase):
 
         self.assertEqual(claim.action, ProcessDocumentRequestAction.DEFER)
         request.refresh_from_db()
+        self.document.refresh_from_db()
         self.assertEqual(request.status, ProcessDocumentRequest.Status.RUNNING)
         self.assertEqual(request.lease_token, token)
+        self.assertEqual(
+            self.document.processing_state_user,
+            Document.ProcessingState.PROCESSING,
+        )
 
-    def test_expired_running_request_is_fenced_for_recovery_without_reclaim(self):
+    @patch(
+        "documents.services.process_document_request_enqueue."
+        "send_process_document_request_message"
+    )
+    @patch("documents.services.htr_engine.transcribe_pages")
+    def test_expired_running_request_is_fenced_for_recovery_without_reclaim(
+        self,
+        mock_transcribe,
+        mock_send,
+    ):
         token = uuid.uuid4()
         request = self._request(
             status=ProcessDocumentRequest.Status.RUNNING,
@@ -189,6 +215,7 @@ class ProcessDocumentRequestWorkerTests(TestCase):
         self.assertEqual(claim.action, ProcessDocumentRequestAction.ACK)
         self.assertIsNone(claim.lease_token)
         request.refresh_from_db()
+        self.document.refresh_from_db()
         self.assertEqual(
             request.status,
             ProcessDocumentRequest.Status.RECOVERY_REQUIRED,
@@ -196,6 +223,140 @@ class ProcessDocumentRequestWorkerTests(TestCase):
         self.assertEqual(request.lease_token, token)
         self.assertIsNone(request.lease_expires_at)
         self.assertIsNone(request.completed_at)
+        self.assertEqual(
+            self.document.processing_state_user,
+            Document.ProcessingState.RECOVERY_REQUIRED,
+        )
+        mock_transcribe.assert_not_called()
+        mock_send.assert_not_called()
+
+    def test_expired_running_does_not_overwrite_non_processing_document(self):
+        token = uuid.uuid4()
+        self.document.processing_state_user = Document.ProcessingState.READY
+        self.document.save(update_fields=["processing_state_user", "updated_at"])
+        request = self._request(
+            status=ProcessDocumentRequest.Status.RUNNING,
+            lease_token=token,
+            lease_expires_at=timezone.now() - timedelta(seconds=1),
+            started_at=timezone.now() - timedelta(hours=1),
+        )
+
+        claim = claim_process_document_request(request_id=request.id)
+
+        self.assertEqual(claim.action, ProcessDocumentRequestAction.ACK)
+        request.refresh_from_db()
+        self.document.refresh_from_db()
+        self.assertEqual(
+            request.status,
+            ProcessDocumentRequest.Status.RECOVERY_REQUIRED,
+        )
+        self.assertEqual(
+            self.document.processing_state_user,
+            Document.ProcessingState.READY,
+        )
+
+    def test_late_original_holder_can_replace_document_recovery_required(self):
+        token = uuid.uuid4()
+        self.document.processing_state_user = (
+            Document.ProcessingState.RECOVERY_REQUIRED
+        )
+        self.document.save(update_fields=["processing_state_user", "updated_at"])
+        request = self._request(
+            status=ProcessDocumentRequest.Status.RECOVERY_REQUIRED,
+            lease_token=token,
+            started_at=timezone.now() - timedelta(hours=1),
+        )
+        DocumentTextResult.objects.create(
+            document=self.document,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="gemini-2.0-flash",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="usable hebrew transcription",
+        )
+
+        update_document_processing_state_for_engine(
+            self.document,
+            "gemini-2.0-flash",
+        )
+        self.document.save(update_fields=["processing_state_user"])
+        terminal = terminalize_process_document_request(
+            request_id=request.id,
+            lease_token=token,
+            outcome=ProcessDocumentOutcome(ProcessDocumentDisposition.COMPLETED),
+        )
+
+        self.assertTrue(terminal)
+        request.refresh_from_db()
+        self.document.refresh_from_db()
+        self.assertEqual(request.status, ProcessDocumentRequest.Status.COMPLETED)
+        self.assertEqual(
+            self.document.processing_state_user,
+            Document.ProcessingState.READY,
+        )
+
+    def test_processing_state_rollup_still_writes_partial_and_failed(self):
+        self.document.processing_state_user = Document.ProcessingState.PROCESSING
+        self.document.save(update_fields=["processing_state_user"])
+        update_document_processing_state_for_engine(
+            self.document,
+            "gemini-2.0-flash",
+        )
+        self.assertEqual(
+            self.document.processing_state_user,
+            Document.ProcessingState.PARTIAL,
+        )
+
+        DocumentTextResult.objects.create(
+            document=self.document,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="gemini-2.0-flash",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.FAILED,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            text="",
+            error_code="OCR_FAILED",
+        )
+        update_document_processing_state_for_engine(
+            self.document,
+            "gemini-2.0-flash",
+        )
+        self.assertEqual(
+            self.document.processing_state_user,
+            Document.ProcessingState.FAILED,
+        )
+
+    def test_verified_fence_restore_keeps_recovery_overlay_for_processing_prior(
+        self,
+    ):
+        self.document.processing_state_user = (
+            Document.ProcessingState.RECOVERY_REQUIRED
+        )
+        self.document.save(update_fields=["processing_state_user"])
+
+        changed = apply_verified_fence_processing_state_restore(
+            self.document,
+            Document.ProcessingState.PROCESSING,
+        )
+
+        self.assertFalse(changed)
+        self.assertEqual(
+            self.document.processing_state_user,
+            Document.ProcessingState.RECOVERY_REQUIRED,
+        )
+
+        changed = apply_verified_fence_processing_state_restore(
+            self.document,
+            Document.ProcessingState.READY,
+        )
+        self.assertTrue(changed)
+        self.assertEqual(
+            self.document.processing_state_user,
+            Document.ProcessingState.READY,
+        )
 
     def test_recovery_required_and_terminal_requests_ack(self):
         token = uuid.uuid4()
@@ -303,8 +464,57 @@ class ProcessDocumentRequestWorkerTests(TestCase):
         self.assertEqual(request.status, ProcessDocumentRequest.Status.RUNNING)
         self.assertEqual(request.lease_token, claim.lease_token)
 
-    def test_late_original_holder_can_terminalize_recovery_required(self):
+    def test_late_holder_cannot_terminalize_while_document_still_recovery_required(
+        self,
+    ):
         token = uuid.uuid4()
+        self.document.processing_state_user = (
+            Document.ProcessingState.RECOVERY_REQUIRED
+        )
+        self.document.save(update_fields=["processing_state_user", "updated_at"])
+        request = self._request(
+            status=ProcessDocumentRequest.Status.RECOVERY_REQUIRED,
+            lease_token=token,
+            started_at=timezone.now() - timedelta(hours=1),
+        )
+
+        for disposition in (
+            ProcessDocumentDisposition.NOOP,
+            ProcessDocumentDisposition.FAILED,
+        ):
+            with self.subTest(disposition=disposition):
+                with patch(
+                    "documents.services.process_document_request_enqueue."
+                    "send_process_document_request_message"
+                ) as mock_send, patch(
+                    "documents.services.htr_engine.transcribe_pages"
+                ) as mock_transcribe:
+                    terminal = terminalize_process_document_request(
+                        request_id=request.id,
+                        lease_token=token,
+                        outcome=ProcessDocumentOutcome(disposition),
+                    )
+
+                self.assertFalse(terminal)
+                mock_send.assert_not_called()
+                mock_transcribe.assert_not_called()
+                request.refresh_from_db()
+                self.document.refresh_from_db()
+                self.assertEqual(
+                    request.status,
+                    ProcessDocumentRequest.Status.RECOVERY_REQUIRED,
+                )
+                self.assertEqual(request.lease_token, token)
+                self.assertIsNone(request.completed_at)
+                self.assertEqual(
+                    self.document.processing_state_user,
+                    Document.ProcessingState.RECOVERY_REQUIRED,
+                )
+
+    def test_late_holder_can_terminalize_after_document_ready_rollup(self):
+        token = uuid.uuid4()
+        self.document.processing_state_user = Document.ProcessingState.READY
+        self.document.save(update_fields=["processing_state_user", "updated_at"])
         request = self._request(
             status=ProcessDocumentRequest.Status.RECOVERY_REQUIRED,
             lease_token=token,
@@ -319,7 +529,111 @@ class ProcessDocumentRequestWorkerTests(TestCase):
 
         self.assertTrue(terminal)
         request.refresh_from_db()
+        self.document.refresh_from_db()
         self.assertEqual(request.status, ProcessDocumentRequest.Status.COMPLETED)
+        self.assertEqual(
+            self.document.processing_state_user,
+            Document.ProcessingState.READY,
+        )
+
+    def test_late_holder_can_terminalize_after_document_partial_or_failed(self):
+        token = uuid.uuid4()
+        cases = (
+            (
+                Document.ProcessingState.PARTIAL,
+                ProcessDocumentDisposition.PARTIAL,
+                ProcessDocumentRequest.Status.PARTIAL,
+            ),
+            (
+                Document.ProcessingState.FAILED,
+                ProcessDocumentDisposition.FAILED,
+                ProcessDocumentRequest.Status.FAILED,
+            ),
+        )
+        for document_state, disposition, request_status in cases:
+            with self.subTest(document_state=document_state):
+                self.document.processing_state_user = document_state
+                self.document.save(
+                    update_fields=["processing_state_user", "updated_at"]
+                )
+                request = self._request(
+                    status=ProcessDocumentRequest.Status.RECOVERY_REQUIRED,
+                    lease_token=token,
+                    started_at=timezone.now() - timedelta(hours=1),
+                )
+
+                terminal = terminalize_process_document_request(
+                    request_id=request.id,
+                    lease_token=token,
+                    outcome=ProcessDocumentOutcome(disposition),
+                )
+
+                self.assertTrue(terminal)
+                request.refresh_from_db()
+                self.document.refresh_from_db()
+                self.assertEqual(request.status, request_status)
+                self.assertEqual(
+                    self.document.processing_state_user,
+                    document_state,
+                )
+
+    def test_wrong_token_cannot_terminalize_recovery_required_after_ready(self):
+        token = uuid.uuid4()
+        self.document.processing_state_user = Document.ProcessingState.READY
+        self.document.save(update_fields=["processing_state_user", "updated_at"])
+        request = self._request(
+            status=ProcessDocumentRequest.Status.RECOVERY_REQUIRED,
+            lease_token=token,
+            started_at=timezone.now() - timedelta(hours=1),
+        )
+
+        terminal = terminalize_process_document_request(
+            request_id=request.id,
+            lease_token=uuid.uuid4(),
+            outcome=ProcessDocumentOutcome(ProcessDocumentDisposition.COMPLETED),
+        )
+
+        self.assertFalse(terminal)
+        request.refresh_from_db()
+        self.document.refresh_from_db()
+        self.assertEqual(
+            request.status,
+            ProcessDocumentRequest.Status.RECOVERY_REQUIRED,
+        )
+        self.assertEqual(request.lease_token, token)
+        self.assertEqual(
+            self.document.processing_state_user,
+            Document.ProcessingState.READY,
+        )
+
+    def test_recovery_required_request_cannot_terminalize_while_document_processing(
+        self,
+    ):
+        token = uuid.uuid4()
+        request = self._request(
+            status=ProcessDocumentRequest.Status.RECOVERY_REQUIRED,
+            lease_token=token,
+            started_at=timezone.now() - timedelta(hours=1),
+        )
+
+        terminal = terminalize_process_document_request(
+            request_id=request.id,
+            lease_token=token,
+            outcome=ProcessDocumentOutcome(ProcessDocumentDisposition.COMPLETED),
+        )
+
+        self.assertFalse(terminal)
+        request.refresh_from_db()
+        self.document.refresh_from_db()
+        self.assertEqual(
+            request.status,
+            ProcessDocumentRequest.Status.RECOVERY_REQUIRED,
+        )
+        self.assertEqual(request.lease_token, token)
+        self.assertEqual(
+            self.document.processing_state_user,
+            Document.ProcessingState.PROCESSING,
+        )
 
     def _assert_nonterminal_outcome_keeps_running(
         self,
@@ -348,6 +662,76 @@ class ProcessDocumentRequestWorkerTests(TestCase):
     def test_retryable_outcome_keeps_running_request(self):
         self._assert_nonterminal_outcome_keeps_running(
             ProcessDocumentDisposition.RETRYABLE
+        )
+
+
+class ProcessDocumentRequestWorkerEnqueueBoundaryTests(TransactionTestCase):
+    """Enqueue after claim fencing must run outside TestCase's outer atomic."""
+
+    def setUp(self) -> None:
+        self.document = create_ocr_document(
+            title="Worker enqueue boundary document",
+            doc_type=Document.DocType.PDF,
+            language=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.HANDWRITTEN,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.PROCESSING,
+            file_s3_key="worker-enqueue-boundary.pdf",
+            mime_type="application/pdf",
+        )
+
+    @patch(
+        "documents.services.process_document_request_enqueue."
+        "send_process_document_request_message"
+    )
+    @patch("documents.services.htr_engine.transcribe_pages")
+    def test_fenced_recovery_required_blocks_enqueue_without_resend(
+        self,
+        mock_transcribe,
+        mock_send,
+    ):
+        token = uuid.uuid4()
+        request = ProcessDocumentRequest.objects.create(
+            document=self.document,
+            status=ProcessDocumentRequest.Status.RUNNING,
+            operation=ProcessDocumentRequest.Operation.OCR,
+            origin=ProcessDocumentRequest.Origin.UPLOAD_FINALIZE,
+            ocr_retry_mode=ProcessDocumentRequest.OcrRetryMode.NORMAL_REENQUEUE,
+            lease_token=token,
+            lease_expires_at=timezone.now() - timedelta(seconds=1),
+            started_at=timezone.now() - timedelta(hours=1),
+        )
+
+        claim = claim_process_document_request(request_id=request.id)
+
+        self.assertEqual(claim.action, ProcessDocumentRequestAction.ACK)
+        request.refresh_from_db()
+        self.document.refresh_from_db()
+        self.assertEqual(
+            request.status,
+            ProcessDocumentRequest.Status.RECOVERY_REQUIRED,
+        )
+        self.assertEqual(
+            self.document.processing_state_user,
+            Document.ProcessingState.RECOVERY_REQUIRED,
+        )
+        mock_transcribe.assert_not_called()
+
+        enqueue_result = enqueue_process_document_request(
+            document_id=self.document.id,
+            operation=ProcessDocumentRequest.Operation.OCR,
+            origin=ProcessDocumentRequest.Origin.UPLOAD_FINALIZE,
+            ocr_retry_mode=(ProcessDocumentRequest.OcrRetryMode.NORMAL_REENQUEUE),
+            source_transkribus_run_id=None,
+            initiated_by=None,
+        )
+        mock_send.assert_not_called()
+        self.assertEqual(enqueue_result.outcome, "BLOCKED_RECOVERY_REQUIRED")
+        self.assertFalse(enqueue_result.send_attempted)
+        self.document.refresh_from_db()
+        self.assertEqual(
+            self.document.processing_state_user,
+            Document.ProcessingState.RECOVERY_REQUIRED,
         )
 
 
@@ -579,8 +963,45 @@ class ProcessDocumentRequestHandlerTests(TestCase):
             [FRESH_IN_PROGRESS_DEFER_SECONDS],
         )
         request.refresh_from_db()
+        self.document.refresh_from_db()
         self.assertEqual(request.status, ProcessDocumentRequest.Status.RUNNING)
         self.assertEqual(request.lease_token, token)
+        self.assertEqual(
+            self.document.processing_state_user,
+            Document.ProcessingState.PROCESSING,
+        )
+
+    def test_expired_running_request_acks_without_execution(self):
+        token = uuid.uuid4()
+        request = self._request(
+            status=ProcessDocumentRequest.Status.RUNNING,
+            lease_token=token,
+            lease_expires_at=timezone.now() - timedelta(seconds=1),
+            started_at=timezone.now() - timedelta(hours=1),
+        )
+        execute_payload = MagicMock()
+
+        ack = self._handle(
+            {
+                "type": "PROCESS_DOCUMENT",
+                "request_id": request.id,
+            },
+            execute_payload=execute_payload,
+        )
+
+        self.assertTrue(ack)
+        execute_payload.assert_not_called()
+        self.sqs.change_message_visibility.assert_not_called()
+        request.refresh_from_db()
+        self.document.refresh_from_db()
+        self.assertEqual(
+            request.status,
+            ProcessDocumentRequest.Status.RECOVERY_REQUIRED,
+        )
+        self.assertEqual(
+            self.document.processing_state_user,
+            Document.ProcessingState.RECOVERY_REQUIRED,
+        )
 
     def test_partial_outcome_terminalizes_partial_and_acks(self):
         request = self._request()
