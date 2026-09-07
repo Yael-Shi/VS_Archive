@@ -98,3 +98,33 @@ substitute for engine-scoped DTR rollup. A late fenced worker may terminalize
 the Request only after the Document is `READY` / `PARTIAL` / `FAILED`.
 `RECOVERY_REQUIRED` does not authorize a new provider execution. This
 command still does not replay `RECOVERY_REQUIRED` execution.
+
+## Expired RUNNING lease fencing (separate command)
+
+SQS redelivery is not required to fence a stale `RUNNING` Request. Use
+`fence_expired_process_document_requests` for that. It is dry-run by
+default, never resends work, never calls a provider, and never redives the
+DLQ.
+
+Eligible writes are only `ProcessDocumentRequest.status=RUNNING` whose
+`lease_expires_at` is `<= now` or `NULL` (defensive; `NULL` is illegal on
+`RUNNING` by constraint). The locked transition is the same helper worker
+claim uses: Request → `RECOVERY_REQUIRED`, retain `lease_token`, clear
+`lease_expires_at`, overlay Document `PROCESSING` → `RECOVERY_REQUIRED`,
+leave `READY` / `PARTIAL` / `FAILED` / existing Document overlay unchanged.
+Late retained-token completion / terminalize rules are unchanged.
+
+```bash
+DJANGO_ENV=local DJANGO_DEBUG=1 poetry run python manage.py \
+  fence_expired_process_document_requests --request-id REQUEST_ID
+
+DJANGO_ENV=local DJANGO_DEBUG=1 poetry run python manage.py \
+  fence_expired_process_document_requests --request-id REQUEST_ID --apply
+
+DJANGO_ENV=local DJANGO_DEBUG=1 poetry run python manage.py \
+  fence_expired_process_document_requests --all-eligible --limit 100 --apply
+```
+
+`--apply` requires `--request-id`, `--document-id`, or `--all-eligible`.
+Do not combine `--all-eligible` with id scopes. `TranskribusCorrectedCurrentSyncRequest`
+is out of scope. Do not use this command to replay `RECOVERY_REQUIRED`.

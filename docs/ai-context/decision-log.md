@@ -6963,7 +6963,7 @@ JavaScript hover behavior, scrolling, image overlays, or schema changes.
 - `parse_approximate_receive_count` never raises. Absent or malformed attributes yield `None`. The count is passed into request-aware PROCESS_DOCUMENT and corrected/current handlers for structured logs on DEFER / RETRYABLE / handler-exception / missing-SQS-context paths. It is not used for ACK, retry, DLQ, claim, or request-state decisions.
 - Legacy `{type, document_id}` PROCESS_DOCUMENT execution remains accepted if such a message is received (mixed-version / in-flight safety). A cutoff is deferred until drain/inspection.
 
-**Deferred (next retry/DLQ phase):** heartbeat; changing DLQ topology / queue retention / IAM / ECS desired count; automatic SQS retries / automatic DLQ redrive; rejecting legacy `document_id` PROCESS_DOCUMENT messages; DB-side expired-lease fencing/recovery. **`maxReceiveCount=5` is superseded as repository/CDK policy** (CDK-configured 100; last verified live AWS remains 5 until data-stack deploy; see the later safety-net entry).
+**Deferred (next retry/DLQ phase):** heartbeat; changing DLQ topology / queue retention / IAM / ECS desired count; automatic SQS retries / automatic DLQ redrive; rejecting legacy `document_id` PROCESS_DOCUMENT messages. **DB-side expired-lease fencing is implemented** in the later “DB-side expired ProcessDocumentRequest lease fencing” entry. **`maxReceiveCount=5` is superseded as repository/CDK policy** (CDK-configured 100; last verified live AWS remains 5 until data-stack deploy; see the later safety-net entry).
 
 ## Jobs queue DLQ maxReceiveCount safety net (2026-09-07)
 
@@ -6983,4 +6983,22 @@ JavaScript hover behavior, scrolling, image overlays, or schema changes.
 
 **Unchanged:** worker ACK/defer logic; execution lease; request statuses; provider retries; legacy PROCESS_DOCUMENT acceptance; ECS desired/min/max healthy percentages; queue encryption.
 
-**Deferred:** heartbeat; DB-side expired-lease fencing/recovery; DLQ consumer / recovery commands; queue split; automatic redrive.
+**Deferred:** heartbeat; DLQ consumer / recovery commands; queue split; automatic redrive. **DB-side expired ProcessDocumentRequest fencing is implemented** in the later entry below. Corrected/current DB-side STARTED fencing remains deferred.
+
+## DB-side expired ProcessDocumentRequest lease fencing (2026-09-07)
+
+**Decision / implemented:** Operators can fence expired `ProcessDocumentRequest` `RUNNING` rows from the database without an SQS redelivery. Worker claim still fences the same case when a message arrives. Both paths share `fence_locked_expired_running_process_document_request` after Document-then-Request locks.
+
+**Current behavior:**
+
+- Management command `fence_expired_process_document_requests` is dry-run by default. `--apply` requires `--request-id`, `--document-id`, or `--all-eligible`. `--all-eligible` cannot be combined with id scopes.
+- Writes are authorized only after a per-row lock-time recheck of `RUNNING` and an expired or null `lease_expires_at`. The unlocked candidate query is not write authorization.
+- Transition: `RUNNING` → `RECOVERY_REQUIRED`; `lease_token` retained; `lease_expires_at` cleared; `started_at` unchanged; `completed_at` unset; no new token. If `Document.processing_state_user` is `PROCESSING`, set `RECOVERY_REQUIRED`; otherwise leave the Document unchanged.
+- The command does not send/receive/delete/redrive SQS, call a provider, retry OCR or translation, recompute DTR, or select a route/engine.
+- `recover_process_document_requests` is unchanged: stranded `QUEUED` / `ENQUEUE_FAILED` resend only; it still does not replay `RUNNING` or `RECOVERY_REQUIRED`.
+- Late retained-token persist/terminalize semantics are unchanged. `RECOVERY_REQUIRED` remains fail-closed and is not authorized by DLQ.
+- `TranskribusCorrectedCurrentSyncRequest` is out of scope (expired unlinked `RUNNING` still reclaims on worker delivery; linked `STARTED` ≥ 60m fencing stays delivery-driven).
+
+**Unchanged:** schema/migrations; CDK; live AWS `maxReceiveCount` (repo/CDK desired 100; last verified live remains 5 until data-stack deploy); heartbeat; automatic redrive.
+
+**Deferred:** staff abandon/retry UI; automatic replay of `RECOVERY_REQUIRED`; corrected/current DB-side STARTED fencing; heartbeat; queue split.

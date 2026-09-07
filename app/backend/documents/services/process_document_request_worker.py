@@ -26,6 +26,10 @@ from documents.services.process_document_outcome import (
     ProcessDocumentDisposition,
     ProcessDocumentOutcome,
 )
+from documents.services.process_document_request_expired_lease import (
+    fence_locked_expired_running_process_document_request,
+    lock_document_then_request,
+)
 from documents.services.processing_state import ORDINARY_RESULT_PROCESSING_STATES
 
 logger = logging.getLogger(__name__)
@@ -100,8 +104,7 @@ def _log_unacked_delivery(
     approximate_receive_count: int | None,
 ) -> None:
     logger.info(
-        "SQS message left unacked reason=%s request_id=%s "
-        "approximate_receive_count=%s",
+        "SQS message left unacked reason=%s request_id=%s approximate_receive_count=%s",
         reason,
         request_id,
         approximate_receive_count,
@@ -158,25 +161,6 @@ def _execution_payload(sync_request: ProcessDocumentRequest) -> dict[str, Any]:
     return payload
 
 
-def _lock_request(request_id: int) -> ProcessDocumentRequest:
-    return ProcessDocumentRequest.objects.select_for_update().get(pk=request_id)
-
-
-def _lock_document_then_request(
-    request_id: int,
-) -> tuple[Document, ProcessDocumentRequest]:
-    """Lock Document then Request so claim cannot deadlock with enqueue."""
-    document_id = ProcessDocumentRequest.objects.values_list(
-        "document_id",
-        flat=True,
-    ).get(pk=request_id)
-    document = Document.objects.select_for_update().get(pk=document_id)
-    sync_request = _lock_request(request_id)
-    if sync_request.document_id != document.pk:
-        raise ProcessDocumentRequest.DoesNotExist
-    return document, sync_request
-
-
 def _claim_new_lease(
     sync_request: ProcessDocumentRequest,
     *,
@@ -204,20 +188,6 @@ def _claim_new_lease(
     return token
 
 
-def _mark_recovery_required(
-    sync_request: ProcessDocumentRequest,
-    document: Document,
-) -> None:
-    """Fence stale work without authorizing another provider execution."""
-    sync_request.status = ProcessDocumentRequest.Status.RECOVERY_REQUIRED
-    sync_request.lease_expires_at = None
-    sync_request.save(update_fields=["status", "lease_expires_at", "updated_at"])
-    if document.processing_state_user != Document.ProcessingState.PROCESSING:
-        return
-    document.processing_state_user = Document.ProcessingState.RECOVERY_REQUIRED
-    document.save(update_fields=["processing_state_user", "updated_at"])
-
-
 def claim_process_document_request(
     *,
     request_id: int,
@@ -226,7 +196,7 @@ def claim_process_document_request(
     now = timezone.now()
     with transaction.atomic():
         try:
-            document, sync_request = _lock_document_then_request(request_id)
+            document, sync_request = lock_document_then_request(request_id)
         except (ProcessDocumentRequest.DoesNotExist, Document.DoesNotExist):
             logger.info(
                 "Process document request id=%s missing; ack poison message",
@@ -260,18 +230,19 @@ def claim_process_document_request(
             )
 
         if sync_request.status == ProcessDocumentRequest.Status.RUNNING:
-            lease_expires_at = sync_request.lease_expires_at
-            if lease_expires_at is not None and lease_expires_at > now:
-                return ProcessDocumentRequestClaim(
-                    ProcessDocumentRequestAction.DEFER,
-                    request_id,
-                )
-
             # There is no generic provider Attempt to reconcile or safely replay.
             # Retain the old token so the original late holder may still finish.
-            _mark_recovery_required(sync_request, document)
+            if fence_locked_expired_running_process_document_request(
+                document=document,
+                sync_request=sync_request,
+                now=now,
+            ):
+                return ProcessDocumentRequestClaim(
+                    ProcessDocumentRequestAction.ACK,
+                    request_id,
+                )
             return ProcessDocumentRequestClaim(
-                ProcessDocumentRequestAction.ACK,
+                ProcessDocumentRequestAction.DEFER,
                 request_id,
             )
 
@@ -343,7 +314,7 @@ def terminalize_process_document_request(
     now = timezone.now()
     with transaction.atomic():
         try:
-            document, sync_request = _lock_document_then_request(request_id)
+            document, sync_request = lock_document_then_request(request_id)
         except (ProcessDocumentRequest.DoesNotExist, Document.DoesNotExist):
             return False
 
