@@ -314,9 +314,16 @@ Current worker/SQS policy:
   state.
 - Legacy `{type, document_id}` PROCESS_DOCUMENT execution remains accepted
   temporarily for mixed-version / in-flight safety.
-- Live CDK `maxReceiveCount=5`, DLQ topology, heartbeat, and broader
-  retry/backoff/DLQ redesign remain deferred. Do not change those
-  opportunistically.
+- CDK-configured jobs-queue `maxReceiveCount` is **100** (delivery/handler
+  safety net, not a provider retry budget). This takes effect in live AWS
+  only after deploying `vs-archive-dev-data-v2` and verifying; last
+  verified live AWS remains **5**. The existing jobs DLQ stays attached.
+  Source retention remains 4 days; DLQ retention remains 14 days; CDK
+  queue default visibility remains 10 minutes. Automatic DLQ redrive is
+  unimplemented and forbidden. `RECOVERY_REQUIRED` remains non-replayable
+  and is not authorized by DLQ. Heartbeat, DB-side expired-lease
+  fencing/recovery, queue split, and broader retry/backoff redesign remain
+  deferred. Do not change those opportunistically.
 
 Arabic printed ambiguous Vision/create fences stay fail-closed on automatic
 reclaim (no counter reset, no second create, no poll/cancel/LQ). An operator
