@@ -83,6 +83,49 @@ class GetOrderedSourceFilesForProcessingTests(TestCase):
         ordered = get_ordered_source_files_for_processing(doc)
         self.assertEqual(len(ordered), MULTI_IMAGE_MIN_FILES)
 
+    def test_excludes_display_only_source_files_from_ocr_set(self):
+        doc = self._make_doc(expected_count=3)
+        self._add_source(doc, 0)
+        self._add_source(doc, 1)
+        display_only = self._add_source(doc, 2)
+        display_only.include_in_ocr = False
+        display_only.save(update_fields=["include_in_ocr"])
+
+        ordered = get_ordered_source_files_for_processing(doc)
+        self.assertEqual([s.order_index for s in ordered], [0, 1])
+        self.assertTrue(all(s.include_in_ocr for s in ordered))
+
+    def test_ignores_in_flight_display_only_extra_beyond_expected_count(self):
+        doc = self._make_doc(expected_count=2)
+        self._add_source(doc, 0)
+        self._add_source(doc, 1)
+        DocumentSourceFile.objects.create(
+            document=doc,
+            order_index=2,
+            file_s3_key=f"documents/{doc.id}/source/2.png",
+            file_original_name="pending.png",
+            mime_type="image/png",
+            size_bytes=100,
+            upload_status=DocumentSourceFile.UploadStatus.PENDING,
+            include_in_ocr=False,
+        )
+
+        ordered = get_ordered_source_files_for_processing(doc)
+        self.assertEqual([s.order_index for s in ordered], [0, 1])
+
+    def test_rejects_empty_ocr_included_set(self):
+        doc = self._make_doc()
+        a = self._add_source(doc, 0)
+        b = self._add_source(doc, 1)
+        a.include_in_ocr = False
+        b.include_in_ocr = False
+        a.save(update_fields=["include_in_ocr"])
+        b.save(update_fields=["include_in_ocr"])
+
+        with self.assertRaises(MultiImageSourceFilesError) as ctx:
+            get_ordered_source_files_for_processing(doc)
+        self.assertIn("no OCR-included", str(ctx.exception))
+
     def test_mime_only_fallback_rejects_non_allowlisted_mime(self):
         doc = self._make_doc()
         self._add_source(doc, 0, mime_type="image/png", file_original_name="")

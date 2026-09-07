@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 from documents.models import Document, DocumentSourceFile
 from documents.s3 import create_presigned_get
+from documents.services.page_extraction import PageImage, source_file_bytes_to_page
 from documents.services.upload_validation import (
     validate_allowed_image_mime,
     validate_image_upload_metadata,
@@ -196,20 +198,98 @@ def all_expected_source_files_uploaded(document: Document) -> tuple[bool, str]:
     return True, ""
 
 
+def _is_in_flight_display_only_extra(
+    source: DocumentSourceFile,
+    *,
+    expected: int,
+) -> bool:
+    """PENDING/FAILED display-only rows beyond the committed physical count."""
+    if source.order_index < expected:
+        return False
+    if source.include_in_ocr:
+        return False
+    return source.upload_status in (
+        DocumentSourceFile.UploadStatus.PENDING,
+        DocumentSourceFile.UploadStatus.FAILED,
+    )
+
+
+def ocr_page_source_identity(
+    document: Document,
+    source: DocumentSourceFile,
+    *,
+    ocr_included_count: int,
+) -> str:
+    """
+    PageImage.source_identity for one OCR-included source file.
+
+    Legacy single-image worker identity is ``Document.file_s3_key``. After a
+    display-only append, that document becomes multi-image with one OCR page;
+    keep the same identity so Gemini/Arabic attempt fingerprints do not change.
+    Multi-image documents with two or more OCR-included files keep
+    ``{source.id}:{source.file_s3_key}``.
+    """
+    if (
+        ocr_included_count == 1
+        and source.order_index == 0
+        and (source.file_s3_key or "").strip()
+        and source.file_s3_key == (document.file_s3_key or "")
+    ):
+        return document.file_s3_key
+    return f"{source.id}:{source.file_s3_key}"
+
+
+def page_images_from_ocr_source_bytes(
+    document: Document,
+    loaded_sources: Sequence[tuple[DocumentSourceFile, bytes]],
+) -> List[PageImage]:
+    """
+    Convert OCR-included source files (already downloaded) to contiguous PageImages.
+
+    ``loaded_sources`` must already be the ``include_in_ocr=True`` set in
+    physical ``order_index`` order. Display-only files must not be included.
+    ``page_index`` is 1..K in that filtered order.
+    """
+    ocr_count = len(loaded_sources)
+    pages: List[PageImage] = []
+    for ocr_order_index, (source, file_bytes) in enumerate(loaded_sources):
+        source_content_fingerprint = hashlib.sha256(file_bytes).hexdigest()
+        pages.append(
+            source_file_bytes_to_page(
+                order_index=ocr_order_index,
+                file_bytes=file_bytes,
+                mime_type=source.mime_type,
+                source_identity=ocr_page_source_identity(
+                    document,
+                    source,
+                    ocr_included_count=ocr_count,
+                ),
+                source_content_fingerprint=source_content_fingerprint,
+            )
+        )
+    return pages
+
+
 def get_ordered_source_files_for_processing(
     document: Document,
 ) -> List[DocumentSourceFile]:
     """
-    Validate and return this document's source files ordered by ``order_index`` (0..N-1).
+    Validate the physical source set and return OCR-included files only.
 
-    Used by the worker before building the multi-image ``PageImage`` list. Raises
-    ``MultiImageSourceFilesError`` (no OCR/HTR dispatch) when any of the following fail:
+    Physical/display set: contiguous ``order_index`` 0..N-1 matching
+    ``expected_source_file_count``. OCR set: those rows with
+    ``include_in_ocr=True``, still in physical order. Worker/adapters must use
+    this list (not the full physical set).
+
+    In-flight display-only extras (PENDING/FAILED, ``include_in_ocr=False``,
+    ``order_index >= N``) are ignored so an unfinished add cannot fail OCR.
+
+    Raises ``MultiImageSourceFilesError`` (no OCR/HTR dispatch) when:
 
     - ``expected_source_file_count`` is missing or ``< MULTI_IMAGE_MIN_FILES``
-    - a ``DocumentSourceFile`` is missing for any ``order_index`` in ``0..N-1`` (contiguous)
-    - any row is not ``upload_status=UPLOADED``
-    - any row has an empty ``file_s3_key``
-    - any row fails centralized image MIME/extension metadata validation (V1)
+    - a committed physical row is missing / not UPLOADED / empty key / invalid MIME
+    - an unexpected extra row is not an in-flight display-only add
+    - the OCR-included set is empty
     """
     expected = document.expected_source_file_count
     if expected is None or expected < MULTI_IMAGE_MIN_FILES:
@@ -224,13 +304,18 @@ def get_ordered_source_files_for_processing(
     }
 
     extra_indexes = sorted(idx for idx in sources if idx < 0 or idx >= expected)
-    if extra_indexes:
+    unexpected_extras = [
+        idx
+        for idx in extra_indexes
+        if not _is_in_flight_display_only_extra(sources[idx], expected=expected)
+    ]
+    if unexpected_extras:
         raise MultiImageSourceFilesError(
-            f"unexpected source file order_index values {extra_indexes} "
+            f"unexpected source file order_index values {unexpected_extras} "
             f"(valid range is 0..{expected - 1})"
         )
 
-    ordered: List[DocumentSourceFile] = []
+    ordered_physical: List[DocumentSourceFile] = []
     for order_index in range(expected):
         source = sources.get(order_index)
         if source is None:
@@ -247,9 +332,14 @@ def get_ordered_source_files_for_processing(
                 f"source file has empty file_s3_key for order_index={order_index}"
             )
         _validate_source_file_image_metadata(source, order_index)
-        ordered.append(source)
+        ordered_physical.append(source)
 
-    return ordered
+    ocr_sources = [source for source in ordered_physical if source.include_in_ocr]
+    if not ocr_sources:
+        raise MultiImageSourceFilesError(
+            f"document_id={document.id} has no OCR-included source files"
+        )
+    return ocr_sources
 
 
 @dataclass
@@ -314,6 +404,7 @@ def build_source_preview(
                 "mime_type": source.mime_type,
                 "original_name": source.file_original_name,
                 "upload_status": source.upload_status,
+                "include_in_ocr": source.include_in_ocr,
             }
         )
 

@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - {{ page_title }}{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'documents-detail-page' doc_id=doc.id %}">חזרה למסמך</a>
+    </div>
+    <h1 class="page-title">{{ page_title }}</h1>
+    <p class="page-subtitle">
+      התמונה תתווסף בסוף המסמך ותוצג כחלק ממנו. היא <strong>לא</strong> תישלח לתעתוק
+      או לעיבוד OCR, גם לא בהרצות עיבוד מחדש בעתיד.
+    </p>
+  </div>
+
+  <div class="spacer"></div>
+  <div id="msg" class="msg" role="status" aria-live="polite"></div>
+
+  <div class="card card--pad-lg">
+    <form
+      id="displayOnlyPageForm"
+      data-add-url="{% url 'uploads-display-only-page-add' doc_id=doc.id %}"
+      data-complete-url-template="{% url 'uploads-display-only-page-complete' doc_id=doc.id order_index=0 %}"
+      data-redirect-url="{% url 'documents-detail-page' doc_id=doc.id %}"
+    >
+      {% csrf_token %}
+      <div class="field">
+        <label for="file">קובץ תמונה *</label>
+        <input
+          id="file"
+          name="file"
+          type="file"
+          accept="image/jpeg,image/png,image/tiff,image/webp,.jpg,.jpeg,.png,.tif,.tiff,.webp"
+          required
+        />
+        <div class="field-hint">תמונה אחת (JPEG, PNG, TIFF, WebP). העמוד יתווסף בסוף המסמך.</div>
+      </div>
+      <div class="form-actions form-actions--spaced">
+        <button id="submitBtn" class="btn btn-primary" type="submit">הוספת עמוד ללא תעתוק</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    const form = document.getElementById("displayOnlyPageForm");
+    const msgEl = document.getElementById("msg");
+    const submitBtn = document.getElementById("submitBtn");
+    const fileEl = document.getElementById("file");
+    const addUrl = form.dataset.addUrl;
+    const completeUrlTemplate = form.dataset.completeUrlTemplate;
+    const redirectUrl = form.dataset.redirectUrl;
+    const ALLOWED_IMAGE_EXTENSIONS_BY_MIME = {
+      "image/jpeg": [".jpg", ".jpeg"],
+      "image/png": [".png"],
+      "image/tiff": [".tif", ".tiff"],
+      "image/webp": [".webp"],
+    };
+    const MIME_TYPE_ALIASES = {
+      "image/jpg": "image/jpeg",
+      "image/pjpeg": "image/jpeg",
+    };
+
+    function setMessage(kind, text) {
+      msgEl.className = "msg";
+      if (kind === "error") msgEl.classList.add("msg-error");
+      else if (kind === "ok") msgEl.classList.add("msg-ok");
+      msgEl.textContent = text || "";
+    }
+
+    function getCsrfToken() {
+      const input = form.querySelector("input[name=csrfmiddlewaretoken]");
+      if (input && input.value) return input.value;
+      return "";
+    }
+
+    function mimeTypeForFile(file) {
+      const raw = (file.type || "").toLowerCase();
+      return MIME_TYPE_ALIASES[raw] || raw;
+    }
+
+    function isAllowedImage(file) {
+      const mime = mimeTypeForFile(file);
+      const exts = ALLOWED_IMAGE_EXTENSIONS_BY_MIME[mime];
+      if (!exts) return false;
+      const name = (file.name || "").toLowerCase();
+      return exts.some((ext) => name.endsWith(ext));
+    }
+
+    async function jsonFetch(url, options) {
+      const headers = Object.assign(
+        {"Content-Type": "application/json", "X-CSRFToken": getCsrfToken()},
+        (options && options.headers) || {}
+      );
+      const res = await fetch(url, Object.assign({}, options || {}, {headers}));
+      const text = await res.text();
+      let data = null;
+      try { data = JSON.parse(text); } catch (_) {}
+      if (!res.ok) {
+        const message = (data && data.error) ? data.error : text;
+        throw new Error(message || ("HTTP " + res.status));
+      }
+      return data;
+    }
+
+    function completeUrlForOrder(orderIndex) {
+      return completeUrlTemplate.replace(/\/0\/complete\/$/, "/" + String(orderIndex) + "/complete/");
+    }
+
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      setMessage("", "");
+      const file = fileEl.files && fileEl.files[0];
+      if (!file) {
+        setMessage("error", "נא לבחור קובץ תמונה.");
+        return;
+      }
+      if (!isAllowedImage(file)) {
+        setMessage("error", "יש לבחור תמונת JPEG, PNG, TIFF או WebP.");
+        return;
+      }
+      submitBtn.disabled = true;
+      const mimeType = mimeTypeForFile(file);
+      try {
+        setMessage("ok", "מכינה העלאה…");
+        const plan = await jsonFetch(addUrl, {
+          method: "POST",
+          body: JSON.stringify({
+            original_name: file.name,
+            mime_type: mimeType,
+            size_bytes: file.size,
+          }),
+        });
+        const orderIndex = plan.order_index;
+        const uploadUrl = plan.upload_url;
+        if (orderIndex == null || !uploadUrl) {
+          throw new Error("תשובת השרת חסרה פרטי העלאה.");
+        }
+        setMessage("ok", "מעלה ל-S3…");
+        const putRes = await fetch(uploadUrl, {
+          method: "PUT",
+          headers: {"Content-Type": mimeType},
+          body: file,
+        });
+        const completeUrl = completeUrlForOrder(orderIndex);
+        if (!putRes.ok) {
+          try {
+            await jsonFetch(completeUrl, {
+              method: "POST",
+              body: JSON.stringify({
+                success: false,
+                error: "S3 PUT failed: HTTP " + putRes.status,
+              }),
+            });
+          } catch (_) {}
+          throw new Error("העלאה ל-S3 נכשלה.");
+        }
+        setMessage("ok", "מאמתת העלאה…");
+        const completed = await jsonFetch(completeUrl, {
+          method: "POST",
+          body: JSON.stringify({
+            success: true,
+            file_mime: mimeType,
+            file_size: file.size,
+          }),
+        });
+        if (!completed || completed.upload_status !== "UPLOADED") {
+          throw new Error((completed && completed.error) || "העלאה לא הושלמה");
+        }
+        window.location.href = redirectUrl;
+      } catch (err) {
+        setMessage("error", err && err.message ? err.message : String(err));
+        submitBtn.disabled = false;
+      }
+    });
+  </script>
+{% endblock %}

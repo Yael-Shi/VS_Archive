@@ -1,7 +1,8 @@
 {% comment %}
 Shared staff cross-management navigation for the same OCR document.
 Expects: doc, current_section ("document"|"review"|"transkribus"),
-show_transkribus_corrected_current_sync_action.
+show_transkribus_corrected_current_sync_action,
+show_display_only_page_add_action.
 Optional staff_nav_variant="stack" uses btn-primary for document-detail
 (compact staff column CSS is parent-scoped under
 document-detail-staff-management-actions).
@@ -19,6 +20,12 @@ Do not include on the metadata-edit page.
       class="btn {% if staff_nav_variant == 'stack' %}btn-primary{% else %}staff-document-nav__button{% endif %}"
       href="{% url 'archive-manage-edit' item_id=doc.archive_item_id %}"
     >עריכת מטא־דאטה</a>
+  {% endif %}
+  {% if show_display_only_page_add_action %}
+    <a
+      class="btn {% if staff_nav_variant == 'stack' %}btn-primary{% else %}staff-document-nav__button{% endif %}"
+      href="{% url 'documents-display-only-page-add' doc_id=doc.id %}"
+    >הוספת עמוד ללא תעתוק</a>
   {% endif %}
   {% if current_section != "review" %}
     <a

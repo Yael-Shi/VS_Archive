@@ -102,7 +102,7 @@
                 {% for item in editor_source_preview_items %}
                   <div class="source-preview-page">
                     <div class="muted text-sm source-preview-page__label">
-                      עמוד {{ item.display_number }}
+                      עמוד {{ item.display_number }}{% if item.include_in_ocr == False %} · ללא תעתוק{% endif %}
                     </div>
                     {% if item.url %}
                       <div class="viewer document-detail-viewer">

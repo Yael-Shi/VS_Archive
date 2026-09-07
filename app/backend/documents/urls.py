@@ -22,6 +22,16 @@ urlpatterns = [
         name="uploads-finalize",
     ),
     path(
+        "uploads/<int:doc_id>/display-only-pages/add/",
+        views.upload_display_only_page_add,
+        name="uploads-display-only-page-add",
+    ),
+    path(
+        "uploads/<int:doc_id>/display-only-pages/<int:order_index>/complete/",
+        views.upload_display_only_page_complete,
+        name="uploads-display-only-page-complete",
+    ),
+    path(
         "photo-uploads/create/",
         views.create_photo_upload,
         name="photo-uploads-create",
@@ -47,6 +57,11 @@ urlpatterns = [
         "ui/documents/<int:doc_id>/ocr-reprocess/",
         views.document_ocr_reprocess,
         name="documents-ocr-reprocess",
+    ),
+    path(
+        "ui/documents/<int:doc_id>/display-only-page/",
+        views.document_display_only_page_add,
+        name="documents-display-only-page-add",
     ),
     path(
         "ui/documents/<int:doc_id>/hebrew-translation-retry/",

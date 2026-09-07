@@ -69,11 +69,12 @@ from documents.services.review_reasons import (
     MIN_TEXT_LENGTH,
     NEEDS_REVIEW_FLAG,
 )
-from documents.services.page_extraction import extract_pages, source_file_bytes_to_page
+from documents.services.page_extraction import extract_pages
 from documents.services.source_files import (
     MultiImageSourceFilesError,
     get_ordered_source_files_for_processing,
     is_multi_image_document,
+    page_images_from_ocr_source_bytes,
 )
 from documents.services.sqs import (
     SQS_WORKER_VISIBILITY_TIMEOUT_SECONDS,
@@ -466,7 +467,7 @@ class Command(BaseCommand):
             bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
             if is_multi:
                 pages = self._build_pages_from_source_files(
-                    bucket, ordered_sources or []
+                    bucket, doc, ordered_sources or []
                 )
             else:
                 file_bytes, s3_mime = get_object_bytes(
@@ -719,30 +720,20 @@ class Command(BaseCommand):
 
         return _outcome_for_final_processing_state(doc.processing_state_user)
 
-    def _build_pages_from_source_files(self, bucket, ordered_sources):
+    def _build_pages_from_source_files(self, bucket, doc, ordered_sources):
         """
-        Download each ordered ``DocumentSourceFile`` from S3 and build a PageImage list.
+        Download OCR-included source files from S3 and build a contiguous PageImage list.
 
-        S3 I/O stays in the worker; ``source_file_bytes_to_page`` is the pure conversion that
-        normalizes bytes to PNG and assigns the page index. Pages are returned in
-        ``order_index`` order.
+        ``ordered_sources`` must already be the ``include_in_ocr=True`` set from
+        ``get_ordered_source_files_for_processing``. S3 I/O stays in the worker.
         """
-        pages = []
+        loaded = []
         for source in ordered_sources:
             file_bytes, _s3_mime = get_object_bytes(
                 bucket=bucket, key=source.file_s3_key
             )
-            source_content_fingerprint = hashlib.sha256(file_bytes).hexdigest()
-            pages.append(
-                source_file_bytes_to_page(
-                    order_index=source.order_index,
-                    file_bytes=file_bytes,
-                    mime_type=source.mime_type,
-                    source_identity=f"{source.id}:{source.file_s3_key}",
-                    source_content_fingerprint=source_content_fingerprint,
-                )
-            )
-        return pages
+            loaded.append((source, file_bytes))
+        return page_images_from_ocr_source_bytes(doc, loaded)
 
     # ------------------------------------------------------------------ DB Helpers
 
