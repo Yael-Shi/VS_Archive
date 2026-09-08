@@ -563,6 +563,8 @@ def parse_add_photo_upload_metadata(
     )
 
     raw_item_id = payload.get("archive_item_id")
+    if raw_item_id is None:
+        return None, "archive_item_id required"
     try:
         archive_item_id = int(raw_item_id)
     except (TypeError, ValueError):
