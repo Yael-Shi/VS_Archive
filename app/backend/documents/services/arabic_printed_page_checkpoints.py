@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, NoReturn, Sequence
 
 from django.db import DatabaseError, transaction
 from django.db.models import Sum
@@ -154,7 +154,9 @@ def _truncate_diagnostic(value: str) -> str:
     return value.strip()[:512]
 
 
-def _raise_retryable(stage: str, page_index: int | None, exc: DatabaseError) -> None:
+def _raise_retryable(
+    stage: str, page_index: int | None, exc: DatabaseError
+) -> NoReturn:
     raise ArabicPrintedCheckpointPersistenceRetryableError(
         stage=stage,
         page_index=page_index,
