@@ -1,5 +1,26 @@
 # VS-Archive Decision Log
 
+## Public document list hides staff processing-status badges
+
+**Decision / implemented:** `/api/ui/documents/` remains a visibility-filtered
+public list (not staff-gated). Staff-only operational badges are staff-only.
+
+**Current behavior:**
+
+- Anonymous users and authenticated non-staff users may still open public
+  documents on `/api/ui/documents/` and `/api/ui/documents/<id>/`.
+- Those users do **not** see staff processing/upload badges such as
+  **מוכן לצפייה**, **חלקי**, **עיבוד נכשל**, **בעיבוד**,
+  **נדרש טיפול בעיבוד**, or **הועלה**.
+- Staff/admin (`is_document_admin` / existing `is_admin` template flag) still
+  see those badges on the list and in staff technical details.
+- Public text-quality indicators and the public `PROCESSING` wait copy on
+  document detail are unchanged. Document state semantics are unchanged.
+- `/api/documents/` JSON still includes `processing_state_user` /
+  `upload_status` for visible items; this change is HTML presentation only.
+
+**Tests:** `documents.tests.DocumentVisibilityAccessControlTests`.
+
 ## Public PHOTO detail person-list dedup (PhotoPerson vs ArchiveItemPerson)
 
 **Decision / implemented:** Public PHOTO detail no longer lists the same

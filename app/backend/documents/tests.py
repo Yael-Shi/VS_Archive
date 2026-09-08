@@ -12853,6 +12853,133 @@ class DocumentVisibilityAccessControlTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, f"מסמך #{public_doc.id}")
 
+    # Exact ``_status_badge.html`` markup from ``processing_state_badge``.
+    # Substring checks on labels like "חלקי" are too broad (e.g. tooltip "חלקים").
+    _STAFF_PROCESSING_BADGE_MARKUP = (
+        '<span class="badge badge-ok">מוכן לצפייה</span>',
+        '<span class="badge">חלקי</span>',
+        '<span class="badge badge-bad">עיבוד נכשל</span>',
+        '<span class="badge badge-warn">בעיבוד</span>',
+        '<span class="badge badge-bad">נדרש טיפול בעיבוד</span>',
+    )
+
+    def _create_public_processing_badge_docs(self):
+        return {
+            "ready": self._create_document(
+                visibility=Document.Visibility.PUBLIC,
+                title="Public READY status badge doc",
+                processing_state_user=Document.ProcessingState.READY,
+            ),
+            "partial": self._create_document(
+                visibility=Document.Visibility.PUBLIC,
+                title="Public PARTIAL status badge doc",
+                processing_state_user=Document.ProcessingState.PARTIAL,
+            ),
+            "failed": self._create_document(
+                visibility=Document.Visibility.PUBLIC,
+                title="Public FAILED status badge doc",
+                processing_state_user=Document.ProcessingState.FAILED,
+            ),
+        }
+
+    def _assert_hides_staff_processing_badges(self, resp):
+        for markup in self._STAFF_PROCESSING_BADGE_MARKUP:
+            self.assertNotContains(resp, markup, html=False)
+
+    def test_anonymous_list_page_hides_staff_processing_status_badges(self):
+        docs = self._create_public_processing_badge_docs()
+        resp = self.client.get("/api/ui/documents/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, docs["ready"].archive_item.title)
+        self.assertContains(resp, docs["partial"].archive_item.title)
+        self.assertContains(resp, docs["failed"].archive_item.title)
+        self._assert_hides_staff_processing_badges(resp)
+
+    def test_viewer_list_page_hides_staff_processing_status_badges(self):
+        docs = self._create_public_processing_badge_docs()
+        self.client.force_login(self.viewer)
+        resp = self.client.get("/api/ui/documents/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, docs["ready"].archive_item.title)
+        self.assertContains(resp, docs["partial"].archive_item.title)
+        self.assertContains(resp, docs["failed"].archive_item.title)
+        self._assert_hides_staff_processing_badges(resp)
+
+    def test_staff_list_page_shows_staff_processing_status_badges(self):
+        docs = self._create_public_processing_badge_docs()
+        self.client.force_login(self.staff)
+        resp = self.client.get("/api/ui/documents/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, docs["ready"].archive_item.title)
+        self.assertContains(resp, docs["partial"].archive_item.title)
+        self.assertContains(resp, docs["failed"].archive_item.title)
+        self.assertContains(resp, "מוכן לצפייה")
+        self.assertContains(resp, "חלקי")
+        self.assertContains(resp, "עיבוד נכשל")
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value="https://example.com/presigned",
+    )
+    def test_anonymous_detail_hides_staff_processing_badges_keeps_quality(
+        self, _mock_presign
+    ):
+        from documents.services.text_quality import PUBLIC_TEXT_QUALITY_LABELS
+
+        doc = self._create_document(
+            visibility=Document.Visibility.PUBLIC,
+            processing_state_user=Document.ProcessingState.READY,
+        )
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            engine="engine-public-quality",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            quality=DocumentTextResult.Quality.GOOD,
+            text="טקסט ציבורי",
+        )
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "טקסט ציבורי")
+        self.assertContains(
+            resp, PUBLIC_TEXT_QUALITY_LABELS[DocumentTextResult.Quality.GOOD]
+        )
+        self._assert_hides_staff_processing_badges(resp)
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value="https://example.com/presigned",
+    )
+    def test_viewer_detail_hides_staff_processing_status_badges(self, _mock_presign):
+        doc = self._create_document(
+            visibility=Document.Visibility.PUBLIC,
+            processing_state_user=Document.ProcessingState.PARTIAL,
+        )
+        self.client.force_login(self.viewer)
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self._assert_hides_staff_processing_badges(resp)
+
+    @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value="https://example.com/presigned",
+    )
+    def test_staff_detail_page_shows_staff_processing_status_badge(self, _mock_presign):
+        doc = self._create_document(
+            visibility=Document.Visibility.PUBLIC,
+            processing_state_user=Document.ProcessingState.FAILED,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(f"/api/ui/documents/{doc.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "עיבוד נכשל")
+
 
 class DocumentDatePrecisionTests(TestCase):
     def setUp(self):

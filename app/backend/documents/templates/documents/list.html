@@ -131,10 +131,12 @@
                 {% if is_admin and d.file_original_name %} · {{ d.file_original_name }}{% endif %}
               </div>
 
+              {% if is_admin %}
               <div class="badge-row">
                 {% upload_status_badge d.upload_status %}
                 {% processing_state_badge d.processing_state_user %}
               </div>
+              {% endif %}
             </td>
 
             <td>
