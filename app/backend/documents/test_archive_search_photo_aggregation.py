@@ -143,7 +143,7 @@ def _add_photo(
 
 
 def _metadata_update_kwargs(**overrides) -> dict:
-    values = {
+    values: dict[str, str | list[int] | None] = {
         "description": "",
         "location": "",
         "context": "",
@@ -168,7 +168,7 @@ def _s3_head_ok(*, content_type: str = "image/jpeg", content_length: int = 2048)
 
 
 def _create_photo_plan_kwargs(**overrides) -> dict:
-    values = {
+    values: dict[str, str | None | dict[str, list[str]]] = {
         "bucket": "test-uploads-bucket",
         "title": "Created album",
         "visibility": ArchiveItem.Visibility.PUBLIC,

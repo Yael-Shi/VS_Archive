@@ -170,6 +170,7 @@ class AuthorPersonLinkStaffEditTests(TestCase):
     def _option_attrs(self, html: str, value: str) -> str:
         match = re.search(rf'<option value="{re.escape(value)}"([^>]*)>', html)
         self.assertIsNotNone(match, f"missing option value={value!r}")
+        assert match is not None
         return match.group(1)
 
     def test_get_linked_author_selects_person_option_by_id(self):
