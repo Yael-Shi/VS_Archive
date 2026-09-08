@@ -79,7 +79,7 @@ def _ordered_page_indexes(snapshot: TranskribusTranscriptSnapshot) -> tuple[int,
 
 def _contributing_identity_rows(
     snapshot: TranskribusTranscriptSnapshot,
-) -> tuple[tuple[int, int, str, int], str | None]:
+) -> tuple[tuple[tuple[int, int, str, int], ...], str | None]:
     """Return ``((line_id, page_index, provider_line_id, order_index), ...), refusal``.
 
     Refusal is ``MISSING_PROVIDER_LINE_ID`` or ``DUPLICATE_PROVIDER_LINE_ID``.
