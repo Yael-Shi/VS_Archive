@@ -95,9 +95,7 @@ def resolve_process_document_execution_identity(
     request_id = parse_process_document_request_id(
         payload[PROCESS_DOCUMENT_REQUEST_ID_PAYLOAD_KEY]
     )
-    lease_token = parse_process_document_lease_token(
-        payload[LEASE_TOKEN_PAYLOAD_KEY]
-    )
+    lease_token = parse_process_document_lease_token(payload[LEASE_TOKEN_PAYLOAD_KEY])
     if request_id is None or lease_token is None:
         return ProcessDocumentExecutionIdentity.invalid()
     return ProcessDocumentExecutionIdentity.request_aware(request_id, lease_token)

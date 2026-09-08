@@ -70,9 +70,7 @@ class ProcessDocumentExecutionIdentityResolveTests(SimpleTestCase):
         identity = resolve_process_document_execution_identity(
             {"type": "PROCESS_DOCUMENT", "document_id": 1}
         )
-        self.assertEqual(
-            identity.kind, ProcessDocumentExecutionIdentityKind.LEGACY
-        )
+        self.assertEqual(identity.kind, ProcessDocumentExecutionIdentityKind.LEGACY)
         self.assertIsNone(identity.request_id)
         self.assertIsNone(identity.lease_token)
 
@@ -94,17 +92,13 @@ class ProcessDocumentExecutionIdentityResolveTests(SimpleTestCase):
         identity = resolve_process_document_execution_identity(
             {PROCESS_DOCUMENT_REQUEST_ID_PAYLOAD_KEY: "not-an-id"}
         )
-        self.assertEqual(
-            identity.kind, ProcessDocumentExecutionIdentityKind.INVALID
-        )
+        self.assertEqual(identity.kind, ProcessDocumentExecutionIdentityKind.INVALID)
 
     def test_malformed_lease_token_without_request_id_is_invalid(self):
         identity = resolve_process_document_execution_identity(
             {LEASE_TOKEN_PAYLOAD_KEY: "not-a-uuid"}
         )
-        self.assertEqual(
-            identity.kind, ProcessDocumentExecutionIdentityKind.INVALID
-        )
+        self.assertEqual(identity.kind, ProcessDocumentExecutionIdentityKind.INVALID)
 
     def test_both_present_malformed_is_invalid(self):
         identity = resolve_process_document_execution_identity(
@@ -113,9 +107,7 @@ class ProcessDocumentExecutionIdentityResolveTests(SimpleTestCase):
                 LEASE_TOKEN_PAYLOAD_KEY: "also-bad",
             }
         )
-        self.assertEqual(
-            identity.kind, ProcessDocumentExecutionIdentityKind.INVALID
-        )
+        self.assertEqual(identity.kind, ProcessDocumentExecutionIdentityKind.INVALID)
 
     def test_one_valid_and_one_malformed_is_invalid(self):
         identity = resolve_process_document_execution_identity(
@@ -124,18 +116,14 @@ class ProcessDocumentExecutionIdentityResolveTests(SimpleTestCase):
                 LEASE_TOKEN_PAYLOAD_KEY: "not-a-uuid",
             }
         )
-        self.assertEqual(
-            identity.kind, ProcessDocumentExecutionIdentityKind.INVALID
-        )
+        self.assertEqual(identity.kind, ProcessDocumentExecutionIdentityKind.INVALID)
         identity = resolve_process_document_execution_identity(
             {
                 PROCESS_DOCUMENT_REQUEST_ID_PAYLOAD_KEY: "12",
                 LEASE_TOKEN_PAYLOAD_KEY: str(uuid.uuid4()),
             }
         )
-        self.assertEqual(
-            identity.kind, ProcessDocumentExecutionIdentityKind.INVALID
-        )
+        self.assertEqual(identity.kind, ProcessDocumentExecutionIdentityKind.INVALID)
 
 
 class AutomatedProcessDocumentPersistHelperTests(TestCase):
@@ -159,7 +147,9 @@ class AutomatedProcessDocumentPersistHelperTests(TestCase):
             self.request.pk, self.token
         )
 
-    def _allowed(self, identity: ProcessDocumentExecutionIdentity | None = None) -> bool:
+    def _allowed(
+        self, identity: ProcessDocumentExecutionIdentity | None = None
+    ) -> bool:
         if identity is None:
             identity = self._matching_identity()
         with transaction.atomic():
@@ -279,7 +269,9 @@ class ProcessDocumentPersistFenceWorkerTests(TestCase):
     def test_matching_running_token_persists(
         self, mock_transcribe, mock_extract, mock_get
     ):
-        outcome = self._execute(self._payload(), mock_transcribe, mock_extract, mock_get)
+        outcome = self._execute(
+            self._payload(), mock_transcribe, mock_extract, mock_get
+        )
         self.assertEqual(outcome.disposition, ProcessDocumentDisposition.COMPLETED)
         self.assertTrue(
             DocumentTextResult.objects.filter(
@@ -298,7 +290,9 @@ class ProcessDocumentPersistFenceWorkerTests(TestCase):
         def transcribe_then_fence(*_args, **_kwargs):
             self.request.status = ProcessDocumentRequest.Status.RECOVERY_REQUIRED
             self.request.lease_expires_at = None
-            self.request.save(update_fields=["status", "lease_expires_at", "updated_at"])
+            self.request.save(
+                update_fields=["status", "lease_expires_at", "updated_at"]
+            )
             self.document.processing_state_user = (
                 Document.ProcessingState.RECOVERY_REQUIRED
             )
@@ -351,7 +345,9 @@ class ProcessDocumentPersistFenceWorkerTests(TestCase):
         def transcribe_then_abandon(*_args, **_kwargs):
             self.request.status = ProcessDocumentRequest.Status.RECOVERY_REQUIRED
             self.request.lease_expires_at = None
-            self.request.save(update_fields=["status", "lease_expires_at", "updated_at"])
+            self.request.save(
+                update_fields=["status", "lease_expires_at", "updated_at"]
+            )
             self.document.processing_state_user = (
                 Document.ProcessingState.RECOVERY_REQUIRED
             )
@@ -588,7 +584,9 @@ class ProcessDocumentPersistFenceWorkerTests(TestCase):
             verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
             text="human reviewed hebrew",
         )
-        outcome = self._execute(self._payload(), mock_transcribe, mock_extract, mock_get)
+        outcome = self._execute(
+            self._payload(), mock_transcribe, mock_extract, mock_get
+        )
         self.assertEqual(outcome.disposition, ProcessDocumentDisposition.COMPLETED)
         source.refresh_from_db()
         hebrew.refresh_from_db()
@@ -796,4 +794,3 @@ class HebrewTranslationPersistFenceWorkerTests(TestCase):
         outcome = self._execute(self._payload(token=uuid.uuid4()))
         self.assertEqual(outcome.disposition, ProcessDocumentDisposition.NOOP)
         mock_translate.assert_not_called()
-
