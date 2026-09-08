@@ -152,7 +152,7 @@ class AntigravityAdapter:
         language_hint: Optional[str],
         prompt_variant: str,
         worker_env: "WorkerEnvConfig",
-        document_id: object,
+        document_id: int | None,
         absolute_deadline_monotonic: object,
         kwargs: dict,
     ) -> HtrResult:

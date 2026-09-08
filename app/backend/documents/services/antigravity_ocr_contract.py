@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, NoReturn
+from typing import Any, NoReturn, TypeGuard
 
 SCHEMA_VERSION = 1
 OUTCOME_TRANSCRIBED = "transcribed"
@@ -72,7 +72,7 @@ def _fail(
     raise OcrContractError(message, reason=reason, details=details)
 
 
-def _is_int(value: Any) -> bool:
+def _is_int(value: Any) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)
 
 

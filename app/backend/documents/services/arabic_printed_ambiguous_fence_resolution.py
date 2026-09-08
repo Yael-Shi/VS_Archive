@@ -573,6 +573,7 @@ def _plan_no_provider_call_band(
     audit_field, audit_before, audit_after = _band_audit_change(
         band, target, loaded.reason
     )
+    changes: tuple[FieldChange, ...]
     if target == TARGET_PRIMARY:
         changes = (
             FieldChange("band", "create_call_count", band.create_call_count, 0),

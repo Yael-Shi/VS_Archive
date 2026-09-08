@@ -232,7 +232,7 @@ class ArabicPrintedBandSafeDiagnostics:
 def build_arabic_printed_attempt_identity(
     *,
     pages: Sequence[ArabicPrintedPageSource],
-    language_hint: str,
+    language_hint: str | None,
     text_input_type: str,
     engine_key: str,
     prompt_variant: str,
