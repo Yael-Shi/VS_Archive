@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Sequence, TypeGuard
 
 
 BANDING_STRATEGY = "structural-gap-v3-hybrid"
@@ -70,8 +70,12 @@ class ArabicPrintedBandRect:
     line_end: int
 
 
-def _is_int(value: object) -> bool:
+def _is_int(value: object) -> TypeGuard[int]:
     return type(value) is int
+
+
+def _is_int_or_float(value: object) -> TypeGuard[int | float]:
+    return type(value) is int or type(value) is float
 
 
 def _require_positive_dimension(value: object, *, name: str) -> int:
@@ -93,7 +97,7 @@ def _require_banding_config(
             "max_bands must be an integer in 1..MAX_BANDS",
             reason=REASON_INVALID_BANDING_CONFIG,
         )
-    if type(max_height_ratio) is bool or type(max_height_ratio) not in {int, float}:
+    if type(max_height_ratio) is bool or not _is_int_or_float(max_height_ratio):
         raise ArabicPrintedBandingError(
             "max_height_ratio must be a finite real in (0, 1]",
             reason=REASON_INVALID_BANDING_CONFIG,
