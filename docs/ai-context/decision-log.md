@@ -1,5 +1,31 @@
 # VS-Archive Decision Log
 
+## Public OCR technical-details cleanup (quality indicator is the review signal)
+
+**Decision / implemented:** Public OCR document detail no longer shows the
+collapsed notes “הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו
+שגיאות.” or “הטקסט המוצג עבר בקרה אנושית.” Effective review/quality for
+displayed transcription is the existing public quality indicator only.
+
+**Current behavior:**
+
+- Public **`READY`**: omit the OCR `פרטים טכניים` `<details>` entirely
+  (no remaining public body).
+- Public **`PROCESSING`**: keep the wait copy “העיבוד האוטומטי עדיין רץ.
+  הטקסט המלא יוצג לאחר סיום העיבוד.” even when older displayable text
+  still exists (reprocess).
+- Public **`PARTIAL` / `FAILED` / `RECOVERY_REQUIRED`**: still omitted
+  (unchanged).
+- Staff OCR technical details (status badges, engine, result rows,
+  timestamps, errors, admin metadata) are unchanged. PHOTO/MANUAL_TEXT/
+  VIDEO public pages are unchanged.
+- `TextPresentation.show_auto_ocr_disclaimer` and `AUTO_OCR_DISCLAIMER`
+  were removed; they had no remaining callers.
+
+**Tests:** `documents.tests.DocumentDetailTextGroupingTests` (public
+READY/PROCESSING/REJECTED + staff collapse); quality REJECTED coverage in
+`documents/test_text_quality_public_ui.py`.
+
 ## Display-only IMAGE page (`include_in_ocr`)
 
 **Decision / implemented:** Staff may append one extra IMAGE page to an

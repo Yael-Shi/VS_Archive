@@ -1,5 +1,5 @@
 {% load status_labels %}
-{% if is_admin or doc.processing_state_user == "READY" or doc.processing_state_user == "PROCESSING" %}
+{% if is_admin or doc.processing_state_user == "PROCESSING" %}
 <details class="review-details review-details--secondary document-detail-technical">
   <summary>פרטים טכניים</summary>
   <div class="review-details-body">
@@ -18,17 +18,11 @@
       </div>
     {% endif %}
 
-    {% if doc.processing_state_user == "PROCESSING" or text_presentation.show_auto_ocr_disclaimer %}
+    {% if doc.processing_state_user == "PROCESSING" %}
       {% if is_admin %}<div class="spacer-sm"></div>{% endif %}
       <div class="page-lead">
-        {% if doc.processing_state_user == "PROCESSING" %}
-          העיבוד האוטומטי עדיין רץ. הטקסט המלא יוצג לאחר סיום העיבוד.
-        {% elif text_presentation.show_auto_ocr_disclaimer %}
-          הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות.
-        {% endif %}
+        העיבוד האוטומטי עדיין רץ. הטקסט המלא יוצג לאחר סיום העיבוד.
       </div>
-    {% elif not is_admin %}
-      <div class="page-lead">הטקסט המוצג עבר בקרה אנושית.</div>
     {% endif %}
 
     {% if is_admin %}

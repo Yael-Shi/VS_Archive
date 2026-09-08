@@ -179,6 +179,11 @@ class TextQualityPublicUiTests(TestCase):
         badge = self._badge_html(html)
         self.assertIn("text-quality-indicator__badge--needs-correction", badge)
         self.assertIn("נדרש תיקון", badge)
+        self.assertNotIn(
+            "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות.",
+            html,
+        )
+        self.assertNotIn("document-detail-technical", html)
         self.assertIn("text-quality-indicator", self._top_meta_html(html))
         self.assertNotIn('class="text-quality-indicator__heading"', html)
         self.assertNotIn("text-quality-indicator", self._text_blocks_html(html))
@@ -399,6 +404,12 @@ class TextQualityPublicUiTests(TestCase):
         )
         body_end = html.index("archive-detail-manual-text-signature", body_start)
         self.assertNotIn("text-quality-indicator", html[body_start:body_end])
+        self.assertNotIn("document-detail-technical", html)
+        self.assertNotIn("פרטים טכניים", html)
+        self.assertNotIn(
+            "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות.",
+            html,
+        )
         status_html = html[html.index("archive-detail-manual-text-status") : body_start]
         self.assertIn("data-text-quality-indicator", status_html)
         indicator = public_text_quality_indicator_for_manual_text(

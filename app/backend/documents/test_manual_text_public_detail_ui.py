@@ -99,6 +99,11 @@ class ManualTextPublicDetailUiTests(TestCase):
         self.assertNotContains(
             resp, "archive-detail-manual-text-staff-management-actions"
         )
+        self.assertNotContains(resp, "פרטים טכניים")
+        self.assertNotContains(resp, "document-detail-technical")
+        self.assertNotContains(
+            resp, "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות."
+        )
 
         public_start = html.index("archive-detail-manual-text-navigation-actions")
         public_end = html.index("</div>", public_start)

@@ -50,7 +50,6 @@ class TextPresentation:
     hebrew_meta: TextBlockDisplayMeta
     show_source: bool
     show_hebrew: bool
-    show_auto_ocr_disclaimer: bool
 
 
 DOCUMENT_DETAIL_TOP_ANCHOR_ID = "document-detail-top"
@@ -66,39 +65,6 @@ class DocumentDetailJumpNav:
     show_transcription: bool
     show_hebrew_translation: bool
     transcription_target_id: str
-
-
-AUTO_OCR_DISCLAIMER = "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות."
-
-
-def _displayed_text_blocks_with_content(
-    presentation: TextPresentation,
-) -> list[DisplayTextBlock]:
-    blocks: list[DisplayTextBlock] = []
-    if (
-        presentation.show_source
-        and presentation.source
-        and (presentation.source.text or "").strip()
-    ):
-        blocks.append(presentation.source)
-    if (
-        presentation.show_hebrew
-        and presentation.hebrew
-        and (presentation.hebrew.text or "").strip()
-    ):
-        blocks.append(presentation.hebrew)
-    return blocks
-
-
-def presentation_show_auto_ocr_disclaimer(presentation: TextPresentation) -> bool:
-    """True when at least one displayed text block with content is not human-verified."""
-    blocks = _displayed_text_blocks_with_content(presentation)
-    if not blocks:
-        return False
-    return any(
-        block.verification_status != DocumentTextResult.VerificationStatus.VERIFIED
-        for block in blocks
-    )
 
 
 def build_document_detail_jump_nav(
@@ -481,17 +447,6 @@ def get_text_presentation_for_document(doc: Document) -> TextPresentation:
         show_hebrew=show_hebrew,
     )
 
-    presentation_without_disclaimer_flag = TextPresentation(
-        source=source,
-        hebrew=hebrew,
-        missing=missing,
-        expected=expected,
-        source_meta=source_meta,
-        hebrew_meta=hebrew_meta,
-        show_source=show_source,
-        show_hebrew=show_hebrew,
-        show_auto_ocr_disclaimer=False,
-    )
     return TextPresentation(
         source=source,
         hebrew=hebrew,
@@ -501,9 +456,6 @@ def get_text_presentation_for_document(doc: Document) -> TextPresentation:
         hebrew_meta=hebrew_meta,
         show_source=show_source,
         show_hebrew=show_hebrew,
-        show_auto_ocr_disclaimer=presentation_show_auto_ocr_disclaimer(
-            presentation_without_disclaimer_flag
-        ),
     )
 
 
