@@ -138,6 +138,7 @@ class ArchivePersonPublicCardTests(TestCase):
         resp = self.client.get(reverse("archive-list"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "אנשים קשורים")
+        self.assertNotContains(resp, "אנשים קשורים לפריט")
         self.assertContains(resp, _person_href_html(person), count=4)
         self.assertContains(resp, "Card Linked Person")
         self.assertIn(f"/archive/people/{person.id}/", resp.content.decode())
@@ -292,22 +293,22 @@ class ArchivePersonPublicDetailTests(TestCase):
         resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
-        self.assertContains(resp, "אנשים קשורים")
+        self.assertContains(resp, "אנשים קשורים לפריט")
         self.assertContains(resp, "Item Related Person")
         self.assertContains(resp, _person_href_html(related))
-        self.assertContains(resp, "אנשים מזוהים:")
+        self.assertContains(resp, "אנשים בתמונה")
         self.assertContains(resp, "Photo Identified Person")
         self.assertContains(resp, _person_href_html(identified))
         header = html[
             html.index("archive-detail-photo-header") : html.index("</header>")
         ]
-        self.assertIn("אנשים קשורים", header)
+        self.assertIn("אנשים קשורים לפריט", header)
         self.assertIn("Item Related Person", header)
         self.assertIn(_person_href_html(related), header)
-        self.assertNotIn("אנשים מזוהים:", header)
+        self.assertNotIn("אנשים בתמונה", header)
         self.assertNotIn("Photo Identified Person", header)
-        identified_idx = html.index("אנשים מזוהים:")
-        related_idx = html.index("אנשים קשורים")
+        identified_idx = html.index("אנשים בתמונה")
+        related_idx = html.index("אנשים קשורים לפריט")
         identified_block = html[identified_idx : html.index("</div>", identified_idx)]
         related_block = html[related_idx : html.index("</div>", related_idx)]
         self.assertIn("Photo Identified Person", identified_block)
@@ -322,6 +323,132 @@ class ArchivePersonPublicDetailTests(TestCase):
             html.rfind("archive-detail-meta-block--photo", 0, identified_idx),
             -1,
         )
+
+    def test_non_photo_detail_keeps_generic_related_people_heading(self):
+        person = Person.objects.create(name="Generic Heading Person")
+        manual = _public_manual("Manual people heading")
+        video = _public_video("Video people heading")
+        ocr = _public_ocr("OCR people heading")
+        _link_person(manual, person)
+        _link_person(video, person)
+        _link_person(ocr.archive_item, person)
+
+        manual_resp = self.client.get(
+            reverse("archive-detail", kwargs={"item_id": manual.id})
+        )
+        video_resp = self.client.get(
+            reverse("archive-detail", kwargs={"item_id": video.id})
+        )
+        ocr_resp = self.client.get(
+            reverse("documents-detail-page", kwargs={"doc_id": ocr.id})
+        )
+        for resp in (manual_resp, video_resp, ocr_resp):
+            self.assertEqual(resp.status_code, 200)
+            self.assertContains(resp, "אנשים קשורים")
+            self.assertNotContains(resp, "אנשים קשורים לפריט")
+            self.assertNotContains(resp, "אנשים בתמונה")
+            self.assertContains(resp, _person_href_html(person))
+
+    @patch("documents.views.create_presigned_get", return_value=PRESIGNED_URL)
+    def test_overlapping_photoperson_and_aip_shows_one_list(self, _mock_presign):
+        item = _public_photo("Overlap only")
+        photo = item.photo_contents.get()
+        person = Person.objects.create(name="Both Relations Person")
+        PhotoPerson.objects.create(photo_content=photo, person=person)
+        _link_person(item, person)
+
+        resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
+        html = resp.content.decode()
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "אנשים בתמונה")
+        self.assertContains(resp, "Both Relations Person")
+        self.assertContains(resp, _person_href_html(person))
+        self.assertNotContains(resp, "אנשים קשורים לפריט")
+        self.assertEqual(html.count("Both Relations Person"), 1)
+
+    @patch("documents.views.create_presigned_get", return_value=PRESIGNED_URL)
+    def test_overlapping_photoperson_leaves_extra_aip_in_secondary(self, _mock_presign):
+        item = _public_photo("Overlap plus extra")
+        photo = item.photo_contents.get()
+        in_photo = Person.objects.create(name="In Photo Person")
+        extra = Person.objects.create(name="Extra Item Person")
+        PhotoPerson.objects.create(photo_content=photo, person=in_photo)
+        _link_person(item, in_photo)
+        _link_person(item, extra)
+
+        resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
+        html = resp.content.decode()
+        self.assertContains(resp, "אנשים בתמונה")
+        self.assertContains(resp, "אנשים קשורים לפריט")
+        identified_idx = html.index("אנשים בתמונה")
+        related_idx = html.index("אנשים קשורים לפריט")
+        identified_block = html[identified_idx : html.index("</div>", identified_idx)]
+        related_block = html[related_idx : html.index("</div>", related_idx)]
+        self.assertIn("In Photo Person", identified_block)
+        self.assertIn(_person_href_html(in_photo), identified_block)
+        self.assertNotIn("Extra Item Person", identified_block)
+        self.assertIn("Extra Item Person", related_block)
+        self.assertIn(_person_href_html(extra), related_block)
+        self.assertNotIn("In Photo Person", related_block)
+        self.assertNotIn(_person_href_html(in_photo), related_block)
+
+    @patch("documents.views.create_presigned_get", return_value=PRESIGNED_URL)
+    def test_other_photo_person_stays_in_item_list_on_selected_photo(
+        self, _mock_presign
+    ):
+        item = _public_photo("Multi photo people")
+        first = item.photo_contents.get()
+        second = _add_uploaded_photo(item, position=2)
+        on_second = Person.objects.create(name="Only On Second")
+        PhotoPerson.objects.create(photo_content=second, person=on_second)
+        _link_person(item, on_second)
+
+        album = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
+        self.assertEqual(album.status_code, 200)
+        self.assertNotContains(album, "אנשים בתמונה")
+        self.assertContains(album, "אנשים קשורים לפריט")
+        self.assertContains(album, "Only On Second")
+        self.assertContains(album, _person_href_html(on_second))
+
+        first_view = self.client.get(
+            reverse("archive-detail", kwargs={"item_id": item.id}),
+            {"photo": str(first.id)},
+        )
+        html = first_view.content.decode()
+        self.assertNotContains(first_view, "אנשים בתמונה")
+        self.assertContains(first_view, "אנשים קשורים לפריט")
+        self.assertContains(first_view, "Only On Second")
+        self.assertIn("אנשים קשורים לפריט", html)
+        related_block = html[
+            html.index("אנשים קשורים לפריט") : html.index(
+                "</div>", html.index("אנשים קשורים לפריט")
+            )
+        ]
+        self.assertIn("Only On Second", related_block)
+        self.assertIn(_person_href_html(on_second), related_block)
+
+    @patch("documents.views.create_presigned_get", return_value=PRESIGNED_URL)
+    def test_same_canonical_name_distinct_ids_remain_visible(self, _mock_presign):
+        item = _public_photo("Same name distinct ids")
+        photo = item.photo_contents.get()
+        in_photo = Person.objects.create(name="Same Name")
+        item_only = Person.objects.create(name="Same Name")
+        PhotoPerson.objects.create(photo_content=photo, person=in_photo)
+        _link_person(item, in_photo)
+        _link_person(item, item_only)
+
+        resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
+        html = resp.content.decode()
+        self.assertContains(resp, "אנשים בתמונה")
+        self.assertContains(resp, "אנשים קשורים לפריט")
+        identified_idx = html.index("אנשים בתמונה")
+        related_idx = html.index("אנשים קשורים לפריט")
+        identified_block = html[identified_idx : html.index("</div>", identified_idx)]
+        related_block = html[related_idx : html.index("</div>", related_idx)]
+        self.assertIn(_person_href_html(in_photo), identified_block)
+        self.assertNotIn(_person_href_html(item_only), identified_block)
+        self.assertIn(_person_href_html(item_only), related_block)
+        self.assertNotIn(_person_href_html(in_photo), related_block)
 
 
 class ArchivePersonPublicQueryCountTests(TestCase):

@@ -1094,13 +1094,17 @@ class ArchiveItemPersonStaffUiTests(ArchiveItemPersonStaffUiHarness, TestCase):
         )
         self.assertEqual(manual_detail.status_code, 200)
         self.assertEqual(photo_detail.status_code, 200)
-        for resp in (list_resp, manual_detail, photo_detail):
+        for resp in (list_resp, manual_detail):
             self.assertNotContains(resp, 'name="archive_item_person_ids"')
             self.assertNotContains(resp, PHOTO_ARCHIVE_ITEM_PEOPLE_HEADING)
             self.assertNotContains(resp, "אנשים קשורים לפריט זה")
+        self.assertNotContains(photo_detail, 'name="archive_item_person_ids"')
+        self.assertNotContains(photo_detail, "אנשים קשורים לפריט זה")
+        self.assertContains(photo_detail, PHOTO_ARCHIVE_ITEM_PEOPLE_HEADING)
         self.assertContains(manual_detail, "PublicHiddenPersonToken")
         self.assertContains(photo_detail, "PublicHiddenPersonToken")
         self.assertNotContains(photo_detail, "אנשים מזוהים:")
+        self.assertNotContains(photo_detail, "אנשים בתמונה")
 
 
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")

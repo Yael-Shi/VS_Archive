@@ -6,7 +6,7 @@ Stored enum/database values are unchanged; templates and forms map values here.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from urllib.parse import urlencode
 
@@ -1248,12 +1248,22 @@ def person_public_page_url(person_id: int) -> str:
     return reverse("archive-person-detail", kwargs={"person_id": person_id})
 
 
-def person_links_for_item(archive_item: ArchiveItem) -> tuple[ArchiveBrowseLink, ...]:
+ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING = "אנשים קשורים"
+PHOTO_ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING = "אנשים קשורים לפריט"
+
+
+def person_links_for_item(
+    archive_item: ArchiveItem,
+    *,
+    exclude_person_ids: Collection[int] = (),
+) -> tuple[ArchiveBrowseLink, ...]:
     """Item-level ArchiveItemPerson links, ordered by ``(name, id)``.
 
     Identity is ``Person.id``. Duplicate names stay distinct. PhotoPerson is
-    not read.
+    not read. ``exclude_person_ids`` is for public PHOTO selected-photo
+    dedup only; browse cards omit it.
     """
+    excluded = set(exclude_person_ids)
     people = sorted(
         _prefetched_relation(archive_item, "people"),
         key=lambda person: (person.name, person.id),
@@ -1264,6 +1274,22 @@ def person_links_for_item(archive_item: ArchiveItem) -> tuple[ArchiveBrowseLink,
             href=person_public_page_url(person.id),
         )
         for person in people
+        if person.id not in excluded
+    )
+
+
+def photo_detail_item_person_links(
+    archive_item: ArchiveItem,
+    *,
+    identified_person_ids: Collection[int] = (),
+    is_album_view: bool,
+) -> tuple[ArchiveBrowseLink, ...]:
+    """Public PHOTO detail AIP links; album keeps the full item set."""
+    if is_album_view:
+        return person_links_for_item(archive_item)
+    return person_links_for_item(
+        archive_item,
+        exclude_person_ids=identified_person_ids,
     )
 
 
@@ -1275,6 +1301,7 @@ def public_discovery_context(archive_item: ArchiveItem | None) -> dict:
             "person_links": (),
             "author_links": (),
             "author_display": "",
+            "person_links_heading": ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING,
         }
     author_links, author_display = author_presentation_for_item(archive_item)
     return {
@@ -1282,6 +1309,7 @@ def public_discovery_context(archive_item: ArchiveItem | None) -> dict:
         "person_links": person_links_for_item(archive_item),
         "author_links": author_links,
         "author_display": author_display,
+        "person_links_heading": ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING,
     }
 
 

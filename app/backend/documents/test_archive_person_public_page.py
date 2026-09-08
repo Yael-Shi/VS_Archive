@@ -846,25 +846,25 @@ class PersonPublicPageLinkRetargetTests(TestCase):
         html = resp.content.decode("utf-8")
         identified_href = person_public_page_url(identified.id)
         related_href = person_public_page_url(related.id)
-        self.assertContains(resp, "אנשים מזוהים:")
+        self.assertContains(resp, "אנשים בתמונה")
         self.assertContains(resp, "Photo Identified Person")
         self.assertContains(
             resp,
             f'<a href="{identified_href}">Photo Identified Person</a>',
         )
-        self.assertContains(resp, "אנשים קשורים")
+        self.assertContains(resp, "אנשים קשורים לפריט")
         self.assertContains(resp, "Item Related Person")
         self.assertContains(resp, related_href)
         header = html[
             html.index("archive-detail-photo-header") : html.index("</header>")
         ]
-        self.assertIn("אנשים קשורים", header)
+        self.assertIn("אנשים קשורים לפריט", header)
         self.assertIn("Item Related Person", header)
         self.assertIn(related_href, header)
-        self.assertNotIn("אנשים מזוהים:", header)
+        self.assertNotIn("אנשים בתמונה", header)
         self.assertNotIn("Photo Identified Person", header)
-        self.assertLess(html.index("אנשים מזוהים:"), html.index("photo-detail__image"))
-        self.assertEqual(html.count("אנשים מזוהים:"), 1)
+        self.assertLess(html.index("אנשים בתמונה"), html.index("photo-detail__image"))
+        self.assertEqual(html.count("אנשים בתמונה"), 1)
         self.assertEqual(html.count("Photo Identified Person"), 1)
         appearance = html[
             html.index("archive-detail-meta-block--photo") : html.index(

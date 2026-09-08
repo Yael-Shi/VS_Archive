@@ -1,5 +1,45 @@
 # VS-Archive Decision Log
 
+## Public PHOTO detail person-list dedup (PhotoPerson vs ArchiveItemPerson)
+
+**Decision / implemented:** Public PHOTO detail no longer lists the same
+`Person.id` under both item-level people and selected-photo people.
+
+**Current behavior:**
+
+- Selected-photo / single-photo public PHOTO detail:
+  - Primary list is `PhotoPerson` for the selected photo only, labeled
+    **אנשים בתמונה** (no colon). Canonical-name links to
+    `/archive/people/<Person.id>/` are unchanged.
+  - Secondary list is `ArchiveItemPerson` minus `Person.id` values already
+    in that primary list, labeled **אנשים קשורים לפריט** (no colon).
+  - The secondary list is omitted when empty (including when every AIP
+    person also appears on the selected photo).
+  - Dedup is `Person.id` only. Duplicate canonical names stay distinct.
+    Aliases are not read. `people_present` stays a separate free-text row.
+- Album view (multi-photo, no `?photo=`): no PhotoPerson list (unchanged).
+  The full item-level AIP list remains, labeled **אנשים קשורים לפריט**.
+  Other-photo appearances are not subtracted.
+- A person who appears only on another photo of the same item remains in
+  the secondary list when viewing the current photo.
+- Legacy PhotoPerson without AIP still appears in the primary list.
+- MANUAL_TEXT / OCR / VIDEO detail and browse/homepage cards still use
+  **אנשים קשורים** for AIP. Staff PHOTO item form still uses
+  **אנשים קשורים לפריט**; staff photo appearance form still uses
+  **אנשים מזוהים בתמונה**. Write paths and PhotoPerson→AIP propagation
+  are unchanged.
+
+**Supersedes:** public PHOTO presentation that showed the full AIP set
+under **אנשים קשורים** next to a separate **אנשים מזוהים:** PhotoPerson
+list (see **PhotoPerson implies ArchiveItemPerson; public PHOTO album vs
+selected photo**, **Public PhotoPerson name links**, and **Public
+presentation cutover (Person vs Tag, Stage A)**). Relation semantics
+are unchanged.
+
+**Tests:** `documents/test_archive_person_public_presentation.py`,
+`documents/test_photo_public_gallery.py`,
+`documents/test_archive_person_public_page.py`.
+
 ## Public OCR technical-details cleanup (quality indicator is the review signal)
 
 **Decision / implemented:** Public OCR document detail no longer shows the
@@ -149,6 +189,9 @@ ArchiveItemPerson” rule is reversed in one direction only.
   - invalid/foreign/non-renderable `?photo=` still falls back to the first
     renderable photo (no existence leak). PhotoPerson names on the selected
     photo remain appearance-only; AIP stays under **אנשים קשורים**.
+    **Superseded for public PHOTO list labels:** selected-photo AIP is now
+    **אנשים קשורים לפריט** minus selected PhotoPerson ids; primary list is
+    **אנשים בתמונה**. See **Public PHOTO detail person-list dedup**.
 
 **Supersedes:** statements that PhotoPerson and ArchiveItemPerson are never
 inferred from each other, including importer “no AIP writes”, add-photo
@@ -1376,6 +1419,11 @@ canonical-name links to the existing public Person page. This is
 presentation only. `PhotoPerson` and `ArchiveItemPerson` stay separate
 relations. Person-page authorization is unchanged.
 
+**Public list labels superseded:** selected-photo names are now under
+**אנשים בתמונה**; `PublicIdentifiedPersonLink` also carries `person_id`
+for AIP dedup. See **Public PHOTO detail person-list dedup**. Link
+behavior is unchanged.
+
 **Current behavior:**
 
 - Selected-photo `PhotoPerson` rows still use canonical `Person.name`,
@@ -2357,11 +2405,11 @@ and unified Person detail** for current behavior):**
   items span multiple pages, and **חזרה לארכיון**. Aliases are not
   displayed. No public staff-edit link.
 - Item-level **אנשים קשורים** links on archive cards, homepage cards,
-  archive detail, and OCR document detail go to the Person page
-  (`person_public_page_url`). PhotoPerson **אנשים מזוהים:** names are
-  canonical-name links to the same Person page (see **Public PhotoPerson
-  name links**). PhotoPerson still does not create ArchiveItemPerson
-  cards.
+  MANUAL_TEXT / OCR / VIDEO detail go to the Person page
+  (`person_public_page_url`). Public PHOTO detail uses **אנשים בתמונה**
+  and leftover AIP **אנשים קשורים לפריט** (see **Public PHOTO detail
+  person-list dedup**). PhotoPerson still does not create
+  ArchiveItemPerson cards.
 - Stage B mapped historical Tag browse
   `/archive/tags/<mapped_tag_id>/` now **302**s to the Person page
   (map-first). Following that URL still 404s when the Person has no
@@ -2477,6 +2525,10 @@ public card `קשור ל־` and detail `תגיות:`. Identity is `Person.id`.
 Person links go to `/archive/people/<Person.id>/`. Ordinary Tags, events,
 categories, current ordering, visibility, and existing URLs are
 unchanged. PhotoPerson / **אנשים מזוהים:** stay separate.
+
+**Public PHOTO list labels superseded:** see **Public PHOTO detail
+person-list dedup**. Cards and non-PHOTO detail still use **אנשים
+קשורים**.
 
 **Current behavior:**
 
