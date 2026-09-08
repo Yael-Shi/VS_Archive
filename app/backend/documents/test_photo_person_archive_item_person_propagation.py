@@ -173,9 +173,7 @@ class EnsureArchiveItemPersonRaceTests(TestCase):
         missed.first.return_value = None
 
         with transaction.atomic():
-            with patch.object(
-                ArchiveItemPerson.objects, "filter", return_value=missed
-            ):
+            with patch.object(ArchiveItemPerson.objects, "filter", return_value=missed):
                 with patch(
                     "documents.services.archive_search_index.sync_archive_item_search_index"
                 ) as mocked:

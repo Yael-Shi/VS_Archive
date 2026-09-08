@@ -73,9 +73,7 @@ class RegisteredAdapterDeadlineCompatTests(SimpleTestCase):
             )
         self.assertEqual(gemini_result.text, "gemini-ok")
         mock_gemini.assert_called_once()
-        self.assertNotIn(
-            "absolute_deadline_monotonic", mock_gemini.call_args.kwargs
-        )
+        self.assertNotIn("absolute_deadline_monotonic", mock_gemini.call_args.kwargs)
 
         with patch.object(
             TranskribusAdapter,
@@ -100,14 +98,17 @@ class RegisteredAdapterDeadlineCompatTests(SimpleTestCase):
             "absolute_deadline_monotonic", mock_transkribus.call_args.kwargs
         )
 
-        with patch(
-            "documents.services.htr_adapters.antigravity_adapter."
-            "process_arabic_printed_banded_document"
-        ) as mock_coordinator, patch(
-            "documents.services.htr_adapters.antigravity_adapter."
-            "transcribe_pages_with_antigravity",
-            side_effect=_raise_if_deadline("transcribe_pages_with_antigravity"),
-        ) as mock_json:
+        with (
+            patch(
+                "documents.services.htr_adapters.antigravity_adapter."
+                "process_arabic_printed_banded_document"
+            ) as mock_coordinator,
+            patch(
+                "documents.services.htr_adapters.antigravity_adapter."
+                "transcribe_pages_with_antigravity",
+                side_effect=_raise_if_deadline("transcribe_pages_with_antigravity"),
+            ) as mock_json,
+        ):
             antigravity_result = transcribe_pages(
                 pages,
                 Document.Language.ARABIC,
@@ -126,7 +127,5 @@ class RegisteredAdapterDeadlineCompatTests(SimpleTestCase):
         self.assertEqual(antigravity_result.text, "antigravity-json-ok")
         mock_coordinator.assert_not_called()
         mock_json.assert_called_once()
-        self.assertNotIn(
-            "absolute_deadline_monotonic", mock_json.call_args.kwargs
-        )
+        self.assertNotIn("absolute_deadline_monotonic", mock_json.call_args.kwargs)
         self.assertNotIn("timeout_seconds", mock_json.call_args.kwargs)

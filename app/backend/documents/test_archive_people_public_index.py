@@ -504,7 +504,9 @@ class UnifiedPeopleDirectoryMembershipTests(TestCase):
         PhotoPerson.objects.create(photo_content=triple_photo, person=triple)
         extra_author = Author.objects.create(name="Second Linked Author", person=triple)
         _link_author(_public_manual("Triple authored letter"), extra_author)
-        _link_author(triple_item, Author.objects.create(name="Overlap Author", person=triple))
+        _link_author(
+            triple_item, Author.objects.create(name="Overlap Author", person=triple)
+        )
 
         unlinked_author = Author.objects.create(name="Unified Author Only")
         _link_author(_public_manual("Author-only letter"), unlinked_author)
@@ -541,7 +543,9 @@ class UnifiedPeopleDirectoryMembershipTests(TestCase):
 
         author_only_row = _row_by_href(resp, author_public_page_url(unlinked_author.id))
         self.assertEqual(author_only_row.name, "Unified Author Only")
-        self.assertEqual(author_only_row.identity_kind, PublicDirectoryIdentityKind.AUTHOR)
+        self.assertEqual(
+            author_only_row.identity_kind, PublicDirectoryIdentityKind.AUTHOR
+        )
 
         html = _people_index_list_html(resp)
         self.assertNotIn("Linked Author Display Name", html)
@@ -608,7 +612,9 @@ class UnifiedPeopleDirectorySearchTests(TestCase):
         same_author = Author.objects.create(name="SharedSearchName")
         _link_author(_public_manual("Shared author letter"), same_author)
 
-        canonical_resp = self.client.get(_index_url(), {"q": "CanonicalDirectoryPerson"})
+        canonical_resp = self.client.get(
+            _index_url(), {"q": "CanonicalDirectoryPerson"}
+        )
         self.assertEqual(_row_names(canonical_resp), ["CanonicalDirectoryPerson"])
 
         alias_resp = self.client.get(_index_url(), {"q": "AliasOnlyDirectoryToken"})
@@ -616,9 +622,13 @@ class UnifiedPeopleDirectorySearchTests(TestCase):
         self.assertNotIn("AliasOnlyDirectoryToken", _people_index_list_html(alias_resp))
 
         linked_resp = self.client.get(_index_url(), {"q": "LinkedAuthorSearchToken"})
-        self.assertEqual(_row_hrefs(linked_resp), [person_public_page_url(linked_person.id)])
+        self.assertEqual(
+            _row_hrefs(linked_resp), [person_public_page_url(linked_person.id)]
+        )
         self.assertEqual(_row_names(linked_resp), ["Person With Linked Author"])
-        self.assertNotIn(author_public_page_url(linked_author.id), _row_hrefs(linked_resp))
+        self.assertNotIn(
+            author_public_page_url(linked_author.id), _row_hrefs(linked_resp)
+        )
 
         unlinked_resp = self.client.get(
             _index_url(), {"q": "IndependentAuthorOnlySearchToken"}
@@ -649,7 +659,9 @@ class UnifiedPeopleDirectorySearchTests(TestCase):
         self.assertEqual(_row_names(hidden), [])
         self.assertNotIn(person_public_page_url(person.id), _row_hrefs(hidden))
         self.assertNotIn("VisibleAipPerson", hidden.content.decode("utf-8"))
-        self.assertNotIn("PrivateOnlyLinkedAuthorToken", _people_index_list_html(hidden))
+        self.assertNotIn(
+            "PrivateOnlyLinkedAuthorToken", _people_index_list_html(hidden)
+        )
 
         by_name = self.client.get(_index_url(), {"q": "VisibleAipPerson"})
         self.assertEqual(_row_hrefs(by_name), [person_public_page_url(person.id)])
@@ -699,9 +711,7 @@ class UnifiedPeopleDirectorySearchTests(TestCase):
         self.assertEqual(_row_names(anon_restricted), [])
 
         self.client.force_login(family)
-        family_private = self.client.get(
-            _index_url(), {"q": "FamilyLinkedAuthorToken"}
-        )
+        family_private = self.client.get(_index_url(), {"q": "FamilyLinkedAuthorToken"})
         self.assertEqual(
             _row_hrefs(family_private), [person_public_page_url(person.id)]
         )
@@ -718,9 +728,7 @@ class UnifiedPeopleDirectorySearchTests(TestCase):
         restricted_ok = self.client.get(
             _index_url(), {"q": "RestrictedLinkedAuthorToken"}
         )
-        self.assertEqual(
-            _row_hrefs(restricted_ok), [person_public_page_url(person.id)]
-        )
+        self.assertEqual(_row_hrefs(restricted_ok), [person_public_page_url(person.id)])
 
 
 class UnifiedPeopleDirectoryOrderAndPaginationTests(TestCase):

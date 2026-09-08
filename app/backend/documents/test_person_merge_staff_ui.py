@@ -35,9 +35,13 @@ FROZEN_PERSON_IDS = frozenset(
 def _next_ordinary_person_id() -> int:
     """Return an unused Person.id above frozen historical ids and existing PKs."""
     max_frozen = max(FROZEN_PERSON_IDS)
-    max_existing = Person.objects.order_by("-pk").values_list("pk", flat=True).first() or 0
+    max_existing = (
+        Person.objects.order_by("-pk").values_list("pk", flat=True).first() or 0
+    )
     candidate = max(max_frozen, max_existing) + 1
-    while candidate in FROZEN_PERSON_IDS or Person.objects.filter(pk=candidate).exists():
+    while (
+        candidate in FROZEN_PERSON_IDS or Person.objects.filter(pk=candidate).exists()
+    ):
         candidate += 1
     return candidate
 
@@ -230,9 +234,7 @@ class PersonMergeStaffFlowTests(TestCase):
         self.assertEqual(missing.status_code, 200)
         self.assertContains(missing, "אדם מזוהה לא נמצא")
 
-        invalid = self.client.get(
-            _merge_url(self.keeper), data={"duplicate_id": "abc"}
-        )
+        invalid = self.client.get(_merge_url(self.keeper), data={"duplicate_id": "abc"})
         self.assertEqual(invalid.status_code, 200)
 
         empty = self.client.get(_merge_url(self.keeper))

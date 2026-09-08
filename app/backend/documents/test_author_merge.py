@@ -372,9 +372,7 @@ class AuthorMergeServiceTests(TestCase):
         self.assertEqual(_author_name(item), "DuplicateAuthor")
         self.assertEqual(_order(late_item), [])
         self.assertEqual(_author_name(late_item), "LateUnrelatedAuthor")
-        self.assertFalse(
-            ArchiveItemAuthor.objects.filter(author=self.keeper).exists()
-        )
+        self.assertFalse(ArchiveItemAuthor.objects.filter(author=self.keeper).exists())
 
     def test_locks_items_before_authors_and_locks_coauthors(self):
         item = _item(title="Lock order", author_name="Bob, DuplicateAuthor")

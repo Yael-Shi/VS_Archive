@@ -38,9 +38,7 @@ def set_author_person(*, author: Author, person_id: int | None) -> Author:
     """
     target_person: Person | None = None
     if person_id is not None:
-        target_person = (
-            Person.objects.select_for_update().filter(pk=person_id).first()
-        )
+        target_person = Person.objects.select_for_update().filter(pk=person_id).first()
         if target_person is None:
             raise ArchiveItemAuthorError(PERSON_NOT_FOUND_ERROR)
 

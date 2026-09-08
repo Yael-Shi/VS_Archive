@@ -41,7 +41,9 @@ class PersonDuplicateCandidateMatchingTests(TestCase):
             create_identified_people_from_new_names("יעקב כהן")
         conflict = raised.exception.check.conflicts[0]
         self.assertEqual(conflict.submitted_name, "יעקב כהן")
-        self.assertEqual([candidate.id for candidate in conflict.candidates], [existing.id])
+        self.assertEqual(
+            [candidate.id for candidate in conflict.candidates], [existing.id]
+        )
         self.assertEqual(Person.objects.filter(name="יעקב כהן").count(), 1)
 
     def test_case_insensitive_canonical_match_blocks_creation(self):
@@ -49,7 +51,10 @@ class PersonDuplicateCandidateMatchingTests(TestCase):
         with self.assertRaises(PersonNameDuplicateConflictError) as raised:
             create_identified_people_from_new_names("ADA")
         self.assertEqual(
-            [candidate.id for candidate in raised.exception.check.conflicts[0].candidates],
+            [
+                candidate.id
+                for candidate in raised.exception.check.conflicts[0].candidates
+            ],
             [existing.id],
         )
         self.assertFalse(Person.objects.filter(name="ADA").exists())
@@ -60,7 +65,10 @@ class PersonDuplicateCandidateMatchingTests(TestCase):
         with self.assertRaises(PersonNameDuplicateConflictError) as raised:
             create_identified_people_from_new_names("Jacob Cohen")
         self.assertEqual(
-            [candidate.id for candidate in raised.exception.check.conflicts[0].candidates],
+            [
+                candidate.id
+                for candidate in raised.exception.check.conflicts[0].candidates
+            ],
             [person.id],
         )
         self.assertFalse(Person.objects.filter(name="Jacob Cohen").exists())

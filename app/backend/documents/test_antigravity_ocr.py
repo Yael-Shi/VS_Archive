@@ -1190,9 +1190,7 @@ class AntigravityAdapterBandedWiringTests(SimpleTestCase):
             pages=pages,
             language_hint="ar",
             prompt_variant="printed",
-            worker_env=_make_worker_env(
-                enable_antigravity_arabic_printed_banded=False
-            ),
+            worker_env=_make_worker_env(enable_antigravity_arabic_printed_banded=False),
             document_id=9,
         )
 
@@ -1232,9 +1230,7 @@ class AntigravityAdapterBandedWiringTests(SimpleTestCase):
             pages=_one_page(),
             language_hint="ar",
             prompt_variant="printed",
-            worker_env=_make_worker_env(
-                enable_antigravity_arabic_printed_banded=False
-            ),
+            worker_env=_make_worker_env(enable_antigravity_arabic_printed_banded=False),
             document_id=9,
             absolute_deadline_monotonic=_BANDED_DEADLINE,
         )
@@ -1260,7 +1256,9 @@ class AntigravityAdapterBandedWiringTests(SimpleTestCase):
     ):
         page = _jpeg_page(1, label=b"source-one")
         mock_coordinator.return_value = _completed_banded_result(
-            _banded_page_result(0, text="النص الكامل", marker="antigravity-banded:unassisted")
+            _banded_page_result(
+                0, text="النص الكامل", marker="antigravity-banded:unassisted"
+            )
         )
         adapter = AntigravityAdapter()
 
@@ -1279,9 +1277,7 @@ class AntigravityAdapterBandedWiringTests(SimpleTestCase):
         kwargs = mock_coordinator.call_args.kwargs
         self.assertEqual(kwargs["document_id"], 9)
         self.assertEqual(kwargs["gemini_api_key"], "test-api-key")
-        self.assertEqual(
-            kwargs["cloud_vision_api_key"], "vision-test-key-DO-NOT-LEAK"
-        )
+        self.assertEqual(kwargs["cloud_vision_api_key"], "vision-test-key-DO-NOT-LEAK")
         self.assertEqual(kwargs["language_hint"], "ar")
         self.assertEqual(kwargs["text_input_type"], Document.TextInputType.PRINTED)
         self.assertEqual(kwargs["absolute_deadline_monotonic"], _BANDED_DEADLINE)
@@ -1349,11 +1345,9 @@ class AntigravityAdapterBandedWiringTests(SimpleTestCase):
     def test_retryable_persistence_maps_to_engine_page_exception(
         self, mock_transcribe, mock_coordinator
     ):
-        mock_coordinator.side_effect = (
-            ArabicPrintedCheckpointPersistenceRetryableError(
-                stage="claim_page",
-                page_index=0,
-            )
+        mock_coordinator.side_effect = ArabicPrintedCheckpointPersistenceRetryableError(
+            stage="claim_page",
+            page_index=0,
         )
         with self.assertRaises(EnginePageCheckpointPersistenceRetryableError) as raised:
             AntigravityAdapter().execute(
@@ -1409,16 +1403,10 @@ class AntigravityAdapterBandedWiringTests(SimpleTestCase):
     @patch(
         "documents.services.htr_adapters.antigravity_adapter.process_arabic_printed_banded_document"
     )
-    def test_completed_uses_banded_runtime_marker_not_agent_id(
-        self, mock_coordinator
-    ):
+    def test_completed_uses_banded_runtime_marker_not_agent_id(self, mock_coordinator):
         mock_coordinator.return_value = _completed_banded_result(
-            _banded_page_result(
-                0, text="one", marker="antigravity-banded:unassisted"
-            ),
-            _banded_page_result(
-                1, text="two", marker="antigravity-banded:assisted"
-            ),
+            _banded_page_result(0, text="one", marker="antigravity-banded:unassisted"),
+            _banded_page_result(1, text="two", marker="antigravity-banded:assisted"),
         )
         result = AntigravityAdapter().execute(
             pages=[_jpeg_page(1, label=b"m1"), _jpeg_page(2, label=b"m2")],
@@ -1433,7 +1421,9 @@ class AntigravityAdapterBandedWiringTests(SimpleTestCase):
             "antigravity-banded:assisted",
         ]
         digest = hashlib.sha256(
-            json.dumps(markers, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            json.dumps(markers, ensure_ascii=False, separators=(",", ":")).encode(
+                "utf-8"
+            )
         ).hexdigest()[:ARABIC_PRINTED_RUNTIME_ENGINE_DIGEST_LEN]
         expected = f"antigravity-banded:mixed:{digest}"
         self.assertEqual(result.engine_name, expected)
@@ -1511,7 +1501,6 @@ class AntigravityAdapterBandedWiringTests(SimpleTestCase):
                 absolute_deadline_monotonic=_BANDED_DEADLINE,
             )
 
-
     @patch(
         "documents.services.htr_adapters.antigravity_adapter.prepare_arabic_printed_working_image"
     )
@@ -1579,9 +1568,7 @@ class AntigravityBandedEnvValidationTests(SimpleTestCase):
         ):
             cfg = validate_required_env()
         self.assertTrue(cfg.enable_antigravity_arabic_printed_banded)
-        self.assertEqual(
-            cfg.google_cloud_vision_api_key, "vision-test-key-DO-NOT-LEAK"
-        )
+        self.assertEqual(cfg.google_cloud_vision_api_key, "vision-test-key-DO-NOT-LEAK")
 
 
 class AntigravityBandedCdkWiringTests(SimpleTestCase):

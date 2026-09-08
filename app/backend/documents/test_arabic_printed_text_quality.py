@@ -8,7 +8,11 @@ from unittest.mock import patch
 from django.test import SimpleTestCase, TestCase, override_settings
 
 from documents.management.commands.run_worker import Command
-from documents.models import ArabicPrintedOcrPageCheckpoint, Document, DocumentTextResult
+from documents.models import (
+    ArabicPrintedOcrPageCheckpoint,
+    Document,
+    DocumentTextResult,
+)
 from documents.services.archive_items import create_ocr_document
 from documents.services.arabic_printed_text_quality import (
     quality_from_banded_page_qualities,

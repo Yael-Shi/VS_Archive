@@ -451,13 +451,9 @@ class ManualTextPublicDetailLayoutStyleTests(SimpleTestCase):
         self.assertIn("availableWidth,", js)
         self.assertIn('signature.style.width = fittingWidth + "px"', js)
         self.assertIn("safeTopInCard", js)
-        self.assertIn(
-            "cardHeight = cardRect.height - borders.top - borders.bottom", js
-        )
+        self.assertIn("cardHeight = cardRect.height - borders.top - borders.bottom", js)
         self.assertIn("signatureHeight = fittingWidth * 9 / 16", js)
-        self.assertIn(
-            "cardHeight - signatureHeight - spacing", js
-        )
+        self.assertIn("cardHeight - signatureHeight - spacing", js)
         self.assertNotIn("page.clientHeight", js)
         self.assertNotIn("signature.offsetHeight", js)
         self.assertIn("desiredTopInCard", js)

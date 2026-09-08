@@ -162,9 +162,7 @@ class AuthorMergeStaffFlowTests(TestCase):
         self.assertContains(missing, AUTHOR_NOT_FOUND_ERROR)
         self.assertTrue(Author.objects.filter(pk=self.duplicate.pk).exists())
 
-        invalid = self.client.get(
-            _merge_url(self.keeper), data={"duplicate_id": "abc"}
-        )
+        invalid = self.client.get(_merge_url(self.keeper), data={"duplicate_id": "abc"})
         self.assertEqual(invalid.status_code, 200)
         self.assertTrue(Author.objects.filter(pk=self.duplicate.pk).exists())
 

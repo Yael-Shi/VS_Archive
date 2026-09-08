@@ -151,7 +151,9 @@ class Command(BaseCommand):
         self._write_candidate_rows(report)
         self.stdout.write("")
         self.stdout.write("Commit results:")
-        self.stdout.write(f"  source_files_deleted: {apply_result.source_files_deleted}")
+        self.stdout.write(
+            f"  source_files_deleted: {apply_result.source_files_deleted}"
+        )
         self.stdout.write(f"  s3_keys_deleted: {apply_result.s3_keys_deleted}")
         self.stdout.write(f"  s3_keys_not_found: {apply_result.s3_keys_not_found}")
         if apply_result.s3_delete_failures:

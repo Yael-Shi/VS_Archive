@@ -45,9 +45,13 @@ FROZEN_PERSON_IDS = frozenset(
 def _next_ordinary_person_id() -> int:
     """Return an unused Person.id above frozen historical ids and existing PKs."""
     max_frozen = max(FROZEN_PERSON_IDS)
-    max_existing = Person.objects.order_by("-pk").values_list("pk", flat=True).first() or 0
+    max_existing = (
+        Person.objects.order_by("-pk").values_list("pk", flat=True).first() or 0
+    )
     candidate = max(max_frozen, max_existing) + 1
-    while candidate in FROZEN_PERSON_IDS or Person.objects.filter(pk=candidate).exists():
+    while (
+        candidate in FROZEN_PERSON_IDS or Person.objects.filter(pk=candidate).exists()
+    ):
         candidate += 1
     return candidate
 
@@ -177,9 +181,13 @@ class PersonMergeServiceTests(TestCase):
             )
         )
         self.assertEqual(linked, {shared.pk, only_dup.pk})
-        self.assertEqual(ArchiveItemPerson.objects.filter(person_id=duplicate.pk).count(), 0)
         self.assertEqual(
-            ArchiveItemPerson.objects.filter(archive_item=shared, person=keeper).count(),
+            ArchiveItemPerson.objects.filter(person_id=duplicate.pk).count(), 0
+        )
+        self.assertEqual(
+            ArchiveItemPerson.objects.filter(
+                archive_item=shared, person=keeper
+            ).count(),
             1,
         )
 
@@ -303,7 +311,9 @@ class PersonMergeServiceTests(TestCase):
 
     def test_biography_copy_when_keeper_empty(self):
         keeper = _create_ordinary_person(name="Keeper", biography="")
-        duplicate = _create_ordinary_person(name="Duplicate", biography="  Copied bio  ")
+        duplicate = _create_ordinary_person(
+            name="Duplicate", biography="  Copied bio  "
+        )
 
         result = merge_persons(keeper_id=keeper.pk, duplicate_id=duplicate.pk)
 

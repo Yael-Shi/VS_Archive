@@ -172,7 +172,9 @@ class ArabicPrintedCheckpointIdentityTests(TestCase):
             prompt_contract_version="arabic-printed-banded-prompt-v2",
         )
 
-        self.assertNotEqual(original.identity_fingerprint, replaced.identity_fingerprint)
+        self.assertNotEqual(
+            original.identity_fingerprint, replaced.identity_fingerprint
+        )
         self.assertNotEqual(original.source_fingerprint, replaced.source_fingerprint)
         self.assertNotEqual(
             original.identity_fingerprint,
@@ -237,7 +239,11 @@ class ArabicPrintedCheckpointIdentityTests(TestCase):
         ArabicPrintedOcrPageCheckpoint.objects.filter(
             attempt=attempt,
             page_index=0,
-        ).update(oriented_image_width=999, banding_strategy="other", max_band_height_ratio="0.200")
+        ).update(
+            oriented_image_width=999,
+            banding_strategy="other",
+            max_band_height_ratio="0.200",
+        )
 
         with self.assertRaises(ArabicPrintedIdentityMismatchError):
             ensure_arabic_printed_page_checkpoints(
@@ -353,7 +359,9 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         self.assertEqual(len(pages), 2)
         self.assertEqual([page.page_index for page in pages], [0, 1])
         for page in pages:
-            self.assertEqual(page.status, ArabicPrintedOcrPageCheckpoint.Status.PLANNING)
+            self.assertEqual(
+                page.status, ArabicPrintedOcrPageCheckpoint.Status.PLANNING
+            )
             self.assertIsNone(page.lease_token)
             self.assertIsNone(page.assembled_text)
             self.assertEqual(page.cloud_vision_call_count, 0)
@@ -771,7 +779,9 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
                 transcription_sha256=_sha256_text("ok"),
                 transcription_byte_length=2,
             )
-        with self.assertRaisesRegex(ValueError, "failed band or confirmed cancellation"):
+        with self.assertRaisesRegex(
+            ValueError, "failed band or confirmed cancellation"
+        ):
             select_arabic_printed_band_cloud_vision_low_quality(
                 checkpoint_id=claim.checkpoint_id,
                 lease_token=claim.lease_token,
@@ -996,7 +1006,9 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
             lease_token=claim.lease_token,
             band_index=0,
         )
-        with self.assertRaisesRegex(ValueError, "failed band or confirmed cancellation"):
+        with self.assertRaisesRegex(
+            ValueError, "failed band or confirmed cancellation"
+        ):
             select_arabic_printed_band_cloud_vision_low_quality(
                 checkpoint_id=claim.checkpoint_id,
                 lease_token=claim.lease_token,
@@ -1015,7 +1027,9 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
             lease_token=claim.lease_token,
             band_index=0,
         )
-        with self.assertRaisesRegex(ValueError, "failed band or confirmed cancellation"):
+        with self.assertRaisesRegex(
+            ValueError, "failed band or confirmed cancellation"
+        ):
             select_arabic_printed_band_cloud_vision_low_quality(
                 checkpoint_id=claim.checkpoint_id,
                 lease_token=claim.lease_token,
@@ -1034,7 +1048,9 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
             band_index=0,
             diagnostics={"cancel_confirmed_status": "unknown"},
         )
-        with self.assertRaisesRegex(ValueError, "failed band or confirmed cancellation"):
+        with self.assertRaisesRegex(
+            ValueError, "failed band or confirmed cancellation"
+        ):
             select_arabic_printed_band_cloud_vision_low_quality(
                 checkpoint_id=claim.checkpoint_id,
                 lease_token=claim.lease_token,
@@ -1389,7 +1405,10 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
             },
         )
         self.assertEqual(
-            {constraint.name for constraint in GeminiOcrPageCheckpoint._meta.constraints},
+            {
+                constraint.name
+                for constraint in GeminiOcrPageCheckpoint._meta.constraints
+            },
             {
                 "uniq_gem_ocr_attempt_page",
                 "gem_ocr_page_index_gte_1",

@@ -88,9 +88,7 @@ class ArchiveAdvancedFilters:
         """Stable GET pairs for URL construction (repeatable M2M params)."""
         params: list[tuple[str, str]] = []
         if self.author_id is not None:
-            params.append(
-                (ARCHIVE_ADVANCED_FILTER_PARAM_AUTHOR, str(self.author_id))
-            )
+            params.append((ARCHIVE_ADVANCED_FILTER_PARAM_AUTHOR, str(self.author_id)))
         for category_id in self.category_ids:
             params.append((ARCHIVE_ADVANCED_FILTER_PARAM_CATEGORY, str(category_id)))
         for event_id in self.event_ids:

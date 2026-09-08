@@ -214,8 +214,9 @@ def _has_resumable_arabic_printed_checkpoint_evidence(doc: Document) -> bool:
         return False
 
     pages = list(
-        ArabicPrintedOcrPageCheckpoint.objects.filter(attempt_id=attempt.id)
-        .prefetch_related("band_checkpoints")
+        ArabicPrintedOcrPageCheckpoint.objects.filter(
+            attempt_id=attempt.id
+        ).prefetch_related("band_checkpoints")
     )
     if not pages:
         return False

@@ -86,7 +86,9 @@ class ArchiveAdvancedAuthorFilterTests(TestCase):
         _link(other, second, position=0)
 
         filters = normalize_archive_advanced_filters({"author": str(first.id)})
-        qs = filter_archive_items_by_advanced_filters(ArchiveItem.objects.all(), filters)
+        qs = filter_archive_items_by_advanced_filters(
+            ArchiveItem.objects.all(), filters
+        )
         self.assertEqual(_ids(qs), [match.pk])
 
         resp = self.client.get(self.url, {"author": str(first.id), "advanced": "1"})
@@ -207,7 +209,9 @@ class ArchiveAdvancedAuthorFilterTests(TestCase):
         _set_author_name_only(legacy, "Orphan Legacy Name")
 
         resp = self.client.get(self.url, {"advanced": "1"})
-        names = [author.name for author in resp.context["advanced_filter_author_choices"]]
+        names = [
+            author.name for author in resp.context["advanced_filter_author_choices"]
+        ]
         self.assertEqual(names, ["Choice Linked Author"])
         self.assertNotIn("Orphan Legacy Name", names)
         self.assertEqual(
@@ -216,7 +220,9 @@ class ArchiveAdvancedAuthorFilterTests(TestCase):
         )
 
     def test_unauthorized_authors_are_omitted_from_choices(self):
-        public_item = _public_manual("Public author item", author_name="Public Choice Author")
+        public_item = _public_manual(
+            "Public author item", author_name="Public Choice Author"
+        )
         private_item = create_manual_text_archive_item(
             title="Private author item",
             body="secret",
@@ -237,7 +243,10 @@ class ArchiveAdvancedAuthorFilterTests(TestCase):
         self.client.force_login(self.family)
         family = self.client.get(self.url, {"advanced": "1"})
         self.assertEqual(
-            {author.name for author in family.context["advanced_filter_author_choices"]},
+            {
+                author.name
+                for author in family.context["advanced_filter_author_choices"]
+            },
             {"Public Choice Author", "Private Choice Author"},
         )
         self.assertIn(public_item.title, family.content.decode("utf-8"))
@@ -258,9 +267,7 @@ class ArchiveAdvancedAuthorFilterTests(TestCase):
         ids = _ids(
             filter_archive_items_by_advanced_filters(
                 authorized,
-                normalize_archive_advanced_filters(
-                    {"author": str(private_author_id)}
-                ),
+                normalize_archive_advanced_filters({"author": str(private_author_id)}),
             )
         )
         self.assertNotIn(public_legacy.pk, ids)
@@ -339,7 +346,8 @@ class ArchiveAdvancedAuthorFilterTests(TestCase):
         self.assertTrue(
             any(
                 "documents_author" in query["sql"].lower().replace('"', "")
-                and "documents_archiveitemauthor" in query["sql"].lower().replace('"', "")
+                and "documents_archiveitemauthor"
+                in query["sql"].lower().replace('"', "")
                 for query in loaded.captured_queries
             )
         )

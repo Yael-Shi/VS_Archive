@@ -261,8 +261,13 @@ def build_arabic_printed_attempt_identity(
     source_pages: list[dict[str, Any]] = []
     for page in ordered_pages:
         if page.oriented_image_width < 1 or page.oriented_image_height < 1:
-            raise ValueError("Arabic printed identity requires oriented image dimensions")
-        if len(page.oriented_image_sha256) != 64 or len(page.source_content_fingerprint) != 64:
+            raise ValueError(
+                "Arabic printed identity requires oriented image dimensions"
+            )
+        if (
+            len(page.oriented_image_sha256) != 64
+            or len(page.source_content_fingerprint) != 64
+        ):
             raise ValueError("Arabic printed identity requires SHA-256 fingerprints")
         page_payload = {
             "mime_type": page.mime_type,
@@ -407,7 +412,9 @@ def ensure_arabic_printed_page_checkpoints(
                     "source_content_fingerprint": (
                         identity.source_content_fingerprints[page_index]
                     ),
-                    "oriented_image_sha256": identity.oriented_image_sha256s[page_index],
+                    "oriented_image_sha256": identity.oriented_image_sha256s[
+                        page_index
+                    ],
                     "oriented_image_width": width,
                     "oriented_image_height": height,
                     "banding_contract_fingerprint": identity.banding_contract_fingerprint,
@@ -416,8 +423,7 @@ def ensure_arabic_printed_page_checkpoints(
                     "status": ArabicPrintedOcrPageCheckpoint.Status.PLANNING,
                 }
                 checkpoint, created = (
-                    ArabicPrintedOcrPageCheckpoint.objects.select_for_update()
-                    .get_or_create(
+                    ArabicPrintedOcrPageCheckpoint.objects.select_for_update().get_or_create(
                         attempt=attempt,
                         page_index=page_index,
                         defaults=defaults,
@@ -668,7 +674,9 @@ def _locked_band(
         .first()
     )
     if band is None:
-        raise ValueError(f"Arabic printed band_index={band_index} is missing for the page")
+        raise ValueError(
+            f"Arabic printed band_index={band_index} is missing for the page"
+        )
     return band
 
 
@@ -708,9 +716,7 @@ def _normalize_diagnostics_payload(
         return payload
     unknown = set(diagnostics) - _BAND_SAFE_DIAGNOSTIC_FIELDS
     if unknown:
-        raise ValueError(
-            "Unsupported diagnostic fields: " + ", ".join(sorted(unknown))
-        )
+        raise ValueError("Unsupported diagnostic fields: " + ", ".join(sorted(unknown)))
     return dict(diagnostics)
 
 
@@ -823,13 +829,17 @@ def _validate_vision_plan(
         if band.rect_x != 0 or band.rect_width != page_width:
             raise ValueError("Vision plan bands must be full width")
         if band.rect_y < 0 or band.rect_height < 1:
-            raise ValueError("Band rectangle coordinates must be nonnegative with positive size")
+            raise ValueError(
+                "Band rectangle coordinates must be nonnegative with positive size"
+            )
         if band.rect_y + band.rect_height > page_height:
             raise ValueError("Band rectangle is outside the oriented page dimensions")
         if index == 0 and band.rect_y < 0:
             raise ValueError("Band rectangle is outside the oriented page dimensions")
         if index > 0 and band.rect_y < previous_bottom:
-            raise ValueError("Vision plan bands must be vertically ordered and non-overlapping")
+            raise ValueError(
+                "Vision plan bands must be vertically ordered and non-overlapping"
+            )
         previous_bottom = band.rect_y + band.rect_height
         if band.crop_byte_length < 1 or len(band.crop_sha256) != 64:
             raise ValueError("Vision plan bands require crop hash and byte length")
@@ -897,17 +907,13 @@ def reserve_arabic_printed_vision_call(
             if _durable_vision_plan_exists(checkpoint):
                 raise ValueError("Vision call already reserved for this page")
             if checkpoint.cloud_vision_call_count != 0:
-                raise ValueError(
-                    "Ambiguous Vision reservation cannot be repeated"
-                )
+                raise ValueError("Ambiguous Vision reservation cannot be repeated")
             if (
                 checkpoint.band_count != 0
                 or checkpoint.cloud_vision_response_sha256
                 or checkpoint.band_checkpoints.exists()
             ):
-                raise ValueError(
-                    "Ambiguous Vision reservation cannot be repeated"
-                )
+                raise ValueError("Ambiguous Vision reservation cannot be repeated")
             checkpoint.cloud_vision_call_count = 1
             checkpoint.save(
                 update_fields=["cloud_vision_call_count", "updated_at"],
@@ -946,7 +952,11 @@ def persist_arabic_printed_vision_plan(
             existing = list(
                 checkpoint.band_checkpoints.select_for_update().order_by("band_index")
             )
-            if existing or checkpoint.band_count or checkpoint.cloud_vision_response_sha256:
+            if (
+                existing
+                or checkpoint.band_count
+                or checkpoint.cloud_vision_response_sha256
+            ):
                 _stored_plan_matches(
                     checkpoint,
                     existing,
@@ -1047,7 +1057,9 @@ def reserve_arabic_printed_primary_create(
                 ArabicPrintedOcrBandCheckpoint.Status.PENDING,
                 ArabicPrintedOcrBandCheckpoint.Status.FAILED,
             }:
-                raise ValueError("Primary reservation requires a pending or failed band")
+                raise ValueError(
+                    "Primary reservation requires a pending or failed band"
+                )
             band.status = ArabicPrintedOcrBandCheckpoint.Status.PRIMARY_RUNNING
             band.create_call_count = 1
             band.completed_at = None
@@ -1119,7 +1131,9 @@ def mark_arabic_printed_band_cancel_pending(
                 ArabicPrintedOcrBandCheckpoint.Status.PRIMARY_RUNNING,
                 ArabicPrintedOcrBandCheckpoint.Status.FALLBACK_RUNNING,
             }:
-                raise ValueError("Cancel pending requires a reserved primary or fallback")
+                raise ValueError(
+                    "Cancel pending requires a reserved primary or fallback"
+                )
             if (
                 band.status == ArabicPrintedOcrBandCheckpoint.Status.PRIMARY_RUNNING
                 and band.create_call_count != 1
@@ -1248,7 +1262,10 @@ def persist_arabic_printed_band_success(
         raise ValueError("Band success requires an Antigravity selected result")
     expected_sha = _utf8_sha256(normalized)
     expected_len = _utf8_byte_length(normalized)
-    if transcription_sha256 != expected_sha or transcription_byte_length != expected_len:
+    if (
+        transcription_sha256 != expected_sha
+        or transcription_byte_length != expected_len
+    ):
         raise ValueError("Band transcription hash metadata does not match text")
     try:
         with transaction.atomic():
@@ -1258,7 +1275,10 @@ def persist_arabic_printed_band_success(
                 operation="band success",
             )
             band = _locked_band(checkpoint, band_index)
-            if selected_result == ArabicPrintedOcrBandCheckpoint.SelectedResult.UNASSISTED:
+            if (
+                selected_result
+                == ArabicPrintedOcrBandCheckpoint.SelectedResult.UNASSISTED
+            ):
                 if band.status not in {
                     ArabicPrintedOcrBandCheckpoint.Status.PRIMARY_RUNNING,
                     ArabicPrintedOcrBandCheckpoint.Status.CANCEL_PENDING,
@@ -1336,7 +1356,9 @@ def select_arabic_printed_band_cloud_vision_low_quality(
             )
             band = _locked_band(checkpoint, band_index)
             if band.create_call_count > ARABIC_PRINTED_MAX_CREATES_PER_BAND:
-                raise ValueError("Low-quality selection requires create_call_count 0..2")
+                raise ValueError(
+                    "Low-quality selection requires create_call_count 0..2"
+                )
             if not _low_quality_path_is_allowed(band):
                 raise ValueError(
                     "CLOUD_VISION_LOW_QUALITY requires a failed band or confirmed cancellation"
@@ -1348,7 +1370,9 @@ def select_arabic_printed_band_cloud_vision_low_quality(
                 band.vision_draft_sha256 != expected_draft_sha
                 or band.vision_draft_byte_length != expected_draft_len
             ):
-                raise ValueError("Stored Vision draft hash metadata does not match draft text")
+                raise ValueError(
+                    "Stored Vision draft hash metadata does not match draft text"
+                )
             normalized = stored_draft.strip()
             if not normalized:
                 raise ValueError("Stored Vision draft is empty")
@@ -1450,8 +1474,7 @@ def persist_arabic_printed_band_failure(
 
 def _rollup_page_quality(selected: Sequence[str]) -> str:
     if any(
-        value
-        == ArabicPrintedOcrBandCheckpoint.SelectedResult.CLOUD_VISION_LOW_QUALITY
+        value == ArabicPrintedOcrBandCheckpoint.SelectedResult.CLOUD_VISION_LOW_QUALITY
         for value in selected
     ):
         return ArabicPrintedOcrPageCheckpoint.PageQuality.CLOUD_VISION_LOW_QUALITY
@@ -1475,7 +1498,10 @@ def _runtime_engine_marker(selected: Sequence[str]) -> str:
             for index, value in enumerate(selected)
         ]
         digest = _canonical_sha256(mapping)[:ARABIC_PRINTED_RUNTIME_ENGINE_DIGEST_LEN]
-        if quality == ArabicPrintedOcrPageCheckpoint.PageQuality.CLOUD_VISION_LOW_QUALITY:
+        if (
+            quality
+            == ArabicPrintedOcrPageCheckpoint.PageQuality.CLOUD_VISION_LOW_QUALITY
+        ):
             marker = f"antigravity-banded:cloud-vision-lq:{digest}"
         else:
             marker = f"antigravity-banded:mixed:{digest}"

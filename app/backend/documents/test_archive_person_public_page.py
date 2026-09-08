@@ -918,7 +918,9 @@ class PersonPublicPageLinkedAuthorTests(TestCase):
         self.assertEqual(_titles(resp), {"Authored public letter"})
         self.assertEqual(resp.context["total_count"], 1)
         self.assertEqual(len(resp.context["browse_cards"]), 1)
-        self.assertContains(resp, '<h1 class="page-title">Authored Only Person</h1>', html=True)
+        self.assertContains(
+            resp, '<h1 class="page-title">Authored Only Person</h1>', html=True
+        )
         self.assertContains(resp, "Bibliographic Name")
         person_href = person_public_page_url(person.id)
         self.assertContains(
@@ -942,7 +944,9 @@ class PersonPublicPageLinkedAuthorTests(TestCase):
         resp = self.client.get(_person_page(person))
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.context["total_count"], 2)
-        self.assertEqual(_titles(resp), {"Overlap authored album", "Authored extra letter"})
+        self.assertEqual(
+            _titles(resp), {"Overlap authored album", "Authored extra letter"}
+        )
         self.assertEqual(
             _card_urls(resp).count(public_photo_detail_url(item.id, photo.id)),
             1,

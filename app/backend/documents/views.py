@@ -464,9 +464,7 @@ def _bad(msg: str):
 def _json_people_error_response(parsed_people: dict, people_errors: list[str]):
     conflicts = parsed_people.get("person_name_conflicts") or []
     if conflicts:
-        return JsonResponse(
-            person_name_candidates_error_payload(conflicts), status=400
-        )
+        return JsonResponse(person_name_candidates_error_payload(conflicts), status=400)
     return JsonResponse({"error": people_errors[0]}, status=400)
 
 
@@ -3676,9 +3674,7 @@ def transkribus_paragraph_editor_page(request, doc_id: int):
             "source_is_rtl": editor.source_is_rtl,
             "adoption_suggestions": editor.adoption_suggestions,
             "adoption_intro": editor.adoption_intro,
-            "show_display_only_page_add_action": is_display_only_page_add_eligible(
-                doc
-            ),
+            "show_display_only_page_add_action": is_display_only_page_add_eligible(doc),
         },
     )
 
@@ -5752,11 +5748,7 @@ def archive_detail_page(request, item_id: int):
 
         photo_content = photo_gallery.selected
         photo_url = None
-        if (
-            not photo_gallery.is_album_view
-            and photo_content is not None
-            and bucket
-        ):
+        if not photo_gallery.is_album_view and photo_content is not None and bucket:
             photo_url = create_presigned_get(
                 bucket=bucket,
                 key=photo_content.original_file_key,
@@ -6280,9 +6272,7 @@ def _author_edit_form_context(
 ) -> dict:
     affected_items = affected_archive_items_for_author(author)
     selected_ids = [author.person_id] if author.person_id is not None else []
-    person_choices, _ = build_staff_person_choices(
-        selected_person_ids=selected_ids
-    )
+    person_choices, _ = build_staff_person_choices(selected_person_ids=selected_ids)
     linked_person = next(
         (choice for choice in person_choices if choice.id == author.person_id),
         None,
@@ -6423,9 +6413,7 @@ def archive_manage_author_merge_page(request, author_id: int):
                     form_errors = [exc.message]
                 else:
                     messages.success(request, AUTHOR_MERGED_MSG)
-                    return redirect(
-                        "archive-manage-author-edit", author_id=keeper.id
-                    )
+                    return redirect("archive-manage-author-edit", author_id=keeper.id)
         elif confirm == "1" and preview is not None and preview.blockers:
             form_errors = [preview.blockers[0]]
 

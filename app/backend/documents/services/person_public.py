@@ -292,7 +292,9 @@ def matching_photo_ids_for_selected_persons(
     selected ids is a superset of S; omit the item when no such photo exists.
     """
     selected = tuple(
-        person_id for person_id in (int(value) for value in person_ids) if person_id >= 1
+        person_id
+        for person_id in (int(value) for value in person_ids)
+        if person_id >= 1
     )
     page_ids = [
         item_id for item_id in (int(value) for value in item_ids) if item_id >= 1

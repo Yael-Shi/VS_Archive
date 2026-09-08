@@ -31,9 +31,7 @@ AUTHOR_MERGE_ID_REQUIRED_ERROR = "יש להזין מזהה של רשומת המ�
 AUTHOR_MERGE_ID_INVALID_ERROR = "מזהה המחבר/ת חייב להיות מספר שלם חיובי."
 AUTHOR_MERGE_SAME_ID_ERROR = "לא ניתן למזג רשומת מחבר/ת עם עצמה."
 AUTHOR_MERGE_CONCURRENCY_ERROR = "המיזוג נכשל בגלל שינוי מקביל. נסו שוב."
-AUTHOR_MERGE_PERSON_CONFLICT_ERROR = (
-    "לא ניתן למזג: הרשומות מקושרות לאנשים שונים."
-)
+AUTHOR_MERGE_PERSON_CONFLICT_ERROR = "לא ניתן למזג: הרשומות מקושרות לאנשים שונים."
 
 
 class AuthorMergeError(ArchiveItemAuthorError):
@@ -178,7 +176,9 @@ def preview_author_merge(*, keeper: Author, duplicate: Author) -> AuthorMergePre
         item.pk: item
         for item in ArchiveItem.objects.filter(pk__in=item_ids).order_by("pk")
     }
-    links_by_item: dict[int, list[ArchiveItemAuthor]] = {item_id: [] for item_id in item_ids}
+    links_by_item: dict[int, list[ArchiveItemAuthor]] = {
+        item_id: [] for item_id in item_ids
+    }
     for link in (
         ArchiveItemAuthor.objects.filter(archive_item_id__in=item_ids)
         .select_related("author")
@@ -205,7 +205,10 @@ def preview_author_merge(*, keeper: Author, duplicate: Author) -> AuthorMergePre
             deduped += 1
         else:
             moved += 1
-        if len(joined) > AUTHOR_NAME_MAX_LENGTH and AUTHOR_JOINED_TOO_LONG_ERROR not in blockers:
+        if (
+            len(joined) > AUTHOR_NAME_MAX_LENGTH
+            and AUTHOR_JOINED_TOO_LONG_ERROR not in blockers
+        ):
             blockers.append(AUTHOR_JOINED_TOO_LONG_ERROR)
 
     if _linked_person_conflict(keeper, duplicate):
@@ -274,7 +277,9 @@ def merge_author(*, keeper: Author, duplicate: Author) -> AuthorMergeResult:
     locked_items: dict[int, ArchiveItem] = {}
     while True:
         current_ids = affected_archive_item_ids_for_author(duplicate)
-        missing_ids = [item_id for item_id in current_ids if item_id not in locked_items]
+        missing_ids = [
+            item_id for item_id in current_ids if item_id not in locked_items
+        ]
         if not missing_ids:
             break
         locked_items.update(_lock_archive_items_for_update(missing_ids))

@@ -499,9 +499,9 @@ class PhotoAddUploadTests(TestCase):
         self.assertEqual(resp.status_code, 201)
         photo = PhotoContent.objects.get(pk=resp.json()["photo_content_id"])
         created = list(
-            Person.objects.filter(name__in=["Unique Add One", "Unique Add Two"]).order_by(
-                "id"
-            )
+            Person.objects.filter(
+                name__in=["Unique Add One", "Unique Add Two"]
+            ).order_by("id")
         )
         self.assertEqual(
             [person.name for person in created], ["Unique Add One", "Unique Add Two"]
@@ -877,9 +877,7 @@ class PhotoComponentEditTests(TestCase):
             1,
         )
         self.assertFalse(
-            PhotoPerson.objects.filter(
-                photo_content=self.first, person=person
-            ).exists()
+            PhotoPerson.objects.filter(photo_content=self.first, person=person).exists()
         )
         self.assertEqual(self.second.people_present, "crowd")
 
@@ -1552,12 +1550,8 @@ class PhotoMultiPublicCompatibilityTests(TestCase):
         mock_presign.assert_not_called()
         self.assertContains(resp, "photo-gallery--album")
         self.assertContains(resp, "photo-gallery__thumbs--album")
-        self.assertContains(
-            resp, public_photo_detail_url(self.item.id, self.first.id)
-        )
-        self.assertContains(
-            resp, public_photo_detail_url(self.item.id, self.second.id)
-        )
+        self.assertContains(resp, public_photo_detail_url(self.item.id, self.first.id))
+        self.assertContains(resp, public_photo_detail_url(self.item.id, self.second.id))
         self.assertNotContains(resp, 'class="photo-detail__image"')
         self.assertNotContains(resp, "photo-gallery--selected")
         self.assertNotContains(resp, "חזרה לכל התמונות")

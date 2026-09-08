@@ -696,7 +696,7 @@ class PhotoCreateMultiFileUploadTests(TestCase):
         self.assertNotIn('id="new_author_name"', html)
         add_branch = html[
             html.index('if (uploadMode === "add")') : html.index(
-                "const meta = {\n      title: get(\"title\")"
+                'const meta = {\n      title: get("title")'
             )
         ]
         self.assertNotIn("author_ids", add_branch)

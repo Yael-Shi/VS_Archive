@@ -59,9 +59,7 @@ class PersonNameDuplicateConflictError(PhotoContentManagementError):
     """Raised when new-Person tokens match existing people without force-create."""
 
     def __init__(self, check: NewPersonNamesCheck):
-        message = (
-            check.errors[0] if check.errors else PERSON_NAME_CANDIDATES_ERROR
-        )
+        message = check.errors[0] if check.errors else PERSON_NAME_CANDIDATES_ERROR
         super().__init__(message)
         self.check = check
 

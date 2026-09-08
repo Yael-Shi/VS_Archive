@@ -160,7 +160,9 @@ class ReviewedPhotoPersonImportTests(TestCase):
         self.assertEqual(result.noop_count, 2)
         self.assertEqual(Person.objects.count(), person_count)
         self.assertEqual(
-            ReviewedPersonImportBinding.objects.get(operation_id="create-amos").person_id,
+            ReviewedPersonImportBinding.objects.get(
+                operation_id="create-amos"
+            ).person_id,
             bound.person_id,
         )
         self.assertEqual(
@@ -597,7 +599,9 @@ class ReviewedPhotoPersonImportTests(TestCase):
                 "local_person_ref": "p-1",
             },
         )
-        with patch.object(PhotoPerson.objects, "create", side_effect=RuntimeError("boom")):
+        with patch.object(
+            PhotoPerson.objects, "create", side_effect=RuntimeError("boom")
+        ):
             with self.assertRaises(RuntimeError):
                 apply_reviewed_photo_person_import(payload)
         self.assertFalse(Person.objects.filter(name="Rollback Person").exists())
@@ -749,7 +753,9 @@ class ReviewedPhotoPersonImportTests(TestCase):
         result = merge_persons(keeper_id=keeper.pk, duplicate_id=duplicate.pk)
         self.assertEqual(result.import_bindings_repointed, 1)
         self.assertEqual(
-            ReviewedPersonImportBinding.objects.get(operation_id="create-dup").person_id,
+            ReviewedPersonImportBinding.objects.get(
+                operation_id="create-dup"
+            ).person_id,
             keeper.pk,
         )
         self.assertFalse(Person.objects.filter(pk=duplicate.pk).exists())

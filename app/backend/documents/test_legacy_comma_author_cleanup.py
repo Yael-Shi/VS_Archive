@@ -145,7 +145,9 @@ def _seed_reviewed_snapshot() -> dict[str, object]:
             pk: _author(pk=pk, name=name)
             for pk, name in zip(ITEM_289_AUTHOR_IDS, ITEM_289_AUTHOR_NAMES, strict=True)
         },
-        UNRELATED_AUTHOR_ID: _author(pk=UNRELATED_AUTHOR_ID, name="UnrelatedAuthorToken"),
+        UNRELATED_AUTHOR_ID: _author(
+            pk=UNRELATED_AUTHOR_ID, name="UnrelatedAuthorToken"
+        ),
     }
     item_13 = _item(
         pk=ITEM_13_ID,
@@ -250,7 +252,9 @@ class LegacyCommaAuthorCleanupTests(TestCase):
             result = cleanup_legacy_comma_authors(apply=False)
 
         self.assertEqual(result.status, STATUS_DRY_RUN)
-        self.assertEqual(result.planned_item_311_author_ids, ITEM_311_DESIRED_AUTHOR_IDS)
+        self.assertEqual(
+            result.planned_item_311_author_ids, ITEM_311_DESIRED_AUTHOR_IDS
+        )
         self.assertEqual(result.planned_author_name, ITEM_311_AUTHOR_NAME)
         self.assertEqual(result.authors_planned_unlinked_and_deleted, DELETE_AUTHOR_IDS)
         self.assertEqual(result.deleted_author_ids, ())
@@ -405,8 +409,9 @@ class LegacyCommaAuthorCleanupMismatchTests(TestCase):
     def _assert_no_apply(self, mutate, *, fragment: str) -> None:
         mutate()
         reviewed_links = set(
-            ArchiveItemAuthor.objects.filter(archive_item_id__in=REVIEWED_ITEM_IDS)
-            .values_list("archive_item_id", "author_id", "position")
+            ArchiveItemAuthor.objects.filter(
+                archive_item_id__in=REVIEWED_ITEM_IDS
+            ).values_list("archive_item_id", "author_id", "position")
         )
         reviewed_author_names = dict(
             ArchiveItem.objects.filter(pk__in=REVIEWED_ITEM_IDS).values_list(
@@ -440,7 +445,9 @@ class LegacyCommaAuthorCleanupMismatchTests(TestCase):
             reviewed_author_names,
         )
         self.assertEqual(
-            set(Author.objects.filter(pk__in=LOCK_AUTHOR_IDS).values_list("pk", "name")),
+            set(
+                Author.objects.filter(pk__in=LOCK_AUTHOR_IDS).values_list("pk", "name")
+            ),
             author_rows,
         )
 

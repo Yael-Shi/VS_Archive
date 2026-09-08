@@ -19,12 +19,8 @@ from documents.services.text_quality import (
 )
 
 TEXT_QUALITY_TOOLTIP_TITLE = "מה המשמעות של דירוג האיכות?"
-TEXT_QUALITY_TOOLTIP_INTRO = (
-    "הדירוג מסייע להעריך עד כמה ניתן להסתמך על הטקסט המוצג."
-)
-TEXT_QUALITY_TOOLTIP_FOOTER = (
-    "ייתכנו שגיאות גם בטקסטים המדורגים באיכות טובה."
-)
+TEXT_QUALITY_TOOLTIP_INTRO = "הדירוג מסייע להעריך עד כמה ניתן להסתמך על הטקסט המוצג."
+TEXT_QUALITY_TOOLTIP_FOOTER = "ייתכנו שגיאות גם בטקסטים המדורגים באיכות טובה."
 # General explanation only. Does not mean HEBREW_TEXT quality is persisted
 # as inherited/capped from SOURCE_TEXT (that writer is still deferred).
 TEXT_QUALITY_TOOLTIP_TRANSLATION_NOTE = (

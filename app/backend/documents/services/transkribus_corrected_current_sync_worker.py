@@ -109,8 +109,7 @@ def _log_unacked_delivery(
     approximate_receive_count: int | None,
 ) -> None:
     logger.info(
-        "SQS message left unacked reason=%s request_id=%s "
-        "approximate_receive_count=%s",
+        "SQS message left unacked reason=%s request_id=%s approximate_receive_count=%s",
         reason,
         request_id,
         approximate_receive_count,

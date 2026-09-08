@@ -89,9 +89,7 @@ class AntigravityAdapter:
     ) -> HtrResult:
         worker_env: Optional["WorkerEnvConfig"] = kwargs.pop("worker_env", None)
         document_id = kwargs.pop("document_id", None)
-        absolute_deadline_monotonic = kwargs.pop(
-            "absolute_deadline_monotonic", None
-        )
+        absolute_deadline_monotonic = kwargs.pop("absolute_deadline_monotonic", None)
 
         if worker_env is None:
             raise EnginePermanentError(
@@ -169,9 +167,10 @@ class AntigravityAdapter:
             raise EnginePermanentError(
                 "Arabic printed banded OCR requires a language hint."
             )
-        if type(absolute_deadline_monotonic) is not int and type(
-            absolute_deadline_monotonic
-        ) is not float:
+        if (
+            type(absolute_deadline_monotonic) is not int
+            and type(absolute_deadline_monotonic) is not float
+        ):
             raise EnginePermanentError(_BANDED_DEADLINE_MESSAGE)
 
         text_input_type = kwargs.get("text_input_type") or (
@@ -224,7 +223,9 @@ class AntigravityAdapter:
 
 def _contiguous_one_based_pages(pages: Sequence[PageImage]) -> list[PageImage]:
     if not pages:
-        raise EnginePermanentError("Arabic printed banded OCR requires at least one page.")
+        raise EnginePermanentError(
+            "Arabic printed banded OCR requires at least one page."
+        )
     ordered = sorted(pages, key=lambda page: page.page_index)
     expected = list(range(1, len(ordered) + 1))
     actual = [page.page_index for page in ordered]

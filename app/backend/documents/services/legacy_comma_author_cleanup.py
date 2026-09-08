@@ -159,9 +159,7 @@ def _require_item_authors(
         _fail(
             f"{CLEANUP_MISMATCH_ERROR}: ArchiveItem.id={item.pk} author_name mismatch"
         )
-    notes.append(
-        f"ArchiveItem.id={item.pk} author_name matches {author_name!r}"
-    )
+    notes.append(f"ArchiveItem.id={item.pk} author_name matches {author_name!r}")
     ids = _ordered_ids(item)
     names = _ordered_names(item)
     if ids != author_ids or names != author_names:
@@ -280,7 +278,9 @@ def _verify_pre_cleanup_snapshot() -> tuple[list[str], str]:
             f"{CLEANUP_MISMATCH_ERROR}: Author.id={AUTHOR_69_ID} links are not "
             f"exactly ArchiveItem.id={ITEM_311_ID}"
         )
-    notes.append(f"Author.id={AUTHOR_69_ID} is linked only to ArchiveItem.id={ITEM_311_ID}")
+    notes.append(
+        f"Author.id={AUTHOR_69_ID} is linked only to ArchiveItem.id={ITEM_311_ID}"
+    )
 
     _require_author(AUTHOR_29_ID, AUTHOR_29_NAME)
     notes.append(f"Author.id={AUTHOR_29_ID} name matches {AUTHOR_29_NAME!r}")
@@ -334,7 +334,9 @@ def _already_complete_result(notes: list[str]) -> LegacyCommaAuthorCleanupResult
     )
 
 
-def cleanup_legacy_comma_authors(*, apply: bool = False) -> LegacyCommaAuthorCleanupResult:
+def cleanup_legacy_comma_authors(
+    *, apply: bool = False
+) -> LegacyCommaAuthorCleanupResult:
     """Dry-run by default. ``apply=True`` mutates inside one transaction."""
     complete_notes = _verify_already_complete()
     if complete_notes is not None:
@@ -390,11 +392,14 @@ def _apply_cleanup(
             joined = _joined_author_name([link.author.name for link in rebuilt_links])
             if len(joined) > AUTHOR_NAME_MAX_LENGTH:
                 _fail(AUTHOR_JOINED_TOO_LONG_ERROR)
-            if (
-                tuple(link.author_id for link in rebuilt_links) != ITEM_311_DESIRED_AUTHOR_IDS
-                or [link.position for link in rebuilt_links] != [0, 1]
-            ):
-                _fail(f"{CLEANUP_MISMATCH_ERROR}: ArchiveItem.id={ITEM_311_ID} order after replace")
+            if tuple(
+                link.author_id for link in rebuilt_links
+            ) != ITEM_311_DESIRED_AUTHOR_IDS or [
+                link.position for link in rebuilt_links
+            ] != [0, 1]:
+                _fail(
+                    f"{CLEANUP_MISMATCH_ERROR}: ArchiveItem.id={ITEM_311_ID} order after replace"
+                )
             if joined != planned_name:
                 _fail(
                     f"{CLEANUP_MISMATCH_ERROR}: rebuilt author_name changed under lock"
@@ -416,9 +421,7 @@ def _apply_cleanup(
                 if remaining.get(author_id, 0) != 0
             ]
             if still_linked:
-                _fail(
-                    f"{CLEANUP_ORPHAN_STILL_LINKED_ERROR}: {still_linked}"
-                )
+                _fail(f"{CLEANUP_ORPHAN_STILL_LINKED_ERROR}: {still_linked}")
 
             for author_id in DELETE_AUTHOR_IDS:
                 locked_authors[author_id].delete()
@@ -496,8 +499,6 @@ def _verify_locked_snapshot(
 
     for author_id in ORPHAN_AGGREGATE_AUTHOR_IDS:
         if _author_link_item_ids(author_id):
-            _fail(
-                f"{CLEANUP_ORPHAN_STILL_LINKED_ERROR}: Author.id={author_id}"
-            )
+            _fail(f"{CLEANUP_ORPHAN_STILL_LINKED_ERROR}: Author.id={author_id}")
     if _author_link_item_ids(AUTHOR_69_ID) != [ITEM_311_ID]:
         raise LegacyCommaAuthorCleanupError(AUTHOR_LINKS_CHANGED_RETRY_ERROR)
