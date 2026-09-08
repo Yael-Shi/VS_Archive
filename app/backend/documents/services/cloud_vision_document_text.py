@@ -514,8 +514,10 @@ def _embedded_cloud_vision_error(
         code = raw_status.strip()
     elif raw_code is not None:
         code = str(raw_code)
-    message = error.get("message")
-    if not isinstance(message, str) or not message.strip():
+    error_message = error.get("message")
+    if isinstance(error_message, str) and error_message.strip():
+        message = error_message
+    else:
         message = "Cloud Vision response contained an embedded error"
     return code, message
 
@@ -599,9 +601,10 @@ def reconstruct_text_from_symbols(
             extra = ""
             is_prefix = False
             if isinstance(brk, dict):
+                break_type = brk.get("type")
                 extra = (
-                    BREAK_WHITESPACE.get(brk.get("type"), "")
-                    if isinstance(brk.get("type"), str)
+                    BREAK_WHITESPACE.get(break_type, "")
+                    if isinstance(break_type, str)
                     else ""
                 )
                 is_prefix = bool(brk.get("isPrefix"))
