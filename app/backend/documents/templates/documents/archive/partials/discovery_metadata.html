@@ -26,7 +26,7 @@
     {% endif %}
     {% if person_links %}
       <div class="archive-detail-meta-row">
-        <strong class="archive-detail-meta-label">אנשים קשורים</strong>
+        <strong class="archive-detail-meta-label">{{ person_links_heading|default:"אנשים קשורים" }}</strong>
         <span class="archive-detail-meta-value">
           {% for link in person_links %}<a href="{{ link.href }}">{{ link.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
         </span>

@@ -44,6 +44,7 @@ class PublicPhotoGalleryItem:
 class PublicIdentifiedPersonLink:
     """Canonical PhotoPerson display name plus public Person page href."""
 
+    person_id: int
     name: str
     href: str
 
@@ -106,6 +107,8 @@ def identified_people_links(
 
     Identity is ``Person.id``. Duplicate canonical names stay distinct.
     Aliases are not read. Empty/placeholder names are omitted.
+    ``person_id`` is the selected-photo appearance identity used by public
+    PHOTO detail to hide matching ArchiveItemPerson rows.
     """
     people = list(photo_content.people.all())
     people.sort(key=lambda person: (person.name, person.pk))
@@ -115,6 +118,7 @@ def identified_people_links(
         if name:
             links.append(
                 PublicIdentifiedPersonLink(
+                    person_id=person.pk,
                     name=name,
                     href=person_public_page_url(person.pk),
                 )

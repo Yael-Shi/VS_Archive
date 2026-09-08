@@ -280,6 +280,7 @@ from documents.services.archive_advanced_search import (
 )
 from documents.services.archive_item_presentation import (
     ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
+    PHOTO_ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING,
     aggregate_archive_public_list_type_counts,
     archive_browse_displayable_text_results_prefetch,
     archive_item_author_links_prefetch,
@@ -297,6 +298,7 @@ from documents.services.archive_item_presentation import (
     normalize_archive_public_list_per_page,
     normalize_archive_public_list_type_filter,
     person_public_page_url,
+    photo_detail_item_person_links,
     public_discovery_context,
 )
 from documents.services.author_public import (
@@ -5755,6 +5757,9 @@ def archive_detail_page(request, item_id: int):
                 expires_in=PRESIGNED_GET_EXPIRY_SECONDS,
             )
 
+        identified_person_ids = tuple(
+            link.person_id for link in photo_gallery.identified_people
+        )
         return render(
             request,
             "documents/archive/detail.html",
@@ -5766,6 +5771,12 @@ def archive_detail_page(request, item_id: int):
                 "photo_gallery": photo_gallery,
                 "is_admin": _is_admin(request.user),
                 **discovery_context,
+                "person_links": photo_detail_item_person_links(
+                    item,
+                    identified_person_ids=identified_person_ids,
+                    is_album_view=photo_gallery.is_album_view,
+                ),
+                "person_links_heading": PHOTO_ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING,
             },
         )
 

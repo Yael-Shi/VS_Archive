@@ -339,7 +339,7 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         self.assertNotContains(resp, "מיקום:")
         self.assertNotContains(resp, "הקשר / נסיבות:")
         self.assertNotContains(resp, "נוכחים בתמונה:")
-        self.assertNotContains(resp, "אנשים מזוהים:")
+        self.assertNotContains(resp, "אנשים בתמונה")
         self.assertNotContains(resp, "תאריך התמונה:")
         self.assertNotContains(resp, "הערות נוספות:")
 
