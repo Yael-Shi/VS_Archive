@@ -32,9 +32,9 @@ from documents.services.archive_metadata_suggestion_review import (
 )
 
 EXPECTED_HISTORICAL_PERSON_NAME_TAG_MAP_SIZE = 29
-STATE_ALL_PRESENT = "all_present"
-STATE_ALL_ABSENT = "all_absent"
 MappedTagRowState = Literal["all_present", "all_absent"]
+STATE_ALL_PRESENT: MappedTagRowState = "all_present"
+STATE_ALL_ABSENT: MappedTagRowState = "all_absent"
 
 
 class HistoricalPersonTagRowDeletionError(Exception):

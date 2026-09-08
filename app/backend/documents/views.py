@@ -97,6 +97,7 @@ from documents.services.archive_item_people import (
 )
 from documents.services.person_duplicate_check import (
     FORCE_CREATE_PERSON_FIELD,
+    PersonNameDuplicateConflictError,
     person_name_candidates_error_payload,
 )
 from documents.services.archive_items import (
@@ -854,7 +855,7 @@ def _parse_create_upload_common(
     payload: dict,
     *,
     user=None,
-) -> tuple[_CreateUploadCommon | None, HttpResponseBadRequest | None]:
+) -> tuple[_CreateUploadCommon | None, HttpResponseBadRequest | JsonResponse | None]:
     title = (payload.get("title") or "").strip()
     if not title:
         return None, _bad("title required")
@@ -2057,6 +2058,7 @@ def upload_display_only_page_complete(request, doc_id: int, order_index: int):
             return norm_err
 
         file_size = payload.get("file_size")
+        complete_size: int | None
         if norm_result.rewritten and norm_result.size_bytes is not None:
             complete_size = norm_result.size_bytes
         elif isinstance(file_size, int):
@@ -5011,9 +5013,10 @@ def _save_photo_content_from_staff_post(
             new_person_name=parsed["new_person_name"],
             force_create_person_keys=parsed.get(FORCE_CREATE_PERSON_FIELD) or [],
         )
+    except PersonNameDuplicateConflictError as exc:
+        parsed["person_name_conflicts"] = list(exc.check.matches)
+        return False, parsed, [exc.message]
     except PhotoContentManagementError as exc:
-        if getattr(exc, "check", None) is not None:
-            parsed["person_name_conflicts"] = list(exc.check.matches)
         return False, parsed, [exc.message]
     return True, parsed, []
 
@@ -5593,7 +5596,7 @@ def archive_list_page(request):
     if load_advanced_choices:
         choice_context = archive_advanced_filter_choice_context(authorized_items)
     else:
-        choice_context = dict(EMPTY_ARCHIVE_ADVANCED_FILTER_CHOICE_CONTEXT)
+        choice_context = EMPTY_ARCHIVE_ADVANCED_FILTER_CHOICE_CONTEXT
 
     # Any authoritative year-validation failure blocks result execution until
     # the form is corrected. Non-date filters remain in the redisplayed form

@@ -10,12 +10,20 @@ Invalid or out-of-bounds geometry fails closed.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TypedDict
 
 from documents.models import TranskribusSnapshotPage
 from documents.services.archive_search_match_ranges import (
     ArchiveSearchGeometryMatch,
 )
 from documents.services.overlay_bbox_percent import page_bbox_to_percent
+
+
+class _SnapshotPageDimensionRow(TypedDict):
+    snapshot__text_result_bindings__text_result_id: int
+    page_index: int
+    image_width: int | None
+    image_height: int | None
 
 
 @dataclass(frozen=True)
@@ -45,10 +53,12 @@ def build_archive_search_overlay_targets(
 
     text_result_ids = {match.text_result.pk for match in matches if match.geometry}
 
-    pages_by_text_result_and_index: dict[tuple[int, int], TranskribusSnapshotPage] = {}
+    pages_by_text_result_and_index: dict[
+        tuple[int, int], _SnapshotPageDimensionRow
+    ] = {}
 
     if text_result_ids:
-        pages = (
+        page_rows = (
             TranskribusSnapshotPage.objects.filter(
                 snapshot__text_result_bindings__text_result_id__in=text_result_ids,
             )
@@ -61,20 +71,41 @@ def build_archive_search_overlay_targets(
             .distinct()
         )
 
-        for page in pages:
-            text_result_id = page["snapshot__text_result_bindings__text_result_id"]
-            page_index = page["page_index"]
-            pages_by_text_result_and_index[(text_result_id, page_index)] = page
+        for values_row in page_rows:
+            text_result_id = values_row[
+                "snapshot__text_result_bindings__text_result_id"
+            ]
+            page_index = values_row["page_index"]
+            image_width = values_row["image_width"]
+            image_height = values_row["image_height"]
+            if not isinstance(text_result_id, int) or isinstance(text_result_id, bool):
+                continue
+            if not isinstance(page_index, int) or isinstance(page_index, bool):
+                continue
+            if image_width is not None and (
+                not isinstance(image_width, int) or isinstance(image_width, bool)
+            ):
+                continue
+            if image_height is not None and (
+                not isinstance(image_height, int) or isinstance(image_height, bool)
+            ):
+                continue
+            pages_by_text_result_and_index[(text_result_id, page_index)] = {
+                "snapshot__text_result_bindings__text_result_id": text_result_id,
+                "page_index": page_index,
+                "image_width": image_width,
+                "image_height": image_height,
+            }
 
     for match_index, match in enumerate(matches):
         match_targets: list[ArchiveSearchOverlayTarget] = []
 
         for geometry in match.geometry:
-            page = pages_by_text_result_and_index.get(
+            dimension_row = pages_by_text_result_and_index.get(
                 (match.text_result.pk, geometry.page_index)
             )
 
-            if page is None:
+            if dimension_row is None:
                 match_targets = []
                 break
 
@@ -83,8 +114,8 @@ def build_archive_search_overlay_targets(
                 min_y=geometry.bbox_min_y,
                 max_x=geometry.bbox_max_x,
                 max_y=geometry.bbox_max_y,
-                image_width=page["image_width"],
-                image_height=page["image_height"],
+                image_width=dimension_row["image_width"],
+                image_height=dimension_row["image_height"],
             )
             if percents is None:
                 match_targets = []
