@@ -14,6 +14,9 @@ from django.test import RequestFactory, TestCase, TransactionTestCase, override_
 from django.urls import reverse
 
 from documents.admin import ArchiveItemAdmin
+from documents.historical_migration_test_support import (
+    documents_migration_leaf_targets,
+)
 from documents.models import (
     ArchiveItem,
     ArchiveItemAuthor,
@@ -986,4 +989,4 @@ class AuthorFoundationApplyMigrationTests(TransactionTestCase):
                 "Ada Lovelace / עדה לאבלייס",
             )
         finally:
-            self._migrate([("documents", DATA_MIGRATION)])
+            self._migrate(documents_migration_leaf_targets())
