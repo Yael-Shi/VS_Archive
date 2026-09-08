@@ -11060,9 +11060,10 @@ class StatusLabelPresentationTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         # Processing readiness and human approval stay distinct on the detail page.
         self.assertContains(resp, "מוכן לצפייה")
-        self.assertContains(
+        self.assertNotContains(
             resp, "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות."
         )
+        self.assertNotContains(resp, "הטקסט המוצג עבר בקרה אנושית.")
         self.assertContains(resp, "פרטים")
         self.assertContains(resp, "טרם אושר")
         self.assertContains(resp, "ממתין לבקרת תעתוק")
@@ -12216,13 +12217,25 @@ class DocumentDetailTextGroupingTests(TestCase):
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "SOURCE_TEXT")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "NEEDS_REVIEW")
         _assert_raw_enum_not_in_visible_badge_text(self, resp, "UNVERIFIED")
+        self.assertNotContains(resp, self.AUTO_OCR_DISCLAIMER)
+        self.assertNotContains(resp, self.VERIFIED_TECHNICAL_NOTE)
 
     AUTO_OCR_DISCLAIMER = (
         "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות."
     )
     VERIFIED_TECHNICAL_NOTE = "הטקסט המוצג עבר בקרה אנושית."
+    PROCESSING_TECHNICAL_NOTE = (
+        "העיבוד האוטומטי עדיין רץ. הטקסט המלא יוצג לאחר סיום העיבוד."
+    )
 
-    def test_unverified_displayed_text_shows_auto_ocr_disclaimer(self):
+    def _assert_viewer_omits_public_technical_details(self, response):
+        self.assertNotContains(response, "document-detail-technical")
+        self.assertEqual(self._technical_details_html(response), "")
+        self.assertNotContains(response, self.AUTO_OCR_DISCLAIMER)
+        self.assertNotContains(response, self.VERIFIED_TECHNICAL_NOTE)
+        self.assertNotContains(response, "פרטים טכניים")
+
+    def test_unverified_displayed_text_omits_public_technical_details(self):
         doc = self._create_document(visibility=Document.Visibility.PUBLIC)
         self._create_text_result(
             doc,
@@ -12233,9 +12246,10 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.client.force_login(self.viewer)
         resp = self.client.get(self._detail_url(doc.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, self.AUTO_OCR_DISCLAIMER)
+        self.assertContains(resp, "טקסט לא מאומת")
+        self._assert_viewer_omits_public_technical_details(resp)
 
-    def test_verified_displayed_text_shows_verified_technical_note(self):
+    def test_verified_displayed_text_omits_public_technical_details(self):
         doc = self._create_document(visibility=Document.Visibility.PUBLIC)
         self._create_text_result(
             doc,
@@ -12247,13 +12261,10 @@ class DocumentDetailTextGroupingTests(TestCase):
         resp = self.client.get(self._detail_url(doc.id))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "טקסט מאומת")
-        self.assertContains(resp, "document-detail-technical")
-        self.assertContains(resp, self.VERIFIED_TECHNICAL_NOTE)
-        self.assertNotContains(resp, self.AUTO_OCR_DISCLAIMER)
+        self.assertContains(resp, "נבדק ואושר")
+        self._assert_viewer_omits_public_technical_details(resp)
 
-    def test_mixed_verification_shows_auto_ocr_disclaimer_when_any_unverified(
-        self,
-    ):
+    def test_mixed_verification_omits_public_technical_details(self):
         doc = self._create_document(
             language=Document.Language.ENGLISH,
             visibility=Document.Visibility.PUBLIC,
@@ -12275,9 +12286,10 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Verified source")
         self.assertContains(resp, "Unverified translation")
-        self.assertContains(resp, self.AUTO_OCR_DISCLAIMER)
+        self.assertContains(resp, "נבדק ואושר")
+        self._assert_viewer_omits_public_technical_details(resp)
 
-    def test_all_verified_displayed_texts_show_verified_technical_note(self):
+    def test_all_verified_displayed_texts_omits_public_technical_details(self):
         doc = self._create_document(
             language=Document.Language.ENGLISH,
             visibility=Document.Visibility.PUBLIC,
@@ -12299,11 +12311,25 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Verified source")
         self.assertContains(resp, "Verified translation")
-        self.assertContains(resp, "document-detail-technical")
-        self.assertContains(resp, self.VERIFIED_TECHNICAL_NOTE)
-        self.assertNotContains(resp, self.AUTO_OCR_DISCLAIMER)
+        self.assertContains(resp, "נבדק ואושר")
+        self._assert_viewer_omits_public_technical_details(resp)
 
-    def test_viewer_detail_hides_internal_text_labels_and_shows_auto_disclaimer(self):
+    def test_rejected_displayed_text_omits_old_warning_and_keeps_quality_ui(self):
+        doc = self._create_document(visibility=Document.Visibility.PUBLIC)
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            verification_status=DocumentTextResult.VerificationStatus.REJECTED,
+            text="טקסט שנדחה",
+        )
+        self.client.force_login(self.viewer)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "טקסט שנדחה")
+        self.assertContains(resp, "נדרש תיקון")
+        self._assert_viewer_omits_public_technical_details(resp)
+
+    def test_viewer_detail_hides_internal_text_labels_without_auto_disclaimer(self):
         doc = self._create_document(visibility=Document.Visibility.PUBLIC)
         self._create_text_result(
             doc,
@@ -12315,10 +12341,7 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "תעתוק")
         self.assertContains(resp, "טקסט לצופה")
-        self.assertContains(resp, "פרטים")
-        self.assertContains(
-            resp, "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות."
-        )
+        self._assert_viewer_omits_public_technical_details(resp)
         self.assertNotContains(resp, "תעתוק אוטומטי")
         self.assertNotContains(resp, "מוכן לצפייה")
         self.assertNotContains(resp, "הועלה")
@@ -12357,14 +12380,33 @@ class DocumentDetailTextGroupingTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         technical_section = self._technical_details_html(resp)
         self.assertTrue(technical_section)
-        self.assertContains(
-            resp,
-            "העיבוד האוטומטי עדיין רץ. הטקסט המלא יוצג לאחר סיום העיבוד.",
+        self.assertContains(resp, self.PROCESSING_TECHNICAL_NOTE)
+        self.assertIn(self.PROCESSING_TECHNICAL_NOTE, technical_section)
+        self.assertNotContains(resp, self.AUTO_OCR_DISCLAIMER)
+        self.assertNotContains(resp, self.VERIFIED_TECHNICAL_NOTE)
+        self._assert_viewer_technical_section_has_no_status_badges(resp)
+
+    def test_viewer_processing_detail_keeps_message_when_displayable_text_exists(
+        self,
+    ):
+        doc = self._create_document(
+            visibility=Document.Visibility.PUBLIC,
+            processing_state_user=Document.ProcessingState.PROCESSING,
         )
-        self.assertIn(
-            "העיבוד האוטומטי עדיין רץ. הטקסט המלא יוצג לאחר סיום העיבוד.",
-            technical_section,
+        self._create_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="טקסט קיים בזמן עיבוד",
         )
+        self.client.force_login(self.viewer)
+        resp = self.client.get(self._detail_url(doc.id))
+        self.assertEqual(resp.status_code, 200)
+        technical_section = self._technical_details_html(resp)
+        self.assertTrue(technical_section)
+        self.assertContains(resp, "טקסט קיים בזמן עיבוד")
+        self.assertContains(resp, self.PROCESSING_TECHNICAL_NOTE)
+        self.assertIn(self.PROCESSING_TECHNICAL_NOTE, technical_section)
+        self.assertNotContains(resp, self.AUTO_OCR_DISCLAIMER)
         self._assert_viewer_technical_section_has_no_status_badges(resp)
 
 
@@ -12432,7 +12474,6 @@ class TextPresentationHelperTests(TestCase):
         presentation = get_text_presentation_for_document(doc)
         self.assertFalse(presentation.show_source)
         self.assertTrue(presentation.show_hebrew)
-        self.assertTrue(presentation.show_auto_ocr_disclaimer)
 
     def test_get_text_presentation_hebrew_falls_back_to_source_panel(self):
         from documents.services.text_presentation import (
@@ -12459,42 +12500,6 @@ class TextPresentationHelperTests(TestCase):
         presentation = get_text_presentation_for_document(doc)
         self.assertTrue(presentation.show_source)
         self.assertFalse(presentation.show_hebrew)
-        self.assertTrue(presentation.show_auto_ocr_disclaimer)
-
-    def test_get_text_presentation_hides_disclaimer_when_all_displayed_verified(self):
-        from documents.services.text_presentation import (
-            get_text_presentation_for_document,
-        )
-
-        doc = create_ocr_document(
-            title="Verified presentation doc",
-            doc_type=Document.DocType.IMAGE,
-            text_input_type=Document.TextInputType.PRINTED,
-            language=Document.Language.ENGLISH,
-            upload_status=Document.UploadStatus.UPLOADED,
-            processing_state_user=Document.ProcessingState.READY,
-        )
-        DocumentTextResult.objects.create(
-            document=doc,
-            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
-            engine="engine-a",
-            status=DocumentTextResult.Status.NEEDS_REVIEW,
-            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
-            text="Verified source",
-        )
-        DocumentTextResult.objects.create(
-            document=doc,
-            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
-            engine="engine-a",
-            status=DocumentTextResult.Status.NEEDS_REVIEW,
-            verification_status=DocumentTextResult.VerificationStatus.VERIFIED,
-            text="Verified translation",
-        )
-
-        presentation = get_text_presentation_for_document(doc)
-        self.assertTrue(presentation.show_source)
-        self.assertTrue(presentation.show_hebrew)
-        self.assertFalse(presentation.show_auto_ocr_disclaimer)
 
     def test_build_document_detail_jump_nav_shows_hebrew_link_for_non_hebrew_doc(
         self,

@@ -602,6 +602,10 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         self.assertContains(resp, "Public photo event")
         self.assertContains(resp, "public-photo-tag")
         self.assertNotContains(resp, "archive-detail-photo-technical")
+        self.assertNotContains(
+            resp, "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות."
+        )
+        self.assertNotContains(resp, "הטקסט המוצג עבר בקרה אנושית.")
 
     @patch(
         "documents.views.create_presigned_get",
