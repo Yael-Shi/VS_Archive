@@ -10,6 +10,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from django.db.models import Exists, OuterRef, Q, QuerySet, Subquery
+from django.db.models.expressions import Combinable
 
 from documents.models import (
     ArchiveItem,
@@ -94,7 +95,7 @@ def person_public_membership_q(user) -> Q:
     return person_public_membership_q_for_item_pks(authorized_browse_item_pks(user))
 
 
-def person_linked_author_membership_q_for_item_pks(item_pks: QuerySet) -> Q:
+def person_linked_author_membership_q_for_item_pks(item_pks: QuerySet) -> Exists:
     """Person rows with an explicit ``Author.person`` link to public AIA items.
 
     Uses the FK only. Does not infer identity from Author/Person names.
@@ -107,7 +108,7 @@ def person_linked_author_membership_q_for_item_pks(item_pks: QuerySet) -> Q:
     )
 
 
-def person_unified_public_membership_q(user) -> Q:
+def person_unified_public_membership_q(user) -> Combinable:
     """Directory/detail membership: AIP, renderable PhotoPerson, or linked Author AIA."""
     item_pks = authorized_browse_item_pks(user)
     return person_public_membership_q_for_item_pks(
@@ -115,7 +116,7 @@ def person_unified_public_membership_q(user) -> Q:
     ) | person_linked_author_membership_q_for_item_pks(item_pks)
 
 
-def _person_linked_author_name_icontains_q(user, search_query: str) -> Q | None:
+def _person_linked_author_name_icontains_q(user, search_query: str) -> Exists | None:
     """Match linked ``Author.name`` only when that Author has public AIA membership.
 
     Uses ``author_public_membership_q`` (authorized + browse-renderable

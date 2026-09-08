@@ -330,7 +330,7 @@ def _author_membership_q(
     author_id: int,
     *,
     authorized_queryset: QuerySet[ArchiveItem],
-) -> Q:
+) -> Q | Exists:
     """Structured ArchiveItemAuthor membership, plus fail-closed legacy fallback.
 
     Structured links match ``author_id`` via correlated ``Exists``.
