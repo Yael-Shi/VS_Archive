@@ -963,6 +963,28 @@ do not derive quality.
 
 **Tests:** `documents/test_text_quality_public_ui.py`.
 
+## MANUAL_TEXT public quality badge placement
+
+**Decision / implemented:** Public `MANUAL_TEXT` detail shows the shared
+transcription-quality indicator in the top metadata/status area, not inside
+the manual text block. Labels, colors, explanation copy, and OCR document
+detail placement are unchanged.
+
+**Current behavior:**
+
+- One indicator (`show_heading=True`, PR1 `HUMAN_VERIFIED`).
+- Markup lives in `archive-detail-manual-text-status` /
+  `archive-detail-manual-text-quality`, above `archive-detail-meta` and the
+  manual text body.
+- OCR still uses `document-detail-top-meta` via `detail_jump_nav.html`.
+- MANUAL_TEXT popover positioning is CSS-only and scoped under
+  `.archive-detail-page--manual-text`; the shared OCR popover rule is
+  unchanged. Hover/focus/`is-open` behavior stays on
+  `.text-quality-indicator__info-wrap`.
+
+**Tests:** `documents/test_manual_text_public_detail_ui.py`,
+`documents/test_text_quality_public_ui.py`.
+
 ## Staff Author merge (explicit ids)
 
 **Decision / implemented:** Controlled staff merge of one bibliographic
