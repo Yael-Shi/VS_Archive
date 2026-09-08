@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import date
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence, TypedDict
 
 from django.db.models import Exists, OuterRef, Q, QuerySet
 
@@ -53,7 +53,16 @@ ARCHIVE_ADVANCED_YEAR_TO_WITHOUT_YEAR_ERROR = (
     "כדי לחפש לפי טווח שנים יש להזין גם את השנה הראשונה."
 )
 
-EMPTY_ARCHIVE_ADVANCED_FILTER_CHOICE_CONTEXT: dict[str, object] = {
+
+class ArchiveAdvancedFilterChoiceContext(TypedDict):
+    advanced_filter_author_choices: tuple[Author, ...]
+    advanced_filter_category_choices: tuple[ArchiveCategory, ...]
+    advanced_filter_event_choices: tuple[ArchiveEvent, ...]
+    advanced_filter_tag_choices: tuple[Tag, ...]
+    advanced_filter_person_choices: tuple[Person, ...]
+
+
+EMPTY_ARCHIVE_ADVANCED_FILTER_CHOICE_CONTEXT: ArchiveAdvancedFilterChoiceContext = {
     "advanced_filter_author_choices": (),
     "advanced_filter_category_choices": (),
     "advanced_filter_event_choices": (),
@@ -369,7 +378,7 @@ def _author_membership_q(
 
 def archive_advanced_filter_choice_context(
     authorized_queryset: QuerySet[ArchiveItem],
-) -> dict[str, object]:
+) -> ArchiveAdvancedFilterChoiceContext:
     """
     Discovery/author choices for advanced filters.
 
