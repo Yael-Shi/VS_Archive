@@ -42,9 +42,9 @@ _PERSISTED_QUALITY_RANK = {
 }
 
 
-def _persisted_base_quality(value: str | None) -> str:
+def _persisted_base_quality(value: str | None) -> DocumentTextResult.Quality:
     if value in _PERSISTED_QUALITY_VALUES:
-        return value
+        return DocumentTextResult.Quality(value)
     return DocumentTextResult.Quality.UNKNOWN
 
 
