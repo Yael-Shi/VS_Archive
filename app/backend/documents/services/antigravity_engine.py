@@ -483,10 +483,10 @@ def _log_encoded_image_blocks(
             page = pages[page_offset] if page_offset < len(pages) else None
             page_offset += 1
             data = block.get("data")
-            data_is_str = isinstance(data, str)
+            data_text = data if isinstance(data, str) else None
             outbound_bytes = None
-            if data_is_str and data and not data.startswith(_DATA_URL_PREFIX):
-                outbound_bytes = _decode_outbound_image_bytes(data)
+            if data_text and not data_text.startswith(_DATA_URL_PREFIX):
+                outbound_bytes = _decode_outbound_image_bytes(data_text)
             logger.info(
                 "Antigravity image block document_id=%s page_index=%s "
                 "outbound_mime_type=%s outbound_byte_length=%s outbound_sha256=%s "
@@ -501,10 +501,12 @@ def _log_encoded_image_blocks(
                     if outbound_bytes is not None
                     else None
                 ),
-                len(data) if data_is_str else None,
-                data_is_str,
-                data_is_str and bool(data),
-                data_is_str and data.startswith(_DATA_URL_PREFIX),
+                len(data_text) if data_text is not None else None,
+                data_text is not None,
+                bool(data_text),
+                data_text.startswith(_DATA_URL_PREFIX)
+                if data_text is not None
+                else False,
             )
     except Exception:
         logger.warning(
@@ -1540,7 +1542,12 @@ def _validate_band_inputs(
             failure_kind=_BAND_FAILURE_POLL_TIMEOUT,
             polling_outcome=_BAND_POLL_TIMEOUT,
         )
-    return key, jpeg_bytes, mime_type, vision_draft_text, attempt_kind
+    kind = (
+        BAND_ATTEMPT_UNASSISTED
+        if attempt_kind == BAND_ATTEMPT_UNASSISTED
+        else BAND_ATTEMPT_ASSISTED_FALLBACK
+    )
+    return key, jpeg_bytes, _BAND_JPEG_MIME, vision_draft_text, kind
 
 
 def _attempt_remaining(absolute_deadline: float, now: float, started: float) -> float:
