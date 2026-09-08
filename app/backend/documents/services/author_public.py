@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from django.db.models import Count, Exists, OuterRef, Q, QuerySet
+from django.db.models import Count, Exists, OuterRef, QuerySet
 from django.urls import reverse
 
 from documents.models import ArchiveItem, ArchiveItemAuthor, Author
@@ -35,7 +35,7 @@ def authorized_browse_item_pks(user) -> QuerySet:
     return archive_browse_queryset_for_user(user).order_by().values("pk")
 
 
-def author_public_membership_q(user) -> Q:
+def author_public_membership_q(user) -> Exists:
     """Author rows with at least one authorized+browse-renderable ArchiveItemAuthor item."""
     return Exists(
         ArchiveItemAuthor.objects.filter(

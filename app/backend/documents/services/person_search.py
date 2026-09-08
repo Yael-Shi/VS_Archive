@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from django.db.models import Exists, OuterRef, Q
+from django.db.models.expressions import Combinable
 
 from documents.models import PersonAlias
 
 
-def person_canonical_or_alias_icontains_q(search_query: str) -> Q | None:
+def person_canonical_or_alias_icontains_q(search_query: str) -> Combinable | None:
     """Case-insensitive canonical name or alias substring match.
 
     Alias matching uses ``Exists`` so joining ``PersonAlias`` cannot duplicate
