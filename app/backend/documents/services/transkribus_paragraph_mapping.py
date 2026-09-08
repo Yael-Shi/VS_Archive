@@ -105,15 +105,16 @@ def validate_break_after_lines(
             resolved.append(line)
             continue
 
-        line = (
+        found_line = (
             TranskribusSnapshotLine.objects.filter(pk=line_id)
             .select_related("page")
             .first()
         )
-        if line is None:
+        if found_line is None:
             raise TranskribusParagraphMappingError(
                 f"Unknown snapshot line id={line_id} for paragraph break."
             )
+        line = found_line
         if line.page.snapshot_id != snapshot.pk:
             raise TranskribusParagraphMappingError(
                 "Paragraph break after_line must belong to the mapping's snapshot."
@@ -252,7 +253,7 @@ def assess_paragraph_mapping_currentness(
     )
 
     resolved_mapping = mapping
-    if resolved_mapping is None and bound_snapshot_id is not None:
+    if resolved_mapping is None and binding is not None:
         resolved_mapping = get_paragraph_mapping_for_snapshot(binding.snapshot)
 
     mapping_snapshot_id = (

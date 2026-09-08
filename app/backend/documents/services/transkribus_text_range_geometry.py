@@ -175,10 +175,14 @@ def resolve_text_range_geometry(
     ``text_range_geometry_from_snapshot_line`` after the trusted binding gate
     succeeds (without re-querying the same snapshot lines).
     """
-    if isinstance(start, bool) or isinstance(end, bool):
+    start_value: object = start
+    end_value: object = end
+    if isinstance(start_value, bool) or isinstance(end_value, bool):
         return ()
-    if not isinstance(start, int) or not isinstance(end, int):
+    if not isinstance(start_value, int) or not isinstance(end_value, int):
         return ()
+    start = start_value
+    end = end_value
 
     text = text_result.text or ""
     if start < 0 or start >= end or end > len(text):

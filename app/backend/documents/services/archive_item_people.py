@@ -220,14 +220,17 @@ def _replace_archive_item_person_rows(
 
     kept_or_created: list[ArchiveItemPerson] = []
     for person in desired_persons:
-        link = existing_by_person_id.get(person.pk)
-        if link is None:
-            link = ArchiveItemPerson.objects.create(
-                archive_item=archive_item,
-                person=person,
+        existing_link = existing_by_person_id.get(person.pk)
+        if existing_link is None:
+            kept_or_created.append(
+                ArchiveItemPerson.objects.create(
+                    archive_item=archive_item,
+                    person=person,
+                )
             )
             changed = True
-        kept_or_created.append(link)
+            continue
+        kept_or_created.append(existing_link)
     return kept_or_created, changed
 
 

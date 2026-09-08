@@ -7,6 +7,7 @@ from the 2026-09-03 live audit. The command infers no additional cases.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import NoReturn
 
 from django.db import IntegrityError, transaction
 from django.db.models import Count
@@ -116,7 +117,7 @@ class LegacyCommaAuthorCleanupResult:
     search_indexes_refreshed: int
 
 
-def _fail(message: str) -> None:
+def _fail(message: str) -> NoReturn:
     raise LegacyCommaAuthorCleanupError(message)
 
 
