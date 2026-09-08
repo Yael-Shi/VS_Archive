@@ -14,7 +14,7 @@ import math
 import re
 from dataclasses import dataclass
 from io import BytesIO
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence, TypeGuard
 
 import requests
 from PIL import Image
@@ -295,8 +295,12 @@ def prepare_arabic_printed_working_image(
     )
 
 
-def _is_int(value: object) -> bool:
+def _is_int(value: object) -> TypeGuard[int]:
     return type(value) is int
+
+
+def _is_int_or_float(value: object) -> TypeGuard[int | float]:
+    return type(value) is int or type(value) is float
 
 
 def _validate_working_image(working_image: object) -> ArabicPrintedWorkingImage:
@@ -361,12 +365,16 @@ def encode_arabic_printed_band_crop(
 ) -> ArabicPrintedBandCrop:
     """Crop from retained oriented RGB pixels. Never reopens JPEG or re-applies EXIF."""
     image = _validate_working_image(working_image)
-    for value in (left, top, right, bottom):
-        if not _is_int(value):
-            raise _fail(
-                FAILURE_OUT_OF_BOUNDS,
-                exception_class="CloudVisionDocumentTextError",
-            )
+    if (
+        not _is_int(left)
+        or not _is_int(top)
+        or not _is_int(right)
+        or not _is_int(bottom)
+    ):
+        raise _fail(
+            FAILURE_OUT_OF_BOUNDS,
+            exception_class="CloudVisionDocumentTextError",
+        )
     if left != 0 or right != image.width:
         raise _fail(
             FAILURE_OUT_OF_BOUNDS,
@@ -408,12 +416,9 @@ def encode_arabic_printed_band_crop(
 
 
 def _vision_timeout(remaining_timeout_seconds: object) -> float:
-    if type(remaining_timeout_seconds) is bool or type(
+    if type(remaining_timeout_seconds) is bool or not _is_int_or_float(
         remaining_timeout_seconds
-    ) not in {
-        int,
-        float,
-    }:
+    ):
         raise _fail(
             FAILURE_INVALID_TIMEOUT,
             exception_class="CloudVisionDocumentTextError",
