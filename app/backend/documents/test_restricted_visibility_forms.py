@@ -662,7 +662,10 @@ class RestrictedPhotoUploadWriteTests(TestCase):
             ),
         )
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp["Location"], reverse("archive-manage-list"))
+        self.assertEqual(
+            resp["Location"],
+            reverse("archive-manage-edit", kwargs={"item_id": item.id}),
+        )
         item.refresh_from_db()
         self.assertEqual(item.visibility, ArchiveItem.Visibility.RESTRICTED)
 

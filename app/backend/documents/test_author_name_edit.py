@@ -669,7 +669,9 @@ class AuthorEditLinkOnItemFormTests(TestCase):
         self.assertContains(resp, _edit_url(author))
         self.assertContains(resp, "עריכת מחבר/ת")
 
-    def test_photo_pages_have_no_author_controls_or_author_edit_link(self):
+    def test_photo_pages_include_structured_author_controls_without_legacy_author_name(
+        self,
+    ):
         photo_item = ArchiveItem.objects.create(
             item_type=ArchiveItem.ItemType.PHOTO,
             title="PhotoNoAuthors",
@@ -683,5 +685,7 @@ class AuthorEditLinkOnItemFormTests(TestCase):
         )
         for resp in (create_resp, edit_resp):
             self.assertEqual(resp.status_code, 200)
+            self.assertContains(resp, 'name="author_ids"')
+            self.assertContains(resp, 'name="new_author_name"')
+            self.assertNotContains(resp, 'name="author_name"')
             self.assertNotContains(resp, "עריכת מחבר/ת")
-            self.assertNotContains(resp, 'name="new_author_name"')

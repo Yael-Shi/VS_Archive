@@ -595,7 +595,7 @@ class ArchiveDateDuplicateControlTests(TestCase):
             title="Photo dup control",
             visibility=ArchiveItem.Visibility.PRIVATE,
         )
-        PhotoContent.objects.create(
+        photo = PhotoContent.objects.create(
             archive_item=photo_item,
             original_file_key="photos/1/original.jpg",
             original_filename="photo.jpg",
@@ -603,8 +603,16 @@ class ArchiveDateDuplicateControlTests(TestCase):
             original_size_bytes=100,
             upload_status=PhotoContent.UploadStatus.UPLOADED,
         )
-        self._assert_single_date_precision_control(
-            self.client.get(f"/archive/manage/{photo_item.id}/edit/")
+        resp = self.client.get(f"/archive/manage/{photo_item.id}/edit/")
+        self.assertEqual(resp.status_code, 200)
+        content = resp.content
+        # Shared ArchiveItem widget plus one per-PhotoContent card widget.
+        # DOM ids are unique; POST field names stay unprefixed on purpose.
+        self.assertEqual(_count_substrings(content, 'id="date_precision"'), 1)
+        self.assertEqual(_count_substrings(content, 'name="date_precision"'), 2)
+        self.assertEqual(
+            _count_substrings(content, f'id="photo{photo.id}_date_precision"'),
+            1,
         )
 
 
