@@ -101,9 +101,18 @@
         </div>
       </header>
 
-      {% if is_admin %}
-        <div class="badge-row archive-detail-badges archive-detail-manual-text-badges">
-          <span class="badge">{{ item.metadata_status|archive_metadata_status_label }}</span>
+      {% if is_admin or text_quality_indicator %}
+        <div class="archive-detail-manual-text-status">
+          {% if is_admin %}
+            <div class="badge-row archive-detail-badges archive-detail-manual-text-badges">
+              <span class="badge">{{ item.metadata_status|archive_metadata_status_label }}</span>
+            </div>
+          {% endif %}
+          {% if text_quality_indicator %}
+            <div class="archive-detail-manual-text-quality">
+              {% include "documents/partials/text_quality_indicator.html" with indicator=text_quality_indicator show_heading=True %}
+            </div>
+          {% endif %}
         </div>
         <div class="spacer-sm"></div>
       {% else %}
@@ -165,9 +174,6 @@
 
     {% if item.item_type == "MANUAL_TEXT" %}
       <div class="archive-detail-text archive-detail-manual-text-body">
-        {% if text_quality_indicator %}
-          {% include "documents/partials/text_quality_indicator.html" with indicator=text_quality_indicator show_heading=True %}
-        {% endif %}
         <div class="text-block text-block--pre">{{ body|manual_text_body_display }}</div>
       </div>
       <div class="archive-detail-manual-text-signature" aria-hidden="true"></div>

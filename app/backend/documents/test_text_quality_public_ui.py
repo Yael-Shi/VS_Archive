@@ -394,6 +394,13 @@ class TextQualityPublicUiTests(TestCase):
         self.assertEqual(html.count('class="text-quality-indicator__info"'), 1)
         self.assertNotIn('class="text-quality-indicator__context"', html)
         self.assertNotIn(TEXT_QUALITY_TOOLTIP_TRANSLATION_NOTE, html)
+        body_start = html.index(
+            'class="archive-detail-text archive-detail-manual-text-body"'
+        )
+        body_end = html.index("archive-detail-manual-text-signature", body_start)
+        self.assertNotIn("text-quality-indicator", html[body_start:body_end])
+        status_html = html[html.index("archive-detail-manual-text-status") : body_start]
+        self.assertIn("data-text-quality-indicator", status_html)
         indicator = public_text_quality_indicator_for_manual_text(
             item.manual_text_content
         )
@@ -481,3 +488,54 @@ class TextQualityPublicUiTests(TestCase):
             with_note.tooltip_translation_note,
             TEXT_QUALITY_TOOLTIP_TRANSLATION_NOTE,
         )
+
+
+class OcrPublicQualityBadgePlacementUnchangedTests(TestCase):
+    def _create_doc(self) -> Document:
+        return create_ocr_document(
+            title="OCR quality placement unchanged",
+            doc_type=Document.DocType.IMAGE,
+            text_input_type=Document.TextInputType.PRINTED,
+            language=Document.Language.ENGLISH,
+            visibility=Document.Visibility.PUBLIC,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.READY,
+            file_s3_key="documents/quality-ui/placement.jpg",
+            mime_type="image/jpeg",
+        )
+
+    def test_ocr_detail_still_renders_one_indicator_in_top_meta(self):
+        doc = self._create_doc()
+        DocumentTextResult.objects.create(
+            document=doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            engine="engine-quality-placement",
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            status=DocumentTextResult.Status.NEEDS_REVIEW,
+            verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
+            quality=DocumentTextResult.Quality.MEDIUM,
+            text="displayed text",
+        )
+        response = self.client.get(
+            reverse("documents-detail-page", kwargs={"doc_id": doc.id})
+        )
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+
+        self.assertEqual(html.count("data-text-quality-indicator"), 1)
+        self.assertEqual(html.count('class="text-quality-indicator__info"'), 1)
+        self.assertNotIn("archive-detail-manual-text-quality", html)
+        self.assertNotIn("archive-detail-manual-text-status", html)
+
+        top_meta_start = html.index('class="document-detail-top-meta"')
+        source_panel = html.index('id="document-detail-source-panel"', top_meta_start)
+        top_meta = html[top_meta_start:source_panel]
+        self.assertIn("data-text-quality-indicator", top_meta)
+        self.assertIn("text-quality-indicator__badge--medium", top_meta)
+        self.assertIn("איכות בינונית", top_meta)
+        self.assertIn('class="text-quality-indicator__context"', top_meta)
+
+        text_content = html.find('class="document-detail-text-content"')
+        if text_content != -1:
+            self.assertNotIn("text-quality-indicator", html[text_content:])
