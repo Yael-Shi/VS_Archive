@@ -129,9 +129,7 @@ def parse_archive_item_people_form(post_data) -> tuple[dict[str, Any], list[str]
         else None
     )
     force_keys = parse_force_create_person_keys(post_data)
-    name_check = check_new_person_names(
-        raw, force_create_person_keys=force_keys
-    )
+    name_check = check_new_person_names(raw, force_create_person_keys=force_keys)
     errors = id_errors + name_check.errors
     if not id_errors and person_ids:
         found = set(
@@ -277,9 +275,7 @@ def set_archive_item_people(
         resolved_ids.append(created.pk)
         created_person = True
 
-    required_ids = person_ids_required_by_photo_people(
-        locked_item, for_update=True
-    )
+    required_ids = person_ids_required_by_photo_people(locked_item, for_update=True)
     resolved_ids = _union_person_ids(resolved_ids, required_ids)
 
     links, changed = _replace_archive_item_person_rows(

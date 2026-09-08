@@ -104,9 +104,7 @@ class CleanupAbandonedDisplayOnlyPageUploadsTests(TestCase):
         mock_delete.assert_called_once_with("test-uploads-bucket", extra_key)
         self.assertFalse(DocumentSourceFile.objects.filter(pk=extra_id).exists())
         self.assertTrue(Document.objects.filter(pk=doc.id).exists())
-        self.assertEqual(
-            DocumentSourceFile.objects.filter(document=doc).count(), 2
-        )
+        self.assertEqual(DocumentSourceFile.objects.filter(document=doc).count(), 2)
         doc.refresh_from_db()
         self.assertEqual(doc.expected_source_file_count, 2)
         self.assertEqual(doc.upload_status, Document.UploadStatus.UPLOADED)
@@ -148,9 +146,7 @@ class CleanupAbandonedDisplayOnlyPageUploadsTests(TestCase):
         committed.include_in_ocr = False
         committed.save(update_fields=["include_in_ocr"])
         stale_time = timezone.now() - timedelta(hours=48)
-        DocumentSourceFile.objects.filter(pk=committed.pk).update(
-            updated_at=stale_time
-        )
+        DocumentSourceFile.objects.filter(pk=committed.pk).update(updated_at=stale_time)
         with patch(
             "documents.services.display_only_page_abandoned_cleanup.delete_s3_object"
         ) as mock_delete:

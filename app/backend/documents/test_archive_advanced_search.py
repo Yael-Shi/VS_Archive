@@ -212,9 +212,7 @@ class ArchiveAdvancedFilterQuerysetTests(TestCase):
         match = _public_item(title="Author match", author_name="Exact Author")
         _public_item(title="Author other", author_name="Other Author")
         _public_item(title="Author blank", author_name="")
-        filters = normalize_archive_advanced_filters(
-            {"author": str(_author_id(match))}
-        )
+        filters = normalize_archive_advanced_filters({"author": str(_author_id(match))})
         ids = _ids(
             filter_archive_items_by_advanced_filters(ArchiveItem.objects.all(), filters)
         )

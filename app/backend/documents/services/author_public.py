@@ -60,7 +60,9 @@ def public_authors_queryset(user, *, search_query: str = "") -> QuerySet[Author]
     return authors
 
 
-def public_unlinked_authors_queryset(user, *, search_query: str = "") -> QuerySet[Author]:
+def public_unlinked_authors_queryset(
+    user, *, search_query: str = ""
+) -> QuerySet[Author]:
     """Public directory Author-only identities: public AIA and no ``Author.person``."""
     authors = (
         Author.objects.filter(person_id__isnull=True)
@@ -73,9 +75,7 @@ def public_unlinked_authors_queryset(user, *, search_query: str = "") -> QuerySe
     return authors
 
 
-def public_author_archive_items_queryset(
-    user, author_id: int
-) -> QuerySet[ArchiveItem]:
+def public_author_archive_items_queryset(user, author_id: int) -> QuerySet[ArchiveItem]:
     """Distinct authorized+renderable ArchiveItems linked via ArchiveItemAuthor.
 
     Outer queryset is ``ArchiveItem``, so duplicate link rows cannot duplicate

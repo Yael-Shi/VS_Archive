@@ -169,9 +169,7 @@ def build_abandoned_display_only_extra_cleanup_report(
         stale_hours=stale_hours,
         document_id=document_id,
     ):
-        if not is_abandoned_display_only_extra(
-            source, source.document, cutoff=cutoff
-        ):
+        if not is_abandoned_display_only_extra(source, source.document, cutoff=cutoff):
             continue
         report.candidates.append(
             AbandonedDisplayOnlyExtraCandidate(
@@ -218,9 +216,7 @@ def apply_abandoned_display_only_extra_cleanup(
             )
             if source is None:
                 continue
-            if not is_abandoned_display_only_extra(
-                source, document, cutoff=cutoff
-            ):
+            if not is_abandoned_display_only_extra(source, document, cutoff=cutoff):
                 continue
 
             s3_key = (source.file_s3_key or "").strip()

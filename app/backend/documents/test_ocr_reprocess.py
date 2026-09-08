@@ -580,9 +580,7 @@ class ReadyUnverifiedOcrReprocessTests(TransactionTestCase):
     clear=False,
 )
 class AntigravityPartialOcrReprocessTests(TransactionTestCase):
-    _OLDER_SOURCE_UPDATED_AT = datetime(
-        2026, 8, 17, 20, 33, 17, tzinfo=dt_timezone.utc
-    )
+    _OLDER_SOURCE_UPDATED_AT = datetime(2026, 8, 17, 20, 33, 17, tzinfo=dt_timezone.utc)
     _LATEST_SOURCE_UPDATED_AT = datetime(
         2026, 8, 24, 19, 40, 25, tzinfo=dt_timezone.utc
     )
@@ -656,9 +654,7 @@ class AntigravityPartialOcrReprocessTests(TransactionTestCase):
             verification_status=DocumentTextResult.VerificationStatus.UNVERIFIED,
             text="older unverified hebrew text",
         )
-        self._set_text_result_updated_at(
-            latest_failed, self._LATEST_SOURCE_UPDATED_AT
-        )
+        self._set_text_result_updated_at(latest_failed, self._LATEST_SOURCE_UPDATED_AT)
         self._set_text_result_updated_at(older_source, self._OLDER_SOURCE_UPDATED_AT)
         self._set_text_result_updated_at(older_hebrew, self._OLDER_SOURCE_UPDATED_AT)
         return doc
@@ -716,9 +712,7 @@ class AntigravityPartialOcrReprocessTests(TransactionTestCase):
             text="recovered on a later attempt",
         )
         self._set_text_result_updated_at(older_failed, self._OLDER_SOURCE_UPDATED_AT)
-        self._set_text_result_updated_at(
-            latest_usable, self._LATEST_SOURCE_UPDATED_AT
-        )
+        self._set_text_result_updated_at(latest_usable, self._LATEST_SOURCE_UPDATED_AT)
 
         self.assertFalse(is_ocr_reprocess_ui_eligible(doc))
 
@@ -757,9 +751,7 @@ class AntigravityPartialOcrReprocessTests(TransactionTestCase):
             text=None,
         )
         self._set_text_result_updated_at(older_failed, self._OLDER_SOURCE_UPDATED_AT)
-        self._set_text_result_updated_at(
-            latest_other, self._LATEST_SOURCE_UPDATED_AT
-        )
+        self._set_text_result_updated_at(latest_other, self._LATEST_SOURCE_UPDATED_AT)
 
         self.assertFalse(is_ocr_reprocess_ui_eligible(doc))
 
@@ -1089,9 +1081,7 @@ class ArabicPrintedBandedPartialOcrReprocessTests(TransactionTestCase):
         "documents.services.arabic_printed_banded_document_ocr."
         "process_claimed_arabic_printed_page"
     )
-    def test_reprocess_reuses_worker_selected_attempt(
-        self, mock_claimed, mock_enqueue
-    ):
+    def test_reprocess_reuses_worker_selected_attempt(self, mock_claimed, mock_enqueue):
         doc = self._partial_arabic_printed_document()
         identity, attempt, pages = self._seed_attempt(doc, b"page-a", b"page-b")
         self._fail_page_deadline(attempt, identity, 0)
@@ -1161,7 +1151,9 @@ class ArabicPrintedBandedPartialOcrReprocessTests(TransactionTestCase):
         )
 
         self.assertEqual(result.attempt_id, attempt.id)
-        self.assertEqual(ArabicPrintedOcrAttempt.objects.filter(document=doc).count(), 1)
+        self.assertEqual(
+            ArabicPrintedOcrAttempt.objects.filter(document=doc).count(), 1
+        )
         self.assertEqual(
             list(
                 ArabicPrintedOcrPageCheckpoint.objects.filter(attempt_id=attempt.id)
@@ -2203,7 +2195,9 @@ class RunWorkerVerifiedWriteFenceTests(TestCase):
             hebrew.verification_status,
             DocumentTextResult.VerificationStatus.UNVERIFIED,
         )
-        self.assertEqual(DocumentTextResult.objects.filter(document=self.doc).count(), 2)
+        self.assertEqual(
+            DocumentTextResult.objects.filter(document=self.doc).count(), 2
+        )
         self.assertEqual(self._index_body(), prior_body)
         self.assertNotEqual(self._index_body(), late_text)
         self.assertEqual(
@@ -2287,9 +2281,7 @@ class RunWorkerVerifiedWriteFenceTests(TestCase):
         self.assertEqual(source_a.status, DocumentTextResult.Status.NEEDS_REVIEW)
         self.assertEqual(hebrew_b.status, DocumentTextResult.Status.NEEDS_REVIEW)
         self.doc.refresh_from_db()
-        self.assertEqual(
-            self.doc.processing_state_user, Document.ProcessingState.READY
-        )
+        self.assertEqual(self.doc.processing_state_user, Document.ProcessingState.READY)
         self.assertNotEqual(
             self.doc.processing_state_user, Document.ProcessingState.PARTIAL
         )

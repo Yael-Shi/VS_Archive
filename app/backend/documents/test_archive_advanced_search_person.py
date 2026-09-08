@@ -1232,7 +1232,9 @@ class ArchiveAdvancedPersonFilterPhotoPresentationTests(TestCase):
         self.url = reverse("archive-list")
 
     def _list_cards(self, *person_ids: int, extra: list[tuple[str, str]] | None = None):
-        params: list[tuple[str, str]] = [("person", str(person_id)) for person_id in person_ids]
+        params: list[tuple[str, str]] = [
+            ("person", str(person_id)) for person_id in person_ids
+        ]
         if extra:
             params.extend(extra)
         with patch(
@@ -1334,8 +1336,12 @@ class ArchiveAdvancedPersonFilterPhotoPresentationTests(TestCase):
     def test_matching_photoperson_overrides_primary_photo_thumbnail(self):
         person = Person.objects.create(name="Not Primary")
         item = _create_photo_item(title="Match is later photo")
-        primary = _add_photo(item, position=1, thumbnail_file_key="photos/np/primary.jpg")
-        matching = _add_photo(item, position=2, thumbnail_file_key="photos/np/match.jpg")
+        primary = _add_photo(
+            item, position=1, thumbnail_file_key="photos/np/primary.jpg"
+        )
+        matching = _add_photo(
+            item, position=2, thumbnail_file_key="photos/np/match.jpg"
+        )
         PhotoPerson.objects.create(photo_content=matching, person=person)
 
         resp = self._list_cards(person.id)
@@ -1373,7 +1379,9 @@ class ArchiveAdvancedPersonFilterPhotoPresentationTests(TestCase):
         charles = Person.objects.create(name="Charles Together")
         item = _create_photo_item(title="Shared appearance")
         _add_photo(item, position=1, thumbnail_file_key="photos/shared/primary.jpg")
-        shared = _add_photo(item, position=2, thumbnail_file_key="photos/shared/both.jpg")
+        shared = _add_photo(
+            item, position=2, thumbnail_file_key="photos/shared/both.jpg"
+        )
         PhotoPerson.objects.create(photo_content=shared, person=ada)
         PhotoPerson.objects.create(photo_content=shared, person=charles)
 
@@ -1488,9 +1496,7 @@ class ArchiveAdvancedPersonFilterPhotoPresentationTests(TestCase):
         PhotoPerson.objects.create(photo_content=photo, person=person)
         rebuild_archive_item_search_index(item)
 
-        resp = self._list_cards(
-            person.id, extra=[("q", "UniquePhotoSnippetTokenXYZ")]
-        )
+        resp = self._list_cards(person.id, extra=[("q", "UniquePhotoSnippetTokenXYZ")])
         card = resp.context["browse_cards"][0]
         self.assertEqual(card.detail_url, public_photo_detail_url(item.id, photo.id))
         self.assertEqual(
@@ -1508,9 +1514,7 @@ class ArchiveAdvancedPersonFilterPhotoPresentationTests(TestCase):
             items.append(item)
 
         with CaptureQueriesContext(connection) as one_ctx:
-            matching_photo_ids_for_selected_persons(
-                [items[0].pk], [people[0].id]
-            )
+            matching_photo_ids_for_selected_persons([items[0].pk], [people[0].id])
         with CaptureQueriesContext(connection) as many_ctx:
             matching_photo_ids_for_selected_persons(
                 [item.pk for item in items], [person.id for person in people]

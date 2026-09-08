@@ -317,7 +317,9 @@ class ArabicPrintedBandedOcrTestBase(TestCase):
     ) -> ArabicPrintedBandedPageResult:
         return process_claimed_arabic_printed_page(
             claim=claim,
-            working_image=self.working_image if working_image is None else working_image,
+            working_image=self.working_image
+            if working_image is None
+            else working_image,
             gemini_api_key=GEMINI_KEY,
             cloud_vision_api_key=VISION_KEY,
             absolute_deadline_monotonic=deadline,
@@ -1357,9 +1359,7 @@ class ArabicPrintedBandedControlErrorTests(ArabicPrintedBandedOcrTestBase):
         vision.assert_not_called()
         transcribe.assert_not_called()
         cancel.assert_not_called()
-        checkpoint = ArabicPrintedOcrPageCheckpoint.objects.get(
-            pk=claim.checkpoint_id
-        )
+        checkpoint = ArabicPrintedOcrPageCheckpoint.objects.get(pk=claim.checkpoint_id)
         self.assertEqual(checkpoint.cloud_vision_call_count, 0)
         self.assertEqual(
             checkpoint.status, ArabicPrintedOcrPageCheckpoint.Status.RUNNING
@@ -1392,9 +1392,7 @@ class ArabicPrintedBandedControlErrorTests(ArabicPrintedBandedOcrTestBase):
 
     def test_matching_oriented_sha_follows_the_happy_path(self):
         claim = self._claim()
-        checkpoint = ArabicPrintedOcrPageCheckpoint.objects.get(
-            pk=claim.checkpoint_id
-        )
+        checkpoint = ArabicPrintedOcrPageCheckpoint.objects.get(pk=claim.checkpoint_id)
         self.assertEqual(checkpoint.oriented_image_sha256, self.working_image.sha256)
 
         def fake_transcribe(**kwargs):

@@ -156,9 +156,7 @@ def _biography_outcome(keeper: Person, duplicate: Person) -> str:
 
 
 def _alias_names(person: Person) -> tuple[str, ...]:
-    return tuple(
-        person.aliases.order_by("name", "id").values_list("name", flat=True)
-    )
+    return tuple(person.aliases.order_by("name", "id").values_list("name", flat=True))
 
 
 def _duplicate_canonical_becomes_alias(keeper: Person, duplicate: Person) -> str | None:
@@ -188,9 +186,7 @@ def _pending_suggestion_conflict_keys(
             status=ArchiveItemPersonSuggestion.Status.PENDING,
         ).values_list("archive_item_id", "action")
     )
-    return [
-        key for key in duplicate_pending if key in keeper_pending
-    ]
+    return [key for key in duplicate_pending if key in keeper_pending]
 
 
 def _author_identities(person_id: int) -> tuple[PersonMergeAuthorIdentityPreview, ...]:
@@ -271,9 +267,7 @@ def preview_person_merge(*, keeper_id: int, duplicate_id: int) -> PersonMergePre
         photo_person_count_duplicate=PhotoPerson.objects.filter(
             person_id=duplicate.pk
         ).count(),
-        author_identity_count_keeper=Author.objects.filter(
-            person_id=keeper.pk
-        ).count(),
+        author_identity_count_keeper=Author.objects.filter(person_id=keeper.pk).count(),
         author_identity_count_duplicate=Author.objects.filter(
             person_id=duplicate.pk
         ).count(),

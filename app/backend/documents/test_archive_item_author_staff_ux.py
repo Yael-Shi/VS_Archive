@@ -592,7 +592,9 @@ class StaffAuthorHtmlFormTests(TestCase):
         self.assertEqual(item.author_name, "Video Selected")
         self.assertEqual(Author.objects.filter(name="Video Selected").count(), 1)
 
-    def test_photo_forms_include_structured_authors_and_omitted_writer_kwargs_leave_compat(self):
+    def test_photo_forms_include_structured_authors_and_omitted_writer_kwargs_leave_compat(
+        self,
+    ):
         staff = self.staff
         item = ArchiveItem.objects.create(
             item_type=ArchiveItem.ItemType.PHOTO,
@@ -1151,9 +1153,7 @@ class StaffAuthorPhotoHtmlTests(TestCase):
 
         clear = self.client.post(
             EDIT_URL_TEMPLATE.format(item_id=item.id),
-            data=self._photo_payload(
-                **{"archive_item_person_ids": [str(person.pk)]}
-            ),
+            data=self._photo_payload(**{"archive_item_person_ids": [str(person.pk)]}),
         )
         self.assertEqual(clear.status_code, 302)
         item.refresh_from_db()
@@ -1170,9 +1170,7 @@ class StaffAuthorPhotoHtmlTests(TestCase):
             author_name="Photo Stay",
             people_present="crowd",
         )
-        ArchiveItemAuthor.objects.create(
-            archive_item=item, author=existing, position=0
-        )
+        ArchiveItemAuthor.objects.create(archive_item=item, author=existing, position=0)
         person = Person.objects.create(name="Stay Person")
         ArchiveItemPerson.objects.create(archive_item=item, person=person)
         before_authors = Author.objects.count()
@@ -1202,9 +1200,7 @@ class StaffAuthorPhotoHtmlTests(TestCase):
         self.client.force_login(self.staff)
         existing = Author.objects.create(name="Inline Stay")
         item, photo = _create_uploaded_photo_item(people_present="crowd")
-        ArchiveItemAuthor.objects.create(
-            archive_item=item, author=existing, position=0
-        )
+        ArchiveItemAuthor.objects.create(archive_item=item, author=existing, position=0)
         item.author_name = "Inline Stay"
         item.save(update_fields=["author_name", "updated_at"])
         inline_url = reverse(
@@ -1239,7 +1235,9 @@ class StaffAuthorPhotoPublicTests(TestCase):
         ArchiveItemAuthor.objects.create(archive_item=item, author=author, position=0)
         item.author_name = "Public Photo Author"
         item.save(update_fields=["author_name", "updated_at"])
-        from documents.services.archive_search_index import sync_archive_item_search_index
+        from documents.services.archive_search_index import (
+            sync_archive_item_search_index,
+        )
 
         sync_archive_item_search_index(item.pk)
 
@@ -1293,7 +1291,9 @@ class StaffAuthorPhotoPublicTests(TestCase):
             upload_status=PhotoContent.UploadStatus.PENDING,
         )
         ArchiveItemAuthor.objects.create(archive_item=item, author=author, position=0)
-        self.assertEqual(self.client.get(author_public_page_url(author.id)).status_code, 404)
+        self.assertEqual(
+            self.client.get(author_public_page_url(author.id)).status_code, 404
+        )
         self.assertNotContains(
             self.client.get(reverse("archive-list")),
             "Pending authored album",
@@ -1348,7 +1348,9 @@ class StaffAuthorPhotoPublicTests(TestCase):
             upload_status=PhotoContent.UploadStatus.UPLOADED,
             original_size_bytes=1024,
         )
-        from documents.services.archive_search_index import sync_archive_item_search_index
+        from documents.services.archive_search_index import (
+            sync_archive_item_search_index,
+        )
 
         sync_archive_item_search_index(item.pk)
         metadata_after_create = ArchiveItemSearchIndex.objects.get(
@@ -1403,9 +1405,7 @@ class StaffAuthorPhotoPublicTests(TestCase):
             .filter(pk=item.pk)
             .exists()
         )
-        q_after_edit = self.client.get(
-            reverse("archive-list"), {"q": "EditAuthorQzy"}
-        )
+        q_after_edit = self.client.get(reverse("archive-list"), {"q": "EditAuthorQzy"})
         self.assertContains(q_after_edit, "Family portrait album")
         stale = self.client.get(reverse("archive-list"), {"q": "CreateAuthorQzx"})
         self.assertNotContains(stale, "Family portrait album")

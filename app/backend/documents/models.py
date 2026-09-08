@@ -840,9 +840,7 @@ class DocumentTextResult(models.Model):
                 name="uniq_document_resulttype_engine",
             ),
             models.CheckConstraint(
-                condition=models.Q(
-                    quality__in=["UNKNOWN", "LOW", "MEDIUM", "GOOD"]
-                ),
+                condition=models.Q(quality__in=["UNKNOWN", "LOW", "MEDIUM", "GOOD"]),
                 name="dtr_quality_persisted_values",
             ),
         ]
@@ -1123,7 +1121,9 @@ class ArabicPrintedOcrPageCheckpoint(models.Model):
     oriented_image_sha256 = models.CharField(max_length=64)
     oriented_image_width = models.IntegerField()
     oriented_image_height = models.IntegerField()
-    cloud_vision_response_sha256 = models.CharField(max_length=64, blank=True, default="")
+    cloud_vision_response_sha256 = models.CharField(
+        max_length=64, blank=True, default=""
+    )
     cloud_vision_call_count = models.PositiveSmallIntegerField(default=0)
     banding_contract_fingerprint = models.CharField(max_length=64)
     banding_strategy = models.CharField(max_length=64)
@@ -1449,15 +1449,13 @@ class ArabicPrintedOcrBandCheckpoint(models.Model):
             ),
             models.CheckConstraint(
                 condition=(
-                    ~models.Q(status="PRIMARY_RUNNING")
-                    | models.Q(create_call_count=1)
+                    ~models.Q(status="PRIMARY_RUNNING") | models.Q(create_call_count=1)
                 ),
                 name="ar_pr_ocr_band_primary_count",
             ),
             models.CheckConstraint(
                 condition=(
-                    ~models.Q(status="FALLBACK_RUNNING")
-                    | models.Q(create_call_count=2)
+                    ~models.Q(status="FALLBACK_RUNNING") | models.Q(create_call_count=2)
                 ),
                 name="ar_pr_ocr_band_fallback_count",
             ),

@@ -301,9 +301,7 @@ class AuthorPublicPageMembershipTests(TestCase):
         pending_item = _create_photo_item(title="Pending album")
         _add_photo(pending_item, uploaded=False)
         _link(pending_item, pending_author)
-        self.assertEqual(
-            self.client.get(_author_page(pending_author)).status_code, 404
-        )
+        self.assertEqual(self.client.get(_author_page(pending_author)).status_code, 404)
 
         author = Author.objects.create(name="Renderable Photo Author")
         item = _create_photo_item(title="Renderable album")
@@ -445,7 +443,9 @@ class AuthorPublicPageLinkedPersonRedirectTests(TestCase):
 
     def test_linked_author_redirects_to_person_detail(self):
         person = Person.objects.create(name="Canonical Linked Person")
-        author = Author.objects.create(name="Linked Bibliographic Author", person=person)
+        author = Author.objects.create(
+            name="Linked Bibliographic Author", person=person
+        )
         _link(_public_manual("Linked authored letter"), author)
 
         resp = self.client.get(_author_page(author))

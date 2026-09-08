@@ -75,8 +75,7 @@ CREATE_PERSON_CANDIDATES_ERROR = (
     "alias matches; v1 does not force-create or reuse by name"
 )
 PHOTO_BINDING_ERROR = (
-    "photo must belong to the given PHOTO ArchiveItem with a matching "
-    "original_file_key"
+    "photo must belong to the given PHOTO ArchiveItem with a matching original_file_key"
 )
 PHOTO_NOT_RENDERABLE_ERROR = "photo is not public-renderable"
 NON_PHOTO_PARENT_ERROR = "archive item is not PHOTO"
@@ -183,7 +182,9 @@ def _alias_name_for_canonical(raw: object, *, canonical_name: str) -> str:
     return name
 
 
-def _reject_unknown_fields(op: dict[str, Any], allowed: set[str], *, operation_id: str) -> None:
+def _reject_unknown_fields(
+    op: dict[str, Any], allowed: set[str], *, operation_id: str
+) -> None:
     extra = sorted(key for key in op if key not in allowed)
     if "document_id" in extra:
         raise ReviewedPhotoPersonImportError(
@@ -196,7 +197,9 @@ def _reject_unknown_fields(op: dict[str, Any], allowed: set[str], *, operation_i
         )
 
 
-def _person_target(op: dict[str, Any], *, operation_id: str) -> tuple[int | None, str | None]:
+def _person_target(
+    op: dict[str, Any], *, operation_id: str
+) -> tuple[int | None, str | None]:
     has_id = "person_id" in op and op.get("person_id") is not None
     has_ref = bool(_strip(op.get("local_person_ref")))
     if has_id == has_ref:
@@ -340,7 +343,9 @@ def _parse_operations(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return parsed
 
 
-def _require_person(*, person_id: int, expected_canonical_name: str, operation_id: str) -> Person:
+def _require_person(
+    *, person_id: int, expected_canonical_name: str, operation_id: str
+) -> Person:
     person = Person.objects.filter(pk=person_id).first()
     if person is None:
         raise ReviewedPhotoPersonImportError(
@@ -353,7 +358,9 @@ def _require_person(*, person_id: int, expected_canonical_name: str, operation_i
     return person
 
 
-def _resolve_create_person(row: dict[str, Any], *, for_write: bool) -> tuple[Person | None, str, str]:
+def _resolve_create_person(
+    row: dict[str, Any], *, for_write: bool
+) -> tuple[Person | None, str, str]:
     operation_id = row["id"]
     canonical_name = row["canonical_name"]
     queryset = ReviewedPersonImportBinding.objects.select_related("person")

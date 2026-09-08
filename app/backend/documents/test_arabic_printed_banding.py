@@ -42,9 +42,7 @@ def _line(ymin: int, ymax: int, *indexes: int) -> ArabicPrintedLineBox:
 def _word(
     index: int, *, xmin: int = 10, ymin: int, xmax: int = 90, ymax: int
 ) -> ArabicPrintedWordBox:
-    return ArabicPrintedWordBox(
-        index=index, xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax
-    )
+    return ArabicPrintedWordBox(index=index, xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax)
 
 
 def _isolated_required_band_lines(count: int) -> list[ArabicPrintedLineBox]:
@@ -90,7 +88,9 @@ def _page321_like_words() -> list[ArabicPrintedWordBox]:
     return words
 
 
-def _assert_band_invariants(bands, *, image_width: int, image_height: int, word_count: int):
+def _assert_band_invariants(
+    bands, *, image_width: int, image_height: int, word_count: int
+):
     validate_arabic_printed_band_plan(
         bands,
         image_width=image_width,
@@ -117,24 +117,23 @@ class ArabicPrintedBandingTests(SimpleTestCase):
     def test_invalid_image_dimensions(self):
         word = _word(0, ymin=10, ymax=20)
         with self.assertRaises(ArabicPrintedBandingError) as ctx:
-            plan_arabic_printed_bands(
-                [word], image_width=0, image_height=IMAGE_HEIGHT
-            )
+            plan_arabic_printed_bands([word], image_width=0, image_height=IMAGE_HEIGHT)
         self.assertEqual(ctx.exception.reason, REASON_INVALID_IMAGE_DIMENSIONS)
         with self.assertRaises(ArabicPrintedBandingError) as ctx:
-            plan_arabic_printed_bands(
-                [word], image_width=IMAGE_WIDTH, image_height=-1
-            )
+            plan_arabic_printed_bands([word], image_width=IMAGE_WIDTH, image_height=-1)
         self.assertEqual(ctx.exception.reason, REASON_INVALID_IMAGE_DIMENSIONS)
         with self.assertRaises(ArabicPrintedBandingError) as ctx:
             plan_arabic_printed_line_groups(
-                [_line(0, 10, 0)], image_height=True  # noqa: FBT003
+                [_line(0, 10, 0)],
+                image_height=True,  # noqa: FBT003
             )
         self.assertEqual(ctx.exception.reason, REASON_INVALID_IMAGE_DIMENSIONS)
 
     def test_invalid_and_out_of_bounds_boxes(self):
         with self.assertRaises(ArabicPrintedBandingError) as ctx:
-            plan_arabic_printed_bands([], image_width=IMAGE_WIDTH, image_height=IMAGE_HEIGHT)
+            plan_arabic_printed_bands(
+                [], image_width=IMAGE_WIDTH, image_height=IMAGE_HEIGHT
+            )
         self.assertEqual(ctx.exception.reason, REASON_EMPTY_GEOMETRY)
 
         inverted = _word(0, xmin=90, ymin=10, xmax=10, ymax=20)

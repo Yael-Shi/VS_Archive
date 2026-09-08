@@ -294,7 +294,9 @@ class PhotoPublicGalleryTests(TestCase):
         self.assertContains(resp, "הוספת מידע על הפריט")
         self.assertNotContains(resp, "חזרה לכל התמונות")
         html = resp.content.decode("utf-8")
-        self.assertLess(html.index("Only photo caption"), html.index("photo-detail__image"))
+        self.assertLess(
+            html.index("Only photo caption"), html.index("photo-detail__image")
+        )
         self.assertEqual(html.count("Only photo caption"), 1)
 
     def test_multi_photo_renders_renderable_photos_in_position_id_order(self):
@@ -572,7 +574,10 @@ class PhotoPublicGalleryTests(TestCase):
         self.assertContains(family, "Private album")
         self.assertContains(family, "photo-gallery--album")
         self.assertNotContains(family, "Secret first")
-        selected = self._detail(item=private_item, photo=private_item.photo_contents.order_by("position", "id").first().id)
+        selected = self._detail(
+            item=private_item,
+            photo=private_item.photo_contents.order_by("position", "id").first().id,
+        )
         self.assertContains(selected, "Secret first")
 
     def test_browse_card_still_uses_primary_photo_only(self):

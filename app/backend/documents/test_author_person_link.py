@@ -344,7 +344,9 @@ class AuthorPersonLinkPublicPresentationTests(TestCase):
         self.assertContains(people_index, "UniquePersonTokenForAuthorLink")
         self.assertNotContains(people_index, "UniqueAuthorTokenForPersonLink")
         self.assertContains(person_detail, "UniquePersonTokenForAuthorLink")
-        self.assertContains(person_detail, "Person biography must stay off author pages.")
+        self.assertContains(
+            person_detail, "Person biography must stay off author pages."
+        )
         self.assertContains(item_detail, "UniqueAuthorTokenForPersonLink")
         self.assertContains(item_detail, person_public_page_url(person.id))
         self.assertNotContains(item_detail, author_public_page_url(author.id))
@@ -355,9 +357,7 @@ class AuthorPersonLinkPublicPresentationTests(TestCase):
             self.assertNotIn("עדכון קישור לאדם", html)
             self.assertNotIn('id="author_person_id"', html)
             self.assertNotIn(
-                reverse(
-                    "archive-manage-person-edit", kwargs={"person_id": person.id}
-                ),
+                reverse("archive-manage-person-edit", kwargs={"person_id": person.id}),
                 html,
             )
 
@@ -367,7 +367,8 @@ class AuthorPersonLinkMigrationContractTests(TestCase):
         migration_module = import_module(f"documents.migrations.{SCHEMA_MIGRATION}")
         Migration = migration_module.Migration
         self.assertEqual(
-            Migration.dependencies, [("documents", "0062_reviewed_person_import_binding")]
+            Migration.dependencies,
+            [("documents", "0062_reviewed_person_import_binding")],
         )
         self.assertEqual(len(Migration.operations), 1)
         operation = Migration.operations[0]

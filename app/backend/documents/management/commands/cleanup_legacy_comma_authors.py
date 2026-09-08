@@ -23,9 +23,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--apply",
             action="store_true",
-            help=(
-                "Apply the reviewed mapping. Default is dry-run with zero writes."
-            ),
+            help=("Apply the reviewed mapping. Default is dry-run with zero writes."),
         )
 
     def handle(self, *args, **options):
@@ -47,8 +45,7 @@ class Command(BaseCommand):
         for line in result.verifications:
             self.stdout.write(f"verify: {line}")
         self.stdout.write(
-            "planned_item_311_author_ids: "
-            f"{list(result.planned_item_311_author_ids)}"
+            f"planned_item_311_author_ids: {list(result.planned_item_311_author_ids)}"
         )
         self.stdout.write(f"planned_author_name: {result.planned_author_name!r}")
         self.stdout.write(

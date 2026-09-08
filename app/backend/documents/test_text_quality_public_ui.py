@@ -183,7 +183,9 @@ class TextQualityPublicUiTests(TestCase):
         self.assertNotIn('class="text-quality-indicator__heading"', html)
         self.assertNotIn("text-quality-indicator", self._text_blocks_html(html))
 
-    def test_non_hebrew_source_and_hebrew_has_one_transcription_indicator_and_note(self):
+    def test_non_hebrew_source_and_hebrew_has_one_transcription_indicator_and_note(
+        self,
+    ):
         doc = self._create_doc()
         self._create_result(
             doc,

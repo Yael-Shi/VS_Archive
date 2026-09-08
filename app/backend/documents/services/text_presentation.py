@@ -387,7 +387,12 @@ def _attach_displayed_transcription_quality(
         and has_source_text
         and has_hebrew_text
     )
-    if show_source and has_source_text and source is not None and source_row is not None:
+    if (
+        show_source
+        and has_source_text
+        and source is not None
+        and source_row is not None
+    ):
         return (
             replace(
                 source,

@@ -269,9 +269,7 @@ class ProcessDocumentRequestWorkerTests(TestCase):
 
     def test_late_original_holder_can_replace_document_recovery_required(self):
         token = uuid.uuid4()
-        self.document.processing_state_user = (
-            Document.ProcessingState.RECOVERY_REQUIRED
-        )
+        self.document.processing_state_user = Document.ProcessingState.RECOVERY_REQUIRED
         self.document.save(update_fields=["processing_state_user", "updated_at"])
         request = self._request(
             status=ProcessDocumentRequest.Status.RECOVERY_REQUIRED,
@@ -344,9 +342,7 @@ class ProcessDocumentRequestWorkerTests(TestCase):
     def test_verified_fence_restore_keeps_recovery_overlay_for_processing_prior(
         self,
     ):
-        self.document.processing_state_user = (
-            Document.ProcessingState.RECOVERY_REQUIRED
-        )
+        self.document.processing_state_user = Document.ProcessingState.RECOVERY_REQUIRED
         self.document.save(update_fields=["processing_state_user"])
 
         changed = apply_verified_fence_processing_state_restore(
@@ -480,9 +476,7 @@ class ProcessDocumentRequestWorkerTests(TestCase):
         self,
     ):
         token = uuid.uuid4()
-        self.document.processing_state_user = (
-            Document.ProcessingState.RECOVERY_REQUIRED
-        )
+        self.document.processing_state_user = Document.ProcessingState.RECOVERY_REQUIRED
         self.document.save(update_fields=["processing_state_user", "updated_at"])
         request = self._request(
             status=ProcessDocumentRequest.Status.RECOVERY_REQUIRED,
@@ -495,12 +489,15 @@ class ProcessDocumentRequestWorkerTests(TestCase):
             ProcessDocumentDisposition.FAILED,
         ):
             with self.subTest(disposition=disposition):
-                with patch(
-                    "documents.services.process_document_request_enqueue."
-                    "send_process_document_request_message"
-                ) as mock_send, patch(
-                    "documents.services.htr_engine.transcribe_pages"
-                ) as mock_transcribe:
+                with (
+                    patch(
+                        "documents.services.process_document_request_enqueue."
+                        "send_process_document_request_message"
+                    ) as mock_send,
+                    patch(
+                        "documents.services.htr_engine.transcribe_pages"
+                    ) as mock_transcribe,
+                ):
                     terminal = terminalize_process_document_request(
                         request_id=request.id,
                         lease_token=token,
@@ -935,7 +932,9 @@ class ProcessDocumentRequestHandlerTests(TestCase):
         execute_payload_mock.assert_called_once()
         payload = execute_payload_mock.call_args.args[0]
         self.assertIn(LEASE_EXPIRES_AT_PAYLOAD_KEY, payload)
-        self.assertEqual(payload[LEASE_EXPIRES_AT_PAYLOAD_KEY], persisted_lease["value"])
+        self.assertEqual(
+            payload[LEASE_EXPIRES_AT_PAYLOAD_KEY], persisted_lease["value"]
+        )
         self.assertEqual(
             payload,
             {

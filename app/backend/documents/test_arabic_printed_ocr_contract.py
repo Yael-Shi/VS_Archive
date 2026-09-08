@@ -94,9 +94,7 @@ class ArabicPrintedOcrContractTests(SimpleTestCase):
         result = evaluate_arabic_printed_band_output(
             f"\n{COMPLETION_MARKER}", "مرحبا", status="completed"
         )
-        self.assertEqual(
-            result.failure_kind, ArabicPrintedOcrFailureKind.EMPTY_OUTPUT
-        )
+        self.assertEqual(result.failure_kind, ArabicPrintedOcrFailureKind.EMPTY_OUTPUT)
         self.assertTrue(result.marker_seen)
         self.assertEqual(result.transcription, "")
         self.assertEqual(classify_plain_text_output("   "), "empty_output")
@@ -136,9 +134,7 @@ class ArabicPrintedOcrContractTests(SimpleTestCase):
     def test_status_must_be_completed(self):
         raw = _marked("مرحبا")
         for status in (None, "in_progress", "failed", "cancelled", ""):
-            result = evaluate_arabic_printed_band_output(
-                raw, "مرحبا", status=status
-            )
+            result = evaluate_arabic_printed_band_output(raw, "مرحبا", status=status)
             self.assertEqual(
                 result.failure_kind, ArabicPrintedOcrFailureKind.OTHER_STATUS
             )
@@ -265,7 +261,5 @@ class ArabicPrintedOcrContractTests(SimpleTestCase):
         invalid = evaluate_arabic_printed_band_output(
             _marked(valid_json), "مرحبا", status="completed"
         )
-        self.assertEqual(
-            invalid.failure_kind, ArabicPrintedOcrFailureKind.INVALID_JSON
-        )
+        self.assertEqual(invalid.failure_kind, ArabicPrintedOcrFailureKind.INVALID_JSON)
         self.assertEqual(invalid.transcription, "")

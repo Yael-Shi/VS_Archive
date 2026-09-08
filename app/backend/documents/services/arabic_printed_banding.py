@@ -160,10 +160,7 @@ def _validate_word_box(
 
 
 def _validate_line_box(line: ArabicPrintedLineBox, *, image_height: int) -> None:
-    if not all(
-        _is_int(value)
-        for value in (line.ymin, line.ymax, *line.word_indexes)
-    ):
+    if not all(_is_int(value) for value in (line.ymin, line.ymax, *line.word_indexes)):
         raise ArabicPrintedBandingError(
             "Line box coordinates and word indexes must be integers",
             reason=REASON_INVALID_BOX,

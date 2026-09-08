@@ -113,14 +113,11 @@ def _classify_photo_person(link: PhotoPerson) -> BackfillRow:
 def build_photo_person_archive_item_person_backfill_plan() -> BackfillPlan:
     """Read-only plan. No writes."""
     rows: list[BackfillRow] = []
-    queryset = (
-        PhotoPerson.objects.select_related(
-            "photo_content",
-            "photo_content__archive_item",
-            "person",
-        )
-        .order_by("id")
-    )
+    queryset = PhotoPerson.objects.select_related(
+        "photo_content",
+        "photo_content__archive_item",
+        "person",
+    ).order_by("id")
     for link in queryset:
         rows.append(_classify_photo_person(link))
     return BackfillPlan(rows=rows)
@@ -145,14 +142,11 @@ def apply_photo_person_archive_item_person_backfill() -> BackfillPlan:
             if row.status != STATUS_CREATE:
                 applied_rows.append(row)
                 continue
-            link = (
-                PhotoPerson.objects.select_related(
-                    "photo_content",
-                    "photo_content__archive_item",
-                    "person",
-                )
-                .get(pk=row.photo_person_id)
-            )
+            link = PhotoPerson.objects.select_related(
+                "photo_content",
+                "photo_content__archive_item",
+                "person",
+            ).get(pk=row.photo_person_id)
             classified = _classify_photo_person(link)
             if classified.status == STATUS_ERROR:
                 raise PhotoPersonArchiveItemPersonBackfillError(classified.reason)

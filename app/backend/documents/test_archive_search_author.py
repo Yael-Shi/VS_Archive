@@ -86,9 +86,7 @@ class ArchiveSearchAuthorContractTests(TestCase):
 
         public_qs = ArchiveItem.objects.filter(visibility=ArchiveItem.Visibility.PUBLIC)
         self.assertTrue(
-            filter_archive_items_by_search_query(
-                public_qs, "CanonicalFirstToken"
-            )
+            filter_archive_items_by_search_query(public_qs, "CanonicalFirstToken")
             .filter(pk=item.pk)
             .exists()
         )
@@ -178,9 +176,7 @@ class ArchiveSearchAuthorContractTests(TestCase):
             if "documents_archiveitemauthor" in query["sql"].lower()
         ]
         self.assertLessEqual(len(author_link_queries), 1)
-        names = {
-            list(item.author_links.all())[0].author.name for item in loaded
-        }
+        names = {list(item.author_links.all())[0].author.name for item in loaded}
         self.assertEqual(
             names,
             {f"PrefetchSearchAuthor{index}" for index in range(3)},

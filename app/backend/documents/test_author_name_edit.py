@@ -442,9 +442,7 @@ class AuthorRenameSuccessTests(TestCase):
         self.author.refresh_from_db()
         self.assertEqual(self.author.name, "FilterAuthorToken")
 
-        filters = normalize_archive_advanced_filters(
-            {"author": str(self.author.id)}
-        )
+        filters = normalize_archive_advanced_filters({"author": str(self.author.id)})
         self.assertEqual(filters.author_id, self.author.id)
         matched = filter_archive_items_by_advanced_filters(
             ArchiveItem.objects.all(), filters

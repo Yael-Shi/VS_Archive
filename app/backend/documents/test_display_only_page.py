@@ -249,16 +249,12 @@ class DisplayOnlyPageUploadTests(TestCase):
         self.assertFalse(source.include_in_ocr)
         self.assertEqual(source.upload_status, DocumentSourceFile.UploadStatus.UPLOADED)
         self.assertEqual(doc.expected_source_file_count, 3)
-        self.assertEqual(
-            doc.processing_state_user, Document.ProcessingState.READY
-        )
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.READY)
         self.assertEqual(
             DocumentTextResult.objects.filter(document=doc).get().text,
             "existing source text",
         )
-        self.assertFalse(
-            ProcessDocumentRequest.objects.filter(document=doc).exists()
-        )
+        self.assertFalse(ProcessDocumentRequest.objects.filter(document=doc).exists())
         self.assertEqual(doc.thumbnail_file_key, f"documents/{doc.id}/thumb_400.jpg")
 
     def test_add_display_only_page_to_legacy_single_image_document(self):
@@ -272,9 +268,7 @@ class DisplayOnlyPageUploadTests(TestCase):
         self.assertEqual(source.order_index, 1)
         self.assertFalse(source.include_in_ocr)
         self.assertEqual(doc.expected_source_file_count, 2)
-        self.assertEqual(
-            doc.processing_state_user, Document.ProcessingState.READY
-        )
+        self.assertEqual(doc.processing_state_user, Document.ProcessingState.READY)
 
     def test_display_only_page_visible_in_preview_and_public_display(self):
         doc = self._ready_multi_image_doc(count=2)
@@ -621,7 +615,10 @@ class DisplayOnlyPageOcrPathTests(TestCase):
         self, mock_translate, mock_transcribe, mock_get_object_bytes
     ):
         doc = self._png_doc_with_display_only()
-        mock_get_object_bytes.side_effect = lambda bucket, key: (_png_bytes(), "image/png")
+        mock_get_object_bytes.side_effect = lambda bucket, key: (
+            _png_bytes(),
+            "image/png",
+        )
         mock_transcribe.return_value = HtrResult(
             text="combined text",
             needs_review=False,
@@ -645,7 +642,9 @@ class DisplayOnlyPageOcrPathTests(TestCase):
         msg = {"Body": json.dumps({"type": "PROCESS_DOCUMENT", "document_id": doc.id})}
         self.assertTrue(command._process_message(msg))
         mock_transcribe.assert_called_once()
-        read_keys = [call.kwargs["key"] for call in mock_get_object_bytes.call_args_list]
+        read_keys = [
+            call.kwargs["key"] for call in mock_get_object_bytes.call_args_list
+        ]
         self.assertEqual(
             read_keys,
             [
