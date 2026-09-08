@@ -10,6 +10,9 @@ from django.test import RequestFactory, TestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
 
 from documents.admin import PhotoContentAdmin
+from documents.historical_migration_test_support import (
+    documents_migration_leaf_targets,
+)
 from documents.models import ArchiveItem, Document, Person, PhotoContent, PhotoPerson
 from documents.services.archive_item_access import (
     filter_browse_renderable_archive_items,
@@ -497,4 +500,4 @@ class PhotoContentMultiPhotoMigrationTests(TransactionTestCase):
             self.assertEqual(migrated.archive_item_id, item_id)
             self.assertEqual(migrated.original_file_key, original_key)
         finally:
-            self._migrate([("documents", "0053_photocontent_multi_photo_foundation")])
+            self._migrate(documents_migration_leaf_targets())

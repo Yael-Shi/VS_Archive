@@ -10,6 +10,9 @@ from django.db import connection
 from django.test import TestCase, TransactionTestCase
 from django.db.migrations.executor import MigrationExecutor
 
+from documents.historical_migration_test_support import (
+    documents_migration_leaf_targets,
+)
 from documents.models import (
     ArchiveItem,
     ArchiveItemPerson,
@@ -563,4 +566,4 @@ class PersonNameTagBackfillApplyMigrationTests(TransactionTestCase):
             migrated_item = MigratedArchiveItem.objects.get(pk=item_id)
             self.assertTrue(migrated_item.tags.filter(pk=2).exists())
         finally:
-            self._migrate([("documents", "0055_backfill_person_from_person_name_tags")])
+            self._migrate(documents_migration_leaf_targets())
