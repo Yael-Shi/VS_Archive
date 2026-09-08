@@ -11,7 +11,7 @@ every affected ``author_name`` from its ordered links.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -551,7 +551,7 @@ def _lock_archive_items_for_update(item_ids: Sequence[int]) -> dict[int, Archive
 
 
 def _lock_archive_item_author_links_for_update(
-    item_ids: Sequence[int],
+    item_ids: Iterable[int],
 ) -> list[ArchiveItemAuthor]:
     """Lock through rows for ``item_ids`` in (item, position, id) order."""
     ordered_ids = sorted(set(item_ids))
@@ -566,7 +566,7 @@ def _lock_archive_item_author_links_for_update(
 
 def _lock_authors_for_update(
     *,
-    author_ids: Sequence[int],
+    author_ids: Iterable[int],
     exact_name: str | None = None,
 ) -> dict[int, Author]:
     """Lock Author rows in ascending pk order.
