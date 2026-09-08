@@ -257,18 +257,18 @@ def _parse_operations(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 {"id", "op", "local_person_ref", "canonical_name"},
                 operation_id=operation_id,
             )
-            local_ref = _strip(raw.get("local_person_ref"))
-            if not local_ref:
+            created_local_ref = _strip(raw.get("local_person_ref"))
+            if not created_local_ref:
                 raise ReviewedPhotoPersonImportError(
                     LOCAL_REF_REQUIRED_ERROR, operation_id=operation_id
                 )
-            if local_ref in seen_refs:
+            if created_local_ref in seen_refs:
                 raise ReviewedPhotoPersonImportError(
                     LOCAL_REF_DUPLICATE_ERROR, operation_id=operation_id
                 )
-            seen_refs.add(local_ref)
-            create_refs.add(local_ref)
-            row["local_person_ref"] = local_ref
+            seen_refs.add(created_local_ref)
+            create_refs.add(created_local_ref)
+            row["local_person_ref"] = created_local_ref
             row["canonical_name"] = _canonical_name(raw.get("canonical_name"))
         elif op_type == OP_ADD_ALIAS:
             _reject_unknown_fields(
@@ -283,10 +283,12 @@ def _parse_operations(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 },
                 operation_id=operation_id,
             )
-            person_id, local_ref = _person_target(raw, operation_id=operation_id)
-            row["person_id"] = person_id
-            row["local_person_ref"] = local_ref
-            if person_id is not None:
+            target_person_id, target_local_ref = _person_target(
+                raw, operation_id=operation_id
+            )
+            row["person_id"] = target_person_id
+            row["local_person_ref"] = target_local_ref
+            if target_person_id is not None:
                 row["expected_canonical_name"] = _canonical_name(
                     raw.get("expected_canonical_name")
                 )
@@ -308,10 +310,12 @@ def _parse_operations(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 },
                 operation_id=operation_id,
             )
-            person_id, local_ref = _person_target(raw, operation_id=operation_id)
-            row["person_id"] = person_id
-            row["local_person_ref"] = local_ref
-            if person_id is not None:
+            photo_person_id, photo_local_ref = _person_target(
+                raw, operation_id=operation_id
+            )
+            row["person_id"] = photo_person_id
+            row["local_person_ref"] = photo_local_ref
+            if photo_person_id is not None:
                 row["expected_canonical_name"] = _canonical_name(
                     raw.get("expected_canonical_name")
                 )
@@ -335,8 +339,12 @@ def _parse_operations(payload: dict[str, Any]) -> list[dict[str, Any]]:
         parsed.append(row)
 
     for row in parsed:
-        local_ref = row.get("local_person_ref")
-        if row["op"] != OP_CREATE_PERSON and local_ref and local_ref not in create_refs:
+        later_local_ref = row.get("local_person_ref")
+        if (
+            row["op"] != OP_CREATE_PERSON
+            and later_local_ref
+            and later_local_ref not in create_refs
+        ):
             raise ReviewedPhotoPersonImportError(
                 LOCAL_REF_UNKNOWN_ERROR, operation_id=row["id"]
             )

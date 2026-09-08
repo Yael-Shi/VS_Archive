@@ -733,7 +733,15 @@ def archive_public_list_active_filter_summary_context(
     for item in summary_items:
         kind = str(item["kind"])
         if kind == "person":
-            selected_person_ids = tuple(item.get("ids") or filters.person_ids)
+            selected_person_ids: tuple[int, ...] = filters.person_ids
+            raw_person_ids = item.get("ids")
+            if isinstance(raw_person_ids, (list, tuple)) and raw_person_ids:
+                parsed_person_ids: list[int] = []
+                for raw_person_id in raw_person_ids:
+                    if isinstance(raw_person_id, int):
+                        parsed_person_ids.append(raw_person_id)
+                if parsed_person_ids:
+                    selected_person_ids = tuple(parsed_person_ids)
             for person_id in selected_person_ids:
                 person_name = person_name_by_id.get(person_id, str(person_id))
                 remove_query = build_archive_public_list_query(

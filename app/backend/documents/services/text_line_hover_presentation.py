@@ -11,6 +11,7 @@ geometry.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from documents.models import (
@@ -97,14 +98,18 @@ def _hover_line_id(geometry: TextRangeLineGeometry) -> str:
 def _page_dimensions_by_index(
     *,
     snapshot_id: int,
-) -> dict[int, dict]:
+) -> dict[int, Mapping[str, object]]:
     """Load page dimensions for the already-trusted binding snapshot only."""
     pages = TranskribusSnapshotPage.objects.filter(snapshot_id=snapshot_id).values(
         "page_index",
         "image_width",
         "image_height",
     )
-    return {page["page_index"]: page for page in pages}
+    pages_by_index: dict[int, Mapping[str, object]] = {}
+    for page in pages:
+        page_index = page["page_index"]
+        pages_by_index[page_index] = page
+    return pages_by_index
 
 
 def _contributing_lines_for_binding(
@@ -125,7 +130,7 @@ def _overlay_targets_for_geometry(
     geometry: TextRangeLineGeometry,
     *,
     hover_line_id: str,
-    pages_by_index: dict[int, dict],
+    pages_by_index: dict[int, Mapping[str, object]],
     renderable_page_indexes: set[int],
 ) -> tuple[TextLineHoverOverlayTarget, ...] | None:
     """Convert one trusted line to overlay rects, or fail closed for the line."""
@@ -185,7 +190,7 @@ def _build_segments_and_targets(
     text: str,
     *,
     lines: list[TranskribusSnapshotLine],
-    pages_by_index: dict[int, dict],
+    pages_by_index: dict[int, Mapping[str, object]],
     renderable_page_indexes: set[int],
 ) -> tuple[tuple[TextLineHoverSegment, ...], tuple[TextLineHoverOverlayTarget, ...]]:
     segments: list[TextLineHoverSegment] = []
