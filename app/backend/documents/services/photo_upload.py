@@ -32,6 +32,10 @@ from documents.services.photo_thumbnail import generate_and_persist_photo_thumbn
 
 _UPLOAD_ERROR_MAX_LENGTH = 512
 
+# String message, or structured person-duplicate dict from
+# person_name_candidates_error_payload.
+PhotoUploadParseError = str | dict[str, Any]
+
 
 @dataclass(frozen=True)
 class PhotoS3VerificationError:
@@ -415,8 +419,8 @@ def parse_create_photo_upload_metadata(
     payload: dict[str, Any],
     *,
     user=None,
-) -> tuple[dict | None, str | None]:
-    """Parse JSON body for photo upload create; return (parsed, error_message)."""
+) -> tuple[dict | None, PhotoUploadParseError | None]:
+    """Parse JSON body for photo upload create; return (parsed, error)."""
     title = (payload.get("title") or "").strip()
     if not title:
         return None, "title required"
@@ -539,7 +543,7 @@ def parse_create_photo_upload_metadata(
 
 def parse_add_photo_upload_metadata(
     payload: dict[str, Any],
-) -> tuple[dict | None, str | None]:
+) -> tuple[dict | None, PhotoUploadParseError | None]:
     """Parse JSON body for adding a PhotoContent to an existing PHOTO item."""
     from documents.services.archive_item_validation import parse_date_precision
     from documents.services.archive_date_input import parse_archive_date_bounds
