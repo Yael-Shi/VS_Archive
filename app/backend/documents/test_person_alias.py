@@ -100,7 +100,7 @@ def _add_photo(
 
 
 def _metadata_update_kwargs(**overrides) -> dict:
-    values = {
+    values: dict[str, str | list[int] | None] = {
         "description": "",
         "location": "",
         "context": "",
@@ -174,11 +174,13 @@ class PersonAliasModelTests(TestCase):
         self.assertEqual(Person.objects.filter(pk=person.pk).count(), 1)
 
     def test_alias_name_is_not_globally_unique(self):
-        constraint_names = {
-            constraint.name for constraint in PersonAlias._meta.constraints
+        named_constraints = {
+            constraint.name: constraint
+            for constraint in PersonAlias._meta.constraints
+            if constraint.name is not None
         }
-        self.assertEqual(constraint_names, {"uniq_person_alias_person_name"})
-        fields = PersonAlias._meta.constraints[0].fields
+        self.assertEqual(set(named_constraints), {"uniq_person_alias_person_name"})
+        fields = named_constraints["uniq_person_alias_person_name"].fields
         self.assertEqual(list(fields), ["person", "name"])
 
 
@@ -204,9 +206,10 @@ class PersonAliasServiceTests(TestCase):
         self.assertEqual(alias.name, "Jacob Cohen")
         self.assertEqual(first.aliases.count(), 0)
 
-    def test_empty_alias_is_rejected(self):
+    def test_empty_alias_is_rejected(self) -> None:
         person = Person.objects.create(name="יעקב כהן")
-        for raw in ("", "   ", None):
+        invalid_names: list[str | None] = ["", "   ", None]
+        for raw in invalid_names:
             with self.subTest(raw=raw):
                 with self.assertRaises(PhotoContentManagementError) as raised:
                     create_person_alias(person, name=raw)  # type: ignore[arg-type]

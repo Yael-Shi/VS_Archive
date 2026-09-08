@@ -51,10 +51,13 @@ class CleanupAbandonedDisplayOnlyPageUploadsTests(TestCase):
         include_in_ocr: bool = False,
         hours: int = 30,
     ) -> DocumentSourceFile:
+        order_index = doc.expected_source_file_count
+        self.assertIsNotNone(order_index)
+        assert order_index is not None
         extra = DocumentSourceFile.objects.create(
             document=doc,
-            order_index=doc.expected_source_file_count,
-            file_s3_key=f"documents/{doc.id}/source/{doc.expected_source_file_count}.jpg",
+            order_index=order_index,
+            file_s3_key=f"documents/{doc.id}/source/{order_index}.jpg",
             file_original_name="extra.jpg",
             mime_type="image/jpeg",
             size_bytes=100,

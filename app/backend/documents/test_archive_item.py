@@ -4564,25 +4564,39 @@ class ArchiveItemListSearchTests(TestCase):
             name=ARCHIVE_FAMILY_GROUP_NAME
         )
 
-    def _create_public_item(self, **kwargs) -> ArchiveItem:
-        defaults = {
-            "title": "Public search item",
-            "body": "Search test body.",
-            "visibility": ArchiveItem.Visibility.PUBLIC,
-        }
-        defaults.update(kwargs)
-        body = defaults.pop("body")
-        return create_manual_text_archive_item(body=body, **defaults)
+    def _create_public_item(
+        self,
+        *,
+        title: str = "Public search item",
+        body: str = "Search test body.",
+        visibility: str = ArchiveItem.Visibility.PUBLIC,
+        author_name: str = "",
+        source_title: str = "",
+    ) -> ArchiveItem:
+        return create_manual_text_archive_item(
+            title=title,
+            body=body,
+            visibility=visibility,
+            author_name=author_name,
+            source_title=source_title,
+        )
 
-    def _create_private_item(self, **kwargs) -> ArchiveItem:
-        defaults = {
-            "title": "Private search item",
-            "body": "Private search body.",
-            "visibility": ArchiveItem.Visibility.PRIVATE,
-        }
-        defaults.update(kwargs)
-        body = defaults.pop("body")
-        return create_manual_text_archive_item(body=body, **defaults)
+    def _create_private_item(
+        self,
+        *,
+        title: str = "Private search item",
+        body: str = "Private search body.",
+        visibility: str = ArchiveItem.Visibility.PRIVATE,
+        author_name: str = "",
+        source_title: str = "",
+    ) -> ArchiveItem:
+        return create_manual_text_archive_item(
+            title=title,
+            body=body,
+            visibility=visibility,
+            author_name=author_name,
+            source_title=source_title,
+        )
 
     def test_anonymous_search_finds_public_item_by_title(self):
         item = self._create_public_item(title="Unique public title search")
@@ -4785,25 +4799,31 @@ class ArchiveItemDiscoveryBrowseTests(TestCase):
             name=ARCHIVE_FAMILY_GROUP_NAME
         )
 
-    def _create_public_item(self, **kwargs) -> ArchiveItem:
-        defaults = {
-            "title": "Public browse item",
-            "body": "Browse test body.",
-            "visibility": ArchiveItem.Visibility.PUBLIC,
-        }
-        defaults.update(kwargs)
-        body = defaults.pop("body")
-        return create_manual_text_archive_item(body=body, **defaults)
+    def _create_public_item(
+        self,
+        *,
+        title: str = "Public browse item",
+        body: str = "Browse test body.",
+        visibility: str = ArchiveItem.Visibility.PUBLIC,
+    ) -> ArchiveItem:
+        return create_manual_text_archive_item(
+            title=title,
+            body=body,
+            visibility=visibility,
+        )
 
-    def _create_private_item(self, **kwargs) -> ArchiveItem:
-        defaults = {
-            "title": "Private browse item",
-            "body": "Private browse body.",
-            "visibility": ArchiveItem.Visibility.PRIVATE,
-        }
-        defaults.update(kwargs)
-        body = defaults.pop("body")
-        return create_manual_text_archive_item(body=body, **defaults)
+    def _create_private_item(
+        self,
+        *,
+        title: str = "Private browse item",
+        body: str = "Private browse body.",
+        visibility: str = ArchiveItem.Visibility.PRIVATE,
+    ) -> ArchiveItem:
+        return create_manual_text_archive_item(
+            title=title,
+            body=body,
+            visibility=visibility,
+        )
 
     def _attach_discovery_metadata(self, item: ArchiveItem):
         category = ArchiveCategory.objects.create(
