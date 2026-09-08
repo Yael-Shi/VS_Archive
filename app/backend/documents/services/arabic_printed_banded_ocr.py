@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import hashlib
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
+from uuid import UUID
 
 from documents.models import (
     ArabicPrintedOcrBandCheckpoint,
@@ -150,14 +152,14 @@ class _PageAborted(Exception):
 class _PageContext:
     checkpoint_id: int
     page_index: int
-    lease_token: object
+    lease_token: UUID
     working_image: ArabicPrintedWorkingImage
     gemini_api_key: str
     cloud_vision_api_key: str
     absolute_deadline_monotonic: float
     poll_seconds: float
-    sleep_fn: object
-    monotonic_fn: object
+    sleep_fn: Callable[[float], None]
+    monotonic_fn: Callable[[], float]
 
     def remaining(self) -> float:
         return self.absolute_deadline_monotonic - self.monotonic_fn()
@@ -947,8 +949,8 @@ def process_claimed_arabic_printed_page(
     cloud_vision_api_key: str,
     absolute_deadline_monotonic: float,
     poll_seconds: float = DEFAULT_POLL_SECONDS,
-    sleep_fn=time.sleep,
-    monotonic_fn=time.monotonic,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    monotonic_fn: Callable[[], float] = time.monotonic,
 ) -> ArabicPrintedBandedPageResult:
     """Run Vision, banded Antigravity OCR, and assembly for one claimed page."""
     if claim.action == ArabicPrintedPageClaimAction.REUSE:

@@ -38,6 +38,7 @@ from documents.services.arabic_printed_banded_ocr import (
 from documents.services.arabic_printed_page_checkpoints import (
     ArabicPrintedPageClaimAction,
     ArabicPrintedPageSource,
+    StaleArabicPrintedPageClaimError,
     build_arabic_printed_attempt_identity,
     claim_arabic_printed_page,
     ensure_arabic_printed_page_checkpoints,
@@ -284,10 +285,16 @@ def process_arabic_printed_banded_document(
             collected.append(page_result)
             continue
 
+        lease_token = claim.lease_token
+        if lease_token is None:
+            raise StaleArabicPrintedPageClaimError(
+                "EXECUTE claim requires a lease token"
+            )
+
         if page_deadline is None:
             persist_arabic_printed_page_failure(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=lease_token,
                 failure_code=DOCUMENT_FAILURE_DEADLINE,
                 failure_message=f"insufficient page start budget page_index={page_index}",
             )
@@ -300,7 +307,7 @@ def process_arabic_printed_banded_document(
         except Exception:
             persist_arabic_printed_page_failure(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=lease_token,
                 failure_code=DOCUMENT_FAILURE_IMAGE_LOAD,
                 failure_message=f"working image load failed page_index={page_index}",
             )
