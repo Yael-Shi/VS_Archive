@@ -228,11 +228,12 @@ class PublicArchiveItemAuthorPresentationTests(TestCase):
 
         detail = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
         self.assertEqual(detail.status_code, 200)
-        self.assertNotContains(detail, "מחבר/ת:")
-        self.assertNotContains(detail, "Photo Card Author")
+        self.assertContains(detail, "מחבר/ת:")
+        self.assertContains(detail, "Photo Card Author")
+        self.assertContains(detail, author_public_page_url(author.id))
         self.assertNotContains(detail, "Photo stale")
 
-    def test_photo_detail_does_not_gain_author_surface_for_author_name_only(self):
+    def test_photo_detail_uses_author_name_fallback_when_no_structured_authors(self):
         item = _public_photo(title="Photo author_name only")
         _set_author_name_only(item, "Hidden photo author")
 
@@ -241,8 +242,9 @@ class PublicArchiveItemAuthorPresentationTests(TestCase):
         self.assertNotContains(listing, "/archive/authors/")
 
         detail = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
-        self.assertNotContains(detail, "מחבר/ת:")
-        self.assertNotContains(detail, "Hidden photo author")
+        self.assertContains(detail, "מחבר/ת:")
+        self.assertContains(detail, "Hidden photo author")
+        self.assertNotContains(detail, "/archive/authors/")
 
     def test_global_q_and_advanced_author_use_structured_authors(self):
         item = _public_manual("Search cutover item")

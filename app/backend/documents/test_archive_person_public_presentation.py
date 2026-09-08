@@ -298,14 +298,30 @@ class ArchivePersonPublicDetailTests(TestCase):
         self.assertContains(resp, "אנשים מזוהים:")
         self.assertContains(resp, "Photo Identified Person")
         self.assertContains(resp, _person_href_html(identified))
+        header = html[
+            html.index("archive-detail-photo-header") : html.index("</header>")
+        ]
+        self.assertIn("אנשים קשורים", header)
+        self.assertIn("Item Related Person", header)
+        self.assertIn(_person_href_html(related), header)
+        self.assertNotIn("אנשים מזוהים:", header)
+        self.assertNotIn("Photo Identified Person", header)
         identified_idx = html.index("אנשים מזוהים:")
         related_idx = html.index("אנשים קשורים")
-        self.assertLess(identified_idx, related_idx)
-        identified_block = html[identified_idx:related_idx]
-        related_block = html[related_idx:]
+        identified_block = html[identified_idx : html.index("</div>", identified_idx)]
+        related_block = html[related_idx : html.index("</div>", related_idx)]
+        self.assertIn("Photo Identified Person", identified_block)
         self.assertIn(_person_href_html(identified), identified_block)
+        self.assertNotIn("Item Related Person", identified_block)
+        self.assertNotIn(_person_href_html(related), identified_block)
+        self.assertIn("Item Related Person", related_block)
+        self.assertIn(_person_href_html(related), related_block)
         self.assertNotIn("Photo Identified Person", related_block)
         self.assertNotIn(_person_href_html(identified), related_block)
+        self.assertNotEqual(
+            html.rfind("archive-detail-meta-block--photo", 0, identified_idx),
+            -1,
+        )
 
 
 class ArchivePersonPublicQueryCountTests(TestCase):

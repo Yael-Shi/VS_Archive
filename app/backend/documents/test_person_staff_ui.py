@@ -979,9 +979,14 @@ class PersonStaffCompatibilityTests(TestCase):
             set(self.p2.people.values_list("id", flat=True)),
             {self.existing.id, created.id},
         )
-        self.assertFalse(
+        self.assertTrue(
             ArchiveItemPerson.objects.filter(
                 archive_item=self.multi, person=created
+            ).exists()
+        )
+        self.assertTrue(
+            ArchiveItemPerson.objects.filter(
+                archive_item=self.multi, person=self.existing
             ).exists()
         )
         edit_page = self.client.get(url)
