@@ -30,11 +30,17 @@ from documents.services.process_document_request_expired_lease import (
     fence_locked_expired_running_process_document_request,
     lock_document_then_request,
 )
+from documents.services.process_document_request_persist import (
+    LEASE_TOKEN_PAYLOAD_KEY,
+    PROCESS_DOCUMENT_REQUEST_ID_PAYLOAD_KEY,
+    automated_process_document_persist_is_allowed,
+    parse_process_document_lease_token,
+    parse_process_document_request_id,
+)
 from documents.services.processing_state import ORDINARY_RESULT_PROCESSING_STATES
 
 logger = logging.getLogger(__name__)
 
-PROCESS_DOCUMENT_REQUEST_ID_PAYLOAD_KEY = "request_id"
 LEASE_EXPIRES_AT_PAYLOAD_KEY = "lease_expires_at"
 EXECUTION_LEASE = timedelta(seconds=SQS_WORKER_VISIBILITY_TIMEOUT_SECONDS)
 SQS_VISIBILITY_AFTER_CLAIM_SECONDS = SQS_WORKER_VISIBILITY_TIMEOUT_SECONDS
@@ -64,13 +70,6 @@ class ProcessDocumentRequestClaim:
     request_id: int
     lease_token: uuid.UUID | None = None
     execution_payload: dict[str, Any] | None = None
-
-
-def parse_process_document_request_id(raw: Any) -> int | None:
-    """Accept only a positive plain int Request id."""
-    if type(raw) is not int or raw < 1:
-        return None
-    return raw
 
 
 def _change_message_visibility(
@@ -139,6 +138,7 @@ def _execution_payload(sync_request: ProcessDocumentRequest) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "type": "PROCESS_DOCUMENT",
         "document_id": sync_request.document_id,
+        PROCESS_DOCUMENT_REQUEST_ID_PAYLOAD_KEY: sync_request.pk,
     }
 
     if sync_request.operation == ProcessDocumentRequest.Operation.HEBREW_TRANSLATION:
@@ -222,6 +222,7 @@ def claim_process_document_request(
             execution_payload[LEASE_EXPIRES_AT_PAYLOAD_KEY] = (
                 sync_request.lease_expires_at
             )
+            execution_payload[LEASE_TOKEN_PAYLOAD_KEY] = token
             return ProcessDocumentRequestClaim(
                 ProcessDocumentRequestAction.EXECUTE,
                 request_id,
@@ -478,12 +479,15 @@ __all__ = [
     "EXECUTION_LEASE",
     "FRESH_IN_PROGRESS_DEFER_SECONDS",
     "LEASE_EXPIRES_AT_PAYLOAD_KEY",
+    "LEASE_TOKEN_PAYLOAD_KEY",
     "PROCESS_DOCUMENT_REQUEST_ID_PAYLOAD_KEY",
+    "automated_process_document_persist_is_allowed",
+    "parse_process_document_lease_token",
+    "parse_process_document_request_id",
     "SQS_VISIBILITY_AFTER_CLAIM_SECONDS",
     "ProcessDocumentRequestAction",
     "ProcessDocumentRequestClaim",
     "claim_process_document_request",
     "handle_process_document_request",
-    "parse_process_document_request_id",
     "terminalize_process_document_request",
 ]

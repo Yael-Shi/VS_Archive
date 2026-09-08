@@ -45,6 +45,24 @@ def apply_verified_fence_processing_state_restore(
     return True
 
 
+def update_document_processing_state_from_displayed_source(doc: Document) -> str | None:
+    """Roll up using displayed usable SOURCE_TEXT. Missing source becomes PARTIAL.
+
+    Never writes PROCESSING or RECOVERY_REQUIRED. Returns the source engine
+    when a usable displayed SOURCE_TEXT row exists.
+    """
+    from documents.services.text_presentation import (
+        resolve_displayable_source_text_result,
+    )
+
+    source_row = resolve_displayable_source_text_result(doc)
+    if source_row is None or not (source_row.text or "").strip():
+        doc.processing_state_user = Document.ProcessingState.PARTIAL
+        return None
+    update_document_processing_state_for_engine(doc, source_row.engine)
+    return source_row.engine
+
+
 def update_document_processing_state_for_engine(doc: Document, engine: str) -> None:
     expected_types = expected_result_types_for_document(doc)
 

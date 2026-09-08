@@ -238,22 +238,17 @@ def _has_failed_gemini_page_checkpoint(document_id: int) -> bool:
     ).exists()
 
 
-def _is_recoverable_partial_ocr_failure(doc: Document) -> bool:
-    """Latest SOURCE_TEXT is a failed source OCR on a supported recoverable PARTIAL route."""
-    if doc.processing_state_user != Document.ProcessingState.PARTIAL:
-        return False
+def has_recoverable_ocr_partial_evidence(doc: Document) -> bool:
+    """Checkpoint or failed-source OCR evidence, independent of Document state.
 
-    route = _select_document_ocr_route(doc)
-    if route.engine_key not in (
-        DocumentTextResult.OcrEngineKey.GEMINI,
-        DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
-    ):
-        return False
-
+    Used by staff abandon overlay replacement. Does not require the Document to
+    already be PARTIAL. Invalid routes are treated as no evidence rather than
+    raised, so abandon can still choose FAILED.
+    """
     latest_source = _latest_source_text_row(doc)
     if latest_source is None:
-        # Checkpoint-backed Gemini or Arabic printed banded OCR can stop as
-        # PARTIAL before a DocumentTextResult exists. Failed Gemini pages, or
+        # Checkpoint-backed Gemini or Arabic printed banded OCR can stop
+        # before a DocumentTextResult exists. Failed Gemini pages, or
         # unfinished Arabic pages that are not permanently fenced, are durable
         # resume evidence. Do not require the Antigravity routing flag here:
         # staff UI may assess on web (flag unset) while the worker resumes
@@ -263,6 +258,36 @@ def _is_recoverable_partial_ocr_failure(doc: Document) -> bool:
         ) or _has_resumable_arabic_printed_checkpoint_evidence(doc)
 
     if _source_text_row_is_usable(latest_source):
+        return False
+    try:
+        route = _select_document_ocr_route(doc)
+    except OcrReprocessError:
+        return False
+    if route.engine_key not in (
+        DocumentTextResult.OcrEngineKey.GEMINI,
+        DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+    ):
+        return False
+    return _source_text_row_is_failed_ocr(latest_source)
+
+
+def _is_recoverable_partial_ocr_failure(doc: Document) -> bool:
+    """Latest SOURCE_TEXT is a failed source OCR on a supported recoverable PARTIAL route."""
+    if doc.processing_state_user != Document.ProcessingState.PARTIAL:
+        return False
+    latest_source = _latest_source_text_row(doc)
+    if latest_source is None:
+        return _has_failed_gemini_page_checkpoint(
+            doc.id
+        ) or _has_resumable_arabic_printed_checkpoint_evidence(doc)
+
+    if _source_text_row_is_usable(latest_source):
+        return False
+    route = _select_document_ocr_route(doc)
+    if route.engine_key not in (
+        DocumentTextResult.OcrEngineKey.GEMINI,
+        DocumentTextResult.OcrEngineKey.ANTIGRAVITY,
+    ):
         return False
     return _source_text_row_is_failed_ocr(latest_source)
 
