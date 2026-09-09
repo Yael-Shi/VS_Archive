@@ -262,9 +262,9 @@ def _model_output_step(*texts: str) -> dict:
 
 
 def _page_entry(
-    page_index: int = 1,
+    page_index: object = 1,
     outcome: str = "transcribed",
-    text: str = "visible text",
+    text: object = "visible text",
     extra: dict | None = None,
 ) -> dict:
     entry = {
@@ -1617,6 +1617,8 @@ class ProcessDocumentLeaseDeadlineTests(SimpleTestCase):
             now=now,
             monotonic_fn=lambda: monotonic_now,
         )
+        self.assertIsNotNone(deadline)
+        assert deadline is not None
         self.assertEqual(deadline, monotonic_now)
         self.assertLessEqual(deadline, monotonic_now)
 

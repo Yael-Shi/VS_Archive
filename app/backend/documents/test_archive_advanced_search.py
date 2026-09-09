@@ -717,10 +717,13 @@ class ArchiveAdvancedFilterVisibilityAndViewTests(TestCase):
             per_page=24,
             advanced_filters=filters,
         )
+        type_links = type_context["item_type_filter_links"]
+        self.assertIsInstance(type_links, list)
+        assert isinstance(type_links, list)
         photo_link = next(
             link
-            for link in type_context["item_type_filter_links"]
-            if link["label"] == "תמונות"
+            for link in type_links
+            if isinstance(link, dict) and link["label"] == "תמונות"
         )
         photo_parsed = parse_qs(str(photo_link["href_suffix"]).lstrip("?"))
         self.assertEqual(photo_parsed["author"], [str(author_id)])

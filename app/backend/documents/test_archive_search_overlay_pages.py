@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from typing import cast
 
 from django.test import SimpleTestCase
 
@@ -6,15 +7,30 @@ from documents.models import Document
 from documents.services.archive_search_overlay_pages import (
     build_archive_search_overlay_pages,
 )
+from documents.services.archive_search_overlay_payload import (
+    ArchiveSearchOverlayTarget,
+)
 
 
-def _target(page_index: int):
-    return SimpleNamespace(page_index=page_index)
+def _document(*, doc_type: str) -> Document:
+    return cast(Document, SimpleNamespace(doc_type=doc_type))
+
+
+def _target(page_index: int) -> ArchiveSearchOverlayTarget:
+    return ArchiveSearchOverlayTarget(
+        match_index=0,
+        term="",
+        page_index=page_index,
+        left_pct=0.0,
+        top_pct=0.0,
+        width_pct=0.0,
+        height_pct=0.0,
+    )
 
 
 class ArchiveSearchOverlayPagesTests(SimpleTestCase):
     def test_multi_image_maps_display_number_to_transkribus_page_index(self):
-        doc = SimpleNamespace(doc_type=Document.DocType.IMAGE)
+        doc = _document(doc_type=Document.DocType.IMAGE)
         first = _target(1)
         second = _target(2)
 
@@ -33,7 +49,7 @@ class ArchiveSearchOverlayPagesTests(SimpleTestCase):
         self.assertEqual(pages[1].targets, (second,))
 
     def test_multi_image_unavailable_preview_page_fails_closed(self):
-        doc = SimpleNamespace(doc_type=Document.DocType.IMAGE)
+        doc = _document(doc_type=Document.DocType.IMAGE)
         target = _target(2)
 
         pages = build_archive_search_overlay_pages(
@@ -50,7 +66,7 @@ class ArchiveSearchOverlayPagesTests(SimpleTestCase):
         self.assertEqual(pages[0].targets, ())
 
     def test_target_for_nonexistent_multi_image_page_is_not_exposed(self):
-        doc = SimpleNamespace(doc_type=Document.DocType.IMAGE)
+        doc = _document(doc_type=Document.DocType.IMAGE)
         target = _target(3)
 
         pages = build_archive_search_overlay_pages(
@@ -67,7 +83,7 @@ class ArchiveSearchOverlayPagesTests(SimpleTestCase):
         self.assertTrue(all(page.targets == () for page in pages))
 
     def test_single_image_maps_only_to_page_one(self):
-        doc = SimpleNamespace(doc_type=Document.DocType.IMAGE)
+        doc = _document(doc_type=Document.DocType.IMAGE)
         first = _target(1)
         second = _target(2)
 
@@ -83,7 +99,7 @@ class ArchiveSearchOverlayPagesTests(SimpleTestCase):
         self.assertEqual(pages[0].targets, (first,))
 
     def test_single_image_without_content_url_exposes_nothing(self):
-        doc = SimpleNamespace(doc_type=Document.DocType.IMAGE)
+        doc = _document(doc_type=Document.DocType.IMAGE)
 
         pages = build_archive_search_overlay_pages(
             doc,
@@ -95,7 +111,7 @@ class ArchiveSearchOverlayPagesTests(SimpleTestCase):
         self.assertEqual(pages, ())
 
     def test_pdf_deliberately_exposes_no_overlay_pages(self):
-        doc = SimpleNamespace(doc_type=Document.DocType.PDF)
+        doc = _document(doc_type=Document.DocType.PDF)
 
         pages = build_archive_search_overlay_pages(
             doc,

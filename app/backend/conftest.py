@@ -23,7 +23,7 @@ Verified Django 6.0.1 / pytest-django ordering used here:
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from functools import wraps
 
 import pytest
@@ -47,11 +47,11 @@ def _install_transaction_testcase_tag_pk_guard() -> None:
 
     from documents.models import Tag
 
-    current = TransactionTestCase._reset_sequences
+    current = getattr(TransactionTestCase, "_reset_sequences")
     if getattr(current, _TAG_PK_SEQUENCE_GUARD_ATTR, False):
         return
 
-    original = current
+    original: Callable[[str], None] = current
 
     @wraps(original)
     def _reset_sequences(db_name: str) -> None:
@@ -68,7 +68,7 @@ def _install_transaction_testcase_tag_pk_guard() -> None:
         advance_tag_pk(using=db_name, tag_model=Tag)
 
     setattr(_reset_sequences, _TAG_PK_SEQUENCE_GUARD_ATTR, True)
-    TransactionTestCase._reset_sequences = staticmethod(_reset_sequences)
+    setattr(TransactionTestCase, "_reset_sequences", staticmethod(_reset_sequences))
 
 
 def pytest_configure() -> None:

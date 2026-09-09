@@ -321,7 +321,13 @@ class PhotoContentDateTests(TestCase):
     def test_photo_date_precision_choices_match_archive_item(self):
         photo_field = PhotoContent._meta.get_field("date_precision")
         archive_field = ArchiveItem._meta.get_field("date_precision")
-        self.assertEqual(list(photo_field.choices), list(archive_field.choices))
+        photo_choices = photo_field.choices
+        archive_choices = archive_field.choices
+        self.assertIsNotNone(photo_choices)
+        self.assertIsNotNone(archive_choices)
+        assert photo_choices is not None
+        assert archive_choices is not None
+        self.assertEqual(list(photo_choices), list(archive_choices))
         self.assertEqual(photo_field.default, ArchiveItem.DatePrecision.UNKNOWN)
 
     def test_photo_date_end_before_start_is_rejected_like_archive_item(self):

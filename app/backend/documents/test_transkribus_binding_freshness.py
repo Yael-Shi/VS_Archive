@@ -147,9 +147,9 @@ def _bind(
 class BindingFreshnessTests(TestCase):
     def setUp(self) -> None:
         self.doc = _create_doc()
-        self.run = _upload_run(self.doc)
+        self.tb_run = _upload_run(self.doc)
         self.snapshot = _ready_snapshot(
-            document=self.doc, run=self.run, hover_eligible=True
+            document=self.doc, run=self.tb_run, hover_eligible=True
         )
 
     def test_valid_source_binding_is_structurally_fresh_and_hover_trusted(self):
@@ -365,7 +365,7 @@ class BindingFreshnessTests(TestCase):
     def test_hover_eligible_false_keeps_structural_freshness_but_rejects_hover(self):
         snapshot = _ready_snapshot(
             document=self.doc,
-            run=self.run,
+            run=self.tb_run,
             text="Hover false text",
             hover_eligible=False,
         )

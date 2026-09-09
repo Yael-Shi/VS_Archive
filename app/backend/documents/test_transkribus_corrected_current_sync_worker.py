@@ -43,8 +43,8 @@ from documents.test_transkribus_corrected_current_sync_models import (
 User = get_user_model()
 
 
-def _worker_env(**kwargs) -> WorkerEnvConfig:
-    defaults = dict(
+def _worker_env() -> WorkerEnvConfig:
+    return WorkerEnvConfig(
         gemini_api_key="k",
         gemini_confidence_threshold=0.7,
         min_text_length=20,
@@ -74,8 +74,6 @@ def _worker_env(**kwargs) -> WorkerEnvConfig:
         gemini_double_pass=False,
         gemini_consistency_min_ratio=0.7,
     )
-    defaults.update(kwargs)
-    return WorkerEnvConfig(**defaults)
 
 
 def _completed_attempt(
@@ -106,7 +104,7 @@ def _started_attempt(*, document, run, user) -> TranskribusCorrectedCurrentSyncA
 class CorrectedCurrentSyncWorkerTests(TestCase):
     def setUp(self) -> None:
         self.doc = _create_he_doc()
-        self.run = _upload_run(self.doc)
+        self.tb_run = _upload_run(self.doc)
         self.user = _staff_user()
         self.sqs = MagicMock()
         self.queue_url = "https://sqs.example/test"
@@ -211,7 +209,7 @@ class CorrectedCurrentSyncWorkerTests(TestCase):
         run_sync.assert_not_called()
 
     def test_terminal_request_noop_ack(self):
-        attempt = _completed_attempt(document=self.doc, run=self.run, user=self.user)
+        attempt = _completed_attempt(document=self.doc, run=self.tb_run, user=self.user)
         req = TranskribusCorrectedCurrentSyncRequest.objects.create(
             document=self.doc,
             initiated_by=self.user,
@@ -261,7 +259,7 @@ class CorrectedCurrentSyncWorkerTests(TestCase):
             lease_token=old_token,
             lease_expires_at=timezone.now() - timedelta(minutes=1),
         )
-        attempt = _completed_attempt(document=self.doc, run=self.run, user=self.user)
+        attempt = _completed_attempt(document=self.doc, run=self.tb_run, user=self.user)
 
         def run_sync(**kwargs):
             self.assertEqual(kwargs["sync_request_id"], req.pk)
@@ -289,7 +287,7 @@ class CorrectedCurrentSyncWorkerTests(TestCase):
 
     def test_queued_claim_extends_visibility_and_terminalizes(self):
         req = self._queued_request()
-        attempt = _completed_attempt(document=self.doc, run=self.run, user=self.user)
+        attempt = _completed_attempt(document=self.doc, run=self.tb_run, user=self.user)
 
         def run_sync(**kwargs):
             req.attempt = attempt
@@ -326,7 +324,7 @@ class CorrectedCurrentSyncWorkerTests(TestCase):
         self.assertIsNotNone(req.lease_token)
 
     def test_linked_started_fresh_never_reruns(self):
-        attempt = _started_attempt(document=self.doc, run=self.run, user=self.user)
+        attempt = _started_attempt(document=self.doc, run=self.tb_run, user=self.user)
         TranskribusCorrectedCurrentSyncAttempt.objects.filter(pk=attempt.pk).update(
             created_at=timezone.now() - timedelta(minutes=10)
         )
@@ -343,7 +341,7 @@ class CorrectedCurrentSyncWorkerTests(TestCase):
 
     def test_linked_started_just_below_60_minutes_defers(self):
         fixed_now = timezone.now()
-        attempt = _started_attempt(document=self.doc, run=self.run, user=self.user)
+        attempt = _started_attempt(document=self.doc, run=self.tb_run, user=self.user)
         TranskribusCorrectedCurrentSyncAttempt.objects.filter(pk=attempt.pk).update(
             created_at=fixed_now - STARTED_RECOVERY_REQUIRED + timedelta(microseconds=1)
         )
@@ -364,7 +362,7 @@ class CorrectedCurrentSyncWorkerTests(TestCase):
 
     def test_linked_started_exactly_60_minutes_moves_to_recovery_required(self):
         fixed_now = timezone.now()
-        attempt = _started_attempt(document=self.doc, run=self.run, user=self.user)
+        attempt = _started_attempt(document=self.doc, run=self.tb_run, user=self.user)
         TranskribusCorrectedCurrentSyncAttempt.objects.filter(pk=attempt.pk).update(
             created_at=fixed_now - STARTED_RECOVERY_REQUIRED
         )
@@ -399,7 +397,7 @@ class CorrectedCurrentSyncWorkerTests(TestCase):
             failure_code="ENQUEUE_SEND_FAILED",
             failure_message="SQS send failed.",
         )
-        attempt = _completed_attempt(document=self.doc, run=self.run, user=self.user)
+        attempt = _completed_attempt(document=self.doc, run=self.tb_run, user=self.user)
 
         def run_sync(**kwargs):
             self.assertEqual(kwargs["sync_request_id"], req.pk)
@@ -426,7 +424,7 @@ class CorrectedCurrentSyncWorkerTests(TestCase):
         self.assertEqual(req.attempt_id, attempt.pk)
 
     def test_terminal_attempt_reconciles_running_request(self):
-        attempt = _completed_attempt(document=self.doc, run=self.run, user=self.user)
+        attempt = _completed_attempt(document=self.doc, run=self.tb_run, user=self.user)
         req = self._running_request(attempt=attempt)
         run_sync = MagicMock()
         self.assertTrue(self._handle(req.pk, run_sync=run_sync))
@@ -440,7 +438,7 @@ class CorrectedCurrentSyncWorkerTests(TestCase):
 
     def test_crash_after_terminal_attempt_reconciles_without_rerun(self):
         """Attempt COMPLETED, Request still RUNNING (worker died before Request update)."""
-        attempt = _completed_attempt(document=self.doc, run=self.run, user=self.user)
+        attempt = _completed_attempt(document=self.doc, run=self.tb_run, user=self.user)
         req = self._running_request(attempt=attempt)
         run_sync = MagicMock()
         self.assertTrue(self._handle(req.pk, run_sync=run_sync))
@@ -455,7 +453,7 @@ class CorrectedCurrentSyncWorkerTests(TestCase):
     def test_crash_after_failed_attempt_copies_failure_code(self):
         attempt = TranskribusCorrectedCurrentSyncAttempt.objects.create(
             document=self.doc,
-            transkribus_run=self.run,
+            transkribus_run=self.tb_run,
             initiated_by=self.user,
             status=TranskribusCorrectedCurrentSyncAttempt.Status.FAILED,
             failure_code="HTTP_METADATA_FAILED",
@@ -473,7 +471,7 @@ class CorrectedCurrentSyncWorkerTests(TestCase):
         self.assertEqual(req.failure_code, "HTTP_METADATA_FAILED")
 
     def test_recovery_required_late_terminal_attempt_reconciles(self):
-        attempt = _completed_attempt(document=self.doc, run=self.run, user=self.user)
+        attempt = _completed_attempt(document=self.doc, run=self.tb_run, user=self.user)
         req = TranskribusCorrectedCurrentSyncRequest.objects.create(
             document=self.doc,
             initiated_by=self.user,
@@ -493,7 +491,7 @@ class CorrectedCurrentSyncWorkerTests(TestCase):
 
     def test_late_worker_terminalizes_from_recovery_required_with_lease(self):
         token = uuid.uuid4()
-        attempt = _started_attempt(document=self.doc, run=self.run, user=self.user)
+        attempt = _started_attempt(document=self.doc, run=self.tb_run, user=self.user)
         req = TranskribusCorrectedCurrentSyncRequest.objects.create(
             document=self.doc,
             initiated_by=self.user,
@@ -503,7 +501,7 @@ class CorrectedCurrentSyncWorkerTests(TestCase):
             started_at=timezone.now() - timedelta(hours=2),
         )
         # Simulate late legitimate worker finishing after recovery mark.
-        snap = _ready_snapshot(document=self.doc, run=self.run)
+        snap = _ready_snapshot(document=self.doc, run=self.tb_run)
         attempt.status = TranskribusCorrectedCurrentSyncAttempt.Status.COMPLETED
         attempt.completed_at = timezone.now()
         attempt.resolved_snapshot = snap
@@ -547,7 +545,7 @@ class CorrectedCurrentSyncWorkerTests(TestCase):
 
     def test_terminalize_rejects_unrelated_attempt_same_document(self):
         token = uuid.uuid4()
-        linked = _started_attempt(document=self.doc, run=self.run, user=self.user)
+        linked = _started_attempt(document=self.doc, run=self.tb_run, user=self.user)
         req = TranskribusCorrectedCurrentSyncRequest.objects.create(
             document=self.doc,
             initiated_by=self.user,
@@ -556,7 +554,9 @@ class CorrectedCurrentSyncWorkerTests(TestCase):
             lease_token=token,
             started_at=timezone.now() - timedelta(hours=2),
         )
-        unrelated = _completed_attempt(document=self.doc, run=self.run, user=self.user)
+        unrelated = _completed_attempt(
+            document=self.doc, run=self.tb_run, user=self.user
+        )
         self.assertNotEqual(unrelated.pk, linked.pk)
 
         self.assertFalse(
@@ -577,7 +577,7 @@ class CorrectedCurrentSyncWorkerTests(TestCase):
 
     def test_terminalize_rejects_unrelated_attempt_other_document(self):
         token = uuid.uuid4()
-        linked = _started_attempt(document=self.doc, run=self.run, user=self.user)
+        linked = _started_attempt(document=self.doc, run=self.tb_run, user=self.user)
         req = TranskribusCorrectedCurrentSyncRequest.objects.create(
             document=self.doc,
             initiated_by=self.user,
@@ -610,7 +610,7 @@ class CorrectedCurrentSyncWorkerTests(TestCase):
 
     def test_visibility_failure_still_executes_under_lease(self):
         req = self._queued_request()
-        attempt = _completed_attempt(document=self.doc, run=self.run, user=self.user)
+        attempt = _completed_attempt(document=self.doc, run=self.tb_run, user=self.user)
         self.sqs.change_message_visibility.side_effect = Exception("visibility boom")
 
         def run_sync(**kwargs):

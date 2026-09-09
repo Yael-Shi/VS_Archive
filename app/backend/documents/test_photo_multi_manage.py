@@ -102,8 +102,9 @@ class _IdCollector(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         attr_map = dict(attrs)
-        if "id" in attr_map:
-            self.ids.append(attr_map["id"])
+        element_id = attr_map.get("id")
+        if element_id is not None:
+            self.ids.append(element_id)
 
 
 def _duplicate_ids(html: str) -> list[str]:

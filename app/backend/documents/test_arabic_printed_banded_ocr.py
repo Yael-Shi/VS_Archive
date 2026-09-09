@@ -71,6 +71,12 @@ BAND_TWO_TEXT = "النص الثاني للنطاق"
 SECRET_REJECTED = "REJECTED_OUTPUT_MUST_NOT_APPEAR"
 
 
+def _require_lease_token(claim: ArabicPrintedPageClaim) -> uuid.UUID:
+    token = claim.lease_token
+    assert token is not None
+    return token
+
+
 def _sha_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -368,7 +374,7 @@ class ArabicPrintedBandedOcrTestBase(TestCase):
         checkpoint.save(update_fields=["cloud_vision_call_count", "updated_at"])
         persist_arabic_printed_vision_plan(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             cloud_vision_response_sha256=RESPONSE_SHA,
             bands=plans,
         )
@@ -1416,7 +1422,7 @@ class ArabicPrintedBandedControlErrorTests(ArabicPrintedBandedOcrTestBase):
             ArabicPrintedPageClaimAction.EXECUTE,
             claim.checkpoint_id,
             claim.page_index + 5,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
         )
         with self.assertRaises(ArabicPrintedIdentityMismatchError):
             self._run(broken)

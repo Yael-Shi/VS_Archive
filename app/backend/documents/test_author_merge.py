@@ -345,15 +345,16 @@ class AuthorMergeServiceTests(TestCase):
         original_ids = [item.pk]
         stale_ids = sorted([item.pk, late_item.pk])
 
+        call_count = 0
+
         def affected_ids_for_lock_then_stale_fanout(_author):
-            call_index = affected_ids_for_lock_then_stale_fanout.calls
-            affected_ids_for_lock_then_stale_fanout.calls += 1
+            nonlocal call_count
+            current = call_count
+            call_count += 1
             # merge_author: expand, stabilize, then re-read after Author locks.
-            if call_index < 2:
+            if current < 2:
                 return list(original_ids)
             return list(stale_ids)
-
-        affected_ids_for_lock_then_stale_fanout.calls = 0
 
         with patch(
             "documents.services.author_merge.affected_archive_item_ids_for_author",
@@ -363,7 +364,7 @@ class AuthorMergeServiceTests(TestCase):
                 merge_author(keeper=self.keeper, duplicate=self.duplicate)
 
         self.assertEqual(ctx.exception.message, AUTHOR_LINKS_CHANGED_RETRY_ERROR)
-        self.assertEqual(affected_ids_for_lock_then_stale_fanout.calls, 3)
+        self.assertEqual(call_count, 3)
         self.assertTrue(Author.objects.filter(pk=self.duplicate.pk).exists())
         self.keeper.refresh_from_db()
         self.assertEqual(self.keeper.name, "KeeperAuthor")

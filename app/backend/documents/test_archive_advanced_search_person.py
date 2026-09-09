@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from html.parser import HTMLParser
 from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs
@@ -59,6 +60,48 @@ YOUTUBE_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
 def _ids(queryset) -> list[int]:
     return list(queryset.values_list("pk", flat=True))
+
+
+class _ArchiveFilterPersonOptionsCollector(HTMLParser):
+    """Collect ``(value, label)`` from ``#archive-filter-person`` only."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._in_select = False
+        self._option_value: str | None = None
+        self._option_label: list[str] = []
+        self.options: list[tuple[str, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr_map = dict(attrs)
+        if tag == "select" and attr_map.get("id") == "archive-filter-person":
+            self._in_select = True
+            return
+        if self._in_select and tag == "option":
+            value = attr_map.get("value")
+            self._option_value = "" if value is None else value
+            self._option_label = []
+
+    def handle_data(self, data: str) -> None:
+        if self._option_value is not None:
+            self._option_label.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "option" and self._option_value is not None:
+            self.options.append(
+                (self._option_value, "".join(self._option_label).strip())
+            )
+            self._option_value = None
+            self._option_label = []
+        if tag == "select":
+            self._in_select = False
+
+
+def _archive_filter_person_options(html: str) -> list[tuple[str, str]]:
+    collector = _ArchiveFilterPersonOptionsCollector()
+    collector.feed(html)
+    collector.close()
+    return collector.options
 
 
 def _author_id(item: ArchiveItem) -> int:
@@ -582,10 +625,14 @@ class ArchiveAdvancedPersonFilterUiTests(TestCase):
         self.assertIn('id="archive-filter-person"', html)
         self.assertIn('name="person"', html)
         self.assertIn("multiple", html)
-        self.assertIn(f'value="{person.id}"', html)
         self.assertIn("יעקב כהן", html)
         self.assertNotIn("Yankele", html)
-        self.assertNotIn(f">{person.id}<", html)
+        person_id = person.id
+        self.assertIsNotNone(person_id)
+        assert person_id is not None
+        person_options = _archive_filter_person_options(html)
+        self.assertEqual(person_options, [(str(person_id), "יעקב כהן")])
+        self.assertNotIn(str(person_id), [label for _value, label in person_options])
 
     def test_aliases_are_not_independent_options(self):
         person = Person.objects.create(name="Canonical Only")
@@ -774,10 +821,15 @@ class ArchiveAdvancedPersonFilterUiTests(TestCase):
             tag_choices=[tag],
             person_choices=[ada, charles],
         )
+        chips = summary["active_filter_chips"]
+        self.assertIsInstance(chips, list)
+        assert isinstance(chips, list)
         ada_chip = next(
             chip
-            for chip in summary["active_filter_chips"]
-            if chip["kind"] == "person" and chip["person_id"] == ada.id
+            for chip in chips
+            if isinstance(chip, dict)
+            and chip["kind"] == "person"
+            and chip["person_id"] == ada.id
         )
         parsed = parse_qs(str(ada_chip["remove_href_suffix"]).lstrip("?"))
         self.assertEqual(parsed["person"], [str(charles.id)])

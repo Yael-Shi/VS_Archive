@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import timedelta
+from typing import cast
 from unittest.mock import patch
+from uuid import UUID
 
 from django.db import DatabaseError, IntegrityError, transaction
 from django.test import TestCase
@@ -26,6 +29,7 @@ from documents.services.arabic_printed_page_checkpoints import (
     ArabicPrintedCheckpointBusyError,
     ArabicPrintedCheckpointPersistenceRetryableError,
     ArabicPrintedIdentityMismatchError,
+    ArabicPrintedPageClaim,
     ArabicPrintedPageClaimAction,
     ArabicPrintedPageSource,
     StaleArabicPrintedPageClaimError,
@@ -96,17 +100,30 @@ def _identity(
     jpeg_quality: int = 95,
     prompt_contract_version: str | None = None,
 ) -> ArabicPrintedAttemptIdentity:
-    kwargs = {
-        "pages": pages,
-        "language_hint": Document.Language.ARABIC,
-        "text_input_type": Document.TextInputType.PRINTED,
-        "engine_key": "ANTIGRAVITY",
-        "prompt_variant": "printed",
-        "jpeg_quality": jpeg_quality,
-    }
-    if prompt_contract_version is not None:
-        kwargs["prompt_contract_version"] = prompt_contract_version
-    return build_arabic_printed_attempt_identity(**kwargs)
+    if prompt_contract_version is None:
+        return build_arabic_printed_attempt_identity(
+            pages=pages,
+            language_hint=Document.Language.ARABIC,
+            text_input_type=Document.TextInputType.PRINTED,
+            engine_key="ANTIGRAVITY",
+            prompt_variant="printed",
+            jpeg_quality=jpeg_quality,
+        )
+    return build_arabic_printed_attempt_identity(
+        pages=pages,
+        language_hint=Document.Language.ARABIC,
+        text_input_type=Document.TextInputType.PRINTED,
+        engine_key="ANTIGRAVITY",
+        prompt_variant="printed",
+        jpeg_quality=jpeg_quality,
+        prompt_contract_version=prompt_contract_version,
+    )
+
+
+def _require_lease_token(claim: ArabicPrintedPageClaim) -> UUID:
+    token = claim.lease_token
+    assert token is not None
+    return token
 
 
 def _band(
@@ -286,7 +303,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         assert claim.lease_token is not None
         reserve_arabic_printed_vision_call(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
         )
 
     def _plan(self, claim, *drafts: str, reserve: bool = True):
@@ -297,7 +314,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
                 self._reserve_vision(claim)
         return persist_arabic_printed_vision_plan(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             cloud_vision_response_sha256=_sha256_bytes(b"vision-response"),
             bands=_bands(*drafts),
         )
@@ -306,12 +323,12 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         assert claim.lease_token is not None
         reserve_arabic_printed_primary_create(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=band_index,
         )
         persist_arabic_printed_band_success(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=band_index,
             selected_result=ArabicPrintedOcrBandCheckpoint.SelectedResult.UNASSISTED,
             transcription_text=text,
@@ -323,24 +340,24 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         assert claim.lease_token is not None
         reserve_arabic_printed_primary_create(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=band_index,
         )
         persist_arabic_printed_band_failure(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=band_index,
             failure_code="PRIMARY_FAILED",
             failure_message="safe",
         )
         reserve_arabic_printed_fallback_create(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=band_index,
         )
         persist_arabic_printed_band_success(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=band_index,
             selected_result=(
                 ArabicPrintedOcrBandCheckpoint.SelectedResult.ASSISTED_FALLBACK
@@ -433,19 +450,19 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaises(StaleArabicPrintedPageClaimError):
             reserve_arabic_printed_vision_call(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
             )
         with self.assertRaises(StaleArabicPrintedPageClaimError):
             persist_arabic_printed_vision_plan(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 cloud_vision_response_sha256=_sha256_bytes(b"vision-response"),
                 bands=_bands("draft"),
             )
         with self.assertRaises(StaleArabicPrintedPageClaimError):
             persist_arabic_printed_page_failure(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 failure_code="LATE",
                 failure_message="expired",
             )
@@ -456,13 +473,13 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaises(StaleArabicPrintedPageClaimError):
             reserve_arabic_printed_primary_create(
                 checkpoint_id=live.checkpoint_id,
-                lease_token=live.lease_token,
+                lease_token=_require_lease_token(live),
                 band_index=0,
             )
         with self.assertRaises(StaleArabicPrintedPageClaimError):
             persist_arabic_printed_band_success(
                 checkpoint_id=live.checkpoint_id,
-                lease_token=live.lease_token,
+                lease_token=_require_lease_token(live),
                 band_index=0,
                 selected_result=ArabicPrintedOcrBandCheckpoint.SelectedResult.UNASSISTED,
                 transcription_text="late",
@@ -472,7 +489,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaises(StaleArabicPrintedPageClaimError):
             assemble_arabic_printed_page(
                 checkpoint_id=live.checkpoint_id,
-                lease_token=live.lease_token,
+                lease_token=_require_lease_token(live),
             )
 
     def test_stale_token_cannot_write_plan_band_success_page_success_or_failure(self):
@@ -485,7 +502,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaises(StaleArabicPrintedPageClaimError):
             persist_arabic_printed_vision_plan(
                 checkpoint_id=first.checkpoint_id,
-                lease_token=first.lease_token,
+                lease_token=_require_lease_token(first),
                 cloud_vision_response_sha256=_sha256_bytes(b"vision-response"),
                 bands=_bands("draft"),
             )
@@ -494,7 +511,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaises(StaleArabicPrintedPageClaimError):
             persist_arabic_printed_band_success(
                 checkpoint_id=first.checkpoint_id,
-                lease_token=first.lease_token,
+                lease_token=_require_lease_token(first),
                 band_index=0,
                 selected_result=(
                     ArabicPrintedOcrBandCheckpoint.SelectedResult.UNASSISTED
@@ -506,12 +523,12 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaises(StaleArabicPrintedPageClaimError):
             assemble_arabic_printed_page(
                 checkpoint_id=first.checkpoint_id,
-                lease_token=first.lease_token,
+                lease_token=_require_lease_token(first),
             )
         with self.assertRaises(StaleArabicPrintedPageClaimError):
             persist_arabic_printed_page_failure(
                 checkpoint_id=first.checkpoint_id,
-                lease_token=first.lease_token,
+                lease_token=_require_lease_token(first),
                 failure_code="LATE",
                 failure_message="stale writer",
             )
@@ -522,14 +539,14 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaisesRegex(ValueError, "existing Vision reservation"):
             persist_arabic_printed_vision_plan(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 cloud_vision_response_sha256=_sha256_bytes(b"vision-response"),
                 bands=_bands("draft"),
             )
 
         reserved = reserve_arabic_printed_vision_call(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
         )
         self.assertEqual(reserved.cloud_vision_call_count, 1)
         self.assertEqual(reserved.band_count, 0)
@@ -537,14 +554,14 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaisesRegex(ValueError, "Ambiguous Vision reservation"):
             reserve_arabic_printed_vision_call(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
             )
 
         self._plan(claim, "draft", reserve=False)
         with self.assertRaisesRegex(ValueError, "already reserved"):
             reserve_arabic_printed_vision_call(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
             )
 
     def test_ambiguous_vision_reservation_cannot_be_repeated_after_reclaim(self):
@@ -558,7 +575,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaisesRegex(ValueError, "Ambiguous Vision reservation"):
             reserve_arabic_printed_vision_call(
                 checkpoint_id=reclaimed.checkpoint_id,
-                lease_token=reclaimed.lease_token,
+                lease_token=_require_lease_token(reclaimed),
             )
 
     def test_vision_plan_and_band_rows_persist_atomically(self):
@@ -572,7 +589,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
             with self.assertRaises(ArabicPrintedCheckpointPersistenceRetryableError):
                 persist_arabic_printed_vision_plan(
                     checkpoint_id=claim.checkpoint_id,
-                    lease_token=claim.lease_token,
+                    lease_token=_require_lease_token(claim),
                     cloud_vision_response_sha256=_sha256_bytes(b"vision-response"),
                     bands=_bands("one", "two"),
                 )
@@ -603,42 +620,42 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaisesRegex(ValueError, "full width"):
             persist_arabic_printed_vision_plan(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 cloud_vision_response_sha256=_sha256_bytes(b"vision-response"),
                 bands=[_band(0, width=0)],
             )
         with self.assertRaisesRegex(ValueError, "full width"):
             persist_arabic_printed_vision_plan(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 cloud_vision_response_sha256=_sha256_bytes(b"vision-response"),
                 bands=[_band(0, x=1)],
             )
         with self.assertRaisesRegex(ValueError, "outside"):
             persist_arabic_printed_vision_plan(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 cloud_vision_response_sha256=_sha256_bytes(b"vision-response"),
                 bands=[_band(0, y=1990, height=40)],
             )
         with self.assertRaisesRegex(ValueError, "ordered and non-overlapping"):
             persist_arabic_printed_vision_plan(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 cloud_vision_response_sha256=_sha256_bytes(b"vision-response"),
                 bands=[_band(0, y=40), _band(1, y=0)],
             )
         with self.assertRaisesRegex(ValueError, "ordered and non-overlapping"):
             persist_arabic_printed_vision_plan(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 cloud_vision_response_sha256=_sha256_bytes(b"vision-response"),
                 bands=[_band(0, y=0, height=80), _band(1, y=40, height=40)],
             )
         with self.assertRaisesRegex(ValueError, "1 to 6"):
             persist_arabic_printed_vision_plan(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 cloud_vision_response_sha256=_sha256_bytes(b"vision-response"),
                 bands=_bands("a", "b", "c", "d", "e", "f", "g"),
             )
@@ -664,27 +681,27 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaises(ArabicPrintedIdentityMismatchError):
             persist_arabic_printed_vision_plan(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 cloud_vision_response_sha256=_sha256_bytes(b"vision-response"),
                 bands=changed_crop,
             )
         with self.assertRaises(ArabicPrintedIdentityMismatchError):
             persist_arabic_printed_vision_plan(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 cloud_vision_response_sha256=_sha256_bytes(b"vision-response"),
                 bands=changed_draft,
             )
         with self.assertRaises(ArabicPrintedIdentityMismatchError):
             persist_arabic_printed_vision_plan(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 cloud_vision_response_sha256=_sha256_bytes(b"other-vision"),
                 bands=_bands("one", "two"),
             )
         reused = persist_arabic_printed_vision_plan(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             cloud_vision_response_sha256=_sha256_bytes(b"vision-response"),
             bands=_bands("one", "two"),
         )
@@ -696,7 +713,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         assert claim.lease_token is not None
         first = reserve_arabic_printed_primary_create(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
         )
         self.assertEqual(first.create_call_count, 1)
@@ -707,49 +724,49 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaisesRegex(ValueError, "already reserved"):
             reserve_arabic_printed_primary_create(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
             )
         with self.assertRaisesRegex(ValueError, "terminal or cancel-confirmed"):
             reserve_arabic_printed_fallback_create(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
             )
 
         apply_arabic_printed_band_diagnostics(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
             diagnostics={"primary_interaction_id": "primary-1"},
         )
         mark_arabic_printed_band_cancel_pending(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
         )
         with self.assertRaisesRegex(ValueError, "terminal or cancel-confirmed"):
             reserve_arabic_printed_fallback_create(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
             )
         apply_arabic_printed_band_diagnostics(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
             diagnostics={"cancel_confirmed_status": "cancelled"},
         )
         fallback = reserve_arabic_printed_fallback_create(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
         )
         self.assertEqual(fallback.create_call_count, 2)
         with self.assertRaisesRegex(ValueError, "already reserved or primary missing"):
             reserve_arabic_printed_fallback_create(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
             )
         page = ArabicPrintedOcrPageCheckpoint.objects.get(pk=claim.checkpoint_id)
@@ -762,7 +779,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaisesRegex(ValueError, "Antigravity selected result"):
             persist_arabic_printed_band_success(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
                 selected_result="",
                 transcription_text="ok",
@@ -772,7 +789,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaisesRegex(ValueError, "reserved primary"):
             persist_arabic_printed_band_success(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
                 selected_result=ArabicPrintedOcrBandCheckpoint.SelectedResult.UNASSISTED,
                 transcription_text="ok",
@@ -784,18 +801,18 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         ):
             select_arabic_printed_band_cloud_vision_low_quality(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
             )
 
         reserve_arabic_printed_primary_create(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
         )
         persist_arabic_printed_band_failure(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
             failure_code="PRIMARY_FAILED",
             failure_message="safe",
@@ -810,7 +827,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
 
         select_arabic_printed_band_cloud_vision_low_quality(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
         )
         lq = ArabicPrintedOcrBandCheckpoint.objects.get(
@@ -835,7 +852,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaisesRegex(ValueError, "Unsupported diagnostic fields"):
             apply_arabic_printed_band_diagnostics(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
                 diagnostics={
                     "rect_x": 99,
@@ -855,31 +872,31 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         assert claim.lease_token is not None
         reserve_arabic_printed_primary_create(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
         )
         mark_arabic_printed_band_cancel_pending(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
             diagnostics={"primary_interaction_id": "primary-1"},
         )
         for status in ("completed", "failed", "unknown", "other", ""):
             apply_arabic_printed_band_diagnostics(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
                 diagnostics={"cancel_confirmed_status": status},
             )
             with self.assertRaisesRegex(ValueError, "terminal or cancel-confirmed"):
                 reserve_arabic_printed_fallback_create(
                     checkpoint_id=claim.checkpoint_id,
-                    lease_token=claim.lease_token,
+                    lease_token=_require_lease_token(claim),
                     band_index=0,
                 )
         persist_arabic_printed_band_success(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
             selected_result=ArabicPrintedOcrBandCheckpoint.SelectedResult.UNASSISTED,
             transcription_text="primary completed",
@@ -902,13 +919,13 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         assert claim.lease_token is not None
         reserve_arabic_printed_primary_create(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
         )
         with self.assertRaisesRegex(ValueError, "in-flight interaction id"):
             mark_arabic_printed_band_cancel_pending(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
             )
         band = ArabicPrintedOcrBandCheckpoint.objects.get(
@@ -923,20 +940,20 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
 
         persist_arabic_printed_band_failure(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
             failure_code="PRIMARY_FAILED",
             failure_message="safe",
         )
         reserve_arabic_printed_fallback_create(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
         )
         with self.assertRaisesRegex(ValueError, "in-flight interaction id"):
             mark_arabic_printed_band_cancel_pending(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
             )
         band.refresh_from_db()
@@ -953,24 +970,24 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         assert claim.lease_token is not None
         reserve_arabic_printed_primary_create(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
         )
         persist_arabic_printed_band_failure(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
             failure_code="PRIMARY_FAILED",
             failure_message="safe",
         )
         reserve_arabic_printed_fallback_create(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
         )
         cancelled = mark_arabic_printed_band_cancel_pending(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
             diagnostics={"fallback_interaction_id": "fallback-1"},
         )
@@ -994,16 +1011,20 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         self.assertNotIn("transcription_sha256", params)
         self.assertNotIn("transcription_byte_length", params)
         with self.assertRaises(TypeError):
-            select_arabic_printed_band_cloud_vision_low_quality(
+            select_lq = cast(
+                Callable[..., object],
+                select_arabic_printed_band_cloud_vision_low_quality,
+            )
+            select_lq(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
                 transcription_text="attacker",
             )
 
         reserve_arabic_printed_primary_create(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
         )
         with self.assertRaisesRegex(
@@ -1011,20 +1032,20 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         ):
             select_arabic_printed_band_cloud_vision_low_quality(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
             )
 
         persist_arabic_printed_band_failure(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
             failure_code="PRIMARY_FAILED",
             failure_message="safe",
         )
         reserve_arabic_printed_fallback_create(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
         )
         with self.assertRaisesRegex(
@@ -1032,19 +1053,19 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         ):
             select_arabic_printed_band_cloud_vision_low_quality(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
             )
 
         mark_arabic_printed_band_cancel_pending(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
             diagnostics={"fallback_interaction_id": "fallback-1"},
         )
         apply_arabic_printed_band_diagnostics(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
             diagnostics={"cancel_confirmed_status": "unknown"},
         )
@@ -1053,18 +1074,18 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         ):
             select_arabic_printed_band_cloud_vision_low_quality(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
             )
         apply_arabic_printed_band_diagnostics(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
             diagnostics={"cancel_confirmed_status": "cancelled"},
         )
         selected = select_arabic_printed_band_cloud_vision_low_quality(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
         )
         self.assertEqual(selected.transcription_text, "draft text")
@@ -1083,12 +1104,12 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         assert claim.lease_token is not None
         reserve_arabic_printed_primary_create(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
         )
         persist_arabic_printed_band_failure(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
             failure_code="PRIMARY_FAILED",
             failure_message="safe",
@@ -1100,7 +1121,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaisesRegex(ValueError, "Stored Vision draft hash"):
             select_arabic_printed_band_cloud_vision_low_quality(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
             )
         whitespace = "   "
@@ -1115,7 +1136,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaisesRegex(ValueError, "Stored Vision draft is empty"):
             select_arabic_printed_band_cloud_vision_low_quality(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
             )
 
@@ -1134,7 +1155,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         ]
         apply_arabic_printed_band_diagnostics(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
             diagnostics={"prior_attempts": valid_entries},
         )
@@ -1147,7 +1168,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaisesRegex(ValueError, "more than four"):
             apply_arabic_printed_band_diagnostics(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
                 diagnostics={
                     "prior_attempts": [
@@ -1159,7 +1180,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaisesRegex(ValueError, "sensitive keys"):
             apply_arabic_printed_band_diagnostics(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
                 diagnostics={
                     "prior_attempts": [{"transcription": "secret", "kind": "primary"}]
@@ -1168,21 +1189,21 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaisesRegex(ValueError, "unsupported keys"):
             apply_arabic_printed_band_diagnostics(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
                 diagnostics={"prior_attempts": [{"notes": "nope"}]},
             )
         with self.assertRaisesRegex(ValueError, "JSON scalars"):
             apply_arabic_printed_band_diagnostics(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
                 diagnostics={"prior_attempts": [{"kind": {"nested": True}}]},
             )
         with self.assertRaisesRegex(ValueError, "string values exceed"):
             apply_arabic_printed_band_diagnostics(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
                 diagnostics={"prior_attempts": [{"kind": "x" * 129}]},
             )
@@ -1196,13 +1217,13 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         assert claim.lease_token is not None
         reserve_arabic_printed_primary_create(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
         )
         with self.assertRaisesRegex(ValueError, "empty"):
             persist_arabic_printed_band_success(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
                 selected_result=(
                     ArabicPrintedOcrBandCheckpoint.SelectedResult.UNASSISTED
@@ -1214,7 +1235,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaisesRegex(ValueError, "hash metadata"):
             persist_arabic_printed_band_success(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
                 band_index=0,
                 selected_result=(
                     ArabicPrintedOcrBandCheckpoint.SelectedResult.UNASSISTED
@@ -1233,17 +1254,17 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaisesRegex(ValueError, "missing or failed"):
             assemble_arabic_printed_page(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
             )
 
         reserve_arabic_printed_primary_create(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=1,
         )
         persist_arabic_printed_band_failure(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=1,
             failure_code="BAND_FAILED",
             failure_message="safe",
@@ -1251,7 +1272,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         with self.assertRaisesRegex(ValueError, "missing or failed"):
             assemble_arabic_printed_page(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
             )
 
     def test_successful_assembly_uses_band_order_and_exactly_one_newline(self):
@@ -1262,7 +1283,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
 
         assembled = assemble_arabic_printed_page(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
         )
         self.assertEqual(assembled.assembled_text, "first\nsecond")
         self.assertEqual(
@@ -1289,7 +1310,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         self._succeed_assisted(claim, 1, text="second")
         first = assemble_arabic_printed_page(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
         )
         self.assertEqual(
             first.page_quality,
@@ -1303,7 +1324,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
 
         ArabicPrintedOcrPageCheckpoint.objects.filter(pk=claim.checkpoint_id).update(
             status=ArabicPrintedOcrPageCheckpoint.Status.RUNNING,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             lease_expires_at=timezone.now() + timedelta(minutes=45),
             assembled_text=None,
             page_quality="",
@@ -1312,7 +1333,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         )
         second = assemble_arabic_printed_page(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
         )
         self.assertEqual(second.runtime_engine_marker, first.runtime_engine_marker)
         self.assertLessEqual(len(second.runtime_engine_marker), 64)
@@ -1323,13 +1344,13 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
         self._succeed_unassisted(first, 0, text="page-one")
         assemble_arabic_printed_page(
             checkpoint_id=first.checkpoint_id,
-            lease_token=first.lease_token,
+            lease_token=_require_lease_token(first),
         )
 
         failed = self._claim(0)
         missing = persist_arabic_printed_page_failure(
             checkpoint_id=failed.checkpoint_id,
-            lease_token=failed.lease_token,
+            lease_token=_require_lease_token(failed),
             failure_code="BANDING_UNSAFE",
             failure_message="safe",
         )
@@ -1349,7 +1370,7 @@ class ArabicPrintedCheckpointPersistenceTests(TestCase):
             self._succeed_unassisted(claim, 0, text=text)
             assemble_arabic_printed_page(
                 checkpoint_id=claim.checkpoint_id,
-                lease_token=claim.lease_token,
+                lease_token=_require_lease_token(claim),
             )
 
         self.attempt.refresh_from_db()

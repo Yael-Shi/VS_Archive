@@ -9,6 +9,9 @@ from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
 from documents.models import Document, DocumentTextResult
+from documents.services.archive_search_match_ranges import (
+    ArchiveSearchGeometryMatch,
+)
 from documents.services.archive_search_transcription_presentation import (
     build_archive_search_transcription_presentation,
 )
@@ -35,14 +38,14 @@ def _match(
     term: str,
     start: int,
     end: int,
-):
-    """Geometry payload is unused by transcription presentation; keep a stub."""
-    return SimpleNamespace(
+) -> ArchiveSearchGeometryMatch:
+    """Geometry payload is unused by transcription presentation."""
+    return ArchiveSearchGeometryMatch(
         term=term,
         text_result=text_result,
         start=start,
         end=end,
-        geometry=(SimpleNamespace(page_index=1),),
+        geometry=(),
     )
 
 

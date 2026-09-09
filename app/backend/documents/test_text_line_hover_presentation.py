@@ -2,6 +2,7 @@
 
 import hashlib
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
@@ -523,7 +524,7 @@ class TextLineHoverPresentationTests(TestCase):
 
 class TextLineHoverOverlayPagesTests(SimpleTestCase):
     def test_target_for_nonexistent_page_is_not_exposed(self):
-        doc = SimpleNamespace(doc_type=Document.DocType.IMAGE)
+        doc = cast(Document, SimpleNamespace(doc_type=Document.DocType.IMAGE))
         target = TextLineHoverOverlayTarget(
             hover_line_id="p3-o0",
             page_index=3,
@@ -547,7 +548,7 @@ class TextLineHoverOverlayPagesTests(SimpleTestCase):
         self.assertTrue(all(page.targets == () for page in pages))
 
     def test_apply_and_single_image_helpers(self):
-        doc = SimpleNamespace(doc_type=Document.DocType.IMAGE)
+        doc = cast(Document, SimpleNamespace(doc_type=Document.DocType.IMAGE))
         target = TextLineHoverOverlayTarget(
             hover_line_id="p1-o0",
             page_index=1,

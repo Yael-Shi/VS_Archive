@@ -36,8 +36,9 @@ from documents.tag_pk_sequence_support import reset_pk_sequence as _reset_pk_seq
 from documents.test_historical_person_tag_reuse import _create_tag
 
 MAPPED_TAG_ID = next(iter(sorted(historical_person_name_tag_ids())))
-MAPPED_PERSON_ID = person_id_for_historical_person_name_tag(MAPPED_TAG_ID)
-assert MAPPED_PERSON_ID is not None
+_mapped_person_id = person_id_for_historical_person_name_tag(MAPPED_TAG_ID)
+assert _mapped_person_id is not None
+MAPPED_PERSON_ID: int = _mapped_person_id
 MISSING_UNMAPPED_TAG_ID = 9_999_003
 
 
@@ -51,6 +52,12 @@ def _mapped_person(*, name: str = "Mapped Canonical Person") -> Person:
     person = Person.objects.create(pk=MAPPED_PERSON_ID, name=name)
     _reset_pk_sequence(Person)
     return person
+
+
+def _saved_person_id(person: Person) -> int:
+    person_id = person.id
+    assert person_id is not None
+    return person_id
 
 
 def _public_manual(title: str) -> ArchiveItem:
@@ -85,7 +92,9 @@ class ArchivePersonTagStageBRedirectTests(TestCase):
             reverse("archive-tag-browse", kwargs={"tag_id": MAPPED_TAG_ID})
         )
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp["Location"], person_public_page_url(person.id))
+        self.assertEqual(
+            resp["Location"], person_public_page_url(_saved_person_id(person))
+        )
         self.assertEqual(resp["Location"], person_public_page_url(MAPPED_PERSON_ID))
         self.assertEqual(resp["Location"], f"/archive/people/{MAPPED_PERSON_ID}/")
 
@@ -96,7 +105,9 @@ class ArchivePersonTagStageBRedirectTests(TestCase):
             reverse("archive-tag-browse", kwargs={"tag_id": MAPPED_TAG_ID})
         )
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp["Location"], person_public_page_url(person.id))
+        self.assertEqual(
+            resp["Location"], person_public_page_url(_saved_person_id(person))
+        )
 
     def test_redirect_uses_mapped_person_id_not_name(self):
         mapped = _mapped_person(name="Canonical Mapped")
@@ -106,8 +117,12 @@ class ArchivePersonTagStageBRedirectTests(TestCase):
             reverse("archive-tag-browse", kwargs={"tag_id": MAPPED_TAG_ID})
         )
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp["Location"], person_public_page_url(mapped.id))
-        self.assertNotEqual(resp["Location"], person_public_page_url(decoy.id))
+        self.assertEqual(
+            resp["Location"], person_public_page_url(_saved_person_id(mapped))
+        )
+        self.assertNotEqual(
+            resp["Location"], person_public_page_url(_saved_person_id(decoy))
+        )
         self.assertNotIn(f"/archive/people/{decoy.id}/", resp["Location"])
 
     def test_ordinary_tag_browse_is_unchanged(self):

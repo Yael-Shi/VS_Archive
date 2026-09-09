@@ -161,7 +161,7 @@ class EnqueueCoalesceAndGuardTests(TestCase):
 
     def setUp(self) -> None:
         self.doc = _create_he_doc()
-        self.run = _upload_run(self.doc)
+        self.tb_run = _upload_run(self.doc)
         self.user = User.objects.create_user(
             username="enqueue_staff", password="test-pass"
         )
@@ -225,7 +225,7 @@ class EnqueueCoalesceAndGuardTests(TestCase):
     def test_recovery_required_blocks_without_send(self, mock_send):
         attempt = TranskribusCorrectedCurrentSyncAttempt.objects.create(
             document=self.doc,
-            transkribus_run=self.run,
+            transkribus_run=self.tb_run,
             initiated_by=self.user,
             status=TranskribusCorrectedCurrentSyncAttempt.Status.STARTED,
         )
@@ -309,7 +309,7 @@ class EnqueueCoalesceAndGuardTests(TestCase):
 
         attempt = TranskribusCorrectedCurrentSyncAttempt.objects.create(
             document=self.doc,
-            transkribus_run=self.run,
+            transkribus_run=self.tb_run,
             initiated_by=self.user,
             status=TranskribusCorrectedCurrentSyncAttempt.Status.STARTED,
         )
@@ -342,7 +342,7 @@ class EnqueueSendPathTests(TransactionTestCase):
 
     def setUp(self) -> None:
         self.doc = _create_he_doc()
-        self.run = _upload_run(self.doc)
+        self.tb_run = _upload_run(self.doc)
         self.user = User.objects.create_user(
             username="enqueue_send_staff", password="test-pass"
         )
@@ -462,7 +462,7 @@ class EnqueueSendPathTests(TransactionTestCase):
         def _send_and_terminalize(request_id: int) -> None:
             req = TranskribusCorrectedCurrentSyncRequest.objects.get(pk=request_id)
             attempt = _completed_attempt(
-                document=self.doc, run=self.run, user=self.user
+                document=self.doc, run=self.tb_run, user=self.user
             )
             req.status = TranskribusCorrectedCurrentSyncRequest.Status.COMPLETED
             req.attempt = attempt
@@ -558,7 +558,7 @@ class EnqueueSendPathTests(TransactionTestCase):
         "send_sync_transkribus_corrected_current_message"
     )
     def test_terminal_history_allows_new_queued_create(self, mock_send):
-        attempt = _completed_attempt(document=self.doc, run=self.run, user=self.user)
+        attempt = _completed_attempt(document=self.doc, run=self.tb_run, user=self.user)
         TranskribusCorrectedCurrentSyncRequest.objects.create(
             document=self.doc,
             initiated_by=self.user,
