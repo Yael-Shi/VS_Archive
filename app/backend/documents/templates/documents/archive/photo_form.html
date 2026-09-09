@@ -11,7 +11,8 @@
     <h1 class="page-title">{{ page_title }}</h1>
     <p class="page-subtitle">
       פריט ארכיון מסוג תמונה — עריכת מטא־דאטה בלבד, ללא החלפת קובץ התמונה.
-      מטא־דאטה משותף לפריט נשמר בטופס העליון; מטא־דאטה של כל תמונה נערך ונשמר בכרטיס שלה באותו דף.
+      מטא־דאטה משותף לפריט נשמר בטופס העליון; מטא־דאטה של התמונה נערך בטופס נפרד מתחת.
+      בפריט עם כמה תמונות בוחרים תמונה לעריכה מעל העורך.
     </p>
     <p class="muted">
       דף זה מאפשר עריכת מטא־דאטה בלבד (תיאור קצר, נראות, תאריכים, קטגוריות וכו׳).
@@ -59,6 +60,7 @@
 
     <div class="spacer"></div>
     <h2 class="section-title">תמונות בפריט זה</h2>
+    {% include "documents/archive/partials/photo_contents_staff_selector.html" %}
     {% include "documents/archive/partials/photo_contents_manage_list.html" %}
     <div class="spacer"></div>
     <a class="btn btn-primary" href="{% url 'archive-manage-photo-add' item_id=item.id %}">הוספת תמונה</a>

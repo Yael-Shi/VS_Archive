@@ -1,0 +1,27 @@
+{% if show_photo_selector %}
+  <nav class="staff-photo-selector" aria-label="בחירת תמונה לעריכה">
+    {% for entry in photo_selector_items %}
+      {% with row=entry.row photo=entry.row.photo %}
+        <a
+          class="staff-photo-selector-link{% if entry.is_selected %} is-selected{% endif %}"
+          href="{{ entry.url }}"
+          {% if entry.is_selected %}aria-current="page"{% endif %}
+          title="{{ photo.original_filename|default:entry.label }}"
+        >
+          {% if row.thumbnail_url %}
+            <img
+              class="staff-photo-thumb"
+              src="{{ row.thumbnail_url }}"
+              alt=""
+              width="48"
+              height="48"
+            />
+          {% else %}
+            <div class="staff-photo-thumb staff-photo-thumb--missing" aria-hidden="true"></div>
+          {% endif %}
+          <span class="staff-photo-selector-label">{{ entry.label }}</span>
+        </a>
+      {% endwith %}
+    {% endfor %}
+  </nav>
+{% endif %}

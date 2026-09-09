@@ -39,7 +39,10 @@ from documents.services.photo_content_management import (
     next_photo_position,
     reorder_photo_contents,
 )
-from documents.services.photo_gallery import public_photo_detail_url
+from documents.services.photo_gallery import (
+    PUBLIC_PHOTO_QUERY_PARAM,
+    public_photo_detail_url,
+)
 from documents.services.photo_upload import create_additional_photo_upload_plan
 
 
@@ -114,6 +117,13 @@ def _duplicate_ids(html: str) -> list[str]:
     return sorted({value for value in collector.ids if collector.ids.count(value) > 1})
 
 
+def _staff_item_edit_url(item_id: int, photo: PhotoContent | None = None) -> str:
+    url = reverse("archive-manage-edit", kwargs={"item_id": item_id})
+    if photo is None:
+        return url
+    return f"{url}?{PUBLIC_PHOTO_QUERY_PARAM}={photo.id}"
+
+
 def _photo_content_post(**overrides):
     payload = {
         "description": "",
@@ -158,8 +168,8 @@ class PhotoMultiManagePageTests(TestCase):
         self.assertLess(content.index("one.jpg"), content.index("two.jpg"))
         self.assertLess(content.index("two.jpg"), content.index("three.jpg"))
         self.assertContains(resp, "הוספת תמונה")
-        self.assertContains(resp, "למעלה")
         self.assertContains(resp, "למטה")
+        self.assertNotContains(resp, ">למעלה<")
 
     def test_one_photo_manage_page_stays_compact_without_reorder(self):
         solo = _create_photo_item(title="Single photo")
@@ -176,39 +186,91 @@ class PhotoMultiManagePageTests(TestCase):
                 kwargs={"item_id": solo.id, "photo_id": photo.id},
             ),
         )
+        self.assertNotContains(resp, "staff-photo-selector")
         self.assertNotContains(resp, ">למעלה<")
         self.assertNotContains(resp, ">למטה<")
 
-    def test_manage_page_renders_distinct_inline_photo_forms(self):
+    def test_manage_page_renders_selector_and_only_the_selected_photo_form(self):
         resp = self.client.get(
             reverse("archive-manage-edit", kwargs={"item_id": self.item.id})
         )
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
-        self.assertEqual(html.count('name="description"'), 3)
-        self.assertEqual(html.count('name="person_ids"'), 3)
-        self.assertEqual(html.count('name="inline_photo_edit"'), 3)
+        self.assertIn("staff-photo-selector", html)
+        self.assertEqual(html.count("staff-photo-selector-link"), 3)
+        self.assertEqual(html.count('name="description"'), 1)
+        self.assertEqual(html.count('name="person_ids"'), 1)
+        self.assertEqual(html.count('name="inline_photo_edit"'), 1)
         shared = _fragment_by_id(html, "archive-item-shared-form")
         self.assertIn('name="title"', shared)
         self.assertNotIn('name="description"', shared)
         self.assertNotIn('name="person_ids"', shared)
         self.assertNotIn('name="inline_photo_edit"', shared)
+        selected = _fragment_by_id(html, f"photo-{self.first.id}")
+        self.assertIn('class="staff-photo-selector-link is-selected"', html)
+        self.assertIn(
+            f'href="{_staff_item_edit_url(self.item.id, self.first)}"',
+            html,
+        )
         for photo in (self.first, self.second, self.third):
-            card = _fragment_by_id(html, f"photo-{photo.id}")
-            edit_url = reverse(
-                "archive-manage-photo-edit",
-                kwargs={"item_id": self.item.id, "photo_id": photo.id},
-            )
-            self.assertIn(f'action="{edit_url}"', card)
-            self.assertIn(f'id="photo{photo.id}_description"', card)
-            self.assertIn(f'id="photo{photo.id}_person_ids"', card)
-            self.assertIn(photo.original_filename, card)
-            self.assertIn(f"?photo={photo.id}", card)
-            self.assertIn(">צפייה<", card)
-            self.assertIn(">מחיקה<", card)
-            self.assertIn("שמירת תמונה זו", card)
-            self.assertNotIn('name="title"', card)
-            self.assertNotIn('name="archive_item_person_ids"', card)
+            selector_url = _staff_item_edit_url(self.item.id, photo)
+            self.assertIn(f'href="{selector_url}"', html)
+            self.assertIn(photo.original_filename, html)
+        self.assertNotIn(f'id="photo-{self.second.id}"', html)
+        self.assertNotIn(f'id="photo-{self.third.id}"', html)
+        edit_url = reverse(
+            "archive-manage-photo-edit",
+            kwargs={"item_id": self.item.id, "photo_id": self.first.id},
+        )
+        self.assertIn(f'action="{edit_url}"', selected)
+        self.assertIn(f'id="photo{self.first.id}_description"', selected)
+        self.assertIn(f'id="photo{self.first.id}_person_ids"', selected)
+        self.assertIn("one.jpg", selected)
+        self.assertIn(f"?photo={self.first.id}", selected)
+        self.assertIn(">צפייה<", selected)
+        self.assertIn(">מחיקה<", selected)
+        self.assertIn("שמירת תמונה זו", selected)
+        self.assertNotIn('name="title"', selected)
+        self.assertNotIn('name="archive_item_person_ids"', selected)
+        self.assertNotIn("Second", selected)
+        self.assertNotIn("Third", selected)
+
+    def test_photo_query_selects_requested_photo_and_marks_selector(self):
+        resp = self.client.get(_staff_item_edit_url(self.item.id, self.second))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        selected = _fragment_by_id(html, f"photo-{self.second.id}")
+        self.assertIn("two.jpg", selected)
+        self.assertIn("Second", selected)
+        self.assertNotIn(f'id="photo-{self.first.id}"', html)
+        self.assertNotIn(f'id="photo-{self.third.id}"', html)
+        self.assertEqual(html.count('name="inline_photo_edit"'), 1)
+        self.assertEqual(html.count("staff-photo-selector-link is-selected"), 1)
+        self.assertIn('aria-current="page"', html)
+        self.assertIn(
+            f'href="{_staff_item_edit_url(self.item.id, self.second)}"',
+            html,
+        )
+        self.assertIn(">למעלה<", selected)
+        self.assertIn(">למטה<", selected)
+
+    def test_invalid_or_foreign_photo_query_is_not_editable(self):
+        other = _create_photo_item(title="Other album")
+        foreign = _add_photo(other, position=1, filename="foreign.jpg")
+        item_edit = reverse("archive-manage-edit", kwargs={"item_id": self.item.id})
+        missing = self.client.get(f"{item_edit}?photo=999999")
+        self.assertEqual(missing.status_code, 404)
+        garbage = self.client.get(f"{item_edit}?photo=abc")
+        self.assertEqual(garbage.status_code, 404)
+        empty = self.client.get(f"{item_edit}?photo=")
+        self.assertEqual(empty.status_code, 404)
+        foreign_resp = self.client.get(f"{item_edit}?photo={foreign.id}")
+        self.assertEqual(foreign_resp.status_code, 404)
+        self.assertFalse(
+            PhotoContent.objects.filter(
+                pk=foreign.id, archive_item_id=self.item.id
+            ).exists()
+        )
 
     def test_unified_page_date_widgets_use_unique_ids_and_shared_post_names(self):
         resp = self.client.get(
@@ -218,12 +280,12 @@ class PhotoMultiManagePageTests(TestCase):
         self.assertEqual(_duplicate_ids(html), [])
         self.assertIn('id="date_precision"', html)
         self.assertIn('id="archiveDateWidget"', html)
-        for photo in (self.first, self.second, self.third):
-            card = _fragment_by_id(html, f"photo-{photo.id}")
-            self.assertIn(f'id="photo{photo.id}_date_precision"', card)
-            self.assertIn(f'id="photo{photo.id}_archiveDateWidget"', card)
-            self.assertIn('name="date_precision"', card)
-            self.assertNotIn(f'name="photo{photo.id}_date_precision"', card)
+        self.assertNotIn(f'id="photo{self.second.id}_date_precision"', html)
+        card = _fragment_by_id(html, f"photo-{self.first.id}")
+        self.assertIn(f'id="photo{self.first.id}_date_precision"', card)
+        self.assertIn(f'id="photo{self.first.id}_archiveDateWidget"', card)
+        self.assertIn('name="date_precision"', card)
+        self.assertNotIn(f'name="photo{self.first.id}_date_precision"', card)
 
     def test_manage_page_prefetches_photo_people_without_n_plus_one(self):
         person = Person.objects.create(name="Ada")
@@ -304,6 +366,11 @@ class PhotoAddUploadTests(TestCase):
         self.assertContains(
             resp,
             reverse("archive-manage-edit", kwargs={"item_id": self.item.id}),
+        )
+        self.assertContains(resp, "function staffPhotoEditUrl")
+        self.assertContains(
+            resp,
+            "staffPhotoEditUrl(redirectUrl, progress.lastPhotoContentId)",
         )
         match = re.search(
             r'<input[^>]*id="new_person_name"[^>]*>',
@@ -1114,7 +1181,7 @@ class PhotoUnifiedInlineEditTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(
             resp["Location"],
-            f"{self._item_edit_url()}#photo-{self.second.id}",
+            _staff_item_edit_url(self.item.id, self.second),
         )
         self.first.refresh_from_db()
         self.second.refresh_from_db()
@@ -1161,11 +1228,14 @@ class PhotoUnifiedInlineEditTests(TestCase):
         self.second.refresh_from_db()
         self.assertEqual(self.second.description, "Second caption")
         second_card = _fragment_by_id(html, f"photo-{self.second.id}")
-        first_card = _fragment_by_id(html, f"photo-{self.first.id}")
         self.assertIn("date_end must not be before date_start", second_card)
         self.assertIn("Kept in card", second_card)
-        self.assertNotIn("date_end must not be before date_start", first_card)
-        self.assertIn("First caption", first_card)
+        self.assertNotIn(f'id="photo-{self.first.id}"', html)
+        self.assertEqual(html.count('name="inline_photo_edit"'), 1)
+        self.assertIn(
+            f'href="{_staff_item_edit_url(self.item.id, self.second)}"',
+            html,
+        )
 
     def test_inline_photo_person_editing_stays_photo_only(self):
         ada = Person.objects.create(name="Ada")
@@ -1213,11 +1283,10 @@ class PhotoUnifiedInlineEditTests(TestCase):
         self.assertFalse(resp.has_header("Location"))
         html = resp.content.decode()
         second_card = _fragment_by_id(html, f"photo-{self.second.id}")
-        first_card = _fragment_by_id(html, f"photo-{self.first.id}")
         self.assertIn(PERSON_NAME_CANDIDATES_ERROR, second_card)
         self.assertIn('name="force_create_person"', second_card)
         self.assertIn("Kept on second", second_card)
-        self.assertNotIn(PERSON_NAME_CANDIDATES_ERROR, first_card)
+        self.assertNotIn(f'id="photo-{self.first.id}"', html)
         self.assertEqual(Person.objects.filter(name="Inline Dup").count(), 1)
         self.assertEqual(self.second.people.count(), 0)
         self.assertEqual(
@@ -1345,6 +1414,10 @@ class PhotoReorderTests(TestCase):
             data={"photo_ids": [self.p3.id, self.p1.id, self.p2.id]},
         )
         self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            resp["Location"],
+            reverse("archive-manage-edit", kwargs={"item_id": self.item.id}),
+        )
         self.assertEqual(self._positions(), [self.p3.id, self.p1.id, self.p2.id])
         self.assertEqual(
             list(
@@ -1419,6 +1492,27 @@ class PhotoReorderTests(TestCase):
         foreign.refresh_from_db()
         self.assertEqual(foreign.position, 1)
 
+    def test_reorder_returns_to_the_selected_photo(self):
+        resp = self.client.post(
+            self.url,
+            data={
+                "photo_ids": [self.p2.id, self.p1.id, self.p3.id],
+                "selected_photo_id": str(self.p2.id),
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            resp["Location"],
+            _staff_item_edit_url(self.item.id, self.p2),
+        )
+        self.assertEqual(self._positions(), [self.p2.id, self.p1.id, self.p3.id])
+        follow = self.client.get(resp["Location"])
+        self.assertEqual(follow.status_code, 200)
+        html = follow.content.decode()
+        self.assertIn(f'id="photo-{self.p2.id}"', html)
+        self.assertNotIn(f'id="photo-{self.p1.id}"', html)
+        self.assertLess(html.index("two.jpg"), html.index("one.jpg"))
+
 
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
 class PhotoDeleteOneTests(TestCase):
@@ -1461,6 +1555,10 @@ class PhotoDeleteOneTests(TestCase):
             resp = self.client.post(self._delete_url(self.p2))
 
         self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            resp["Location"],
+            _staff_item_edit_url(self.item.id, self.p3),
+        )
         self.assertFalse(PhotoContent.objects.filter(pk=self.p2.id).exists())
         self.assertTrue(ArchiveItem.objects.filter(pk=self.item.id).exists())
         self.assertFalse(
@@ -1493,11 +1591,25 @@ class PhotoDeleteOneTests(TestCase):
         resp = self.client.post(self._delete_url(self.p1))
 
         self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            resp["Location"],
+            _staff_item_edit_url(self.item.id, self.p2),
+        )
         self.assertFalse(PhotoContent.objects.filter(pk=self.p1.id).exists())
         remaining = list(
             self.item.photo_contents.order_by("position").values_list("id", "position")
         )
         self.assertEqual(remaining, [(self.p2.id, 1), (self.p3.id, 2)])
+
+    def test_deleting_last_photo_in_order_selects_the_new_last(self):
+        resp = self.client.post(self._delete_url(self.p3))
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            resp["Location"],
+            _staff_item_edit_url(self.item.id, self.p2),
+        )
+        self.assertFalse(PhotoContent.objects.filter(pk=self.p3.id).exists())
+        self.assertNotIn(f"photo={self.p3.id}", resp["Location"])
 
     def test_deleting_last_remaining_photo_is_rejected(self):
         solo = _create_photo_item(title="Solo")
