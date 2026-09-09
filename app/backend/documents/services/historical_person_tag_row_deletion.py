@@ -9,10 +9,10 @@ are never written. Default callers plan only; writes require
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Manager, Q
 
 from documents.historical_person_tag_map import (
     HISTORICAL_PERSON_NAME_TAG_RECORDS,
@@ -30,6 +30,14 @@ from documents.models import (
 from documents.services.archive_metadata_suggestion_review import (
     pending_archive_metadata_suggestions_with_retired_tag_names,
 )
+
+if TYPE_CHECKING:
+    from django.db.models import Model
+
+    class _ImplicitTagM2MThrough(Model):
+        id: int
+        tag_id: int
+
 
 EXPECTED_HISTORICAL_PERSON_NAME_TAG_MAP_SIZE = 29
 MappedTagRowState = Literal["all_present", "all_absent"]
@@ -103,6 +111,13 @@ def _exact_frozen_tag_q() -> Q:
     return query
 
 
+def _implicit_tag_m2m_through_manager(
+    through: type[Tag],
+) -> Manager[_ImplicitTagM2MThrough]:
+    """Manager for auto-created Tag M2M through rows (typed as Tag by stubs)."""
+    return cast("Manager[_ImplicitTagM2MThrough]", through.objects)
+
+
 def _validate_map_artifact() -> None:
     if len(HISTORICAL_PERSON_NAME_TAG_TO_PERSON_ID) != (
         EXPECTED_HISTORICAL_PERSON_NAME_TAG_MAP_SIZE
@@ -130,12 +145,14 @@ def _lock_apply_rows() -> None:
         .select_for_update()
     )
     list(
-        ArchiveItem.tags.through.objects.filter(tag_id__in=mapped_ids)
+        _implicit_tag_m2m_through_manager(ArchiveItem.tags.through)
+        .filter(tag_id__in=mapped_ids)
         .order_by("id")
         .select_for_update()
     )
     list(
-        Document.tags_m2m.through.objects.filter(tag_id__in=mapped_ids)
+        _implicit_tag_m2m_through_manager(Document.tags_m2m.through)
+        .filter(tag_id__in=mapped_ids)
         .order_by("id")
         .select_for_update()
     )
@@ -157,12 +174,14 @@ def _require_persons_present() -> None:
 def _require_no_mapped_through_rows() -> tuple[int, int]:
     mapped_ids = historical_person_name_tag_ids()
     archiveitem_ids = list(
-        ArchiveItem.tags.through.objects.filter(tag_id__in=mapped_ids)
+        _implicit_tag_m2m_through_manager(ArchiveItem.tags.through)
+        .filter(tag_id__in=mapped_ids)
         .order_by("id")
         .values_list("id", flat=True)
     )
     document_ids = list(
-        Document.tags_m2m.through.objects.filter(tag_id__in=mapped_ids)
+        _implicit_tag_m2m_through_manager(Document.tags_m2m.through)
+        .filter(tag_id__in=mapped_ids)
         .order_by("id")
         .values_list("id", flat=True)
     )

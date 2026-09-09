@@ -217,7 +217,9 @@ def discover_transferable_historical_mappings(
     to oldest. Structurally incompatible mappings are omitted. Snapshots with
     no mapping are ignored.
     """
-    if target.pk is None or target.created_at is None:
+    snapshot_pk: object = target.pk
+    snapshot_created_at: object = target.created_at
+    if snapshot_pk is None or snapshot_created_at is None:
         return ()
 
     historical_mappings = (

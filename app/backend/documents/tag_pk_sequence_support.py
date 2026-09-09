@@ -63,7 +63,9 @@ def ensure_tag_pk_sequence_past_historical_ids(
     """
     model = tag_model if tag_model is not None else Tag
     alias = _write_alias(model, using)
-    manager = model.objects.using(alias)
+    # django-stubs strips ``objects`` from type[Model]; the metaclass still
+    # exposes the default manager used at runtime (``objects`` on Tag).
+    manager = model._default_manager.using(alias)
     conn = connections[alias]
 
     frozen_max = max(historical_person_name_tag_ids())
