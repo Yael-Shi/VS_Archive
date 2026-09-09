@@ -222,6 +222,7 @@ def process_arabic_printed_banded_document(
     poll_seconds: float = DEFAULT_POLL_SECONDS,
     sleep_fn=time.sleep,
     monotonic_fn=time.monotonic,
+    execution_identity=None,
 ) -> ArabicPrintedBandedDocumentResult:
     """Claim and OCR every 0-based page under one document deadline.
 
@@ -268,6 +269,7 @@ def process_arabic_printed_banded_document(
             page_fingerprint=identity.page_fingerprints[page_index],
             source_content_fingerprint=identity.source_content_fingerprints[page_index],
             oriented_image_sha256=identity.oriented_image_sha256s[page_index],
+            execution_identity=execution_identity,
         )
         checkpoint = ArabicPrintedOcrPageCheckpoint.objects.get(pk=claim.checkpoint_id)
 

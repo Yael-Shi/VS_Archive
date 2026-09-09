@@ -23,6 +23,10 @@ from documents.services.gemini_engine import (
     GeminiTranscriptionContract,
 )
 from documents.services.page_extraction import PageImage
+from documents.services.process_document_request_persist import (
+    StaleProcessDocumentPageClaimError,
+    require_process_document_page_claim_allowed,
+)
 
 PAGE_CHECKPOINT_LEASE = timedelta(minutes=45)
 
@@ -210,12 +214,17 @@ class GeminiPageClaim:
     lease_token: uuid.UUID | None = None
 
 
+class StaleGeminiPageClaimError(RuntimeError):
+    pass
+
+
 def claim_gemini_page(
     *,
     attempt_id: int,
     page_index: int,
     page_fingerprint: str,
     source_content_fingerprint: str,
+    execution_identity=None,
 ) -> GeminiPageClaim:
     now = timezone.now()
     with transaction.atomic():
@@ -256,6 +265,14 @@ def claim_gemini_page(
                     checkpoint.id,
                     page_index,
                 )
+
+        try:
+            require_process_document_page_claim_allowed(
+                document_id=attempt.document_id,
+                identity=execution_identity,
+            )
+        except StaleProcessDocumentPageClaimError as exc:
+            raise StaleGeminiPageClaimError(str(exc)) from exc
 
         token = uuid.uuid4()
         values = {
@@ -298,10 +315,6 @@ def claim_gemini_page(
             page_index,
             lease_token=token,
         )
-
-
-class StaleGeminiPageClaimError(RuntimeError):
-    pass
 
 
 def persist_gemini_page_success(

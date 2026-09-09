@@ -113,8 +113,35 @@ result state. It does not send SQS, call a provider, or enqueue retry.
 Staff document detail exposes that service as POST
 `ui/documents/<doc_id>/process-document-requests/<request_id>/abandon/`
 (eligibility is Request `RECOVERY_REQUIRED`, not Document overlay alone).
-Intentional-retry orchestration is not implemented yet. Do not use
+Intentional retry is a separate POST
+`ui/documents/<doc_id>/process-document-requests/<request_id>/retry/`
+implemented by `retry_process_document_request`. Staff detail shows
+abandon-only only for the parked `RECOVERY_REQUIRED` Request. The retry
+control binds to that parked Request, or to the latest `STAFF_ABANDONED`
+Request when it is still the valid recovery-retry source (no later
+Request, or exactly one later matching `ENQUEUE_FAILED`). Other later
+history hides retry. For OCR, retry first refuses when any Gemini or
+Arabic printed page checkpoint for the Document is `RUNNING` with
+`lease_expires_at` in the future (read-only; leases are not cleared).
+`claim_gemini_page` / `claim_arabic_printed_page` then refuse a **new**
+page lease when the worker ProcessDocumentRequest execution identity is
+terminal, mismatched, or cleared. Then it abandons the parked Request and, after
+that transaction commits, enqueues a **new** Request through
+`apply_ocr_reprocess` or `enqueue_hebrew_translation_retry` according to
+`operation`. It never replays the parked Request, lease token, origin,
+`ocr_retry_mode`, source Transkribus run, or DLQ. A later POST against
+the same `FAILED` / `STAFF_ABANDONED` Request skips abandon and only
+enqueues. Other terminal Requests do not authorize retry. Do not use
 this recovery command to abandon or replay `RECOVERY_REQUIRED`.
+
+**Known limitation (checkpoint residual):** after abandon, a late worker
+that already holds a **page** lease may continue Gemini/Arabic checkpoint
+**writes** until that page lease expires. It cannot acquire a **new** page
+lease. PR1 still blocks stale DTR / search-index / document-rollup
+persistence. PR3 refuses to start a competing OCR retry while a page
+lease is live. Page leases must not be forcibly cleared (ambiguous
+external-call fences). Full Phase 2 checkpoint-write
+ProcessDocumentRequest-token fencing is deferred.
 
 ## Expired RUNNING lease fencing (separate command)
 

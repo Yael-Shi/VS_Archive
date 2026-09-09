@@ -24,6 +24,10 @@ from documents.models import (
     ArabicPrintedOcrBandCheckpoint,
     ArabicPrintedOcrPageCheckpoint,
 )
+from documents.services.process_document_request_persist import (
+    StaleProcessDocumentPageClaimError,
+    require_process_document_page_claim_allowed,
+)
 
 PAGE_CHECKPOINT_LEASE = timedelta(minutes=45)
 
@@ -508,6 +512,7 @@ def claim_arabic_printed_page(
     page_fingerprint: str,
     source_content_fingerprint: str,
     oriented_image_sha256: str,
+    execution_identity=None,
 ) -> ArabicPrintedPageClaim:
     now = timezone.now()
     try:
@@ -549,6 +554,14 @@ def claim_arabic_printed_page(
                 raise ArabicPrintedCheckpointBusyError(
                     f"Arabic printed OCR page_index={page_index} is already claimed"
                 )
+
+            try:
+                require_process_document_page_claim_allowed(
+                    document_id=attempt.document_id,
+                    identity=execution_identity,
+                )
+            except StaleProcessDocumentPageClaimError as exc:
+                raise StaleArabicPrintedPageClaimError(str(exc)) from exc
 
             token = uuid.uuid4()
             checkpoint.status = ArabicPrintedOcrPageCheckpoint.Status.RUNNING
