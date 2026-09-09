@@ -1,13 +1,34 @@
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 from django.test import SimpleTestCase
 
 from documents.models import Document
+from documents.services.archive_search_overlay_pages import ArchiveSearchOverlayPage
+from documents.services.archive_search_overlay_payload import (
+    ArchiveSearchOverlayTarget,
+)
 from documents.services.archive_search_overlay_presentation import (
     apply_archive_search_overlay_to_source_previews,
     build_archive_search_single_image_overlay,
 )
+
+
+def _document(*, doc_type: str) -> Document:
+    return cast(Document, SimpleNamespace(doc_type=doc_type))
+
+
+def _overlay_target() -> ArchiveSearchOverlayTarget:
+    return ArchiveSearchOverlayTarget(
+        match_index=0,
+        term="t",
+        page_index=1,
+        left_pct=0.0,
+        top_pct=0.0,
+        width_pct=1.0,
+        height_pct=1.0,
+    )
 
 
 class ArchiveSearchMatchNavStickyCssTests(SimpleTestCase):
@@ -32,16 +53,16 @@ class ArchiveSearchMatchNavStickyCssTests(SimpleTestCase):
 
 class ArchiveSearchOverlayPresentationTests(SimpleTestCase):
     def test_multi_image_preview_items_receive_matching_page_targets(self):
-        first = object()
-        second = object()
+        first = _overlay_target()
+        second = _overlay_target()
 
         items = [
             {"display_number": 1, "url": "one"},
             {"display_number": 2, "url": "two"},
         ]
         pages = (
-            SimpleNamespace(page_index=1, targets=(first,)),
-            SimpleNamespace(page_index=2, targets=(second,)),
+            ArchiveSearchOverlayPage(page_index=1, targets=(first,)),
+            ArchiveSearchOverlayPage(page_index=2, targets=(second,)),
         )
 
         rendered = apply_archive_search_overlay_to_source_previews(items, pages)
@@ -60,7 +81,7 @@ class ArchiveSearchOverlayPresentationTests(SimpleTestCase):
             {"display_number": 1, "url": "one"},
             {"display_number": 2, "url": "two"},
         ]
-        pages = (SimpleNamespace(page_index=1, targets=(object(),)),)
+        pages = (ArchiveSearchOverlayPage(page_index=1, targets=(_overlay_target(),)),)
 
         rendered = apply_archive_search_overlay_to_source_previews(items, pages)
 
@@ -81,13 +102,13 @@ class ArchiveSearchOverlayPresentationTests(SimpleTestCase):
         self.assertIn("archive_search_overlay_targets", rendered[0])
 
     def test_single_image_page_one_overlay_is_exposed(self):
-        target = object()
-        doc = SimpleNamespace(doc_type=Document.DocType.IMAGE)
+        target = _overlay_target()
+        doc = _document(doc_type=Document.DocType.IMAGE)
 
         overlay = build_archive_search_single_image_overlay(
             doc,
             content_url="https://example.test/image",
-            overlay_pages=(SimpleNamespace(page_index=1, targets=(target,)),),
+            overlay_pages=(ArchiveSearchOverlayPage(page_index=1, targets=(target,)),),
         )
 
         self.assertIsNotNone(overlay)
@@ -95,7 +116,7 @@ class ArchiveSearchOverlayPresentationTests(SimpleTestCase):
         self.assertEqual(overlay.targets, (target,))
 
     def test_single_image_without_match_still_has_empty_page_one_overlay(self):
-        doc = SimpleNamespace(doc_type=Document.DocType.IMAGE)
+        doc = _document(doc_type=Document.DocType.IMAGE)
 
         overlay = build_archive_search_single_image_overlay(
             doc,
@@ -108,7 +129,7 @@ class ArchiveSearchOverlayPresentationTests(SimpleTestCase):
         self.assertEqual(overlay.targets, ())
 
     def test_pdf_has_no_single_image_overlay(self):
-        doc = SimpleNamespace(doc_type=Document.DocType.PDF)
+        doc = _document(doc_type=Document.DocType.PDF)
 
         overlay = build_archive_search_single_image_overlay(
             doc,

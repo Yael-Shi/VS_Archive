@@ -333,12 +333,15 @@ class _IdLabelCollector(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         attr_map = dict(attrs)
-        if "id" in attr_map:
-            self.ids.append(attr_map["id"])
-        if "name" in attr_map:
-            self.names.append(attr_map["name"])
-        if "aria-labelledby" in attr_map:
-            self.labelledby.append(attr_map["aria-labelledby"])
+        element_id = attr_map.get("id")
+        if element_id is not None:
+            self.ids.append(element_id)
+        element_name = attr_map.get("name")
+        if element_name is not None:
+            self.names.append(element_name)
+        labelledby = attr_map.get("aria-labelledby")
+        if labelledby is not None:
+            self.labelledby.append(labelledby)
         if tag == "label":
             self._label_for = attr_map.get("for")
             self._label_text = []

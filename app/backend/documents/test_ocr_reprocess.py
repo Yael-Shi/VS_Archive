@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone as dt_timezone
 from io import StringIO
 from typing import TypedDict
 from unittest.mock import patch
+from uuid import UUID
 
 from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase, TransactionTestCase
@@ -37,6 +38,7 @@ from documents.services.arabic_printed_banded_ocr import (
 )
 from documents.services.arabic_printed_page_checkpoints import (
     ArabicPrintedBandPlan,
+    ArabicPrintedPageClaim,
     ArabicPrintedPageSource,
     build_arabic_printed_attempt_identity,
     claim_arabic_printed_page,
@@ -88,6 +90,12 @@ _TRANSKRIBUS_WORKER_ENV_FIELDS: _TranskribusWorkerEnvFields = {
     "transkribus_collection_id": COLLECTION_ID,
     "transkribus_model_id": MODEL_ID,
 }
+
+
+def _require_lease_token(claim: ArabicPrintedPageClaim) -> UUID:
+    token = claim.lease_token
+    assert token is not None
+    return token
 
 
 def _failed_ocr_document(**kwargs) -> Document:
@@ -861,7 +869,7 @@ class ArabicPrintedBandedPartialOcrReprocessTests(TransactionTestCase):
         claim = self._claim_page(attempt, identity, page_index)
         persist_arabic_printed_page_failure(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             failure_code="ARABIC_PRINTED_DOCUMENT_DEADLINE",
             failure_message=f"insufficient page start budget page_index={page_index}",
         )
@@ -871,11 +879,11 @@ class ArabicPrintedBandedPartialOcrReprocessTests(TransactionTestCase):
         claim = self._claim_page(attempt, identity, page_index)
         reserve_arabic_printed_vision_call(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
         )
         persist_arabic_printed_page_failure(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             failure_code=PAGE_FAILURE_VISION_AMBIGUOUS,
             failure_message="vision reserved without a durable plan",
         )
@@ -946,12 +954,12 @@ class ArabicPrintedBandedPartialOcrReprocessTests(TransactionTestCase):
         claim = self._claim_page(attempt, identity, 0)
         reserve_arabic_printed_vision_call(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
         )
         draft = "مسودة"
         persist_arabic_printed_vision_plan(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             cloud_vision_response_sha256=_sha256_bytes(b"vision-response"),
             bands=[
                 ArabicPrintedBandPlan(
@@ -973,19 +981,19 @@ class ArabicPrintedBandedPartialOcrReprocessTests(TransactionTestCase):
         )
         reserve_arabic_printed_primary_create(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
         )
         persist_arabic_printed_band_failure(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
             failure_code=BAND_FAILURE_PRIMARY_AMBIGUOUS,
             failure_message="primary reserved without an interaction id",
         )
         persist_arabic_printed_page_failure(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             failure_code="ARABIC_PRINTED_BANDS_UNRESOLVED",
             failure_message="band_index=0 did not reach success",
         )

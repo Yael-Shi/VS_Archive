@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
+from typing import cast
 
 from django.test import SimpleTestCase
 
@@ -363,10 +365,11 @@ class ArabicPrintedBandingTests(SimpleTestCase):
             None,
             "6",
         )
+        plan_groups = cast(Callable[..., object], plan_arabic_printed_line_groups)
         for max_bands in invalid_max_bands:
             with self.subTest(max_bands=max_bands):
                 with self.assertRaises(ArabicPrintedBandingError) as ctx:
-                    plan_arabic_printed_line_groups(
+                    plan_groups(
                         lines,
                         image_height=IMAGE_HEIGHT,
                         max_bands=max_bands,
@@ -388,7 +391,7 @@ class ArabicPrintedBandingTests(SimpleTestCase):
         for ratio in invalid_ratios:
             with self.subTest(max_height_ratio=ratio):
                 with self.assertRaises(ArabicPrintedBandingError) as ctx:
-                    plan_arabic_printed_line_groups(
+                    plan_groups(
                         lines,
                         image_height=IMAGE_HEIGHT,
                         max_height_ratio=ratio,

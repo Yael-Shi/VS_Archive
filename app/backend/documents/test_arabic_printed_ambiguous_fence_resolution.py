@@ -7,6 +7,7 @@ import inspect
 from datetime import timedelta
 from io import StringIO
 from unittest.mock import patch
+from uuid import UUID
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
@@ -50,6 +51,7 @@ from documents.services.arabic_printed_banded_ocr import (
 )
 from documents.services.arabic_printed_page_checkpoints import (
     ArabicPrintedBandPlan,
+    ArabicPrintedPageClaim,
     ArabicPrintedPageSource,
     apply_arabic_printed_band_diagnostics,
     assemble_arabic_printed_page,
@@ -83,6 +85,12 @@ def _sha256_bytes(value: bytes) -> str:
 
 def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _require_lease_token(claim: ArabicPrintedPageClaim) -> UUID:
+    token = claim.lease_token
+    assert token is not None
+    return token
 
 
 def _forbid_provider_call(*_args, **_kwargs):
@@ -221,11 +229,11 @@ class ArabicPrintedAmbiguousFenceResolutionTests(TransactionTestCase):
         claim = self._claim(attempt, identity, page_index)
         reserve_arabic_printed_vision_call(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
         )
         persist_arabic_printed_page_failure(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             failure_code=PAGE_FAILURE_VISION_AMBIGUOUS,
             failure_message="vision reserved without a durable plan",
         )
@@ -234,7 +242,7 @@ class ArabicPrintedAmbiguousFenceResolutionTests(TransactionTestCase):
     def _persist_plan(self, claim, *drafts: str):
         persist_arabic_printed_vision_plan(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             cloud_vision_response_sha256=_sha256_bytes(b"vision-response"),
             bands=[
                 _band_plan(index, draft=draft) for index, draft in enumerate(drafts)
@@ -245,24 +253,24 @@ class ArabicPrintedAmbiguousFenceResolutionTests(TransactionTestCase):
         claim = self._claim(attempt, identity, page_index)
         reserve_arabic_printed_vision_call(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
         )
         self._persist_plan(claim, "مسودة")
         reserve_arabic_printed_primary_create(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
         )
         persist_arabic_printed_band_failure(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
             failure_code=BAND_FAILURE_PRIMARY_AMBIGUOUS,
             failure_message="primary reserved without an interaction id",
         )
         persist_arabic_printed_page_failure(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             failure_code="ARABIC_PRINTED_BANDS_UNRESOLVED",
             failure_message="band_index=0 did not reach success",
         )
@@ -272,42 +280,42 @@ class ArabicPrintedAmbiguousFenceResolutionTests(TransactionTestCase):
         claim = self._claim(attempt, identity, page_index)
         reserve_arabic_printed_vision_call(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
         )
         self._persist_plan(claim, "مسودة")
         reserve_arabic_printed_primary_create(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
         )
         apply_arabic_printed_band_diagnostics(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
             diagnostics={"primary_interaction_id": "ix-primary-known"},
         )
         persist_arabic_printed_band_failure(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
             failure_code=BAND_FAILURE_PRIMARY,
             failure_message="primary rejected",
         )
         reserve_arabic_printed_fallback_create(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
         )
         persist_arabic_printed_band_failure(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
             failure_code=BAND_FAILURE_FALLBACK_AMBIGUOUS,
             failure_message="fallback reserved without an interaction id",
         )
         persist_arabic_printed_page_failure(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             failure_code="ARABIC_PRINTED_BANDS_UNRESOLVED",
             failure_message="band_index=0 did not reach success",
         )
@@ -622,18 +630,18 @@ class ArabicPrintedAmbiguousFenceResolutionTests(TransactionTestCase):
         claim = self._claim(attempt, identity, 0)
         reserve_arabic_printed_vision_call(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
         )
         self._persist_plan(claim, "مسودة")
         reserve_arabic_printed_primary_create(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
         )
         text = "ok"
         persist_arabic_printed_band_success(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
             band_index=0,
             selected_result=ArabicPrintedOcrBandCheckpoint.SelectedResult.UNASSISTED,
             transcription_text=text,
@@ -642,7 +650,7 @@ class ArabicPrintedAmbiguousFenceResolutionTests(TransactionTestCase):
         )
         assemble_arabic_printed_page(
             checkpoint_id=claim.checkpoint_id,
-            lease_token=claim.lease_token,
+            lease_token=_require_lease_token(claim),
         )
         with self.assertRaises(ArabicPrintedAmbiguousFenceResolutionError) as ctx:
             plan_arabic_printed_ambiguous_fence_resolution(**self._kwargs(doc))
@@ -653,17 +661,17 @@ class ArabicPrintedAmbiguousFenceResolutionTests(TransactionTestCase):
         claim_b = self._claim(attempt_b, identity_b, 0)
         reserve_arabic_printed_vision_call(
             checkpoint_id=claim_b.checkpoint_id,
-            lease_token=claim_b.lease_token,
+            lease_token=_require_lease_token(claim_b),
         )
         self._persist_plan(claim_b, "مسودة")
         reserve_arabic_printed_primary_create(
             checkpoint_id=claim_b.checkpoint_id,
-            lease_token=claim_b.lease_token,
+            lease_token=_require_lease_token(claim_b),
             band_index=0,
         )
         persist_arabic_printed_band_success(
             checkpoint_id=claim_b.checkpoint_id,
-            lease_token=claim_b.lease_token,
+            lease_token=_require_lease_token(claim_b),
             band_index=0,
             selected_result=ArabicPrintedOcrBandCheckpoint.SelectedResult.UNASSISTED,
             transcription_text=text,
@@ -672,7 +680,7 @@ class ArabicPrintedAmbiguousFenceResolutionTests(TransactionTestCase):
         )
         persist_arabic_printed_page_failure(
             checkpoint_id=claim_b.checkpoint_id,
-            lease_token=claim_b.lease_token,
+            lease_token=_require_lease_token(claim_b),
             failure_code="ARABIC_PRINTED_BANDS_UNRESOLVED",
             failure_message="unfinished sibling",
         )

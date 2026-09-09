@@ -54,7 +54,7 @@ _TRANSKRIBUS_ROUTE = OcrRouteConfig(
 
 
 class ArabicPrintedBandedQualityScorerTests(SimpleTestCase):
-    def _score(self, page_qualities, assembled_text="assembled text"):
+    def _score(self, page_qualities, assembled_text: str | None = "assembled text"):
         return quality_from_banded_page_qualities(
             page_qualities,
             assembled_text=assembled_text,

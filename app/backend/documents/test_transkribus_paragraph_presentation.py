@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import re
 from html.parser import HTMLParser
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
@@ -24,6 +23,9 @@ from documents.models import (
     TranskribusTranscriptSnapshot,
 )
 from documents.services.archive_items import create_ocr_document
+from documents.services.archive_search_match_ranges import (
+    ArchiveSearchGeometryMatch,
+)
 from documents.services.archive_search_transcription_presentation import (
     ArchiveSearchTranscriptionPresentation,
     build_archive_search_transcription_presentation,
@@ -95,13 +97,13 @@ def _match(
     start: int,
     end: int,
     term: str = "x",
-):
-    return SimpleNamespace(
+) -> ArchiveSearchGeometryMatch:
+    return ArchiveSearchGeometryMatch(
         term=term,
         text_result=text_result,
         start=start,
         end=end,
-        geometry=(SimpleNamespace(page_index=1),),
+        geometry=(),
     )
 
 

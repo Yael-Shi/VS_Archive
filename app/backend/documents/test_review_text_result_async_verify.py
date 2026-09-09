@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import TypedDict
 from unittest.mock import patch
 
 from django.contrib.auth.models import Permission, User
@@ -37,7 +38,11 @@ def _select_for_update_model_order(captured_queries):
     return order
 
 
-def _async_headers() -> dict[str, str]:
+class _AsyncClientHeaders(TypedDict):
+    HTTP_X_REQUESTED_WITH: str
+
+
+def _async_headers() -> _AsyncClientHeaders:
     return {"HTTP_X_REQUESTED_WITH": "XMLHttpRequest"}
 
 

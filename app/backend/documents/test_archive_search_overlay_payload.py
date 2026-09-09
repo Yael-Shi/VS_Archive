@@ -1,4 +1,4 @@
-from types import SimpleNamespace
+from typing import cast
 from unittest.mock import patch
 
 from django.test import SimpleTestCase, TestCase
@@ -11,46 +11,72 @@ from documents.models import (
     TranskribusTranscriptSnapshot,
 )
 from documents.services.archive_items import create_ocr_document
+from documents.services.archive_search_match_ranges import (
+    ArchiveSearchGeometryMatch,
+)
 from documents.services.archive_search_overlay_payload import (
     build_archive_search_overlay_targets,
 )
+from documents.services.transkribus_text_range_geometry import (
+    TextRangeLineGeometry,
+)
+
+
+class _ResultPk:
+    def __init__(self, pk: int) -> None:
+        self.pk = pk
 
 
 class ArchiveSearchOverlayPayloadTests(SimpleTestCase):
     def _geometry(
         self,
         *,
-        page_index=1,
-        min_x=100.0,
-        min_y=50.0,
-        max_x=300.0,
-        max_y=150.0,
-    ):
-        return SimpleNamespace(
+        page_index: int = 1,
+        min_x: float = 100.0,
+        min_y: float = 50.0,
+        max_x: float = 300.0,
+        max_y: float = 150.0,
+    ) -> TextRangeLineGeometry:
+        return TextRangeLineGeometry(
             page_index=page_index,
-            bbox_min_x=min_x,
-            bbox_min_y=min_y,
-            bbox_max_x=max_x,
-            bbox_max_y=max_y,
+            page_nr=page_index,
+            order_index=0,
+            provider_region_id="r1",
+            provider_line_id="l1",
+            char_start=0,
+            char_end=1,
+            polygon_points=((0.0, 0.0), (1.0, 0.0), (1.0, 1.0)),
+            bbox_min_x=float(min_x),
+            bbox_min_y=float(min_y),
+            bbox_max_x=float(max_x),
+            bbox_max_y=float(max_y),
         )
 
-    def _match(self, *geometry, term="alpha", text_result=None):
-        if text_result is None:
-            text_result = SimpleNamespace(pk=17)
-        return SimpleNamespace(
+    def _match(
+        self,
+        *geometry: TextRangeLineGeometry,
+        term: str = "alpha",
+        text_result: DocumentTextResult | None = None,
+    ) -> ArchiveSearchGeometryMatch:
+        result = text_result
+        if result is None:
+            result = cast(DocumentTextResult, _ResultPk(17))
+        return ArchiveSearchGeometryMatch(
             term=term,
-            text_result=text_result,
+            text_result=result,
+            start=0,
+            end=1,
             geometry=geometry,
         )
 
     def _page_row(
         self,
         *,
-        text_result_id=17,
-        page_index=1,
-        width=1000,
-        height=500,
-    ):
+        text_result_id: int = 17,
+        page_index: int = 1,
+        width: int | None = 1000,
+        height: int | None = 500,
+    ) -> dict[str, int | None]:
         return {
             "snapshot__text_result_bindings__text_result_id": text_result_id,
             "page_index": page_index,
@@ -244,19 +270,30 @@ class ArchiveSearchOverlayPayloadQueryCountTests(TestCase):
             image_height=1000,
         )
 
-    def _geometry(self, page_index, min_y):
-        return SimpleNamespace(
+    def _geometry(self, page_index: int, min_y: float) -> TextRangeLineGeometry:
+        return TextRangeLineGeometry(
             page_index=page_index,
+            page_nr=page_index,
+            order_index=0,
+            provider_region_id="r1",
+            provider_line_id="l1",
+            char_start=0,
+            char_end=1,
+            polygon_points=((0.0, 0.0), (1.0, 0.0), (1.0, 1.0)),
             bbox_min_x=100.0,
             bbox_min_y=float(min_y),
             bbox_max_x=300.0,
             bbox_max_y=float(min_y + 50),
         )
 
-    def _match(self, *geometry, term="alpha"):
-        return SimpleNamespace(
+    def _match(
+        self, *geometry: TextRangeLineGeometry, term: str = "alpha"
+    ) -> ArchiveSearchGeometryMatch:
+        return ArchiveSearchGeometryMatch(
             term=term,
             text_result=self.text_result,
+            start=0,
+            end=1,
             geometry=geometry,
         )
 

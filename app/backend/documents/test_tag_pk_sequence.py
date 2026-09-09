@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import inspect
+from typing import cast
 from unittest.mock import patch
 
 from django.apps import apps
 from django.core.management.color import no_style
 from django.db import DEFAULT_DB_ALIAS, connection, connections
+from django.db.models import Model
 from django.db.models.query import QuerySet
 from django.test import TestCase, TransactionTestCase
 from django.utils.connection import ConnectionDoesNotExist
@@ -106,7 +108,9 @@ class TagPkSequenceEmptyResetTests(TestCase):
         with patch(
             "documents.tag_pk_sequence_support.ensure_tag_pk_sequence_past_historical_ids"
         ) as mocked:
-            reset_pk_sequence(FakeHistoricalTag, using=DEFAULT_DB_ALIAS)
+            reset_pk_sequence(
+                cast(type[Model], FakeHistoricalTag), using=DEFAULT_DB_ALIAS
+            )
         mocked.assert_called_once_with(
             using=DEFAULT_DB_ALIAS,
             tag_model=FakeHistoricalTag,

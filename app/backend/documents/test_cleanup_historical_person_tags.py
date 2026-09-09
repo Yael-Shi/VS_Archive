@@ -10,6 +10,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db.models import ManyToManyField
 from django.forms import ValidationError
 from django.test import RequestFactory, TestCase
 
@@ -568,8 +569,11 @@ class HistoricalPersonTagLegacyWriterTests(TestCase):
         blocked = Tag.objects.create(pk=BLOCKED_TAG_ID, name="blocked-admin-choice")
         _reset_pk_sequence(Tag)
         ordinary = _create_tag(name="admin-ordinary")
+        tags_field = Document._meta.get_field("tags_m2m")
+        self.assertIsInstance(tags_field, ManyToManyField)
+        assert isinstance(tags_field, ManyToManyField)
         field = DocumentAdmin(Document, self.site).formfield_for_manytomany(
-            Document._meta.get_field("tags_m2m"),
+            tags_field,
             self.request,
         )
         choice_ids = set(field.queryset.values_list("pk", flat=True))
