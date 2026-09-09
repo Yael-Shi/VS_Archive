@@ -23,6 +23,7 @@ from documents.services.text_quality import (
     effective_public_text_quality_for_result,
 )
 from documents.services.verified_text_result_edit import (
+    review_form_baseline_for_result_id,
     edit_pending_text_result,
     edit_verified_text_result,
     verify_pending_text_result,
@@ -171,6 +172,7 @@ class TextQualityFoundationTests(TestCase):
             result_id=row.id,
             new_text="after edit",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(row.id),
         )
         row.refresh_from_db()
         self.assertEqual(row.text, "after edit")
@@ -191,6 +193,7 @@ class TextQualityFoundationTests(TestCase):
             result_id=row.id,
             new_text="verified after",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(row.id),
         )
         row.refresh_from_db()
         self.assertEqual(row.text, "verified after")
@@ -215,6 +218,7 @@ class TextQualityFoundationTests(TestCase):
             result_id=row.id,
             new_text="ready to verify",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(row.id),
         )
         row.refresh_from_db()
         self.assertEqual(row.quality, DocumentTextResult.Quality.GOOD)

@@ -35,6 +35,7 @@ from documents.services.transkribus_corrected_current_activation import (
 )
 from documents.services.transkribus_snapshot_parser import compute_sha256_hex
 from documents.services.verified_text_result_edit import (
+    review_form_baseline_for_result_id,
     edit_pending_text_result,
     edit_verified_text_result,
 )
@@ -128,6 +129,7 @@ class PendingAndVerifiedEditSearchIndexSyncTests(TestCase):
             result_id=source.id,
             new_text="Pending after indexed",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         self.assertEqual(
@@ -164,6 +166,7 @@ class PendingAndVerifiedEditSearchIndexSyncTests(TestCase):
             result_id=hebrew.id,
             new_text="תרגום אחרי עריכה",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(hebrew.id),
         )
 
         index = _index_for(doc.archive_item_id)
@@ -195,6 +198,7 @@ class PendingAndVerifiedEditSearchIndexSyncTests(TestCase):
             result_id=source.id,
             new_text="Source after revision bump",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         index = _index_for(doc.archive_item_id)
@@ -217,6 +221,7 @@ class PendingAndVerifiedEditSearchIndexSyncTests(TestCase):
             result_id=source.id,
             new_text="Verified after indexed",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         self.assertEqual(
@@ -250,6 +255,7 @@ class PendingAndVerifiedEditSearchIndexSyncTests(TestCase):
             result_id=source.id,
             new_text="טקסט מעודכן משותף",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         source.refresh_from_db()
@@ -282,6 +288,7 @@ class PendingAndVerifiedEditSearchIndexSyncTests(TestCase):
                     result_id=source.id,
                     new_text="Pending rollback after",
                     editor=self.staff,
+                    baseline=review_form_baseline_for_result_id(source.id),
                 )
         source.refresh_from_db()
         self.assertEqual(source.text, "Pending rollback before")
@@ -311,6 +318,7 @@ class PendingAndVerifiedEditSearchIndexSyncTests(TestCase):
                     result_id=source.id,
                     new_text="טקסט שלא אמור להישמר",
                     editor=self.staff,
+                    baseline=review_form_baseline_for_result_id(source.id),
                 )
         source.refresh_from_db()
         hebrew.refresh_from_db()
@@ -338,6 +346,7 @@ class PendingAndVerifiedEditSearchIndexSyncTests(TestCase):
                     result_id=source.id,
                     new_text="Verified rollback after",
                     editor=self.staff,
+                    baseline=review_form_baseline_for_result_id(source.id),
                 )
         source.refresh_from_db()
         self.assertEqual(source.text, "Verified rollback before")
@@ -358,6 +367,7 @@ class PendingAndVerifiedEditSearchIndexSyncTests(TestCase):
                 result_id=source.id,
                 new_text="Same pending text",
                 editor=self.staff,
+                baseline=review_form_baseline_for_result_id(source.id),
             )
             mock_sync.assert_not_called()
 
@@ -664,6 +674,7 @@ class PublicSearchAndPr2aRegressionTests(TestCase):
             result_id=source.id,
             new_text="unique-ocr-body-token-pr2b1-aaa",
             editor=staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
         self.assertEqual(
             _index_for(doc.archive_item_id).body_text,

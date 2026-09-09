@@ -35,7 +35,10 @@ from documents.services.text_presentation import get_displayed_transcription_tex
 from documents.services.transkribus_local_completion import (
     complete_transkribus_local_success,
 )
-from documents.services.verified_text_result_edit import edit_pending_text_result
+from documents.services.verified_text_result_edit import (
+    edit_pending_text_result,
+    review_form_baseline_for_result_id,
+)
 from documents.test_hebrew_translation_retry import (
     ENGINE,
     _failed_hebrew,
@@ -634,6 +637,7 @@ class Pr2aPr2b1AndPublicSearchRegressionTests(TestCase):
             result_id=source.id,
             new_text="after human edit indexed",
             editor=staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
         self.assertEqual(
             _index_for(doc.archive_item_id).body_text,

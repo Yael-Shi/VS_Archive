@@ -75,6 +75,11 @@ from documents.services.transkribus_engine import (
     PylaiaTranscriptionOutcome,
     SelectedTranscriptPage,
 )
+from documents.services.verified_text_result_edit import (
+    review_form_baseline_as_post_dict,
+    review_form_revision_for_row,
+)
+from documents.services.transkribus_snapshot_parser import compute_sha256_hex
 
 
 def _adapter_selected_pages_stub(text: str = "text") -> tuple:
@@ -10015,13 +10020,23 @@ class ReviewUiTests(TestCase):
 
     def _verify_post(self, row, **extra):
         """POST verify with current row text (combined save+verify contract)."""
-        data = {"text": row.text or ""}
+        data = {
+            "text": row.text or "",
+            "expected_text_sha256": compute_sha256_hex(row.text or ""),
+        }
+        revision = review_form_revision_for_row(row, row.document)
+        if revision is not None:
+            data["expected_source_revision"] = str(revision)
         data.update(extra)
         return self.client.post(self._verify_url(row.id), data)
 
+    def _text_post(self, row, text: str):
+        data = {"text": text, **review_form_baseline_as_post_dict(row)}
+        return self.client.post(self._text_url(row.id), data)
+
     def test_staff_can_verify_pending_transcription_result(self):
         doc = self._create_document()
-        row = self._create_text_result(doc)
+        row = self._create_hebrew_mirror_for_pending_edit(doc)
         self.client.force_login(self.staff)
         resp = self._verify_post(row)
         self.assertEqual(resp.status_code, 302)
@@ -10057,7 +10072,7 @@ class ReviewUiTests(TestCase):
 
     def test_verify_with_unchanged_text_changes_only_verification_status(self):
         doc = self._create_document()
-        row = self._create_text_result(
+        row = self._create_hebrew_mirror_for_pending_edit(
             doc,
             review_reasons='["AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW","MIN_TEXT_LENGTH"]',
         )
@@ -10083,10 +10098,7 @@ class ReviewUiTests(TestCase):
         doc = self._create_document()
         row = self._create_hebrew_mirror_for_pending_edit(doc, text="לפני אישור")
         self.client.force_login(self.staff)
-        resp = self.client.post(
-            self._verify_url(row.id),
-            {"text": "  אחרי אישור  \n"},
-        )
+        resp = self._verify_post(row, text="  אחרי אישור  \n")
         self.assertEqual(resp.status_code, 302)
         row.refresh_from_db()
         self.assertEqual(row.text, "  אחרי אישור  \n")
@@ -10285,7 +10297,7 @@ class ReviewUiTests(TestCase):
         doc = self._create_document()
         row = self._create_hebrew_mirror_for_pending_edit(doc, text="טקסט מקורי")
         self.client.force_login(self.staff)
-        resp = self.client.post(self._text_url(row.id), {"text": "טקסט מתוקן"})
+        resp = self._text_post(row, "טקסט מתוקן")
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp["Location"], f"/api/ui/admin/review/{doc.id}/")
         row.refresh_from_db()
@@ -10299,7 +10311,7 @@ class ReviewUiTests(TestCase):
             text="נדחה",
         )
         self.client.force_login(self.staff)
-        self.client.post(self._text_url(row.id), {"text": "תיקון אחרי דחייה"})
+        self._text_post(row, "תיקון אחרי דחייה")
         row.refresh_from_db()
         self.assertEqual(row.text, "תיקון אחרי דחייה")
         self.assertEqual(
@@ -10310,7 +10322,7 @@ class ReviewUiTests(TestCase):
         doc = self._create_document()
         row = self._create_hebrew_mirror_for_pending_edit(doc)
         self.client.force_login(self.staff)
-        resp = self.client.post(self._text_url(row.id), {"text": "חדש"})
+        resp = self._text_post(row, "חדש")
         self.assertEqual(resp["Location"], f"/api/ui/admin/review/{doc.id}/")
 
     def test_edit_preserves_multiline_text(self):
@@ -10318,7 +10330,7 @@ class ReviewUiTests(TestCase):
         row = self._create_hebrew_mirror_for_pending_edit(doc)
         multiline = "שורה א\n\nשורה ב\t עם רווח"
         self.client.force_login(self.staff)
-        self.client.post(self._text_url(row.id), {"text": multiline})
+        self._text_post(row, multiline)
         row.refresh_from_db()
         self.assertEqual(row.text, multiline)
 
@@ -10327,7 +10339,7 @@ class ReviewUiTests(TestCase):
         row = self._create_hebrew_mirror_for_pending_edit(doc)
         leading_trailing = "  שורה עם רווחים  \n"
         self.client.force_login(self.staff)
-        self.client.post(self._text_url(row.id), {"text": leading_trailing})
+        self._text_post(row, leading_trailing)
         row.refresh_from_db()
         self.assertEqual(row.text, leading_trailing)
 
@@ -10344,7 +10356,7 @@ class ReviewUiTests(TestCase):
             "processing_state_user": doc.processing_state_user,
         }
         self.client.force_login(self.staff)
-        self.client.post(self._text_url(row.id), {"text": "עודכן"})
+        self._text_post(row, "עודכן")
         row.refresh_from_db()
         doc.refresh_from_db()
         self.assertEqual(row.status, before["status"])
@@ -10439,7 +10451,7 @@ class ReviewUiTests(TestCase):
         doc = self._create_document()
         row = self._create_hebrew_mirror_for_pending_edit(doc)
         self.client.force_login(self.staff)
-        self.client.post(self._text_url(row.id), {"text": "עודכן"})
+        self._text_post(row, "עודכן")
         self.assertIn(
             doc.id, set(documents_in_review_backlog().values_list("id", flat=True))
         )
@@ -10453,7 +10465,7 @@ class ReviewUiTests(TestCase):
             verification_status=DocumentTextResult.VerificationStatus.REJECTED,
         )
         self.client.force_login(self.staff)
-        self.client.post(self._text_url(row.id), {"text": "עודכן"})
+        self._text_post(row, "עודכן")
         row.refresh_from_db()
         self.assertEqual(
             row.verification_status, DocumentTextResult.VerificationStatus.REJECTED

@@ -13,9 +13,11 @@ from documents.models import (
 )
 from documents.services.archive_items import create_ocr_document
 from documents.services.verified_text_result_edit import (
+    review_form_baseline_for_result_id,
     PendingTextResultEditError,
     edit_pending_text_result,
     is_hebrew_translation_stale,
+    review_form_text_post_data,
 )
 
 
@@ -103,6 +105,7 @@ class PendingTextResultEditTests(TestCase):
             result_id=source.id,
             new_text="Version two",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         source.refresh_from_db()
@@ -120,6 +123,7 @@ class PendingTextResultEditTests(TestCase):
             result_id=source.id,
             new_text="After audit",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         audit = DocumentTextResultEdit.objects.get(text_result=source)
@@ -145,6 +149,7 @@ class PendingTextResultEditTests(TestCase):
             result_id=source.id,
             new_text="Same text",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         source.refresh_from_db()
@@ -168,11 +173,13 @@ class PendingTextResultEditTests(TestCase):
             result_id=source.id,
             new_text="Rev 1",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
         edit_pending_text_result(
             result_id=source.id,
             new_text="Rev 2",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         source.refresh_from_db()
@@ -192,6 +199,7 @@ class PendingTextResultEditTests(TestCase):
             result_id=source.id,
             new_text="Edited unverified source",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         source.refresh_from_db()
@@ -214,6 +222,7 @@ class PendingTextResultEditTests(TestCase):
             result_id=source.id,
             new_text="Fixed rejected source",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         source.refresh_from_db()
@@ -241,6 +250,7 @@ class PendingTextResultEditTests(TestCase):
             result_id=source.id,
             new_text="Updated English source",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         source.refresh_from_db()
@@ -268,6 +278,7 @@ class PendingTextResultEditTests(TestCase):
             result_id=hebrew.id,
             new_text="Updated Hebrew",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(hebrew.id),
         )
 
         source.refresh_from_db()
@@ -298,6 +309,7 @@ class PendingTextResultEditTests(TestCase):
             result_id=source.id,
             new_text="טקסט מעודכן",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         source.refresh_from_db()
@@ -326,6 +338,7 @@ class PendingTextResultEditTests(TestCase):
             result_id=source.id,
             new_text="טקסט מבוקר",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         self.assertEqual(DocumentTextResultEdit.objects.count(), 1)
@@ -346,6 +359,7 @@ class PendingTextResultEditTests(TestCase):
                 result_id=source.id,
                 new_text="טקסט חדש",
                 editor=self.staff,
+                baseline=review_form_baseline_for_result_id(source.id),
             )
 
         source.refresh_from_db()
@@ -405,7 +419,7 @@ class PendingTextResultEditTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.post(
             self._pending_edit_url(source.id),
-            {"text": "Redirected edit"},
+            review_form_text_post_data(source, "Redirected edit"),
         )
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(
@@ -425,7 +439,7 @@ class PendingTextResultEditTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.post(
             self._pending_edit_url(source.id),
-            {"text": "Unchanged"},
+            review_form_text_post_data(source, "Unchanged"),
         )
         self.assertEqual(resp.status_code, 302)
 
@@ -446,6 +460,7 @@ class PendingTextResultEditTests(TestCase):
             result_id=source.id,
             new_text=submitted,
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         source.refresh_from_db()
@@ -467,6 +482,7 @@ class PendingTextResultEditTests(TestCase):
             result_id=source.id,
             new_text="  stable text  \n",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         source.refresh_from_db()
