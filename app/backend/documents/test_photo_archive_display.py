@@ -452,8 +452,9 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, "<summary>פרטים</summary>")
-        self.assertContains(resp, "btn-secondary archive-detail-suggest-btn")
+        self.assertContains(resp, "document-detail-navigation-actions")
         self.assertContains(resp, "הוספת מידע על הפריט")
+        self.assertNotContains(resp, "btn-secondary")
 
     @patch(
         "documents.views.create_presigned_get",
@@ -467,13 +468,13 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode("utf-8")
-        self.assertContains(resp, "archive-detail-photo-header")
-        self.assertContains(resp, "archive-detail-photo-header-main")
+        self.assertContains(resp, "document-detail-header")
+        self.assertContains(resp, "document-detail-header-main")
         self.assertContains(resp, "חזרה לארכיון")
         self.assertContains(resp, reverse("archive-list"))
         self.assertContains(resp, "הוספת מידע על הפריט")
-        self.assertContains(resp, "archive-detail-navigation-actions")
-        self.assertNotContains(resp, "archive-detail-staff-management-actions")
+        self.assertContains(resp, "document-detail-navigation-actions")
+        self.assertNotContains(resp, "document-detail-staff-management-actions")
         self.assertNotContains(resp, "עריכת מטא־דאטה")
         self.assertNotContains(
             resp,
@@ -493,7 +494,7 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         self.assertNotIn(f"פריט ארכיון #{self.public_uploaded.id}", html)
         self.assertNotContains(resp, "archive-detail-badges")
 
-        public_start = html.index("archive-detail-navigation-actions")
+        public_start = html.index("document-detail-navigation-actions")
         public_end = html.index("</div>", public_start)
         public_column = html[public_start:public_end]
         back_pos = public_column.index("חזרה לארכיון")
@@ -534,13 +535,13 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode("utf-8")
 
-        header_start = html.index("archive-detail-photo-header")
+        header_start = html.index("document-detail-header")
         header_end = html.index("</header>", header_start)
         header = html[header_start:header_end]
 
-        main_start = header.index("archive-detail-photo-header-main")
-        metadata_start = header.index("archive-detail-photo-meta")
-        toolbar_start = header.index("archive-detail-photo-top")
+        main_start = header.index("document-detail-header-main")
+        metadata_start = header.index("document-detail-meta")
+        toolbar_start = header.index("document-detail-toolbar")
 
         self.assertLess(main_start, metadata_start)
         self.assertLess(metadata_start, toolbar_start)
@@ -628,11 +629,11 @@ class PhotoArchiveDisplayDetailTests(TestCase):
             "archive-manage-delete", kwargs={"item_id": self.public_uploaded.id}
         )
 
-        self.assertContains(resp, "archive-detail-photo-header")
-        self.assertContains(resp, "archive-detail-photo-header-main")
-        self.assertContains(resp, "archive-detail-photo-top")
-        self.assertContains(resp, "archive-detail-navigation-actions")
-        self.assertContains(resp, "archive-detail-staff-management-actions")
+        self.assertContains(resp, "document-detail-header")
+        self.assertContains(resp, "document-detail-header-main")
+        self.assertContains(resp, "document-detail-toolbar")
+        self.assertContains(resp, "document-detail-navigation-actions")
+        self.assertContains(resp, "document-detail-staff-management-actions")
         self.assertContains(resp, "חזרה לארכיון")
         self.assertContains(resp, "הוספת מידע על הפריט")
         self.assertContains(resp, "עריכת מטא־דאטה")
@@ -653,17 +654,17 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         self.assertNotIn('href="/admin/', page_html)
         self.assertNotIn("עריכה טכנית", page_html)
 
-        header_start = html.index("archive-detail-photo-header")
+        header_start = html.index("document-detail-header")
         header_end = html.index("</header>", header_start)
         header = html[header_start:header_end]
-        self.assertIn("archive-detail-photo-header-main", header)
-        self.assertIn("archive-detail-photo-top", header)
+        self.assertIn("document-detail-header-main", header)
+        self.assertIn("document-detail-toolbar", header)
         self.assertIn(self.public_uploaded.title, header)
         self.assertIn("חזרה לארכיון", header)
         self.assertIn("עריכת מטא־דאטה", header)
         self.assertIn(f"פריט ארכיון #{self.public_uploaded.id}", header)
 
-        public_start = html.index("archive-detail-navigation-actions")
+        public_start = html.index("document-detail-navigation-actions")
         public_end = html.index("</div>", public_start)
         public_column = html[public_start:public_end]
         self.assertIn("חזרה לארכיון", public_column)
@@ -684,7 +685,7 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         self.assertIn("btn-primary", public_column[back_tag_start:back_tag_end])
         self.assertNotIn("btn-link", public_column[back_tag_start:back_tag_end])
 
-        staff_start = html.index("archive-detail-staff-management-actions")
+        staff_start = html.index("document-detail-staff-management-actions")
         staff_end = html.index("</div>", staff_start)
         staff_section = html[staff_start:staff_end]
         self.assertIn("עריכת מטא־דאטה", staff_section)
@@ -931,34 +932,49 @@ class PhotoArchiveBrowsePreviewStyleTests(SimpleTestCase):
 
 
 class PhotoArchiveDetailLayoutStyleTests(SimpleTestCase):
-    def test_photo_top_action_columns_match_document_detail_pattern(self):
+    def test_photo_top_action_columns_reuse_document_detail_pattern(self):
         css_path = settings.BASE_DIR / "public" / "static" / "public" / "app.css"
         css = css_path.read_text(encoding="utf-8")
 
-        header_start = css.index(".archive-detail-photo-header {")
+        self.assertNotIn(".archive-detail-photo-header {", css)
+        self.assertNotIn(".archive-detail-navigation-actions {", css)
+        self.assertNotIn(".archive-detail-staff-management-actions {", css)
+
+        header_start = css.index(".document-detail-header {")
         header_rule = css[header_start : css.index("}", header_start)]
         self.assertIn("display: flex;", header_rule)
         self.assertIn("flex-wrap: wrap;", header_rule)
         self.assertIn("align-items: flex-start;", header_rule)
 
-        main_start = css.index(".archive-detail-photo-header-main {")
+        main_start = css.index(".document-detail-header-main {")
         main_rule = css[main_start : css.index("}", main_start)]
         self.assertIn("flex: 1 1 16rem;", main_rule)
 
-        top_start = css.index(".archive-detail-photo-top {")
+        top_start = css.index(".document-detail-toolbar {")
         top_rule = css[top_start : css.index("}", top_start)]
         self.assertIn("justify-content: flex-end;", top_rule)
         self.assertIn("align-items: flex-start;", top_rule)
 
-        public_start = css.index(".archive-detail-navigation-actions {")
+        public_start = css.index(".document-detail-navigation-actions {")
         public_rule = css[public_start : css.index("}", public_start)]
         self.assertIn("flex-direction: column;", public_rule)
         self.assertIn("inline-size: max-content;", public_rule)
 
-        staff_start = css.index(".archive-detail-staff-management-actions {")
+        archive_staff_start = css.index(
+            ".archive-detail-page .document-detail-staff-management-actions {"
+        )
+        archive_staff_rule = css[
+            archive_staff_start : css.index("}", archive_staff_start)
+        ]
+        self.assertIn("inline-size: max-content;", archive_staff_rule)
+        self.assertIn("max-inline-size: 100%;", archive_staff_rule)
+        self.assertNotIn("display: grid", archive_staff_rule)
+
+        staff_start = css.index("\n.document-detail-staff-management-actions {")
         staff_rule = css[staff_start : css.index("}", staff_start)]
+        self.assertIn("display: flex;", staff_rule)
         self.assertIn("flex-direction: column;", staff_rule)
-        self.assertIn("inline-size: max-content;", staff_rule)
+        self.assertIn("align-items: stretch;", staff_rule)
         self.assertNotIn("display: grid", staff_rule)
 
     def test_photo_detail_figure_is_centered_and_width_capped(self):

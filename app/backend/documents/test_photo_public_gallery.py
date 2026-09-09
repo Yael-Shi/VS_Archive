@@ -372,9 +372,7 @@ class PhotoPublicGalleryTests(TestCase):
         self.assertEqual(html.count("Gallery category"), 1)
         self.assertEqual(html.count("Gallery event"), 1)
         self.assertEqual(html.count("gallery-tag"), 1)
-        header = html[
-            html.index("archive-detail-photo-header") : html.index("</header>")
-        ]
+        header = html[html.index("document-detail-header") : html.index("</header>")]
         self.assertIn("Gallery category", header)
         self.assertNotIn("Second outing", header)
         self.assertIn("Second outing", html)

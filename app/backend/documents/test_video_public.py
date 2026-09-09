@@ -463,6 +463,68 @@ class VideoPublicDetailTests(TestCase):
         self.assertNotIn("הפעלת הסרטון", html)
         self.assertContains(resp, "פתיחה ב־YouTube")
 
+    def test_public_video_detail_uses_canonical_nav_without_type_badge(self):
+        item = create_video_archive_item(
+            title="Canonical video chrome",
+            source_url=YOUTUBE_URL,
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        self.assertContains(resp, "document-detail-header")
+        self.assertContains(resp, "document-detail-navigation-actions")
+        self.assertNotContains(resp, '<span class="badge">סרטון</span>', html=True)
+        self.assertNotContains(resp, "archive-detail-video-staff-status")
+        self.assertContains(resp, "מקור:")
+        self.assertContains(resp, "YouTube")
+        self.assertNotContains(resp, "עריכה")
+        self.assertNotContains(
+            resp,
+            reverse("archive-manage-edit", kwargs={"item_id": item.id}),
+        )
+
+        public_start = html.index("document-detail-navigation-actions")
+        public_column = html[public_start : html.index("</div>", public_start)]
+        self.assertIn("btn-primary", public_column)
+        self.assertIn("←", public_column)
+        self.assertLess(
+            public_column.index("חזרה לארכיון"),
+            public_column.index("הוספת מידע על הפריט"),
+        )
+        self.assertIn(
+            reverse(
+                "archive-metadata-suggestion-new",
+                kwargs={"item_id": item.id},
+            ),
+            public_column,
+        )
+        self.assertNotIn("מידע והשתתפות", html)
+        header = html[html.index("document-detail-header") : html.index("</header>")]
+        self.assertNotIn('class="spacer"', header)
+        self.assertNotIn("spacer-sm", header)
+
+    def test_staff_video_detail_keeps_metadata_status_without_type_badge(self):
+        staff = get_user_model().objects.create_user(
+            username="video_detail_staff_chrome",
+            password="x",
+            is_staff=True,
+        )
+        item = create_video_archive_item(
+            title="Staff video chrome",
+            source_url=YOUTUBE_URL,
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        self.client.force_login(staff)
+        resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "archive-detail-video-staff-status")
+        self.assertContains(resp, "דרושה השלמת פרטים")
+        self.assertNotContains(resp, '<span class="badge">סרטון</span>', html=True)
+        self.assertContains(resp, "עריכה")
+        self.assertContains(resp, "מחיקה")
+
     def test_video_detail_shows_public_note_without_label(self):
         item = create_video_archive_item(
             title="Video with public note",

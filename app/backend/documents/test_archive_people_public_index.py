@@ -161,6 +161,12 @@ class PeoplePublicIndexRouteTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "אנשים")
         self.assertContains(resp, "אין אנשים להצגה.")
+        html = resp.content.decode("utf-8")
+        header = html[html.index("document-detail-header") : html.index("</header>")]
+        self.assertIn("חזרה לארכיון", header)
+        self.assertIn("btn-primary", header)
+        self.assertIn("←", header)
+        self.assertNotIn("הוספת מידע על הפריט", html)
         self.assertNotContains(resp, reverse("archive-manage-people"))
         self.assertNotContains(resp, "ניהול אנשים")
         self.assertNotContains(resp, "מזהה")

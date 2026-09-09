@@ -158,6 +158,10 @@ class AuthorPublicPageAuthorizedTests(TestCase):
         self.assertContains(resp, "Ada public note")
         self.assertContains(resp, "חזרה לארכיון")
         html = resp.content.decode("utf-8")
+        header = html[html.index("document-detail-header") : html.index("</header>")]
+        self.assertIn("btn-primary", header)
+        self.assertIn("←", header)
+        self.assertNotIn("הוספת מידע על הפריט", html)
         self.assertNotIn("עריכת מחבר", html)
         self.assertNotIn(
             reverse("archive-manage-author-edit", kwargs={"author_id": author.id}),
@@ -453,11 +457,14 @@ class AuthorPublicPageLinkedPersonRedirectTests(TestCase):
         self.assertEqual(resp["Location"], person_public_page_url(person.id))
         followed = self.client.get(resp["Location"])
         self.assertEqual(followed.status_code, 200)
-        self.assertContains(
-            followed,
-            '<h1 class="page-title">Canonical Linked Person</h1>',
-            html=True,
-        )
+        self.assertContains(followed, "Canonical Linked Person")
+        followed_html = followed.content.decode("utf-8")
+        h1 = followed_html[
+            followed_html.index("<h1") : followed_html.index("</h1>") + len("</h1>")
+        ]
+        self.assertIn("page-title", h1)
+        self.assertIn("document-detail-title", h1)
+        self.assertIn("Canonical Linked Person", h1)
         self.assertContains(followed, "Linked Bibliographic Author")
         person_href = person_public_page_url(person.id)
         self.assertContains(

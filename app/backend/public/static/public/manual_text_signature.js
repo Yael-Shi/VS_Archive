@@ -12,8 +12,8 @@
   var MIN_SIGNATURE_WIDTH_PX = 160;
 
   var ACTION_GROUP_SELECTORS = [
-    ".archive-detail-manual-text-navigation-actions",
-    ".archive-detail-manual-text-staff-management-actions",
+    ".document-detail-navigation-actions",
+    ".document-detail-staff-management-actions",
   ];
 
   function qs(selector) {
@@ -219,7 +219,7 @@
     var page = qs(".archive-detail-page--manual-text");
     var body = qs(".archive-detail-manual-text-body");
     var signature = qs(".archive-detail-manual-text-signature");
-    var actionTop = qs(".archive-detail-manual-text-top");
+    var actionTop = qs(".document-detail-toolbar");
 
     if (!page || !body || !signature) {
       return;

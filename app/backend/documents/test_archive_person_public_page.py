@@ -185,6 +185,10 @@ class PersonPublicPageAuthorizedTests(TestCase):
         self.assertContains(resp, "Ada public note")
         self.assertContains(resp, "חזרה לארכיון")
         html = resp.content.decode("utf-8")
+        header = html[html.index("document-detail-header") : html.index("</header>")]
+        self.assertIn("btn-primary", header)
+        self.assertIn("←", header)
+        self.assertNotIn("הוספת מידע על הפריט", html)
         self.assertNotIn("SecretAliasToken", html)
         self.assertNotIn("עריכת אדם", html)
         self.assertNotIn("archive-detail-meta-block--person-biography", html)
@@ -225,6 +229,11 @@ class PersonPublicPageAuthorizedTests(TestCase):
         self.assertNotEqual(name_idx, -1)
         self.assertNotEqual(bio_idx, -1)
         self.assertLess(name_idx, bio_idx)
+        header = html[html.index("document-detail-header") : html.index("</header>")]
+        self.assertIn("archive-detail-meta-block--person-biography", header)
+        self.assertIn("document-detail-header-main", header)
+        self.assertIn("btn-primary", header)
+        self.assertIn("חזרה לארכיון", header)
         self.assertContains(
             resp, "&lt;script&gt;alert(1)&lt;/script&gt;<br>second line", html=True
         )
@@ -855,9 +864,7 @@ class PersonPublicPageLinkRetargetTests(TestCase):
         self.assertContains(resp, "אנשים קשורים לפריט")
         self.assertContains(resp, "Item Related Person")
         self.assertContains(resp, related_href)
-        header = html[
-            html.index("archive-detail-photo-header") : html.index("</header>")
-        ]
+        header = html[html.index("document-detail-header") : html.index("</header>")]
         self.assertIn("אנשים קשורים לפריט", header)
         self.assertIn("Item Related Person", header)
         self.assertIn(related_href, header)
@@ -918,9 +925,12 @@ class PersonPublicPageLinkedAuthorTests(TestCase):
         self.assertEqual(_titles(resp), {"Authored public letter"})
         self.assertEqual(resp.context["total_count"], 1)
         self.assertEqual(len(resp.context["browse_cards"]), 1)
-        self.assertContains(
-            resp, '<h1 class="page-title">Authored Only Person</h1>', html=True
-        )
+        self.assertContains(resp, "Authored Only Person")
+        html = resp.content.decode("utf-8")
+        h1 = html[html.index("<h1") : html.index("</h1>") + len("</h1>")]
+        self.assertIn("page-title", h1)
+        self.assertIn("document-detail-title", h1)
+        self.assertIn("Authored Only Person", h1)
         self.assertContains(resp, "Bibliographic Name")
         person_href = person_public_page_url(person.id)
         self.assertContains(

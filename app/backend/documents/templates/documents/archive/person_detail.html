@@ -4,20 +4,23 @@
 
 {% block content %}
   <div class="card page-header" id="archive-top">
-    <h1 class="page-title">{{ person.name }}</h1>
-    {% with biography=person.biography|meaningful_archive_metadata %}
-      {% if biography %}
-        <div class="archive-detail-meta-block archive-detail-meta-block--person-biography">
-          <div class="archive-detail-meta-row">
-            <span class="archive-detail-meta-value">{{ biography|linebreaksbr }}</span>
-          </div>
-        </div>
-      {% endif %}
-    {% endwith %}
-
-    <div class="page-toolbar page-toolbar--archive-browse">
-      <a class="btn" href="{% url 'archive-list' %}">חזרה לארכיון</a>
-    </div>
+    <header class="document-detail-header">
+      <div class="document-detail-header-main">
+        <h1 class="page-title document-detail-title">{{ person.name }}</h1>
+        {% with biography=person.biography|meaningful_archive_metadata %}
+          {% if biography %}
+            <div class="archive-detail-meta-block archive-detail-meta-block--person-biography">
+              <div class="archive-detail-meta-row">
+                <span class="archive-detail-meta-value">{{ biography|linebreaksbr }}</span>
+              </div>
+            </div>
+          {% endif %}
+        {% endwith %}
+      </div>
+      <div class="page-toolbar document-detail-toolbar">
+        {% include "documents/partials/detail_back_to_archive.html" %}
+      </div>
+    </header>
 
     {% if browse_cards %}
       <h2 class="archive-person-section-title">פריטים קשורים</h2>
