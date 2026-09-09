@@ -16,6 +16,7 @@ from documents.admin import (
     DocumentTextResultAdmin,
     ManualTextContentAdmin,
     PhotoContentAdmin,
+    TranskribusRunInline,
 )
 from documents.models import (
     ArchiveItem,
@@ -573,6 +574,18 @@ class RestrictedVisibilityAdminTests(TestCase):
         )
         allowed_ids = set(allowed_field.queryset.values_list("pk", flat=True))
         self.assertIn(self.restricted_ocr.pk, allowed_ids)
+
+    def test_transkribus_run_inline_fk_choice_querysets_hide_restricted_documents(
+        self,
+    ):
+        request = self._request(self.staff)
+        inline = TranskribusRunInline(Document, self.site)
+        field = TranskribusRun._meta.get_field("document")
+        formfield = inline.formfield_for_foreignkey(field, request)
+        ids = set(formfield.queryset.values_list("pk", flat=True))
+        self.assertIn(self.public_ocr.pk, ids)
+        self.assertIn(self.private_ocr.pk, ids)
+        self.assertNotIn(self.restricted_ocr.pk, ids)
 
     def test_fk_choice_querysets_hide_restricted_archive_items(self):
         request = self._request(self.staff)

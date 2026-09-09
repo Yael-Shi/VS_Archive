@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Literal
 
 from django.core.management.base import BaseCommand, CommandError
 
@@ -77,7 +78,7 @@ class Command(BaseCommand):
                 raise CommandError(str(exc)) from exc
 
         if options.get("json"):
-            mode = "commit" if commit_mode else "dry-run"
+            mode: Literal["dry-run", "commit"] = "commit" if commit_mode else "dry-run"
             payload = report.to_json_dict(mode=mode, apply_result=apply_result)
             self.stdout.write(json.dumps(payload, indent=2, sort_keys=True))
             return
