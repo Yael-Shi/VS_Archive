@@ -180,13 +180,51 @@ def automated_process_document_persist_is_allowed(
     return True
 
 
+class StaleProcessDocumentPageClaimError(RuntimeError):
+    """Raised when a Request execution may not acquire a new page lease."""
+
+
+def require_process_document_page_claim_allowed(
+    *,
+    document_id: int,
+    identity: ProcessDocumentExecutionIdentity | None,
+) -> None:
+    """Fail closed before issuing a new Gemini/Arabic page lease.
+
+    Lock order is Document then Request, matching persist/abandon/claim.
+    ``None`` identity is treated as mixed-version legacy (both identity keys
+    absent). Present-but-malformed identity remains fail-closed.
+    Does not clear or steal existing page leases.
+    """
+    resolved = (
+        identity if identity is not None else ProcessDocumentExecutionIdentity.legacy()
+    )
+    try:
+        document = Document.objects.select_for_update().get(pk=document_id)
+    except Document.DoesNotExist as exc:
+        raise StaleProcessDocumentPageClaimError(
+            "ProcessDocumentRequest execution cannot acquire a page lease; "
+            "document was not found."
+        ) from exc
+    if automated_process_document_persist_is_allowed(
+        document=document,
+        identity=resolved,
+    ):
+        return
+    raise StaleProcessDocumentPageClaimError(
+        "ProcessDocumentRequest execution identity cannot acquire a page lease."
+    )
+
+
 __all__ = [
     "LEASE_TOKEN_PAYLOAD_KEY",
     "PROCESS_DOCUMENT_REQUEST_ID_PAYLOAD_KEY",
     "ProcessDocumentExecutionIdentity",
     "ProcessDocumentExecutionIdentityKind",
+    "StaleProcessDocumentPageClaimError",
     "automated_process_document_persist_is_allowed",
     "parse_process_document_lease_token",
     "parse_process_document_request_id",
+    "require_process_document_page_claim_allowed",
     "resolve_process_document_execution_identity",
 ]

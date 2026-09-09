@@ -90,6 +90,8 @@ class AntigravityAdapter:
         worker_env: Optional["WorkerEnvConfig"] = kwargs.pop("worker_env", None)
         document_id = kwargs.pop("document_id", None)
         absolute_deadline_monotonic = kwargs.pop("absolute_deadline_monotonic", None)
+        execution_identity = kwargs.pop("execution_identity", None)
+        kwargs.pop("source_transkribus_run_id", None)
 
         if worker_env is None:
             raise EnginePermanentError(
@@ -107,6 +109,7 @@ class AntigravityAdapter:
                 worker_env=worker_env,
                 document_id=document_id,
                 absolute_deadline_monotonic=absolute_deadline_monotonic,
+                execution_identity=execution_identity,
                 kwargs=kwargs,
             )
 
@@ -154,6 +157,7 @@ class AntigravityAdapter:
         worker_env: "WorkerEnvConfig",
         document_id: int | None,
         absolute_deadline_monotonic: object,
+        execution_identity: object,
         kwargs: dict,
     ) -> HtrResult:
         vision_key = (worker_env.google_cloud_vision_api_key or "").strip()
@@ -199,6 +203,7 @@ class AntigravityAdapter:
                 text_input_type=str(text_input_type),
                 engine_key=str(engine_key),
                 prompt_variant=prompt_variant or "printed",
+                execution_identity=execution_identity,
             )
         except ArabicPrintedCheckpointBusyError as exc:
             raise EnginePageCheckpointBusyError(
@@ -215,7 +220,8 @@ class AntigravityAdapter:
             ) from exc
         except StaleArabicPrintedPageClaimError as exc:
             raise EnginePermanentError(
-                "Arabic printed banded OCR stale page lease"
+                "Arabic printed OCR stale process-document execution "
+                "cannot claim a page"
             ) from exc
 
         return _htr_result_from_banded_document(result)

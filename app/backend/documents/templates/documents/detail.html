@@ -53,7 +53,7 @@
                 {% include "documents/partials/transkribus_paragraph_status.html" with doc=doc paragraph_status=paragraph_status show_editor_link=True variant="compact" %}
               {% endif %}
 
-              {% if show_staff_abandon_action or show_ocr_reprocess_action or show_hebrew_translation_retry_action %}
+              {% if show_staff_abandon_action or show_staff_retry_action or show_ocr_reprocess_action or show_hebrew_translation_retry_action %}
                 <details class="review-details review-details--secondary document-detail-staff-actions">
                   <summary>פעולות נוספות</summary>
                   <div class="review-details-body document-detail-staff-actions-body">
@@ -68,6 +68,28 @@
                           פעולה זו מסיימת את בקשת העיבוד התקועה ואינה מתחילה עיבוד חדש.
                         </p>
                         <button type="submit" class="btn btn-primary">שחרור בקשת עיבוד תקועה</button>
+                      </form>
+                    {% endif %}
+                    {% if show_staff_retry_action and staff_retry_request %}
+                      <form
+                        method="post"
+                        action="{% url 'documents-process-document-request-retry' doc_id=doc.id request_id=staff_retry_request.id %}"
+                        class="inline-form"
+                      >
+                        {% csrf_token %}
+                        {% if staff_retry_request.operation == "HEBREW_TRANSLATION" %}
+                          <p class="muted text-sm">
+                            פעולה זו סוגרת את בקשת העיבוד התקועה ומתחילה בקשת תרגום לעברית חדשה.
+                            זו אינה השמעה מחדש של הבקשה הישנה.
+                          </p>
+                          <button type="submit" class="btn btn-primary">התחל תרגום לעברית חדש</button>
+                        {% else %}
+                          <p class="muted text-sm">
+                            פעולה זו סוגרת את בקשת העיבוד התקועה ומתחילה בקשת עיבוד OCR חדשה.
+                            זו אינה השמעה מחדש של הבקשה הישנה.
+                          </p>
+                          <button type="submit" class="btn btn-primary">התחל עיבוד OCR חדש</button>
+                        {% endif %}
                       </form>
                     {% endif %}
                     {% if show_ocr_reprocess_action %}

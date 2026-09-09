@@ -64,6 +64,11 @@ urlpatterns = [
         name="documents-process-document-request-abandon",
     ),
     path(
+        "ui/documents/<int:doc_id>/process-document-requests/<int:request_id>/retry/",
+        views.document_process_document_request_retry,
+        name="documents-process-document-request-retry",
+    ),
+    path(
         "ui/documents/<int:doc_id>/display-only-page/",
         views.document_display_only_page_add,
         name="documents-display-only-page-add",

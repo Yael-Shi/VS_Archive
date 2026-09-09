@@ -7479,8 +7479,9 @@ write DTRs and search index after the parked Request was released.
 **Unchanged:** queue visibility, `maxReceiveCount`, DLQ, heartbeat, automatic
 redrive, `recover_process_document_requests`, expired-lease fence command.
 
-**Deferred:** intentional-retry orchestration; automatic replay of
-`RECOVERY_REQUIRED`. Staff abandon **UI** is implemented in the following entry.
+**Deferred:** automatic replay of `RECOVERY_REQUIRED`. Staff abandon **UI**
+is implemented in PROCESS_DOCUMENT staff abandon UI (PR2). Intentional retry
+is implemented in PROCESS_DOCUMENT staff intentional retry (PR3).
 
 ## PROCESS_DOCUMENT staff abandon UI (PR2)
 
@@ -7507,5 +7508,67 @@ No Request → no control.
 **Unchanged:** PR1 abandon write contract; persist token fence; worker; schema;
 Django Admin; list/backlog; actor/audit fields.
 
-**Deferred:** intentional-retry orchestration; automatic replay of
-`RECOVERY_REQUIRED`.
+**Deferred:** automatic replay of `RECOVERY_REQUIRED`. Intentional retry is
+implemented in the following entry.
+
+## PROCESS_DOCUMENT staff intentional retry (PR3)
+
+**Decision / implemented:** Staff document detail exposes a second POST that
+starts a **new** PROCESS_DOCUMENT Request after closing a parked
+`RECOVERY_REQUIRED` Request. Path selection uses `operation` only (`OCR` →
+`apply_ocr_reprocess`; `HEBREW_TRANSLATION` → `enqueue_hebrew_translation_retry`).
+The parked Request is never replayed. `origin`, `ocr_retry_mode`,
+`source_transkribus_run`, and the old lease token are not copied. Upload-finalize
+OCR recovery therefore becomes `origin=OCR_REPROCESS`.
+`enqueue_uploaded_document_processing` is not used. DLQ is not used.
+
+**Current behavior:**
+
+- Route: `ui/documents/<doc_id>/process-document-requests/<request_id>/retry/`
+  (`documents-process-document-request-retry`). Same auth as PR2 abandon
+  (login, staff, `get_viewable_document`, CSRF, POST-only).
+- Orchestrator `retry_process_document_request` does **not** wrap abandon +
+  enqueue in one `atomic()`. Abandon commits first.
+- OCR live-lease guard (read-only) runs before abandon (and before
+  enqueue-only on `STAFF_ABANDONED`): any `GeminiOcrPageCheckpoint` or
+  `ArabicPrintedOcrPageCheckpoint` for the Document with `status=RUNNING` and
+  `lease_expires_at` in the future refuses retry. Leases are not cleared,
+  stolen, or expired. Expired RUNNING pages do not block.
+- `RECOVERY_REQUIRED` → require `ABANDONED` (`FAILED` / `STAFF_ABANDONED`),
+  then enqueue a new Request.
+- Same Request already `FAILED` / `STAFF_ABANDONED` → skip abandon, enqueue
+  only (covers abandon-ok / enqueue-fail / retry-again).
+- Other terminal (`COMPLETED`, `PARTIAL`, other `FAILED`) → no enqueue.
+- Enqueue failure after abandon leaves the old Request `STAFF_ABANDONED`;
+  it is not revived. Double POST coalesces via existing enqueue
+  (`ALREADY_QUEUED` / `ALREADY_RUNNING` / `REENQUEUED`).
+- UI: abandon-only is shown only for the unique parked `RECOVERY_REQUIRED`
+  Request. Intentional retry binds to
+  `get_staff_retry_source_process_document_request`: that parked RR Request,
+  or the latest `FAILED` / `STAFF_ABANDONED` Request when later history is
+  absent or is exactly one matching `ENQUEUE_FAILED` row. Any other later
+  Request, mismatched operation, or ambiguous later history hides retry
+  (fail closed). Generic OCR/Hebrew retry buttons stay hidden while that
+  retry source exists.
+- Gemini/Arabic **new page-lease acquisition**
+  (`claim_gemini_page` / `claim_arabic_printed_page`) requires the worker
+  `ProcessDocumentExecutionIdentity` (from `run_worker` → `transcribe_pages`
+  → adapter). After abandon/token-clear, that old identity cannot obtain a
+  **new** page lease. REUSE/BUSY paths do not issue a lease. Existing live
+  page leases are not cleared. Legacy identity (both keys absent) remains
+  allowed for mixed-version drain; present-but-malformed identity is
+  fail-closed.
+
+**Known limitation:** Phase 2 Gemini/Arabic checkpoint **writes** (success /
+failure / vision / band persist) remain page-lease-fenced only, not
+ProcessDocumentRequest-token-fenced. A stale worker that already holds a
+valid page lease may keep writing that page until the page lease expires.
+The live-lease guard blocks staff OCR retry when a lease is already live.
+Acquisition fencing stops the abandoned execution from taking another page
+lease after the guard. Do not forcibly clear page leases (ambiguous
+external-call fences).
+
+**Unchanged:** schema; DLQ; automatic replay; `recover_process_document_requests`.
+
+**Deferred:** full Phase 2 checkpoint-write ProcessDocumentRequest-token fence;
+automatic replay of `RECOVERY_REQUIRED`.

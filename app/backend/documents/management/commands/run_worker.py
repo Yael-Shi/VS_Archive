@@ -526,6 +526,7 @@ class Command(BaseCommand):
                 "worker_env": self._effective_worker_env(payload),
                 "document_id": document_id,
                 "source_transkribus_run_id": source_transkribus_run_id,
+                "execution_identity": execution_identity,
             }
             deadline = absolute_deadline_monotonic_from_lease(
                 payload.get(LEASE_EXPIRES_AT_PAYLOAD_KEY)

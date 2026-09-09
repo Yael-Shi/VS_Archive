@@ -1334,6 +1334,11 @@ class AntigravityAdapterBandedWiringTests(SimpleTestCase):
                 absolute_deadline_monotonic=_BANDED_DEADLINE,
             )
         self.assertEqual(raised.exception.page_index, 0)
+        self.assertIsInstance(
+            raised.exception.__cause__,
+            ArabicPrintedCheckpointBusyError,
+        )
+        self.assertNotIsInstance(raised.exception, EnginePermanentError)
         mock_transcribe.assert_not_called()
 
     @patch(
@@ -1489,9 +1494,7 @@ class AntigravityAdapterBandedWiringTests(SimpleTestCase):
         mock_coordinator.side_effect = StaleArabicPrintedPageClaimError(
             "Stale Arabic printed page success claim for page_index=0"
         )
-        with self.assertRaisesMessage(
-            EnginePermanentError, "Arabic printed banded OCR stale page lease"
-        ):
+        with self.assertRaises(EnginePermanentError) as raised:
             AntigravityAdapter().execute(
                 pages=[_jpeg_page(1, label=b"stale")],
                 language_hint="ar",
@@ -1500,6 +1503,14 @@ class AntigravityAdapterBandedWiringTests(SimpleTestCase):
                 document_id=9,
                 absolute_deadline_monotonic=_BANDED_DEADLINE,
             )
+        self.assertIn(
+            "stale process-document execution cannot claim a page",
+            str(raised.exception),
+        )
+        self.assertIsInstance(
+            raised.exception.__cause__,
+            StaleArabicPrintedPageClaimError,
+        )
 
     @patch(
         "documents.services.htr_adapters.antigravity_adapter.prepare_arabic_printed_working_image"

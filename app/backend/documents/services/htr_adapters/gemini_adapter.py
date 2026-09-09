@@ -91,7 +91,9 @@ class GeminiAdapter:
         text_input_type = kwargs.pop("text_input_type", None)
         handwriting_type = kwargs.pop("handwriting_type", None)
         engine_key = kwargs.pop("engine_key", self.engine_key)
+        execution_identity = kwargs.pop("execution_identity", None)
         kwargs.pop("absolute_deadline_monotonic", None)
+        kwargs.pop("source_transkribus_run_id", None)
         # English handwriting retains its RECITATION-only candidate switch.
         # Hebrew GENERAL handwriting gets a separate cost-aware policy: one
         # primary 2.5 Flash call, then 3.6 Flash only for MAX_TOKENS or
@@ -189,7 +191,12 @@ class GeminiAdapter:
                     source_content_fingerprint=(
                         identity.source_content_fingerprints[page_index]
                     ),
+                    execution_identity=execution_identity,
                 )
+            except StaleGeminiPageClaimError as exc:
+                raise EnginePermanentError(
+                    "Gemini OCR stale process-document execution cannot claim a page"
+                ) from exc
             except DatabaseError as exc:
                 raise EnginePageCheckpointPersistenceRetryableError(
                     stage="claim",

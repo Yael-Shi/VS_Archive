@@ -48,6 +48,7 @@ from .models import (
     Person,
     PersonAlias,
     PhotoContent,
+    ProcessDocumentRequest,
     Tag,
     TranscriptionEditSuggestion,
     TranskribusCorrectedCurrentSyncAttempt,
@@ -375,6 +376,14 @@ from documents.services.process_document_request_staff_recovery import (
     StaffAbandonOutcome,
     abandon_process_document_request,
     get_recovery_required_process_document_request,
+)
+from documents.services.process_document_request_staff_retry import (
+    LIVE_PAGE_LEASE_PUBLIC_MESSAGE,
+    REQUEST_ALREADY_FINISHED_PUBLIC_MESSAGE,
+    ProcessDocumentRequestStaffRetryError,
+    ProcessDocumentRequestStaffRetryErrorCode,
+    get_staff_retry_source_process_document_request,
+    retry_process_document_request,
 )
 from documents.services.process_document_upload_enqueue import (
     UploadProcessEnqueueError,
@@ -3855,7 +3864,13 @@ def document_detail_page(request, doc_id: int):
         if is_admin
         else None
     )
+    staff_retry_request = (
+        get_staff_retry_source_process_document_request(document_id=doc.id)
+        if is_admin
+        else None
+    )
     show_staff_abandon_action = staff_abandon_request is not None
+    show_staff_retry_action = staff_retry_request is not None
     context = {
         "doc": doc,
         **source_context,
@@ -3878,11 +3893,13 @@ def document_detail_page(request, doc_id: int):
         "show_transkribus_corrected_current_sync_action": show_transkribus_action,
         "staff_abandon_request": staff_abandon_request,
         "show_staff_abandon_action": show_staff_abandon_action,
+        "staff_retry_request": staff_retry_request,
+        "show_staff_retry_action": show_staff_retry_action,
         "show_ocr_reprocess_action": is_admin
-        and not show_staff_abandon_action
+        and not show_staff_retry_action
         and is_ocr_reprocess_ui_eligible(doc),
         "show_hebrew_translation_retry_action": is_admin
-        and not show_staff_abandon_action
+        and not show_staff_retry_action
         and is_hebrew_translation_retry_ui_eligible(doc),
         "show_display_only_page_add_action": is_admin
         and is_display_only_page_add_eligible(doc),
@@ -4677,6 +4694,118 @@ def document_process_document_request_abandon(request, doc_id: int, request_id: 
         result.previous_document_state,
         result.request.status,
         result.document.processing_state_user,
+    )
+    return detail_redirect
+
+
+_STAFF_RETRY_MSG_OCR_CREATED = "בקשת העיבוד התקועה נסגרה. עיבוד OCR חדש תוזמן."
+_STAFF_RETRY_MSG_OCR_QUEUED = "עיבוד OCR חדש כבר ממתין בתור."
+_STAFF_RETRY_MSG_OCR_RUNNING = "עיבוד OCR חדש כבר מתבצע."
+_STAFF_RETRY_MSG_HEBREW_CREATED = "בקשת העיבוד התקועה נסגרה. תרגום לעברית חדש תוזמן."
+_STAFF_RETRY_MSG_HEBREW_QUEUED = "תרגום לעברית חדש כבר ממתין בתור."
+_STAFF_RETRY_MSG_HEBREW_RUNNING = "תרגום לעברית חדש כבר מתבצע."
+_STAFF_RETRY_MSG_GENERIC = "לא ניתן היה להתחיל עיבוד חדש."
+
+
+def _staff_retry_error_message(code: str, message: str) -> str:
+    if code == ProcessDocumentRequestStaffRetryErrorCode.LIVE_PAGE_LEASE:
+        return LIVE_PAGE_LEASE_PUBLIC_MESSAGE
+    if code == ProcessDocumentRequestStaffRetryErrorCode.REQUEST_ALREADY_FINISHED:
+        return REQUEST_ALREADY_FINISHED_PUBLIC_MESSAGE
+    if code in {
+        ProcessDocumentRequestStaffRetryErrorCode.INVALID_REQUEST_ID,
+        ProcessDocumentRequestStaffRetryErrorCode.INVALID_DOCUMENT_ID,
+        ProcessDocumentRequestStaffRetryErrorCode.REQUEST_NOT_FOUND,
+        ProcessDocumentRequestStaffRetryErrorCode.DOCUMENT_MISMATCH,
+    }:
+        return _STAFF_ABANDON_MSG_NOT_FOUND
+    if code == ProcessDocumentRequestStaffRetryErrorCode.STATUS_NOT_RETRYABLE:
+        return _STAFF_ABANDON_MSG_NOT_ABANDONABLE
+    if code == ProcessDocumentRequestStaffRetryErrorCode.INVALID_RECOVERY_SHAPE:
+        return _STAFF_ABANDON_MSG_INVALID_SHAPE
+    if code == ProcessDocumentRequestStaffRetryErrorCode.CONFIG_ERROR:
+        return message
+    if code in {
+        ProcessDocumentRequestStaffRetryErrorCode.QUEUE_UNAVAILABLE,
+        ProcessDocumentRequestStaffRetryErrorCode.REQUEST_REJECTED,
+    }:
+        return message
+    return _STAFF_RETRY_MSG_GENERIC
+
+
+def _staff_retry_success_message(*, operation: str, enqueue_outcome: str) -> str:
+    is_hebrew = operation == ProcessDocumentRequest.Operation.HEBREW_TRANSLATION
+    if enqueue_outcome in {"CREATED_AND_ENQUEUED", "REENQUEUED"}:
+        return (
+            _STAFF_RETRY_MSG_HEBREW_CREATED
+            if is_hebrew
+            else _STAFF_RETRY_MSG_OCR_CREATED
+        )
+    if enqueue_outcome == "ALREADY_QUEUED":
+        return (
+            _STAFF_RETRY_MSG_HEBREW_QUEUED if is_hebrew else _STAFF_RETRY_MSG_OCR_QUEUED
+        )
+    if enqueue_outcome == "ALREADY_RUNNING":
+        return (
+            _STAFF_RETRY_MSG_HEBREW_RUNNING
+            if is_hebrew
+            else _STAFF_RETRY_MSG_OCR_RUNNING
+        )
+    if enqueue_outcome == "ALREADY_TERMINAL":
+        return _STAFF_ABANDON_MSG_ALREADY_TERMINAL
+    raise AssertionError(f"Unhandled staff retry enqueue outcome: {enqueue_outcome}")
+
+
+@login_required
+@require_POST
+def document_process_document_request_retry(request, doc_id: int, request_id: int):
+    deny = _require_admin(request)
+    if deny:
+        return deny
+
+    doc = get_viewable_document(
+        request.user,
+        doc_id,
+        queryset=Document.objects.select_related("archive_item"),
+    )
+    detail_redirect = redirect("documents-detail-page", doc_id=doc.id)
+
+    try:
+        result = retry_process_document_request(
+            request_id=request_id,
+            document_id=doc.id,
+            initiated_by=request.user,
+        )
+    except ProcessDocumentRequestStaffRetryError as exc:
+        messages.error(request, _staff_retry_error_message(exc.code, exc.message))
+        logger.info(
+            "document_process_document_request_retry refused "
+            "user=%s doc_id=%s request_id=%s code=%s",
+            getattr(request.user, "username", None),
+            doc.id,
+            request_id,
+            exc.code,
+        )
+        return detail_redirect
+
+    messages.success(
+        request,
+        _staff_retry_success_message(
+            operation=result.operation,
+            enqueue_outcome=result.enqueue_result.outcome,
+        ),
+    )
+    logger.info(
+        "document_process_document_request_retry user=%s doc_id=%s "
+        "request_id=%s new_request_id=%s operation=%s abandoned_now=%s "
+        "enqueue_outcome=%s",
+        getattr(request.user, "username", None),
+        doc.id,
+        result.source_request.pk,
+        result.enqueue_result.request.pk,
+        result.operation,
+        result.abandoned_now,
+        result.enqueue_result.outcome,
     )
     return detail_redirect
 
