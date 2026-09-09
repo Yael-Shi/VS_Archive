@@ -647,7 +647,9 @@ def _base_queryset(
     if doc_type:
         qs = qs.filter(doc_type=doc_type)
 
-    if metadata_status:
+    # metadata_status is staff/editorial catalog-completion, not public
+    # membership. Non-staff ?metadata_status= must not shrink the result set.
+    if is_admin and metadata_status:
         qs = qs.filter(archive_item__metadata_status=metadata_status)
 
     # visibility is admin-only operational field
@@ -700,7 +702,6 @@ def _serialize_doc(d: Document, *, is_admin: bool) -> dict:
         "doc_type": d.doc_type,
         "category_event": d.category_event,
         "tags": [t.name for t in d.tags_m2m.all()],
-        "metadata_status": getattr(item, "metadata_status", None),
         "created_at": d.created_at.isoformat() if d.created_at else None,
         "updated_at": d.updated_at.isoformat() if d.updated_at else None,
     }
@@ -713,6 +714,7 @@ def _serialize_doc(d: Document, *, is_admin: bool) -> dict:
                 "processing_state_user": d.processing_state_user,
                 "admin_meta": admin_meta,
                 "visibility": item.visibility,
+                "metadata_status": getattr(item, "metadata_status", None),
                 "file_s3_key": d.file_s3_key,
                 "file_original_name": d.file_original_name,
                 "mime_type": d.mime_type,
@@ -2441,7 +2443,7 @@ def documents_list_page(request):
         "upload_status": upload_status if is_admin else "",
         "visibility": visibility if is_admin else "",
         "doc_type": doc_type,
-        "metadata_status": metadata_status,
+        "metadata_status": metadata_status if is_admin else "",
         **_pagination_context(total=total, offset=offset, limit=limit),
         "doc_type_choices": Document.DocType.choices,
         "metadata_status_choices": Document.MetadataStatus.choices,

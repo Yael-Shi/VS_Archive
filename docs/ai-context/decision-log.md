@@ -1,5 +1,35 @@
 # VS-Archive Decision Log
 
+## Document list/API staff-only metadata_status (editorial workflow)
+
+**Decision / implemented:** `ArchiveItem.metadata_status` is staff/editorial
+catalog-completion workflow metadata. It is not a public completeness
+signal and does not affect public membership or visibility.
+
+**Current behavior:**
+
+- `/api/documents/` JSON omits `metadata_status` for anonymous and
+  authenticated non-staff. Staff/admin still receive the raw enum
+  (`NEEDS_COMPLETION` / `COMPLETED`) from `ArchiveItem`.
+- `?metadata_status=` on `/api/documents/` and `/api/ui/documents/` is
+  applied only for staff/admin. Non-staff `?metadata_status=COMPLETED`
+  does not shrink their visibility-filtered public result set.
+- `/api/ui/documents/` hides the metadata-status filter, active chip, and
+  table column from anonymous/non-staff. Staff still see the filter,
+  chip, Hebrew labels (**דרושה השלמת פרטים** / **פרטים הושלמו**), and
+  column header **השלמת פרטים** (replacing the former **סטטוס** header).
+- Public `/archive/` browse, search, cards, homepage, and non-staff
+  archive detail remain unchanged. Staff archive-detail badge, manage
+  list, metadata backlog membership (`NEEDS_COMPLETION`), forms, Django
+  Admin, default `NEEDS_COMPLETION`, and OCR/processing semantics are
+  unchanged. Visibility/access is still `ArchiveItem.visibility`.
+
+**Supersedes:** the open policy question in **Document list/API staff-only
+upload/processing status (Slice 1)** that left `metadata_status` JSON,
+filter, and list column public.
+
+**Tests:** `documents.tests.DocumentVisibilityAccessControlTests`.
+
 ## Document list/API staff-only upload/processing status (Slice 1)
 
 **Decision / implemented:** Non-staff document list/API surfaces no longer
@@ -18,9 +48,9 @@ rules are unchanged.
 - `/api/ui/documents/` hides the upload-status filter control and its active
   chip from anonymous/non-staff. Staff still see both. The already-merged
   staff-only processing/upload badge row is unchanged.
-- `metadata_status` JSON, filter, and list column remain public in this
-  slice. Whether that field should stay public is a **separate policy
-  question**.
+- **Superseded:** `metadata_status` JSON, filter, and list column are
+  staff-only. See **Document list/API staff-only metadata_status
+  (editorial workflow)**.
 - List routes stay unauthenticated. Visibility model, document detail,
   archive browse/detail, models, OCR/worker, and processing-state
   semantics are unchanged.
