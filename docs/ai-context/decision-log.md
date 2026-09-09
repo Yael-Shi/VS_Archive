@@ -1,5 +1,46 @@
 # VS-Archive Decision Log
 
+## Document list/API public JSON field contract
+
+**Decision / implemented:** Non-staff `GET /api/documents/` JSON is the
+OCR **document-list** JSON contract, not the public `/archive/` catalog API.
+It exposes only fields that are part of the current public document-list
+product: identity, ArchiveItem title and archival dates, language, and
+`doc_type`.
+
+**Current behavior:**
+
+- Envelope is unchanged: `count`, `limit`, `offset`, `items`.
+- Anonymous and authenticated non-staff item objects contain only:
+  `id`, `title`, `date_start`, `date_end`, `language`, `doc_type`.
+- `title`, `date_start`, and `date_end` still come from linked
+  `ArchiveItem` (PR5c). Those dates are archival catalog dates, not
+  ingest clocks. `Document.created_at` / `Document.updated_at` are
+  ORM system timestamps (`auto_now_add` / `auto_now`) and are staff-only
+  in this JSON.
+- Staff/admin still receive the previous extra item fields, including
+  `text_input_type`, `created_at`, `updated_at`, `category_event`,
+  `tags` (`Document.tags_m2m` names), plus the already staff-only
+  operational keys (`upload_status`, `processing_state_user`,
+  `metadata_status`, `visibility`, `admin_meta`, file fields).
+- `text_input_type` is OCR routing / editorial processing taxonomy, not a
+  public catalog facet.
+- `category_event` is a legacy Document-side string. Public catalog
+  categories/events are `ArchiveItem.categories` / `ArchiveItem.events`.
+- JSON `tags` remain `Document.tags_m2m` names when present for staff.
+  Public `/archive/` tags are `ArchiveItem.tags` and can diverge; this
+  endpoint does not serialize ArchiveItem tags.
+- `_base_queryset` filters, `q` search (still includes `category_event`
+  and `tags_m2m`), `/api/ui/documents/` HTML, `/archive/`, models, OCR,
+  and search index are unchanged.
+
+**Supersedes:** leftover non-staff JSON keys after **Document list/API
+staff-only upload/processing status (Slice 1)** and **Document list/API
+staff-only metadata_status (editorial workflow)** (`text_input_type`,
+`created_at`, `updated_at`, `category_event`, `tags`).
+
+**Tests:** `documents.tests.DocumentVisibilityAccessControlTests`.
+
 ## Document list/API staff-only metadata_status (editorial workflow)
 
 **Decision / implemented:** `ArchiveItem.metadata_status` is staff/editorial

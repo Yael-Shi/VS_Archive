@@ -26,6 +26,7 @@ from documents.models import (
     Document,
     DocumentSourceFile,
     DocumentTextResult,
+    Tag,
     TranskribusRun,
 )
 from documents.services.archive_items import create_ocr_document
@@ -12658,6 +12659,15 @@ class SourceTextDirectionTests(TestCase):
 class DocumentVisibilityAccessControlTests(TestCase):
     """PR1 — public archive visibility: only explicit public documents for non-staff."""
 
+    _PUBLIC_DOCUMENT_LIST_JSON_KEYS = {
+        "id",
+        "title",
+        "date_start",
+        "date_end",
+        "language",
+        "doc_type",
+    }
+
     def setUp(self):
         from django.contrib.auth.models import User
 
@@ -12688,6 +12698,32 @@ class DocumentVisibilityAccessControlTests(TestCase):
         }
         defaults.update(kwargs)
         return create_ocr_document(**defaults)
+
+    def _assert_non_staff_document_list_item(self, item, doc):
+        self.assertEqual(set(item.keys()), self._PUBLIC_DOCUMENT_LIST_JSON_KEYS)
+        self.assertEqual(item["id"], doc.id)
+        self.assertEqual(item["title"], doc.archive_item.title)
+        date_start = doc.archive_item.date_start
+        date_end = doc.archive_item.date_end
+        self.assertEqual(
+            item["date_start"], date_start.isoformat() if date_start else None
+        )
+        self.assertEqual(item["date_end"], date_end.isoformat() if date_end else None)
+        self.assertEqual(item["language"], doc.language)
+        self.assertEqual(item["doc_type"], doc.doc_type)
+        for key in (
+            "text_input_type",
+            "created_at",
+            "updated_at",
+            "category_event",
+            "tags",
+            "metadata_status",
+            "processing_state_user",
+            "upload_status",
+            "visibility",
+            "admin_meta",
+        ):
+            self.assertNotIn(key, item)
 
     def test_anonymous_list_api_public_only(self):
         public_doc = self._create_document(
@@ -12991,19 +13027,7 @@ class DocumentVisibilityAccessControlTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         items = resp.json()["items"]
         self.assertEqual(len(items), 1)
-        item = items[0]
-        self.assertEqual(item["id"], public_doc.id)
-        self.assertEqual(item["title"], public_doc.archive_item.title)
-        self.assertEqual(item["language"], public_doc.language)
-        self.assertEqual(item["doc_type"], public_doc.doc_type)
-        self.assertIn("text_input_type", item)
-        self.assertIn("created_at", item)
-        self.assertIn("updated_at", item)
-        self.assertNotIn("metadata_status", item)
-        self.assertNotIn("processing_state_user", item)
-        self.assertNotIn("upload_status", item)
-        self.assertNotIn("visibility", item)
-        self.assertNotIn("admin_meta", item)
+        self._assert_non_staff_document_list_item(items[0], public_doc)
 
     def test_viewer_list_api_omits_processing_and_upload_status(self):
         public_doc = self._create_document(
@@ -13014,21 +13038,36 @@ class DocumentVisibilityAccessControlTests(TestCase):
         resp = self.client.get("/api/documents/")
         self.assertEqual(resp.status_code, 200)
         items = {item["id"]: item for item in resp.json()["items"]}
-        item = items[public_doc.id]
-        self.assertNotIn("processing_state_user", item)
-        self.assertNotIn("upload_status", item)
-        self.assertNotIn("metadata_status", item)
+        self._assert_non_staff_document_list_item(items[public_doc.id], public_doc)
 
     def test_staff_list_api_includes_processing_and_upload_status(self):
         public_doc = self._create_document(
             visibility=Document.Visibility.PUBLIC,
             title="Staff JSON status included",
+            category_event="Staff category event",
         )
+        tag = Tag.objects.create(name="staff-json-acl-tag")
+        public_doc.tags_m2m.add(tag)
         self.client.force_login(self.staff)
         resp = self.client.get("/api/documents/")
         self.assertEqual(resp.status_code, 200)
         items = {item["id"]: item for item in resp.json()["items"]}
         item = items[public_doc.id]
+        self.assertEqual(item["id"], public_doc.id)
+        self.assertEqual(item["title"], public_doc.archive_item.title)
+        self.assertEqual(item["language"], public_doc.language)
+        self.assertEqual(item["doc_type"], public_doc.doc_type)
+        self.assertEqual(item["text_input_type"], public_doc.text_input_type)
+        self.assertEqual(item["category_event"], "Staff category event")
+        self.assertEqual(item["tags"], ["staff-json-acl-tag"])
+        self.assertEqual(
+            item["created_at"],
+            public_doc.created_at.isoformat() if public_doc.created_at else None,
+        )
+        self.assertEqual(
+            item["updated_at"],
+            public_doc.updated_at.isoformat() if public_doc.updated_at else None,
+        )
         self.assertEqual(
             item["processing_state_user"], public_doc.processing_state_user
         )
