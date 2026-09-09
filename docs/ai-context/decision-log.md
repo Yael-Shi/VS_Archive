@@ -1,5 +1,36 @@
 # VS-Archive Decision Log
 
+## Document list/API staff-only upload/processing status (Slice 1)
+
+**Decision / implemented:** Non-staff document list/API surfaces no longer
+expose staff/internal operational upload/processing status. Public visibility
+rules are unchanged.
+
+**Current behavior:**
+
+- `/api/documents/` JSON omits `processing_state_user` and `upload_status`
+  for anonymous and authenticated non-staff. Staff/admin still receive both,
+  plus the existing staff-only fields.
+- `?upload_status=` on `/api/documents/` and `/api/ui/documents/` is
+  applied only for staff/admin. Non-staff still use the existing forced
+  `Document.upload_status=UPLOADED` gate; `?upload_status=FAILED` does not
+  change their public UPLOADED result set.
+- `/api/ui/documents/` hides the upload-status filter control and its active
+  chip from anonymous/non-staff. Staff still see both. The already-merged
+  staff-only processing/upload badge row is unchanged.
+- `metadata_status` JSON, filter, and list column remain public in this
+  slice. Whether that field should stay public is a **separate policy
+  question**.
+- List routes stay unauthenticated. Visibility model, document detail,
+  archive browse/detail, models, OCR/worker, and processing-state
+  semantics are unchanged.
+
+**Supersedes:** the note in **Public document list hides staff
+processing-status badges** that `/api/documents/` JSON still included
+`processing_state_user` / `upload_status` (HTML-only).
+
+**Tests:** `documents.tests.DocumentVisibilityAccessControlTests`.
+
 ## Public document list hides staff processing-status badges
 
 **Decision / implemented:** `/api/ui/documents/` remains a visibility-filtered
@@ -16,8 +47,9 @@ public list (not staff-gated). Staff-only operational badges are staff-only.
   see those badges on the list and in staff technical details.
 - Public text-quality indicators and the public `PROCESSING` wait copy on
   document detail are unchanged. Document state semantics are unchanged.
-- `/api/documents/` JSON still includes `processing_state_user` /
-  `upload_status` for visible items; this change is HTML presentation only.
+- **Superseded:** `/api/documents/` JSON no longer includes
+  `processing_state_user` / `upload_status` for non-staff. See **Document
+  list/API staff-only upload/processing status (Slice 1)**.
 
 **Tests:** `documents.tests.DocumentVisibilityAccessControlTests`.
 
