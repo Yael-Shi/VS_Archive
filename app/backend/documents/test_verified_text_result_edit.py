@@ -15,6 +15,7 @@ from documents.models import (
 from documents.services.archive_items import create_ocr_document
 from documents.services.transcription_edit_suggestions import texts_are_equivalent
 from documents.services.verified_text_result_edit import (
+    review_form_baseline_for_result_id,
     VerifiedTextResultEditError,
     edit_verified_text_result,
     is_hebrew_translation_stale,
@@ -104,6 +105,7 @@ class VerifiedTextResultEditTests(TestCase):
             result_id=source.id,
             new_text="Edited source",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         source.refresh_from_db()
@@ -126,6 +128,7 @@ class VerifiedTextResultEditTests(TestCase):
             result_id=source.id,
             new_text="Version two",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         source.refresh_from_db()
@@ -143,6 +146,7 @@ class VerifiedTextResultEditTests(TestCase):
             result_id=source.id,
             new_text="After audit",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         audit = DocumentTextResultEdit.objects.get(text_result=source)
@@ -167,6 +171,7 @@ class VerifiedTextResultEditTests(TestCase):
                 result_id=source.id,
                 new_text="Same text",
                 editor=self.staff,
+                baseline=review_form_baseline_for_result_id(source.id),
             )
 
         self.assertEqual(DocumentTextResultEdit.objects.count(), 0)
@@ -190,6 +195,7 @@ class VerifiedTextResultEditTests(TestCase):
             result_id=source.id,
             new_text="Updated English source",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         source.refresh_from_db()
@@ -217,6 +223,7 @@ class VerifiedTextResultEditTests(TestCase):
             result_id=hebrew.id,
             new_text="Updated Hebrew",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(hebrew.id),
         )
 
         hebrew.refresh_from_db()
@@ -261,6 +268,7 @@ class VerifiedTextResultEditTests(TestCase):
             result_id=source.id,
             new_text="Staff edited source",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         source.refresh_from_db()
@@ -311,7 +319,7 @@ class VerifiedTextResultEditTests(TestCase):
         resp = self.client.get(reverse("review-detail-page", kwargs={"doc_id": doc.id}))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "עריכת תעתוק מאושר")
-        self.assertNotContains(resp, "source_revision")
+        self.assertContains(resp, 'name="expected_source_revision"')
 
     def test_hebrew_source_edit_updates_hebrew_text(self):
         doc = self._create_hebrew_doc()
@@ -332,6 +340,7 @@ class VerifiedTextResultEditTests(TestCase):
             result_id=source.id,
             new_text="טקסט מעודכן",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         source.refresh_from_db()
@@ -358,6 +367,7 @@ class VerifiedTextResultEditTests(TestCase):
             result_id=hebrew.id,
             new_text="טקסט מעודכן",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(hebrew.id),
         )
 
         source.refresh_from_db()
@@ -384,6 +394,7 @@ class VerifiedTextResultEditTests(TestCase):
             result_id=source.id,
             new_text="טקסט מאומת",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         source.refresh_from_db()
@@ -416,6 +427,7 @@ class VerifiedTextResultEditTests(TestCase):
             result_id=source.id,
             new_text="טקסט מבוקר",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         self.assertEqual(DocumentTextResultEdit.objects.count(), 1)
@@ -436,6 +448,7 @@ class VerifiedTextResultEditTests(TestCase):
                 result_id=source.id,
                 new_text="טקסט חדש",
                 editor=self.staff,
+                baseline=review_form_baseline_for_result_id(source.id),
             )
 
         source.refresh_from_db()

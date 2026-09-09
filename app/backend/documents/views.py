@@ -452,11 +452,14 @@ from documents.services.transcription_suggestion_review import (
 )
 from documents.services.verified_text_result_edit import (
     PendingTextResultEditError,
+    StaleReviewFormError,
     VerifiedTextResultEditError,
     edit_pending_text_result,
     edit_verified_text_result,
     is_hebrew_translation_stale,
     is_verified_editable_text_result,
+    parse_review_form_baseline,
+    review_form_revision_for_row,
     verify_pending_text_result,
 )
 
@@ -2753,6 +2756,10 @@ def review_detail_page(request, doc_id: int):
                     row, paired_source
                 ),
                 "non_actionable_reason": _review_non_actionable_reason(row),
+                "expected_text_sha256": compute_sha256_hex(row.text or ""),
+                "expected_source_revision": review_form_revision_for_row(
+                    row, doc, paired_source=paired_source
+                ),
             }
         )
 
@@ -3387,6 +3394,13 @@ def _get_admin_viewable_text_result(request, result_id: int) -> DocumentTextResu
     )
 
 
+def _review_form_baseline_from_post(request):
+    return parse_review_form_baseline(
+        expected_text_sha256=request.POST.get("expected_text_sha256"),
+        expected_source_revision=request.POST.get("expected_source_revision"),
+    )
+
+
 @login_required
 @require_POST
 def review_text_result_verify(request, result_id: int):
@@ -3421,7 +3435,10 @@ def review_text_result_verify(request, result_id: int):
             result_id=row.id,
             new_text=submitted,
             editor=request.user,
+            baseline=_review_form_baseline_from_post(request),
         )
+    except StaleReviewFormError as exc:
+        return _review_async_error(request, str(exc), status=400)
     except DocumentTextResult.DoesNotExist:
         return _review_async_error(request, "לא נמצא.", status=404)
     except PendingTextResultEditError as exc:
@@ -3521,7 +3538,10 @@ def review_text_result_update_text(request, result_id: int):
             result_id=row.id,
             new_text=submitted,
             editor=request.user,
+            baseline=_review_form_baseline_from_post(request),
         )
+    except StaleReviewFormError as exc:
+        return _review_async_error(request, str(exc), status=400)
     except DocumentTextResult.DoesNotExist:
         return _review_async_error(request, "לא נמצא.", status=404)
     except PendingTextResultEditError as exc:
@@ -3567,7 +3587,10 @@ def review_text_result_verified_edit(request, result_id: int):
             result_id=result_id,
             new_text=submitted,
             editor=request.user,
+            baseline=_review_form_baseline_from_post(request),
         )
+    except StaleReviewFormError as exc:
+        return HttpResponseBadRequest(str(exc))
     except DocumentTextResult.DoesNotExist:
         raise Http404() from None
     except VerifiedTextResultEditError as exc:

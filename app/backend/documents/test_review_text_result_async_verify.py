@@ -20,7 +20,9 @@ from documents.models import (
 )
 from documents.services.archive_items import create_ocr_document
 from documents.services.verified_text_result_edit import (
+    review_form_baseline_for_result_id,
     is_hebrew_translation_stale,
+    review_form_text_post_data,
     verify_pending_text_result,
 )
 
@@ -153,6 +155,7 @@ class ReviewCombinedVerifyAndAsyncTests(TestCase):
             result_id=source.id,
             new_text=submitted,
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         source.refresh_from_db()
@@ -185,6 +188,7 @@ class ReviewCombinedVerifyAndAsyncTests(TestCase):
                 result_id=source.id,
                 new_text="stable lock-order text",
                 editor=self.staff,
+                baseline=review_form_baseline_for_result_id(source.id),
             )
 
         order = _select_for_update_model_order(ctx.captured_queries)
@@ -211,6 +215,7 @@ class ReviewCombinedVerifyAndAsyncTests(TestCase):
             result_id=source.id,
             new_text="  stable text  \n",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         source.refresh_from_db()
@@ -242,6 +247,7 @@ class ReviewCombinedVerifyAndAsyncTests(TestCase):
                     result_id=source.id,
                     new_text="changed for index fail",
                     editor=self.staff,
+                    baseline=review_form_baseline_for_result_id(source.id),
                 )
 
         source.refresh_from_db()
@@ -275,6 +281,7 @@ class ReviewCombinedVerifyAndAsyncTests(TestCase):
             result_id=source.id,
             new_text="מקור מתוקן",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         source.refresh_from_db()
@@ -316,6 +323,7 @@ class ReviewCombinedVerifyAndAsyncTests(TestCase):
             result_id=source.id,
             new_text="English source revised",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
         )
 
         source.refresh_from_db()
@@ -349,6 +357,7 @@ class ReviewCombinedVerifyAndAsyncTests(TestCase):
             result_id=hebrew.id,
             new_text="תרגום מעודכן",
             editor=self.staff,
+            baseline=review_form_baseline_for_result_id(hebrew.id),
         )
 
         source.refresh_from_db()
@@ -386,15 +395,24 @@ class ReviewCombinedVerifyAndAsyncTests(TestCase):
 
     def test_restricted_verify_succeeds_with_permission(self):
         doc = self._create_hebrew_doc(visibility=ArchiveItem.Visibility.RESTRICTED)
+        engine = "engine-async"
+        self._create_pending(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="restricted secret",
+            engine=engine,
+        )
         row = self._create_pending(
             doc,
             result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
             text="restricted secret",
+            engine=engine,
+            based_on_source_revision=1,
         )
         self.client.force_login(self.staff_restricted)
         resp = self.client.post(
             self._verify_url(row.id),
-            {"text": "restricted secret"},
+            review_form_text_post_data(row, "restricted secret"),
         )
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(
@@ -417,13 +435,16 @@ class ReviewCombinedVerifyAndAsyncTests(TestCase):
         detail = reverse("review-detail-page", kwargs={"doc_id": doc.id})
         self.client.force_login(self.staff)
 
-        save = self.client.post(self._save_url(source.id), {"text": "redirect me"})
+        save = self.client.post(
+            self._save_url(source.id),
+            review_form_text_post_data(source, "redirect me"),
+        )
         self.assertEqual(save.status_code, 302)
         self.assertEqual(save["Location"], detail)
 
         verify = self.client.post(
             self._verify_url(source.id),
-            {"text": "redirect me"},
+            review_form_text_post_data(source, "redirect me"),
         )
         self.assertEqual(verify.status_code, 302)
         self.assertEqual(verify["Location"], detail)
@@ -451,7 +472,7 @@ class ReviewCombinedVerifyAndAsyncTests(TestCase):
 
         save = self.client.post(
             self._save_url(source.id),
-            {"text": "async saved"},
+            review_form_text_post_data(source, "async saved"),
             **_async_headers(),
         )
         self.assertEqual(save.status_code, 200)
@@ -468,9 +489,10 @@ class ReviewCombinedVerifyAndAsyncTests(TestCase):
             },
         )
 
+        source.refresh_from_db()
         verify = self.client.post(
             self._verify_url(source.id),
-            {"text": "async saved"},
+            review_form_text_post_data(source, "async saved"),
             **_async_headers(),
         )
         self.assertEqual(verify.status_code, 200)

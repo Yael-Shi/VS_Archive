@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import NamedTuple
 
 from django.db import transaction
@@ -16,6 +17,7 @@ from documents.services.transcription_edit_suggestions import (
     normalize_transcription_text,
     texts_are_equivalent,
 )
+from documents.services.transkribus_snapshot_parser import compute_sha256_hex
 
 
 class VerifiedTextResultEditError(Exception):
@@ -24,6 +26,158 @@ class VerifiedTextResultEditError(Exception):
 
 class PendingTextResultEditError(Exception):
     """Validation or eligibility failure for pending review text edits."""
+
+
+STALE_REVIEW_FORM = "STALE_REVIEW_FORM"
+STALE_REVIEW_FORM_MESSAGE = (
+    "התעתוק השתנה מאז פתיחת הדף. רענני את הדף לפני שמירה או אישור."
+)
+_SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+class StaleReviewFormError(Exception):
+    """POSTed review form baseline does not match the locked DTR row."""
+
+    code = STALE_REVIEW_FORM
+
+    def __str__(self) -> str:
+        return STALE_REVIEW_FORM_MESSAGE
+
+
+class ReviewFormBaseline(NamedTuple):
+    """Optimistic-concurrency token rendered into a review card and POSTed back."""
+
+    expected_text_sha256: str
+    expected_source_revision: int | None
+
+
+def review_form_revision_for_row(
+    row: DocumentTextResult,
+    doc: Document,
+    *,
+    paired_source: DocumentTextResult | None = None,
+) -> int | None:
+    """Revision baseline for the exact review card, not public displayed text.
+
+    SOURCE: that row's ``source_revision``.
+    HEBREW on a Hebrew-language document: paired SOURCE ``source_revision``.
+    HEBREW on a non-Hebrew document: ``based_on_source_revision``, else paired
+    SOURCE revision.
+    """
+    if row.result_type == DocumentTextResult.ResultType.SOURCE_TEXT:
+        return int(row.source_revision)
+    if row.result_type != DocumentTextResult.ResultType.HEBREW_TEXT:
+        return None
+    if _is_hebrew_document(doc):
+        source = paired_source
+        if source is None or source.engine != row.engine:
+            source = find_paired_source_row(doc, engine=row.engine)
+        if source is None:
+            return None
+        return int(source.source_revision)
+    if row.based_on_source_revision is not None:
+        return int(row.based_on_source_revision)
+    source = paired_source
+    if source is None or source.engine != row.engine:
+        source = find_paired_source_row(doc, engine=row.engine)
+    if source is None:
+        return None
+    return int(source.source_revision)
+
+
+def review_form_baseline_for_row(
+    row: DocumentTextResult,
+    *,
+    document: Document | None = None,
+    paired_source: DocumentTextResult | None = None,
+) -> ReviewFormBaseline:
+    """Build the baseline that the review template should render for ``row``."""
+    doc = document if document is not None else row.document
+    return ReviewFormBaseline(
+        expected_text_sha256=compute_sha256_hex(row.text or ""),
+        expected_source_revision=review_form_revision_for_row(
+            row, doc, paired_source=paired_source
+        ),
+    )
+
+
+def review_form_baseline_for_result_id(result_id: int) -> ReviewFormBaseline:
+    row = DocumentTextResult.objects.select_related("document").get(pk=result_id)
+    return review_form_baseline_for_row(row, document=row.document)
+
+
+def review_form_baseline_as_post_dict(
+    row: DocumentTextResult,
+    *,
+    document: Document | None = None,
+    paired_source: DocumentTextResult | None = None,
+) -> dict[str, str]:
+    baseline = review_form_baseline_for_row(
+        row, document=document, paired_source=paired_source
+    )
+    data = {"expected_text_sha256": baseline.expected_text_sha256}
+    if baseline.expected_source_revision is not None:
+        data["expected_source_revision"] = str(baseline.expected_source_revision)
+    return data
+
+
+def review_form_text_post_data(
+    row: DocumentTextResult,
+    text: str,
+    *,
+    document: Document | None = None,
+    paired_source: DocumentTextResult | None = None,
+) -> dict[str, str]:
+    data = review_form_baseline_as_post_dict(
+        row, document=document, paired_source=paired_source
+    )
+    data["text"] = text
+    return data
+
+
+def parse_review_form_baseline(
+    *,
+    expected_text_sha256: str | None,
+    expected_source_revision: str | int | None,
+) -> ReviewFormBaseline:
+    """SHA is required. Revision is optional when the rendered card had none."""
+    sha = (expected_text_sha256 or "").strip().lower()
+    if not _SHA256_HEX_RE.fullmatch(sha):
+        raise StaleReviewFormError()
+    if expected_source_revision is None:
+        revision: int | None = None
+    else:
+        raw = str(expected_source_revision).strip()
+        if raw == "":
+            revision = None
+        else:
+            try:
+                revision = int(raw)
+            except (TypeError, ValueError):
+                raise StaleReviewFormError() from None
+            if revision < 1:
+                raise StaleReviewFormError()
+    return ReviewFormBaseline(
+        expected_text_sha256=sha,
+        expected_source_revision=revision,
+    )
+
+
+def assert_review_form_baseline_matches(
+    *,
+    target: DocumentTextResult,
+    doc: Document,
+    baseline: ReviewFormBaseline,
+) -> None:
+    """Compare POSTed baseline to locked card/row state. Does not use displayed text."""
+    current_sha = compute_sha256_hex(target.text or "")
+    if current_sha != baseline.expected_text_sha256:
+        raise StaleReviewFormError()
+    if baseline.expected_source_revision is None:
+        return
+    current_revision = review_form_revision_for_row(target, doc)
+    if current_revision != baseline.expected_source_revision:
+        raise StaleReviewFormError()
 
 
 def _is_hebrew_document(doc: Document) -> bool:
@@ -253,6 +407,7 @@ def edit_verified_text_result(
     result_id: int,
     new_text: str,
     editor,
+    baseline: ReviewFormBaseline,
 ) -> DocumentTextResult:
     normalized = normalize_transcription_text(new_text)
     if not normalized:
@@ -264,6 +419,8 @@ def edit_verified_text_result(
         target = DocumentTextResult.objects.select_for_update().get(pk=result_id)
         if not is_verified_editable_text_result(target):
             raise VerifiedTextResultEditError("תוצאה זו אינה זמינה לעריכה מאושרת.")
+
+        assert_review_form_baseline_matches(target=target, doc=doc, baseline=baseline)
 
         if not _submitted_text_differs_from_current(target, doc, normalized):
             raise VerifiedTextResultEditError("לא בוצעו שינויים בטקסט.")
@@ -295,6 +452,7 @@ def edit_pending_text_result(
     result_id: int,
     new_text: str,
     editor,
+    baseline: ReviewFormBaseline,
 ) -> PendingTextResultEditResult:
     normalized = normalize_transcription_text(new_text)
     if not normalized:
@@ -308,6 +466,8 @@ def edit_pending_text_result(
             raise PendingTextResultEditError(
                 "transcription result is not eligible for review action"
             )
+
+        assert_review_form_baseline_matches(target=target, doc=doc, baseline=baseline)
 
         if not _submitted_text_differs_from_current(target, doc, normalized):
             return PendingTextResultEditResult(row=target, text_saved=False)
@@ -343,6 +503,7 @@ def verify_pending_text_result(
     result_id: int,
     new_text: str,
     editor,
+    baseline: ReviewFormBaseline,
 ) -> PendingTextResultVerifyResult:
     """Save-if-changed via pending-edit semantics, then mark VERIFIED atomically.
 
@@ -355,6 +516,7 @@ def verify_pending_text_result(
             result_id=result_id,
             new_text=new_text,
             editor=editor,
+            baseline=baseline,
         )
 
         row = DocumentTextResult.objects.select_for_update().get(pk=result_id)

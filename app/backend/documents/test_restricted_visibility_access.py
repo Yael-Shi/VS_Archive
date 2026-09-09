@@ -817,13 +817,19 @@ class RestrictedVisibilityMutationGateTests(TestCase):
         self.assertEqual(self.pending_result.verification_status, before)
 
     def test_review_verify_succeeds_with_permission(self):
+        from documents.services.verified_text_result_edit import (
+            review_form_text_post_data,
+        )
+
         resp = self._post_as(
             self.staff_with_perm,
             reverse(
                 "review-text-result-verify",
                 kwargs={"result_id": self.pending_result.pk},
             ),
-            data={"text": self.pending_result.text},
+            data=review_form_text_post_data(
+                self.pending_result, self.pending_result.text or ""
+            ),
         )
         self.assertEqual(resp.status_code, 302)
         self.pending_result.refresh_from_db()
@@ -1187,6 +1193,7 @@ class RestrictedVisibilityMutationGateTests(TestCase):
     def test_review_update_text_reaches_mutation_with_permission(self, mock_edit):
         from documents.services.verified_text_result_edit import (
             PendingTextResultEditResult,
+            review_form_text_post_data,
         )
 
         mock_edit.return_value = PendingTextResultEditResult(
@@ -1199,7 +1206,9 @@ class RestrictedVisibilityMutationGateTests(TestCase):
                 "review-text-result-update-text",
                 kwargs={"result_id": self.pending_result.pk},
             ),
-            data={"text": "updated pending text"},
+            data=review_form_text_post_data(
+                self.pending_result, "updated pending text"
+            ),
         )
         self.assertEqual(resp.status_code, 302)
         mock_edit.assert_called_once()

@@ -155,6 +155,10 @@
                   data-verified-save-label="שמור עריכה"
                 >
                   {% csrf_token %}
+                  <input type="hidden" name="expected_text_sha256" value="{{ card.expected_text_sha256 }}">
+                  {% if card.expected_source_revision %}
+                    <input type="hidden" name="expected_source_revision" value="{{ card.expected_source_revision }}">
+                  {% endif %}
                   <textarea class="review-textarea" name="text" rows="12">{{ card.row.text }}</textarea>
                   <div class="review-zone-actions review-zone-actions--spaced">
                     <button class="btn btn-primary" type="submit" data-review-action="save">שמור טקסט</button>
@@ -175,6 +179,10 @@
                 {% endif %}
                 <form method="post" action="{% url 'review-text-result-verified-edit' result_id=card.row.id %}" class="inline-form">
                   {% csrf_token %}
+                  <input type="hidden" name="expected_text_sha256" value="{{ card.expected_text_sha256 }}">
+                  {% if card.expected_source_revision %}
+                    <input type="hidden" name="expected_source_revision" value="{{ card.expected_source_revision }}">
+                  {% endif %}
                   <div class="review-zone-title review-verified-edit-title" style="margin-bottom: 8px;">
                     {% if card.row.result_type == "SOURCE_TEXT" %}
                       עריכת תעתוק מאושר

@@ -1,6 +1,41 @@
 # VS-Archive Decision Log
 
+## Staff review stale-form optimistic concurrency
+
+**Decision / implemented:** Pending save, pending verify, and verified edit of
+`DocumentTextResult` text require a POSTed baseline that matches the **exact
+review card/row** after write locks, not `get_displayed_transcription_text`.
+
+**Current behavior:**
+
+- Each editable review card always renders hidden `expected_text_sha256`
+  (SHA-256 of that row's `text`). `expected_source_revision` is rendered only
+  when a meaningful revision exists (SOURCE: `source_revision`; HEBREW on a
+  Hebrew-language document: paired same-engine SOURCE `source_revision`; HEBREW
+  otherwise: `based_on_source_revision` or paired SOURCE revision).
+- After locking `Document` then the target row, the mutation always compares
+  SHA. If a revision was POSTed, it must equal the current meaningful revision.
+  SHA missing/malformed, or a present revision that is malformed or `< 1`, is
+  stale. Omitted revision is SHA-only and is valid when the card had no
+  revision (including Hebrew HEBREW with no paired SOURCE).
+- Mismatch raises `StaleReviewFormError` (`STALE_REVIEW_FORM`) with
+  `התעתוק השתנה מאז פתיחת הדף. רענני את הדף לפני שמירה או אישור.`
+- Stale rejection does not change SOURCE/HEBREW text, revisions, verification
+  status, bindings, or `DocumentTextResultEdit` rows.
+- Reject-transcription POSTs are unchanged (they do not persist textarea text).
+- `_submitted_text_differs_from_current` still uses displayed transcription for
+  Hebrew-language **whether-to-save** after a fresh baseline match. Follow-up:
+  that helper is multi-engine/display-based and is not the stale-form baseline;
+  do not use it as the concurrency token.
+
+**Why:** Staff “אשר תעתוק” POSTs the current textarea. A review tab opened
+before corrected/current activation (or restored by the browser) can submit
+pre-activation text and overwrite the newly activated canonical rows.
+
+**Tests:** `documents.test_stale_review_form_guard`.
+
 ## Document list/API public JSON field contract
+
 
 **Decision / implemented:** Non-staff `GET /api/documents/` JSON is the
 OCR **document-list** JSON contract, not the public `/archive/` catalog API.
