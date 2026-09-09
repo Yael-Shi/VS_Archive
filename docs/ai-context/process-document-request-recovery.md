@@ -104,13 +104,16 @@ fenced worker may terminalize the Request only after the Document is `READY`
 / `PARTIAL` / `FAILED`. `RECOVERY_REQUIRED` does not authorize a new provider
 execution. This command still does not replay `RECOVERY_REQUIRED` execution.
 
-Staff abandon of a parked Request is service-only
-(`abandon_process_document_request` in
-`documents/services/process_document_request_staff_recovery.py`). It
+Staff abandon of a parked Request uses
+`abandon_process_document_request` in
+`documents/services/process_document_request_staff_recovery.py`. It
 terminalizes `RECOVERY_REQUIRED → FAILED` with `failure_code=STAFF_ABANDONED`,
 clears the lease token, and replaces a Document overlay with an ordinary
-result state. It does not send SQS, call a provider, or enqueue retry. Staff
-UI and intentional-retry orchestration are not implemented yet. Do not use
+result state. It does not send SQS, call a provider, or enqueue retry.
+Staff document detail exposes that service as POST
+`ui/documents/<doc_id>/process-document-requests/<request_id>/abandon/`
+(eligibility is Request `RECOVERY_REQUIRED`, not Document overlay alone).
+Intentional-retry orchestration is not implemented yet. Do not use
 this recovery command to abandon or replay `RECOVERY_REQUIRED`.
 
 ## Expired RUNNING lease fencing (separate command)

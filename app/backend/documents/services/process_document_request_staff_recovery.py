@@ -1,7 +1,7 @@
 """Staff recovery for parked PROCESS_DOCUMENT RECOVERY_REQUIRED Requests.
 
-PR1 is service-only: abandon a fenced Request without SQS, provider I/O, or UI.
-Intentional retry orchestration is out of scope.
+Abandon is service-only write: no SQS, provider I/O, or retry. Staff HTTP UI
+calls this service. Intentional retry orchestration is out of scope.
 """
 
 from __future__ import annotations
@@ -114,6 +114,28 @@ def _replace_recovery_overlay(
         document.processing_state_user = Document.ProcessingState.PARTIAL
         return
     document.processing_state_user = Document.ProcessingState.FAILED
+
+
+def get_recovery_required_process_document_request(
+    *,
+    document_id: int,
+) -> ProcessDocumentRequest | None:
+    """Return the parked RECOVERY_REQUIRED Request for a document, or None.
+
+    Fail-closed: invalid ids, zero matches, and more than one match return None.
+    Does not validate recovery shape; POST abandon remains the write fence.
+    """
+    if type(document_id) is not int or document_id < 1:
+        return None
+    matches = list(
+        ProcessDocumentRequest.objects.filter(
+            document_id=document_id,
+            status=ProcessDocumentRequest.Status.RECOVERY_REQUIRED,
+        ).order_by("pk")[:2]
+    )
+    if len(matches) != 1:
+        return None
+    return matches[0]
 
 
 def abandon_process_document_request(
@@ -245,4 +267,5 @@ __all__ = [
     "StaffAbandonOutcome",
     "StaffAbandonResult",
     "abandon_process_document_request",
+    "get_recovery_required_process_document_request",
 ]

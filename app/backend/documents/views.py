@@ -369,6 +369,13 @@ from documents.services.process_document_hebrew_translation_retry_enqueue import
     HebrewTranslationRetryEnqueueError,
     enqueue_hebrew_translation_retry,
 )
+from documents.services.process_document_request_staff_recovery import (
+    ProcessDocumentRequestStaffAbandonError,
+    ProcessDocumentRequestStaffAbandonErrorCode,
+    StaffAbandonOutcome,
+    abandon_process_document_request,
+    get_recovery_required_process_document_request,
+)
 from documents.services.process_document_upload_enqueue import (
     UploadProcessEnqueueError,
     enqueue_uploaded_document_processing,
@@ -3843,6 +3850,12 @@ def document_detail_page(request, doc_id: int):
     show_transkribus_action = (
         is_admin and _is_transkribus_corrected_current_sync_ui_eligible(doc)
     )
+    staff_abandon_request = (
+        get_recovery_required_process_document_request(document_id=doc.id)
+        if is_admin
+        else None
+    )
+    show_staff_abandon_action = staff_abandon_request is not None
     context = {
         "doc": doc,
         **source_context,
@@ -3863,8 +3876,13 @@ def document_detail_page(request, doc_id: int):
         "transkribus_paragraph_presentation": transkribus_paragraph_presentation,
         "is_admin": is_admin,
         "show_transkribus_corrected_current_sync_action": show_transkribus_action,
-        "show_ocr_reprocess_action": is_admin and is_ocr_reprocess_ui_eligible(doc),
+        "staff_abandon_request": staff_abandon_request,
+        "show_staff_abandon_action": show_staff_abandon_action,
+        "show_ocr_reprocess_action": is_admin
+        and not show_staff_abandon_action
+        and is_ocr_reprocess_ui_eligible(doc),
         "show_hebrew_translation_retry_action": is_admin
+        and not show_staff_abandon_action
         and is_hebrew_translation_retry_ui_eligible(doc),
         "show_display_only_page_add_action": is_admin
         and is_display_only_page_add_eligible(doc),
@@ -4583,6 +4601,84 @@ def archive_item_person_suggestion_reject(request, suggestion_id: int):
         messages.error(request, str(exc))
 
     return redirect(backlog_url)
+
+
+_STAFF_ABANDON_MSG_ABANDONED = "בקשת העיבוד התקועה שוחררה. לא נשלח עיבוד חדש."
+_STAFF_ABANDON_MSG_ALREADY_TERMINAL = "בקשת העיבוד כבר הסתיימה."
+_STAFF_ABANDON_MSG_NOT_FOUND = "לא נמצאה בקשת עיבוד תואמת למסמך זה."
+_STAFF_ABANDON_MSG_NOT_ABANDONABLE = "לא ניתן לשחרר בקשה שאינה במצב שחזור."
+_STAFF_ABANDON_MSG_INVALID_SHAPE = "לא ניתן לשחרר את בקשת העיבוד במצבה הנוכחי."
+_STAFF_ABANDON_MSG_GENERIC = "לא ניתן לשחרר את בקשת העיבוד התקועה."
+
+
+def _staff_abandon_error_message(code: str) -> str:
+    if code in {
+        ProcessDocumentRequestStaffAbandonErrorCode.INVALID_REQUEST_ID,
+        ProcessDocumentRequestStaffAbandonErrorCode.INVALID_DOCUMENT_ID,
+        ProcessDocumentRequestStaffAbandonErrorCode.REQUEST_NOT_FOUND,
+        ProcessDocumentRequestStaffAbandonErrorCode.DOCUMENT_MISMATCH,
+    }:
+        return _STAFF_ABANDON_MSG_NOT_FOUND
+    if code == ProcessDocumentRequestStaffAbandonErrorCode.STATUS_NOT_ABANDONABLE:
+        return _STAFF_ABANDON_MSG_NOT_ABANDONABLE
+    if code == ProcessDocumentRequestStaffAbandonErrorCode.INVALID_RECOVERY_SHAPE:
+        return _STAFF_ABANDON_MSG_INVALID_SHAPE
+    return _STAFF_ABANDON_MSG_GENERIC
+
+
+@login_required
+@require_POST
+def document_process_document_request_abandon(request, doc_id: int, request_id: int):
+    deny = _require_admin(request)
+    if deny:
+        return deny
+
+    doc = get_viewable_document(
+        request.user,
+        doc_id,
+        queryset=Document.objects.select_related("archive_item"),
+    )
+    detail_redirect = redirect("documents-detail-page", doc_id=doc.id)
+
+    try:
+        result = abandon_process_document_request(
+            request_id=request_id,
+            document_id=doc.id,
+        )
+    except ProcessDocumentRequestStaffAbandonError as exc:
+        messages.error(request, _staff_abandon_error_message(exc.code))
+        logger.info(
+            "document_process_document_request_abandon refused "
+            "user=%s doc_id=%s request_id=%s code=%s",
+            getattr(request.user, "username", None),
+            doc.id,
+            request_id,
+            exc.code,
+        )
+        return detail_redirect
+
+    if result.outcome == StaffAbandonOutcome.ABANDONED:
+        messages.success(request, _STAFF_ABANDON_MSG_ABANDONED)
+    elif result.outcome == StaffAbandonOutcome.ALREADY_TERMINAL:
+        messages.success(request, _STAFF_ABANDON_MSG_ALREADY_TERMINAL)
+    else:
+        raise AssertionError(f"Unhandled staff abandon outcome: {result.outcome}")
+
+    logger.info(
+        "document_process_document_request_abandon user=%s doc_id=%s "
+        "request_id=%s outcome=%s previous_request_status=%s "
+        "previous_document_state=%s new_request_status=%s "
+        "new_document_state=%s",
+        getattr(request.user, "username", None),
+        doc.id,
+        result.request.pk,
+        result.outcome,
+        result.previous_request_status,
+        result.previous_document_state,
+        result.request.status,
+        result.document.processing_state_user,
+    )
+    return detail_redirect
 
 
 @login_required
