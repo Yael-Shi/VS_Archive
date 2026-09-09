@@ -7331,7 +7331,7 @@ JavaScript hover behavior, scrolling, image overlays, or schema changes.
 
 **Unchanged:** provider/SQS-send/OCR/retry-policy/routing/search-index behavior; VERIFIED write-fences; existing `READY`/`PARTIAL`/`FAILED` rollup.
 
-**Deferred:** staff abandon/retry **UI** for `RECOVERY_REQUIRED` Requests (abandon **service** is implemented; see later persist-token/abandon-service PR1); automatic replay.
+**Deferred:** staff abandon **UI** for `RECOVERY_REQUIRED` Requests → implemented in later **PROCESS_DOCUMENT staff abandon UI (PR2)**; intentional-retry orchestration; automatic replay. (Abandon **service** is in persist-token/abandon-service PR1.)
 
 ## Worker SQS receive visibility / ApproximateReceiveCount observability (2026-09-07)
 
@@ -7384,7 +7384,7 @@ JavaScript hover behavior, scrolling, image overlays, or schema changes.
 
 **Unchanged:** schema/migrations; CDK (this PR did not change queue policy); heartbeat; automatic redrive. Live jobs-queue `maxReceiveCount` is repository/CDK **100** and was verified live **100** after the 2026-09-07 data-stack deploy.
 
-**Deferred:** staff abandon/retry **UI** and intentional-retry orchestration (abandon **service** and persist token fence are implemented; see later persist-token/abandon-service PR1); automatic replay of `RECOVERY_REQUIRED`; corrected/current DB-side STARTED fencing; heartbeat; queue split.
+**Deferred:** staff abandon **UI** → implemented in later **PROCESS_DOCUMENT staff abandon UI (PR2)**; intentional-retry orchestration (abandon **service** and persist token fence are implemented; see persist-token/abandon-service PR1); automatic replay of `RECOVERY_REQUIRED`; corrected/current DB-side STARTED fencing; heartbeat; queue split.
 
 ## PROCESS_DOCUMENT persist token fence and staff abandon service (PR1)
 
@@ -7412,7 +7412,7 @@ write DTRs and search index after the parked Request was released.
   search-index replacement from that run, and do not roll up from the stale
   runtime engine. They do not revive `RECOVERY_REQUIRED`.
 - VERIFIED write-fences are unchanged and still win when the token matches.
-- `abandon_process_document_request(request_id, document_id)` (no HTTP UI)
+-   `abandon_process_document_request(request_id, document_id)`
   locks Document then Request. `RECOVERY_REQUIRED` → `FAILED` with
   `failure_code=STAFF_ABANDONED`, `lease_token` cleared, `completed_at` set.
   Overlay `RECOVERY_REQUIRED` is replaced using displayed SOURCE_TEXT engine
@@ -7429,5 +7429,33 @@ write DTRs and search index after the parked Request was released.
 **Unchanged:** queue visibility, `maxReceiveCount`, DLQ, heartbeat, automatic
 redrive, `recover_process_document_requests`, expired-lease fence command.
 
-**Deferred:** staff abandon/retry UI; intentional-retry orchestration; automatic
-replay of `RECOVERY_REQUIRED`.
+**Deferred:** intentional-retry orchestration; automatic replay of
+`RECOVERY_REQUIRED`. Staff abandon **UI** is implemented in the following entry.
+
+## PROCESS_DOCUMENT staff abandon UI (PR2)
+
+**Decision / implemented:** Staff document detail exposes the existing PR1
+abandon service as a POST-only action. Eligibility is the parked
+`ProcessDocumentRequest` with `status=RECOVERY_REQUIRED`, not Document overlay
+alone. Overlay READY/PARTIAL/FAILED with a parked Request still shows abandon.
+No Request → no control.
+
+**Current behavior:**
+
+- Route: `ui/documents/<doc_id>/process-document-requests/<request_id>/abandon/`
+  (`documents-process-document-request-abandon`). Staff/admin POST, same
+  document viewability path as OCR reprocess. PRG back to document detail.
+- View calls `abandon_process_document_request(request_id, document_id)` only.
+  No SQS, no provider, no new Request, no retry orchestration.
+- `ABANDONED` and `ALREADY_TERMINAL` are success/info flashes. Service errors
+  map to Hebrew errors; the view does not repair recovery shape.
+- While a parked Request exists, OCR reprocess and Hebrew-translation-retry
+  buttons are hidden (UI gating only; enqueue services unchanged).
+- Read helper `get_recovery_required_process_document_request(document_id)`
+  returns the single RR Request or `None` (fail-closed on invalid id / 0 / >1).
+
+**Unchanged:** PR1 abandon write contract; persist token fence; worker; schema;
+Django Admin; list/backlog; actor/audit fields.
+
+**Deferred:** intentional-retry orchestration; automatic replay of
+`RECOVERY_REQUIRED`.
