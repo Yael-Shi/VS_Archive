@@ -1,5 +1,8 @@
+from typing import Any, cast
+
 from django import forms
 from django.contrib import admin
+from django.contrib.admin.options import BaseModelAdmin
 from django.core.exceptions import PermissionDenied
 
 from documents.historical_person_tag_map import (
@@ -67,7 +70,13 @@ class _VisibilityScopedAdminMixin:
             kwargs["queryset"] = archive_item_queryset_for_user(request.user)
         elif db_field.related_model is Document:
             kwargs["queryset"] = document_queryset_for_user(request.user)
-        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+        # Used with ModelAdmin and TabularInline; both provide this method via
+        # BaseModelAdmin. Call that implementation directly: inheriting
+        # BaseModelAdmin here would put its attributes ahead of Inline MRO.
+        admin_self = cast("BaseModelAdmin[Any]", self)
+        return BaseModelAdmin.formfield_for_foreignkey(
+            admin_self, db_field, request, **kwargs
+        )
 
 
 class TagAdminForm(forms.ModelForm):

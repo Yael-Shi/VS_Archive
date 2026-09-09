@@ -8,10 +8,9 @@ DDoS or infrastructure-level protection.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.contrib.auth import get_user_model
-from django.contrib.auth.base_user import AbstractBaseUser
 from django.contrib.auth.password_validation import validate_password
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -19,7 +18,10 @@ from django.db import IntegrityError, transaction
 
 from documents.services.archive_item_access import ARCHIVE_FAMILY_GROUP_NAME
 
-User = get_user_model()
+if TYPE_CHECKING:
+    from django.contrib.auth.models import User
+else:
+    User = get_user_model()
 
 # Honeypot field — hidden in the form; bots that fill it are rejected silently.
 HONEYPOT_FIELD_NAME = "company_name"
@@ -97,7 +99,7 @@ class RegistrationFieldValues:
 
 @dataclass
 class RegistrationResult:
-    user: AbstractBaseUser | None = None
+    user: User | None = None
     errors: list[str] | None = None
     field_values: RegistrationFieldValues | None = None
     honeypot_triggered: bool = False
