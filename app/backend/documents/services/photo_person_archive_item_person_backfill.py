@@ -7,6 +7,7 @@ people_present, or aliases. Default callers plan only; writes require apply.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import cast
 
 from django.db import transaction
 
@@ -68,8 +69,10 @@ class BackfillPlan:
 
 def _classify_photo_person(link: PhotoPerson) -> BackfillRow:
     photo = link.photo_content
-    archive_item = photo.archive_item
-    if archive_item is None:
+    # django-stubs types a non-null FK as ArchiveItem, but unsaved or
+    # integrity-broken PhotoContent can still have archive_item is None.
+    related_archive_item: object = photo.archive_item
+    if related_archive_item is None:
         return BackfillRow(
             photo_person_id=link.pk,
             photo_content_id=photo.pk,
@@ -78,6 +81,7 @@ def _classify_photo_person(link: PhotoPerson) -> BackfillRow:
             status=STATUS_ERROR,
             reason="photo content is missing its archive item",
         )
+    archive_item = cast(ArchiveItem, related_archive_item)
     if archive_item.item_type != ArchiveItem.ItemType.PHOTO:
         return BackfillRow(
             photo_person_id=link.pk,

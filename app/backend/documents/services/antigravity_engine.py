@@ -7,7 +7,6 @@ import logging
 import random
 import re
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, NoReturn
 
@@ -1840,7 +1839,7 @@ def transcribe_band_with_antigravity(
     vision_draft_text: str,
     attempt_kind: str,
     absolute_deadline_monotonic: float,
-    on_interaction_created: Callable[[str], None],
+    on_interaction_created: object,
     poll_seconds: float = DEFAULT_POLL_SECONDS,
     sleep_fn=time.sleep,
     monotonic_fn=time.monotonic,
