@@ -11007,6 +11007,8 @@ class StatusLabelPresentationTests(TestCase):
         resp = self.client.get("/api/ui/documents/")
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "דרושה השלמת פרטים")
+        self.assertContains(resp, ">השלמת פרטים<")
+        self.assertNotContains(resp, ">סטטוס<")
         # Neither the badge nor the metadata_status filter <option> may show the
         # raw English enum label.
         self.assertNotContains(resp, "Needs completion")
@@ -12994,10 +12996,10 @@ class DocumentVisibilityAccessControlTests(TestCase):
         self.assertEqual(item["title"], public_doc.archive_item.title)
         self.assertEqual(item["language"], public_doc.language)
         self.assertEqual(item["doc_type"], public_doc.doc_type)
-        self.assertIn("metadata_status", item)
         self.assertIn("text_input_type", item)
         self.assertIn("created_at", item)
         self.assertIn("updated_at", item)
+        self.assertNotIn("metadata_status", item)
         self.assertNotIn("processing_state_user", item)
         self.assertNotIn("upload_status", item)
         self.assertNotIn("visibility", item)
@@ -13015,7 +13017,7 @@ class DocumentVisibilityAccessControlTests(TestCase):
         item = items[public_doc.id]
         self.assertNotIn("processing_state_user", item)
         self.assertNotIn("upload_status", item)
-        self.assertIn("metadata_status", item)
+        self.assertNotIn("metadata_status", item)
 
     def test_staff_list_api_includes_processing_and_upload_status(self):
         public_doc = self._create_document(
@@ -13033,6 +13035,10 @@ class DocumentVisibilityAccessControlTests(TestCase):
         self.assertEqual(item["upload_status"], Document.UploadStatus.UPLOADED)
         self.assertIn("visibility", item)
         self.assertIn("admin_meta", item)
+        self.assertIn("metadata_status", item)
+        self.assertEqual(
+            item["metadata_status"], public_doc.archive_item.metadata_status
+        )
 
     def test_anonymous_upload_status_query_does_not_hide_public_uploaded_docs(self):
         public_doc = self._create_document(
@@ -13082,22 +13088,77 @@ class DocumentVisibilityAccessControlTests(TestCase):
         self.assertEqual(ids, {failed.id})
         self.assertNotIn(uploaded.id, ids)
 
-    def test_anonymous_list_page_hides_upload_status_filter_keeps_metadata_status(self):
+    def test_anonymous_metadata_status_query_does_not_hide_needs_completion_docs(self):
+        public_doc = self._create_document(
+            visibility=Document.Visibility.PUBLIC,
+            title="Public needs completion stays listed",
+            metadata_status=Document.MetadataStatus.NEEDS_COMPLETION,
+        )
+        resp = self.client.get(
+            "/api/documents/",
+            {"metadata_status": Document.MetadataStatus.COMPLETED},
+        )
+        self.assertEqual(resp.status_code, 200)
+        ids = {item["id"] for item in resp.json()["items"]}
+        self.assertIn(public_doc.id, ids)
+
+    def test_viewer_metadata_status_query_does_not_hide_needs_completion_docs(self):
+        public_doc = self._create_document(
+            visibility=Document.Visibility.PUBLIC,
+            title="Viewer needs completion stays listed",
+            metadata_status=Document.MetadataStatus.NEEDS_COMPLETION,
+        )
+        self.client.force_login(self.viewer)
+        resp = self.client.get(
+            "/api/documents/",
+            {"metadata_status": Document.MetadataStatus.COMPLETED},
+        )
+        self.assertEqual(resp.status_code, 200)
+        ids = {item["id"] for item in resp.json()["items"]}
+        self.assertIn(public_doc.id, ids)
+
+    def test_staff_metadata_status_completed_filter_still_works(self):
+        needs = self._create_document(
+            visibility=Document.Visibility.PUBLIC,
+            title="Staff needs completion filter doc",
+            metadata_status=Document.MetadataStatus.NEEDS_COMPLETION,
+        )
+        completed = self._create_document(
+            visibility=Document.Visibility.PUBLIC,
+            title="Staff completed filter doc",
+            metadata_status=Document.MetadataStatus.COMPLETED,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.get(
+            "/api/documents/",
+            {"metadata_status": Document.MetadataStatus.COMPLETED},
+        )
+        self.assertEqual(resp.status_code, 200)
+        ids = {item["id"] for item in resp.json()["items"]}
+        self.assertEqual(ids, {completed.id})
+        self.assertNotIn(needs.id, ids)
+
+    def test_anonymous_list_page_hides_metadata_status_filter_and_column(self):
         public_doc = self._create_document(
             visibility=Document.Visibility.PUBLIC,
             title="Public metadata column doc",
             metadata_status=Document.MetadataStatus.NEEDS_COMPLETION,
         )
-        resp = self.client.get("/api/ui/documents/")
+        resp = self.client.get(
+            "/api/ui/documents/",
+            {"metadata_status": Document.MetadataStatus.COMPLETED},
+        )
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, public_doc.archive_item.title)
         self.assertNotContains(resp, 'id="filter-upload-status"')
         self.assertNotContains(resp, "סטטוס העלאה")
-        self.assertContains(resp, 'id="filter-metadata-status"')
-        self.assertContains(resp, "השלמת פרטים")
-        self.assertContains(resp, "דרושה השלמת פרטים")
+        self.assertNotContains(resp, 'id="filter-metadata-status"')
+        self.assertNotContains(resp, "השלמת פרטים")
+        self.assertNotContains(resp, "דרושה השלמת פרטים")
+        self.assertNotContains(resp, "פרטים הושלמו")
+        self.assertNotContains(resp, "השלמת פרטים:")
 
-    def test_viewer_list_page_hides_upload_status_filter_keeps_metadata_status(self):
+    def test_viewer_list_page_hides_metadata_status_filter_and_column(self):
         public_doc = self._create_document(
             visibility=Document.Visibility.PUBLIC,
             title="Viewer metadata column doc",
@@ -13106,29 +13167,48 @@ class DocumentVisibilityAccessControlTests(TestCase):
         self.client.force_login(self.viewer)
         resp = self.client.get(
             "/api/ui/documents/",
-            {"upload_status": Document.UploadStatus.FAILED},
+            {
+                "upload_status": Document.UploadStatus.FAILED,
+                "metadata_status": Document.MetadataStatus.NEEDS_COMPLETION,
+            },
         )
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, public_doc.archive_item.title)
         self.assertNotContains(resp, 'id="filter-upload-status"')
         self.assertNotContains(resp, "סטטוס העלאה")
-        self.assertContains(resp, 'id="filter-metadata-status"')
-        self.assertContains(resp, "פרטים הושלמו")
+        self.assertNotContains(resp, 'id="filter-metadata-status"')
+        self.assertNotContains(resp, "השלמת פרטים")
+        self.assertNotContains(resp, "פרטים הושלמו")
+        self.assertNotContains(resp, "דרושה השלמת פרטים")
+        self.assertNotContains(resp, "השלמת פרטים:")
 
     def test_staff_list_page_still_has_upload_status_filter(self):
+        self._create_document(
+            visibility=Document.Visibility.PUBLIC,
+            title="Staff metadata column header doc",
+            metadata_status=Document.MetadataStatus.NEEDS_COMPLETION,
+        )
         self.client.force_login(self.staff)
         resp = self.client.get("/api/ui/documents/")
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'id="filter-upload-status"')
         self.assertContains(resp, "סטטוס העלאה")
         self.assertContains(resp, 'id="filter-metadata-status"')
+        self.assertContains(resp, ">השלמת פרטים<")
+        self.assertNotContains(resp, ">סטטוס<")
+        self.assertContains(resp, "דרושה השלמת פרטים")
         resp = self.client.get(
             "/api/ui/documents/",
-            {"upload_status": Document.UploadStatus.FAILED},
+            {
+                "upload_status": Document.UploadStatus.FAILED,
+                "metadata_status": Document.MetadataStatus.NEEDS_COMPLETION,
+            },
         )
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'id="filter-upload-status"')
         self.assertContains(resp, "סטטוס העלאה:")
+        self.assertContains(resp, "השלמת פרטים:")
+        self.assertContains(resp, "דרושה השלמת פרטים")
 
 
 class DocumentDatePrecisionTests(TestCase):

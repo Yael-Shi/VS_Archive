@@ -5,7 +5,7 @@
 {% block content %}
   <div class="card page-header">
     <h1 class="page-title">מסמכים</h1>
-    <p class="page-subtitle">רשימת כל המסמכים במערכת. ניתן לסנן לפי חיפוש, סוג קובץ והשלמת פרטים. מציג {{ docs|length }} מתוך {{ total }} מסמכים.</p>
+    <p class="page-subtitle">רשימת כל המסמכים במערכת. ניתן לסנן לפי חיפוש{% if is_admin %}, סוג קובץ והשלמת פרטים{% else %} וסוג קובץ{% endif %}. מציג {{ docs|length }} מתוך {{ total }} מסמכים.</p>
 
     <div class="filter-panel">
       <div class="section-title">סינון מסמכים</div>
@@ -29,6 +29,7 @@
           </select>
         </div>
 
+        {% if is_admin %}
         <div class="field">
           <label for="filter-metadata-status">השלמת פרטים</label>
           <select id="filter-metadata-status" name="metadata_status">
@@ -38,6 +39,7 @@
             {% endfor %}
           </select>
         </div>
+        {% endif %}
 
         {% if is_admin %}
         <div class="field">
@@ -86,7 +88,7 @@
             </span>
           {% endif %}
 
-          {% if metadata_status %}
+          {% if is_admin and metadata_status %}
             <span class="filter-chip"><span class="filter-chip__key">השלמת פרטים:</span> {{ metadata_status|metadata_status_label }}</span>
           {% endif %}
 
@@ -113,8 +115,8 @@
           <th class="col-w-55">כותרת</th>
           <th class="col-w-15">שפה</th>
           <th class="col-w-10">סוג</th>
-          <th class="col-w-10">סטטוס</th>
           {% if is_admin %}
+            <th class="col-w-10">השלמת פרטים</th>
             <th class="col-w-10">נראות</th>
           {% endif %}
         </tr>
@@ -149,17 +151,16 @@
               {% if d.doc_type == "IMAGE" %}תמונה{% elif d.doc_type == "PDF" %}PDF{% else %}{{ d.doc_type }}{% endif %}
             </td>
 
+            {% if is_admin %}
             <td>
               {% metadata_status_badge d.archive_item.metadata_status %}
             </td>
-
-            {% if is_admin %}
               <td>{{ d.archive_item.visibility|archive_visibility_display_label }}</td>
             {% endif %}
           </tr>
         {% empty %}
           <tr>
-            <td colspan="{% if is_admin %}5{% else %}4{% endif %}" class="table-empty">
+            <td colspan="{% if is_admin %}5{% else %}3{% endif %}" class="table-empty">
               <div class="empty-state">
                 <div class="empty-state__title">לא נמצאו מסמכים</div>
                 {% if q or doc_type or metadata_status or upload_status or visibility %}
