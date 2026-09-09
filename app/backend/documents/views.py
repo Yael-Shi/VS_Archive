@@ -266,7 +266,9 @@ from documents.services.photo_archive_urls import (
     apply_photo_thumbnail_urls_to_browse_cards,
 )
 from documents.services.photo_gallery import (
+    PUBLIC_PHOTO_QUERY_PARAM,
     build_public_photo_gallery,
+    parse_public_photo_selector,
 )
 from documents.services.archive_advanced_search import (
     EMPTY_ARCHIVE_ADVANCED_FILTER_CHOICE_CONTEXT,
@@ -4959,18 +4961,94 @@ def _photo_inline_edit_prefixes(photo_content: PhotoContent) -> tuple[str, str]:
     return date_widget_prefix, f"{date_widget_prefix}_"
 
 
-def _staff_photo_edit_cards(
+def _staff_photo_edit_url(item_id: int, *, photo_id: int | None = None) -> str:
+    url = reverse("archive-manage-edit", kwargs={"item_id": item_id})
+    if photo_id is None:
+        return url
+    return f"{url}?{urlencode({PUBLIC_PHOTO_QUERY_PARAM: photo_id})}"
+
+
+def _staff_photo_selector_items(
     item: ArchiveItem,
+    rows: list,
+    selected_photo_id: int | None,
+) -> list[dict]:
+    items: list[dict] = []
+    for index, row in enumerate(rows, start=1):
+        photo = row.photo
+        items.append(
+            {
+                "row": row,
+                "label": f"תמונה {index}",
+                "url": _staff_photo_edit_url(item.id, photo_id=photo.id),
+                "is_selected": photo.id == selected_photo_id,
+            }
+        )
+    return items
+
+
+def _resolve_staff_selected_photo(
+    request,
+    photos: list[PhotoContent],
     *,
+    selected_photo_id: int | None = None,
+) -> PhotoContent | None:
+    if not photos:
+        return None
+    if selected_photo_id is not None:
+        for photo in photos:
+            if photo.pk == selected_photo_id:
+                return photo
+        raise Http404()
+    if PUBLIC_PHOTO_QUERY_PARAM not in request.GET:
+        return photos[0]
+    photo_id = parse_public_photo_selector(request.GET.get(PUBLIC_PHOTO_QUERY_PARAM))
+    if photo_id is None:
+        raise Http404()
+    for photo in photos:
+        if photo.pk == photo_id:
+            return photo
+    raise Http404()
+
+
+def _owned_staff_photo_id(item: ArchiveItem, photo_id: int | None) -> int | None:
+    if photo_id is None:
+        return None
+    if item.photo_contents.filter(pk=photo_id).exists():
+        return photo_id
+    return None
+
+
+def _next_staff_photo_id_after_delete(
+    ordered_ids: list[int], deleted_id: int
+) -> int | None:
+    remaining = [photo_id for photo_id in ordered_ids if photo_id != deleted_id]
+    if not remaining:
+        return None
+    try:
+        index = ordered_ids.index(deleted_id)
+    except ValueError:
+        return remaining[0]
+    if index < len(remaining):
+        return remaining[index]
+    return remaining[-1]
+
+
+def _staff_photo_edit_cards(
+    _item: ArchiveItem,
+    rows: list,
+    *,
+    selected_photo_id: int | None,
     inline_photo_id: int | None = None,
     inline_form_data: dict | None = None,
     inline_form_errors: list[str] | None = None,
 ) -> list[dict]:
-    rows = _staff_photo_manage_rows(item)
     picker_people = list(staff_person_picker_queryset())
     cards: list[dict] = []
     for row in rows:
         photo = row.photo
+        if selected_photo_id is not None and photo.id != selected_photo_id:
+            continue
         if inline_photo_id == photo.id and inline_form_data is not None:
             form_data = inline_form_data
             form_errors = list(inline_form_errors or [])
@@ -5026,10 +5104,7 @@ def _save_photo_content_from_staff_post(
 
 
 def _photo_item_edit_redirect(item_id: int, *, photo_id: int | None = None):
-    url = reverse("archive-manage-edit", kwargs={"item_id": item_id})
-    if photo_id is not None:
-        return redirect(f"{url}#photo-{photo_id}")
-    return redirect(url)
+    return redirect(_staff_photo_edit_url(item_id, photo_id=photo_id))
 
 
 def _is_inline_photo_edit_post(post_data) -> bool:
@@ -6040,17 +6115,30 @@ def _render_archive_manage_edit_photo(
     *,
     form_data: dict,
     form_errors: list[str],
+    selected_photo_id: int | None = None,
     inline_photo_id: int | None = None,
     inline_form_data: dict | None = None,
     inline_form_errors: list[str] | None = None,
 ):
+    rows = _staff_photo_manage_rows(item)
+    photos = [row.photo for row in rows]
+    selected = _resolve_staff_selected_photo(
+        request, photos, selected_photo_id=selected_photo_id
+    )
+    selected_id = selected.id if selected is not None else None
     return render(
         request,
         "documents/archive/photo_form.html",
         context={
             "item": item,
+            "show_photo_selector": len(rows) > 1,
+            "photo_selector_items": _staff_photo_selector_items(
+                item, rows, selected_id
+            ),
             "photo_edit_cards": _staff_photo_edit_cards(
                 item,
+                rows,
+                selected_photo_id=selected_id,
                 inline_photo_id=inline_photo_id,
                 inline_form_data=inline_form_data,
                 inline_form_errors=inline_form_errors,
@@ -6190,6 +6278,7 @@ def archive_manage_photo_edit_page(request, item_id: int, photo_id: int):
                 item,
                 form_data=_photo_form_data_from_item(item),
                 form_errors=[],
+                selected_photo_id=photo_content.id,
                 inline_photo_id=photo_content.id,
                 inline_form_data=form_data,
                 inline_form_errors=form_errors,
@@ -6217,6 +6306,10 @@ def archive_manage_photo_reorder(request, item_id: int):
         return HttpResponseBadRequest("POST only")
 
     item = _get_staff_photo_archive_item(request, item_id)
+    selected_photo_id = _owned_staff_photo_id(
+        item,
+        parse_public_photo_selector(request.POST.get("selected_photo_id")),
+    )
     raw_ids = request.POST.getlist("photo_ids")
     ordered_ids: list[int] = []
     try:
@@ -6224,13 +6317,14 @@ def archive_manage_photo_reorder(request, item_id: int):
             ordered_ids.append(int(raw))
     except (TypeError, ValueError):
         messages.error(request, PHOTO_NOT_IN_ITEM_ERROR)
-        return redirect("archive-manage-edit", item_id=item.id)
+        return _photo_item_edit_redirect(item.id, photo_id=selected_photo_id)
 
     try:
         reorder_photo_contents(item, ordered_ids)
     except PhotoContentManagementError as exc:
         messages.error(request, exc.message)
-    return redirect("archive-manage-edit", item_id=item.id)
+        return _photo_item_edit_redirect(item.id, photo_id=selected_photo_id)
+    return _photo_item_edit_redirect(item.id, photo_id=selected_photo_id)
 
 
 @login_required
@@ -6243,6 +6337,9 @@ def archive_manage_photo_delete_page(request, item_id: int, photo_id: int):
     form_errors: list[str] = []
 
     if request.method == "POST":
+        ordered_ids = list(
+            item.photo_contents.order_by("position", "id").values_list("id", flat=True)
+        )
         try:
             delete_one_photo_content(
                 photo_content,
@@ -6251,7 +6348,10 @@ def archive_manage_photo_delete_page(request, item_id: int, photo_id: int):
         except PhotoContentManagementError as exc:
             form_errors = [exc.message]
         else:
-            return redirect("archive-manage-edit", item_id=item.id)
+            next_photo_id = _next_staff_photo_id_after_delete(
+                ordered_ids, photo_content.id
+            )
+            return _photo_item_edit_redirect(item.id, photo_id=next_photo_id)
 
     photo_count = item.photo_contents.count()
     return render(

@@ -29,6 +29,7 @@
               {% if row.move_up_ids %}
                 <form method="post" action="{% url 'archive-manage-photo-reorder' item_id=item.id %}">
                   {% csrf_token %}
+                  <input type="hidden" name="selected_photo_id" value="{{ photo.id }}" />
                   {% for photo_id in row.move_up_ids %}
                     <input type="hidden" name="photo_ids" value="{{ photo_id }}" />
                   {% endfor %}
@@ -38,6 +39,7 @@
               {% if row.move_down_ids %}
                 <form method="post" action="{% url 'archive-manage-photo-reorder' item_id=item.id %}">
                   {% csrf_token %}
+                  <input type="hidden" name="selected_photo_id" value="{{ photo.id }}" />
                   {% for photo_id in row.move_down_ids %}
                     <input type="hidden" name="photo_ids" value="{{ photo_id }}" />
                   {% endfor %}

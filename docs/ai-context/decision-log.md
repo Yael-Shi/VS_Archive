@@ -1350,39 +1350,53 @@ signed confirmation tokens.
 workflow. The standalone per-photo URL remains as a compatibility
 fallback.
 
+**Historical (stacked cards):** The first unified-cards implementation
+rendered **every** PhotoContent as a full inline editor stacked
+vertically on `/archive/manage/<id>/edit/`, and successful inline save
+returned to `#photo-<photo_id>`. That stacked-forms UX is **not** current.
+
 **Current behavior:**
 
 - Shared ArchiveItem metadata stays in its own form at the top
   (title, visibility, item dates, discovery, ArchiveItemPerson).
-- Each PhotoContent is a separate card in `(position, id)` order under
-  **תמונות בפריט זה**, with thumbnail/status/filename, public **צפייה**
-  (`/archive/<id>/?photo=<photo_id>`), move up/down, delete confirmation,
-  and the existing per-photo fields.
-- Each card is an independent `<form>` POSTing to
+- Multi-photo items show a compact staff selector above the editor
+  (thumbnail when available, fallback label **תמונה N**, ordered by
+  `(position, id)`). Entries link to
+  `/archive/manage/<item_id>/edit/?photo=<photo_id>`. The selected entry
+  is marked active. A single-photo item does not render that selector.
+- Only the selected PhotoContent editor is rendered. Absent `?photo=`
+  selects the first photo in `(position, id)` order. A `?photo=` id that
+  is missing, malformed, or owned by another ArchiveItem is HTTP 404
+  (fail closed; unlike public gallery fallback).
+- The selected card is an independent `<form>` POSTing to
   `/archive/manage/<id>/photos/<photo_id>/edit/` with hidden
   `inline_photo_edit=1`. Saving one card updates only that PhotoContent /
   PhotoPerson. It does not write ArchiveItem shared metadata or another
   photo. No inference between ArchiveItemPerson and PhotoPerson.
 - Successful inline save redirects to
-  `/archive/manage/<id>/edit/#photo-<photo_id>`. Validation errors
+  `/archive/manage/<id>/edit/?photo=<photo_id>`. Validation errors
   re-render the **item** edit page (HTTP 200) with submitted values and
-  errors on that card only.
+  errors on that selected photo only.
 - GET/POST without `inline_photo_edit` on the standalone photo-edit URL
   still renders/saves that page and redirects back to itself on success.
 - Date-widget POST `name`s stay unprefixed (`date_precision`,
-  `date_start_*`, `date_end_*`). Photo cards prefix DOM ids via
-  `date_widget_prefix=photo<id>` so multiple widgets can coexist with the
-  unprefixed item-level widget. Other per-photo control ids use the same
-  `photo<id>_` prefix; add-photo and the standalone editor stay
+  `date_start_*`, `date_end_*`). The selected photo editor prefixes DOM
+  ids via `date_widget_prefix=photo<id>` so it can coexist with the
+  unprefixed item-level widget. Add-photo and the standalone editor stay
   unprefixed.
-- Add-photo, reorder, and delete-one-photo endpoints are unchanged.
+- Add-photo, reorder, and delete-one-photo endpoints are unchanged in
+  upload/storage semantics. After add-photo JS success, redirect is
+  `/archive/manage/<id>/edit/?photo=<new_photo_id>` when the new id is
+  known. Reorder returns with `selected_photo_id` when posted.
+  Delete-one-photo redirects to the next remaining photo in
+  `(position, id)` order (or the new last photo), never a deleted id.
 
 **Why:** Editing N photos required a round-trip per photo. Independent
 server-rendered forms keep the existing parse/update path without a
-modal/JS editor or mixed POST of item + photo fields.
+modal/JS editor or mixed POST of item + photo fields. The `?photo=`
+selector avoids stacking every editor on one page.
 
-**Deferred:** staff `?photo=` selector on the item edit URL; removing the
-standalone photo-edit route; add-photo returning with a card hash.
+**Deferred:** removing the standalone photo-edit route.
 
 **Tests:** `documents/test_photo_multi_manage.py`,
 `documents/test_photo_manage_edit_delete.py`,
@@ -1966,7 +1980,8 @@ the first widget only.
 
 **Deferred:** ~~unified staff PHOTO page / actually placing two prefixed
 widgets on a live page~~ → implemented in **Unified staff PHOTO edit
-cards**. Remaining: public UI date widgets; staff `?photo=` selector.
+cards**. Remaining: public UI date widgets. Staff `?photo=` selector is
+implemented in that same cards entry.
 
 **Tests:** `documents/test_archive_date_widget_prefix.py`; existing
 `documents/test_archive_date_input.py` create/edit/upload markup tests.
@@ -1997,22 +2012,27 @@ not change PHOTO item create, shared metadata, redirects, or layout.
 - PHOTO item create (`/api/photo-uploads/create/`) still writes
   **`ArchiveItemPerson` only**. Extra `person_ids` / `new_person_name` on
   that payload are ignored.
-- Add-photo JS still redirects to the item management page.
+- Add-photo JS redirects to
+  `/archive/manage/<id>/edit/?photo=<new_photo_id>` when the created
+  `photo_content_id` is available.
 
 **Why:** Staff often identify people while attaching another image. Waiting
 until the per-photo editor forced a second round-trip.
 
-**Deferred:** unified staff PHOTO page / selector; staff `?photo=` after
-add; lookup/merge by name; parsing `people_present`.
+**Deferred:** lookup/merge by name; parsing `people_present`.
+Staff `?photo=` after add is implemented (see **Unified staff PHOTO edit
+cards**).
 
 **Tests:** `documents/test_photo_multi_manage.py` (`PhotoAddUploadTests`).
 
 ## PHOTO staff save stays on the same page
 
 **Decision / implemented:** Successful staff PHOTO metadata saves remain on
-the page that was submitted. This is a redirect-contract change only. It
-does not unify the shared-metadata page with the per-photo editor, add
-staff `?photo=` selection, or change add-photo / Person write paths.
+the page that was submitted. This was a redirect-contract change only and
+did not itself add staff `?photo=` selection. The later **Unified staff
+PHOTO edit cards** selector now uses `?photo=` on inline save / add /
+reorder / delete-one-photo. Shared and standalone non-inline POST
+contracts here are unchanged.
 
 **Current behavior:**
 
@@ -2027,21 +2047,21 @@ staff `?photo=` selection, or change add-photo / Person write paths.
   edit keeps **חזרה לפריט** to the staff item-management page and adds a
   separate **צפייה** link to `/archive/<id>/?photo=<photo_id>`. Public
   gallery selection behavior is unchanged.
-- Unchanged: PHOTO create redirect to the manage list; add-photo JS
-  redirect to item edit; reorder/delete-one-photo redirects to item edit;
-  whole-item delete redirect to the manage list; `people_present`; date
-  widgets (prefixable, still unprefixed on current pages); public pages.
-  Add-photo PhotoPerson is implemented separately
-  (see **PHOTO add-photo identified people**).
+- Unchanged: PHOTO create redirect to the manage list; whole-item delete
+  redirect to the manage list; `people_present`; public pages. Add-photo
+  JS, reorder, and delete-one-photo still land on item edit and now keep
+  a staff `?photo=` selection when the photo id is known (see **Unified
+  staff PHOTO edit cards**). Add-photo PhotoPerson is implemented
+  separately (see **PHOTO add-photo identified people**).
 
 **Why:** Leaving the item or the edited photo after every save forces extra
 navigation. Stay-on-page matches the already-decided unified-management UX
 without merging layouts yet.
 
 **Deferred (superseded in part):** ~~unified staff PHOTO page~~ →
-**Unified staff PHOTO edit cards**. Remaining: staff `?photo=` selector
-on the item edit URL. Non-inline POST to the standalone photo-edit URL
-still redirects to that same URL.
+**Unified staff PHOTO edit cards**. ~~staff `?photo=` selector on the
+item edit URL~~ → implemented there. Non-inline POST to the standalone
+photo-edit URL still redirects to that same URL.
 
 **Tests:** `documents/test_photo_manage_edit_delete.py`,
 `documents/test_photo_multi_manage.py`.

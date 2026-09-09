@@ -849,6 +849,55 @@ textarea {
   gap: var(--space-2);
 }
 
+.staff-photo-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.staff-photo-selector-link {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 4.75rem;
+  max-width: 7.5rem;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: inherit;
+  text-decoration: none;
+  text-align: center;
+}
+
+.staff-photo-selector-link:hover {
+  border-color: var(--border-strong);
+}
+
+.staff-photo-selector-link:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.staff-photo-selector-link.is-selected {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
+.staff-photo-selector-link .staff-photo-thumb {
+  width: 48px;
+  height: 48px;
+}
+
+.staff-photo-selector-label {
+  font-size: var(--font-xs);
+  font-weight: 600;
+  line-height: var(--line-tight);
+}
+
 .staff-photo-cards {
   display: flex;
   flex-direction: column;

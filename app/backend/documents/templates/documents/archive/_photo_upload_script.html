@@ -36,6 +36,12 @@
     return itemRedirectUrlTemplate.replace("__ITEM_ID__", String(archiveItemId));
   }
 
+  function staffPhotoEditUrl(baseUrl, photoContentId) {
+    if (!baseUrl || !photoContentId) return baseUrl || "";
+    const separator = baseUrl.indexOf("?") >= 0 ? "&" : "?";
+    return baseUrl + separator + "photo=" + encodeURIComponent(String(photoContentId));
+  }
+
   function setErrorMessageWithItemLink(text, archiveItemId) {
     setMessage("error", text);
     const href = itemManageUrl(archiveItemId);
@@ -360,6 +366,7 @@
         mime_type: mimeType,
       })),
     });
+    progress.lastPhotoContentId = (plan && plan.photo_content_id) || null;
     await uploadPlannedPhoto(plan, file, mimeType, "");
     progress.completedCount += 1;
   }
@@ -371,6 +378,7 @@
 
     const progress = {
       archiveItemId: null,
+      lastPhotoContentId: null,
       completedCount: 0,
       failedIndex: -1,
       failedFileName: "",
@@ -402,7 +410,9 @@
       }
 
       setMessage("ok", "בוצע. מעבירה…");
-      const target = itemManageUrl(progress.archiveItemId) || redirectUrl;
+      const target = uploadMode === "add"
+        ? staffPhotoEditUrl(redirectUrl, progress.lastPhotoContentId)
+        : (itemManageUrl(progress.archiveItemId) || redirectUrl);
       window.location.href = target;
     } catch (err) {
       if (showPersonNameDuplicateWarning(err && err.payload)) {

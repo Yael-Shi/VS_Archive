@@ -116,7 +116,7 @@ class PhotoManageEditTests(TestCase):
         self.assertContains(resp, ">חזרה לפריט<")
         self.assertContains(resp, ">צפייה<")
         self.assertContains(resp, f"{public_url}?photo={photo.id}")
-        self.assertContains(resp, "בכרטיס שלה באותו דף")
+        self.assertContains(resp, "בוחרים תמונה לעריכה מעל העורך")
         self.assertNotContains(resp, "עריכת תמונה בודדת נעשית מדף התמונה עצמו")
 
     def test_anonymous_cannot_open_photo_edit_page(self):
