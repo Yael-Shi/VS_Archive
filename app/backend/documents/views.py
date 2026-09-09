@@ -639,7 +639,9 @@ def _base_queryset(
     if is_admin:
         qs = qs.select_related("admin_meta")
 
-    if upload_status:
+    # upload_status query filter is staff/admin operational. Non-staff lists
+    # already force Document.upload_status=UPLOADED in document_queryset_for_user.
+    if is_admin and upload_status:
         qs = qs.filter(upload_status=upload_status)
 
     if doc_type:
@@ -699,8 +701,6 @@ def _serialize_doc(d: Document, *, is_admin: bool) -> dict:
         "category_event": d.category_event,
         "tags": [t.name for t in d.tags_m2m.all()],
         "metadata_status": getattr(item, "metadata_status", None),
-        "upload_status": d.upload_status,
-        "processing_state_user": d.processing_state_user,
         "created_at": d.created_at.isoformat() if d.created_at else None,
         "updated_at": d.updated_at.isoformat() if d.updated_at else None,
     }
@@ -709,6 +709,8 @@ def _serialize_doc(d: Document, *, is_admin: bool) -> dict:
     if is_admin:
         payload.update(
             {
+                "upload_status": d.upload_status,
+                "processing_state_user": d.processing_state_user,
                 "admin_meta": admin_meta,
                 "visibility": item.visibility,
                 "file_s3_key": d.file_s3_key,

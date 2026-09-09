@@ -39,6 +39,7 @@
           </select>
         </div>
 
+        {% if is_admin %}
         <div class="field">
           <label for="filter-upload-status">סטטוס העלאה</label>
           <select id="filter-upload-status" name="upload_status">
@@ -48,6 +49,7 @@
             {% endfor %}
           </select>
         </div>
+        {% endif %}
 
         {% if is_admin %}
           <div class="field">
@@ -88,7 +90,7 @@
             <span class="filter-chip"><span class="filter-chip__key">השלמת פרטים:</span> {{ metadata_status|metadata_status_label }}</span>
           {% endif %}
 
-          {% if upload_status %}
+          {% if is_admin and upload_status %}
             <span class="filter-chip"><span class="filter-chip__key">סטטוס העלאה:</span> {{ upload_status|upload_status_label }}</span>
           {% endif %}
 
