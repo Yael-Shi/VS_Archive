@@ -1,7 +1,8 @@
 """Staff recovery for parked PROCESS_DOCUMENT RECOVERY_REQUIRED Requests.
 
 Abandon is service-only write: no SQS, provider I/O, or retry. Staff HTTP UI
-calls this service. Intentional retry orchestration is out of scope.
+calls this service for abandon-only. Intentional retry orchestration lives in
+`process_document_request_staff_retry` and calls this abandon service first.
 """
 
 from __future__ import annotations
