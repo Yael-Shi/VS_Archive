@@ -1167,8 +1167,9 @@ detail placement are unchanged.
 
 - One indicator (`show_heading=True`, PR1 `HUMAN_VERIFIED`).
 - Markup lives in `archive-detail-manual-text-status` /
-  `archive-detail-manual-text-quality`, above `archive-detail-meta` and the
-  manual text body.
+  `archive-detail-manual-text-quality` inside `document-detail-header-main`,
+  above compact `archive-detail-meta` and the manual text body (no spacer
+  bands between date/quality and metadata).
 - OCR still uses `document-detail-top-meta` via `detail_jump_nav.html`.
 - MANUAL_TEXT popover positioning is CSS-only and scoped under
   `.archive-detail-page--manual-text`; the shared OCR popover rule is
@@ -1177,6 +1178,55 @@ detail placement are unchanged.
 
 **Tests:** `documents/test_manual_text_public_detail_ui.py`,
 `documents/test_text_quality_public_ui.py`.
+
+- Markup lives in `archive-detail-manual-text-status` /
+  `archive-detail-manual-text-quality` inside `document-detail-header-main`,
+  immediately above compact `archive-detail-meta` (no `.spacer` / `.spacer-sm`
+  between date/quality and metadata). The larger `margin-block-start` before
+  the manual text body is unchanged.
+
+## Public archive detail action chrome (canonical Document treatment)
+
+**Decision / implemented:** Public ArchiveItem detail and public People
+directory pages share Document's visual treatment for **חזרה לארכיון**.
+Document OCR detail remains the reference and keeps **מידע והשתתפות**.
+
+**Current behavior:**
+
+- OCR (`/api/ui/documents/<id>/`): blue primary **חזרה לארכיון ←**; visible
+  **מידע והשתתפות** menu; **הוספת מידע על הפריט** stays inside that menu with
+  transcription-correction and technical details. Unchanged.
+- PHOTO / MANUAL_TEXT / VIDEO (`/archive/<id>/`): shared partial
+  `public_archive_nav_actions.html` — blue primary **חזרה לארכיון ←** with a
+  visible default `.btn` **הוספת מידע על הפריט** stacked directly below it in
+  `.document-detail-navigation-actions`. No OCR dropdown. No rename to
+  **מידע והשתתפות**.
+- VIDEO public detail no longer shows a redundant **סרטון** type chip.
+  Staff still see `metadata_status` on VIDEO. PHOTO staff technical details
+  still include **תמונה**. Browse-list type labels are unchanged.
+- MANUAL_TEXT header/nav CSS isolation (dedicated
+  `archive-detail-manual-text-header` / `-navigation-actions` selectors) is
+  superseded; those pages reuse `.document-detail-header` /
+  `.document-detail-navigation-actions`. Quality indicator, body, and
+  signature remain MANUAL_TEXT-specific.
+- `/archive/people/` and `/archive/people/<id>/` keep the `.page-header`
+  band and use the same blue primary back in a Document-like flex header
+  (title/content vs toolbar). No suggest button. Staff
+  `/archive/manage/people/` is unchanged.
+- Unlinked public Author detail (`/archive/authors/<id>/`) uses the same
+  back/header treatment. Linked Author→Person redirects are unchanged.
+  Category/event/tag browse pages and the metadata-suggestion **חזרה לפריט**
+  control are unchanged.
+
+**Supersedes:** MANUAL_TEXT public-detail layout isolation that forbade
+reusing Document/PHOTO header selectors; VIDEO public type-badge on detail.
+
+**Tests:** `documents/test_manual_text_public_detail_ui.py`,
+`documents/test_photo_archive_display.py`,
+`documents/test_video_public.py`,
+`documents/test_archive_people_public_index.py`,
+`documents/test_archive_person_public_page.py`,
+`documents/test_archive_author_public_page.py`.
 
 ## Staff Author merge (explicit ids)
 

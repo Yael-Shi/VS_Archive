@@ -96,22 +96,24 @@ class ManualTextPublicDetailUiTests(TestCase):
             resp,
             reverse("archive-manage-delete", kwargs={"item_id": self.item.id}),
         )
-        self.assertNotContains(
-            resp, "archive-detail-manual-text-staff-management-actions"
-        )
+        self.assertNotContains(resp, "document-detail-staff-management-actions")
         self.assertNotContains(resp, "פרטים טכניים")
         self.assertNotContains(resp, "document-detail-technical")
         self.assertNotContains(
             resp, "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות."
         )
 
-        public_start = html.index("archive-detail-manual-text-navigation-actions")
+        public_start = html.index("document-detail-navigation-actions")
         public_end = html.index("</div>", public_start)
         public_column = html[public_start:public_end]
         self.assertLess(
             public_column.index("חזרה לארכיון"),
             public_column.index("הוספת מידע על הפריט"),
         )
+        self.assertIn("btn-primary", public_column)
+        self.assertIn("←", public_column)
+        self.assertNotIn("מידע והשתתפות", html)
+        self.assertNotIn("btn-secondary", public_column)
 
     def test_staff_detail_keeps_management_actions_and_status_badge(self):
         self.client.force_login(self.staff)
@@ -134,7 +136,7 @@ class ManualTextPublicDetailUiTests(TestCase):
         self.assertNotContains(resp, '<span class="badge">טקסט</span>', html=True)
         self.assertNotContains(resp, "archive-detail-text-heading")
 
-        public_start = html.index("archive-detail-manual-text-navigation-actions")
+        public_start = html.index("document-detail-navigation-actions")
         public_end = html.index("</div>", public_start)
         public_column = html[public_start:public_end]
         self.assertIn("חזרה לארכיון", public_column)
@@ -143,7 +145,7 @@ class ManualTextPublicDetailUiTests(TestCase):
         self.assertNotIn("עריכה", public_column)
         self.assertNotIn("מחיקה", public_column)
 
-        staff_start = html.index("archive-detail-manual-text-staff-management-actions")
+        staff_start = html.index("document-detail-staff-management-actions")
         staff_end = html.index("</div>", staff_start)
         staff_section = html[staff_start:staff_end]
         self.assertIn("עריכה", staff_section)
@@ -160,10 +162,10 @@ class ManualTextPublicDetailUiTests(TestCase):
         resp = self.client.get(self.detail_url)
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "archive-detail-page--manual-text")
-        self.assertContains(resp, "archive-detail-manual-text-header")
-        self.assertContains(resp, "archive-detail-manual-text-header-main")
-        self.assertContains(resp, "archive-detail-manual-text-top")
-        self.assertContains(resp, "archive-detail-manual-text-navigation-actions")
+        self.assertContains(resp, "document-detail-header")
+        self.assertContains(resp, "document-detail-header-main")
+        self.assertContains(resp, "document-detail-toolbar")
+        self.assertContains(resp, "document-detail-navigation-actions")
         self.assertContains(resp, "archive-detail-manual-text-status")
         self.assertContains(resp, "archive-detail-manual-text-quality")
         self.assertContains(resp, "archive-detail-manual-text-body")
@@ -174,9 +176,14 @@ class ManualTextPublicDetailUiTests(TestCase):
             html=True,
         )
         self.assertContains(resp, "manual_text_signature.js")
-        self.assertNotContains(resp, "archive-detail-photo-header")
-        self.assertNotContains(resp, "archive-detail-toolbar")
         self.assertNotContains(resp, "archive-detail-page--photo")
+        self.assertNotContains(resp, "spacer-sm")
+        html = resp.content.decode("utf-8")
+        header = html[html.index("document-detail-header") : html.index("</header>")]
+        self.assertIn("archive-detail-manual-text-quality", header)
+        self.assertIn("archive-detail-meta", header)
+        self.assertNotIn('class="spacer"', header)
+        self.assertNotIn("spacer-sm", header)
 
     def test_manual_text_signature_choice_is_deterministic_from_item_id(self):
         items = [
@@ -277,28 +284,36 @@ class ManualTextDetailDoesNotChangeOtherTypesTests(TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "archive-detail-page--photo")
-        self.assertContains(resp, "archive-detail-photo-header")
-        self.assertContains(resp, "archive-detail-navigation-actions")
-        self.assertContains(resp, "archive-detail-staff-management-actions")
+        self.assertContains(resp, "document-detail-header")
+        self.assertContains(resp, "document-detail-navigation-actions")
+        self.assertContains(resp, "document-detail-staff-management-actions")
         self.assertContains(resp, '<span class="badge">תמונה</span>', html=True)
         self.assertNotContains(resp, "archive-detail-page--manual-text")
-        self.assertNotContains(resp, "archive-detail-manual-text-header")
         self.assertNotContains(resp, "archive-detail-manual-text-status")
         self.assertNotContains(resp, "archive-detail-manual-text-quality")
         self.assertNotContains(resp, "archive-detail-manual-text-body")
         self.assertNotContains(resp, "archive-detail-manual-text-signature")
         self.assertNotContains(resp, "manual_text_signature.js")
 
-    def test_video_detail_keeps_shared_toolbar_and_type_badge(self):
+    def test_video_detail_uses_canonical_nav_without_public_type_badge(self):
         resp = self.client.get(
             reverse("archive-detail", kwargs={"item_id": self.video.id})
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "archive-detail-toolbar")
-        self.assertContains(resp, '<span class="badge">סרטון</span>', html=True)
+        html = resp.content.decode("utf-8")
+        self.assertContains(resp, "document-detail-header")
+        self.assertContains(resp, "document-detail-navigation-actions")
+        self.assertNotContains(resp, '<span class="badge">סרטון</span>', html=True)
         self.assertContains(resp, "הוספת מידע על הפריט")
+        public_start = html.index("document-detail-navigation-actions")
+        public_column = html[public_start : html.index("</div>", public_start)]
+        self.assertIn("btn-primary", public_column)
+        self.assertIn("←", public_column)
+        self.assertLess(
+            public_column.index("חזרה לארכיון"),
+            public_column.index("הוספת מידע על הפריט"),
+        )
         self.assertNotContains(resp, "archive-detail-page--manual-text")
-        self.assertNotContains(resp, "archive-detail-manual-text-header")
         self.assertNotContains(resp, "archive-detail-manual-text-status")
         self.assertNotContains(resp, "archive-detail-manual-text-quality")
         self.assertNotContains(resp, "archive-detail-manual-text-body")
@@ -367,35 +382,52 @@ class ManualTextPublicDetailLayoutStyleTests(SimpleTestCase):
         css_path = settings.BASE_DIR / "public" / "static" / "public" / "app.css"
         return css_path.read_text(encoding="utf-8")
 
-    def test_manual_text_header_actions_follow_photo_column_pattern(self):
+    def test_manual_text_header_actions_reuse_document_detail_column_pattern(self):
         css = self._css()
 
-        header_start = css.index(".archive-detail-manual-text-header {")
+        self.assertNotIn(".archive-detail-manual-text-header {", css)
+        self.assertNotIn(".archive-detail-manual-text-navigation-actions {", css)
+        self.assertNotIn(
+            ".archive-detail-manual-text-staff-management-actions {",
+            css,
+        )
+
+        header_start = css.index(".document-detail-header {")
         header_rule = css[header_start : css.index("}", header_start)]
         self.assertIn("display: flex;", header_rule)
         self.assertIn("flex-wrap: wrap;", header_rule)
         self.assertIn("align-items: flex-start;", header_rule)
 
-        main_start = css.index(".archive-detail-manual-text-header-main {")
+        main_start = css.index(".document-detail-header-main {")
         main_rule = css[main_start : css.index("}", main_start)]
         self.assertIn("flex: 1 1 16rem;", main_rule)
 
-        top_start = css.index(".archive-detail-manual-text-top {")
+        top_start = css.index(".document-detail-toolbar {")
         top_rule = css[top_start : css.index("}", top_start)]
         self.assertIn("justify-content: flex-end;", top_rule)
         self.assertIn("align-items: flex-start;", top_rule)
 
-        public_start = css.index(".archive-detail-manual-text-navigation-actions {")
+        public_start = css.index(".document-detail-navigation-actions {")
         public_rule = css[public_start : css.index("}", public_start)]
         self.assertIn("flex-direction: column;", public_rule)
         self.assertIn("inline-size: max-content;", public_rule)
 
-        staff_start = css.index(
-            ".archive-detail-manual-text-staff-management-actions {"
+        archive_staff_start = css.index(
+            ".archive-detail-page .document-detail-staff-management-actions {"
         )
+        archive_staff_rule = css[
+            archive_staff_start : css.index("}", archive_staff_start)
+        ]
+        self.assertIn("inline-size: max-content;", archive_staff_rule)
+        self.assertIn("max-inline-size: 100%;", archive_staff_rule)
+        self.assertNotIn("display: grid", archive_staff_rule)
+
+        staff_start = css.index("\n.document-detail-staff-management-actions {")
         staff_rule = css[staff_start : css.index("}", staff_start)]
+        self.assertIn("display: flex;", staff_rule)
         self.assertIn("flex-direction: column;", staff_rule)
-        self.assertIn("inline-size: max-content;", staff_rule)
+        self.assertIn("align-items: stretch;", staff_rule)
+        self.assertNotIn("display: grid", staff_rule)
 
     def test_manual_text_quality_badge_css_is_scoped_outside_text_body(self):
         css = self._css()
@@ -555,8 +587,8 @@ class ManualTextPublicDetailLayoutStyleTests(SimpleTestCase):
 
         self.assertIn(".archive-detail-page--manual-text", js)
         self.assertIn(".archive-detail-manual-text-body", js)
-        self.assertIn(".archive-detail-manual-text-navigation-actions", js)
-        self.assertIn(".archive-detail-manual-text-staff-management-actions", js)
+        self.assertIn(".document-detail-navigation-actions", js)
+        self.assertIn(".document-detail-staff-management-actions", js)
         self.assertIn(".archive-detail-manual-text-signature", js)
         self.assertIn("getBoundingClientRect()", js)
         self.assertIn("sideLeft + sideWidth / 2", js)
@@ -639,13 +671,11 @@ class ManualTextPublicDetailLayoutStyleTests(SimpleTestCase):
         self.assertGreater(script_if, -1)
         self.assertGreater(script_endif, script_idx)
 
-        photo_start = template.index('{% if item.item_type == "PHOTO" %}')
-        photo_header_end = template.index(
-            '{% elif item.item_type == "MANUAL_TEXT" %}', photo_start
-        )
-        photo_header = template[photo_start:photo_header_end]
-        self.assertNotIn("archive-detail-manual-text-signature", photo_header)
-        self.assertNotIn("manual_text_signature.js", photo_header)
+        header = template[
+            template.index("<header") : template.index("</header>") + len("</header>")
+        ]
+        self.assertNotIn("archive-detail-manual-text-signature", header)
+        self.assertNotIn("manual_text_signature.js", header)
 
     def test_manual_text_quality_indicator_is_only_in_status_area(self):
         template = self._template()
@@ -671,12 +701,13 @@ class ManualTextPublicDetailLayoutStyleTests(SimpleTestCase):
         self.assertNotIn("text_quality_indicator.html", body)
         self.assertNotIn("text_quality_indicator", body)
 
-    def test_photo_header_selectors_remain_distinct(self):
+    def test_photo_and_manual_text_share_document_header_selectors(self):
         css = self._css()
-        photo_header = css[
-            css.index(".archive-detail-photo-header {") : css.index(
-                "}", css.index(".archive-detail-photo-header {")
+        self.assertNotIn(".archive-detail-photo-header {", css)
+        header = css[
+            css.index(".document-detail-header {") : css.index(
+                "}", css.index(".document-detail-header {")
             )
         ]
-        self.assertIn("display: flex;", photo_header)
-        self.assertNotIn("archive-detail-manual-text", photo_header)
+        self.assertIn("display: flex;", header)
+        self.assertNotIn("archive-detail-manual-text", header)

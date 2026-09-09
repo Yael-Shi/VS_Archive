@@ -299,9 +299,7 @@ class ArchivePersonPublicDetailTests(TestCase):
         self.assertContains(resp, "אנשים בתמונה")
         self.assertContains(resp, "Photo Identified Person")
         self.assertContains(resp, _person_href_html(identified))
-        header = html[
-            html.index("archive-detail-photo-header") : html.index("</header>")
-        ]
+        header = html[html.index("document-detail-header") : html.index("</header>")]
         self.assertIn("אנשים קשורים לפריט", header)
         self.assertIn("Item Related Person", header)
         self.assertIn(_person_href_html(related), header)

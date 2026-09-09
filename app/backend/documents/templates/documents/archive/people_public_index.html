@@ -3,11 +3,14 @@
 
 {% block content %}
   <div class="card page-header" id="archive-top">
-    <h1 class="page-title">{{ page_title }}</h1>
-
-    <div class="page-toolbar page-toolbar--archive-browse">
-      <a class="btn" href="{% url 'archive-list' %}">חזרה לארכיון</a>
-    </div>
+    <header class="document-detail-header">
+      <div class="document-detail-header-main">
+        <h1 class="page-title document-detail-title">{{ page_title }}</h1>
+      </div>
+      <div class="page-toolbar document-detail-toolbar">
+        {% include "documents/partials/detail_back_to_archive.html" %}
+      </div>
+    </header>
 
     <section class="archive-search-panel" aria-label="חיפוש אנשים">
       <form method="get" class="archive-search-form" action="{% url 'archive-people-index' %}">
