@@ -698,18 +698,18 @@ def _serialize_doc(d: Document, *, is_admin: bool) -> dict:
         "date_start": item.date_start.isoformat() if item.date_start else None,
         "date_end": item.date_end.isoformat() if item.date_end else None,
         "language": d.language,
-        "text_input_type": d.text_input_type,
         "doc_type": d.doc_type,
-        "category_event": d.category_event,
-        "tags": [t.name for t in d.tags_m2m.all()],
-        "created_at": d.created_at.isoformat() if d.created_at else None,
-        "updated_at": d.updated_at.isoformat() if d.updated_at else None,
     }
 
     # Admin-only operational + admin metadata
     if is_admin:
         payload.update(
             {
+                "text_input_type": d.text_input_type,
+                "category_event": d.category_event,
+                "tags": [t.name for t in d.tags_m2m.all()],
+                "created_at": d.created_at.isoformat() if d.created_at else None,
+                "updated_at": d.updated_at.isoformat() if d.updated_at else None,
                 "upload_status": d.upload_status,
                 "processing_state_user": d.processing_state_user,
                 "admin_meta": admin_meta,
