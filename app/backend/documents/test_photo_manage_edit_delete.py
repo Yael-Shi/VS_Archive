@@ -48,6 +48,12 @@ def _create_photo_archive_item(
     return item
 
 
+def _primary_photo(item: ArchiveItem) -> PhotoContent:
+    photo = item.primary_photo_content
+    assert photo is not None
+    return photo
+
+
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
 class PhotoManageEditTests(TestCase):
     EDIT_URL_TEMPLATE = "/archive/manage/{item_id}/edit/"
@@ -99,7 +105,7 @@ class PhotoManageEditTests(TestCase):
         self.assertNotContains(resp, 'name="author_name"')
         self.assertNotContains(resp, 'name="source_title"')
         self.assertNotContains(resp, 'name="body"')
-        photo = self.photo_item.primary_photo_content
+        photo = _primary_photo(self.photo_item)
         self.assertContains(
             resp,
             reverse(
@@ -173,8 +179,12 @@ class PhotoManageEditTests(TestCase):
         self.assertEqual(
             self.photo_item.metadata_status, ArchiveItem.MetadataStatus.COMPLETED
         )
-        self.assertEqual(self.photo_item.date_start.isoformat(), "1940-05-01")
-        self.assertEqual(self.photo_item.date_end.isoformat(), "1940-05-31")
+        date_start = self.photo_item.date_start
+        date_end = self.photo_item.date_end
+        assert date_start is not None
+        assert date_end is not None
+        self.assertEqual(date_start.isoformat(), "1940-05-01")
+        self.assertEqual(date_end.isoformat(), "1940-05-31")
         self.assertEqual(
             self.photo_item.date_precision, ArchiveItem.DatePrecision.RANGE
         )
@@ -192,7 +202,7 @@ class PhotoManageEditTests(TestCase):
         self.assertContains(resp, "שגיאה בטופס")
 
     def test_staff_can_update_photo_metadata_on_photo_component_page(self):
-        photo = self.photo_item.primary_photo_content
+        photo = _primary_photo(self.photo_item)
         photo_edit_url = reverse(
             "archive-manage-photo-edit",
             kwargs={"item_id": self.photo_item.id, "photo_id": photo.id},
@@ -219,7 +229,7 @@ class PhotoManageEditTests(TestCase):
         self.assertEqual(photo.notes, "Scanned from album page 3")
 
     def test_item_edit_does_not_overwrite_photo_component_metadata(self):
-        photo = self.photo_item.primary_photo_content
+        photo = _primary_photo(self.photo_item)
         photo.description = "Keep me"
         photo.location = "Keep location"
         photo.save(update_fields=["description", "location", "updated_at"])
@@ -357,7 +367,7 @@ class PhotoManageEditTests(TestCase):
             ArchiveItem.MetadataStatus.COMPLETED,
         )
         self.assertEqual(
-            pending_item.primary_photo_content.upload_status,
+            _primary_photo(pending_item).upload_status,
             PhotoContent.UploadStatus.PENDING,
         )
 
@@ -376,16 +386,15 @@ class PhotoManageEditTests(TestCase):
         self.assertEqual(detail_resp.status_code, 404)
 
     def test_photo_edit_does_not_change_original_file_key(self):
-        original_key = self.photo_item.primary_photo_content.original_file_key
+        photo = _primary_photo(self.photo_item)
+        original_key = photo.original_file_key
         self.client.force_login(self.staff)
         self.client.post(
             self.EDIT_URL_TEMPLATE.format(item_id=self.photo_item.id),
             data=self._photo_edit_payload(title="Key unchanged photo"),
         )
-        self.photo_item.primary_photo_content.refresh_from_db()
-        self.assertEqual(
-            self.photo_item.primary_photo_content.original_file_key, original_key
-        )
+        photo.refresh_from_db()
+        self.assertEqual(photo.original_file_key, original_key)
 
     @patch("documents.services.sqs.send_process_document_message")
     def test_photo_edit_does_not_create_document_or_enqueue_sqs(self, mock_enqueue):
@@ -452,7 +461,7 @@ class PhotoManageDeleteTests(TestCase):
             name=ARCHIVE_FAMILY_GROUP_NAME
         )
         self.photo_item = _create_photo_archive_item(title="Deletable photo")
-        self.photo_content_id = self.photo_item.primary_photo_content.id
+        self.photo_content_id = _primary_photo(self.photo_item).id
 
     def _delete_url(self, item_id: int) -> str:
         return self.DELETE_URL_TEMPLATE.format(item_id=item_id)
@@ -497,7 +506,7 @@ class PhotoManageDeleteTests(TestCase):
         self, mock_delete_s3_object
     ):
         item_id = self.photo_item.id
-        photo = self.photo_item.primary_photo_content
+        photo = _primary_photo(self.photo_item)
         photo.thumbnail_file_key = "photos/55/thumbnail_400.jpg"
         photo.save(update_fields=["thumbnail_file_key", "updated_at"])
 

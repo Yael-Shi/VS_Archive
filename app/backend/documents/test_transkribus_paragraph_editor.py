@@ -535,6 +535,7 @@ class ParagraphEditorSaveTests(TestCase):
         self.assertEqual(response.status_code, 302)
         mapping = get_paragraph_mapping_for_snapshot(self.snapshot)
         self.assertIsNotNone(mapping)
+        assert mapping is not None
         self.assertEqual(mapping.breaks.count(), 0)
         self.assertIsNone(mapping.copied_from_id)
         self.assertEqual(mapping.created_by_id, self.staff.pk)
@@ -546,6 +547,7 @@ class ParagraphEditorSaveTests(TestCase):
     def test_post_boundaries_creates_break_rows(self):
         self._post(breaks=[self.alpha.pk])
         mapping = get_paragraph_mapping_for_snapshot(self.snapshot)
+        assert mapping is not None
         self.assertEqual(
             list(mapping.breaks.values_list("after_line_id", flat=True)),
             [self.alpha.pk],
@@ -555,6 +557,7 @@ class ParagraphEditorSaveTests(TestCase):
         save_paragraph_mapping(self.snapshot, [self.alpha.pk], actor=self.staff)
         self._post(breaks=[self.beta.pk])
         mapping = get_paragraph_mapping_for_snapshot(self.snapshot)
+        assert mapping is not None
         self.assertEqual(mapping.breaks.count(), 1)
         self.assertEqual(mapping.breaks.get().after_line_id, self.beta.pk)
 
@@ -793,6 +796,7 @@ class ParagraphEditorPageBoundaryTests(TestCase):
             },
         )
         mapping = get_paragraph_mapping_for_snapshot(self.snapshot)
+        assert mapping is not None
         self.assertEqual(
             list(mapping.breaks.values_list("after_line_id", flat=True)),
             [self.alpha.pk],
@@ -811,6 +815,7 @@ class ParagraphEditorPageBoundaryTests(TestCase):
             },
         )
         mapping = get_paragraph_mapping_for_snapshot(self.snapshot)
+        assert mapping is not None
         self.assertEqual(mapping.breaks.count(), 0)
         follow = self.client.get(self.url)
         self.assertContains(follow, "מעבר לעמוד 2")

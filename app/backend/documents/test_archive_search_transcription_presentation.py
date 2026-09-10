@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
@@ -529,6 +530,8 @@ class ArchiveSearchTranscriptionDetailRenderTests(TestCase):
 
 class ArchiveSearchOverlayScrollContractTests(SimpleTestCase):
     """Source-level contract checks for bidirectional match scroll intents."""
+
+    js_source: ClassVar[str]
 
     @classmethod
     def setUpClass(cls):

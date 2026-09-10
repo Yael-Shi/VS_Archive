@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from io import StringIO
+from typing import Protocol, cast
 from unittest.mock import patch
 
 from django.contrib.admin.sites import AdminSite
@@ -46,12 +48,47 @@ from documents.test_historical_person_tag_reuse import (
 )
 
 BLOCKED_TAG_ID = 29
-BLOCKED_PERSON_ID = person_id_for_historical_person_name_tag(BLOCKED_TAG_ID)
 DOCUMENT_MAPPED_TAG_ID = 8
-DOCUMENT_MAPPED_PERSON_ID = person_id_for_historical_person_name_tag(
+COMMAND_NAME = "cleanup_historical_person_tags"
+
+_blocked_person_id = person_id_for_historical_person_name_tag(BLOCKED_TAG_ID)
+assert _blocked_person_id is not None
+BLOCKED_PERSON_ID = _blocked_person_id
+_document_mapped_person_id = person_id_for_historical_person_name_tag(
     DOCUMENT_MAPPED_TAG_ID
 )
-COMMAND_NAME = "cleanup_historical_person_tags"
+assert _document_mapped_person_id is not None
+DOCUMENT_MAPPED_PERSON_ID = _document_mapped_person_id
+
+
+class _ThroughRow(Protocol):
+    id: int
+
+
+class _ThroughQuerySet(Protocol):
+    def values_list(
+        self, *args: str, **kwargs: object
+    ) -> Iterable[tuple[object, ...]]: ...
+    def filter(self, **kwargs: object) -> _ThroughQuerySet: ...
+    def order_by(self, *args: str) -> _ThroughQuerySet: ...
+    def get(self, **kwargs: object) -> _ThroughRow: ...
+    def create(self, **kwargs: object) -> _ThroughRow: ...
+    def count(self) -> int: ...
+    def exists(self) -> bool: ...
+
+    model: type[object]
+
+
+class _ThroughModel(Protocol):
+    objects: _ThroughQuerySet
+
+
+def _archive_item_tags_through() -> _ThroughModel:
+    return cast(_ThroughModel, ArchiveItem.tags.through)
+
+
+def _document_tags_through() -> _ThroughModel:
+    return cast(_ThroughModel, Document.tags_m2m.through)
 
 
 def _seed_frozen_map_rows() -> None:
@@ -95,8 +132,8 @@ class CleanupHistoricalPersonTagsCommandTests(TestCase):
         self.assertIn("missing Person ids", str(caught.exception))
         self.assertNotIn("missing Tag ids", str(caught.exception))
         self.assertEqual(item.tags.count(), 0)
-        self.assertEqual(ArchiveItem.tags.through.objects.count(), 0)
-        self.assertEqual(Document.tags_m2m.through.objects.count(), 0)
+        self.assertEqual(_archive_item_tags_through().objects.count(), 0)
+        self.assertEqual(_document_tags_through().objects.count(), 0)
 
     def test_all_mapped_tag_rows_absent_is_zero_plan_success(self):
         _seed_frozen_person_rows()
@@ -117,8 +154,8 @@ class CleanupHistoricalPersonTagsCommandTests(TestCase):
         self.assertIn("planned: 0", apply_output)
         self.assertIn("deleted: 0", apply_output)
         self.assertEqual(Tag.objects.filter(pk__in=mapped_ids).count(), 0)
-        self.assertEqual(ArchiveItem.tags.through.objects.count(), 0)
-        self.assertEqual(Document.tags_m2m.through.objects.count(), 0)
+        self.assertEqual(_archive_item_tags_through().objects.count(), 0)
+        self.assertEqual(_document_tags_through().objects.count(), 0)
 
     def test_partial_mapped_tag_ids_fail_closed(self):
         _seed_frozen_person_rows()
@@ -141,7 +178,7 @@ class CleanupHistoricalPersonTagsCommandTests(TestCase):
         self.assertEqual(
             Tag.objects.filter(pk__in=historical_person_name_tag_ids()).count(), 28
         )
-        self.assertEqual(ArchiveItem.tags.through.objects.count(), 0)
+        self.assertEqual(_archive_item_tags_through().objects.count(), 0)
 
     def test_missing_archive_item_person_fails_before_writes(self):
         _seed_frozen_map_rows()
@@ -155,9 +192,9 @@ class CleanupHistoricalPersonTagsCommandTests(TestCase):
         create_archive_item_person(archive_item=linked_item, person=person)
 
         item_through_before = list(
-            ArchiveItem.tags.through.objects.order_by("id").values_list(
-                "id", "archiveitem_id", "tag_id"
-            )
+            _archive_item_tags_through()
+            .objects.order_by("id")
+            .values_list("id", "archiveitem_id", "tag_id")
         )
         stdout = StringIO()
         with self.assertRaises(CommandError) as caught:
@@ -166,9 +203,9 @@ class CleanupHistoricalPersonTagsCommandTests(TestCase):
         self.assertIn(str(missing_item.id), str(caught.exception))
         self.assertEqual(
             list(
-                ArchiveItem.tags.through.objects.order_by("id").values_list(
-                    "id", "archiveitem_id", "tag_id"
-                )
+                _archive_item_tags_through()
+                .objects.order_by("id")
+                .values_list("id", "archiveitem_id", "tag_id")
             ),
             item_through_before,
         )
@@ -177,9 +214,9 @@ class CleanupHistoricalPersonTagsCommandTests(TestCase):
             call_command(COMMAND_NAME, "--apply-relations", stdout=StringIO())
         self.assertEqual(
             list(
-                ArchiveItem.tags.through.objects.order_by("id").values_list(
-                    "id", "archiveitem_id", "tag_id"
-                )
+                _archive_item_tags_through()
+                .objects.order_by("id")
+                .values_list("id", "archiveitem_id", "tag_id")
             ),
             item_through_before,
         )
@@ -198,7 +235,7 @@ class CleanupHistoricalPersonTagsCommandTests(TestCase):
         item = create_manual_text_archive_item(title="Tagged item", body="Body")
         item.tags.add(blocked, ordinary)
         create_archive_item_person(archive_item=item, person=person)
-        through = ArchiveItem.tags.through.objects.get(
+        through = _archive_item_tags_through().objects.get(
             archiveitem_id=item.id, tag_id=blocked.pk
         )
 
@@ -218,9 +255,9 @@ class CleanupHistoricalPersonTagsCommandTests(TestCase):
         )
         self.assertIn(str(planned_row), output)
         self.assertTrue(
-            ArchiveItem.tags.through.objects.filter(
-                archiveitem_id=item.id, tag_id=BLOCKED_TAG_ID
-            ).exists()
+            _archive_item_tags_through()
+            .objects.filter(archiveitem_id=item.id, tag_id=BLOCKED_TAG_ID)
+            .exists()
         )
         self.assertTrue(item.tags.filter(pk=ordinary.pk).exists())
         self.assertTrue(Tag.objects.filter(pk=BLOCKED_TAG_ID).exists())
@@ -245,10 +282,10 @@ class CleanupHistoricalPersonTagsCommandTests(TestCase):
         )
         doc.tags_m2m.add(mapped_doc_tag, ordinary)
         doc.archive_item.tags.add(ordinary)
-        item_through = ArchiveItem.tags.through.objects.get(
+        item_through = _archive_item_tags_through().objects.get(
             archiveitem_id=item.id, tag_id=BLOCKED_TAG_ID
         )
-        doc_through = Document.tags_m2m.through.objects.get(
+        doc_through = _document_tags_through().objects.get(
             document_id=doc.id, tag_id=DOCUMENT_MAPPED_TAG_ID
         )
         person_links_before = list(
@@ -292,14 +329,14 @@ class CleanupHistoricalPersonTagsCommandTests(TestCase):
         self.assertIn(str(item_row), output)
         self.assertIn(str(doc_row), output)
         self.assertFalse(
-            ArchiveItem.tags.through.objects.filter(
-                archiveitem_id=item.id, tag_id=BLOCKED_TAG_ID
-            ).exists()
+            _archive_item_tags_through()
+            .objects.filter(archiveitem_id=item.id, tag_id=BLOCKED_TAG_ID)
+            .exists()
         )
         self.assertFalse(
-            Document.tags_m2m.through.objects.filter(
-                document_id=doc.id, tag_id=DOCUMENT_MAPPED_TAG_ID
-            ).exists()
+            _document_tags_through()
+            .objects.filter(document_id=doc.id, tag_id=DOCUMENT_MAPPED_TAG_ID)
+            .exists()
         )
         item.refresh_from_db()
         self.assertEqual(list(item.tags.values_list("pk", flat=True)), [ordinary.pk])
@@ -354,9 +391,9 @@ class CleanupHistoricalPersonTagsCommandTests(TestCase):
         item.tags.add(blocked)
         create_archive_item_person(archive_item=item, person=person)
         through_before = list(
-            ArchiveItem.tags.through.objects.order_by("id").values_list(
-                "id", "archiveitem_id", "tag_id"
-            )
+            _archive_item_tags_through()
+            .objects.order_by("id")
+            .values_list("id", "archiveitem_id", "tag_id")
         )
 
         with patch(
@@ -369,9 +406,9 @@ class CleanupHistoricalPersonTagsCommandTests(TestCase):
 
         self.assertEqual(
             list(
-                ArchiveItem.tags.through.objects.order_by("id").values_list(
-                    "id", "archiveitem_id", "tag_id"
-                )
+                _archive_item_tags_through()
+                .objects.order_by("id")
+                .values_list("id", "archiveitem_id", "tag_id")
             ),
             through_before,
         )
@@ -428,9 +465,9 @@ class CleanupHistoricalPersonTagsCommandTests(TestCase):
         item.tags.add(blocked)
         create_archive_item_person(archive_item=item, person=person)
         through_before = list(
-            ArchiveItem.tags.through.objects.order_by("id").values_list(
-                "id", "archiveitem_id", "tag_id"
-            )
+            _archive_item_tags_through()
+            .objects.order_by("id")
+            .values_list("id", "archiveitem_id", "tag_id")
         )
         real_delete = QuerySet.delete
 
@@ -446,9 +483,9 @@ class CleanupHistoricalPersonTagsCommandTests(TestCase):
         self.assertIn("delete count mismatch", str(caught.exception))
         self.assertEqual(
             list(
-                ArchiveItem.tags.through.objects.order_by("id").values_list(
-                    "id", "archiveitem_id", "tag_id"
-                )
+                _archive_item_tags_through()
+                .objects.order_by("id")
+                .values_list("id", "archiveitem_id", "tag_id")
             ),
             through_before,
         )
@@ -470,9 +507,9 @@ class CleanupHistoricalPersonTagsCommandTests(TestCase):
         item.tags.add(blocked)
         create_archive_item_person(archive_item=item, person=person)
         through_before = list(
-            ArchiveItem.tags.through.objects.order_by("id").values_list(
-                "id", "archiveitem_id", "tag_id"
-            )
+            _archive_item_tags_through()
+            .objects.order_by("id")
+            .values_list("id", "archiveitem_id", "tag_id")
         )
         self.assertEqual(len(through_before), 1)
         real_delete = QuerySet.delete
@@ -482,7 +519,7 @@ class CleanupHistoricalPersonTagsCommandTests(TestCase):
             result = real_delete(queryset)
             if queryset.model is ArchiveItem.tags.through:
                 test_case.assertEqual(result[0], 1)
-                ArchiveItem.tags.through.objects.create(
+                _archive_item_tags_through().objects.create(
                     archiveitem_id=extra_item.id,
                     tag_id=blocked.pk,
                 )
@@ -498,16 +535,16 @@ class CleanupHistoricalPersonTagsCommandTests(TestCase):
         self.assertNotIn("delete count mismatch", str(caught.exception))
         self.assertEqual(
             list(
-                ArchiveItem.tags.through.objects.order_by("id").values_list(
-                    "id", "archiveitem_id", "tag_id"
-                )
+                _archive_item_tags_through()
+                .objects.order_by("id")
+                .values_list("id", "archiveitem_id", "tag_id")
             ),
             through_before,
         )
         self.assertFalse(
-            ArchiveItem.tags.through.objects.filter(
-                archiveitem_id=extra_item.id
-            ).exists()
+            _archive_item_tags_through()
+            .objects.filter(archiveitem_id=extra_item.id)
+            .exists()
         )
         output = stdout.getvalue()
         self.assertNotIn("mode: apply-relations", output)

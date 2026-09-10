@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -143,7 +144,7 @@ class TranskribusTimestampParsingTests(SimpleTestCase):
         self.assertIsNone(_parse_timestamp_epoch(""))
 
     def test_best_parsed_timestamp_uses_highest_comparable_value(self):
-        fields = {
+        fields: Mapping[str, str | int | float] = {
             "timestamp": _EPOCH_2020,
             "modified": _EPOCH_2024_ISO,
         }

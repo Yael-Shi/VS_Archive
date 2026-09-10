@@ -573,6 +573,7 @@ class TextLineHoverOverlayPagesTests(SimpleTestCase):
             pages,
         )
 
+        assert single is not None
         self.assertEqual(single.page_index, 1)
         self.assertEqual(single.targets, (target,))
         self.assertEqual(applied[0]["text_line_hover_overlay_targets"], (target,))

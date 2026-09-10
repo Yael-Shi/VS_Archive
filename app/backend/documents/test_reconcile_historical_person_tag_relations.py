@@ -30,7 +30,9 @@ from documents.services.historical_person_tag_reconciliation import (
 from documents.tag_pk_sequence_support import reset_pk_sequence as _reset_pk_sequence
 
 BLOCKED_TAG_ID = 29
-BLOCKED_PERSON_ID = person_id_for_historical_person_name_tag(BLOCKED_TAG_ID)
+_blocked_person_id = person_id_for_historical_person_name_tag(BLOCKED_TAG_ID)
+assert _blocked_person_id is not None
+BLOCKED_PERSON_ID = _blocked_person_id
 COMMAND_NAME = "reconcile_historical_person_tag_relations"
 
 
@@ -127,8 +129,12 @@ class ReconcileHistoricalPersonTagRelationsCommandTests(TestCase):
 
     def test_dry_run_identifies_missing_link_and_writes_nothing(self):
         _seed_frozen_map_rows()
-        blocked = Tag.objects.get(pk=BLOCKED_TAG_ID)
-        person = Person.objects.get(pk=BLOCKED_PERSON_ID)
+        tag_id = BLOCKED_TAG_ID
+        person_id = BLOCKED_PERSON_ID
+        assert tag_id is not None
+        assert person_id is not None
+        blocked = Tag.objects.get(pk=tag_id)
+        person = Person.objects.get(pk=person_id)
         linked_item = create_manual_text_archive_item(title="Already linked", body="A")
         missing_item = create_manual_text_archive_item(title="Missing person", body="B")
         linked_item.tags.add(blocked)
@@ -167,8 +173,12 @@ class ReconcileHistoricalPersonTagRelationsCommandTests(TestCase):
 
     def test_apply_creates_only_missing_archive_item_person_links(self):
         _seed_frozen_map_rows()
-        blocked = Tag.objects.get(pk=BLOCKED_TAG_ID)
-        person = Person.objects.get(pk=BLOCKED_PERSON_ID)
+        tag_id = BLOCKED_TAG_ID
+        person_id = BLOCKED_PERSON_ID
+        assert tag_id is not None
+        assert person_id is not None
+        blocked = Tag.objects.get(pk=tag_id)
+        person = Person.objects.get(pk=person_id)
         extra_person = Person.objects.create(name="unrelated-already-linked")
         linked_item = create_manual_text_archive_item(title="Has person", body="A")
         missing_item = create_manual_text_archive_item(title="Needs person", body="B")
@@ -223,8 +233,12 @@ class ReconcileHistoricalPersonTagRelationsCommandTests(TestCase):
 
     def test_apply_does_not_mutate_photo_person(self):
         _seed_frozen_map_rows()
-        blocked = Tag.objects.get(pk=BLOCKED_TAG_ID)
-        mapped_person = Person.objects.get(pk=BLOCKED_PERSON_ID)
+        tag_id = BLOCKED_TAG_ID
+        person_id = BLOCKED_PERSON_ID
+        assert tag_id is not None
+        assert person_id is not None
+        blocked = Tag.objects.get(pk=tag_id)
+        mapped_person = Person.objects.get(pk=person_id)
         item, photo = _create_photo_item(title="Photo drift")
         appearance = Person.objects.create(name="appearance-only")
         PhotoPerson.objects.create(photo_content=photo, person=appearance)
@@ -258,8 +272,12 @@ class ReconcileHistoricalPersonTagRelationsCommandTests(TestCase):
 
     def test_plan_is_id_only_and_ignores_names(self):
         _seed_frozen_map_rows()
-        blocked = Tag.objects.get(pk=BLOCKED_TAG_ID)
-        mapped_person = Person.objects.get(pk=BLOCKED_PERSON_ID)
+        tag_id = BLOCKED_TAG_ID
+        person_id = BLOCKED_PERSON_ID
+        assert tag_id is not None
+        assert person_id is not None
+        blocked = Tag.objects.get(pk=tag_id)
+        mapped_person = Person.objects.get(pk=person_id)
         self.assertNotEqual(blocked.name, mapped_person.name)
         decoy = Person.objects.create(name=blocked.name)
         missing_item = create_manual_text_archive_item(title="Name decoy", body="Body")
@@ -274,7 +292,7 @@ class ReconcileHistoricalPersonTagRelationsCommandTests(TestCase):
         call_command(COMMAND_NAME, "--apply", stdout=StringIO())
         self.assertTrue(
             ArchiveItemPerson.objects.filter(
-                archive_item=missing_item, person_id=BLOCKED_PERSON_ID
+                archive_item=missing_item, person_id=person_id
             ).exists()
         )
         self.assertFalse(

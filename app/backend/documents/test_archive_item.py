@@ -5370,9 +5370,13 @@ class ArchiveItemDiscoveryMetadataFoundationTests(TestCase):
         ).archive_item
         item_one.categories.add(category)
         item_two.categories.add(category)
-        self.assertEqual(category.archive_items.count(), 2)
+        self.assertEqual(ArchiveItem.objects.filter(categories=category).count(), 2)
         self.assertEqual(
-            set(category.archive_items.values_list("title", flat=True)),
+            set(
+                ArchiveItem.objects.filter(categories=category).values_list(
+                    "title", flat=True
+                )
+            ),
             {"Item one", "Item two"},
         )
 
@@ -5406,7 +5410,7 @@ class ArchiveItemDiscoveryMetadataFoundationTests(TestCase):
         ).archive_item
         manual_item.events.add(event)
         ocr_item.events.add(event)
-        self.assertEqual(event.archive_items.count(), 2)
+        self.assertEqual(ArchiveItem.objects.filter(events=event).count(), 2)
 
     def test_archive_item_tags_use_archive_item_level_relation(self):
         item = create_manual_text_archive_item(title="Tagged item", body="Body")
@@ -5417,7 +5421,7 @@ class ArchiveItemDiscoveryMetadataFoundationTests(TestCase):
             set(item.tags.values_list("name", flat=True)),
             {"family", "cairo"},
         )
-        self.assertEqual(tag_a.archive_items.get(), item)
+        self.assertEqual(ArchiveItem.objects.filter(tags=tag_a).get(), item)
 
     def test_document_tags_m2m_is_separate_from_archive_item_tags(self):
         doc = create_ocr_document(
@@ -5441,8 +5445,8 @@ class ArchiveItemDiscoveryMetadataFoundationTests(TestCase):
             set(item.tags.values_list("name", flat=True)),
             {"shared-label", "item-only"},
         )
-        self.assertEqual(shared_tag.documents.get(), doc)
-        self.assertEqual(shared_tag.archive_items.get(), item)
+        self.assertEqual(Document.objects.filter(tags_m2m=shared_tag).get(), doc)
+        self.assertEqual(ArchiveItem.objects.filter(tags=shared_tag).get(), item)
 
     def test_create_ocr_document_does_not_require_discovery_metadata(self):
         doc = create_ocr_document(
@@ -5591,7 +5595,9 @@ class ArchiveItemDiscoveryMetadataEditTests(TestCase):
         self.assertTrue(
             ArchiveEvent.objects.filter(name="New event", slug="new-event").exists()
         )
-        self.assertEqual(existing_cat.archive_items.get(), item)
+        self.assertEqual(
+            ArchiveItem.objects.filter(categories=existing_cat).get(), item
+        )
 
     def test_manual_text_post_clears_discovery_metadata(self):
         item = create_manual_text_archive_item(title="Clear manual", body="Body")

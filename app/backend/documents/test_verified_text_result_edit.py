@@ -272,8 +272,10 @@ class VerifiedTextResultEditTests(TestCase):
         )
 
         source.refresh_from_db()
+        source_text = source.text
+        assert source_text is not None
         self.assertFalse(
-            texts_are_equivalent(source.text, suggestion.current_text_snapshot)
+            texts_are_equivalent(source_text, suggestion.current_text_snapshot)
         )
 
         self.client.force_login(self.staff)

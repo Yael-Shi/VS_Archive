@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
@@ -1027,6 +1028,7 @@ class ArchiveDateInitialMarkupTests(TestCase):
             re.DOTALL,
         )
         self.assertIsNotNone(archive_date_css)
+        assert archive_date_css is not None
         block = archive_date_css.group(0)
         self.assertIn("width: fit-content", block)
         self.assertIn("unicode-bidi: isolate", block)
@@ -1044,6 +1046,7 @@ class ArchiveDateInitialMarkupTests(TestCase):
             block,
         )
         self.assertIsNotNone(base_range_rule)
+        assert base_range_rule is not None
         self.assertNotIn("flex-direction: column", base_range_rule.group(0))
         mobile_range_rule = re.search(
             r"@media \(max-width: 640px\)\s*\{[^}]*\.archive-date-group--range\s*\{[^}]+\}",
@@ -1051,6 +1054,7 @@ class ArchiveDateInitialMarkupTests(TestCase):
             re.DOTALL,
         )
         self.assertIsNotNone(mobile_range_rule)
+        assert mobile_range_rule is not None
         self.assertIn("flex-direction: column", mobile_range_rule.group(0))
         self.assertRegex(
             block,
@@ -1072,6 +1076,7 @@ class ArchiveDateInitialMarkupTests(TestCase):
             re.DOTALL,
         )
         self.assertIsNotNone(logical_field_rule)
+        assert logical_field_rule is not None
         rule = logical_field_rule.group(0)
         self.assertRegex(rule, r"flex:\s*0\s+0\s+auto")
         self.assertNotRegex(rule, r"(?<![a-z-])width:\s*100%")
@@ -1398,6 +1403,8 @@ def _sanitize_archive_date_digits_python(raw_value, max_length=None):
 
 
 class ArchiveDateDigitInputScriptTests(TestCase):
+    js_source: ClassVar[str]
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -1467,6 +1474,7 @@ class ArchiveDateDigitInputScriptTests(TestCase):
             re.DOTALL,
         )
         self.assertIsNotNone(match)
+        assert match is not None
         script = (
             match.group(0)
             + """

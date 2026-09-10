@@ -509,6 +509,7 @@ class AntigravityBandOcrTests(SimpleTestCase):
             ctx.exception.exception_class, "AntigravityBandCheckpointError"
         )
         self.assertIsInstance(ctx.exception.__cause__, AntigravityBandCheckpointError)
+        assert isinstance(ctx.exception.__cause__, AntigravityBandCheckpointError)
         self.assertEqual(ctx.exception.__cause__.interaction_id, forged_id)
         self._assert_privacy(ctx.exception)
 

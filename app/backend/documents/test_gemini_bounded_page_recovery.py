@@ -13,6 +13,7 @@ Checkpoint-identity and durable-page-reuse coverage lives in
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import TypedDict, Unpack
 from unittest.mock import Mock, call, patch
 
 from django.test import SimpleTestCase
@@ -66,6 +67,18 @@ def _success() -> SimpleNamespace:
     return _response(text=_VALID_JSON)
 
 
+class _GeminiBoundedRunKwargs(TypedDict, total=False):
+    prompt_variant: str
+    model_name: str
+    max_output_tokens: int | None
+    max_output_tokens_hard_cap: int
+
+
+class _GeminiBoundedCapKwargs(TypedDict, total=False):
+    max_output_tokens: int | None
+    max_output_tokens_hard_cap: int
+
+
 class GeminiRetryHelperTests(SimpleTestCase):
     def test_token_cap_ladder_is_deterministic(self):
         cases = (
@@ -95,18 +108,29 @@ class GeminiRetryHelperTests(SimpleTestCase):
 class GeminiBoundedPageRecoveryTests(SimpleTestCase):
     """Engine-level bounded retry: one page against one model candidate."""
 
-    def _run(self, responses, **overrides):
+    def _run(
+        self,
+        responses,
+        *,
+        language_hint: str = "en",
+        **overrides: Unpack[_GeminiBoundedRunKwargs],
+    ):
         """Run one transcription against mocked provider responses.
 
         ``responses`` entries may be response objects or exceptions.
         Returns calls/caps/sleeps plus either the result or the raised error.
         """
-        kwargs = {
-            "prompt_variant": DocumentTextResult.OcrPromptVariant.PRINTED,
-            "model_name": "test-model",
-        }
-        language_hint = overrides.pop("language_hint", "en")
-        kwargs.update(overrides)
+        prompt_variant = overrides.get(
+            "prompt_variant", DocumentTextResult.OcrPromptVariant.PRINTED
+        )
+        model_name = overrides.get("model_name", "test-model")
+        extra: _GeminiBoundedCapKwargs = {}
+        if "max_output_tokens" in overrides:
+            extra["max_output_tokens"] = overrides["max_output_tokens"]
+        if "max_output_tokens_hard_cap" in overrides:
+            extra["max_output_tokens_hard_cap"] = overrides[
+                "max_output_tokens_hard_cap"
+            ]
         with (
             patch(
                 "documents.services.gemini_engine._get_api_key",
@@ -123,7 +147,13 @@ class GeminiBoundedPageRecoveryTests(SimpleTestCase):
             result = None
             error = None
             try:
-                result = transcribe_pages_with_gemini(_PAGES, language_hint, **kwargs)
+                result = transcribe_pages_with_gemini(
+                    _PAGES,
+                    language_hint,
+                    prompt_variant=prompt_variant,
+                    model_name=model_name,
+                    **extra,
+                )
             except GeminiError as exc:
                 error = exc
         return SimpleNamespace(

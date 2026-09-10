@@ -4,7 +4,7 @@ import threading
 from dataclasses import replace
 from datetime import timedelta
 from types import SimpleNamespace
-from typing import cast
+from typing import TypedDict, Unpack, cast
 from unittest.mock import patch
 
 from django.db import DatabaseError, connection, close_old_connections
@@ -40,11 +40,34 @@ from documents.services.htr_adapters.base import (
     EnginePageIncompleteError,
     EnginePageCheckpointPersistenceRetryableError,
     EnginePermanentError,
+    HtrResult,
 )
 from documents.services.htr_adapters.gemini_adapter import GeminiAdapter
 from documents.services.ocr_routing import OcrRouteConfig
 from documents.services.page_extraction import PageImage
 from documents.services.process_document_outcome import ProcessDocumentDisposition
+
+
+class _GeminiAdapterExecuteKwargs(TypedDict):
+    pages: list[PageImage]
+    language_hint: str | None
+    prompt_variant: str
+    document_id: int
+    text_input_type: str
+    handwriting_type: str
+    engine_key: str
+    model_candidates: list[str]
+
+
+class _GeminiAdapterExecuteOverrides(TypedDict, total=False):
+    pages: list[PageImage]
+    language_hint: str | None
+    prompt_variant: str
+    document_id: int
+    text_input_type: str
+    handwriting_type: str
+    engine_key: str
+    model_candidates: list[str]
 
 
 def _document(title: str = "Gemini checkpoint document") -> Document:
@@ -427,16 +450,33 @@ class GeminiCheckpointAdapterTests(TestCase):
         self.document = _document("Gemini adapter checkpoint document")
         self.pages = _pages(b"one", b"two")
         self.adapter = GeminiAdapter()
-        self.kwargs = {
+        document_id = self.document.id
+        assert document_id is not None
+        self._execute_kwargs: _GeminiAdapterExecuteKwargs = {
             "pages": self.pages,
             "language_hint": Document.Language.ENGLISH,
             "prompt_variant": DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
-            "document_id": self.document.id,
+            "document_id": document_id,
             "text_input_type": Document.TextInputType.HANDWRITTEN,
             "handwriting_type": Document.HandwritingType.VS,
             "engine_key": DocumentTextResult.OcrEngineKey.GEMINI,
             "model_candidates": ["model-a"],
         }
+
+    def _execute(
+        self, **overrides: Unpack[_GeminiAdapterExecuteOverrides]
+    ) -> HtrResult:
+        kwargs: _GeminiAdapterExecuteKwargs = {**self._execute_kwargs, **overrides}
+        return self.adapter.execute(
+            kwargs["pages"],
+            kwargs["language_hint"],
+            kwargs["prompt_variant"],
+            document_id=kwargs["document_id"],
+            text_input_type=kwargs["text_input_type"],
+            handwriting_type=kwargs["handwriting_type"],
+            engine_key=kwargs["engine_key"],
+            model_candidates=kwargs["model_candidates"],
+        )
 
     @patch(
         "documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini"
@@ -449,9 +489,9 @@ class GeminiCheckpointAdapterTests(TestCase):
             text="page text",
             engine_name=model_name,
         )
-        self.kwargs["model_candidates"] = [" model-a "]
+        self._execute_kwargs["model_candidates"] = [" model-a "]
 
-        result = self.adapter.execute(**self.kwargs)
+        result = self._execute()
 
         self.assertEqual(result.engine_name, "model-a")
         self.assertEqual(
@@ -465,13 +505,13 @@ class GeminiCheckpointAdapterTests(TestCase):
         "documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini"
     )
     def test_blank_normalized_model_candidate_is_rejected(self, mock_transcribe):
-        self.kwargs["model_candidates"] = ["   "]
+        self._execute_kwargs["model_candidates"] = ["   "]
 
         with self.assertRaisesRegex(
             EnginePermanentError,
             "No Gemini model candidates configured",
         ):
-            self.adapter.execute(**self.kwargs)
+            self._execute()
 
         mock_transcribe.assert_not_called()
         self.assertFalse(
@@ -510,7 +550,7 @@ class GeminiCheckpointAdapterTests(TestCase):
             engine_name="model-a",
         )
 
-        result = self.adapter.execute(**self.kwargs)
+        result = self._execute()
 
         self.assertEqual(result.text, "page one\n\npage two")
         self.assertEqual(mock_transcribe.call_count, 1)
@@ -531,7 +571,7 @@ class GeminiCheckpointAdapterTests(TestCase):
 
         mock_transcribe.side_effect = first_delivery
         with self.assertRaises(EnginePageIncompleteError) as raised:
-            self.adapter.execute(**self.kwargs)
+            self._execute()
 
         self.assertEqual(raised.exception.missing_page_indices, (2,))
         self.assertEqual(
@@ -548,7 +588,7 @@ class GeminiCheckpointAdapterTests(TestCase):
             text="page two",
             engine_name="model-a",
         )
-        result = self.adapter.execute(**self.kwargs)
+        result = self._execute()
 
         self.assertEqual(result.text, "page one\n\npage two")
         self.assertEqual(
@@ -573,9 +613,9 @@ class GeminiCheckpointAdapterTests(TestCase):
             )
 
         mock_transcribe.side_effect = execute
-        self.kwargs["model_candidates"] = ["model-a", "model-b"]
+        self._execute_kwargs["model_candidates"] = ["model-a", "model-b"]
 
-        result = self.adapter.execute(**self.kwargs)
+        result = self._execute()
 
         self.assertRegex(result.engine_name, r"^gemini-mixed:[0-9a-f]{48}$")
         checkpoints = list(
@@ -596,7 +636,7 @@ class GeminiCheckpointAdapterTests(TestCase):
         mock_transcribe.side_effect = RuntimeError(marker)
 
         with self.assertRaises(EnginePageIncompleteError):
-            self.adapter.execute(**self.kwargs)
+            self._execute()
 
         checkpoint = GeminiOcrPageCheckpoint.objects.get(
             attempt__document=self.document,
@@ -614,7 +654,7 @@ class GeminiCheckpointAdapterTests(TestCase):
         mock_transcribe.side_effect = GeminiError(marker)
 
         with self.assertRaises(EnginePageIncompleteError):
-            self.adapter.execute(**self.kwargs)
+            self._execute()
 
         checkpoint = GeminiOcrPageCheckpoint.objects.get(
             attempt__document=self.document,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import SimpleTestCase, TestCase, override_settings
@@ -17,6 +16,7 @@ from documents.services.archive_items import create_ocr_document
 from documents.services.arabic_printed_text_quality import (
     quality_from_banded_page_qualities,
 )
+from documents.services.env_validation import WorkerEnvConfig
 from documents.services.gemini_engine import GeminiResult
 from documents.services.htr_adapters.base import HtrResult
 from documents.services.non_hebrew_hebrew_translation import (
@@ -51,6 +51,39 @@ _TRANSKRIBUS_ROUTE = OcrRouteConfig(
     engine_key=DocumentTextResult.OcrEngineKey.TRANSKRIBUS,
     prompt_variant=DocumentTextResult.OcrPromptVariant.HANDWRITTEN,
 )
+
+
+def _command_worker_env() -> WorkerEnvConfig:
+    return WorkerEnvConfig(
+        gemini_api_key="key",
+        gemini_confidence_threshold=0.7,
+        min_text_length=5,
+        max_retries=3,
+        retry_delay_seconds_1=30,
+        retry_delay_seconds_2=300,
+        report_window_start="00:00",
+        report_send_time="08:00",
+        free_tier_alert_pct=80,
+        gemini_free_daily_request_limit=1500,
+        gemini_free_daily_image_limit=1000,
+        transkribus_free_monthly_credits=500,
+        enable_hybrid_htr=False,
+        enable_daily_report=False,
+        smtp_host=None,
+        smtp_port=None,
+        smtp_username=None,
+        smtp_password=None,
+        default_from_email=None,
+        transkribus_api_token=None,
+        transkribus_username=None,
+        transkribus_password=None,
+        gemini_temperature=0.2,
+        gemini_top_k=40,
+        gemini_top_p=0.95,
+        gemini_max_output_tokens=8192,
+        gemini_double_pass=False,
+        gemini_consistency_min_ratio=0.85,
+    )
 
 
 class ArabicPrintedBandedQualityScorerTests(SimpleTestCase):
@@ -136,15 +169,7 @@ class ArabicPrintedBandedQualityScorerTests(SimpleTestCase):
 class ArabicPrintedBandedQualityPersistenceTests(TestCase):
     def setUp(self):
         self.command = Command()
-        self.command._cfg = SimpleNamespace(
-            min_text_length=5,
-            gemini_double_pass=False,
-            gemini_consistency_min_ratio=0.85,
-            gemini_temperature=0.2,
-            gemini_top_k=40,
-            gemini_top_p=0.95,
-            gemini_max_output_tokens=8192,
-        )
+        self.command._cfg = _command_worker_env()
         self._translation_patcher = patch(
             "documents.management.commands.run_worker.translate_text_to_hebrew_with_gemini",
             return_value=GeminiResult(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import inspect
 from typing import cast
 from unittest.mock import patch
@@ -200,20 +201,25 @@ class TagPkSequenceTransactionResetTests(TransactionTestCase):
 
         import conftest
 
-        first = DjangoTransactionTestCase._reset_sequences
+        reset_sequences = getattr(DjangoTransactionTestCase, "_reset_sequences")
+        first: Callable[..., object] = reset_sequences
         self.assertTrue(getattr(first, "_vs_archive_tag_pk_guard", False))
         self.assertEqual(list(inspect.signature(first).parameters), ["db_name"])
         conftest._install_transaction_testcase_tag_pk_guard()
         conftest._install_transaction_testcase_tag_pk_guard()
-        self.assertIs(DjangoTransactionTestCase._reset_sequences, first)
+        self.assertIs(
+            getattr(DjangoTransactionTestCase, "_reset_sequences"),
+            first,
+        )
 
     def test_reset_sequences_wrap_advances_tag_on_the_reset_alias(self):
         from django.test import TransactionTestCase as DjangoTransactionTestCase
 
+        reset_sequences = getattr(DjangoTransactionTestCase, "_reset_sequences")
         with patch(
             "documents.tag_pk_sequence_support.ensure_tag_pk_sequence_past_historical_ids"
         ) as mocked:
-            DjangoTransactionTestCase._reset_sequences(DEFAULT_DB_ALIAS)
+            reset_sequences(DEFAULT_DB_ALIAS)
             mocked.assert_called_once_with(using=DEFAULT_DB_ALIAS, tag_model=Tag)
         ensure_tag_pk_sequence_past_historical_ids(using=DEFAULT_DB_ALIAS)
 
@@ -221,11 +227,12 @@ class TagPkSequenceTransactionResetTests(TransactionTestCase):
         from django.db import router
         from django.test import TransactionTestCase as DjangoTransactionTestCase
 
+        reset_sequences = getattr(DjangoTransactionTestCase, "_reset_sequences")
         with patch.object(router, "db_for_write", return_value="other_alias"):
             with patch(
                 "documents.tag_pk_sequence_support.ensure_tag_pk_sequence_past_historical_ids"
             ) as mocked:
-                DjangoTransactionTestCase._reset_sequences(DEFAULT_DB_ALIAS)
+                reset_sequences(DEFAULT_DB_ALIAS)
                 mocked.assert_not_called()
         ensure_tag_pk_sequence_past_historical_ids(using=DEFAULT_DB_ALIAS)
 

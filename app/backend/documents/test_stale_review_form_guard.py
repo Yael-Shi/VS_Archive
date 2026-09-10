@@ -255,7 +255,6 @@ class StaleReviewFormGuardTests(TestCase):
                     fields["expected_source_revision"] = str(revision)
                 return fields
         self.fail(f"no review card for result_id={result_id}")
-        return {}
 
     def _verify_url(self, result_id: int) -> str:
         return reverse("review-text-result-verify", kwargs={"result_id": result_id})
@@ -338,8 +337,12 @@ class StaleReviewFormGuardTests(TestCase):
         self.assertEqual(he_bind.snapshot_id, new_snapshot.pk)
         self.assertEqual(src_bind.bound_source_revision, 2)
         self.assertEqual(he_bind.bound_source_revision, 2)
-        self.assertEqual(src_bind.pk, fixture["src_bind"].pk)  # type: ignore[union-attr]
-        self.assertEqual(he_bind.pk, fixture["he_bind"].pk)  # type: ignore[union-attr]
+        expected_src_bind = fixture["src_bind"]
+        expected_he_bind = fixture["he_bind"]
+        assert isinstance(expected_src_bind, TranskribusTextResultBinding)
+        assert isinstance(expected_he_bind, TranskribusTextResultBinding)
+        self.assertEqual(src_bind.pk, expected_src_bind.pk)
+        self.assertEqual(he_bind.pk, expected_he_bind.pk)
 
     def test_fresh_hebrew_verify_after_activation_still_saves_and_verifies(self):
         fixture = self._hebrew_activation_fixture()

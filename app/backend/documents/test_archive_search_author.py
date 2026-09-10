@@ -151,6 +151,7 @@ class ArchiveSearchAuthorContractTests(TestCase):
             terms=["SnippetStaleToken"],
         )
         self.assertIsNotNone(structured)
+        assert structured is not None
         self.assertEqual(structured.match_source_label, MATCH_SOURCE_AUTHOR)
         self.assertIsNone(stale)
 

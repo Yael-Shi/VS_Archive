@@ -7,6 +7,7 @@ from unittest.mock import patch
 from django.contrib import admin as django_admin
 from django.contrib.auth.models import Group, User
 from django.db import IntegrityError, connection, transaction
+from django.db.models import UniqueConstraint
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
@@ -180,7 +181,10 @@ class PersonAliasModelTests(TestCase):
             if constraint.name is not None
         }
         self.assertEqual(set(named_constraints), {"uniq_person_alias_person_name"})
-        fields = named_constraints["uniq_person_alias_person_name"].fields
+        constraint = named_constraints["uniq_person_alias_person_name"]
+        self.assertIsInstance(constraint, UniqueConstraint)
+        assert isinstance(constraint, UniqueConstraint)
+        fields = constraint.fields
         self.assertEqual(list(fields), ["person", "name"])
 
 

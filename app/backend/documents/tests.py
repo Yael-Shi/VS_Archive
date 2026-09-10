@@ -2513,18 +2513,54 @@ class GeminiAdapterTests(TestCase):
             )
 
 
+def _worker_env_matching_legacy_run_worker_namespace(
+    **overrides,
+):
+    """Typed stand-in for the former RunWorker SimpleNamespace fixture.
+
+    The old fixture only set Gemini/min-length knobs. It did not enable
+    Transkribus dev-upload mode or supply Transkribus credentials, so
+    ``getattr(cfg, "transkribus_dev_upload_mode", False)`` stayed false.
+    """
+    from documents.services.env_validation import WorkerEnvConfig
+
+    base = WorkerEnvConfig(
+        gemini_api_key="unused",
+        gemini_confidence_threshold=0.7,
+        min_text_length=5,
+        max_retries=3,
+        retry_delay_seconds_1=30,
+        retry_delay_seconds_2=300,
+        report_window_start="00:00",
+        report_send_time="08:00",
+        free_tier_alert_pct=80,
+        gemini_free_daily_request_limit=1500,
+        gemini_free_daily_image_limit=1000,
+        transkribus_free_monthly_credits=500,
+        enable_hybrid_htr=False,
+        enable_daily_report=False,
+        smtp_host=None,
+        smtp_port=None,
+        smtp_username=None,
+        smtp_password=None,
+        default_from_email=None,
+        transkribus_api_token=None,
+        transkribus_username=None,
+        transkribus_password=None,
+        gemini_temperature=0.2,
+        gemini_top_k=40,
+        gemini_top_p=0.95,
+        gemini_max_output_tokens=8192,
+        gemini_double_pass=False,
+        gemini_consistency_min_ratio=0.85,
+    )
+    return replace(base, **overrides)
+
+
 class RunWorkerBehaviorTests(TestCase):
     def setUp(self):
         self.command = Command()
-        self.command._cfg = SimpleNamespace(
-            min_text_length=5,
-            gemini_double_pass=False,
-            gemini_consistency_min_ratio=0.85,
-            gemini_temperature=0.2,
-            gemini_top_k=40,
-            gemini_top_p=0.95,
-            gemini_max_output_tokens=8192,
-        )
+        self.command._cfg = _worker_env_matching_legacy_run_worker_namespace()
         self._translation_patcher = patch(
             "documents.management.commands.run_worker.translate_text_to_hebrew_with_gemini",
             return_value=GeminiResult(
@@ -2992,9 +3028,10 @@ class RunWorkerBehaviorTests(TestCase):
         self.assertEqual(
             failure.prompt_variant, DocumentTextResult.OcrPromptVariant.HANDWRITTEN
         )
-        self.assertIn(
-            "Invalid or missing language for OCR routing", failure.error_details
-        )
+        details = failure.error_details
+        self.assertIsNotNone(details)
+        assert details is not None
+        self.assertIn("Invalid or missing language for OCR routing", details)
 
     @patch("documents.management.commands.run_worker.transcribe_pages")
     @patch("documents.management.commands.run_worker.extract_pages")
@@ -3019,14 +3056,7 @@ class RunWorkerBehaviorTests(TestCase):
             PageImage(page_index=1, image_bytes=b"page", mime_type="image/png")
         ]
         cmd = Command()
-        cmd._cfg = SimpleNamespace(
-            min_text_length=5,
-            gemini_double_pass=False,
-            gemini_consistency_min_ratio=0.85,
-            gemini_temperature=0.2,
-            gemini_top_k=40,
-            gemini_top_p=0.95,
-        )
+        cmd._cfg = _worker_env_matching_legacy_run_worker_namespace()
         msg = {"Body": json.dumps({"type": "PROCESS_DOCUMENT", "document_id": doc.id})}
         self.assertTrue(cmd._process_message(msg))
         mock_transcribe.assert_not_called()
@@ -3260,15 +3290,7 @@ def _png_bytes(color=(255, 0, 0)) -> bytes:
 class MultiImageWorkerTests(TestCase):
     def setUp(self):
         self.command = Command()
-        self.command._cfg = SimpleNamespace(
-            min_text_length=5,
-            gemini_double_pass=False,
-            gemini_consistency_min_ratio=0.85,
-            gemini_temperature=0.2,
-            gemini_top_k=40,
-            gemini_top_p=0.95,
-            gemini_max_output_tokens=8192,
-        )
+        self.command._cfg = _worker_env_matching_legacy_run_worker_namespace()
         self._translation_patcher = patch(
             "documents.management.commands.run_worker.translate_text_to_hebrew_with_gemini",
             return_value=GeminiResult(
@@ -4672,6 +4694,7 @@ class UploadsBucketConfigTests(SimpleTestCase):
             result = _uploads_bucket_or_error()
 
         self.assertIsInstance(result, JsonResponse)
+        assert isinstance(result, JsonResponse)
         self.assertEqual(result.status_code, 500)
         body = json.loads(result.content)
         self.assertIn("Bucket not configured", body["error"])
@@ -4685,6 +4708,7 @@ class UploadsBucketConfigTests(SimpleTestCase):
             result = _uploads_bucket_or_error()
 
         self.assertIsInstance(result, JsonResponse)
+        assert isinstance(result, JsonResponse)
         self.assertEqual(result.status_code, 500)
         body = json.loads(result.content)
         self.assertIn("Bucket not configured", body["error"])
@@ -6940,6 +6964,7 @@ class TranskribusRunPersistenceGuardTests(TestCase):
             model_id="42",
         )
         self.assertIsNotNone(blocking)
+        assert blocking is not None
         self.assertEqual(blocking.id, succeeded.id)
 
     def test_find_blocking_failed_with_blank_remote_doc_id_is_not_blocking(self):
@@ -7003,6 +7028,7 @@ class TranskribusRunPersistenceReusableRunTests(TestCase):
             model_id="42",
         )
         self.assertIsNotNone(found)
+        assert found is not None
         self.assertEqual(found.id, run.id)
 
     def test_find_reusable_failed_without_remote_doc_id_returns_none(self):
@@ -7064,6 +7090,7 @@ class TranskribusRunPersistenceReusableRunTests(TestCase):
             collection_id="col",
             model_id="42",
         )
+        assert found is not None
         self.assertEqual(found.id, run.id)
 
     def test_find_reusable_returns_recognition_started_with_remote_doc_id(self):
@@ -7085,6 +7112,7 @@ class TranskribusRunPersistenceReusableRunTests(TestCase):
             collection_id="col",
             model_id="42",
         )
+        assert found is not None
         self.assertEqual(found.id, run.id)
 
     def test_find_reusable_succeeded_with_remote_doc_id_returns_none(self):
@@ -7654,6 +7682,7 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
             .order_by("-created_at", "-id")
             .first()
         )
+        assert new_run is not None
         self.assertEqual(new_run.remote_doc_id, "111")
         self.assertEqual(new_run.upload_id, 10)
         self.assertEqual(new_run.ingest_job_id, "ingest-old")
@@ -7773,6 +7802,7 @@ class TranskribusRecognitionOnlyRetryTests(TestCase):
             .order_by("-created_at", "-id")
             .first()
         )
+        assert new_run is not None
         self.assertNotEqual(new_run.id, source.id)
         self.assertEqual(new_run.status, TranskribusRun.Status.RECOGNITION_STARTED)
         self.assertEqual(new_run.remote_doc_id, "555")

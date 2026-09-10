@@ -43,6 +43,12 @@ def _photo_content_defaults(**overrides) -> dict:
     return values
 
 
+def _primary_photo(item: ArchiveItem) -> PhotoContent:
+    photo = item.primary_photo_content
+    assert photo is not None
+    return photo
+
+
 class PhotoContentModelTests(TestCase):
     def test_photo_content_can_be_created_for_photo_archive_item(self):
         archive_item = _create_photo_archive_item()
@@ -53,10 +59,10 @@ class PhotoContentModelTests(TestCase):
         self.assertEqual(content.archive_item_id, archive_item.id)
         self.assertEqual(content.original_filename, "scan.jpg")
         self.assertEqual(content.position, 1)
-        self.assertEqual(archive_item.primary_photo_content.id, content.id)
+        self.assertEqual(_primary_photo(archive_item).id, content.id)
         self.assertEqual(list(archive_item.photo_contents.all()), [content])
         with self.assertRaises(AttributeError):
-            _ = archive_item.photo_content
+            getattr(archive_item, "photo_content")
 
     def test_photo_content_cannot_validate_for_non_photo_archive_item(self):
         manual_item = ArchiveItem.objects.create(
@@ -90,7 +96,7 @@ class PhotoContentModelTests(TestCase):
             archive_item.photo_contents.values_list("pk", flat=True),
             [first.pk, second.pk],
         )
-        self.assertEqual(archive_item.primary_photo_content.pk, first.pk)
+        self.assertEqual(_primary_photo(archive_item).pk, first.pk)
 
     def test_duplicate_position_within_same_archive_item_is_rejected(self):
         archive_item = _create_photo_archive_item()
@@ -134,7 +140,7 @@ class PhotoContentModelTests(TestCase):
         )
         self.assertEqual(content.position, 1)
         self.assertEqual(archive_item.photo_contents.get().pk, content.pk)
-        self.assertEqual(archive_item.primary_photo_content.pk, content.pk)
+        self.assertEqual(_primary_photo(archive_item).pk, content.pk)
 
     def test_photo_rows_order_deterministically_by_position_then_id(self):
         archive_item = _create_photo_archive_item()
@@ -157,7 +163,7 @@ class PhotoContentModelTests(TestCase):
             list(archive_item.photo_contents.values_list("pk", flat=True)),
             [first.pk, second.pk, third.pk],
         )
-        self.assertEqual(archive_item.primary_photo_content.pk, first.pk)
+        self.assertEqual(_primary_photo(archive_item).pk, first.pk)
 
     def test_prefetched_primary_photo_content_does_not_query(self):
         archive_item = _create_photo_archive_item()
@@ -176,7 +182,7 @@ class PhotoContentModelTests(TestCase):
         )
 
         with CaptureQueriesContext(connection) as ctx:
-            primary = prefetched.primary_photo_content
+            primary = _primary_photo(prefetched)
 
         self.assertEqual(primary.pk, first.pk)
         self.assertEqual(len(ctx), 0)
@@ -194,13 +200,13 @@ class PhotoContentModelTests(TestCase):
             **_photo_content_defaults(original_file_key="photos/2/original.jpg"),
         )
         item = ArchiveItem.objects.get(pk=archive_item.pk)
-        self.assertEqual(item.primary_photo_content.pk, first.pk)
+        self.assertEqual(_primary_photo(item).pk, first.pk)
 
         PhotoContent.objects.filter(pk=first.pk).update(position=3)
         PhotoContent.objects.filter(pk=second.pk).update(position=1)
         PhotoContent.objects.filter(pk=first.pk).update(position=2)
 
-        self.assertEqual(item.primary_photo_content.pk, second.pk)
+        self.assertEqual(_primary_photo(item).pk, second.pk)
 
     def test_deleting_archive_item_cascades_to_all_photo_content_rows(self):
         archive_item = _create_photo_archive_item()

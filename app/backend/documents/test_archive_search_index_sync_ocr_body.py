@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import TypedDict, Unpack
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
@@ -50,6 +51,24 @@ from documents.test_transkribus_corrected_current_activation import (
     _source_row,
     _upload_run,
 )
+
+
+class _ActivateCorrectedCurrentKwargs(TypedDict):
+    document_id: int
+    attempt_id: int
+    source_text_result_id: int
+    activated_by: object
+    expected_source_revision: int
+    expected_source_sha256: str
+
+
+class _ActivateCorrectedCurrentOverrides(TypedDict, total=False):
+    document_id: int
+    attempt_id: int
+    source_text_result_id: int
+    activated_by: object
+    expected_source_revision: int
+    expected_source_sha256: str
 
 
 def _index_for(archive_item_id: int) -> ArchiveItemSearchIndex:
@@ -533,15 +552,21 @@ class CorrectedCurrentActivationSearchIndexSyncTests(TestCase):
         self.source = _source_row(self.doc)
         self.hebrew = _hebrew_row(self.doc)
 
-    def _activate(self, **kwargs):
-        defaults = dict(
-            document_id=self.doc.pk,
-            attempt_id=self.attempt.pk,
-            source_text_result_id=self.source.pk,
-            activated_by=self.user,
-            expected_source_revision=self.source.source_revision,
-            expected_source_sha256=compute_sha256_hex(self.source.text or ""),
-        )
+    def _activate(self, **kwargs: Unpack[_ActivateCorrectedCurrentOverrides]):
+        document_id = self.doc.pk
+        attempt_id = self.attempt.pk
+        source_text_result_id = self.source.pk
+        assert document_id is not None
+        assert attempt_id is not None
+        assert source_text_result_id is not None
+        defaults: _ActivateCorrectedCurrentKwargs = {
+            "document_id": document_id,
+            "attempt_id": attempt_id,
+            "source_text_result_id": source_text_result_id,
+            "activated_by": self.user,
+            "expected_source_revision": self.source.source_revision,
+            "expected_source_sha256": compute_sha256_hex(self.source.text or ""),
+        }
         defaults.update(kwargs)
         return activate_corrected_current_sync_attempt(**defaults)
 

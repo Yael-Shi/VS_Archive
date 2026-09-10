@@ -86,8 +86,10 @@ class ArchiveSearchTextMatchTests(TestCase):
 
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0].text_result.pk, hebrew.pk)
+        text = hebrew.text
+        assert text is not None
         self.assertEqual(
-            hebrew.text[matches[0].start : matches[0].end],
+            text[matches[0].start : matches[0].end],
             "מילה",
         )
 
@@ -149,7 +151,9 @@ class ArchiveSearchTextMatchTests(TestCase):
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0].start, 3)
         self.assertEqual(matches[0].end, 9)
-        self.assertEqual(source.text[matches[0].start : matches[0].end], "target")
+        text = source.text
+        assert text is not None
+        self.assertEqual(text[matches[0].start : matches[0].end], "target")
 
     def test_query_uses_public_search_punctuation_tokenization(self):
         doc = create_viewable_ocr_document(
@@ -220,8 +224,10 @@ class ArchiveSearchTextMatchTests(TestCase):
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0].text_result.pk, source.pk)
         self.assertEqual((matches[0].start, matches[0].end), (0, 3))
+        text = source.text
+        assert text is not None
         self.assertEqual(
-            source.text[matches[0].start : matches[0].end],
+            text[matches[0].start : matches[0].end],
             "run",
         )
 

@@ -113,6 +113,7 @@ class ResolveDisplayableSourceTextResultTests(TestCase):
 
         resolved = resolve_displayable_source_text_result(doc)
         self.assertEqual(resolved, source)
+        assert resolved is not None
         self.assertEqual(resolved.text, "Hello")
 
     def test_never_falls_back_to_hebrew_when_source_missing(self):
@@ -142,6 +143,7 @@ class ResolveDisplayableSourceTextResultTests(TestCase):
 
         resolved = resolve_displayable_source_text_result(doc)
         self.assertEqual(resolved, source)
+        assert resolved is not None
         self.assertEqual(resolved.text, "מקור")
 
     def test_prefers_succeeded_over_needs_review(self):
@@ -524,8 +526,12 @@ class CorrectedCurrentSyncStaffPreviewTests(TestCase):
         self.assertIn("page_index", technical)
         self.assertIn("tsId", technical)
 
-        self.assertNotContains(resp, snapshot.provider_identity_fingerprint)
-        self.assertNotContains(resp, snapshot.raw_xml_fingerprint)
+        provider_identity_fingerprint = snapshot.provider_identity_fingerprint
+        raw_xml_fingerprint = snapshot.raw_xml_fingerprint
+        assert provider_identity_fingerprint is not None
+        assert raw_xml_fingerprint is not None
+        self.assertNotContains(resp, provider_identity_fingerprint)
+        self.assertNotContains(resp, raw_xml_fingerprint)
         self.assertNotContains(resp, "page_xml_s3_key")
         self.assertNotContains(resp, "remote_status_summary")
         self.assertNotContains(resp, '{"pages"')

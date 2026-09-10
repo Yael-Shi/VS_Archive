@@ -50,6 +50,12 @@ def _create_photo_archive_item(
     return item
 
 
+def _primary_photo(item: ArchiveItem) -> PhotoContent:
+    photo = item.primary_photo_content
+    assert photo is not None
+    return photo
+
+
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
 class PhotoArchiveDisplayListTests(TestCase):
     def setUp(self):
@@ -278,7 +284,7 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         return_value=PRESIGNED_URL,
     )
     def test_photo_detail_renders_context_metadata_row(self, _mock_presigned_get):
-        photo = self.public_uploaded.primary_photo_content
+        photo = _primary_photo(self.public_uploaded)
         photo.context = "חתונה בירושלים"
         photo.save(update_fields=["context", "updated_at"])
 
@@ -294,7 +300,7 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         return_value=PRESIGNED_URL,
     )
     def test_photo_detail_displays_non_empty_metadata(self, _mock_presigned_get):
-        photo = self.public_uploaded.primary_photo_content
+        photo = _primary_photo(self.public_uploaded)
         photo.description = "Family picnic"
         photo.location = "Jerusalem"
         photo.context = "Summer outing"
@@ -325,7 +331,7 @@ class PhotoArchiveDisplayDetailTests(TestCase):
     def test_photo_detail_does_not_render_empty_metadata_labels(
         self, _mock_presigned_get
     ):
-        photo = self.public_uploaded.primary_photo_content
+        photo = _primary_photo(self.public_uploaded)
         photo.description = "Only caption filled"
         photo.save()
 

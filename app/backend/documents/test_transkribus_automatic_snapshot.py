@@ -523,6 +523,7 @@ class AutomaticSnapshotLifecycleTests(TestCase):
             engine_runtime="transkribus-pylaia:42",
             is_hebrew=True,
         )
+        assert found is not None
         self.assertEqual(found.pk, run_b.pk)
         result = TranskribusAdapter()._htr_result_from_associated_snapshot(
             run=run_b,
@@ -1040,6 +1041,7 @@ class ResumeEligibilityTests(TestCase):
             engine_runtime="transkribus-pylaia:42",
             is_hebrew=True,
         )
+        assert found is not None
         self.assertEqual(found.pk, run.pk)
 
     def test_historical_succeeded_without_association_not_resumable(self):
@@ -1086,6 +1088,7 @@ class ResumeEligibilityTests(TestCase):
             engine_runtime="transkribus-pylaia:42",
             is_hebrew=True,
         )
+        assert found is not None
         self.assertEqual(found.pk, run.pk)
 
     def test_existing_server_fully_completed_not_selected(self):

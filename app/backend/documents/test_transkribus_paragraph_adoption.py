@@ -654,6 +654,7 @@ class MultipleHistoricalSourceTests(TestCase):
         response = self._adopt(self.middle_mapping, self.middle)
         self.assertEqual(response.status_code, 302)
         created = get_paragraph_mapping_for_snapshot(self.target)
+        assert created is not None
         self.assertEqual(created.copied_from_id, self.middle_mapping.pk)
         self.assertEqual(
             list(created.breaks.values_list("after_line_id", flat=True)),
@@ -665,6 +666,7 @@ class MultipleHistoricalSourceTests(TestCase):
         response = self._adopt(self.oldest_mapping, self.oldest)
         self.assertEqual(response.status_code, 302)
         created = get_paragraph_mapping_for_snapshot(self.target)
+        assert created is not None
         self.assertEqual(created.copied_from_id, self.oldest_mapping.pk)
         self.assertEqual(
             set(created.breaks.values_list("after_line_id", flat=True)),
@@ -744,6 +746,7 @@ class ParagraphAdoptionPostTests(TestCase):
         self.assertEqual(response["Location"], self.editor_url)
         created = get_paragraph_mapping_for_snapshot(self.target)
         self.assertIsNotNone(created)
+        assert created is not None
         self.assertEqual(created.copied_from_id, self.source_mapping.pk)
         self.assertEqual(
             list(created.breaks.values_list("after_line_id", flat=True)),
@@ -767,6 +770,7 @@ class ParagraphAdoptionPostTests(TestCase):
         )
         self.assertEqual(response.status_code, 302)
         created = get_paragraph_mapping_for_snapshot(self.target)
+        assert created is not None
         self.assertEqual(created.breaks.count(), 0)
         self.assertEqual(created.copied_from_id, zero.pk)
         follow = self.client.get(self.editor_url)
@@ -906,6 +910,7 @@ class ParagraphAdoptionPostTests(TestCase):
         )
         self.assertEqual(response.status_code, 302)
         mapping = get_paragraph_mapping_for_snapshot(self.target)
+        assert mapping is not None
         self.assertIsNone(mapping.copied_from_id)
         follow = self.client.get(self.editor_url)
         self.assertContains(follow, MSG_SAVED)
@@ -922,12 +927,14 @@ class ParagraphAdoptionPostTests(TestCase):
             },
         )
         mapping = get_paragraph_mapping_for_snapshot(self.target)
+        assert mapping is not None
         self.assertEqual(mapping.breaks.count(), 0)
         self.assertIsNone(mapping.copied_from_id)
 
     def test_manual_resave_after_adoption_clears_copied_from(self):
         self.client.post(self.adopt_url, data=self._adopt_data())
         mapping = get_paragraph_mapping_for_snapshot(self.target)
+        assert mapping is not None
         self.assertEqual(mapping.copied_from_id, self.source_mapping.pk)
         freshness = self.client.get(self.editor_url).context["freshness"]
         self.client.post(

@@ -294,6 +294,7 @@ class ParagraphMappingModelTests(TestCase):
         self.assertIsNotNone(mapping.pk)
         self.assertEqual(mapping.breaks.count(), 0)
         loaded = get_paragraph_mapping_for_snapshot(self.snapshot)
+        assert loaded is not None
         self.assertEqual(loaded.pk, mapping.pk)
         self.assertEqual(loaded.breaks.count(), 0)
 
@@ -518,6 +519,7 @@ class ParagraphMappingCurrentnessTests(TestCase):
         self.assertTrue(assessment.has_mapping)
         self.assertTrue(assessment.is_current)
         self.assertTrue(assessment.is_structurally_fresh)
+        assert assessment.mapping is not None
         self.assertEqual(assessment.mapping.pk, mapping.pk)
         self.assertEqual(assessment.bound_snapshot_id, self.snapshot.pk)
 
@@ -533,6 +535,7 @@ class ParagraphMappingCurrentnessTests(TestCase):
         assessment = assess_paragraph_mapping_currentness(self.doc)
         self.assertTrue(assessment.has_mapping)
         self.assertTrue(assessment.is_current)
+        assert assessment.mapping is not None
         self.assertEqual(assessment.mapping.pk, mapping.pk)
         self.assertEqual(assessment.mapping.breaks.count(), 0)
 
@@ -597,6 +600,7 @@ class ParagraphMappingCurrentnessTests(TestCase):
         assessment = assess_paragraph_mapping_currentness(self.doc)
         self.assertTrue(assessment.has_mapping)
         self.assertTrue(assessment.is_current)
+        assert assessment.mapping is not None
         self.assertEqual(assessment.mapping.pk, new_mapping.pk)
         self.assertEqual(assessment.bound_snapshot_id, new_snapshot.pk)
 
@@ -608,6 +612,7 @@ class ParagraphMappingCurrentnessTests(TestCase):
         self.assertTrue(assessment.has_mapping)
         self.assertTrue(assessment.is_current)
         self.assertTrue(assessment.is_structurally_fresh)
+        assert assessment.mapping is not None
         self.assertEqual(assessment.mapping.pk, mapping.pk)
 
 

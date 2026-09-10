@@ -50,6 +50,12 @@ def _create_photo_content(*, title: str = "Family photo") -> PhotoContent:
     )
 
 
+def _primary_photo(item: ArchiveItem) -> PhotoContent:
+    photo = item.primary_photo_content
+    assert photo is not None
+    return photo
+
+
 class PersonModelTests(TestCase):
     def test_person_can_be_created(self):
         person = Person.objects.create(name="רחל כהן")
@@ -208,7 +214,7 @@ class PhotoContentCompatibilityTests(TestCase):
         photo = _create_photo_content()
         archive_item = photo.archive_item
 
-        self.assertEqual(archive_item.primary_photo_content.id, photo.id)
+        self.assertEqual(_primary_photo(archive_item).id, photo.id)
         self.assertEqual(photo.position, 1)
         self.assertEqual(photo.description, "")
         self.assertEqual(photo.location, "")
@@ -227,7 +233,7 @@ class PhotoContentCompatibilityTests(TestCase):
             original_size_bytes=1024,
         )
         self.assertEqual(archive_item.photo_contents.count(), 2)
-        self.assertEqual(archive_item.primary_photo_content.id, photo.id)
+        self.assertEqual(_primary_photo(archive_item).id, photo.id)
         self.assertEqual(second.position, 2)
 
 
