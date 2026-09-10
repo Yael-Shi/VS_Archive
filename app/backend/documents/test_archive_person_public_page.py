@@ -184,18 +184,58 @@ class PersonPublicPageAuthorizedTests(TestCase):
         self.assertContains(resp, "Ada public letter")
         self.assertContains(resp, "Ada public note")
         self.assertContains(resp, "חזרה לארכיון")
+        self.assertContains(resp, "חזרה לאנשים")
         html = resp.content.decode("utf-8")
         header = html[html.index("document-detail-header") : html.index("</header>")]
+        self.assertIn("document-detail-navigation-actions", header)
         self.assertIn("btn-primary", header)
         self.assertIn("←", header)
+        self.assertLess(header.index("חזרה לארכיון"), header.index("חזרה לאנשים"))
+        archive_list_href = reverse("archive-list")
+        people_index_href = reverse("archive-people-index")
+        self.assertIn(f'href="{archive_list_href}"', header)
+        self.assertIn(f'href="{people_index_href}"', header)
         self.assertNotIn("הוספת מידע על הפריט", html)
         self.assertNotIn("SecretAliasToken", html)
         self.assertNotIn("עריכת אדם", html)
+        self.assertNotIn("עריכת הפרטים", html)
         self.assertNotIn("archive-detail-meta-block--person-biography", html)
         self.assertNotIn(
             reverse("archive-manage-person-edit", kwargs={"person_id": person.id}),
             html,
         )
+
+    def test_staff_person_detail_shows_edit_control_with_shared_nav_buttons(self):
+        person = Person.objects.create(name="Staff Edit Person")
+        _link(_public_manual("Staff visible letter"), person)
+        staff = User.objects.create_user(
+            username="person-page-staff",
+            password="x",
+            is_staff=True,
+        )
+        self.client.force_login(staff)
+
+        resp = self.client.get(_person_page(person))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+        header = html[html.index("document-detail-header") : html.index("</header>")]
+        edit_href = reverse(
+            "archive-manage-person-edit", kwargs={"person_id": person.id}
+        )
+        self.assertIn("document-detail-navigation-actions", header)
+        self.assertIn("חזרה לארכיון", header)
+        self.assertIn("חזרה לאנשים", header)
+        self.assertIn("עריכת הפרטים", header)
+        self.assertIn(edit_href, header)
+        self.assertNotIn("עריכת אדם", header)
+        self.assertNotIn("הוספת מידע על הפריט", html)
+        nav_start = header.index("document-detail-navigation-actions")
+        nav_end = header.index("</div>", nav_start)
+        nav = header[nav_start:nav_end]
+        self.assertLess(nav.index("חזרה לארכיון"), nav.index("חזרה לאנשים"))
+        self.assertLess(nav.index("חזרה לאנשים"), nav.index("עריכת הפרטים"))
+        self.assertEqual(nav.count("btn-primary"), 3)
+        self.assertNotIn("btn-secondary", nav)
 
     def test_empty_and_whitespace_biography_are_omitted(self):
         person = Person.objects.create(name="Empty Bio Person")
@@ -234,6 +274,7 @@ class PersonPublicPageAuthorizedTests(TestCase):
         self.assertIn("document-detail-header-main", header)
         self.assertIn("btn-primary", header)
         self.assertIn("חזרה לארכיון", header)
+        self.assertIn("חזרה לאנשים", header)
         self.assertContains(
             resp, "&lt;script&gt;alert(1)&lt;/script&gt;<br>second line", html=True
         )
@@ -241,6 +282,7 @@ class PersonPublicPageAuthorizedTests(TestCase):
         self.assertNotContains(resp, "HiddenBioAlias")
         self.assertNotContains(resp, "תקציר")
         self.assertNotContains(resp, "עריכת אדם")
+        self.assertNotContains(resp, "עריכת הפרטים")
 
     def test_biography_does_not_open_inaccessible_person_pages(self):
         unlinked = Person.objects.create(
@@ -323,6 +365,16 @@ class PersonPublicPageVisibilityTests(TestCase):
         self.assertNotIn("PERSON-PRIVATE-TITLE", html)
         self.assertNotIn("PERSON-RESTRICTED-TITLE", html)
         self.assertContains(resp, "נמצאו 1 תוצאות")
+        self.assertContains(resp, "חזרה לארכיון")
+        self.assertContains(resp, "חזרה לאנשים")
+        self.assertNotContains(resp, "עריכת הפרטים")
+        self.assertNotContains(
+            resp,
+            reverse(
+                "archive-manage-person-edit",
+                kwargs={"person_id": self.person.id},
+            ),
+        )
 
     def test_family_sees_private_not_restricted(self):
         self.client.force_login(self.family)
@@ -331,6 +383,16 @@ class PersonPublicPageVisibilityTests(TestCase):
         self.assertEqual(resp.context["total_count"], 2)
         self.assertEqual(_titles(resp), {"PERSON-PUBLIC-TITLE", "PERSON-PRIVATE-TITLE"})
         self.assertNotIn("PERSON-RESTRICTED-TITLE", _titles(resp))
+        self.assertContains(resp, "חזרה לארכיון")
+        self.assertContains(resp, "חזרה לאנשים")
+        self.assertNotContains(resp, "עריכת הפרטים")
+        self.assertNotContains(
+            resp,
+            reverse(
+                "archive-manage-person-edit",
+                kwargs={"person_id": self.person.id},
+            ),
+        )
 
     def test_restricted_user_sees_restricted_not_private(self):
         self.client.force_login(self.restricted_user)

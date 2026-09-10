@@ -166,7 +166,7 @@ class ManualTextPublicDetailUiTests(TestCase):
         self.assertContains(resp, "document-detail-header-main")
         self.assertContains(resp, "document-detail-toolbar")
         self.assertContains(resp, "document-detail-navigation-actions")
-        self.assertContains(resp, "archive-detail-manual-text-status")
+        self.assertNotContains(resp, "archive-detail-manual-text-status")
         self.assertContains(resp, "archive-detail-manual-text-quality")
         self.assertContains(resp, "archive-detail-manual-text-body")
         self.assertContains(resp, "archive-detail-text")
@@ -182,6 +182,11 @@ class ManualTextPublicDetailUiTests(TestCase):
         header = html[html.index("document-detail-header") : html.index("</header>")]
         self.assertIn("archive-detail-manual-text-quality", header)
         self.assertIn("archive-detail-meta", header)
+        self.assertNotIn("archive-detail-manual-text-status", header)
+        self.assertLess(
+            header.index("archive-detail-meta"),
+            header.index("archive-detail-manual-text-quality"),
+        )
         self.assertNotIn('class="spacer"', header)
         self.assertNotIn("spacer-sm", header)
 
@@ -338,25 +343,29 @@ class ManualTextPublicQualityBadgePlacementTests(TestCase):
         self.assertEqual(html.count("data-text-quality-indicator"), 1)
         self.assertEqual(html.count('class="text-quality-indicator__info"'), 1)
         self.assertEqual(html.count("archive-detail-manual-text-quality"), 1)
-        self.assertContains(resp, "archive-detail-manual-text-status")
+        self.assertNotContains(resp, "archive-detail-manual-text-status")
         self.assertContains(resp, "text-quality-indicator__badge--human-verified")
         self.assertContains(resp, "נבדק ואושר")
+        self.assertContains(resp, "איכות התעתוק")
 
-        status_start = html.index("archive-detail-manual-text-status")
+        meta_start = html.index("archive-detail-meta")
+        quality_start = html.index("archive-detail-manual-text-quality")
         body_start = html.index(
             'class="archive-detail-text archive-detail-manual-text-body"'
         )
-        self.assertLess(status_start, body_start)
+        self.assertLess(meta_start, quality_start)
+        self.assertLess(quality_start, body_start)
 
-        status_html = html[status_start:body_start]
-        self.assertIn("data-text-quality-indicator", status_html)
-        self.assertIn("archive-detail-manual-text-quality", status_html)
+        quality_html = html[quality_start:body_start]
+        self.assertIn("data-text-quality-indicator", quality_html)
+        self.assertIn("איכות התעתוק", quality_html)
 
         body_end = html.index("archive-detail-manual-text-signature", body_start)
         body_html = html[body_start:body_end]
         self.assertIn("text-block", body_html)
         self.assertNotIn("text-quality-indicator", body_html)
         self.assertNotIn("data-text-quality-indicator", body_html)
+        self.assertNotIn("איכות התעתוק", body_html)
 
     def test_staff_status_badge_row_does_not_duplicate_quality_indicator(self):
         staff = User.objects.create_user(
@@ -375,6 +384,15 @@ class ManualTextPublicQualityBadgePlacementTests(TestCase):
         badges_section = html[badges_start : html.index("</div>", badges_start)]
         self.assertIn('<span class="badge">', badges_section)
         self.assertNotIn("text-quality-indicator", badges_section)
+        header = html[html.index("document-detail-header") : html.index("</header>")]
+        self.assertLess(
+            header.index("archive-detail-manual-text-status"),
+            header.index("archive-detail-meta"),
+        )
+        self.assertLess(
+            header.index("archive-detail-meta"),
+            header.index("archive-detail-manual-text-quality"),
+        )
 
 
 class ManualTextPublicDetailLayoutStyleTests(SimpleTestCase):
@@ -446,6 +464,7 @@ class ManualTextPublicDetailLayoutStyleTests(SimpleTestCase):
         self.assertIn("position: relative;", quality_rule)
         self.assertIn("min-width: 0;", quality_rule)
         self.assertIn("max-width: 100%;", quality_rule)
+        self.assertIn("margin-top: 2px;", quality_rule)
 
         popover_start = css.index(
             ".archive-detail-page--manual-text "
@@ -490,6 +509,7 @@ class ManualTextPublicDetailLayoutStyleTests(SimpleTestCase):
         body_rule = css[body_start : css.index("}", body_start)]
         self.assertIn("max-width: min(82ch, 100%);", body_rule)
         self.assertIn("margin-inline-end: auto;", body_rule)
+        self.assertIn("margin-block-start: var(--space-5);", body_rule)
         self.assertNotIn("margin: 0 auto", body_rule)
         self.assertNotIn("margin-inline-start: auto", body_rule)
 
@@ -677,7 +697,7 @@ class ManualTextPublicDetailLayoutStyleTests(SimpleTestCase):
         self.assertNotIn("archive-detail-manual-text-signature", header)
         self.assertNotIn("manual_text_signature.js", header)
 
-    def test_manual_text_quality_indicator_is_only_in_status_area(self):
+    def test_manual_text_quality_indicator_is_last_metadata_before_body(self):
         template = self._template()
 
         self.assertEqual(
@@ -692,10 +712,20 @@ class ManualTextPublicDetailLayoutStyleTests(SimpleTestCase):
         quality_wrap_idx = template.rfind(
             "archive-detail-manual-text-quality", 0, include_idx
         )
+        meta_idx = template.index('class="archive-detail-meta document-detail-meta"')
         self.assertGreater(quality_wrap_idx, -1)
+        self.assertLess(meta_idx, quality_wrap_idx)
 
         body_idx = template.index("archive-detail-manual-text-body")
         self.assertLess(include_idx, body_idx)
+        header = template[
+            template.index("<header") : template.index("</header>") + len("</header>")
+        ]
+        self.assertIn("archive-detail-manual-text-quality", header)
+        self.assertLess(
+            header.index("archive-detail-meta"),
+            header.index("archive-detail-manual-text-quality"),
+        )
         body_end = template.index("archive-detail-manual-text-signature", body_idx)
         body = template[body_idx:body_end]
         self.assertNotIn("text_quality_indicator.html", body)

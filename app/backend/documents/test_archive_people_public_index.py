@@ -166,6 +166,8 @@ class PeoplePublicIndexRouteTests(TestCase):
         self.assertIn("חזרה לארכיון", header)
         self.assertIn("btn-primary", header)
         self.assertIn("←", header)
+        self.assertNotIn("חזרה לאנשים", html)
+        self.assertNotIn("עריכת הפרטים", html)
         self.assertNotIn("הוספת מידע על הפריט", html)
         self.assertNotContains(resp, reverse("archive-manage-people"))
         self.assertNotContains(resp, "ניהול אנשים")

@@ -1194,17 +1194,20 @@ do not derive quality.
 ## MANUAL_TEXT public quality badge placement
 
 **Decision / implemented:** Public `MANUAL_TEXT` detail shows the shared
-transcription-quality indicator in the top metadata/status area, not inside
-the manual text block. Labels, colors, explanation copy, and OCR document
-detail placement are unchanged.
+transcription-quality indicator as the **last metadata row immediately
+before** the manual text body, not inside the text panel. Labels, colors,
+explanation copy, and OCR document detail placement are unchanged.
 
 **Current behavior:**
 
 - One indicator (`show_heading=True`, PR1 `HUMAN_VERIFIED`).
-- Markup lives in `archive-detail-manual-text-status` /
-  `archive-detail-manual-text-quality` inside `document-detail-header-main`,
-  above compact `archive-detail-meta` and the manual text body (no spacer
-  bands between date/quality and metadata).
+- Markup lives in `archive-detail-manual-text-quality` inside
+  `document-detail-header-main`, **after** compact `archive-detail-meta`
+  (title / date / source / categories / people / note) and **before** the
+  manual text body. Staff `metadata_status` stays in
+  `archive-detail-manual-text-status` above that metadata. No spacer
+  bands between metadata rows. The larger `margin-block-start` before the
+  manual text body is unchanged.
 - OCR still uses `document-detail-top-meta` via `detail_jump_nav.html`.
 - MANUAL_TEXT popover positioning is CSS-only and scoped under
   `.archive-detail-page--manual-text`; the shared OCR popover rule is
@@ -1213,12 +1216,6 @@ detail placement are unchanged.
 
 **Tests:** `documents/test_manual_text_public_detail_ui.py`,
 `documents/test_text_quality_public_ui.py`.
-
-- Markup lives in `archive-detail-manual-text-status` /
-  `archive-detail-manual-text-quality` inside `document-detail-header-main`,
-  immediately above compact `archive-detail-meta` (no `.spacer` / `.spacer-sm`
-  between date/quality and metadata). The larger `margin-block-start` before
-  the manual text body is unchanged.
 
 ## Public archive detail action chrome (canonical Document treatment)
 
@@ -1244,10 +1241,11 @@ Document OCR detail remains the reference and keeps **מידע והשתתפות*
   superseded; those pages reuse `.document-detail-header` /
   `.document-detail-navigation-actions`. Quality indicator, body, and
   signature remain MANUAL_TEXT-specific.
-- `/archive/people/` and `/archive/people/<id>/` keep the `.page-header`
-  band and use the same blue primary back in a Document-like flex header
-  (title/content vs toolbar). No suggest button. Staff
-  `/archive/manage/people/` is unchanged.
+- `/archive/people/` keeps the `.page-header` band and a single blue
+  primary **חזרה לארכיון**. `/archive/people/<id>/` uses the same header
+  band and stacks **חזרה לארכיון**, **חזרה לאנשים**, and staff-only
+  **עריכת הפרטים** in `.document-detail-navigation-actions`. No suggest
+  button. Staff `/archive/manage/people/` is unchanged.
 - Unlinked public Author detail (`/archive/authors/<id>/`) uses the same
   back/header treatment. Linked Author→Person redirects are unchanged.
   Category/event/tag browse pages and the metadata-suggestion **חזרה לפריט**
@@ -1262,6 +1260,36 @@ reusing Document/PHOTO header selectors; VIDEO public type-badge on detail.
 `documents/test_archive_people_public_index.py`,
 `documents/test_archive_person_public_page.py`,
 `documents/test_archive_author_public_page.py`.
+
+## Public archive UI follow-ups (PHOTO spacing, MANUAL_TEXT quality order, Person actions)
+
+**Decision / implemented:** Small public-chrome follow-ups after the
+canonical Document treatment. Templates/CSS/tests/docs only.
+
+**Current behavior:**
+
+- PHOTO public detail: per-photo metadata (`.archive-detail-meta-block--photo`)
+  and PHOTO header metadata rows use a compact 2px rhythm. Caption
+  (`.archive-detail-photo-description`) no longer adds an extra
+  `--space-2` bottom margin. Gallery, image figure, album controls, and
+  staff technical details are unchanged.
+- MANUAL_TEXT public detail: **איכות התעתוק** is the last metadata item
+  immediately before the text body (see **MANUAL_TEXT public quality badge
+  placement**).
+- Person public detail (`/archive/people/<id>/`) stacks blue primary
+  **חזרה לארכיון ←**, **חזרה לאנשים ←**, and staff-only **עריכת הפרטים**
+  in `.document-detail-navigation-actions` (same `btn-primary` language as
+  the archive back). **עריכת הפרטים** uses existing
+  `archive-manage-person-edit` and is shown only when `_is_admin` /
+  `is_document_admin` (staff or superuser). Public, family, and other
+  non-admin users do not see it. People index
+  (`/archive/people/`) still has only **חזרה לארכיון**.
+
+**Tests:** `documents/test_photo_archive_display.py`,
+`documents/test_manual_text_public_detail_ui.py`,
+`documents/test_text_quality_public_ui.py`,
+`documents/test_archive_person_public_page.py`,
+`documents/test_archive_people_public_index.py`.
 
 ## Staff Author merge (explicit ids)
 
