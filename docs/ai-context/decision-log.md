@@ -34,6 +34,27 @@ pre-activation text and overwrite the newly activated canonical rows.
 
 **Tests:** `documents.test_stale_review_form_guard`.
 
+## Staff review textarea browser form restoration
+
+**Decision / implemented:** The staff review page treats each `.review-textarea`
+HTML `defaultValue` as the authoritative value after load and `pageshow`.
+If the live `.value` differs, JS resets it to `defaultValue`.
+
+**Why:** After corrected/current activation, a reload can render fresh hidden
+`expected_text_sha256` / revision tokens for the new canonical text while the
+browser restores the previous textarea `.value`. Verify then POSTs the restored
+stale text against a fresh baseline and bypasses `STALE_REVIEW_FORM`.
+
+**Current behavior:**
+
+- Server stale-form optimistic concurrency is unchanged and remains required.
+- Restoration does not copy text between SOURCE/HEBREW cards, does not fetch
+  public displayed text, and does not use `localStorage` / `sessionStorage`.
+- `autocomplete="off"` on the review text forms/textareas is secondary only.
+- No `Cache-Control: no-store` was added for this fix.
+
+**Tests:** `documents.test_review_textarea_browser_restoration`.
+
 ## Document list/API public JSON field contract
 
 

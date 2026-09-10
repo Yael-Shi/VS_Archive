@@ -153,13 +153,14 @@
                   data-verified-edit-url="{% url 'review-text-result-verified-edit' result_id=card.row.id %}"
                   data-verified-edit-title="{% if card.row.result_type == "SOURCE_TEXT" %}עריכת תעתוק מאושר{% else %}עריכת תרגום מאושר{% endif %}"
                   data-verified-save-label="שמור עריכה"
+                  autocomplete="off"
                 >
                   {% csrf_token %}
                   <input type="hidden" name="expected_text_sha256" value="{{ card.expected_text_sha256 }}">
                   {% if card.expected_source_revision %}
                     <input type="hidden" name="expected_source_revision" value="{{ card.expected_source_revision }}">
                   {% endif %}
-                  <textarea class="review-textarea" name="text" rows="12">{{ card.row.text }}</textarea>
+                  <textarea class="review-textarea" name="text" rows="12" autocomplete="off">{{ card.row.text }}</textarea>
                   <div class="review-zone-actions review-zone-actions--spaced">
                     <button class="btn btn-primary" type="submit" data-review-action="save">שמור טקסט</button>
                     {% if card.is_pending_review and card.row.verification_status != "VERIFIED" %}
@@ -177,7 +178,7 @@
                 {% if card.hebrew_translation_stale %}
                   <div class="badge badge-warn" style="margin-bottom: 8px;">טעון תרגום מחדש</div>
                 {% endif %}
-                <form method="post" action="{% url 'review-text-result-verified-edit' result_id=card.row.id %}" class="inline-form">
+                <form method="post" action="{% url 'review-text-result-verified-edit' result_id=card.row.id %}" class="inline-form" autocomplete="off">
                   {% csrf_token %}
                   <input type="hidden" name="expected_text_sha256" value="{{ card.expected_text_sha256 }}">
                   {% if card.expected_source_revision %}
@@ -190,7 +191,7 @@
                       עריכת תרגום מאושר
                     {% endif %}
                   </div>
-                  <textarea class="review-textarea" name="text" rows="12">{{ card.row.text }}</textarea>
+                  <textarea class="review-textarea" name="text" rows="12" autocomplete="off">{{ card.row.text }}</textarea>
                   <div class="review-zone-actions review-zone-actions--spaced">
                     <button class="btn btn-primary" type="submit">שמור עריכה</button>
                   </div>

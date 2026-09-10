@@ -205,6 +205,23 @@
     return "הפעולה נכשלה. נסו שוב.";
   }
 
+  function restoreReviewTextareasFromServerDefault(root) {
+    var scope = root && root.querySelectorAll ? root : document;
+    var textareas = scope.querySelectorAll("textarea.review-textarea");
+    var i;
+    var textarea;
+    for (i = 0; i < textareas.length; i++) {
+      textarea = textareas[i];
+      if (textarea.value !== textarea.defaultValue) {
+        textarea.value = textarea.defaultValue;
+      }
+    }
+  }
+
+  function onPageShow() {
+    restoreReviewTextareasFromServerDefault(document);
+  }
+
   function onSubmit(event) {
     var form = event.target;
     if (!form || !form.matches) {
@@ -292,5 +309,7 @@
       });
   }
 
+  restoreReviewTextareasFromServerDefault(document);
+  window.addEventListener("pageshow", onPageShow, false);
   document.addEventListener("submit", onSubmit, false);
 })();
