@@ -423,8 +423,14 @@ class TextQualityPublicUiTests(TestCase):
             "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות.",
             html,
         )
-        status_html = html[html.index("archive-detail-manual-text-status") : body_start]
-        self.assertIn("data-text-quality-indicator", status_html)
+        self.assertNotIn("archive-detail-manual-text-status", html)
+        quality_start = html.index("archive-detail-manual-text-quality")
+        meta_start = html.index("archive-detail-meta")
+        self.assertLess(meta_start, quality_start)
+        self.assertLess(quality_start, body_start)
+        quality_html = html[quality_start:body_start]
+        self.assertIn("data-text-quality-indicator", quality_html)
+        self.assertIn("איכות התעתוק", quality_html)
         indicator = public_text_quality_indicator_for_manual_text(
             item.manual_text_content
         )

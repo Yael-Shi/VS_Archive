@@ -1,0 +1,10 @@
+<div class="document-detail-navigation-actions">
+  {% include "documents/partials/detail_back_to_archive.html" %}
+  {% include "documents/partials/detail_back_to_people.html" %}
+  {% if is_admin %}
+    <a
+      class="btn btn-primary"
+      href="{% url 'archive-manage-person-edit' person_id=person.id %}"
+    >עריכת הפרטים</a>
+  {% endif %}
+</div>

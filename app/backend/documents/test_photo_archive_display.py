@@ -983,6 +983,39 @@ class PhotoArchiveDetailLayoutStyleTests(SimpleTestCase):
         self.assertIn("align-items: stretch;", staff_rule)
         self.assertNotIn("display: grid", staff_rule)
 
+    def test_photo_public_metadata_rows_use_compact_spacing(self):
+        css_path = settings.BASE_DIR / "public" / "static" / "public" / "app.css"
+        css = css_path.read_text(encoding="utf-8")
+
+        row_start = css.index("\n.archive-detail-meta-row {")
+        row_rule = css[row_start : css.index("}", row_start)]
+        self.assertIn("margin: 0;", row_rule)
+
+        adjacent_start = css.index(
+            ".archive-detail-meta-row + .archive-detail-meta-row {"
+        )
+        adjacent_rule = css[adjacent_start : css.index("}", adjacent_start)]
+        self.assertIn("margin-top: 2px;", adjacent_rule)
+
+        photo_block_start = css.index(".archive-detail-meta-block--photo {")
+        photo_block_rule = css[photo_block_start : css.index("}", photo_block_start)]
+        self.assertIn("display: flex;", photo_block_rule)
+        self.assertIn("flex-direction: column;", photo_block_rule)
+        self.assertIn("gap: 2px;", photo_block_rule)
+
+        description_start = css.index(".archive-detail-photo-description {")
+        description_rule = css[description_start : css.index("}", description_start)]
+        self.assertIn("margin: 0;", description_rule)
+        self.assertNotIn("margin-bottom: var(--space-2)", description_rule)
+        self.assertNotIn("line-height: var(--line-relaxed)", description_rule)
+
+        figure_start = css.index(".archive-detail-photo {")
+        figure_block = css[figure_start : css.index("}", figure_start) + 1]
+        self.assertIn("margin: var(--space-5) auto 0", figure_block)
+        gallery_start = css.index(".photo-gallery {")
+        gallery_block = css[gallery_start : css.index("}", gallery_start) + 1]
+        self.assertIn("margin: var(--space-5) auto 0", gallery_block)
+
     def test_photo_detail_figure_is_centered_and_width_capped(self):
         css_path = settings.BASE_DIR / "public" / "static" / "public" / "app.css"
         css = css_path.read_text(encoding="utf-8")
