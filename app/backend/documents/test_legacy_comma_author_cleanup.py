@@ -9,6 +9,8 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
 
+from typing import TypedDict
+
 from documents.models import (
     ArchiveItem,
     ArchiveItemAuthor,
@@ -125,7 +127,14 @@ def _metadata(archive_item_id: int) -> str:
     ).metadata_text
 
 
-def _seed_reviewed_snapshot() -> dict[str, object]:
+class _ReviewedSnapshotSeed(TypedDict):
+    authors: dict[int, Author]
+    person: Person
+    item_311: ArchiveItem
+    unrelated: ArchiveItem
+
+
+def _seed_reviewed_snapshot() -> _ReviewedSnapshotSeed:
     authors = {
         AUTHOR_4_ID: _author(pk=AUTHOR_4_ID, name=AUTHOR_4_NAME),
         AUTHOR_6_ID: _author(pk=AUTHOR_6_ID, name=AUTHOR_6_NAME),

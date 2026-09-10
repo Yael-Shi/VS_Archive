@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
@@ -282,12 +282,14 @@ class HebrewTranslationRetryWorkerTests(TestCase):
             engine_name=ENGINE,
         )
 
+        source_text = source.text
+        assert source_text is not None
         with transaction.atomic():
             locked = Document.objects.select_for_update().get(pk=doc.pk)
             validate_document_for_hebrew_translation_retry_persistence(
                 locked,
                 expected_engine=ENGINE,
-                expected_source_text=source.text,
+                expected_source_text=source_text,
             )
             persist_hebrew_translation_result(
                 locked,
@@ -979,15 +981,17 @@ class HebrewTranslationRetryWorkerMessageTests(TestCase):
         doc = _non_hebrew_doc()
         old_updated_at = timezone.now() - timedelta(days=7)
         Document.objects.filter(pk=doc.pk).update(updated_at=old_updated_at)
-        phase_one_updated_at: dict[str, object] = {}
+        phase_one_updated_at: dict[str, datetime] = {}
 
         def _assert_phase_one_claim(*args, **kwargs):
             doc.refresh_from_db()
             self.assertEqual(
                 doc.processing_state_user, Document.ProcessingState.PROCESSING
             )
-            self.assertGreater(doc.updated_at, old_updated_at)
-            phase_one_updated_at["value"] = doc.updated_at
+            claimed_updated_at = doc.updated_at
+            assert claimed_updated_at is not None
+            self.assertGreater(claimed_updated_at, old_updated_at)
+            phase_one_updated_at["value"] = claimed_updated_at
             return (b"%PDF-1.4", "application/pdf")
 
         mock_get_object_bytes.side_effect = _assert_phase_one_claim
@@ -1015,7 +1019,10 @@ class HebrewTranslationRetryWorkerMessageTests(TestCase):
         mock_transcribe.assert_called_once()
         mock_translate.assert_called_once()
         doc.refresh_from_db()
-        self.assertGreaterEqual(doc.updated_at, phase_one_updated_at["value"])
+        updated_at = doc.updated_at
+        phase_one = phase_one_updated_at["value"]
+        assert updated_at is not None
+        self.assertGreaterEqual(updated_at, phase_one)
 
     @patch(
         "documents.services.hebrew_translation_retry.translate_text_to_hebrew_with_gemini"

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from typing import Protocol, cast
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
@@ -62,6 +64,20 @@ def _rebuild(archive_item_id: int) -> ArchiveItemSearchIndex:
 
 def _index_for(archive_item_id: int) -> ArchiveItemSearchIndex:
     return ArchiveItemSearchIndex.objects.get(archive_item_id=archive_item_id)
+
+
+class _ThroughQuerySet(Protocol):
+    def values_list(
+        self, *args: str, **kwargs: object
+    ) -> Iterable[tuple[object, ...]]: ...
+
+
+class _ThroughModel(Protocol):
+    objects: _ThroughQuerySet
+
+
+def _document_tags_through() -> _ThroughModel:
+    return cast(_ThroughModel, Document.tags_m2m.through)
 
 
 def _create_photo_item(*, title: str) -> tuple[ArchiveItem, PhotoContent]:
@@ -408,7 +424,7 @@ class ArchiveItemPersonSuggestionSubmitTests(
         _rebuild(item.pk)
         index_updated_at = _index_for(item.pk).updated_at
         through_before = set(
-            Document.tags_m2m.through.objects.values_list("document_id", "tag_id")
+            _document_tags_through().objects.values_list("document_id", "tag_id")
         )
 
         self._submit(item, person, action=ArchiveItemPersonSuggestion.Action.ADD)
@@ -419,7 +435,7 @@ class ArchiveItemPersonSuggestionSubmitTests(
         self.assertEqual(PhotoPerson.objects.count(), 1)
         self.assertEqual(Tag.objects.count(), 1)
         self.assertEqual(
-            set(Document.tags_m2m.through.objects.values_list("document_id", "tag_id")),
+            set(_document_tags_through().objects.values_list("document_id", "tag_id")),
             through_before,
         )
         self.assertEqual(_index_for(item.pk).updated_at, index_updated_at)

@@ -6,7 +6,7 @@ import json
 import threading
 import uuid
 from datetime import timedelta
-from typing import cast
+from typing import TypedDict, Unpack, cast
 from unittest.mock import patch
 
 from botocore.exceptions import ClientError, EndpointConnectionError
@@ -40,6 +40,15 @@ def _document(title: str) -> Document:
         file_s3_key=f"{title}.pdf",
         mime_type="application/pdf",
     )
+
+
+class _EnqueueOverrides(TypedDict, total=False):
+    document_id: int
+    operation: str
+    origin: str
+    ocr_retry_mode: str
+    source_transkribus_run_id: int | None
+    initiated_by: object | None
 
 
 def _run(document: Document) -> TranskribusRun:
@@ -139,9 +148,11 @@ class ProcessDocumentEnqueueCoalesceTests(TransactionTestCase):
         self.user = User.objects.create_user(username="enqueue-user")
         self.user2 = User.objects.create_user(username="enqueue-user-2")
 
-    def _enqueue(self, **overrides):
-        values = {
-            "document_id": self.document.pk,
+    def _enqueue(self, **overrides: Unpack[_EnqueueOverrides]):
+        document_id = self.document.pk
+        assert document_id is not None
+        values: _EnqueueOverrides = {
+            "document_id": document_id,
             "operation": ProcessDocumentRequest.Operation.OCR,
             "origin": ProcessDocumentRequest.Origin.UPLOAD_FINALIZE,
             "ocr_retry_mode": (ProcessDocumentRequest.OcrRetryMode.NORMAL_REENQUEUE),
@@ -238,9 +249,11 @@ class ProcessDocumentEnqueueSendPathTests(TransactionTestCase):
         self.user = User.objects.create_user(username="enqueue-send-user")
         self.user2 = User.objects.create_user(username="enqueue-send-user-2")
 
-    def _enqueue(self, **overrides):
-        values = {
-            "document_id": self.document.pk,
+    def _enqueue(self, **overrides: Unpack[_EnqueueOverrides]):
+        document_id = self.document.pk
+        assert document_id is not None
+        values: _EnqueueOverrides = {
+            "document_id": document_id,
             "operation": ProcessDocumentRequest.Operation.OCR,
             "origin": ProcessDocumentRequest.Origin.UPLOAD_FINALIZE,
             "ocr_retry_mode": (ProcessDocumentRequest.OcrRetryMode.NORMAL_REENQUEUE),
@@ -377,9 +390,11 @@ class ProcessDocumentEnqueueAdditionalCoverageTests(TransactionTestCase):
         self.other_document = _document("enqueue-additional-other")
         self.user = User.objects.create_user(username="enqueue-additional-user")
 
-    def _upload_enqueue(self, **overrides):
-        values = {
-            "document_id": self.document.pk,
+    def _upload_enqueue(self, **overrides: Unpack[_EnqueueOverrides]):
+        document_id = self.document.pk
+        assert document_id is not None
+        values: _EnqueueOverrides = {
+            "document_id": document_id,
             "operation": ProcessDocumentRequest.Operation.OCR,
             "origin": ProcessDocumentRequest.Origin.UPLOAD_FINALIZE,
             "ocr_retry_mode": (ProcessDocumentRequest.OcrRetryMode.NORMAL_REENQUEUE),

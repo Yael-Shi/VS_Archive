@@ -65,6 +65,12 @@ def _create_photo_item(
     )
 
 
+def _primary_photo(item: ArchiveItem) -> PhotoContent:
+    photo = item.primary_photo_content
+    assert photo is not None
+    return photo
+
+
 def _add_photo(
     item: ArchiveItem,
     *,
@@ -575,9 +581,11 @@ class PhotoPublicGalleryTests(TestCase):
         self.assertContains(family, "Private album")
         self.assertContains(family, "photo-gallery--album")
         self.assertNotContains(family, "Secret first")
+        selected_photo = private_item.photo_contents.order_by("position", "id").first()
+        assert selected_photo is not None
         selected = self._detail(
             item=private_item,
-            photo=private_item.photo_contents.order_by("position", "id").first().id,
+            photo=selected_photo.id,
         )
         self.assertContains(selected, "Secret first")
 
@@ -671,7 +679,7 @@ class PhotoPublicGalleryTests(TestCase):
     def test_gallery_builder_does_not_query_people_on_viewable_item(self):
         item = get_viewable_archive_item(None, self.item.id)
         with CaptureQueriesContext(connection) as ctx:
-            primary = item.primary_photo_content
+            primary = _primary_photo(item)
             gallery = build_public_photo_gallery(
                 item,
                 selected_photo_param=str(self.p2.id),
@@ -710,7 +718,9 @@ class PhotoPublicGalleryTests(TestCase):
             )
         self.assertIsNotNone(gallery)
         assert gallery is not None
-        self.assertEqual(gallery.selected.id, self.p2.id)
+        selected = gallery.selected
+        assert selected is not None
+        self.assertEqual(selected.id, self.p2.id)
         self.assertFalse(gallery.is_album_view)
         self.assertEqual(mock_thumb.call_count, 0)
         self.assertEqual(gallery.selector_items, [])

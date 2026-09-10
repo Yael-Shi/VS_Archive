@@ -377,6 +377,7 @@ class PhotoAddUploadTests(TestCase):
             resp.content.decode(),
         )
         self.assertIsNotNone(match)
+        assert match is not None
         self.assertNotIn("maxlength", match.group(0))
         self.assertNotContains(resp, 'name="title"')
         self.assertNotContains(resp, 'name="categories"')
@@ -1064,6 +1065,7 @@ class PhotoComponentEditTests(TestCase):
         html = resp.content.decode()
         match = re.search(r'<input[^>]*id="new_person_name"[^>]*>', html)
         self.assertIsNotNone(match)
+        assert match is not None
         self.assertNotIn("maxlength", match.group(0))
         self.assertContains(
             resp,

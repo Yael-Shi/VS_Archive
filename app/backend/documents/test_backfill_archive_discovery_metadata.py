@@ -9,6 +9,7 @@ from django.test import TestCase
 from documents.models import (
     ArchiveCategory,
     ArchiveEvent,
+    ArchiveItem,
     Document,
     DocumentMetadata,
     Tag,
@@ -257,7 +258,9 @@ class BackfillArchiveDiscoveryMetadataCommandTests(TestCase):
 
         category = ArchiveCategory.objects.get(name="shared-category")
         linked_item_ids = list(
-            category.archive_items.order_by("id").values_list("id", flat=True)
+            ArchiveItem.objects.filter(categories=category)
+            .order_by("id")
+            .values_list("id", flat=True)
         )
         self.assertEqual(len(linked_item_ids), 2)
         self.assertEqual(

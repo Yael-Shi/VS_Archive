@@ -6,6 +6,7 @@ import json
 import math
 import os
 from datetime import timedelta
+from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -76,7 +77,11 @@ from documents.services.arabic_printed_page_checkpoints import (
     StaleArabicPrintedPageClaimError,
 )
 from documents.services.archive_items import create_ocr_document
-from documents.services.env_validation import EnvConfigError, validate_required_env
+from documents.services.env_validation import (
+    EnvConfigError,
+    WorkerEnvConfig,
+    validate_required_env,
+)
 from documents.services.htr_adapters.antigravity_adapter import AntigravityAdapter
 from documents.services.htr_adapters.base import (
     EnginePageCheckpointBusyError,
@@ -173,43 +178,40 @@ def _assert_supported_create_payload(
         test_case.assertNotIn(forbidden, payload)
 
 
-def _make_worker_env(**overrides):
-    from documents.services.env_validation import WorkerEnvConfig
-
-    base = {
-        "gemini_api_key": "test-api-key",
-        "gemini_confidence_threshold": 0.55,
-        "min_text_length": 20,
-        "max_retries": 3,
-        "retry_delay_seconds_1": 30,
-        "retry_delay_seconds_2": 300,
-        "report_window_start": "00:00",
-        "report_send_time": "08:00",
-        "free_tier_alert_pct": 80,
-        "gemini_free_daily_request_limit": 200,
-        "gemini_free_daily_image_limit": 200,
-        "transkribus_free_monthly_credits": 500,
-        "enable_hybrid_htr": False,
-        "enable_daily_report": False,
-        "smtp_host": None,
-        "smtp_port": None,
-        "smtp_username": None,
-        "smtp_password": None,
-        "default_from_email": None,
-        "transkribus_api_token": None,
-        "transkribus_username": None,
-        "transkribus_password": None,
-        "gemini_temperature": 0.2,
-        "gemini_top_k": 40,
-        "gemini_top_p": 0.95,
-        "gemini_max_output_tokens": 8192,
-        "gemini_double_pass": False,
-        "gemini_consistency_min_ratio": 0.85,
-        "enable_antigravity_arabic_printed": True,
-        "antigravity_agent_id": DEFAULT_ANTIGRAVITY_AGENT_ID,
-    }
-    base.update(overrides)
-    return WorkerEnvConfig(**base)
+def _make_worker_env(**overrides) -> WorkerEnvConfig:
+    base = WorkerEnvConfig(
+        gemini_api_key="test-api-key",
+        gemini_confidence_threshold=0.55,
+        min_text_length=20,
+        max_retries=3,
+        retry_delay_seconds_1=30,
+        retry_delay_seconds_2=300,
+        report_window_start="00:00",
+        report_send_time="08:00",
+        free_tier_alert_pct=80,
+        gemini_free_daily_request_limit=200,
+        gemini_free_daily_image_limit=200,
+        transkribus_free_monthly_credits=500,
+        enable_hybrid_htr=False,
+        enable_daily_report=False,
+        smtp_host=None,
+        smtp_port=None,
+        smtp_username=None,
+        smtp_password=None,
+        default_from_email=None,
+        transkribus_api_token=None,
+        transkribus_username=None,
+        transkribus_password=None,
+        gemini_temperature=0.2,
+        gemini_top_k=40,
+        gemini_top_p=0.95,
+        gemini_max_output_tokens=8192,
+        gemini_double_pass=False,
+        gemini_consistency_min_ratio=0.85,
+        enable_antigravity_arabic_printed=True,
+        antigravity_agent_id=DEFAULT_ANTIGRAVITY_AGENT_ID,
+    )
+    return replace(base, **overrides)
 
 
 def _ocr_contract_json(*page_texts: str, outcomes: list[str] | None = None) -> str:
@@ -608,6 +610,7 @@ class AntigravityEngineTests(SimpleTestCase):
                 background=False,
             )
         self.assertIsInstance(ctx.exception, AntigravityHttpError)
+        assert isinstance(ctx.exception, AntigravityHttpError)
         self.assertEqual(ctx.exception.status_code, 403)
         mock_get.assert_not_called()
 
@@ -894,6 +897,7 @@ class AntigravityEngineTests(SimpleTestCase):
             )
 
         self.assertIsInstance(ctx.exception, AntigravityHttpError)
+        assert isinstance(ctx.exception, AntigravityHttpError)
         self.assertEqual(ctx.exception.status_code, 400)
         self.assertIn("HTTP 400: bad request", str(ctx.exception))
         self.assertEqual(mock_post.call_count, 1)
@@ -916,6 +920,7 @@ class AntigravityEngineTests(SimpleTestCase):
             )
 
         self.assertIsInstance(ctx.exception, AntigravityHttpError)
+        assert isinstance(ctx.exception, AntigravityHttpError)
         self.assertEqual(ctx.exception.status_code, 403)
         self.assertIn("HTTP 403: permission denied", str(ctx.exception))
         self.assertEqual(mock_post.call_count, 1)
@@ -937,6 +942,7 @@ class AntigravityEngineTests(SimpleTestCase):
             )
 
         self.assertIsInstance(ctx.exception, AntigravityHttpError)
+        assert isinstance(ctx.exception, AntigravityHttpError)
         self.assertEqual(ctx.exception.status_code, 504)
         self.assertIn("HTTP 504: gateway timeout", str(ctx.exception))
         self.assertEqual(mock_post.call_count, 1)
@@ -1900,7 +1906,7 @@ class AntigravityInteractionSummaryTests(SimpleTestCase):
         )
 
     def test_malformed_steps_content_and_usage_do_not_raise(self):
-        cases = (
+        cases: tuple[object, ...] = (
             None,
             [],
             "not-an-object",
@@ -3722,6 +3728,7 @@ class AntigravityWorkerInvalidCompletedOutputTests(TestCase):
             .first()
         )
         self.assertIsNotNone(latest_source)
+        assert latest_source is not None
         self.assertEqual(latest_source.status, DocumentTextResult.Status.FAILED)
         self.assertEqual(latest_source.error_code, "OCR_FAILED")
         self.assertFalse(

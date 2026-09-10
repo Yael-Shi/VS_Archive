@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import threading
 import uuid
+from collections.abc import Mapping
 from datetime import timedelta
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from django.db import connection, connections
@@ -118,7 +120,9 @@ class ProcessDocumentRequestWorkerTests(TestCase):
         self.assertEqual(request.status, ProcessDocumentRequest.Status.RUNNING)
         self.assertEqual(request.lease_token, claim.lease_token)
         self.assertIsNotNone(request.started_at)
-        self.assertGreaterEqual(request.lease_expires_at, before + EXECUTION_LEASE)
+        lease_expires_at = request.lease_expires_at
+        assert lease_expires_at is not None
+        self.assertGreaterEqual(lease_expires_at, before + EXECUTION_LEASE)
 
     def test_recognition_only_payload_is_derived_from_request(self):
         run = self._run()
@@ -547,7 +551,10 @@ class ProcessDocumentRequestWorkerTests(TestCase):
 
     def test_late_holder_can_terminalize_after_document_partial_or_failed(self):
         token = uuid.uuid4()
-        cases = (
+        cases: tuple[
+            tuple[str, ProcessDocumentDisposition, str],
+            ...,
+        ] = (
             (
                 Document.ProcessingState.PARTIAL,
                 ProcessDocumentDisposition.PARTIAL,
@@ -1189,7 +1196,7 @@ class RunWorkerProcessDocumentRequestDispatchTests(SimpleTestCase):
         execute_payload = MagicMock(
             return_value=ProcessDocumentOutcome(ProcessDocumentDisposition.COMPLETED)
         )
-        command._execute_process_document_payload = execute_payload
+        setattr(command, "_execute_process_document_payload", execute_payload)
         payload = {
             "type": "PROCESS_DOCUMENT",
             "document_id": 23,
@@ -1212,7 +1219,7 @@ class RunWorkerProcessDocumentRequestDispatchTests(SimpleTestCase):
         execute_payload = MagicMock(
             return_value=ProcessDocumentOutcome(ProcessDocumentDisposition.COMPLETED)
         )
-        command._execute_process_document_payload = execute_payload
+        setattr(command, "_execute_process_document_payload", execute_payload)
         payload = {
             "type": "PROCESS_DOCUMENT",
             "document_id": 23,
@@ -1237,7 +1244,7 @@ class RunWorkerProcessDocumentRequestDispatchTests(SimpleTestCase):
     ):
         command = Command()
         execute_payload = MagicMock()
-        command._execute_process_document_payload = execute_payload
+        setattr(command, "_execute_process_document_payload", execute_payload)
 
         ack = command._process_message(
             {
@@ -1261,7 +1268,7 @@ class RunWorkerProcessDocumentRequestDispatchTests(SimpleTestCase):
     ):
         command = Command()
         execute_payload = MagicMock()
-        command._execute_process_document_payload = execute_payload
+        setattr(command, "_execute_process_document_payload", execute_payload)
 
         ack = command._process_message(
             {
@@ -1329,7 +1336,7 @@ class ApproximateReceiveCountParsingTests(SimpleTestCase):
         )
 
     def test_parse_approximate_receive_count_tolerates_absent_and_malformed(self):
-        cases = (
+        cases: tuple[Mapping[str, Any] | None, ...] = (
             None,
             {},
             {"Attributes": None},

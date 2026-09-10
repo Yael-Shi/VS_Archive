@@ -1,5 +1,7 @@
 """Public /archive/ list pagination and per-page controls."""
 
+from typing import ClassVar
+
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
@@ -162,6 +164,8 @@ class ArchivePublicListPaginationHelperTests(SimpleTestCase):
 
 
 class ArchivePublicListPaginationViewTests(TestCase):
+    items: ClassVar[list[ArchiveItem]]
+
     @classmethod
     def setUpTestData(cls):
         cls.items = []

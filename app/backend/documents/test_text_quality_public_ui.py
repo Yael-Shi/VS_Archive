@@ -230,12 +230,17 @@ class TextQualityPublicUiTests(TestCase):
         presentation = get_text_presentation_for_document(doc)
         self.assertTrue(presentation.show_source)
         self.assertTrue(presentation.show_hebrew)
-        self.assertEqual(presentation.source.quality_indicator.quality, "GOOD")
+        source_block = presentation.source
+        hebrew_block = presentation.hebrew
+        assert source_block is not None
+        assert source_block.quality_indicator is not None
+        assert hebrew_block is not None
+        self.assertEqual(source_block.quality_indicator.quality, "GOOD")
         self.assertEqual(
-            presentation.source.quality_indicator.tooltip_translation_note,
+            source_block.quality_indicator.tooltip_translation_note,
             TEXT_QUALITY_TOOLTIP_TRANSLATION_NOTE,
         )
-        self.assertIsNone(presentation.hebrew.quality_indicator)
+        self.assertIsNone(hebrew_block.quality_indicator)
 
     @override_settings(UPLOADS_BUCKET_NAME="test-bucket")
     @patch(
@@ -308,7 +313,9 @@ class TextQualityPublicUiTests(TestCase):
         presentation = get_text_presentation_for_document(doc)
         self.assertTrue(presentation.show_source)
         self.assertIsNone(presentation.source)
-        self.assertIsNone(presentation.hebrew.quality_indicator)
+        hebrew_block = presentation.hebrew
+        assert hebrew_block is not None
+        self.assertIsNone(hebrew_block.quality_indicator)
 
     def test_hebrew_language_displayed_hebrew_transcription_has_indicator_without_note(
         self,
@@ -348,11 +355,14 @@ class TextQualityPublicUiTests(TestCase):
         presentation = get_text_presentation_for_document(doc)
         self.assertFalse(presentation.show_source)
         self.assertTrue(presentation.show_hebrew)
-        self.assertIsNone(presentation.source.quality_indicator)
-        self.assertEqual(presentation.hebrew.quality_indicator.quality, "MEDIUM")
-        self.assertEqual(
-            presentation.hebrew.quality_indicator.tooltip_translation_note, ""
-        )
+        source_block = presentation.source
+        hebrew_block = presentation.hebrew
+        assert source_block is not None
+        assert hebrew_block is not None
+        assert hebrew_block.quality_indicator is not None
+        self.assertIsNone(source_block.quality_indicator)
+        self.assertEqual(hebrew_block.quality_indicator.quality, "MEDIUM")
+        self.assertEqual(hebrew_block.quality_indicator.tooltip_translation_note, "")
 
     def test_hebrew_language_source_fallback_transcription_has_indicator_without_note(
         self,
@@ -380,7 +390,10 @@ class TextQualityPublicUiTests(TestCase):
         presentation = get_text_presentation_for_document(doc)
         self.assertTrue(presentation.show_source)
         self.assertFalse(presentation.show_hebrew)
-        self.assertEqual(presentation.source.quality_indicator.quality, "LOW")
+        source_block = presentation.source
+        assert source_block is not None
+        assert source_block.quality_indicator is not None
+        self.assertEqual(source_block.quality_indicator.quality, "LOW")
         self.assertIsNone(presentation.hebrew)
 
     def test_manual_text_renders_human_verified(self):
@@ -416,6 +429,7 @@ class TextQualityPublicUiTests(TestCase):
             item.manual_text_content
         )
         self.assertIsNotNone(indicator)
+        assert indicator is not None
         self.assertEqual(indicator.quality, HUMAN_VERIFIED)
         self.assertEqual(indicator.tooltip_translation_note, "")
 
@@ -487,6 +501,7 @@ class TextQualityPublicUiTests(TestCase):
             engine="engine-verified",
         )
         indicator = public_text_quality_indicator_for_result(verified)
+        assert indicator is not None
         self.assertEqual(indicator.quality, HUMAN_VERIFIED)
         self.assertEqual(indicator.label, "נבדק ואושר")
         self.assertEqual(indicator.css_modifier, "human-verified")
@@ -495,6 +510,7 @@ class TextQualityPublicUiTests(TestCase):
         with_note = public_text_quality_indicator_for_result(
             verified, include_translation_note=True
         )
+        assert with_note is not None
         self.assertEqual(
             with_note.tooltip_translation_note,
             TEXT_QUALITY_TOOLTIP_TRANSLATION_NOTE,

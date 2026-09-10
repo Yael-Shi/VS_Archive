@@ -26,6 +26,7 @@ class CorrectedCurrentSelectionSinglePageTests(SimpleTestCase):
             page_nr=1,
         )
         self.assertIsInstance(outcome, CorrectedCurrentTranscriptSelection)
+        assert isinstance(outcome, CorrectedCurrentTranscriptSelection)
         self.assertEqual(outcome.transcript_ts_id, "42")
         self.assertEqual(outcome.page_index, 1)
         self.assertEqual(outcome.page_nr, 1)
@@ -47,6 +48,7 @@ class CorrectedCurrentSelectionSinglePageTests(SimpleTestCase):
             page_nr=3,
         )
         self.assertIsInstance(outcome, CorrectedCurrentTranscriptSelection)
+        assert isinstance(outcome, CorrectedCurrentTranscriptSelection)
         self.assertEqual(outcome.transcript_ts_id, "99")
 
     def test_in_progress_exposes_warning_not_error(self):
@@ -56,6 +58,7 @@ class CorrectedCurrentSelectionSinglePageTests(SimpleTestCase):
             page_nr=1,
         )
         self.assertIsInstance(outcome, CorrectedCurrentTranscriptSelection)
+        assert isinstance(outcome, CorrectedCurrentTranscriptSelection)
         self.assertEqual(outcome.remote_transcript_status, "IN_PROGRESS")
         self.assertIsNotNone(outcome.in_progress_warning)
         self.assertIn("IN_PROGRESS", outcome.in_progress_warning or "")
@@ -67,6 +70,7 @@ class CorrectedCurrentSelectionSinglePageTests(SimpleTestCase):
             page_nr=1,
         )
         self.assertIsInstance(outcome, CorrectedCurrentTranscriptSelection)
+        assert isinstance(outcome, CorrectedCurrentTranscriptSelection)
         self.assertIsNotNone(outcome.in_progress_warning)
 
     def test_zero_transcripts_refuses(self):
@@ -76,6 +80,7 @@ class CorrectedCurrentSelectionSinglePageTests(SimpleTestCase):
             page_nr=1,
         )
         self.assertIsInstance(outcome, CorrectedCurrentPageSelectionError)
+        assert isinstance(outcome, CorrectedCurrentPageSelectionError)
         self.assertEqual(
             outcome.code, CorrectedCurrentSelectionErrorCode.ZERO_TRANSCRIPTS
         )
@@ -88,6 +93,7 @@ class CorrectedCurrentSelectionSinglePageTests(SimpleTestCase):
             page_nr=3,
         )
         self.assertIsInstance(outcome, CorrectedCurrentPageSelectionError)
+        assert isinstance(outcome, CorrectedCurrentPageSelectionError)
         self.assertEqual(
             outcome.code, CorrectedCurrentSelectionErrorCode.MULTIPLE_TRANSCRIPTS
         )
@@ -101,6 +107,7 @@ class CorrectedCurrentSelectionSinglePageTests(SimpleTestCase):
             page_nr=1,
         )
         self.assertIsInstance(outcome, CorrectedCurrentPageSelectionError)
+        assert isinstance(outcome, CorrectedCurrentPageSelectionError)
         self.assertEqual(outcome.code, CorrectedCurrentSelectionErrorCode.MISSING_TS_ID)
 
 

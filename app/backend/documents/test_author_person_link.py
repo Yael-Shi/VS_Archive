@@ -14,7 +14,10 @@ from documents.models import ArchiveItem, Author, Person, PersonAlias
 from documents.services.archive_item_access import ARCHIVE_FAMILY_GROUP_NAME
 from documents.services.archive_item_presentation import person_public_page_url
 from documents.services.author_public import author_public_page_url
-from documents.services.archive_item_authors import AUTHOR_NOT_FOUND_ERROR
+from documents.services.archive_item_authors import (
+    AUTHOR_NOT_FOUND_ERROR,
+    ArchiveItemAuthorError,
+)
 from documents.services.archive_items import create_manual_text_archive_item
 from documents.services.author_person_link import (
     AUTHOR_PERSON_ID_INVALID_ERROR,
@@ -82,10 +85,10 @@ class AuthorPersonLinkServiceTests(TestCase):
         self.assertIsNone(parse_author_person_id(""))
         self.assertIsNone(parse_author_person_id("   "))
         self.assertIsNone(parse_author_person_id(None))
-        with self.assertRaises(Exception) as ctx:
+        with self.assertRaises(ArchiveItemAuthorError) as ctx:
             parse_author_person_id("Ada Lovelace")
         self.assertEqual(ctx.exception.message, AUTHOR_PERSON_ID_INVALID_ERROR)
-        with self.assertRaises(Exception) as ctx:
+        with self.assertRaises(ArchiveItemAuthorError) as ctx:
             parse_author_person_id("0")
         self.assertEqual(ctx.exception.message, AUTHOR_PERSON_ID_INVALID_ERROR)
 
@@ -101,7 +104,7 @@ class AuthorPersonLinkServiceTests(TestCase):
 
     def test_missing_person_and_author_fail_closed(self):
         author = Author.objects.create(name="Needs person")
-        with self.assertRaises(Exception) as ctx:
+        with self.assertRaises(ArchiveItemAuthorError) as ctx:
             set_author_person(author=author, person_id=999999)
         self.assertEqual(ctx.exception.message, PERSON_NOT_FOUND_ERROR)
         author.refresh_from_db()
@@ -109,7 +112,7 @@ class AuthorPersonLinkServiceTests(TestCase):
 
         missing = Author(pk=999998, name="Missing")
         person = Person.objects.create(name="Existing")
-        with self.assertRaises(Exception) as ctx:
+        with self.assertRaises(ArchiveItemAuthorError) as ctx:
             set_author_person(author=missing, person_id=person.pk)
         self.assertEqual(ctx.exception.message, AUTHOR_NOT_FOUND_ERROR)
 

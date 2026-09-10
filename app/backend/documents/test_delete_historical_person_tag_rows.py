@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from io import StringIO
+from typing import Protocol, cast
 from unittest.mock import patch
 
 from django.core.management import call_command
@@ -47,6 +48,25 @@ RETIRED_NAME = "שלמה הלל"
 ORDINARY_NAME = "ordinary-keep-d2b"
 FIRST_MAPPED_TAG_ID = HISTORICAL_PERSON_NAME_TAG_RECORDS[0][0]
 FIRST_MAPPED_PERSON_ID = HISTORICAL_PERSON_NAME_TAG_RECORDS[0][1]
+
+
+class _ThroughQuerySet(Protocol):
+    def filter(self, **kwargs: object) -> _ThroughQuerySet: ...
+    def exists(self) -> bool: ...
+
+
+class _ThroughModel(Protocol):
+    objects: _ThroughQuerySet
+
+
+def _archive_item_tags_through() -> _ThroughModel:
+    return cast(_ThroughModel, ArchiveItem.tags.through)
+
+
+def _document_tags_through() -> _ThroughModel:
+    return cast(_ThroughModel, Document.tags_m2m.through)
+
+
 DOCUMENT_MAPPED_TAG_ID = 8
 
 
@@ -265,9 +285,9 @@ class DeleteHistoricalPersonTagRowsCommandTests(TestCase):
             29,
         )
         self.assertTrue(
-            ArchiveItem.tags.through.objects.filter(
-                archiveitem_id=item.id, tag_id=FIRST_MAPPED_TAG_ID
-            ).exists()
+            _archive_item_tags_through()
+            .objects.filter(archiveitem_id=item.id, tag_id=FIRST_MAPPED_TAG_ID)
+            .exists()
         )
 
     def test_mapped_document_through_rows_fail_closed(self):
@@ -289,9 +309,9 @@ class DeleteHistoricalPersonTagRowsCommandTests(TestCase):
             Tag.objects.filter(pk__in=historical_person_name_tag_ids()).count(), 29
         )
         self.assertTrue(
-            Document.tags_m2m.through.objects.filter(
-                document_id=doc.id, tag_id=DOCUMENT_MAPPED_TAG_ID
-            ).exists()
+            _document_tags_through()
+            .objects.filter(document_id=doc.id, tag_id=DOCUMENT_MAPPED_TAG_ID)
+            .exists()
         )
 
     def test_pending_retired_name_inventory_fail_closed(self):

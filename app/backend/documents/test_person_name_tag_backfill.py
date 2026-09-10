@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Iterable
+from typing import Protocol, cast
 from unittest.mock import patch
 
 from django.apps import apps as django_apps
@@ -42,6 +44,23 @@ PersonNameTagBackfillError = _migration_module.PersonNameTagBackfillError
 backfill_persons_from_approved_person_name_tags = (
     _migration_module.backfill_persons_from_approved_person_name_tags
 )
+
+
+class _ThroughQuerySet(Protocol):
+    def values_list(self, *args: str, **kwargs: object) -> Iterable[object]: ...
+    def filter(self, **kwargs: object) -> object: ...
+
+
+class _ThroughModel(Protocol):
+    objects: _ThroughQuerySet
+
+
+def _document_tags_through() -> _ThroughModel:
+    return cast(_ThroughModel, Document.tags_m2m.through)
+
+
+def _archive_item_tags_through() -> _ThroughModel:
+    return cast(_ThroughModel, ArchiveItem.tags.through)
 
 
 def _run_backfill():
@@ -296,10 +315,10 @@ class PersonNameTagBackfillSuccessTests(TestCase):
 
         tag_ids_before = set(Tag.objects.values_list("pk", flat=True))
         archive_item_tag_pairs_before = set(
-            ArchiveItem.tags.through.objects.values_list("archiveitem_id", "tag_id")
+            _archive_item_tags_through().objects.values_list("archiveitem_id", "tag_id")
         )
         document_tag_pairs_before = set(
-            Document.tags_m2m.through.objects.values_list("document_id", "tag_id")
+            _document_tags_through().objects.values_list("document_id", "tag_id")
         )
         photo_person_pairs_before = set(
             PhotoPerson.objects.values_list("photo_content_id", "person_id")
@@ -314,7 +333,7 @@ class PersonNameTagBackfillSuccessTests(TestCase):
 
         _run_backfill()
 
-        people_by_name = {}
+        people_by_name: dict[str, list[Person]] = {}
         for person in Person.objects.exclude(
             pk__in=[same_name_unrelated.pk, photo_only_person.pk]
         ):
@@ -372,12 +391,14 @@ class PersonNameTagBackfillSuccessTests(TestCase):
         )
         self.assertEqual(
             set(
-                ArchiveItem.tags.through.objects.values_list("archiveitem_id", "tag_id")
+                _archive_item_tags_through().objects.values_list(
+                    "archiveitem_id", "tag_id"
+                )
             ),
             archive_item_tag_pairs_before,
         )
         self.assertEqual(
-            set(Document.tags_m2m.through.objects.values_list("document_id", "tag_id")),
+            set(_document_tags_through().objects.values_list("document_id", "tag_id")),
             document_tag_pairs_before,
         )
         public_manual.refresh_from_db()

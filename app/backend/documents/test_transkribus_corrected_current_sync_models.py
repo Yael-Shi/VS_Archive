@@ -522,6 +522,7 @@ class TranskribusCorrectedCurrentSyncDbConstraintTests(TestCase):
     def test_document_delete_cascades_attempt_pages_run_and_snapshot(self):
         attempt = self._completed_attempt()
         snap_id = attempt.resolved_snapshot_id
+        assert snap_id is not None
         run_id = self.transkribus_run.pk
         TranskribusCorrectedCurrentSyncPage.objects.create(
             attempt=attempt,

@@ -44,6 +44,12 @@ def _create_photo_archive_item(
     return item
 
 
+def _primary_photo(item: ArchiveItem) -> PhotoContent:
+    photo = item.primary_photo_content
+    assert photo is not None
+    return photo
+
+
 class PhotoPresentationHelperTests(TestCase):
     def test_photo_upload_status_label_maps_known_values(self):
         uploaded = _create_photo_archive_item(
@@ -94,10 +100,12 @@ class PhotoPresentationHelperTests(TestCase):
         self.assertEqual(photo_archive_renderability_tone(None), "badge-warn")
 
     def test_photo_presentation_helpers_handle_unknown_upload_status(self):
-        photo_content = _create_photo_archive_item(
-            title="Unknown status",
-            upload_status=PhotoContent.UploadStatus.UPLOADED,
-        ).primary_photo_content
+        photo_content = _primary_photo(
+            _create_photo_archive_item(
+                title="Unknown status",
+                upload_status=PhotoContent.UploadStatus.UPLOADED,
+            )
+        )
         PhotoContent.objects.filter(pk=photo_content.pk).update(upload_status="UNKNOWN")
         photo_content.refresh_from_db()
 
@@ -110,11 +118,13 @@ class PhotoPresentationHelperTests(TestCase):
         self.assertEqual(photo_archive_renderability_tone(photo_content), "badge-warn")
 
     def test_filter_archive_renderable_photo_contents_matches_helper(self):
-        uploaded = _create_photo_archive_item(
-            title="Filter uploaded",
-            upload_status=PhotoContent.UploadStatus.UPLOADED,
-            original_file_key="photos/1/original.jpg",
-        ).primary_photo_content
+        uploaded = _primary_photo(
+            _create_photo_archive_item(
+                title="Filter uploaded",
+                upload_status=PhotoContent.UploadStatus.UPLOADED,
+                original_file_key="photos/1/original.jpg",
+            )
+        )
         empty_key = _create_photo_archive_item(
             title="Filter empty key",
             upload_status=PhotoContent.UploadStatus.UPLOADED,
@@ -124,11 +134,13 @@ class PhotoPresentationHelperTests(TestCase):
             title="Filter pending",
             upload_status=PhotoContent.UploadStatus.PENDING,
         ).primary_photo_content
-        whitespace = _create_photo_archive_item(
-            title="Filter whitespace key",
-            upload_status=PhotoContent.UploadStatus.UPLOADED,
-            original_file_key="   ",
-        ).primary_photo_content
+        whitespace = _primary_photo(
+            _create_photo_archive_item(
+                title="Filter whitespace key",
+                upload_status=PhotoContent.UploadStatus.UPLOADED,
+                original_file_key="   ",
+            )
+        )
         ids = set(
             filter_archive_renderable_photo_contents(
                 PhotoContent.objects.all()

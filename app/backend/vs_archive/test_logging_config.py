@@ -51,12 +51,24 @@ class LoggingConfigurationTests(SimpleTestCase):
         super().tearDown()
 
     def test_settings_logging_declares_console_root_handler(self):
+        logging_config = settings.LOGGING
+        self.assertIsInstance(logging_config, dict)
+        assert isinstance(logging_config, dict)
+        handlers = logging_config["handlers"]
+        self.assertIsInstance(handlers, dict)
+        assert isinstance(handlers, dict)
+        console = handlers["console"]
+        self.assertIsInstance(console, dict)
+        assert isinstance(console, dict)
         self.assertEqual(
-            settings.LOGGING["handlers"]["console"]["class"],
+            console["class"],
             "logging.StreamHandler",
         )
-        self.assertEqual(settings.LOGGING["root"]["handlers"], ["console"])
-        self.assertEqual(settings.LOGGING["root"]["level"], settings.LOG_LEVEL)
+        root = logging_config["root"]
+        self.assertIsInstance(root, dict)
+        assert isinstance(root, dict)
+        self.assertEqual(root["handlers"], ["console"])
+        self.assertEqual(root["level"], settings.LOG_LEVEL)
 
     def test_root_logger_has_console_handler_at_info(self):
         root = logging.getLogger()

@@ -589,6 +589,7 @@ class ProcessDocumentRequestStaffRetryTests(TransactionTestCase):
         source = staff_retry.get_staff_retry_source_process_document_request(
             document_id=document.pk
         )
+        assert source is not None
         self.assertEqual(source.pk, parked.pk)
         self.assertNotEqual(source.pk, older.pk)
 
@@ -607,6 +608,7 @@ class ProcessDocumentRequestStaffRetryTests(TransactionTestCase):
             document_id=document.pk
         )
         self.assertIsNotNone(source)
+        assert source is not None
         self.assertEqual(source.pk, abandoned.pk)
 
     def test_retry_source_rejects_stale_staff_abandoned_after_completed(self):

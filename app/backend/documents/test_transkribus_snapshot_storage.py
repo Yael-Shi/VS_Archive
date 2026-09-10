@@ -50,6 +50,11 @@ from documents.services.transkribus_snapshot_storage import (
 )
 
 
+def _require_pk(pk: int | None) -> int:
+    assert pk is not None
+    return pk
+
+
 def _page_xml(body: str) -> bytes:
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -216,7 +221,7 @@ class TranskribusSnapshotStorageTests(TestCase):
         self.assertEqual(snap.pages.count(), 1)
         page_row = snap.pages.get()
         expected_key = build_transkribus_snapshot_page_xml_s3_key(
-            self.doc.pk, snap.pk, 1
+            _require_pk(self.doc.pk), _require_pk(snap.pk), 1
         )
         self.assertEqual(page_row.page_xml_s3_key, expected_key)
         self.assertEqual(len(self.put_calls), 1)
@@ -280,8 +285,12 @@ class TranskribusSnapshotStorageTests(TestCase):
         self.assertEqual(
             {call["key"] for call in self.put_calls},
             {
-                build_transkribus_snapshot_page_xml_s3_key(self.doc.pk, snap.pk, 1),
-                build_transkribus_snapshot_page_xml_s3_key(self.doc.pk, snap.pk, 2),
+                build_transkribus_snapshot_page_xml_s3_key(
+                    _require_pk(self.doc.pk), _require_pk(snap.pk), 1
+                ),
+                build_transkribus_snapshot_page_xml_s3_key(
+                    _require_pk(self.doc.pk), _require_pk(snap.pk), 2
+                ),
             },
         )
 
@@ -483,13 +492,15 @@ class TranskribusSnapshotStorageTests(TestCase):
                 )
             return len(body)
 
+        def _delete_uploaded(bucket, key):
+            self.delete_calls.append(key)
+            return S3DeleteObjectResult(deleted=True)
+
         with (
             patch(f"{self.STORAGE_MODULE}.put_object_bytes", side_effect=put_then_fail),
             patch(
                 f"{self.STORAGE_MODULE}.delete_s3_object",
-                side_effect=lambda bucket, key: (
-                    self.delete_calls.append(key) or S3DeleteObjectResult(deleted=True)
-                ),
+                side_effect=_delete_uploaded,
             ),
         ):
             with self.assertRaises(TranskribusSnapshotStorageUploadError) as ctx:
@@ -499,7 +510,9 @@ class TranskribusSnapshotStorageTests(TestCase):
                     pages=[page1, page2],
                 )
 
-        snap = TranskribusTranscriptSnapshot.objects.get(pk=ctx.exception.snapshot_id)
+        snapshot_id = ctx.exception.snapshot_id
+        assert snapshot_id is not None
+        snap = TranskribusTranscriptSnapshot.objects.get(pk=snapshot_id)
         self.assertEqual(
             snap.storage_status,
             TranskribusTranscriptSnapshot.StorageStatus.FAILED,
@@ -606,7 +619,9 @@ class TranskribusSnapshotStorageTests(TestCase):
         )
         mock_mark.assert_called_once()
         # Snapshot may still be PENDING if mark was mocked; never report READY.
-        snap = TranskribusTranscriptSnapshot.objects.get(pk=exc.snapshot_id)
+        snapshot_id = exc.snapshot_id
+        assert snapshot_id is not None
+        snap = TranskribusTranscriptSnapshot.objects.get(pk=snapshot_id)
         self.assertNotEqual(
             snap.storage_status,
             TranskribusTranscriptSnapshot.StorageStatus.READY,
@@ -797,13 +812,17 @@ class TranskribusSnapshotStorageTests(TestCase):
                     page_nr=1,
                     transcript_ts_id="7",
                     page_xml_s3_key=build_transkribus_snapshot_page_xml_s3_key(
-                        self.doc.pk, winner.pk, 1
+                        _require_pk(self.doc.pk), _require_pk(winner.pk), 1
                     ),
                     page_xml_sha256=parsed.pages[0].page_xml_sha256,
                 )
                 pending_result_holder["winner"] = winner
                 pending_result_holder["winner_created"] = True
             return len(body)
+
+        def _delete_concurrent_loser(bucket, key):
+            self.delete_calls.append(key)
+            return S3DeleteObjectResult(deleted=True)
 
         with (
             patch(
@@ -812,9 +831,7 @@ class TranskribusSnapshotStorageTests(TestCase):
             ),
             patch(
                 f"{self.STORAGE_MODULE}.delete_s3_object",
-                side_effect=lambda bucket, key: (
-                    self.delete_calls.append(key) or S3DeleteObjectResult(deleted=True)
-                ),
+                side_effect=_delete_concurrent_loser,
             ),
         ):
             result = store_transkribus_transcript_snapshot(
@@ -990,9 +1007,11 @@ class TranskribusSnapshotOrphanCleanupIntegrationTests(TestCase):
             status=TranskribusTranscriptSnapshot.StorageStatus.PENDING_UPLOAD,
             page_key="tmp2",
         )
-        ready_key = build_transkribus_snapshot_page_xml_s3_key(self.doc.pk, ready.pk, 1)
+        ready_key = build_transkribus_snapshot_page_xml_s3_key(
+            _require_pk(self.doc.pk), _require_pk(ready.pk), 1
+        )
         pending_key = build_transkribus_snapshot_page_xml_s3_key(
-            self.doc.pk, pending.pk, 1
+            _require_pk(self.doc.pk), _require_pk(pending.pk), 1
         )
         ready.pages.update(page_xml_s3_key=ready_key)
         pending.pages.update(page_xml_s3_key=pending_key)
@@ -1034,9 +1053,11 @@ class TranskribusSnapshotOrphanCleanupIntegrationTests(TestCase):
             page_key="tmp-stale",
         )
         recent_key = build_transkribus_snapshot_page_xml_s3_key(
-            self.doc.pk, recent.pk, 1
+            _require_pk(self.doc.pk), _require_pk(recent.pk), 1
         )
-        stale_key = build_transkribus_snapshot_page_xml_s3_key(self.doc.pk, stale.pk, 1)
+        stale_key = build_transkribus_snapshot_page_xml_s3_key(
+            _require_pk(self.doc.pk), _require_pk(stale.pk), 1
+        )
         recent.pages.update(page_xml_s3_key=recent_key)
         stale.pages.update(page_xml_s3_key=stale_key)
 
@@ -1079,7 +1100,9 @@ class TranskribusSnapshotOrphanCleanupIntegrationTests(TestCase):
             status=TranskribusTranscriptSnapshot.StorageStatus.READY,
             page_key="tmp",
         )
-        exact_key = build_transkribus_snapshot_page_xml_s3_key(self.doc.pk, snap.pk, 1)
+        exact_key = build_transkribus_snapshot_page_xml_s3_key(
+            _require_pk(self.doc.pk), _require_pk(snap.pk), 1
+        )
         snap.pages.update(page_xml_s3_key=exact_key)
         self.assertIn(
             exact_key,
@@ -1087,7 +1110,7 @@ class TranskribusSnapshotOrphanCleanupIntegrationTests(TestCase):
         )
 
         mismatched_document = build_transkribus_snapshot_page_xml_s3_key(
-            self.doc.pk + 999, snap.pk, 1
+            _require_pk(self.doc.pk) + 999, _require_pk(snap.pk), 1
         )
         snap.pages.update(page_xml_s3_key=mismatched_document)
         self.assertNotIn(
@@ -1096,7 +1119,7 @@ class TranskribusSnapshotOrphanCleanupIntegrationTests(TestCase):
         )
 
         mismatched_snapshot = build_transkribus_snapshot_page_xml_s3_key(
-            self.doc.pk, snap.pk + 999, 1
+            _require_pk(self.doc.pk), _require_pk(snap.pk) + 999, 1
         )
         snap.pages.update(page_xml_s3_key=mismatched_snapshot)
         self.assertNotIn(
@@ -1105,7 +1128,7 @@ class TranskribusSnapshotOrphanCleanupIntegrationTests(TestCase):
         )
 
         mismatched_page = build_transkribus_snapshot_page_xml_s3_key(
-            self.doc.pk, snap.pk, 2
+            _require_pk(self.doc.pk), _require_pk(snap.pk), 2
         )
         snap.pages.update(page_xml_s3_key=mismatched_page)
         self.assertNotIn(
@@ -1119,7 +1142,7 @@ class TranskribusSnapshotOrphanCleanupIntegrationTests(TestCase):
             page_key="tmp",
         )
         failed_key = build_transkribus_snapshot_page_xml_s3_key(
-            self.doc.pk, failed.pk, 1
+            _require_pk(self.doc.pk), _require_pk(failed.pk), 1
         )
         failed.pages.update(page_xml_s3_key=failed_key)
 
@@ -1175,7 +1198,9 @@ class TranskribusSnapshotOrphanCleanupIntegrationTests(TestCase):
             status=TranskribusTranscriptSnapshot.StorageStatus.READY,
             page_key="tmp",
         )
-        key = build_transkribus_snapshot_page_xml_s3_key(self.doc.pk, snap.pk, 1)
+        key = build_transkribus_snapshot_page_xml_s3_key(
+            _require_pk(self.doc.pk), _require_pk(snap.pk), 1
+        )
         snap.pages.update(page_xml_s3_key=key)
         self.assertIn(key, collect_referenced_document_s3_keys(now=self.now))
 

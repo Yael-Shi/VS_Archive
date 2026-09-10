@@ -112,6 +112,7 @@ class ArchiveSearchOverlayPresentationTests(SimpleTestCase):
         )
 
         self.assertIsNotNone(overlay)
+        assert overlay is not None
         self.assertEqual(overlay.page_index, 1)
         self.assertEqual(overlay.targets, (target,))
 
@@ -125,6 +126,7 @@ class ArchiveSearchOverlayPresentationTests(SimpleTestCase):
         )
 
         self.assertIsNotNone(overlay)
+        assert overlay is not None
         self.assertEqual(overlay.page_index, 1)
         self.assertEqual(overlay.targets, ())
 

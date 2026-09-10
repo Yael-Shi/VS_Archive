@@ -1067,7 +1067,9 @@ class ArabicPrintedBandedPartialOcrReprocessTests(TransactionTestCase):
         claim = self._claim_page(attempt, identity, 0)
         page = ArabicPrintedOcrPageCheckpoint.objects.get(pk=claim.checkpoint_id)
         self.assertEqual(page.status, ArabicPrintedOcrPageCheckpoint.Status.RUNNING)
-        self.assertGreater(page.lease_expires_at, timezone.now())
+        lease_expires_at = page.lease_expires_at
+        assert lease_expires_at is not None
+        self.assertGreater(lease_expires_at, timezone.now())
 
         self.assertFalse(is_ocr_reprocess_ui_eligible(doc))
 

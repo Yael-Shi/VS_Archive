@@ -972,6 +972,7 @@ class ArchiveItemPersonStaffUiTests(ArchiveItemPersonStaffUiHarness, TestCase):
             html,
         )
         self.assertIsNotNone(option)
+        assert option is not None
         self.assertNotIn("selected", option.group(1))
         self.assertFalse(ArchiveItemPerson.objects.filter(archive_item=item).exists())
 
@@ -1433,6 +1434,7 @@ class ArchiveItemPersonStaffCreateTests(ArchiveItemPersonStaffUiHarness, TestCas
                     html,
                 )
                 self.assertIsNotNone(option)
+                assert option is not None
                 self.assertIn("selected", option.group(1))
                 self.assertFalse(Person.objects.filter(name="KeepNewName").exists())
 
@@ -1498,7 +1500,7 @@ class ArchiveItemPersonStaffCreateTests(ArchiveItemPersonStaffUiHarness, TestCas
         person = Person.objects.create(name="CreateTagSafePerson")
         for item_type in self._create_kinds():
             with self.subTest(item_type=item_type):
-                extra = {}
+                extra: dict[str, list[int] | list[str]] = {}
                 if item_type == ArchiveItem.ItemType.OCR_DOCUMENT:
                     extra["selected_tags"] = [item_tag.id]
                 elif item_type == ArchiveItem.ItemType.PHOTO:

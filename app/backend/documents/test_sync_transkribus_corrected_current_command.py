@@ -37,15 +37,19 @@ _CREDS = {
 }
 
 
-def _staff_user(**kwargs):
-    defaults = dict(
-        username="cc_sync_cmd_staff",
-        password="x",
-        is_staff=True,
-        is_active=True,
+def _staff_user(
+    *,
+    username: str = "cc_sync_cmd_staff",
+    password: str = "x",
+    is_staff: bool = True,
+    is_active: bool = True,
+):
+    return User.objects.create_user(
+        username=username,
+        password=password,
+        is_staff=is_staff,
+        is_active=is_active,
     )
-    defaults.update(kwargs)
-    return User.objects.create_user(**defaults)
 
 
 class SyncTranskribusCorrectedCurrentCommandTests(TestCase):
