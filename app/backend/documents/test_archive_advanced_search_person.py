@@ -649,6 +649,40 @@ class ArchiveAdvancedPersonFilterUiTests(TestCase):
         self.assertNotIn("Alias One", html)
         self.assertNotIn("Alias Two", html)
 
+    def test_picker_and_chips_use_display_name_filter_stays_person_id(self):
+        person = Person.objects.create(name="חיים סעדיה", honorific='ד"ר')
+        item = _public_manual("Honorific picker item")
+        ArchiveItemPerson.objects.create(archive_item=item, person=person)
+
+        picker = self.client.get(self.url, {"advanced": "1"})
+        self.assertEqual(
+            _archive_filter_person_options(picker.content.decode("utf-8")),
+            [(str(person.id), 'חיים סעדיה, ד"ר')],
+        )
+        self.assertEqual(
+            [p.name for p in picker.context["advanced_filter_person_choices"]],
+            ["חיים סעדיה"],
+        )
+
+        filtered = self.client.get(self.url, {"person": str(person.id)})
+        self.assertEqual(
+            {item.title for item in filtered.context["items"]},
+            {"Honorific picker item"},
+        )
+        chip = next(
+            chip
+            for chip in filtered.context["active_filter_chips"]
+            if chip["kind"] == "person"
+        )
+        self.assertEqual(chip["value"], 'חיים סעדיה, ד"ר')
+        self.assertEqual(chip["person_id"], person.id)
+        self.assertEqual(chip["detail_href"], person_public_page_url(person.id))
+
+        skipped = normalize_archive_advanced_filters(
+            [("person", person.name), ("person", 'ד"ר')]
+        )
+        self.assertEqual(skipped.person_ids, ())
+
     def test_selected_person_state_persists_after_submit(self):
         ada = Person.objects.create(name="Ada Persist")
         charles = Person.objects.create(name="Charles Persist")

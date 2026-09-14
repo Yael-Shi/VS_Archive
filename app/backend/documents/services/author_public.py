@@ -9,11 +9,16 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from django.db.models import Count, Exists, OuterRef, QuerySet
+from django.db.models import Exists, OuterRef, QuerySet
 from django.urls import reverse
 
 from documents.models import ArchiveItem, ArchiveItemAuthor, Author
 from documents.services.archive_item_access import archive_browse_queryset_for_user
+from documents.services.public_holdings import (
+    EMPTY_PUBLIC_HOLDINGS,
+    PublicHoldingsCounts,
+    holdings_from_item_type_pairs,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,30 +99,46 @@ def public_author_archive_items_queryset(user, author_id: int) -> QuerySet[Archi
     )
 
 
-def public_authors_item_counts_for_author_ids(
+def public_authors_holdings_counts_for_author_ids(
     user,
     author_ids: Iterable[int],
-) -> dict[int, int]:
-    """DISTINCT authorized+browse-renderable ArchiveItem counts for a page of Author ids.
+) -> dict[int, PublicHoldingsCounts]:
+    """DISTINCT authorized+browse-renderable holdings for a page of Author ids.
 
-    One page-restricted ``ArchiveItemAuthor`` aggregate. Unique
-    ``(archive_item, author)`` already prevents double-counting; ``distinct``
-    keeps the catalog contract explicit. Does not read ``author_name`` or
-    Person.
+    One page-restricted ``ArchiveItemAuthor`` query of
+    ``(author_id, archive_item_id, item_type)``. Duplicate ArchiveItem ids for
+    the same Author are dropped before type counting. Does not read
+    ``author_name`` or Person.
     """
     page_ids = [int(author_id) for author_id in author_ids]
     if not page_ids:
         return {}
 
-    rows = (
-        ArchiveItemAuthor.objects.filter(
-            author_id__in=page_ids,
-            archive_item_id__in=authorized_browse_item_pks(user),
-        )
-        .values("author_id")
-        .annotate(item_count=Count("archive_item_id", distinct=True))
+    typed_pairs = ArchiveItemAuthor.objects.filter(
+        author_id__in=page_ids,
+        archive_item_id__in=authorized_browse_item_pks(user),
+    ).values_list("author_id", "archive_item_id", "archive_item__item_type")
+    holdings = holdings_from_item_type_pairs(
+        (int(author_id), int(item_id), str(item_type))
+        for author_id, item_id, item_type in typed_pairs
     )
-    return {int(row["author_id"]): int(row["item_count"]) for row in rows}
+    return {
+        author_id: holdings.get(author_id, EMPTY_PUBLIC_HOLDINGS)
+        for author_id in page_ids
+    }
+
+
+def public_authors_item_counts_for_author_ids(
+    user,
+    author_ids: Iterable[int],
+) -> dict[int, int]:
+    """DISTINCT authorized+browse-renderable ArchiveItem totals for a page of Author ids."""
+    return {
+        author_id: counts.total
+        for author_id, counts in public_authors_holdings_counts_for_author_ids(
+            user, author_ids
+        ).items()
+    }
 
 
 def build_public_authors_index_rows(

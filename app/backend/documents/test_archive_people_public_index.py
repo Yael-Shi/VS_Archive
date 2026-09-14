@@ -7,7 +7,7 @@ from pathlib import Path
 from django.contrib.auth.models import Group, Permission, User
 from django.contrib.contenttypes.models import ContentType
 from django.db import connection
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
@@ -16,13 +16,18 @@ from documents.models import (
     ArchiveItemAuthor,
     ArchiveItemPerson,
     Author,
+    Document,
     Person,
     PersonAlias,
     PhotoContent,
     PhotoPerson,
 )
 from documents.services.author_public import author_public_page_url
-from documents.services.public_people_directory import PublicDirectoryIdentityKind
+from documents.services.public_people_directory import (
+    HEBREW_INDEX_LETTERS,
+    PublicDirectoryIdentityKind,
+    directory_index_letter,
+)
 from documents.services.archive_item_access import (
     ARCHIVE_FAMILY_GROUP_NAME,
     VIEW_RESTRICTED_ARCHIVEITEM_CODENAME,
@@ -31,7 +36,12 @@ from documents.services.archive_item_presentation import (
     ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
     person_public_page_url,
 )
-from documents.services.archive_items import create_manual_text_archive_item
+from documents.services.archive_items import (
+    create_manual_text_archive_item,
+    create_video_archive_item,
+)
+from documents.services.person_display import format_person_display_name
+from documents.test_archive_item import create_viewable_ocr_document
 from documents.services.photo_gallery import public_photo_detail_url
 
 
@@ -145,13 +155,31 @@ def _count_for(response, name: str) -> int:
 
 def _people_index_list_html(response) -> str:
     html = response.content.decode("utf-8")
-    start = html.find('<ul class="archive-people-index-list">')
+    marker = '<div class="archive-people-index-columns">'
+    start = html.find(marker)
     if start == -1:
-        return ""
-    end = html.find("</ul>", start)
+        start = html.find('<ul class="archive-people-index-list">')
+        if start == -1:
+            return ""
+        end = html.rfind("</ul>")
+        if end == -1:
+            raise AssertionError("people index list is not closed")
+        return html[start : end + len("</ul>")]
+
+    end = html.find("</div>", start)
     if end == -1:
-        raise AssertionError("people index list is not closed")
-    return html[start : end + len("</ul>")]
+        raise AssertionError("people index columns are not closed")
+    return html[start : end + len("</div>")]
+
+
+class PeopleDirectoryIndexLetterTests(SimpleTestCase):
+    def test_first_meaningful_letter_skips_noise_and_maps_finals(self):
+        self.assertEqual(directory_index_letter("חיים"), "ח")
+        self.assertEqual(directory_index_letter('  "ונטורה'), "ו")
+        self.assertEqual(directory_index_letter("ךכל"), "כ")
+        self.assertEqual(directory_index_letter("Ada"), "A")
+        self.assertEqual(directory_index_letter("123"), "#")
+        self.assertEqual(directory_index_letter("   "), "#")
 
 
 class PeoplePublicIndexRouteTests(TestCase):
@@ -162,7 +190,7 @@ class PeoplePublicIndexRouteTests(TestCase):
         self.assertContains(resp, "אנשים")
         self.assertContains(resp, "אין אנשים להצגה.")
         html = resp.content.decode("utf-8")
-        header = html[html.index("document-detail-header") : html.index("</header>")]
+        header = html[html.index("archive-people-index-header") : html.index("</header>")]
         self.assertIn("חזרה לארכיון", header)
         self.assertIn("btn-primary", header)
         self.assertIn("←", header)
@@ -306,10 +334,10 @@ class PeoplePublicIndexCountAndOrderTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(_count_for(resp, "Singular Count Person"), 1)
         self.assertEqual(_count_for(resp, "Plural Count Person"), 2)
-        self.assertContains(resp, "1 פריט")
-        self.assertNotContains(resp, "1 פריטים")
-        self.assertNotContains(resp, "פריט אחד")
-        self.assertContains(resp, "2 פריטים")
+        self.assertContains(resp, "1 טקסט")
+        self.assertNotContains(resp, "1 טקסטים")
+        self.assertNotContains(resp, "1 פריט")
+        self.assertContains(resp, "2 טקסטים")
 
     def test_order_is_name_then_id(self):
         first_alpha = Person.objects.create(name="Alpha")
@@ -433,37 +461,65 @@ class PeoplePublicIndexPaginationTests(TestCase):
 
 
 class PeoplePublicIndexLayoutTests(TestCase):
-    def test_css_defines_two_column_people_grid_without_browse_list(self):
+    def test_css_defines_two_column_letter_masonry_without_person_cards(self):
         css = (
             Path(__file__).resolve().parents[1] / "public/static/public/app.css"
         ).read_text(encoding="utf-8")
-        self.assertIn(".archive-people-index-list", css)
+        self.assertIn(".archive-people-index-columns", css)
         self.assertIn(
-            ".archive-people-index-list {\n    grid-template-columns: repeat(2, minmax(0, 1fr));",
+            ".archive-people-index-columns {\n    column-count: 2;",
             css,
         )
-        self.assertIn(".archive-people-index-name {", css)
+        self.assertIn("break-inside: avoid;", css)
         name_start = css.index(".archive-people-index-name {")
         name_rule = css[name_start : css.index("}", name_start)]
         self.assertNotIn("aspect-ratio", name_rule)
-        self.assertIn("padding: var(--space-3);", name_rule)
-        self.assertIn(".archive-people-index-name-text", css)
-        self.assertIn("flex-direction: column;", css)
+        self.assertIn("flex-direction: row;", name_rule)
+        self.assertIn("border-bottom: 1px solid var(--border-subtle);", name_rule)
+        self.assertNotIn("box-shadow: var(--shadow-soft);", name_rule)
         self.assertNotIn(
-            ".archive-people-index-list {\n    grid-template-columns: repeat(3,",
+            ".archive-people-index-list {\n    grid-template-columns: repeat(2,",
+            css,
+        )
+        self.assertNotIn(
+            ".archive-people-index-columns {\n    column-count: 3;",
             css,
         )
 
-    def test_people_index_rows_are_compact_linked_tiles(self):
+    def test_people_index_rows_are_compact_linked_rows(self):
         person = Person.objects.create(name="Compact Tile Person")
         _link(_public_manual("Compact tile letter"), person)
         resp = self.client.get(_index_url())
         self.assertEqual(resp.status_code, 200)
         html = _people_index_list_html(resp)
         self.assertIn("archive-people-index-name-text", html)
+        self.assertIn("archive-people-index-letter-title", html)
         self.assertIn(person_public_page_url(person.id), html)
         self.assertIn("Compact Tile Person", html)
-        self.assertIn("1 פריט", html)
+        self.assertIn("1 טקסט", html)
+        self.assertContains(resp, "archive-people-index-alphabet")
+        self.assertContains(resp, "אנשי הארכיון לפי שם")
+
+    def test_hebrew_letter_sections_and_jump_links(self):
+        aleph = Person.objects.create(name="אהרון")
+        _link(_public_manual("Aleph letter"), aleph)
+        bet = Person.objects.create(name="בנימין")
+        _link(_public_manual("Bet letter"), bet)
+        resp = self.client.get(_index_url())
+        self.assertEqual(
+            [group.letter for group in resp.context["people_letter_groups"]],
+            ["א", "ב"],
+        )
+        nav = resp.context["people_alphabet_nav"]
+        self.assertEqual([letter for letter, _href in nav], list(HEBREW_INDEX_LETTERS))
+        href_by_letter = dict(nav)
+        self.assertEqual(href_by_letter["א"], "#people-letter-א")
+        self.assertEqual(href_by_letter["ב"], "#people-letter-ב")
+        self.assertEqual(href_by_letter["ג"], "")
+        html = resp.content.decode("utf-8")
+        self.assertIn('id="people-letter-א"', html)
+        self.assertIn('href="#people-letter-א"', html)
+        self.assertIn("archive-people-index-alphabet-item is-empty", html)
 
 
 class PeoplePublicIndexQueryCountTests(TestCase):
@@ -812,3 +868,137 @@ class UnifiedPeopleDirectoryOrderAndPaginationTests(TestCase):
         page2 = self.client.get(_index_url(), {"q": "MixPage", "page": "2"})
         self.assertEqual(_row_hrefs(page2), expected_hrefs[48:])
         self.assertEqual(len(page2.context["people_rows"]), 1)
+
+
+def _ocr_item(title: str) -> ArchiveItem:
+    return create_viewable_ocr_document(
+        title=title,
+        visibility=Document.Visibility.PUBLIC,
+    ).archive_item
+
+
+def _video_item(title: str) -> ArchiveItem:
+    return create_video_archive_item(
+        title=title,
+        source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        visibility=ArchiveItem.Visibility.PUBLIC,
+    )
+
+
+class PeopleDirectoryHonorificAndHoldingsTests(TestCase):
+    def test_person_row_uses_display_name_but_orders_by_raw_name(self):
+        first = Person.objects.create(name="אבג", honorific="תתת")
+        _link(_public_manual("First honorific letter"), first)
+        second = Person.objects.create(name="אבג, א")
+        _link(_public_manual("Second honorific letter"), second)
+
+        resp = self.client.get(_index_url())
+        names = _row_names(resp)
+        self.assertEqual(
+            names,
+            [
+                format_person_display_name(name="אבג", honorific="תתת"),
+                "אבג, א",
+            ],
+        )
+        self.assertEqual(
+            [row.sort_name for row in resp.context["people_rows"]],
+            ["אבג", "אבג, א"],
+        )
+        if names[0] == names[1]:
+            self.fail("display names collided; sort assertion is not informative")
+        display_sorted = sorted(names)
+        self.assertNotEqual(names, display_sorted)
+        self.assertEqual(
+            [group.letter for group in resp.context["people_letter_groups"]],
+            ["א"],
+        )
+        self.assertIn('id="people-letter-א"', resp.content.decode("utf-8"))
+
+    def test_honorific_is_not_an_independent_directory_search_field(self):
+        person = Person.objects.create(name="HonorificSearchPerson", honorific='ד"ר')
+        _link(_public_manual("Honorific search letter"), person)
+        resp = self.client.get(_index_url(), {"q": 'ד"ר'})
+        self.assertEqual(_row_names(resp), [])
+
+    def test_holdings_summary_omits_zero_uses_plural_and_stable_order(self):
+        person = Person.objects.create(name="Holdings Mix Person")
+        _link(_public_manual("Holdings text 1"), person)
+        _link(_ocr_item("Holdings ocr 1"), person)
+        _link(_ocr_item("Holdings ocr 2"), person)
+        photo = _create_photo_item(title="Holdings album")
+        _add_photo(photo)
+        _link(photo, person)
+        _link(_video_item("Holdings video"), person)
+
+        resp = self.client.get(_index_url())
+        row = _row_by_href(resp, person_public_page_url(person.id))
+        self.assertEqual(row.item_count, 5)
+        self.assertEqual(
+            row.type_counts,
+            (
+                (ArchiveItem.ItemType.MANUAL_TEXT, 1),
+                (ArchiveItem.ItemType.OCR_DOCUMENT, 2),
+                (ArchiveItem.ItemType.PHOTO, 1),
+                (ArchiveItem.ItemType.VIDEO, 1),
+            ),
+        )
+        self.assertEqual(
+            row.holdings_summary,
+            "1 טקסט · 2 מסמכים · 1 תמונה · 1 קטע וידאו",
+        )
+        html = _people_index_list_html(resp)
+        self.assertIn(row.holdings_summary, html)
+        self.assertNotIn("פריט", html)
+
+    def test_photo_person_collisions_count_one_photo_item(self):
+        person = Person.objects.create(name="Photo Collision Person")
+        item = _create_photo_item(title="Collision album")
+        first = _add_photo(item, position=1)
+        second = _add_photo(item, position=2)
+        _link(item, person)
+        PhotoPerson.objects.create(photo_content=first, person=person)
+        PhotoPerson.objects.create(photo_content=second, person=person)
+
+        resp = self.client.get(_index_url())
+        row = _row_by_href(resp, person_public_page_url(person.id))
+        self.assertEqual(row.item_count, 1)
+        self.assertEqual(row.type_counts, ((ArchiveItem.ItemType.PHOTO, 1),))
+        self.assertEqual(row.holdings_summary, "1 תמונה")
+
+    def test_linked_author_holdings_are_included_once_with_person_relations(self):
+        person = Person.objects.create(name="Linked Holdings Person")
+        author = Author.objects.create(name="Linked Holdings Author", person=person)
+        shared = _public_manual("Shared person and author letter")
+        _link(shared, person)
+        _link_author(shared, author)
+        authored_only = _ocr_item("Authored only ocr")
+        _link_author(authored_only, author)
+
+        resp = self.client.get(_index_url())
+        row = _row_by_href(resp, person_public_page_url(person.id))
+        self.assertEqual(row.item_count, 2)
+        self.assertEqual(
+            row.type_counts,
+            (
+                (ArchiveItem.ItemType.MANUAL_TEXT, 1),
+                (ArchiveItem.ItemType.OCR_DOCUMENT, 1),
+            ),
+        )
+        self.assertEqual(row.holdings_summary, "1 טקסט · 1 מסמך")
+        self.assertNotIn(author_public_page_url(author.id), _row_hrefs(resp))
+
+    def test_author_only_row_uses_type_summary(self):
+        author = Author.objects.create(name="Author Only Holdings")
+        _link_author(_public_manual("Author text"), author)
+        _link_author(_public_manual("Author text 2"), author)
+        photo = _create_photo_item(title="Author photo")
+        _add_photo(photo)
+        _link_author(photo, author)
+
+        resp = self.client.get(_index_url())
+        row = _row_by_href(resp, author_public_page_url(author.id))
+        self.assertEqual(row.identity_kind, PublicDirectoryIdentityKind.AUTHOR)
+        self.assertEqual(row.name, "Author Only Holdings")
+        self.assertEqual(row.item_count, 3)
+        self.assertEqual(row.holdings_summary, "2 טקסטים · 1 תמונה")

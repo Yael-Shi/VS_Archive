@@ -18,6 +18,7 @@ from documents.services.archive_item_presentation import (
 )
 from documents.services.archive_metadata_validation import meaningful_metadata_value
 from documents.services.document_date import NO_DATE_LABEL, format_document_date
+from documents.services.person_display import person_public_display_name
 from documents.services.photo_archive_urls import presign_photo_thumbnail_url
 from documents.services.photo_presentation import (
     filter_archive_renderable_photo_contents,
@@ -117,7 +118,7 @@ def identified_people_links(
     people.sort(key=lambda person: (person.name, person.pk))
     links: list[PublicIdentifiedPersonLink] = []
     for person in people:
-        name = meaningful_metadata_value(person.name)
+        name = meaningful_metadata_value(person_public_display_name(person))
         if name:
             links.append(
                 PublicIdentifiedPersonLink(

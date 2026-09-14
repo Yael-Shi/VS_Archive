@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load archive_labels %}
 {% block title %}VSArchive - {{ page_title }}{% endblock %}
 
 {% block content %}
@@ -8,10 +9,11 @@
     </div>
 
     <h1 class="page-title">{{ page_title }}</h1>
-    <p class="page-subtitle">{{ person.name }}</p>
+    <p class="page-subtitle">{{ person|person_display_name }}</p>
     <p class="muted">
-      שם התצוגה מוצג בארכיון הציבורי. שמות חלופיים משמשים לחיפוש בלבד ואינם מוצגים לציבור.
-      שינוי שם או שם חלופי משפיע על החיפוש בכל התמונות שבהן אדם זה מזוהה.
+      שם האדם הוא השם עצמו בלבד. תואר או כינוי (אם יש) נשמר בנפרד ומוצג בארכיון הציבורי כ־שם, תואר.
+      שמות חלופיים משמשים לחיפוש בלבד ואינם מוצגים לציבור.
+      שינוי שם או שם חלופי משפיע על החיפוש בפריטים שבהם אדם זה מזוהה. שינוי תואר אינו משנה את השם או את השמות החלופיים.
     </p>
 
     {% if messages %}
@@ -40,11 +42,23 @@
       {% csrf_token %}
       <input type="hidden" name="action" value="update_name" />
       <div class="field">
-        <label for="canonical_name">שם תצוגה</label>
+        <label for="canonical_name">שם האדם</label>
         <input id="canonical_name" name="name" type="text" value="{{ canonical_name }}" maxlength="255" />
-        <div class="field-hint">השם הקנוני שמוצג בארכיון הציבורי. שינוי השם אינו מוחק או מקדם שמות חלופיים.</div>
+        <div class="field-hint">השם עצמו, בלי תואר. אינו נגזר אוטומטית משמות חלופיים. שינוי השם אינו מוחק או מקדם שמות חלופיים.</div>
       </div>
-      <button type="submit" class="btn btn-primary">עדכון שם תצוגה</button>
+      <button type="submit" class="btn btn-primary">עדכון שם</button>
+    </form>
+
+    <div class="spacer"></div>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="update_honorific" />
+      <div class="field">
+        <label for="person_honorific">תואר</label>
+        <input id="person_honorific" name="honorific" type="text" value="{{ honorific }}" maxlength="255" />
+        <div class="field-hint">אופציונלי. לדוגמה ד״ר או רב. מוצג בארכיון הציבורי אחרי השם בפסיק. אין זיהוי אוטומטי של תארים מתוך השם.</div>
+      </div>
+      <button type="submit" class="btn btn-primary">עדכון תואר</button>
     </form>
 
     <div class="spacer"></div>
@@ -94,7 +108,7 @@
       <div class="field">
         <label for="alias_name">הוספת שם חלופי</label>
         <input id="alias_name" name="alias_name" type="text" value="{{ alias_name }}" maxlength="255" />
-        <div class="field-hint">שם חיפוש נוסף לאדם זה. לא מחליף את שם התצוגה ולא מוצג בארכיון הציבורי.</div>
+        <div class="field-hint">שם חיפוש נוסף לאדם זה. לא מחליף את שם האדם ואת התואר, ולא מוצג בארכיון הציבורי.</div>
       </div>
       <button type="submit" class="btn btn-primary">הוספת שם חלופי</button>
     </form>
@@ -102,7 +116,7 @@
     <div class="spacer"></div>
     <h2>מיזוג רשומת אדם כפולה</h2>
     <p class="muted">
-      מיזוג זהות לפי מזהה אדם בלבד. הרשומה הנוכחית תישאר, כולל שם התצוגה.
+      מיזוג זהות לפי מזהה אדם בלבד. הרשומה הנוכחית תישאר, כולל שם האדם והתואר.
       הרשומה הכפולה תימחק אחרי אישור. אין התאמה לפי שם.
     </p>
     <form method="get" action="{% url 'archive-manage-person-merge' person_id=person.id %}">

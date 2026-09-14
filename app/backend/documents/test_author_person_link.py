@@ -351,7 +351,8 @@ class AuthorPersonLinkPublicPresentationTests(TestCase):
         self.assertContains(
             person_detail, "Person biography must stay off author pages."
         )
-        self.assertContains(item_detail, "UniqueAuthorTokenForPersonLink")
+        self.assertContains(item_detail, "UniquePersonTokenForAuthorLink")
+        self.assertNotContains(item_detail, "UniqueAuthorTokenForPersonLink")
         self.assertContains(item_detail, person_public_page_url(person.id))
         self.assertNotContains(item_detail, author_public_page_url(author.id))
 

@@ -304,9 +304,10 @@ class PhotoContent(models.Model):
 
 
 class Person(models.Model):
-    """One identified person in the archive (canonical display name)."""
+    """One identified person in the archive (canonical name, optional honorific)."""
 
     name = models.CharField(max_length=255)
+    honorific = models.CharField(max_length=255, blank=True, default="")
     biography = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

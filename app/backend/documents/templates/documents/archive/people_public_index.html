@@ -2,67 +2,92 @@
 {% block title %}VSArchive - {{ page_title }}{% endblock %}
 
 {% block content %}
-  <div class="card page-header" id="archive-top">
-    <header class="document-detail-header">
-      <div class="document-detail-header-main">
-        <h1 class="page-title document-detail-title">{{ page_title }}</h1>
-      </div>
-      <div class="page-toolbar document-detail-toolbar">
+  <div class="card page-header archive-people-index-page" id="archive-top">
+    <header class="archive-people-index-header">
+      <div class="archive-people-index-back">
         {% include "documents/partials/detail_back_to_archive.html" %}
+      </div>
+      <div class="archive-people-index-heading">
+        <h1 class="page-title">{{ page_title }}</h1>
+        <p class="archive-people-index-lede muted">
+          אנשי הארכיון לפי שם. תואר, אם יש, מוצג אחרי השם ואינו משפיע על הסדר.
+        </p>
+        {% if people_rows %}
+          <p class="archive-search-results-count" aria-live="polite">
+            נמצאו {{ total_count }} תוצאות
+          </p>
+        {% endif %}
       </div>
     </header>
 
-    <section class="archive-search-panel" aria-label="חיפוש אנשים">
-      <form method="get" class="archive-search-form" action="{% url 'archive-people-index' %}">
-        <div class="archive-search-form__row">
-          <label class="visually-hidden" for="archive-people-index-q">חיפוש אנשים</label>
-          <input
-            id="archive-people-index-q"
-            class="archive-search-form__input"
-            type="search"
-            name="q"
-            placeholder="חיפוש לפי שם…"
-            value="{{ q }}"
-            autocomplete="off"
-          >
+    <div class="archive-people-index-body">
+      <section class="archive-people-index-search" aria-label="חיפוש אנשים">
+        <form method="get" class="archive-search-form" action="{% url 'archive-people-index' %}">
+          <div class="archive-search-form__row">
+            <label class="visually-hidden" for="archive-people-index-q">חיפוש אנשים</label>
+            <input
+              id="archive-people-index-q"
+              class="archive-search-form__input"
+              type="search"
+              name="q"
+              placeholder="חיפוש לפי שם…"
+              value="{{ q }}"
+              autocomplete="off"
+            >
 
-          <div class="archive-search-form__actions">
-            <div class="archive-search-form__primary-controls">
-              <button class="btn btn-primary archive-search-form__submit" type="submit">חיפוש</button>
+            <div class="archive-search-form__actions">
+              <div class="archive-search-form__primary-controls">
+                <button class="btn btn-primary archive-search-form__submit" type="submit">חיפוש</button>
+              </div>
+              {% if q %}
+                <a class="archive-search-form__clear" href="{% url 'archive-people-index' %}">ניקוי החיפוש</a>
+              {% endif %}
             </div>
-            {% if q %}
-              <a class="archive-search-form__clear" href="{% url 'archive-people-index' %}">ניקוי החיפוש</a>
-            {% endif %}
           </div>
-        </div>
-      </form>
-    </section>
+        </form>
+      </section>
 
-    {% if people_rows %}
-      <p class="archive-search-results-count" aria-live="polite">
-        נמצאו {{ total_count }} תוצאות
-      </p>
-      <div class="spacer"></div>
-      <ul class="archive-people-index-list">
-        {% for row in people_rows %}
-          <li class="archive-people-index-row">
-            <a class="archive-people-index-name" href="{{ row.href }}">
-              <span class="archive-people-index-name-text">{{ row.name }}</span>
-              <span class="archive-people-index-count muted">
-                {% if row.item_count == 1 %}1 פריט{% else %}{{ row.item_count }} פריטים{% endif %}
-              </span>
-            </a>
-          </li>
-        {% endfor %}
-      </ul>
-      {% if show_page_nav %}
-        <div class="spacer"></div>
-        {% include "documents/archive/partials/people_index_pagination.html" %}
+      {% if people_rows %}
+        <nav class="archive-people-index-alphabet" aria-label="ניווט לפי אות">
+          <ol class="archive-people-index-alphabet-list">
+            {% for letter, href in people_alphabet_nav %}
+              <li>
+                {% if href %}
+                  <a class="archive-people-index-alphabet-item" href="{{ href }}">{{ letter }}</a>
+                {% else %}
+                  <span class="archive-people-index-alphabet-item is-empty">{{ letter }}</span>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ol>
+        </nav>
+        <div class="archive-people-index-columns">
+          {% for group in people_letter_groups %}
+            <section class="archive-people-index-letter" id="{{ group.heading_id }}" aria-labelledby="{{ group.heading_id }}-title">
+              <h2 class="archive-people-index-letter-title" id="{{ group.heading_id }}-title">{{ group.heading }}</h2>
+              <ul class="archive-people-index-list">
+                {% for row in group.rows %}
+                  <li class="archive-people-index-row">
+                    <a class="archive-people-index-name" href="{{ row.href }}">
+                      <span class="archive-people-index-name-text">{{ row.name }}</span>
+                      <span class="archive-people-index-count muted">{{ row.holdings_summary }}</span>
+                      <span class="archive-people-index-chevron" aria-hidden="true">‹</span>
+                    </a>
+                  </li>
+                {% endfor %}
+              </ul>
+            </section>
+          {% endfor %}
+        </div>
+        {% if show_page_nav %}
+          <div class="spacer"></div>
+          {% include "documents/archive/partials/people_index_pagination.html" %}
+        {% endif %}
+      {% elif q %}
+        <p class="muted">לא נמצאו אנשים תואמים.</p>
+      {% else %}
+        <p class="muted">אין אנשים להצגה.</p>
       {% endif %}
-    {% elif q %}
-      <p class="muted">לא נמצאו אנשים תואמים.</p>
-    {% else %}
-      <p class="muted">אין אנשים להצגה.</p>
-    {% endif %}
+    </div>
   </div>
 {% endblock %}

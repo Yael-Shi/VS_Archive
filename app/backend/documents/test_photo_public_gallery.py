@@ -28,6 +28,7 @@ from documents.services.archive_item_access import (
     get_viewable_archive_item,
 )
 from documents.services.archive_item_presentation import person_public_page_url
+from documents.services.person_display import person_public_display_name
 from documents.services.photo_gallery import (
     PUBLIC_PHOTO_QUERY_PARAM,
     build_public_photo_gallery,
@@ -40,6 +41,12 @@ from documents.services.photo_gallery import (
 
 
 def _people_sql(captured_queries) -> list[str]:
+    """PhotoPerson / identified-Person loads only.
+
+    Author-link ``select_related("author__person")`` JOINs ``documents_person``
+    for bibliographic Author chips. That is not an identified-people N+1 and
+    must not count against this gallery bound.
+    """
     return [
         query["sql"]
         for query in captured_queries
@@ -47,6 +54,7 @@ def _people_sql(captured_queries) -> list[str]:
         or (
             "documents_person" in query["sql"].lower()
             and "documents_photoperson" not in query["sql"].lower()
+            and "documents_archiveitemauthor" not in query["sql"].lower()
         )
     ]
 
@@ -59,7 +67,7 @@ def _identified_person_link_html(
         from_item_id=from_item_id,
         from_photo_id=from_photo_id,
     )
-    return f'<a href="{escape(href)}">{person.name}</a>'
+    return f'<a href="{escape(href)}">{escape(person_public_display_name(person))}</a>'
 
 
 def _create_photo_item(
@@ -550,6 +558,19 @@ class PhotoPublicGalleryTests(TestCase):
             if "documents_personalias" in query["sql"].lower()
         ]
         self.assertEqual(alias_sql, [])
+
+    def test_identified_people_use_honorific_display_name(self):
+        self.ada.honorific = 'ד"ר'
+        self.ada.save(update_fields=["honorific", "updated_at"])
+        resp = self._detail(photo=self.p1.id)
+        self.assertContains(
+            resp,
+            f"{_identified_person_link_html(self.ada, from_item_id=self.item.id, from_photo_id=self.p1.id)}, {_identified_person_link_html(self.rivka, from_item_id=self.item.id, from_photo_id=self.p1.id)}",
+        )
+        self.assertEqual(
+            identified_people_display_names(self.p1),
+            ['Ada, ד"ר', "Rivka"],
+        )
 
     def test_identified_people_and_people_present_stay_separate(self):
         album = self._detail()

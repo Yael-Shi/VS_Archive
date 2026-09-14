@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load archive_labels %}
 {% block title %}VSArchive - {{ page_title }}{% endblock %}
 
 {% block content %}
@@ -19,7 +20,7 @@
           type="search"
           name="q"
           value="{{ q }}"
-          placeholder="שם תצוגה או שם חלופי"
+          placeholder="שם אדם או שם חלופי"
         />
       </div>
       <div class="field field--actions">
@@ -40,7 +41,7 @@
           <thead>
             <tr>
               <th>מזהה</th>
-              <th>שם תצוגה</th>
+              <th>שם</th>
               <th>שמות חלופיים</th>
               <th>קשר לפריטים</th>
               <th>הופעות בתמונות</th>
@@ -51,7 +52,7 @@
             {% for person in people %}
               <tr>
                 <td>{{ person.id }}</td>
-                <td>{{ person.name }}</td>
+                <td>{{ person|person_display_name }}</td>
                 <td>
                   {% for alias in person.aliases.all %}
                     {% if not forloop.first %}, {% endif %}{{ alias.name }}

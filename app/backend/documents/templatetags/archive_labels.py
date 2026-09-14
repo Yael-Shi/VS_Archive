@@ -5,8 +5,15 @@ from django import template
 from documents.services import archive_item_presentation as labels
 from documents.services import photo_presentation as photo_labels
 from documents.services.archive_metadata_validation import meaningful_metadata_value
+from documents.services.person_display import person_public_display_name
 
 register = template.Library()
+
+
+@register.filter
+def person_display_name(person) -> str:
+    """Public/staff Person identity label: ``name`` or ``name, honorific``."""
+    return person_public_display_name(person)
 
 
 @register.filter

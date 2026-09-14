@@ -257,6 +257,7 @@ from documents.services.photo_content_management import (
     staff_photo_contents_queryset,
     update_person_alias,
     update_person_biography,
+    update_person_honorific,
     update_person_name,
     update_photo_content_metadata,
 )
@@ -319,6 +320,8 @@ from documents.services.person_public import (
 )
 from documents.services.public_people_directory import (
     build_paginated_public_directory_rows,
+    group_directory_rows_by_index_letter,
+    hebrew_alphabet_nav_items,
 )
 from documents.services.archive_search_snippets import (
     apply_archive_search_match_presentation_to_cards,
@@ -5395,7 +5398,8 @@ def _get_staff_photo_content(
     return item, photo_content
 
 
-PERSON_NAME_UPDATED_MSG = "שם התצוגה עודכן."
+PERSON_NAME_UPDATED_MSG = "שם האדם עודכן."
+PERSON_HONORIFIC_UPDATED_MSG = "התואר עודכן."
 PERSON_BIOGRAPHY_UPDATED_MSG = "התקציר עודכן."
 PERSON_ALIAS_ADDED_MSG = "השם החלופי נוסף."
 PERSON_ALIAS_UPDATED_MSG = "השם החלופי עודכן."
@@ -5900,11 +5904,14 @@ def archive_people_index_page(request):
         page_raw=request.GET.get("page"),
         per_page=per_page,
     )
+    letter_groups = group_directory_rows_by_index_letter(people_rows)
     return render(
         request,
         "documents/archive/people_public_index.html",
         context={
             "people_rows": people_rows,
+            "people_letter_groups": letter_groups,
+            "people_alphabet_nav": hebrew_alphabet_nav_items(letter_groups),
             "q": search_query,
             "page_title": "אנשים",
             **archive_public_list_pagination_context(
@@ -6838,6 +6845,7 @@ def _person_edit_form_context(
     person: Person,
     form_errors: list[str],
     canonical_name: str | None = None,
+    honorific: str | None = None,
     alias_name: str = "",
     biography: str | None = None,
 ) -> dict:
@@ -6845,6 +6853,7 @@ def _person_edit_form_context(
         "person": person,
         "aliases": list(person.aliases.all()),
         "canonical_name": person.name if canonical_name is None else canonical_name,
+        "honorific": person.honorific if honorific is None else honorific,
         "alias_name": alias_name,
         "biography": person.biography if biography is None else biography,
         "form_errors": form_errors,
@@ -6881,6 +6890,7 @@ def archive_manage_person_edit_page(request, person_id: int):
     person = _get_staff_person(person_id)
     form_errors: list[str] = []
     canonical_name = person.name
+    honorific = person.honorific
     alias_name = ""
     biography = person.biography
 
@@ -6895,6 +6905,18 @@ def archive_manage_person_edit_page(request, person_id: int):
                 canonical_name = submitted_name
             else:
                 messages.success(request, PERSON_NAME_UPDATED_MSG)
+                return redirect("archive-manage-person-edit", person_id=person.id)
+        elif action == "update_honorific":
+            submitted_honorific = request.POST.get("honorific")
+            try:
+                person = update_person_honorific(person, honorific=submitted_honorific)
+            except PhotoContentManagementError as exc:
+                form_errors = [exc.message]
+                honorific = (
+                    submitted_honorific if submitted_honorific is not None else ""
+                )
+            else:
+                messages.success(request, PERSON_HONORIFIC_UPDATED_MSG)
                 return redirect("archive-manage-person-edit", person_id=person.id)
         elif action == "update_biography":
             submitted_biography = request.POST.get("biography")
@@ -6930,6 +6952,7 @@ def archive_manage_person_edit_page(request, person_id: int):
             person=person,
             form_errors=form_errors,
             canonical_name=canonical_name,
+            honorific=honorific,
             alias_name=alias_name,
             biography=biography,
         ),

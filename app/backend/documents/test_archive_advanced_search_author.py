@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from html.parser import HTMLParser
 from urllib.parse import parse_qs
 
 from django.contrib.auth import get_user_model
@@ -15,6 +16,7 @@ from documents.models import (
     ArchiveItem,
     ArchiveItemAuthor,
     Author,
+    Person,
     PhotoContent,
 )
 from documents.services.archive_advanced_search import (
@@ -29,6 +31,48 @@ from documents.services.archive_item_access import (
 from documents.services.archive_items import create_manual_text_archive_item
 
 User = get_user_model()
+
+
+class _ArchiveFilterAuthorOptionsCollector(HTMLParser):
+    """Collect ``(value, label)`` from ``#archive-filter-author`` only."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._in_select = False
+        self._option_value: str | None = None
+        self._option_label: list[str] = []
+        self.options: list[tuple[str, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr_map = dict(attrs)
+        if tag == "select" and attr_map.get("id") == "archive-filter-author":
+            self._in_select = True
+            return
+        if self._in_select and tag == "option":
+            value = attr_map.get("value")
+            self._option_value = "" if value is None else value
+            self._option_label = []
+
+    def handle_data(self, data: str) -> None:
+        if self._option_value is not None:
+            self._option_label.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "option" and self._option_value is not None:
+            self.options.append(
+                (self._option_value, "".join(self._option_label).strip())
+            )
+            self._option_value = None
+            self._option_label = []
+        if tag == "select":
+            self._in_select = False
+
+
+def _archive_filter_author_options(html: str) -> list[tuple[str, str]]:
+    collector = _ArchiveFilterAuthorOptionsCollector()
+    collector.feed(html)
+    collector.close()
+    return collector.options
 
 
 def _ids(queryset) -> list[int]:
@@ -149,6 +193,40 @@ class ArchiveAdvancedAuthorFilterTests(TestCase):
         html = resp.content.decode("utf-8")
         self.assertIn(f'value="{earlier.id}"', html)
         self.assertIn(f'value="{later.id}"', html)
+
+    def test_author_filter_stays_author_id_not_linked_person_honorific(self):
+        person = Person.objects.create(
+            name="Filter Person", honorific="HonorificAuthorToken"
+        )
+        author = Author.objects.create(
+            name="Bibliographic Filter Author", person=person
+        )
+        item = _public_manual("Linked authored filter item")
+        _link(item, author, position=0)
+
+        ids = _ids(
+            filter_archive_items_by_advanced_filters(
+                ArchiveItem.objects.all(),
+                normalize_archive_advanced_filters({"author": str(author.id)}),
+            )
+        )
+        self.assertEqual(ids, [item.pk])
+        skipped = normalize_archive_advanced_filters({"author": "HonorificAuthorToken"})
+        self.assertIsNone(skipped.author_id)
+        resp = self.client.get(self.url, {"advanced": "1"})
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+        author_options = _archive_filter_author_options(html)
+        self.assertIn(("", "הכל"), author_options)
+        self.assertEqual(
+            [label for value, label in author_options if value == str(author.id)],
+            ["Bibliographic Filter Author"],
+        )
+        self.assertNotIn(
+            "HonorificAuthorToken",
+            " ".join(label for _value, label in author_options),
+        )
+        self.assertContains(resp, "Filter Person, HonorificAuthorToken", html=True)
 
     def test_ambiguous_legacy_author_name_is_fail_closed(self):
         earlier = Author.objects.create(name="Ambiguous Ada")
