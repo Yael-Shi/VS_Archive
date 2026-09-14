@@ -466,6 +466,34 @@ class GeminiRecitationFallbackAdapterTests(SimpleTestCase):
             recitation,
         )
 
+    def test_max_tokens_does_not_use_recitation_model_fallback(self):
+        adapter = GeminiAdapter()
+        max_tokens = _response_error(
+            GeminiResponseFailureCode.MAX_TOKENS,
+            model="model-a",
+            attempt=1,
+            max_output_tokens=4096,
+        )
+
+        with (
+            patch(
+                "documents.services.htr_adapters.gemini_adapter."
+                "transcribe_pages_with_gemini",
+                side_effect=max_tokens,
+            ) as mock_transcribe,
+            patch.object(adapter, "_persist_page_failure") as mock_persist_failure,
+            patch.object(
+                adapter,
+                "_raise_incomplete",
+                side_effect=_ExpectedIncomplete,
+            ),
+            self.assertRaises(_ExpectedIncomplete),
+        ):
+            _execute_claimed_page(adapter)
+
+        self.assertEqual(mock_transcribe.call_count, 1)
+        self.assertIs(mock_persist_failure.call_args.kwargs["exc"], max_tokens)
+
     def test_safety_does_not_use_model_fallback(self):
         adapter = GeminiAdapter()
         safety = _response_error(
