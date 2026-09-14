@@ -126,6 +126,13 @@ def _presign_url(*, bucket: str, key: str, expires_in: int = 3600) -> str:
     return f"https://s3.example/presigned/{kind}-{token}"
 
 
+def _album_nav_html(response) -> str:
+    """The album-level navigation band from a selected-photo detail response."""
+    html = response.content.decode("utf-8")
+    start = html.index("photo-album-nav")
+    return html[start : html.index("</nav>", start)]
+
+
 class PublicPhotoSelectorUnitTests(SimpleTestCase):
     def test_parse_public_photo_selector_accepts_positive_ids(self):
         self.assertEqual(parse_public_photo_selector("12"), 12)
@@ -292,13 +299,16 @@ class PhotoPublicGalleryTests(TestCase):
         self.assertContains(resp, 'class="photo-detail__image"')
         self.assertContains(resp, _presign_url(bucket="x", key=photo.original_file_key))
         self.assertNotContains(resp, "photo-gallery")
-        self.assertNotContains(resp, "הקודמת")
-        self.assertNotContains(resp, "הבאה")
+        self.assertNotContains(resp, "תמונה קודמת")
+        self.assertNotContains(resp, "תמונה הבאה")
         self.assertNotContains(resp, "1 מתוך 1")
         self.assertNotContains(resp, "photo-gallery__nav")
         self.assertContains(resp, "חזרה לארכיון")
         self.assertContains(resp, "הוספת מידע על הפריט")
         self.assertNotContains(resp, "חזרה לכל התמונות")
+        self.assertNotContains(resp, "photo-album-nav")
+        self.assertContains(resp, "archive-detail-photo-meta")
+        self.assertContains(resp, "archive-detail-photo-facts")
         html = resp.content.decode("utf-8")
         self.assertLess(
             html.index("Only photo caption"), html.index("photo-detail__image")
@@ -317,8 +327,9 @@ class PhotoPublicGalleryTests(TestCase):
         self.assertContains(resp, 'aria-label="תמונה 1 מתוך 3"')
         self.assertContains(resp, 'aria-label="תמונה 2 מתוך 3"')
         self.assertContains(resp, 'aria-label="תמונה 3 מתוך 3"')
-        self.assertNotContains(resp, "הבאה")
-        self.assertNotContains(resp, ">הקודמת</a>")
+        self.assertNotContains(resp, "photo-album-nav")
+        self.assertNotContains(resp, "תמונה הבאה")
+        self.assertNotContains(resp, "תמונה קודמת")
         self.assertNotContains(resp, "חזרה לכל התמונות")
         thumbs_start = html.index("photo-gallery__thumbs")
         thumbs_html = html[thumbs_start:]
@@ -351,8 +362,8 @@ class PhotoPublicGalleryTests(TestCase):
         self.assertContains(resp, public_photo_detail_url(self.item.id))
         self.assertContains(resp, public_photo_detail_url(self.item.id, self.p1.id))
         self.assertContains(resp, public_photo_detail_url(self.item.id, self.p3.id))
-        self.assertContains(resp, ">הקודמת</a>")
-        self.assertContains(resp, ">הבאה</a>")
+        self.assertContains(resp, "תמונה קודמת")
+        self.assertContains(resp, "תמונה הבאה")
         self.assertContains(
             resp, _presign_url(bucket="x", key=self.p2.original_file_key)
         )
@@ -366,9 +377,131 @@ class PhotoPublicGalleryTests(TestCase):
 
         last = self._detail(photo=self.p3.id)
         self.assertContains(last, "3 מתוך 3")
-        self.assertContains(last, ">הקודמת</a>")
-        self.assertNotContains(last, ">הבאה</a>")
+        self.assertContains(last, "תמונה קודמת")
+        self.assertNotContains(last, "תמונה הבאה")
         self.assertNotContains(last, "photo-gallery__thumb-fallback")
+
+    def test_album_nav_band_precedes_selected_photo_and_reuses_primary_back(self):
+        resp = self._detail(photo=self.p2.id)
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        nav_start = html.index("photo-album-nav")
+        nav_end = html.index("</nav>", nav_start)
+        nav = html[nav_start:nav_end]
+
+        # The album band sits between item/album metadata and the selected
+        # photo section, not inside the global header toolbar.
+        header = html[html.index("document-detail-header") : html.index("</header>")]
+        self.assertNotIn("חזרה לכל התמונות", header)
+        self.assertNotIn("photo-album-nav", header)
+        toolbar_start = html.index("document-detail-toolbar")
+        self.assertLess(toolbar_start, nav_start)
+        self.assertLess(nav_start, html.index("photo-gallery--selected"))
+        self.assertLess(nav_start, html.index("photo-detail__image"))
+
+        # Same primary button language as חזרה לארכיון.
+        album_href = public_photo_detail_url(self.item.id)
+        back_href_pos = nav.index(f'href="{album_href}"')
+        back_tag_start = nav.rfind("<a", 0, back_href_pos)
+        back_tag_end = nav.find(">", back_href_pos) + 1
+        back_tag = nav[back_tag_start:back_tag_end]
+        self.assertIn("btn btn-primary", back_tag)
+        self.assertIn("photo-album-nav__back", back_tag)
+
+        self.assertIn("תמונה 2 מתוך 3", nav)
+        self.assertIn("photo-album-nav__status", nav)
+        self.assertIn("photo-album-nav__steps", nav)
+        # RTL flex: first cluster sits on the right (prev/next), back on the left.
+        self.assertLess(
+            nav.index("photo-album-nav__steps"),
+            nav.index("photo-album-nav__status"),
+        )
+        self.assertLess(
+            nav.index("photo-album-nav__status"),
+            nav.index("photo-album-nav__back"),
+        )
+        self.assertIn("תמונה קודמת", nav)
+        self.assertIn("תמונה הבאה", nav)
+        self.assertIn(public_photo_detail_url(self.item.id, self.p1.id), nav)
+        self.assertIn(public_photo_detail_url(self.item.id, self.p3.id), nav)
+
+        # Step controls stay visually subordinate to the primary back button.
+        self.assertIn("btn btn-secondary photo-album-nav__step", nav)
+
+        # Selected-photo metadata stays out of the album navigation band and
+        # out of the shared album metadata in the header.
+        self.assertNotIn("Second outing", nav)
+        self.assertNotIn("Second outing", header)
+        self.assertIn("archive-detail-photo-meta", html)
+        self.assertLess(nav_end, html.index("archive-detail-photo-meta"))
+
+    def test_album_nav_prev_next_follow_gallery_order_and_clamp_at_edges(self):
+        first = self._detail(photo=self.p1.id)
+        middle = self._detail(photo=self.p2.id)
+        last = self._detail(photo=self.p3.id)
+
+        first_nav = _album_nav_html(first)
+        middle_nav = _album_nav_html(middle)
+        last_nav = _album_nav_html(last)
+
+        p1_url = public_photo_detail_url(self.item.id, self.p1.id)
+        p2_url = public_photo_detail_url(self.item.id, self.p2.id)
+        p3_url = public_photo_detail_url(self.item.id, self.p3.id)
+
+        self.assertIn("תמונה 1 מתוך 3", first_nav)
+        self.assertNotIn("תמונה קודמת", first_nav)
+        self.assertIn("תמונה הבאה", first_nav)
+        self.assertIn(p2_url, first_nav)
+        self.assertNotIn(p3_url, first_nav)
+
+        self.assertIn("תמונה 2 מתוך 3", middle_nav)
+        self.assertIn("תמונה קודמת", middle_nav)
+        self.assertIn("תמונה הבאה", middle_nav)
+        self.assertLess(middle_nav.index(p1_url), middle_nav.index(p3_url))
+
+        self.assertIn("תמונה 3 מתוך 3", last_nav)
+        self.assertIn("תמונה קודמת", last_nav)
+        self.assertNotIn("תמונה הבאה", last_nav)
+        self.assertIn(p2_url, last_nav)
+        self.assertNotIn(p1_url, last_nav)
+
+    def test_selected_photo_metadata_uses_compact_key_value_block(self):
+        resp = self._detail(photo=self.p1.id)
+        html = resp.content.decode("utf-8")
+
+        block_start = html.index("archive-detail-meta-block--photo")
+        block = html[block_start : html.index("photo-detail__image")]
+
+        self.assertIn("archive-detail-photo-meta", block)
+        self.assertIn("archive-detail-photo-facts", block)
+        self.assertIn('class="archive-detail-photo-description"', block)
+        self.assertIn("First picnic", block)
+
+        # Caption reads as its own paragraph, outside the fact rows.
+        facts_start = block.index("archive-detail-photo-facts")
+        self.assertLess(block.index("First picnic"), facts_start)
+        facts = block[facts_start:]
+        self.assertNotIn("First picnic", facts)
+        self.assertIn("מיקום:", facts)
+        self.assertIn("Jerusalem", facts)
+        self.assertIn("אנשים בתמונה:", facts)
+        self.assertIn("נוכחים:", facts)
+        self.assertIn("archive-detail-meta-label", facts)
+        self.assertIn("archive-detail-meta-value", facts)
+        for marker in (
+            "|10",
+            "|20",
+            "|30",
+            "|40",
+            "|50",
+            "10|",
+            "20|",
+            "30|",
+            "40|",
+            "50|",
+        ):
+            self.assertNotIn(marker, block)
 
     def test_shared_metadata_shown_once_and_stays_in_header(self):
         resp = self._detail(photo=self.p2.id)

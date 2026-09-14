@@ -2,44 +2,48 @@
 {% if photo_content %}
   {% with description=photo_content.description|meaningful_archive_metadata location=photo_content.location|meaningful_archive_metadata photo_context=photo_content.context|meaningful_archive_metadata people_present=photo_content.people_present|meaningful_archive_metadata notes=photo_content.notes|meaningful_archive_metadata %}
     {% if description or location or photo_context or identified_people or people_present or notes or photo_date_label %}
-      <div class="archive-detail-meta-block archive-detail-meta-block--photo">
+      <div class="archive-detail-meta-block archive-detail-meta-block--photo archive-detail-photo-meta">
         {% if description %}
-          <div class="archive-detail-photo-description">{{ description|linebreaksbr }}</div>
+          <p class="archive-detail-photo-description">{{ description|linebreaksbr }}</p>
         {% endif %}
-        {% if photo_date_label %}
-          <div class="archive-detail-meta-row">
-            <strong class="archive-detail-meta-label">תאריך התמונה:</strong>
-            <span class="archive-detail-meta-value">{{ photo_date_label }}</span>
-          </div>
-        {% endif %}
-        {% if location %}
-          <div class="archive-detail-meta-row">
-            <strong class="archive-detail-meta-label">מיקום:</strong>
-            <span class="archive-detail-meta-value">{{ location }}</span>
-          </div>
-        {% endif %}
-        {% if photo_context %}
-          <div class="archive-detail-meta-row">
-            <strong class="archive-detail-meta-label">הקשר / נסיבות:</strong>
-            <span class="archive-detail-meta-value">{{ photo_context|linebreaksbr }}</span>
-          </div>
-        {% endif %}
-        {% if identified_people %}
-          <div class="archive-detail-meta-row">
-            <strong class="archive-detail-meta-label">אנשים בתמונה</strong>
-            <span class="archive-detail-meta-value">{% for person in identified_people %}<a href="{{ person.href }}">{{ person.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</span>
-          </div>
-        {% endif %}
-        {% if people_present %}
-          <div class="archive-detail-meta-row">
-            <strong class="archive-detail-meta-label">נוכחים:</strong>
-            <span class="archive-detail-meta-value">{{ people_present|linebreaksbr }}</span>
-          </div>
-        {% endif %}
-        {% if notes %}
-          <div class="archive-detail-meta-row">
-            <strong class="archive-detail-meta-label">הערות נוספות:</strong>
-            <span class="archive-detail-meta-value">{{ notes|linebreaksbr }}</span>
+        {% if location or photo_context or identified_people or people_present or notes or photo_date_label %}
+          <div class="archive-detail-photo-facts">
+            {% if photo_date_label %}
+              <div class="archive-detail-meta-row">
+                <strong class="archive-detail-meta-label">תאריך התמונה:</strong>
+                <span class="archive-detail-meta-value">{{ photo_date_label }}</span>
+              </div>
+            {% endif %}
+            {% if location %}
+              <div class="archive-detail-meta-row">
+                <strong class="archive-detail-meta-label">מיקום:</strong>
+                <span class="archive-detail-meta-value">{{ location }}</span>
+              </div>
+            {% endif %}
+            {% if photo_context %}
+              <div class="archive-detail-meta-row">
+                <strong class="archive-detail-meta-label">הקשר / נסיבות:</strong>
+                <span class="archive-detail-meta-value">{{ photo_context|linebreaksbr }}</span>
+              </div>
+            {% endif %}
+            {% if identified_people %}
+              <div class="archive-detail-meta-row">
+                <strong class="archive-detail-meta-label">אנשים בתמונה:</strong>
+                <span class="archive-detail-meta-value">{% for person in identified_people %}<a href="{{ person.href }}">{{ person.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</span>
+              </div>
+            {% endif %}
+            {% if people_present %}
+              <div class="archive-detail-meta-row">
+                <strong class="archive-detail-meta-label">נוכחים:</strong>
+                <span class="archive-detail-meta-value">{{ people_present|linebreaksbr }}</span>
+              </div>
+            {% endif %}
+            {% if notes %}
+              <div class="archive-detail-meta-row">
+                <strong class="archive-detail-meta-label">הערות נוספות:</strong>
+                <span class="archive-detail-meta-value">{{ notes|linebreaksbr }}</span>
+              </div>
+            {% endif %}
           </div>
         {% endif %}
       </div>

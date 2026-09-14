@@ -56,6 +56,13 @@ def _primary_photo(item: ArchiveItem) -> PhotoContent:
     return photo
 
 
+def _technical_popover_html(html: str) -> str:
+    """Staff PHOTO technical-details popover markup, trigger through badges."""
+    start = html.rfind("<div", 0, html.index("data-archive-technical-popover"))
+    badges = html.index("badge-row", start)
+    return html[start : html.index("</div>", badges)]
+
+
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
 class PhotoArchiveDisplayListTests(TestCase):
     def setUp(self):
@@ -567,10 +574,9 @@ class PhotoArchiveDisplayDetailTests(TestCase):
         self.assertIn("Photo detail category", header)
         self.assertIn("Photo detail event", header)
         self.assertIn("photo-detail-tag", header)
-        technical_end = header.index("</details>", technical_start)
-        technical_section = header[technical_start:technical_end]
+        technical_section = _technical_popover_html(header)
 
-        self.assertIn("<summary>פרטים טכניים</summary>", technical_section)
+        self.assertIn("פרטים טכניים", technical_section)
         self.assertIn('class="badge-row"', technical_section)
         self.assertNotIn("Photo detail category", technical_section)
         self.assertNotIn("Photo detail event", technical_section)
@@ -613,6 +619,84 @@ class PhotoArchiveDisplayDetailTests(TestCase):
             resp, "הטקסט חולץ אוטומטית ועדיין לא עבר בדיקה ידנית. ייתכנו שגיאות."
         )
         self.assertNotContains(resp, "הטקסט המוצג עבר בקרה אנושית.")
+
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value=PRESIGNED_URL,
+    )
+    def test_photo_technical_details_stay_staff_only(self, _mock_presigned_get):
+        detail_url = reverse(
+            "archive-detail", kwargs={"item_id": self.public_uploaded.id}
+        )
+
+        anonymous = self.client.get(detail_url)
+        self.assertEqual(anonymous.status_code, 200)
+        self.assertNotContains(anonymous, "פרטים טכניים")
+        self.assertNotContains(anonymous, "data-archive-technical-popover")
+        self.assertNotContains(anonymous, "archive_technical_popover.js")
+
+        self.client.force_login(self.family_user)
+        family = self.client.get(detail_url)
+        self.assertEqual(family.status_code, 200)
+        self.assertNotContains(family, "פרטים טכניים")
+        self.assertNotContains(family, "data-archive-technical-popover")
+        self.assertNotContains(family, "archive_technical_popover.js")
+
+    @patch(
+        "documents.views.create_presigned_get",
+        return_value=PRESIGNED_URL,
+    )
+    def test_staff_photo_technical_details_render_as_anchored_popover(
+        self, _mock_presigned_get
+    ):
+        self.client.force_login(self.staff)
+        resp = self.client.get(
+            reverse("archive-detail", kwargs={"item_id": self.public_uploaded.id})
+        )
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        # The in-flow <details> disclosure is gone; nothing about the
+        # technical panel can push the image or metadata around.
+        self.assertNotContains(resp, "<summary>פרטים טכניים</summary>")
+        self.assertNotContains(resp, "<details")
+        self.assertNotContains(resp, "review-details--secondary")
+        self.assertContains(resp, "data-archive-technical-popover")
+        self.assertContains(resp, "data-archive-technical-toggle")
+        self.assertContains(resp, "data-archive-technical-panel")
+        self.assertContains(resp, "data-archive-technical-close")
+        self.assertContains(resp, "archive_technical_popover.js")
+        for marker in (
+            "|10",
+            "|20",
+            "|30",
+            "|40",
+            "|50",
+            "10|",
+            "20|",
+            "30|",
+            "40|",
+            "50|",
+        ):
+            self.assertNotIn(marker, html)
+
+        popover = _technical_popover_html(html)
+        panel_id = f"archive-item-{self.public_uploaded.id}-technical-panel"
+        title_id = f"archive-item-{self.public_uploaded.id}-technical-title"
+
+        self.assertIn('type="button"', popover)
+        self.assertIn('aria-expanded="false"', popover)
+        self.assertIn(f'aria-controls="{panel_id}"', popover)
+        self.assertIn(f'id="{panel_id}"', popover)
+        self.assertIn('role="dialog"', popover)
+        self.assertIn(f'aria-labelledby="{title_id}"', popover)
+        self.assertIn(f'id="{title_id}"', popover)
+        self.assertIn('aria-label="סגירת פרטים טכניים"', popover)
+
+        # The panel starts collapsed and out of the document flow.
+        self.assertIn("hidden", popover)
+        self.assertIn("archive-detail-photo-technical__panel", popover)
+        self.assertIn("archive-detail-photo-technical__trigger", popover)
 
     @patch(
         "documents.views.create_presigned_get",
@@ -704,11 +788,9 @@ class PhotoArchiveDisplayDetailTests(TestCase):
 
         # Admin-only item/status badges live inside the compact
         # technical-details control in the PHOTO toolbar.
-        technical_start = header.index("archive-detail-photo-technical")
-        technical_end = header.index("</details>", technical_start)
-        technical_section = header[technical_start:technical_end]
+        technical_section = _technical_popover_html(header)
 
-        self.assertIn("<summary>פרטים טכניים</summary>", technical_section)
+        self.assertIn("פרטים טכניים", technical_section)
         self.assertIn("תמונה", technical_section)
         self.assertNotIn("חזרה לארכיון", technical_section)
         self.assertNotIn("הוספת מידע על הפריט", technical_section)
@@ -1008,6 +1090,87 @@ class PhotoArchiveDetailLayoutStyleTests(SimpleTestCase):
         self.assertIn("margin: 0;", description_rule)
         self.assertNotIn("margin-bottom: var(--space-2)", description_rule)
         self.assertNotIn("line-height: var(--line-relaxed)", description_rule)
+
+    def test_photo_metadata_uses_aligned_key_value_grid_on_readable_measure(self):
+        css_path = settings.BASE_DIR / "public" / "static" / "public" / "app.css"
+        css = css_path.read_text(encoding="utf-8")
+
+        meta_start = css.index(".archive-detail-photo-meta {")
+        meta_rule = css[meta_start : css.index("}", meta_start)]
+        self.assertIn("max-width: 960px;", meta_rule)
+        self.assertIn("margin-inline: auto;", meta_rule)
+
+        facts_start = css.index(".archive-detail-photo-facts {")
+        facts_rule = css[facts_start : css.index("}", facts_start)]
+        self.assertIn("display: grid;", facts_rule)
+        self.assertIn(
+            "grid-template-columns: minmax(0, max-content) minmax(0, 1fr);",
+            facts_rule,
+        )
+        self.assertIn("align-items: baseline;", facts_rule)
+        self.assertIn("row-gap: 2px;", facts_rule)
+        # Narrower readable measure instead of full-width stretching, and no
+        # regression to the large vertical rhythm.
+        self.assertIn("max-inline-size: 44rem;", facts_rule)
+        self.assertNotIn("row-gap: var(--space-", facts_rule)
+
+        row_start = css.index(".archive-detail-photo-facts .archive-detail-meta-row {")
+        row_rule = css[row_start : css.index("}", row_start)]
+        self.assertIn("display: contents;", row_rule)
+
+        # Flat presentation: no per-row card/box treatment.
+        self.assertNotIn("border:", facts_rule)
+        self.assertNotIn("box-shadow:", facts_rule)
+        self.assertNotIn("background:", row_rule)
+        self.assertNotIn("border:", row_rule)
+        self.assertNotIn("padding:", row_rule)
+
+        description_start = css.index(".archive-detail-photo-description {")
+        description_rule = css[description_start : css.index("}", description_start)]
+        self.assertIn("max-inline-size: 68ch;", description_rule)
+
+    def test_photo_technical_popover_is_anchored_overlay_not_in_flow(self):
+        css_path = settings.BASE_DIR / "public" / "static" / "public" / "app.css"
+        css = css_path.read_text(encoding="utf-8")
+
+        root_start = css.index("\n.archive-detail-photo-technical {")
+        root_rule = css[root_start : css.index("}", root_start)]
+        self.assertIn("position: relative;", root_rule)
+        self.assertIn("width: max-content;", root_rule)
+
+        panel_start = css.index(".archive-detail-photo-technical__panel {")
+        panel_rule = css[panel_start : css.index("}", panel_start)]
+        self.assertIn("position: absolute;", panel_rule)
+        self.assertIn("inset-inline-end: 0;", panel_rule)
+        self.assertIn("width: min(360px, calc(100vw - 2rem));", panel_rule)
+        self.assertIn("z-index:", panel_rule)
+
+        hidden_start = css.index(".archive-detail-photo-technical__panel[hidden] {")
+        hidden_rule = css[hidden_start : css.index("}", hidden_start)]
+        self.assertIn("display: none;", hidden_rule)
+
+        # The superseded <details> disclosure styling is gone.
+        self.assertNotIn(".archive-detail-photo-technical[open]", css)
+        self.assertNotIn(".archive-detail-photo-technical > summary", css)
+
+    def test_album_navigation_band_styles_stay_subordinate_to_archive_nav(self):
+        css_path = settings.BASE_DIR / "public" / "static" / "public" / "app.css"
+        css = css_path.read_text(encoding="utf-8")
+
+        nav_start = css.index(".photo-album-nav {")
+        nav_rule = css[nav_start : css.index("}", nav_start)]
+        self.assertIn("display: flex;", nav_rule)
+        self.assertIn("max-width: 960px;", nav_rule)
+        self.assertIn("border-block: 1px solid var(--border-subtle);", nav_rule)
+
+        step_start = css.index(".photo-album-nav__step.btn {")
+        step_rule = css[step_start : css.index("}", step_start)]
+        self.assertIn("font-size: var(--font-xs);", step_rule)
+
+        # The superseded in-section gallery nav rules are gone.
+        self.assertNotIn(".photo-gallery__nav {", css)
+        self.assertNotIn(".photo-gallery__back {", css)
+        self.assertNotIn(".photo-gallery__status {", css)
 
         figure_start = css.index(".archive-detail-photo {")
         figure_block = css[figure_start : css.index("}", figure_start) + 1]

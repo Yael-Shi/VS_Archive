@@ -1,0 +1,47 @@
+{% load archive_labels %}
+<div
+  class="document-detail-technical archive-detail-photo-technical"
+  data-archive-technical-popover
+>
+  <button
+    type="button"
+    class="archive-detail-photo-technical__trigger"
+    id="archive-item-{{ item.id }}-technical-trigger"
+    aria-expanded="false"
+    aria-controls="archive-item-{{ item.id }}-technical-panel"
+    data-archive-technical-toggle
+  >
+    <span>פרטים טכניים</span>
+    <span class="archive-detail-photo-technical__caret" aria-hidden="true">▾</span>
+  </button>
+
+  <div
+    class="archive-detail-photo-technical__panel"
+    id="archive-item-{{ item.id }}-technical-panel"
+    role="dialog"
+    aria-modal="false"
+    aria-labelledby="archive-item-{{ item.id }}-technical-title"
+    data-archive-technical-panel
+    hidden
+  >
+    <div class="archive-detail-photo-technical__panel-head">
+      <p
+        class="archive-detail-photo-technical__panel-title"
+        id="archive-item-{{ item.id }}-technical-title"
+      >פרטים טכניים</p>
+      <button
+        type="button"
+        class="archive-detail-photo-technical__close"
+        aria-label="סגירת פרטים טכניים"
+        data-archive-technical-close
+      ><span aria-hidden="true">✕</span></button>
+    </div>
+
+    <div class="review-details-body archive-detail-photo-technical__body">
+      <div class="badge-row">
+        <span class="badge">{{ item.item_type|archive_item_type_label }}</span>
+        <span class="badge">{{ item.metadata_status|archive_metadata_status_label }}</span>
+      </div>
+    </div>
+  </div>
+</div>
