@@ -102,6 +102,9 @@ def public_renderable_photo_contents(archive_item: ArchiveItem) -> list[PhotoCon
 
 def identified_people_links(
     photo_content: PhotoContent,
+    *,
+    from_item_id: int | None = None,
+    from_photo_id: int | None = None,
 ) -> list[PublicIdentifiedPersonLink]:
     """Stable public PhotoPerson links for this photo only.
 
@@ -120,7 +123,11 @@ def identified_people_links(
                 PublicIdentifiedPersonLink(
                     person_id=person.pk,
                     name=name,
-                    href=person_public_page_url(person.pk),
+                    href=person_public_page_url(
+                        person.pk,
+                        from_item_id=from_item_id,
+                        from_photo_id=from_photo_id,
+                    ),
                 )
             )
     return links
@@ -236,7 +243,11 @@ def build_public_photo_gallery(
                 archive_item.pk,
                 photos[selected_index].pk,
             )
-        identified_people = identified_people_links(selected)
+        identified_people = identified_people_links(
+            selected,
+            from_item_id=archive_item.pk,
+            from_photo_id=selected.pk,
+        )
         photo_date_label = public_photo_date_label(selected)
         selected_alt_text = public_photo_alt_text(
             selected,

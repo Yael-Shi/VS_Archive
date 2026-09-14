@@ -284,6 +284,8 @@ from documents.services.archive_advanced_search import (
 )
 from documents.services.archive_item_presentation import (
     ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
+    PERSON_PUBLIC_FROM_ITEM_QUERY,
+    PERSON_PUBLIC_FROM_PHOTO_QUERY,
     PHOTO_ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING,
     aggregate_archive_public_list_type_counts,
     archive_browse_displayable_text_results_prefetch,
@@ -313,6 +315,7 @@ from documents.services.person_public import (
     build_person_public_item_cards,
     matching_photo_ids_for_selected_persons,
     public_person_archive_items_queryset,
+    resolve_person_public_source_return_url,
 )
 from documents.services.public_people_directory import (
     build_paginated_public_directory_rows,
@@ -3936,7 +3939,10 @@ def document_detail_page(request, doc_id: int):
             if show_transkribus_action
             else None
         ),
-        **public_discovery_context(doc.archive_item),
+        **public_discovery_context(
+            doc.archive_item,
+            from_item_id=None if doc.archive_item is None else doc.archive_item.id,
+        ),
     }
 
     logger.info(
@@ -5811,6 +5817,12 @@ def archive_person_detail_page(request, person_id: int):
         bucket=getattr(settings, "UPLOADS_BUCKET_NAME", ""),
         expires_in=PRESIGNED_GET_EXPIRY_SECONDS,
     )
+    source_return_url = resolve_person_public_source_return_url(
+        request.user,
+        person_id=person.pk,
+        from_item_raw=request.GET.get(PERSON_PUBLIC_FROM_ITEM_QUERY),
+        from_photo_raw=request.GET.get(PERSON_PUBLIC_FROM_PHOTO_QUERY),
+    )
     return render(
         request,
         "documents/archive/person_detail.html",
@@ -5820,6 +5832,7 @@ def archive_person_detail_page(request, person_id: int):
             "browse_cards": browse_cards,
             "is_admin": _is_admin(request.user),
             "total_count": total_count,
+            "person_source_return_url": source_return_url,
             **archive_public_list_pagination_context(
                 total_count=total_count,
                 page=page,
@@ -6043,7 +6056,7 @@ def archive_detail_page(request, item_id: int):
         archive_item_author_links_prefetch(),
     )
     item = get_viewable_archive_item(request.user, item_id, queryset=detail_qs)
-    discovery_context = public_discovery_context(item)
+    discovery_context = public_discovery_context(item, from_item_id=item.id)
 
     if item.item_type == ArchiveItem.ItemType.OCR_DOCUMENT:
         doc = Document.objects.filter(archive_item_id=item.id).first()
@@ -6110,6 +6123,12 @@ def archive_detail_page(request, item_id: int):
                     item,
                     identified_person_ids=identified_person_ids,
                     is_album_view=photo_gallery.is_album_view,
+                    from_item_id=item.id,
+                    from_photo_id=(
+                        None
+                        if photo_gallery.is_album_view or photo_content is None
+                        else photo_content.pk
+                    ),
                 ),
                 "person_links_heading": PHOTO_ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING,
             },

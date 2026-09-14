@@ -39,6 +39,7 @@ from documents.services.photo_archive_urls import (
 from documents.services.photo_gallery import public_photo_detail_url
 from documents.services.photo_presentation import (
     filter_archive_renderable_photo_contents,
+    photo_is_archive_renderable,
 )
 
 PERSON_FIRST_MATCHING_PHOTO_ANNOTATION = "person_first_matching_photo_id"
@@ -432,3 +433,47 @@ def build_person_public_item_cards(
         bucket=bucket,
         expires_in=expires_in,
     )
+
+
+def _positive_int_query_value(raw: object) -> int | None:
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text.isdigit():
+        return None
+    value = int(text)
+    if value < 1:
+        return None
+    return value
+
+
+def resolve_person_public_source_return_url(
+    user,
+    *,
+    person_id: int,
+    from_item_raw: object = None,
+    from_photo_raw: object = None,
+) -> str | None:
+    """Return a public item/photo URL when explicit Person-page source keys are valid.
+
+    Requires ``from_item`` to identify an authorized, browse-renderable item
+    already in this Person's public holdings. ``from_photo`` may deepen that
+    URL to a renderable photo on that same item. Invalid, private, unrelated,
+    or malformed keys are ignored. HTTP Referer is not consulted.
+    """
+    item_id = _positive_int_query_value(from_item_raw)
+    if item_id is None:
+        return None
+    if (
+        not public_person_archive_items_queryset(user, person_id)
+        .filter(pk=item_id)
+        .exists()
+    ):
+        return None
+    photo_id = _positive_int_query_value(from_photo_raw)
+    if photo_id is None:
+        return public_photo_detail_url(item_id)
+    photo = PhotoContent.objects.filter(pk=photo_id, archive_item_id=item_id).first()
+    if photo is None or not photo_is_archive_renderable(photo):
+        return public_photo_detail_url(item_id)
+    return public_photo_detail_url(item_id, photo_id)

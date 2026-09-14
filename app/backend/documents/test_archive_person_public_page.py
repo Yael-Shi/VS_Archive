@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from html import unescape
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 from django.contrib.auth.models import Group, Permission, User
 from django.contrib.contenttypes.models import ContentType
@@ -32,6 +34,8 @@ from documents.services.archive_item_access import (
 )
 from documents.services.archive_item_presentation import (
     ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
+    PERSON_PUBLIC_FROM_ITEM_QUERY,
+    PERSON_PUBLIC_FROM_PHOTO_QUERY,
     person_public_page_url,
 )
 from documents.services.archive_items import (
@@ -75,6 +79,26 @@ def _link(item: ArchiveItem, person: Person) -> None:
 
 def _person_page(person: Person) -> str:
     return reverse("archive-person-detail", kwargs={"person_id": person.id})
+
+
+def _person_page_hrefs_in_html(html: str, person: Person) -> list[str]:
+    """Unescaped hrefs to this Person page, query order independent."""
+    marker = f'href="{_person_page(person)}'
+    hrefs: list[str] = []
+    start = 0
+    while True:
+        idx = html.find(marker, start)
+        if idx < 0:
+            return hrefs
+        end = html.find('"', idx + len('href="'))
+        if end < 0:
+            raise AssertionError("unterminated person href")
+        hrefs.append(unescape(html[idx + len('href="') : end]))
+        start = end + 1
+
+
+def _query_params(url: str) -> dict[str, list[str]]:
+    return parse_qs(urlsplit(url).query, keep_blank_values=True)
 
 
 def _grant_restricted_permission(user: User) -> User:
@@ -160,6 +184,10 @@ class PersonPublicPageUrlTests(TestCase):
             person_public_page_url(person.id),
             f"/archive/people/{person.id}/",
         )
+        self.assertEqual(
+            person_public_page_url(person.id, from_item_id=12, from_photo_id=34),
+            f"/archive/people/{person.id}/?from_item=12&from_photo=34",
+        )
         self.assertEqual(person_public_page_url(person.id), _person_page(person))
 
 
@@ -196,6 +224,7 @@ class PersonPublicPageAuthorizedTests(TestCase):
         self.assertIn(f'href="{archive_list_href}"', header)
         self.assertIn(f'href="{people_index_href}"', header)
         self.assertNotIn("הוספת מידע על הפריט", html)
+        self.assertNotIn("חזרה לפריט", html)
         self.assertNotIn("SecretAliasToken", html)
         self.assertNotIn("עריכת אדם", html)
         self.assertNotIn("עריכת הפרטים", html)
@@ -236,6 +265,91 @@ class PersonPublicPageAuthorizedTests(TestCase):
         self.assertLess(nav.index("חזרה לאנשים"), nav.index("עריכת הפרטים"))
         self.assertEqual(nav.count("btn-primary"), 3)
         self.assertNotIn("btn-secondary", nav)
+        self.assertNotIn("חזרה לפריט", header)
+
+    def test_explicit_from_item_shows_source_return_without_using_referer(self):
+        person = Person.objects.create(name="Return Context Person")
+        source = _public_manual("Return source letter")
+        other = _public_manual("Unrelated public letter")
+        _link(source, person)
+
+        source_url = reverse("archive-detail", kwargs={"item_id": source.id})
+        referer_only = self.client.get(
+            _person_page(person),
+            HTTP_REFERER=source_url,
+        )
+        self.assertEqual(referer_only.status_code, 200)
+        self.assertIsNone(referer_only.context["person_source_return_url"])
+        self.assertNotContains(referer_only, "חזרה לפריט")
+        self.assertContains(referer_only, "חזרה לארכיון")
+        self.assertContains(referer_only, "חזרה לאנשים")
+
+        valid = self.client.get(
+            _person_page(person),
+            {PERSON_PUBLIC_FROM_ITEM_QUERY: str(source.id)},
+        )
+        self.assertEqual(valid.status_code, 200)
+        self.assertEqual(valid.context["person_source_return_url"], source_url)
+        html = valid.content.decode("utf-8")
+        header = html[html.index("document-detail-header") : html.index("</header>")]
+        nav_start = header.index("document-detail-navigation-actions")
+        nav_end = header.index("</div>", nav_start)
+        nav = header[nav_start:nav_end]
+        self.assertIn("חזרה לפריט", nav)
+        self.assertIn(f'href="{source_url}"', nav)
+        self.assertLess(nav.index("חזרה לפריט"), nav.index("חזרה לארכיון"))
+        self.assertLess(nav.index("חזרה לארכיון"), nav.index("חזרה לאנשים"))
+        self.assertEqual(nav.count("btn-primary"), 3)
+
+        unrelated = self.client.get(
+            _person_page(person),
+            {PERSON_PUBLIC_FROM_ITEM_QUERY: str(other.id)},
+        )
+        self.assertIsNone(unrelated.context["person_source_return_url"])
+        self.assertNotContains(unrelated, "חזרה לפריט")
+
+        private = _private_manual("Private return letter")
+        _link(private, person)
+        hidden = self.client.get(
+            _person_page(person),
+            {PERSON_PUBLIC_FROM_ITEM_QUERY: str(private.id)},
+        )
+        self.assertIsNone(hidden.context["person_source_return_url"])
+        self.assertNotContains(hidden, "חזרה לפריט")
+        self.assertNotContains(
+            hidden,
+            reverse("archive-detail", kwargs={"item_id": private.id}),
+        )
+
+        malformed = self.client.get(
+            _person_page(person),
+            {PERSON_PUBLIC_FROM_ITEM_QUERY: "not-an-id"},
+        )
+        self.assertIsNone(malformed.context["person_source_return_url"])
+
+    def test_explicit_from_photo_returns_to_selected_photo(self):
+        person = Person.objects.create(name="Photo Return Person")
+        item = _create_photo_item(title="Photo return album")
+        first = _add_photo(item, position=1)
+        second = _add_photo(item, position=2)
+        PhotoPerson.objects.create(photo_content=second, person=person)
+
+        resp = self.client.get(
+            _person_page(person),
+            {
+                PERSON_PUBLIC_FROM_ITEM_QUERY: str(item.id),
+                PERSON_PUBLIC_FROM_PHOTO_QUERY: str(second.id),
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        expected = public_photo_detail_url(item.id, second.id)
+        self.assertEqual(resp.context["person_source_return_url"], expected)
+        self.assertContains(resp, "חזרה לפריט")
+        self.assertContains(resp, expected)
+        self.assertNotEqual(
+            resp.context["person_source_return_url"],
+            public_photo_detail_url(item.id, first.id),
+        )
 
     def test_empty_and_whitespace_biography_are_omitted(self):
         person = Person.objects.create(name="Empty Bio Person")
@@ -915,21 +1029,30 @@ class PersonPublicPageLinkRetargetTests(TestCase):
 
         resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
         html = resp.content.decode("utf-8")
-        identified_href = person_public_page_url(identified.id)
-        related_href = person_public_page_url(related.id)
+        identified_hrefs = _person_page_hrefs_in_html(html, identified)
+        related_hrefs = _person_page_hrefs_in_html(html, related)
+        self.assertEqual(len(identified_hrefs), 1)
+        self.assertEqual(len(related_hrefs), 1)
+        identified_query = _query_params(identified_hrefs[0])
+        related_query = _query_params(related_hrefs[0])
+        self.assertEqual(
+            identified_query.get(PERSON_PUBLIC_FROM_ITEM_QUERY), [str(item.id)]
+        )
+        self.assertEqual(
+            identified_query.get(PERSON_PUBLIC_FROM_PHOTO_QUERY), [str(photo.id)]
+        )
+        self.assertEqual(
+            related_query.get(PERSON_PUBLIC_FROM_ITEM_QUERY), [str(item.id)]
+        )
         self.assertContains(resp, "אנשים בתמונה")
         self.assertContains(resp, "Photo Identified Person")
-        self.assertContains(
-            resp,
-            f'<a href="{identified_href}">Photo Identified Person</a>',
-        )
         self.assertContains(resp, "אנשים קשורים לפריט")
         self.assertContains(resp, "Item Related Person")
-        self.assertContains(resp, related_href)
         header = html[html.index("document-detail-header") : html.index("</header>")]
         self.assertIn("אנשים קשורים לפריט", header)
         self.assertIn("Item Related Person", header)
-        self.assertIn(related_href, header)
+        self.assertEqual(_person_page_hrefs_in_html(header, related), related_hrefs)
+        self.assertEqual(_person_page_hrefs_in_html(header, identified), [])
         self.assertNotIn("אנשים בתמונה", header)
         self.assertNotIn("Photo Identified Person", header)
         self.assertLess(html.index("אנשים בתמונה"), html.index("photo-detail__image"))
@@ -940,10 +1063,12 @@ class PersonPublicPageLinkRetargetTests(TestCase):
                 "photo-detail__image"
             )
         ]
-        self.assertIn(identified_href, appearance)
+        self.assertEqual(
+            _person_page_hrefs_in_html(appearance, identified), identified_hrefs
+        )
+        self.assertEqual(_person_page_hrefs_in_html(appearance, related), [])
         self.assertIn("Photo Identified Person", appearance)
         self.assertNotIn("Item Related Person", appearance)
-        self.assertNotIn(related_href, appearance)
 
 
 class PersonPublicPageQueryCountTests(TestCase):
