@@ -1,21 +1,36 @@
-<nav class="photo-gallery__nav" aria-label="מעבר בין תמונות">
-  <div class="photo-gallery__nav-prev">
+<nav class="photo-album-nav" aria-label="ניווט בין תמונות האלבום">
+  <div class="photo-album-nav__steps">
     {% if photo_gallery.previous_url %}
       <a
-        class="btn"
+        class="btn btn-secondary photo-album-nav__step"
         href="{{ photo_gallery.previous_url }}"
-        aria-label="התמונה הקודמת, {{ photo_gallery.selected_index|add:"-1" }} מתוך {{ photo_gallery.photo_count }}"
-      >הקודמת</a>
+        aria-label="תמונה קודמת, {{ photo_gallery.selected_index|add:"-1" }} מתוך {{ photo_gallery.photo_count }}"
+      >
+        <span aria-hidden="true">→</span>
+        <span>תמונה קודמת</span>
+      </a>
     {% endif %}
-  </div>
-  <p class="photo-gallery__status" aria-live="polite">{{ photo_gallery.status_label }}</p>
-  <div class="photo-gallery__nav-next">
     {% if photo_gallery.next_url %}
       <a
-        class="btn"
+        class="btn btn-secondary photo-album-nav__step"
         href="{{ photo_gallery.next_url }}"
-        aria-label="התמונה הבאה, {{ photo_gallery.selected_index|add:"1" }} מתוך {{ photo_gallery.photo_count }}"
-      >הבאה</a>
+        aria-label="תמונה הבאה, {{ photo_gallery.selected_index|add:"1" }} מתוך {{ photo_gallery.photo_count }}"
+      >
+        <span>תמונה הבאה</span>
+        <span aria-hidden="true">←</span>
+      </a>
     {% endif %}
   </div>
+
+  <p class="photo-album-nav__status" aria-live="polite">
+    תמונה {{ photo_gallery.selected_index }} מתוך {{ photo_gallery.photo_count }}
+  </p>
+
+  <a
+    class="btn btn-primary photo-album-nav__back"
+    href="{{ photo_gallery.album_url }}"
+  >
+    <span>חזרה לכל התמונות</span>
+    <span aria-hidden="true">←</span>
+  </a>
 </nav>

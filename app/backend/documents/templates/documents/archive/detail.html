@@ -54,15 +54,7 @@
                 href="{% url 'archive-manage-delete' item_id=item.id %}"
               >מחיקה</a>
 
-              <details class="review-details review-details--secondary document-detail-technical archive-detail-photo-technical">
-                <summary>פרטים טכניים</summary>
-                <div class="review-details-body">
-                  <div class="badge-row">
-                    <span class="badge">{{ item.item_type|archive_item_type_label }}</span>
-                    <span class="badge">{{ item.metadata_status|archive_metadata_status_label }}</span>
-                  </div>
-                </div>
-              </details>
+              {% include "documents/archive/partials/photo_technical_popover.html" with item=item %}
             {% else %}
               <a
                 class="btn btn-primary"
@@ -95,10 +87,8 @@
           {% include "documents/archive/partials/photo_album_grid.html" %}
         </section>
       {% elif photo_gallery.show_gallery %}
+        {% include "documents/archive/partials/photo_gallery_nav.html" %}
         <section class="photo-gallery photo-gallery--selected" aria-label="תמונה נבחרת">
-          <p class="photo-gallery__back">
-            <a class="btn" href="{{ photo_gallery.album_url }}">חזרה לכל התמונות</a>
-          </p>
           {% include "documents/archive/partials/photo_metadata_display.html" with photo_content=photo_content identified_people=photo_gallery.identified_people photo_date_label=photo_gallery.photo_date_label %}
           {% if photo_url %}
             <figure class="photo-detail archive-detail-photo">
@@ -111,7 +101,6 @@
           {% else %}
             <p class="muted">התמונה אינה זמינה כרגע.</p>
           {% endif %}
-          {% include "documents/archive/partials/photo_gallery_nav.html" %}
         </section>
       {% elif photo_url %}
         {% include "documents/archive/partials/photo_metadata_display.html" with photo_content=photo_content identified_people=photo_gallery.identified_people photo_date_label=photo_gallery.photo_date_label %}
@@ -136,5 +125,8 @@
     {% if text_quality_indicator %}
       <script src="{% static 'public/text_quality_indicator.js' %}"></script>
     {% endif %}
+  {% endif %}
+  {% if item.item_type == "PHOTO" and is_admin %}
+    <script src="{% static 'public/archive_technical_popover.js' %}"></script>
   {% endif %}
 {% endblock %}

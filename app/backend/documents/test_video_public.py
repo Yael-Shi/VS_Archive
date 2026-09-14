@@ -468,6 +468,7 @@ class VideoPublicDetailTests(TestCase):
             title="Canonical video chrome",
             source_url=YOUTUBE_URL,
             visibility=ArchiveItem.Visibility.PUBLIC,
+            source_title="ארכיון הווידאו",
         )
         resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
         self.assertEqual(resp.status_code, 200)
@@ -504,6 +505,48 @@ class VideoPublicDetailTests(TestCase):
         header = html[html.index("document-detail-header") : html.index("</header>")]
         self.assertNotIn('class="spacer"', header)
         self.assertNotIn("spacer-sm", header)
+
+    def test_video_detail_shows_source_label_once_in_top_metadata(self):
+        item = create_video_archive_item(
+            title="Video single source label",
+            source_url=YOUTUBE_URL,
+            visibility=ArchiveItem.Visibility.PUBLIC,
+            source_title="ארכיון הווידאו",
+        )
+        resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        self.assertEqual(html.count("מקור:"), 1)
+        self.assertNotContains(resp, "archive-detail-video__provider")
+
+        # The single remaining label is the top ArchiveItem metadata row.
+        header = html[html.index("document-detail-header") : html.index("</header>")]
+        self.assertIn("מקור:", header)
+        self.assertIn("ארכיון הווידאו", header)
+        video_section = html[html.index("archive-detail-video") :]
+        self.assertNotIn("מקור:", video_section)
+
+    def test_external_video_panel_keeps_cta_without_duplicate_source_label(self):
+        item = create_video_archive_item(
+            title="External video single source label",
+            source_url=KAN_URL,
+            visibility=ArchiveItem.Visibility.PUBLIC,
+            source_title="ארכיון כאן",
+        )
+        resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+
+        self.assertEqual(html.count("מקור:"), 1)
+        self.assertNotContains(resp, "archive-detail-video__provider")
+        self.assertContains(resp, "video-external-card")
+        self.assertContains(resp, "צפייה בסרטון באתר כאן")
+        self.assertContains(resp, item.video_content.source_url)
+
+        video_section = html[html.index("archive-detail-video") :]
+        self.assertNotIn("מקור:", video_section)
+        self.assertIn("צפייה בסרטון באתר כאן", video_section)
 
     def test_staff_video_detail_keeps_metadata_status_without_type_badge(self):
         staff = get_user_model().objects.create_user(
