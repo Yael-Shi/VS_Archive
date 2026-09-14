@@ -1,5 +1,60 @@
 # VS-Archive Decision Log
 
+## Bounded Hebrew printed RECITATION crop recovery
+
+**Decision / implemented:** Checkpoint-backed Hebrew printed Gemini OCR gains a
+second recovery layer after the full-page `RECITATION` candidate chain is
+exhausted. The page is split into two deterministic overlapping horizontal
+crops, OCRed in reading order with the existing Hebrew printed model chain, and
+assembled into one page checkpoint. This is not a third Gemini model, not a
+Gemini→Transkribus fallback, and not crop recovery for `SAFETY` or other
+permanent PR A failures.
+
+**Current behavior:**
+- Activation: Hebrew printed, checkpoint-backed only, and only after every
+  configured full-page candidate has returned `RECITATION` (or the last
+  remaining full-page call is `RECITATION` with no further candidate budget).
+- Crops: two full-width horizontal strips. Overlap is
+  `clamp(height // 8, 64, 160)` pixels around the vertical midpoint. Pages
+  shorter than 192px, or images that cannot be decoded, skip crop recovery and
+  keep the full-page `RECITATION` failure.
+- Model policy: each crop reuses the ordered Hebrew printed chain (configured
+  primary, then `gemini-3.6-flash`) with **one** provider call per candidate.
+  Crop `RECITATION` may advance to the next candidate. Crop `SAFETY`,
+  `MAX_TOKENS`, `LANGUAGE`, `SPII`, blocked content, and other permanent
+  failures fail the page immediately without remaining crops.
+- Bound: full-page chain still shares at most three calls. Crop recovery adds
+  at most four more engine invocations (2 crops × 2 candidates × 1 call).
+  Worst case **7** provider calls per page (3 full-page + 4 crop) when the
+  last full-page candidate recites on the third global call and both crops
+  then need the fallback model. Immediate dual-model `RECITATION` then crop
+  success on 3.6 is **6**. A crop that recites on both candidates fails the
+  page before later crops, so the page does not reach 8 crop-side calls.
+- Persistence: no crop text is stored unless every required crop succeeds and
+  assembly is non-empty. One crop failure → page `FAILED`, attempt `PARTIAL`.
+- Assembly: exact suffix/prefix line overlap is dropped; unmatched overlap
+  concatenates (possible duplicate lines if OCR of the overlap differs).
+- Provenance: every successful crop-recovery page records
+  `gemini-crop:<48 hex>` on the checkpoint, including when both crops used the
+  same runtime model. The fingerprint hashes ordered crop/model provenance.
+  Ordinary full-page success still records the concrete model id. Review
+  reason `HEBREW_PRINTED_RECITATION_CROP_RECOVERY` is always added on success.
+  `needs_review` is true. Document-level `gemini-mixed:` applies when
+  page-level engine/provenance values differ. Document-level assembly behavior
+  itself is unchanged.
+- Identity: Hebrew printed configuration fingerprints include
+  `recitation_crop_recovery_policy=hebrew-printed-recitation-horizontal-crops-v1`.
+  Other Gemini routes omit that key and keep their existing identities.
+  `gemini-ocr-page-retry-v2` and `gemini-hebrew-printed-prompt-v2` are
+  unchanged. Prior Hebrew printed attempts, including production document 369
+  with durable pages 1–3, cannot be reused; a later request starts a new
+  attempt and re-OCRs previously successful pages under the new identity.
+
+**Unchanged:** English handwritten `RECITATION` model fallback, Hebrew GENERAL
+cost-aware fallback, French 3.6, Transkribus routing, `READY`/`PARTIAL`
+rollup semantics, and full-page behavior when the primary or 3.6 fallback
+succeeds without exhausting `RECITATION`.
+
 ## Bounded RECITATION model fallback for Hebrew printed OCR
 
 **Decision / implemented:** Hebrew printed Gemini OCR keeps
@@ -16,8 +71,8 @@ policy and not a Gemini→Transkribus fallback.
   spends remaining calls from the existing global three-call page budget.
 - `SAFETY` and other permanent PR A classifications do not switch models.
 - `MAX_TOKENS` stays on the same-model token-cap ladder inside that budget.
-- Successful fallback adds no dedicated review reason. Mixed runtime models
-  still assemble as `gemini-mixed:<fingerprint>` when pages differ.
+- Successful fallback adds no dedicated review reason. Mixed page-level
+  engine/provenance values still assemble as `gemini-mixed:<fingerprint>`.
 - Ordered `model_candidates` are configuration identity. Adding the fallback
   candidate creates a new `GeminiOcrAttempt`. Production document 369 attempt
   36 (`model_candidates=['gemini-3.1-flash-lite']`, durable pages 1–3) cannot

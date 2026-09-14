@@ -330,6 +330,43 @@ class GeminiPageCheckpointIdentityTests(TestCase):
             hard_cap_changed.identity_fingerprint,
         )
 
+    def test_hebrew_printed_crop_recovery_policy_changes_config_identity(self):
+        pages = _pages(b"hebrew printed page")
+        baseline = _identity(
+            pages,
+            language_hint=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.PRINTED,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+        )
+        with patch(
+            "documents.services.gemini_page_checkpoints."
+            "hebrew_printed_recitation_crop_recovery_policy",
+            return_value="",
+        ):
+            without_crop_recovery = _identity(
+                pages,
+                language_hint=Document.Language.HEBREW,
+                text_input_type=Document.TextInputType.PRINTED,
+                prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            )
+        english = _identity(pages)
+        self.assertEqual(
+            baseline.prompt_contract_version,
+            GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION,
+        )
+        self.assertNotEqual(
+            baseline.config_fingerprint,
+            without_crop_recovery.config_fingerprint,
+        )
+        self.assertNotEqual(
+            baseline.identity_fingerprint,
+            without_crop_recovery.identity_fingerprint,
+        )
+        self.assertNotEqual(
+            baseline.config_fingerprint,
+            english.config_fingerprint,
+        )
+
     def test_identity_requires_contiguous_one_based_pages(self):
         pages = [
             PageImage(

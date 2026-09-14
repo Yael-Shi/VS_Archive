@@ -20,10 +20,18 @@ from documents.services.gemini_engine import (
     GeminiQuotaError,
     GeminiResponseError,
     GeminiResponseFailureCode,
+    GeminiResult,
     gemini_transcription_contract,
     transcribe_pages_with_gemini,
 )
 from documents.services.gemini_models import DEFAULT_GEMINI_MODEL_CANDIDATES
+from documents.services.gemini_hebrew_printed_crop_recovery import (
+    REVIEW_REASON_HEBREW_PRINTED_RECITATION_CROP_RECOVERY,
+    crop_assembly_engine_name,
+    hebrew_printed_recitation_crop_recovery_policy,
+    merge_overlapping_crop_texts,
+    plan_hebrew_printed_recitation_crops,
+)
 from documents.services.gemini_page_checkpoints import (
     GeminiPageClaimAction,
     StaleGeminiPageClaimError,
@@ -97,16 +105,24 @@ class GeminiAdapter:
         # English handwriting and Hebrew printed share the RECITATION-only
         # candidate switch: the model that returned RECITATION is not called
         # again for that reason; remaining page budget goes to the next
-        # candidate. Hebrew GENERAL handwriting gets a separate cost-aware
-        # policy: one primary 2.5 Flash call, then 3.6 Flash only for
-        # MAX_TOKENS or RECITATION. Hebrew VS handwriting never reaches this
-        # Gemini route.
+        # candidate. Hebrew printed checkpoint-backed OCR may then split the
+        # page into two overlapping horizontal crops after that full-page
+        # chain is exhausted. Hebrew GENERAL handwriting gets a separate
+        # cost-aware policy: one primary 2.5 Flash call, then 3.6 Flash only
+        # for MAX_TOKENS or RECITATION. Hebrew VS handwriting never reaches
+        # this Gemini route.
         recitation_model_fallback_enabled = (
             language_hint == Document.Language.ENGLISH
             and text_input_type == Document.TextInputType.HANDWRITTEN
         ) or (
             language_hint == Document.Language.HEBREW
             and text_input_type == Document.TextInputType.PRINTED
+        )
+        hebrew_printed_crop_recovery_enabled = bool(
+            hebrew_printed_recitation_crop_recovery_policy(
+                language_hint=language_hint,
+                text_input_type=text_input_type,
+            )
         )
         hebrew_general_model_fallback_enabled = (
             language_hint == Document.Language.HEBREW
@@ -223,6 +239,9 @@ class GeminiAdapter:
                 hebrew_general_model_fallback_enabled=(
                     hebrew_general_model_fallback_enabled
                 ),
+                hebrew_printed_crop_recovery_enabled=(
+                    hebrew_printed_crop_recovery_enabled
+                ),
                 kwargs=kwargs,
                 checkpoint_id=claim.checkpoint_id,
                 lease_token=claim.lease_token,
@@ -260,6 +279,7 @@ class GeminiAdapter:
         checkpoint_id: int,
         lease_token: uuid.UUID,
         attempt_id: int,
+        hebrew_printed_crop_recovery_enabled: bool = False,
     ) -> None:
         last_error: Exception | None = None
         remaining_provider_calls = GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS
@@ -367,6 +387,50 @@ class GeminiAdapter:
                     )
                     continue
 
+                if (
+                    hebrew_printed_crop_recovery_enabled
+                    and response_failure_code == GeminiResponseFailureCode.RECITATION
+                    and not has_next_model
+                ):
+                    recovered = self._recover_hebrew_printed_recitation_crops(
+                        page=page,
+                        language_hint=language_hint,
+                        prompt_variant=prompt_variant,
+                        model_candidates=model_candidates,
+                        kwargs=kwargs,
+                        checkpoint_id=checkpoint_id,
+                        lease_token=lease_token,
+                        attempt_id=attempt_id,
+                    )
+                    if recovered is not None:
+                        try:
+                            persist_gemini_page_success(
+                                checkpoint_id=checkpoint_id,
+                                lease_token=lease_token,
+                                actual_model=recovered.engine_name,
+                                text=recovered.text,
+                                needs_review=recovered.needs_review,
+                                review_reasons=list(recovered.review_reasons or []),
+                            )
+                        except StaleGeminiPageClaimError as stale_exc:
+                            raise EnginePageCheckpointBusyError(
+                                page.page_index
+                            ) from stale_exc
+                        except ValueError as persist_exc:
+                            self._persist_page_failure(
+                                checkpoint_id=checkpoint_id,
+                                lease_token=lease_token,
+                                exc=persist_exc,
+                                page_index=page.page_index,
+                            )
+                            self._raise_incomplete(attempt_id)
+                        except DatabaseError as db_exc:
+                            raise EnginePageCheckpointPersistenceRetryableError(
+                                stage="success",
+                                page_index=page.page_index,
+                            ) from db_exc
+                        return
+
                 self._persist_page_failure(
                     checkpoint_id=checkpoint_id,
                     lease_token=lease_token,
@@ -429,6 +493,155 @@ class GeminiAdapter:
                 page_index=page.page_index,
             ) from exc
         self._raise_incomplete(attempt_id)
+
+    def _recover_hebrew_printed_recitation_crops(
+        self,
+        *,
+        page: PageImage,
+        language_hint: Optional[str],
+        prompt_variant: str,
+        model_candidates: List[str],
+        kwargs: dict[str, Any],
+        checkpoint_id: int,
+        lease_token: uuid.UUID,
+        attempt_id: int,
+    ) -> GeminiResult | None:
+        plan = plan_hebrew_printed_recitation_crops(page)
+        if plan is None:
+            logger.warning(
+                "Hebrew printed RECITATION crop recovery skipped; full-page "
+                "RECITATION stands: page=%s",
+                page.page_index,
+            )
+            return None
+
+        logger.warning(
+            "Starting Hebrew printed RECITATION crop recovery: page=%s crop_count=%s",
+            page.page_index,
+            len(plan.crops),
+        )
+        crop_kwargs = dict(kwargs)
+        crop_kwargs.pop("max_provider_calls", None)
+        crop_kwargs.pop("provider_call_offset", None)
+        crop_kwargs["double_pass"] = False
+        crop_texts: list[str] = []
+        crop_models: list[str] = []
+        any_review = False
+        engine_reasons: list[str] = []
+
+        for crop_index, crop in enumerate(plan.crops, start=1):
+            crop_result: GeminiResult | None = None
+            last_error: Exception | None = None
+            for model_index, model_name in enumerate(model_candidates):
+                try:
+                    crop_result = transcribe_pages_with_gemini(
+                        pages=[crop],
+                        language_hint=language_hint,
+                        prompt_variant=prompt_variant,
+                        model_name=model_name,
+                        max_provider_calls=1,
+                        provider_call_offset=0,
+                        **crop_kwargs,
+                    )
+                    break
+                except GeminiError as exc:
+                    last_error = exc
+                    response_failure_code = (
+                        exc.failure_code
+                        if isinstance(exc, GeminiResponseError)
+                        else None
+                    )
+                    has_next_model = model_index + 1 < len(model_candidates)
+                    if (
+                        response_failure_code == GeminiResponseFailureCode.RECITATION
+                        and has_next_model
+                    ):
+                        logger.warning(
+                            "Hebrew printed crop RECITATION advancing model: "
+                            "page=%s crop_index=%s model=%s -> %s",
+                            page.page_index,
+                            crop_index,
+                            model_name,
+                            model_candidates[model_index + 1],
+                        )
+                        continue
+                    if _is_quota_error(exc) and has_next_model:
+                        logger.warning(
+                            "Hebrew printed crop quota advancing model: "
+                            "page=%s crop_index=%s model=%s -> %s",
+                            page.page_index,
+                            crop_index,
+                            model_name,
+                            model_candidates[model_index + 1],
+                        )
+                        continue
+                    logger.warning(
+                        "Hebrew printed crop recovery failed: page=%s "
+                        "crop_index=%s model=%s failure=%s",
+                        page.page_index,
+                        crop_index,
+                        model_name,
+                        (
+                            response_failure_code.value
+                            if response_failure_code is not None
+                            else type(exc).__name__
+                        ),
+                    )
+                    self._persist_page_failure(
+                        checkpoint_id=checkpoint_id,
+                        lease_token=lease_token,
+                        exc=exc,
+                        page_index=page.page_index,
+                    )
+                    self._raise_incomplete(attempt_id)
+                except Exception as exc:
+                    self._persist_page_failure(
+                        checkpoint_id=checkpoint_id,
+                        lease_token=lease_token,
+                        exc=exc,
+                        page_index=page.page_index,
+                    )
+                    self._raise_incomplete(attempt_id)
+
+            if crop_result is None:
+                self._persist_page_failure(
+                    checkpoint_id=checkpoint_id,
+                    lease_token=lease_token,
+                    exc=last_error or GeminiError("crop recovery produced no result"),
+                    page_index=page.page_index,
+                )
+                self._raise_incomplete(attempt_id)
+                raise AssertionError("unreachable")
+
+            crop_texts.append(crop_result.text)
+            crop_models.append(crop_result.engine_name)
+            any_review = any_review or crop_result.needs_review
+            engine_reasons.extend(crop_result.review_reasons or [])
+
+        assembled = merge_overlapping_crop_texts(crop_texts[0], crop_texts[1])
+        if not assembled:
+            self._persist_page_failure(
+                checkpoint_id=checkpoint_id,
+                lease_token=lease_token,
+                exc=ValueError("crop recovery assembled empty page text"),
+                page_index=page.page_index,
+            )
+            self._raise_incomplete(attempt_id)
+            raise AssertionError("unreachable")
+
+        reasons: list[str] = []
+        for reason in (
+            REVIEW_REASON_HEBREW_PRINTED_RECITATION_CROP_RECOVERY,
+            *engine_reasons,
+        ):
+            if reason and reason not in reasons:
+                reasons.append(reason)
+        return GeminiResult(
+            text=assembled,
+            needs_review=True,
+            engine_name=crop_assembly_engine_name(crop_models),
+            review_reasons=reasons,
+        )
 
     def _persist_page_failure(
         self,

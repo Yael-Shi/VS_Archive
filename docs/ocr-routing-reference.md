@@ -96,8 +96,13 @@ English handwritten `RECITATION` may also advance from `gemini-2.5-flash` to
 configured primary (default `gemini-3.1-flash-lite`) to `gemini-3.6-flash`,
 within one shared maximum of three provider calls per page. The current output
 cap and remaining budget are carried forward. The same model is not called
-again merely because it returned `RECITATION`. French
-handwriting uses one direct full-page `gemini-3.6-flash` candidate. Hebrew
+again merely because it returned `RECITATION`. If that full-page Hebrew printed
+chain still ends in `RECITATION`, checkpoint-backed execution may OCR two
+overlapping horizontal crops with the same candidate order (one call per crop
+per candidate) and assemble a single page checkpoint. Crop recovery does not
+run for `SAFETY` or other permanent classifications, is not used on English
+handwriting, and is not used on legacy adapter calls without document identity.
+French handwriting uses one direct full-page `gemini-3.6-flash` candidate. Hebrew
 general handwriting uses one 4096-token `gemini-2.5-flash` call first; success
 ends processing, while `MAX_TOKENS` or `RECITATION` advances to
 `gemini-3.6-flash` with at most two calls left in the shared three-call budget.
@@ -134,6 +139,13 @@ configuration identity reuses that success instead of restarting it.
   `DocumentTextResult.engine` is the deterministic runtime marker
   `gemini-mixed:<fingerprint>`. Full page-to-model provenance remains on the
   checkpoints.
+- A Hebrew printed page assembled from RECITATION crops always records
+  `HEBREW_PRINTED_RECITATION_CROP_RECOVERY` and page-level
+  `gemini-crop:<fingerprint>`, including when both crops used the same runtime
+  model. The fingerprint hashes ordered crop/model provenance. Ordinary
+  full-page success still records the concrete model id. Document-level
+  `gemini-mixed:` applies when page-level engine/provenance values differ.
+  Document-level assembly behavior itself is unchanged.
 - French handwritten successes record `gemini-3.6-flash` directly.
 - Hebrew general handwritten pages record whichever model succeeded:
   `gemini-2.5-flash` or fallback `gemini-3.6-flash`.

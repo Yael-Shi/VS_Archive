@@ -22,6 +22,9 @@ from documents.services.gemini_engine import (
     GEMINI_OCR_PAGE_RETRY_POLICY_VERSION,
     GeminiTranscriptionContract,
 )
+from documents.services.gemini_hebrew_printed_crop_recovery import (
+    hebrew_printed_recitation_crop_recovery_policy,
+)
 from documents.services.page_extraction import PageImage
 from documents.services.process_document_request_persist import (
     StaleProcessDocumentPageClaimError,
@@ -119,24 +122,31 @@ def build_gemini_attempt_identity(
             "text_input_type": text_input_type or "",
         }
     )
-    config_fingerprint = _canonical_sha256(
-        {
-            "api_version": contract.api_version,
-            "consistency_min_ratio": consistency_min_ratio,
-            "double_pass": double_pass,
-            "effective_temperature": contract.effective_temperature,
-            "max_output_tokens": max_output_tokens,
-            "max_output_tokens_hard_cap": max_output_tokens_hard_cap,
-            "max_provider_calls_per_page": GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS,
-            "min_text_length": min_text_length,
-            "model_candidates": list(normalized_candidates),
-            "output_mode": contract.output_mode,
-            "retry_policy_version": GEMINI_OCR_PAGE_RETRY_POLICY_VERSION,
-            "temperature": temperature,
-            "top_k": top_k,
-            "top_p": top_p,
-        }
+    crop_recovery_policy = hebrew_printed_recitation_crop_recovery_policy(
+        language_hint=language_hint,
+        text_input_type=text_input_type,
     )
+    config_payload: dict[str, Any] = {
+        "api_version": contract.api_version,
+        "consistency_min_ratio": consistency_min_ratio,
+        "double_pass": double_pass,
+        "effective_temperature": contract.effective_temperature,
+        "max_output_tokens": max_output_tokens,
+        "max_output_tokens_hard_cap": max_output_tokens_hard_cap,
+        "max_provider_calls_per_page": GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS,
+        "min_text_length": min_text_length,
+        "model_candidates": list(normalized_candidates),
+        "output_mode": contract.output_mode,
+        "retry_policy_version": GEMINI_OCR_PAGE_RETRY_POLICY_VERSION,
+        "temperature": temperature,
+        "top_k": top_k,
+        "top_p": top_p,
+    }
+    if crop_recovery_policy:
+        # Hebrew printed only. Omitting the key on other routes keeps their
+        # existing configuration fingerprints unchanged.
+        config_payload["recitation_crop_recovery_policy"] = crop_recovery_policy
+    config_fingerprint = _canonical_sha256(config_payload)
     identity_fingerprint = _canonical_sha256(
         {
             "config_fingerprint": config_fingerprint,
