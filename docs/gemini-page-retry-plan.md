@@ -24,7 +24,9 @@ only and routes French handwriting directly to one full-page model.
   `gemini-2.5-flash` and `gemini-3.1-flash-lite`. Hebrew printed
   checkpoint-backed OCR shares at most **three provider calls per page across**
   the configured primary (default `gemini-3.1-flash-lite`) and
-  `gemini-3.6-flash`.
+  `gemini-3.6-flash` for the full-page chain. After that chain ends in
+  `RECITATION`, Hebrew printed may spend a separate crop budget of two
+  horizontal crops and at most one call per crop per candidate.
 - A scoped English or Hebrew printed `RECITATION` switch carries the current
   output cap and remaining call budget to the next candidate.
 - French handwritten OCR has one full-page `gemini-3.6-flash` candidate and no
@@ -100,7 +102,9 @@ the config fingerprint **independently of the prompt-contract version**, so
 the version bump is an intentional new identity boundary for **every Gemini
 OCR route** — including PR C Hebrew printed, which stays on
 `gemini-hebrew-printed-prompt-v2`; PR D adds a new config-identity boundary on
-top of that route-specific prompt version. Source, route, prompt, page,
+top of that route-specific prompt version. Hebrew printed crop recovery later
+adds `recitation_crop_recovery_policy` only on that route and does not bump
+`gemini-ocr-page-retry-v2` or `max_provider_calls_per_page`. Source, route, prompt, page,
 fencing, lease, persistence, and assembly semantics are unchanged. No
 page-level `DocumentTextResult` rows are created.
 

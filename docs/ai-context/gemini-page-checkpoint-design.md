@@ -38,6 +38,14 @@ Approved and implemented by PR B in the Gemini OCR root-cause sequence:
    marker remains `gemini-ocr-page-retry-v2`; Hebrew printed attempt identity
    changes because ordered `model_candidates` are configuration identity.
 
+8. Bounded Hebrew printed `RECITATION` crop recovery — after the full-page
+   Hebrew printed candidate chain ends in `RECITATION`, checkpoint-backed
+   execution may OCR two overlapping horizontal crops and assemble one page
+   result. The shared retry marker remains `gemini-ocr-page-retry-v2`. Hebrew
+   printed configuration identity gains
+   `recitation_crop_recovery_policy=hebrew-printed-recitation-horizontal-crops-v1`;
+   other Gemini routes omit that key.
+
 This design changes persistence and resume behavior only. It does not authorize a
 production retry or deployment by itself.
 
@@ -190,6 +198,9 @@ candidate-list change independently changed English/French handwritten
 identities. The later French-only move to the single `gemini-3.6-flash`
 candidate changes the French handwritten identity again without changing the
 shared retry marker. Historical attempt/checkpoint rows remain immutable.
+Hebrew printed crop recovery adds `recitation_crop_recovery_policy` only to
+that route's configuration fingerprint and does not bump the shared retry
+marker.
 
 The overall attempt identity hashes the source, route, prompt and configuration
 fingerprints, prompt version, ordered candidates, and expected page count.
@@ -542,11 +553,36 @@ fallback on this scoped route stays inside the shared three-call budget.
 Successful fallback does not add a dedicated review reason. Page checkpoints
 and assembled `HtrResult.review_reasons` remain empty unless the page already
 had engine reasons; mixed-model assembly still uses
-`gemini-mixed:<fingerprint>` when pages used more than one runtime model.
+`gemini-mixed:<fingerprint>` when page-level engine/provenance values differ.
 
 This applies only to Hebrew printed Gemini OCR. English handwritten
 `RECITATION` fallback, Hebrew GENERAL cost-aware fallback, French 3.6, and
 Transkribus routing are unchanged. No Gemini→Transkribus fallback.
+
+## Bounded Hebrew printed RECITATION crop recovery
+
+After the full-page Hebrew printed candidate chain ends in `RECITATION`,
+checkpoint-backed execution may recover the page with two deterministic
+full-width horizontal crops (reading order, modest midpoint overlap) instead
+of adding a third model. Crop OCR reuses the same ordered Hebrew printed
+candidates with one provider call per crop per candidate. Crop `RECITATION`
+may advance to the next candidate; `SAFETY`, `MAX_TOKENS`, and other permanent
+PR A classifications fail the page without assembling partial crop text.
+
+Successful crop assembly stores one page checkpoint. `actual_model` is always
+`gemini-crop:<fingerprint>`, including when both crops used the same runtime
+model. The fingerprint hashes ordered `(crop_index, model)` provenance so crop
+assembly is distinguishable from ordinary full-page OCR. Review reason
+`HEBREW_PRINTED_RECITATION_CROP_RECOVERY` is recorded. Ordinary full-page
+success still records the concrete model id. Document-level `gemini-mixed:`
+applies when page-level engine/provenance values differ. Document-level
+assembly behavior itself is unchanged.
+
+The crop-recovery policy string is hashed into the Hebrew printed
+configuration fingerprint only. Prior Hebrew printed attempts cannot be reused
+under the new semantics. The shared `gemini-ocr-page-retry-v2` marker and the
+three-call full-page budget are unchanged; crop calls are a separate bounded
+budget (at most four additional engine invocations).
 
 ## Attempt lifecycle and observability clarification
 
