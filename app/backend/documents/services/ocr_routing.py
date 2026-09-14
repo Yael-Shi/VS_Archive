@@ -104,7 +104,9 @@ def gemini_model_candidates(
     text_type = (text_input_type or "").strip().upper()
 
     if lang == Document.Language.HEBREW and text_type == Document.TextInputType.PRINTED:
-        return (gemini_hebrew_printed_model,)
+        return gemini_models.hebrew_printed_gemini_model_candidates(
+            gemini_hebrew_printed_model,
+        )
 
     if lang in (Document.Language.ENGLISH, Document.Language.FRENCH):
         if text_type == Document.TextInputType.HANDWRITTEN:

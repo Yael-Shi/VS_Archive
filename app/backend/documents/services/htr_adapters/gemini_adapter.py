@@ -94,13 +94,19 @@ class GeminiAdapter:
         execution_identity = kwargs.pop("execution_identity", None)
         kwargs.pop("absolute_deadline_monotonic", None)
         kwargs.pop("source_transkribus_run_id", None)
-        # English handwriting retains its RECITATION-only candidate switch.
-        # Hebrew GENERAL handwriting gets a separate cost-aware policy: one
-        # primary 2.5 Flash call, then 3.6 Flash only for MAX_TOKENS or
-        # RECITATION. Hebrew VS handwriting never reaches this Gemini route.
+        # English handwriting and Hebrew printed share the RECITATION-only
+        # candidate switch: the model that returned RECITATION is not called
+        # again for that reason; remaining page budget goes to the next
+        # candidate. Hebrew GENERAL handwriting gets a separate cost-aware
+        # policy: one primary 2.5 Flash call, then 3.6 Flash only for
+        # MAX_TOKENS or RECITATION. Hebrew VS handwriting never reaches this
+        # Gemini route.
         recitation_model_fallback_enabled = (
             language_hint == Document.Language.ENGLISH
             and text_input_type == Document.TextInputType.HANDWRITTEN
+        ) or (
+            language_hint == Document.Language.HEBREW
+            and text_input_type == Document.TextInputType.PRINTED
         )
         hebrew_general_model_fallback_enabled = (
             language_hint == Document.Language.HEBREW

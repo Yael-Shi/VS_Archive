@@ -21,13 +21,17 @@ only and routes French handwriting directly to one full-page model.
   call window whose offset plus size cannot exceed three calls.
 - **Scoped candidate-chain boundary:** English handwritten
   checkpoint-backed OCR shares at most **three provider calls per page across**
-  `gemini-2.5-flash` and `gemini-3.1-flash-lite`.
-- A scoped English `RECITATION` switch carries the current output cap and
-  remaining call budget to the next candidate.
+  `gemini-2.5-flash` and `gemini-3.1-flash-lite`. Hebrew printed
+  checkpoint-backed OCR shares at most **three provider calls per page across**
+  the configured primary (default `gemini-3.1-flash-lite`) and
+  `gemini-3.6-flash`.
+- A scoped English or Hebrew printed `RECITATION` switch carries the current
+  output cap and remaining call budget to the next candidate.
 - French handwritten OCR has one full-page `gemini-3.6-flash` candidate and no
   `RECITATION` candidate switch.
-- Outside the scoped English route, the pre-existing quota-only candidate
-  fallback may still start a separate three-call budget on candidate *N+1*.
+- Outside the scoped English handwritten and Hebrew printed routes, the
+  pre-existing quota-only candidate fallback may still start a separate
+  three-call budget on candidate *N+1*.
 - Quota/rate-limit retries inside an engine call window count toward that
   window.
 - Hebrew translation (`translate_text_to_hebrew_with_gemini`) is **unchanged**
@@ -51,9 +55,10 @@ after a classified response failure.
 **Permanent for the active model:**
 
 - PR A finish/block codes remain non-retryable on the same model.
-- `RECITATION` may advance only English handwritten checkpoint-backed OCR
-  to its next configured candidate when global budget remains. French
-  handwriting has one direct `gemini-3.6-flash` candidate.
+- `RECITATION` may advance English handwritten checkpoint-backed OCR to
+  `gemini-3.1-flash-lite`, and Hebrew printed checkpoint-backed OCR to
+  `gemini-3.6-flash`, when global budget remains. French handwriting has one
+  direct `gemini-3.6-flash` candidate.
 - `SAFETY`, `LANGUAGE`, `SPII`, prohibited/blocked content,
   `NO_CANDIDATES`, `OTHER`, and `JSON_SCHEMA` do not trigger candidate
   fallback.

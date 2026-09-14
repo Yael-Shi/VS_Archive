@@ -5,6 +5,18 @@ FALLBACK_GEMINI_MODEL = "gemini-3.1-flash-lite"
 GEMINI_36_FLASH_MODEL = "gemini-3.6-flash"
 DEFAULT_GEMINI_MODEL_CANDIDATES = (DEFAULT_GEMINI_MODEL, FALLBACK_GEMINI_MODEL)
 DEFAULT_HEBREW_PRINTED_GEMINI_MODEL = "gemini-3.1-flash-lite"
+# Hebrew printed keeps 3.1 Flash-Lite first. RECITATION on that primary
+# immediately advances to the already-approved 3.6 Flash recovery model.
+HEBREW_PRINTED_GEMINI_RECITATION_FALLBACK_MODEL = GEMINI_36_FLASH_MODEL
+
+
+def hebrew_printed_gemini_model_candidates(primary: str) -> tuple[str, ...]:
+    """Ordered Hebrew printed candidates: configured primary, then 3.6."""
+    normalized = str(primary).strip() or DEFAULT_HEBREW_PRINTED_GEMINI_MODEL
+    if normalized == HEBREW_PRINTED_GEMINI_RECITATION_FALLBACK_MODEL:
+        return (normalized,)
+    return (normalized, HEBREW_PRINTED_GEMINI_RECITATION_FALLBACK_MODEL)
+
 
 LATIN_HANDWRITTEN_GEMINI_MODEL = "gemini-2.5-flash"
 LATIN_HANDWRITTEN_GEMINI_MODEL_CANDIDATES = (

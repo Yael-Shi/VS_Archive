@@ -23,9 +23,13 @@ from documents.services.env_validation import WorkerEnvConfig
 from documents.services.gemini_engine import (
     GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION,
     GeminiError,
+    GeminiResponseError,
+    GeminiResponseFailureCode,
+    GeminiResponseMetadata,
     GeminiResult,
     gemini_transcription_contract,
 )
+from documents.services.gemini_models import GEMINI_36_FLASH_MODEL
 from documents.services.gemini_page_checkpoints import (
     GeminiPageClaimAction,
     StaleGeminiPageClaimError,
@@ -206,6 +210,54 @@ class GeminiPageCheckpointIdentityTests(TestCase):
             models_changed.identity_fingerprint,
         }
         self.assertEqual(len(fingerprints), 4)
+
+    def test_hebrew_printed_recitation_candidate_change_creates_new_attempt(self):
+        pages = _pages(b"hebrew printed page")
+        single = _identity(
+            pages,
+            language_hint=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.PRINTED,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            model_candidates=("gemini-3.1-flash-lite",),
+        )
+        with_fallback = _identity(
+            pages,
+            language_hint=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.PRINTED,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            model_candidates=("gemini-3.1-flash-lite", GEMINI_36_FLASH_MODEL),
+        )
+
+        self.assertEqual(
+            single.prompt_contract_version,
+            GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION,
+        )
+        self.assertEqual(
+            with_fallback.prompt_contract_version,
+            GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION,
+        )
+        self.assertNotEqual(
+            single.config_fingerprint,
+            with_fallback.config_fingerprint,
+        )
+        self.assertNotEqual(
+            single.identity_fingerprint,
+            with_fallback.identity_fingerprint,
+        )
+
+        first = get_or_create_gemini_attempt(
+            document_id=self.document.id,
+            identity=single,
+        )
+        second = get_or_create_gemini_attempt(
+            document_id=self.document.id,
+            identity=with_fallback,
+        )
+        self.assertNotEqual(first.id, second.id)
+        self.assertEqual(
+            GeminiOcrAttempt.objects.filter(document=self.document).count(),
+            2,
+        )
 
     def test_output_cap_retry_policy_and_hard_cap_are_in_config_identity(self):
         pages = _pages(b"one")
@@ -626,6 +678,173 @@ class GeminiCheckpointAdapterTests(TestCase):
         self.assertEqual(
             [checkpoint.actual_model for checkpoint in checkpoints],
             ["model-a", "model-b"],
+        )
+
+    @patch(
+        "documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini"
+    )
+    def test_hebrew_printed_recitation_switches_model_within_shared_budget(
+        self,
+        mock_transcribe,
+    ):
+        recitation = GeminiResponseError(
+            GeminiResponseFailureCode.RECITATION,
+            GeminiResponseMetadata(
+                model="gemini-3.1-flash-lite",
+                page_index=1,
+                attempt=1,
+                max_output_tokens=4096,
+                candidate_count=1,
+                finish_reason="RECITATION",
+                block_reason=None,
+                raw_output_length=0,
+                output_length=0,
+                trailing_whitespace_chars=0,
+                prompt_token_count=100,
+                candidates_token_count=None,
+                thoughts_token_count=None,
+                total_token_count=100,
+            ),
+        )
+
+        def execute(*, pages, model_name, **kwargs):
+            if pages[0].page_index == 1 and model_name == "gemini-3.1-flash-lite":
+                raise recitation
+            return GeminiResult(
+                text=f"page {pages[0].page_index}",
+                engine_name=model_name,
+            )
+
+        mock_transcribe.side_effect = execute
+        self._execute_kwargs.update(
+            {
+                "language_hint": Document.Language.HEBREW,
+                "prompt_variant": DocumentTextResult.OcrPromptVariant.PRINTED,
+                "text_input_type": Document.TextInputType.PRINTED,
+                "model_candidates": [
+                    "gemini-3.1-flash-lite",
+                    GEMINI_36_FLASH_MODEL,
+                ],
+            }
+        )
+
+        result = self._execute()
+
+        first = mock_transcribe.call_args_list[0].kwargs
+        second = mock_transcribe.call_args_list[1].kwargs
+        self.assertEqual(first["model_name"], "gemini-3.1-flash-lite")
+        self.assertEqual(first["max_provider_calls"], 3)
+        self.assertEqual(first["provider_call_offset"], 0)
+        self.assertEqual(second["model_name"], GEMINI_36_FLASH_MODEL)
+        self.assertEqual(second["max_provider_calls"], 2)
+        self.assertEqual(second["provider_call_offset"], 1)
+        self.assertEqual(result.review_reasons, [])
+        self.assertRegex(result.engine_name, r"^gemini-mixed:[0-9a-f]{48}$")
+        checkpoints = list(
+            GeminiOcrPageCheckpoint.objects.filter(
+                attempt__document=self.document
+            ).order_by("page_index")
+        )
+        self.assertEqual(
+            [checkpoint.actual_model for checkpoint in checkpoints],
+            [GEMINI_36_FLASH_MODEL, "gemini-3.1-flash-lite"],
+        )
+        self.assertEqual(
+            [checkpoint.review_reasons for checkpoint in checkpoints],
+            [[], []],
+        )
+
+    @patch(
+        "documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini"
+    )
+    def test_hebrew_printed_safety_does_not_switch_model(self, mock_transcribe):
+        safety = GeminiResponseError(
+            GeminiResponseFailureCode.SAFETY,
+            GeminiResponseMetadata(
+                model="gemini-3.1-flash-lite",
+                page_index=1,
+                attempt=1,
+                max_output_tokens=4096,
+                candidate_count=1,
+                finish_reason="SAFETY",
+                block_reason=None,
+                raw_output_length=0,
+                output_length=0,
+                trailing_whitespace_chars=0,
+                prompt_token_count=100,
+                candidates_token_count=None,
+                thoughts_token_count=None,
+                total_token_count=100,
+            ),
+        )
+        mock_transcribe.side_effect = safety
+        self._execute_kwargs.update(
+            {
+                "language_hint": Document.Language.HEBREW,
+                "prompt_variant": DocumentTextResult.OcrPromptVariant.PRINTED,
+                "text_input_type": Document.TextInputType.PRINTED,
+                "model_candidates": [
+                    "gemini-3.1-flash-lite",
+                    GEMINI_36_FLASH_MODEL,
+                ],
+            }
+        )
+
+        with self.assertRaises(EnginePageIncompleteError):
+            self._execute()
+
+        self.assertEqual(mock_transcribe.call_count, 1)
+        self.assertEqual(
+            mock_transcribe.call_args.kwargs["model_name"],
+            "gemini-3.1-flash-lite",
+        )
+        checkpoint = GeminiOcrPageCheckpoint.objects.get(
+            attempt__document=self.document,
+            page_index=1,
+        )
+        self.assertEqual(checkpoint.failure_code, "SAFETY")
+
+    @patch(
+        "documents.services.htr_adapters.gemini_adapter.transcribe_pages_with_gemini"
+    )
+    def test_hebrew_printed_new_candidates_do_not_reuse_prior_pages(
+        self,
+        mock_transcribe,
+    ):
+        mock_transcribe.side_effect = lambda *, model_name, **_kwargs: GeminiResult(
+            text="page text",
+            engine_name=model_name,
+        )
+        self._execute_kwargs.update(
+            {
+                "language_hint": Document.Language.HEBREW,
+                "prompt_variant": DocumentTextResult.OcrPromptVariant.PRINTED,
+                "text_input_type": Document.TextInputType.PRINTED,
+                "model_candidates": ["gemini-3.1-flash-lite"],
+            }
+        )
+        self._execute()
+        first_attempt = GeminiOcrAttempt.objects.get(document=self.document)
+        self.assertEqual(first_attempt.model_candidates, ["gemini-3.1-flash-lite"])
+
+        mock_transcribe.reset_mock()
+        self._execute_kwargs["model_candidates"] = [
+            "gemini-3.1-flash-lite",
+            GEMINI_36_FLASH_MODEL,
+        ]
+        self._execute()
+
+        self.assertEqual(
+            GeminiOcrAttempt.objects.filter(document=self.document).count(),
+            2,
+        )
+        self.assertEqual(mock_transcribe.call_count, 2)
+        second_attempt = GeminiOcrAttempt.objects.exclude(id=first_attempt.id).get(
+            document=self.document
+        )
+        self.assertEqual(
+            second_attempt.model_candidates,
+            ["gemini-3.1-flash-lite", GEMINI_36_FLASH_MODEL],
         )
 
     @patch(

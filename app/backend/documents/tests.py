@@ -47,6 +47,7 @@ from documents.services.gemini_engine import (
 from documents.services.gemini_models import (
     DEFAULT_GEMINI_MODEL_CANDIDATES,
     FRENCH_HANDWRITTEN_GEMINI_MODEL_CANDIDATES,
+    GEMINI_36_FLASH_MODEL,
     LATIN_HANDWRITTEN_GEMINI_MODEL_CANDIDATES,
     LATIN_PRINTED_GEMINI_MODEL,
 )
@@ -418,7 +419,7 @@ class HtrDispatcherTests(SimpleTestCase):
             language_hint="he",
             prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
             worker_env=worker_env,
-            model_candidates=["gemini-3.1-flash-lite"],
+            model_candidates=["gemini-3.1-flash-lite", GEMINI_36_FLASH_MODEL],
             text_input_type=Document.TextInputType.PRINTED,
             handwriting_type=None,
             engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
@@ -9085,7 +9086,7 @@ class GeminiHebrewTranslationTests(SimpleTestCase):
 
 
 class GeminiModelCandidatesTests(SimpleTestCase):
-    def test_hebrew_printed_gemini_route_uses_configured_single_model(self):
+    def test_hebrew_printed_gemini_route_uses_configured_primary_then_36(self):
         route = OcrRouteConfig(
             engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
             prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
@@ -9096,7 +9097,10 @@ class GeminiModelCandidatesTests(SimpleTestCase):
             text_input_type=Document.TextInputType.PRINTED,
             gemini_hebrew_printed_model="gemini-3.1-flash-lite",
         )
-        self.assertEqual(candidates, ("gemini-3.1-flash-lite",))
+        self.assertEqual(
+            candidates,
+            ("gemini-3.1-flash-lite", GEMINI_36_FLASH_MODEL),
+        )
 
     def test_hebrew_printed_gemini_route_respects_env_override_model(self):
         route = OcrRouteConfig(
@@ -9109,7 +9113,20 @@ class GeminiModelCandidatesTests(SimpleTestCase):
             text_input_type=Document.TextInputType.PRINTED,
             gemini_hebrew_printed_model="custom-model",
         )
-        self.assertEqual(candidates, ("custom-model",))
+        self.assertEqual(candidates, ("custom-model", GEMINI_36_FLASH_MODEL))
+
+    def test_hebrew_printed_env_override_to_36_does_not_duplicate_candidate(self):
+        route = OcrRouteConfig(
+            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+        )
+        candidates = gemini_model_candidates(
+            route,
+            language="he",
+            text_input_type=Document.TextInputType.PRINTED,
+            gemini_hebrew_printed_model=GEMINI_36_FLASH_MODEL,
+        )
+        self.assertEqual(candidates, (GEMINI_36_FLASH_MODEL,))
 
     def test_english_handwritten_gemini_route_uses_latin_handwritten_model(self):
         route = OcrRouteConfig(

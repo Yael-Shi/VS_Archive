@@ -1,5 +1,33 @@
 # VS-Archive Decision Log
 
+## Bounded RECITATION model fallback for Hebrew printed OCR
+
+**Decision / implemented:** Hebrew printed Gemini OCR keeps
+`GEMINI_HEBREW_PRINTED_MODEL` (default `gemini-3.1-flash-lite`) as the primary
+candidate and adds a bounded checkpoint-backed `RECITATION` fallback to the
+already-approved `gemini-3.6-flash` model. This is the English-handwriting
+`RECITATION` pattern, not the Hebrew GENERAL cost-aware `MAX_TOKENS`/`RECITATION`
+policy and not a Gemini→Transkribus fallback.
+
+**Current behavior:**
+- Candidate chain: configured primary → `gemini-3.6-flash` (no duplicate when
+  the env override already is 3.6).
+- Same-model `RECITATION` is not retried. The adapter switches immediately and
+  spends remaining calls from the existing global three-call page budget.
+- `SAFETY` and other permanent PR A classifications do not switch models.
+- `MAX_TOKENS` stays on the same-model token-cap ladder inside that budget.
+- Successful fallback adds no dedicated review reason. Mixed runtime models
+  still assemble as `gemini-mixed:<fingerprint>` when pages differ.
+- Ordered `model_candidates` are configuration identity. Adding the fallback
+  candidate creates a new `GeminiOcrAttempt`. Production document 369 attempt
+  36 (`model_candidates=['gemini-3.1-flash-lite']`, durable pages 1–3) cannot
+  be reused; a later request re-OCRs pages 1–3 under the new identity and can
+  then apply the fallback on page 4.
+
+**Unchanged:** Transkribus routing, Hebrew GENERAL / English handwritten
+fallback policies, `READY`/`PARTIAL` semantics, `gemini-ocr-page-retry-v2`,
+and Hebrew printed prompt contract `gemini-hebrew-printed-prompt-v2`.
+
 ## PHOTO/VIDEO public detail QA — album nav, staff technical popover, metadata
 
 **Decision / implemented:** Public selected-photo album navigation, staff PHOTO

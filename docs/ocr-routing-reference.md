@@ -77,7 +77,7 @@ Resolved in `gemini_model_candidates()` (called from `htr_engine.transcribe_page
 
 | Route context | Model candidate(s) |
 |---------------|-------------------|
-| Hebrew printed | Single model: `GEMINI_HEBREW_PRINTED_MODEL` env, default `gemini-3.1-flash-lite` |
+| Hebrew printed | Ordered chain: `GEMINI_HEBREW_PRINTED_MODEL` env, default `gemini-3.1-flash-lite`, then `gemini-3.6-flash` for scoped `RECITATION` only |
 | Hebrew general handwritten | Cost-aware chain: `gemini-2.5-flash` → `gemini-3.6-flash` |
 | English handwritten | Ordered chain: `gemini-2.5-flash` → `gemini-3.1-flash-lite` |
 | French handwritten | Single full-page model: `gemini-3.6-flash` |
@@ -92,8 +92,11 @@ handwriting route. Hebrew VS handwriting continues to use Transkribus.
 `GeminiAdapter` tries candidates in order. Quota-style errors retain the
 existing candidate fallback. In the durable checkpoint-backed worker path,
 English handwritten `RECITATION` may also advance from `gemini-2.5-flash` to
-`gemini-3.1-flash-lite`, within one shared maximum of three provider calls per
-page. The current output cap and remaining budget are carried forward. French
+`gemini-3.1-flash-lite`, and Hebrew printed `RECITATION` may advance from the
+configured primary (default `gemini-3.1-flash-lite`) to `gemini-3.6-flash`,
+within one shared maximum of three provider calls per page. The current output
+cap and remaining budget are carried forward. The same model is not called
+again merely because it returned `RECITATION`. French
 handwriting uses one direct full-page `gemini-3.6-flash` candidate. Hebrew
 general handwriting uses one 4096-token `gemini-2.5-flash` call first; success
 ends processing, while `MAX_TOKENS` or `RECITATION` advances to
@@ -126,9 +129,9 @@ configuration identity reuses that success instead of restarting it.
 
 - If every page used the same model, `DocumentTextResult.engine` remains that
   concrete model id.
-- If quota or scoped English handwritten `RECITATION` fallback caused
-  different pages to use different Gemini models, `DocumentTextResult.engine`
-  is the deterministic runtime marker
+- If quota or scoped English handwritten / Hebrew printed `RECITATION`
+  fallback caused different pages to use different Gemini models,
+  `DocumentTextResult.engine` is the deterministic runtime marker
   `gemini-mixed:<fingerprint>`. Full page-to-model provenance remains on the
   checkpoints.
 - French handwritten successes record `gemini-3.6-flash` directly.
@@ -136,9 +139,9 @@ configuration identity reuses that success instead of restarting it.
   `gemini-2.5-flash` or fallback `gemini-3.6-flash`.
 
 This provenance behavior does not alter route selection. It records quota
-fallback, the scoped English handwritten `RECITATION` fallback, the direct
-French model, and the cost-aware Hebrew general fallback truthfully without
-discarding successful pages.
+fallback, the scoped English handwritten and Hebrew printed `RECITATION`
+fallbacks, the direct French model, and the cost-aware Hebrew general
+fallback truthfully without discarding successful pages.
 
 ## Gemini prompt resolution
 

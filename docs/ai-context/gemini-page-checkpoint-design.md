@@ -29,11 +29,14 @@ Approved and implemented by PR B in the Gemini OCR root-cause sequence:
    is restored to `gemini-ocr-prompt-v1`; v2 attempts/checkpoints remain
    immutable incident history. The runaway root cause remains open.
 
-7. Bounded `RECITATION` model fallback follow-up — English/French
-   handwritten checkpoint-backed OCR may advance from `gemini-2.5-flash` to
-   `gemini-3.1-flash-lite` within one global three-call page budget. Other
-   permanent classifications do not gain fallback. The retry marker advances
-   to `gemini-ocr-page-retry-v2`.
+7. Bounded `RECITATION` model fallback follow-up — English handwritten
+   checkpoint-backed OCR may advance from `gemini-2.5-flash` to
+   `gemini-3.1-flash-lite` within one global three-call page budget. Hebrew
+   printed checkpoint-backed OCR may advance from the configured primary
+   (default `gemini-3.1-flash-lite`) to `gemini-3.6-flash` on `RECITATION`
+   only. Other permanent classifications do not gain fallback. The retry
+   marker remains `gemini-ocr-page-retry-v2`; Hebrew printed attempt identity
+   changes because ordered `model_candidates` are configuration identity.
 
 This design changes persistence and resume behavior only. It does not authorize a
 production retry or deployment by itself.
@@ -232,16 +235,22 @@ bounded model-switch follow-up, is:
 - English handwritten checkpoint-backed OCR uses the ordered chain
   `gemini-2.5-flash` → `gemini-3.1-flash-lite` and shares at most **three
   provider calls per page across both candidates**;
+- Hebrew printed checkpoint-backed OCR uses the ordered chain configured
+  primary (default `gemini-3.1-flash-lite`) → `gemini-3.6-flash` and shares
+  at most **three provider calls per page across both candidates**;
 - French handwritten OCR uses the single full-page candidate
   `gemini-3.6-flash`; it receives minimal thinking and model-default decoding;
-- `RECITATION` may advance only the scoped English handwritten route to its next
-  candidate, carries the current output cap forward, and remains terminal for
-  the model that returned it;
+- `RECITATION` may advance the scoped English handwritten route from
+  `gemini-2.5-flash` to `gemini-3.1-flash-lite`, and the scoped Hebrew printed
+  route from its configured primary to `gemini-3.6-flash`. The current output
+  cap is carried forward. `RECITATION` remains terminal for the model that
+  returned it;
 - `SAFETY`, `LANGUAGE`, `SPII`, blocked/prohibited content, `JSON_SCHEMA`, and
   other permanent PR A classifications do not advance to another model;
 - quota/rate-limit calls count toward the active budget. Outside the scoped
-  English handwritten route, the pre-existing quota-only candidate fallback
-  retains a fresh bounded budget on the next candidate;
+  English handwritten and Hebrew printed `RECITATION` routes, the pre-existing
+  quota-only candidate fallback retains a fresh bounded budget on the next
+  candidate;
 - processing stops at the first page that remains unsuccessful after the
   applicable bounded candidate chain.
 
@@ -298,8 +307,9 @@ available on the page checkpoints.
 
 The checkpoint schema itself does not implement fallback; it records the
 actual model selected by the adapter. That provenance covers both the
-pre-existing quota candidate fallback and the scoped English handwritten
-`RECITATION` candidate fallback. French handwritten pages now record the direct
+pre-existing quota candidate fallback, the scoped English handwritten
+`RECITATION` candidate fallback, and the scoped Hebrew printed `RECITATION`
+candidate fallback. French handwritten pages now record the direct
 `gemini-3.6-flash` model.
 
 ## `PARTIAL` semantics
@@ -510,6 +520,33 @@ Quota fallback also remains inside the shared budget.
 Gemini 3.6 receives minimal thinking and model-default decoding when selected.
 The route remains full-page. This applies only to Hebrew GENERAL handwriting;
 Hebrew VS handwriting continues to use Transkribus. No migration is required.
+
+## Bounded RECITATION model fallback for Hebrew printed OCR
+
+Hebrew printed OCR now resolves to the ordered candidates
+`GEMINI_HEBREW_PRINTED_MODEL` (default `gemini-3.1-flash-lite`) →
+`gemini-3.6-flash`. Because ordered candidates are identity inputs, this
+creates a new configuration and attempt identity without changing
+`gemini-hebrew-printed-prompt-v2` or the shared `gemini-ocr-page-retry-v2`
+marker. Earlier single-candidate attempts, including production document 369
+attempt 36 with durable pages 1–3, remain immutable and cannot be reused.
+
+In checkpoint-backed execution, `RECITATION` on the primary model advances
+immediately to 3.6 Flash with the remaining shared three-call page budget and
+the current output cap. The same model is not retried for `RECITATION`.
+`SAFETY` and other permanent PR A classifications do not switch models.
+`MAX_TOKENS` continues to use the existing same-model token-cap ladder inside
+the page budget; it is not a Hebrew-printed model-switch reason. Quota
+fallback on this scoped route stays inside the shared three-call budget.
+
+Successful fallback does not add a dedicated review reason. Page checkpoints
+and assembled `HtrResult.review_reasons` remain empty unless the page already
+had engine reasons; mixed-model assembly still uses
+`gemini-mixed:<fingerprint>` when pages used more than one runtime model.
+
+This applies only to Hebrew printed Gemini OCR. English handwritten
+`RECITATION` fallback, Hebrew GENERAL cost-aware fallback, French 3.6, and
+Transkribus routing are unchanged. No Gemini→Transkribus fallback.
 
 ## Attempt lifecycle and observability clarification
 
