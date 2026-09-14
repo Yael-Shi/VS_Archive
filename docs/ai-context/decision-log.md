@@ -7868,3 +7868,39 @@ external-call fences).
 
 **Deferred:** full Phase 2 checkpoint-write ProcessDocumentRequest-token fence;
 automatic replay of `RECOVERY_REQUIRED`.
+
+## 2026-09-14 — Person honorific cleanup and Author/Person identity unification
+
+Production data cleanup established the following identity policy:
+
+- `Person.name` contains the canonical personal name only; titles and honorifics are stored separately in `Person.honorific`.
+- Old titled spellings are preserved as `PersonAlias` values so legacy/title searches continue to resolve.
+- `Author.name` remains the bibliographic/original author string and may retain titles such as `ד"ר`, `דר'`, or `פרופסור`.
+- When an Author and a Person represent the same individual, `Author.person` is linked explicitly. The public People index then presents one Person identity and incorporates the linked Author holdings.
+- Identity linking is explicit and reviewed; approximate-name matches are not linked automatically.
+
+Production cleanup completed and verified:
+
+- Person 31: `ד"ר חיים סעדיה` -> `חיים סעדיה`, honorific `ד"ר`; old spelling preserved as alias.
+  - Authors 11 `חיים סעדיה` and 57 `דר' חיים סעדיה` linked to Person 31.
+- Person 26: `מוריס זקס`, honorific `ד"ר`; alias `ד"ר מוריס זקס`.
+  - Author 22 `ד"ר מוריס זקס` linked to Person 26.
+- Author 59 `משה שרת` linked to Person 45.
+- Author 93 `אריה ליבוביץ׳` linked to Person 52.
+- Person 7: `הרב נחום אפנדי` -> `נחום אפנדי`, honorific `הרב`; old spelling preserved as alias.
+- Person 9: `הרב דר' משה ונטורה` -> `משה ונטורה`, honorific `הרב ד"ר`; old spelling preserved as alias.
+- Person 11: `המלך פארוק` -> `פארוק`, honorific `מלך`; old spelling preserved as alias.
+- Author 8 `דר' צבי זוהר` linked to new Person 54 `צבי זוהר`, honorific `ד"ר`.
+- Author 76 `פרופסור חיים דורון` linked to new Person 55 `חיים דורון`, honorific `פרופסור`.
+- Author 77 `פרופסור שפרה שורץ` linked to new Person 56 `שפרה שורץ`, honorific `פרופסור`.
+- Author 78 `פרופסור שלמה וינקר` linked to new Person 57 `שלמה וינקר`, honorific `פרופסור`.
+- Author 79 `פרופסור ששון נקר` linked to new Person 58 `ששון נקר`, honorific `פרופסור`.
+- Author 80 `פרופסור שלמה מוניקנדם` linked to new Person 59 `שלמה מוניקנדם`, honorific `פרופסור`.
+
+Post-cleanup production audits found:
+- no remaining `Person.name` values beginning with a known title/honorific;
+- all remaining titled Authors are already linked to structured Person identities;
+- no additional high-confidence unlinked Author/Person duplicates were found.
+- Author 43 `א. פלג` was reviewed as a possible match for Person 4 `אלי פלג`, but the identity is not sufficiently supported and must remain unlinked unless stronger evidence is found.
+
+Production public-view verification confirmed that the cleaned/linked identities appear once each in `/archive/people/` with merged holdings and the expected public display names.
