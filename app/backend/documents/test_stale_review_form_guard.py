@@ -361,7 +361,7 @@ class StaleReviewFormGuardTests(TestCase):
 
         resp = self.client.post(
             self._verify_url(hebrew.id),
-            data={**fresh, "text": _MANUAL},
+            data={**fresh, "text": _MANUAL, "text_was_user_edited": "1"},
             **_async_headers(),
         )
         self.assertEqual(resp.status_code, 200)

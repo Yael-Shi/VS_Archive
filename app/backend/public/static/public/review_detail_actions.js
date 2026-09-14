@@ -205,6 +205,62 @@
     return "הפעולה נכשלה. נסו שוב.";
   }
 
+  function isReviewTextarea(el) {
+    return !!(el && el.matches && el.matches("textarea.review-textarea"));
+  }
+
+  function reviewFormUserEditedFlag(form) {
+    if (!form || !form.querySelector) {
+      return null;
+    }
+    return form.querySelector('input[name="text_was_user_edited"]');
+  }
+
+  function isFormMarkedUserEdited(form) {
+    var flag = reviewFormUserEditedFlag(form);
+    return !!(flag && flag.value === "1");
+  }
+
+  function markReviewTextareaFormUserEdited(textarea) {
+    if (!isReviewTextarea(textarea)) {
+      return;
+    }
+    var flag = reviewFormUserEditedFlag(textarea.form);
+    if (flag) {
+      flag.value = "1";
+    }
+  }
+
+  function isBrowserAutofillInputType(inputType) {
+    return (
+      inputType === "insertFromAutoComplete" ||
+      inputType === "insertReplacementText"
+    );
+  }
+
+  function isContentMutationInputType(inputType) {
+    return (
+      inputType === "insertText" ||
+      inputType === "insertLineBreak" ||
+      inputType === "insertParagraph" ||
+      inputType === "insertFromPaste" ||
+      inputType === "insertFromDrop" ||
+      inputType === "insertCompositionText" ||
+      inputType === "deleteContentBackward" ||
+      inputType === "deleteContentForward" ||
+      inputType === "deleteByCut" ||
+      inputType === "historyUndo" ||
+      inputType === "historyRedo"
+    );
+  }
+
+  function shouldMarkReviewTextareaDirty(inputType) {
+    if (isBrowserAutofillInputType(inputType)) {
+      return false;
+    }
+    return isContentMutationInputType(inputType);
+  }
+
   function restoreReviewTextareasFromServerDefault(root) {
     var scope = root && root.querySelectorAll ? root : document;
     var textareas = scope.querySelectorAll("textarea.review-textarea");
@@ -212,10 +268,24 @@
     var textarea;
     for (i = 0; i < textareas.length; i++) {
       textarea = textareas[i];
+      if (isFormMarkedUserEdited(textarea.form)) {
+        continue;
+      }
       if (textarea.value !== textarea.defaultValue) {
         textarea.value = textarea.defaultValue;
       }
     }
+  }
+
+  function onReviewTextareaContentMutation(event) {
+    var target = event.target;
+    if (!isReviewTextarea(target)) {
+      return;
+    }
+    if (!shouldMarkReviewTextareaDirty(event.inputType)) {
+      return;
+    }
+    markReviewTextareaFormUserEdited(target);
   }
 
   function onPageShow() {
@@ -311,5 +381,7 @@
 
   restoreReviewTextareasFromServerDefault(document);
   window.addEventListener("pageshow", onPageShow, false);
+  document.addEventListener("beforeinput", onReviewTextareaContentMutation, false);
+  document.addEventListener("input", onReviewTextareaContentMutation, false);
   document.addEventListener("submit", onSubmit, false);
 })();
