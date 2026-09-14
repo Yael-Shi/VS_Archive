@@ -10128,7 +10128,7 @@ class ReviewUiTests(TestCase):
         doc = self._create_document()
         row = self._create_hebrew_mirror_for_pending_edit(doc, text="לפני אישור")
         self.client.force_login(self.staff)
-        resp = self._verify_post(row, text="  אחרי אישור  \n")
+        resp = self._verify_post(row, text="  אחרי אישור  \n", text_was_user_edited="1")
         self.assertEqual(resp.status_code, 302)
         row.refresh_from_db()
         self.assertEqual(row.text, "  אחרי אישור  \n")

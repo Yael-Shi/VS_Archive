@@ -127,12 +127,24 @@ def review_form_text_post_data(
     *,
     document: Document | None = None,
     paired_source: DocumentTextResult | None = None,
+    text_was_user_edited: bool | None = None,
 ) -> dict[str, str]:
     data = review_form_baseline_as_post_dict(
         row, document=document, paired_source=paired_source
     )
     data["text"] = text
+    if text_was_user_edited is not None:
+        data["text_was_user_edited"] = "1" if text_was_user_edited else "0"
     return data
+
+
+def parse_review_text_was_user_edited(value: str | None) -> bool:
+    """True only for the explicit hidden-field value ``1``. Missing/other is false.
+
+    This is user-edit intent, not concurrency protection. A stale baseline must
+    still reject even when this is true.
+    """
+    return (value or "").strip() == "1"
 
 
 def parse_review_form_baseline(
@@ -504,20 +516,38 @@ def verify_pending_text_result(
     new_text: str,
     editor,
     baseline: ReviewFormBaseline,
+    text_was_user_edited: bool = False,
 ) -> PendingTextResultVerifyResult:
-    """Save-if-changed via pending-edit semantics, then mark VERIFIED atomically.
+    """Verify a pending row; save submitted text only on explicit user-edit intent.
 
-    Lock order vs OCR persist fence: ``edit_pending_text_result`` locks
-    ``Document`` before the text row; this then re-locks the row while that
-    outer transaction still holds the document lock.
+    Combined one-click save+verify remains: when ``text_was_user_edited`` is
+    true, save-if-changed uses pending-edit semantics, then the clicked row is
+    marked VERIFIED. When false (or omitted at the HTTP layer), the stale-form
+    baseline is still required, but POSTed textarea text is ignored.
+
+    Lock order vs OCR persist fence: ``Document`` then the text row.
     """
     with transaction.atomic():
-        edit_outcome = edit_pending_text_result(
-            result_id=result_id,
-            new_text=new_text,
-            editor=editor,
-            baseline=baseline,
-        )
+        text_saved = False
+        if text_was_user_edited:
+            edit_outcome = edit_pending_text_result(
+                result_id=result_id,
+                new_text=new_text,
+                editor=editor,
+                baseline=baseline,
+            )
+            text_saved = edit_outcome.text_saved
+        else:
+            peek = DocumentTextResult.objects.get(pk=result_id)
+            doc = Document.objects.select_for_update().get(pk=peek.document_id)
+            target = DocumentTextResult.objects.select_for_update().get(pk=result_id)
+            if not is_review_pending_text_result(target):
+                raise PendingTextResultEditError(
+                    "transcription result is not eligible for review action"
+                )
+            assert_review_form_baseline_matches(
+                target=target, doc=doc, baseline=baseline
+            )
 
         row = DocumentTextResult.objects.select_for_update().get(pk=result_id)
         if not is_review_pending_text_result(row):
@@ -530,5 +560,5 @@ def verify_pending_text_result(
 
     return PendingTextResultVerifyResult(
         row=row,
-        text_saved=edit_outcome.text_saved,
+        text_saved=text_saved,
     )

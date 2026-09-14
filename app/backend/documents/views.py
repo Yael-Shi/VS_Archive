@@ -459,6 +459,7 @@ from documents.services.verified_text_result_edit import (
     is_hebrew_translation_stale,
     is_verified_editable_text_result,
     parse_review_form_baseline,
+    parse_review_text_was_user_edited,
     review_form_revision_for_row,
     verify_pending_text_result,
 )
@@ -3422,8 +3423,11 @@ def review_text_result_verify(request, result_id: int):
             )
         return _review_text_result_not_eligible_response()
 
+    text_was_user_edited = parse_review_text_was_user_edited(
+        request.POST.get("text_was_user_edited")
+    )
     submitted = request.POST.get("text")
-    if submitted is None or not submitted.strip():
+    if text_was_user_edited and (submitted is None or not submitted.strip()):
         return _review_async_error(
             request,
             "text is required and must be non-empty",
@@ -3433,9 +3437,10 @@ def review_text_result_verify(request, result_id: int):
     try:
         outcome = verify_pending_text_result(
             result_id=row.id,
-            new_text=submitted,
+            new_text=submitted or "",
             editor=request.user,
             baseline=_review_form_baseline_from_post(request),
+            text_was_user_edited=text_was_user_edited,
         )
     except StaleReviewFormError as exc:
         return _review_async_error(request, str(exc), status=400)

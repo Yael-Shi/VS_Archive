@@ -160,6 +160,7 @@
                   {% if card.expected_source_revision %}
                     <input type="hidden" name="expected_source_revision" value="{{ card.expected_source_revision }}">
                   {% endif %}
+                  <input type="hidden" name="text_was_user_edited" value="0">
                   <textarea class="review-textarea" name="text" rows="12" autocomplete="off">{{ card.row.text }}</textarea>
                   <div class="review-zone-actions review-zone-actions--spaced">
                     <button class="btn btn-primary" type="submit" data-review-action="save">שמור טקסט</button>
@@ -184,6 +185,7 @@
                   {% if card.expected_source_revision %}
                     <input type="hidden" name="expected_source_revision" value="{{ card.expected_source_revision }}">
                   {% endif %}
+                  <input type="hidden" name="text_was_user_edited" value="0">
                   <div class="review-zone-title review-verified-edit-title" style="margin-bottom: 8px;">
                     {% if card.row.result_type == "SOURCE_TEXT" %}
                       עריכת תעתוק מאושר

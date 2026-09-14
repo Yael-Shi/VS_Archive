@@ -156,6 +156,7 @@ class ReviewCombinedVerifyAndAsyncTests(TestCase):
             new_text=submitted,
             editor=self.staff,
             baseline=review_form_baseline_for_result_id(source.id),
+            text_was_user_edited=True,
         )
 
         source.refresh_from_db()
@@ -248,6 +249,7 @@ class ReviewCombinedVerifyAndAsyncTests(TestCase):
                     new_text="changed for index fail",
                     editor=self.staff,
                     baseline=review_form_baseline_for_result_id(source.id),
+                    text_was_user_edited=True,
                 )
 
         source.refresh_from_db()
@@ -282,6 +284,7 @@ class ReviewCombinedVerifyAndAsyncTests(TestCase):
             new_text="מקור מתוקן",
             editor=self.staff,
             baseline=review_form_baseline_for_result_id(source.id),
+            text_was_user_edited=True,
         )
 
         source.refresh_from_db()
@@ -324,6 +327,7 @@ class ReviewCombinedVerifyAndAsyncTests(TestCase):
             new_text="English source revised",
             editor=self.staff,
             baseline=review_form_baseline_for_result_id(source.id),
+            text_was_user_edited=True,
         )
 
         source.refresh_from_db()
@@ -358,6 +362,7 @@ class ReviewCombinedVerifyAndAsyncTests(TestCase):
             new_text="תרגום מעודכן",
             editor=self.staff,
             baseline=review_form_baseline_for_result_id(hebrew.id),
+            text_was_user_edited=True,
         )
 
         source.refresh_from_db()
