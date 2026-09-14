@@ -442,10 +442,28 @@ class PeoplePublicIndexLayoutTests(TestCase):
             ".archive-people-index-list {\n    grid-template-columns: repeat(2, minmax(0, 1fr));",
             css,
         )
+        self.assertIn(".archive-people-index-name {", css)
+        name_start = css.index(".archive-people-index-name {")
+        name_rule = css[name_start : css.index("}", name_start)]
+        self.assertNotIn("aspect-ratio", name_rule)
+        self.assertIn("padding: var(--space-3);", name_rule)
+        self.assertIn(".archive-people-index-name-text", css)
+        self.assertIn("flex-direction: column;", css)
         self.assertNotIn(
             ".archive-people-index-list {\n    grid-template-columns: repeat(3,",
             css,
         )
+
+    def test_people_index_rows_are_compact_linked_tiles(self):
+        person = Person.objects.create(name="Compact Tile Person")
+        _link(_public_manual("Compact tile letter"), person)
+        resp = self.client.get(_index_url())
+        self.assertEqual(resp.status_code, 200)
+        html = _people_index_list_html(resp)
+        self.assertIn("archive-people-index-name-text", html)
+        self.assertIn(person_public_page_url(person.id), html)
+        self.assertIn("Compact Tile Person", html)
+        self.assertIn("1 פריט", html)
 
 
 class PeoplePublicIndexQueryCountTests(TestCase):

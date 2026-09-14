@@ -1,13 +1,10 @@
 <div class="document-detail-navigation-actions">
-  {% if person_source_return_url %}
-    {% include "documents/partials/detail_back_to_source_item.html" %}
-  {% endif %}
   {% include "documents/partials/detail_back_to_archive.html" %}
   {% include "documents/partials/detail_back_to_people.html" %}
   {% if is_admin %}
     <a
       class="btn btn-primary"
-      href="{% url 'archive-manage-person-edit' person_id=person.id %}"
+      href="{% url 'archive-manage-author-edit' author_id=author.id %}"
     >עריכת הפרטים</a>
   {% endif %}
 </div>

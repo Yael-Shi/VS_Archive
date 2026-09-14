@@ -1138,14 +1138,23 @@ def _ordered_author_links(archive_item: ArchiveItem) -> list[ArchiveItemAuthor]:
     )
 
 
-def public_structured_author_href(*, author_id: int, person_id: int | None) -> str:
+def public_structured_author_href(
+    *,
+    author_id: int,
+    person_id: int | None,
+    from_item_id: int | None = None,
+) -> str:
     """Public href for a structured Author: Person page when explicitly linked."""
     if person_id is not None:
-        return person_public_page_url(person_id)
+        return person_public_page_url(person_id, from_item_id=from_item_id)
     return author_public_page_url(author_id)
 
 
-def author_links_for_item(archive_item: ArchiveItem) -> tuple[ArchiveBrowseLink, ...]:
+def author_links_for_item(
+    archive_item: ArchiveItem,
+    *,
+    from_item_id: int | None = None,
+) -> tuple[ArchiveBrowseLink, ...]:
     """Ordered ``ArchiveItemAuthor`` names linking to Person or Author pages.
 
     Identity is ``Author.id``. Duplicate names stay distinct. An explicit
@@ -1159,6 +1168,7 @@ def author_links_for_item(archive_item: ArchiveItem) -> tuple[ArchiveBrowseLink,
             href=public_structured_author_href(
                 author_id=link.author_id,
                 person_id=link.author.person_id,
+                from_item_id=from_item_id,
             ),
         )
         for link in _ordered_author_links(archive_item)
@@ -1167,6 +1177,8 @@ def author_links_for_item(archive_item: ArchiveItem) -> tuple[ArchiveBrowseLink,
 
 def author_presentation_for_item(
     archive_item: ArchiveItem,
+    *,
+    from_item_id: int | None = None,
 ) -> tuple[tuple[ArchiveBrowseLink, ...], str]:
     """Structured Author links, else trimmed ``author_name`` fallback text.
 
@@ -1174,7 +1186,7 @@ def author_presentation_for_item(
     ``author_name`` is ignored (including drifted or empty values). If none
     exist, return the current stripped ``author_name`` string unchanged.
     """
-    links = author_links_for_item(archive_item)
+    links = author_links_for_item(archive_item, from_item_id=from_item_id)
     if links:
         return links, ""
     return (), (archive_item.author_name or "").strip()
@@ -1251,9 +1263,31 @@ def person_archive_filter_url(person_id: int) -> str:
     return f"{path}?{query}" if query else path
 
 
-def person_public_page_url(person_id: int) -> str:
-    """Return ``/archive/people/<person_id>/``."""
-    return reverse("archive-person-detail", kwargs={"person_id": person_id})
+PERSON_PUBLIC_FROM_ITEM_QUERY = "from_item"
+PERSON_PUBLIC_FROM_PHOTO_QUERY = "from_photo"
+
+
+def person_public_page_url(
+    person_id: int,
+    *,
+    from_item_id: int | None = None,
+    from_photo_id: int | None = None,
+) -> str:
+    """Return ``/archive/people/<person_id>/``, optionally with source return keys.
+
+    ``from_item`` / ``from_photo`` are explicit, server-validated return
+    context for Person detail. Callers on browse cards, the People index,
+    and search chips omit them. Do not use HTTP Referer.
+    """
+    path = reverse("archive-person-detail", kwargs={"person_id": person_id})
+    query: dict[str, int] = {}
+    if from_item_id is not None:
+        query[PERSON_PUBLIC_FROM_ITEM_QUERY] = int(from_item_id)
+    if from_photo_id is not None:
+        query[PERSON_PUBLIC_FROM_PHOTO_QUERY] = int(from_photo_id)
+    if not query:
+        return path
+    return f"{path}?{urlencode(query)}"
 
 
 ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING = "אנשים קשורים"
@@ -1264,6 +1298,8 @@ def person_links_for_item(
     archive_item: ArchiveItem,
     *,
     exclude_person_ids: Collection[int] = (),
+    from_item_id: int | None = None,
+    from_photo_id: int | None = None,
 ) -> tuple[ArchiveBrowseLink, ...]:
     """Item-level ArchiveItemPerson links, ordered by ``(name, id)``.
 
@@ -1279,7 +1315,11 @@ def person_links_for_item(
     return tuple(
         ArchiveBrowseLink(
             name=person.name,
-            href=person_public_page_url(person.id),
+            href=person_public_page_url(
+                person.id,
+                from_item_id=from_item_id,
+                from_photo_id=from_photo_id,
+            ),
         )
         for person in people
         if person.id not in excluded
@@ -1291,17 +1331,28 @@ def photo_detail_item_person_links(
     *,
     identified_person_ids: Collection[int] = (),
     is_album_view: bool,
+    from_item_id: int | None = None,
+    from_photo_id: int | None = None,
 ) -> tuple[ArchiveBrowseLink, ...]:
     """Public PHOTO detail AIP links; album keeps the full item set."""
     if is_album_view:
-        return person_links_for_item(archive_item)
+        return person_links_for_item(
+            archive_item,
+            from_item_id=from_item_id,
+        )
     return person_links_for_item(
         archive_item,
         exclude_person_ids=identified_person_ids,
+        from_item_id=from_item_id,
+        from_photo_id=from_photo_id,
     )
 
 
-def public_discovery_context(archive_item: ArchiveItem | None) -> dict:
+def public_discovery_context(
+    archive_item: ArchiveItem | None,
+    *,
+    from_item_id: int | None = None,
+) -> dict:
     """Template context for public discovery Tags, Person links, and Authors."""
     if archive_item is None:
         return {
@@ -1311,10 +1362,16 @@ def public_discovery_context(archive_item: ArchiveItem | None) -> dict:
             "author_display": "",
             "person_links_heading": ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING,
         }
-    author_links, author_display = author_presentation_for_item(archive_item)
+    author_links, author_display = author_presentation_for_item(
+        archive_item,
+        from_item_id=from_item_id,
+    )
     return {
         "public_tags": public_discovery_tags(archive_item),
-        "person_links": person_links_for_item(archive_item),
+        "person_links": person_links_for_item(
+            archive_item,
+            from_item_id=from_item_id,
+        ),
         "author_links": author_links,
         "author_display": author_display,
         "person_links_heading": ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING,

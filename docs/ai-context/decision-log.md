@@ -28,6 +28,40 @@ policy and not a Gemini→Transkribus fallback.
 fallback policies, `READY`/`PARTIAL` semantics, `gemini-ocr-page-retry-v2`,
 and Hebrew printed prompt contract `gemini-hebrew-printed-prompt-v2`.
 
+## Public People / Person / Author UI follow-ups
+
+**Decision / implemented:** Public People index tiles are compact two-column
+cards on desktop. Person detail can return to a concrete archive item only
+via explicit, server-validated `from_item` / `from_photo` query keys that
+public item/photo/OCR Person links attach. HTTP Referer is not used.
+Unlinked public Author detail gained the same staff **עריכת הפרטים** control
+as Person (`archive-manage-author-edit`). Identified Person chips/names that
+already linked to `/archive/people/<id>/` stay linked; `people_present`
+remains unlinked free text.
+
+**Current behavior:**
+
+- `/archive/people/` keeps a one-column grid on small screens and two columns
+  from 768px (no three-column People grid). Each row is a compact whole-tile
+  link using existing `--card` / `--border-strong` / `--radius` tokens, with
+  stacked name + item count and no forced aspect ratio.
+- Person detail still stacks **חזרה לארכיון** and **חזרה לאנשים**. When
+  `from_item` names an authorized item already in that Person's public
+  holdings, **חזרה לפריט** is prepended (photo key may deepen to `?photo=`).
+  Invalid, private, unrelated, or malformed keys are ignored. Browse cards,
+  People index rows, and search Person chips do not add those keys.
+- Public Author detail (`/archive/authors/<id>/`, unlinked Authors only)
+  stacks **חזרה לארכיון**, **חזרה לאנשים**, and staff-only **עריכת הפרטים**.
+  Linked Author detail still 302s to the Person page.
+- Public PHOTO **אנשים בתמונה** and item **אנשים קשורים** / **אנשים קשורים
+  לפריט** remain Person-page links for known `Person` rows.
+
+**Tests:** `documents/test_archive_people_public_index.py`,
+`documents/test_archive_person_public_page.py`,
+`documents/test_archive_person_public_presentation.py`,
+`documents/test_photo_public_gallery.py`,
+`documents/test_archive_author_public_page.py`.
+
 ## PHOTO/VIDEO public detail QA — album nav, staff technical popover, metadata
 
 **Decision / implemented:** Public selected-photo album navigation, staff PHOTO

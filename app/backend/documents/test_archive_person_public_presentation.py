@@ -101,12 +101,32 @@ def _link_person(item: ArchiveItem, person: Person) -> None:
     ArchiveItemPerson.objects.create(archive_item=item, person=person)
 
 
-def _person_href(person: Person) -> str:
-    return person_public_page_url(person.id)
+def _person_href(
+    person: Person,
+    *,
+    from_item_id: int | None = None,
+    from_photo_id: int | None = None,
+) -> str:
+    return person_public_page_url(
+        person.id,
+        from_item_id=from_item_id,
+        from_photo_id=from_photo_id,
+    )
 
 
-def _person_href_html(person: Person) -> str:
-    return escape(_person_href(person))
+def _person_href_html(
+    person: Person,
+    *,
+    from_item_id: int | None = None,
+    from_photo_id: int | None = None,
+) -> str:
+    return escape(
+        _person_href(
+            person,
+            from_item_id=from_item_id,
+            from_photo_id=from_photo_id,
+        )
+    )
 
 
 def _people_select_query_count(captured_queries) -> int:
@@ -239,7 +259,7 @@ class ArchivePersonPublicDetailTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "אנשים קשורים")
         self.assertContains(resp, "Detail Linked")
-        self.assertContains(resp, _person_href_html(person))
+        self.assertContains(resp, _person_href_html(person, from_item_id=item.id))
         self.assertContains(resp, "תגיות:")
         self.assertContains(resp, "detail-ordinary-tag")
         self.assertContains(resp, "Detail Event")
@@ -261,7 +281,7 @@ class ArchivePersonPublicDetailTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "אנשים קשורים")
         self.assertContains(resp, "OCR Linked")
-        self.assertContains(resp, _person_href_html(person))
+        self.assertContains(resp, _person_href_html(person, from_item_id=item.id))
         self.assertContains(resp, "ocr-ordinary-tag")
         self.assertNotContains(resp, "ocr-historical-tag")
 
@@ -274,7 +294,7 @@ class ArchivePersonPublicDetailTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "archive-discovery-meta")
         self.assertContains(resp, "אנשים קשורים")
-        self.assertContains(resp, _person_href_html(person))
+        self.assertContains(resp, _person_href_html(person, from_item_id=item.id))
         self.assertNotContains(resp, "תגיות:")
         self.assertNotContains(resp, "קטגוריות:")
         self.assertNotContains(resp, "אירועים:")
@@ -295,14 +315,23 @@ class ArchivePersonPublicDetailTests(TestCase):
         html = resp.content.decode()
         self.assertContains(resp, "אנשים קשורים לפריט")
         self.assertContains(resp, "Item Related Person")
-        self.assertContains(resp, _person_href_html(related))
+        self.assertContains(
+            resp,
+            _person_href_html(related, from_item_id=item.id, from_photo_id=photo.id),
+        )
         self.assertContains(resp, "אנשים בתמונה")
         self.assertContains(resp, "Photo Identified Person")
-        self.assertContains(resp, _person_href_html(identified))
+        self.assertContains(
+            resp,
+            _person_href_html(identified, from_item_id=item.id, from_photo_id=photo.id),
+        )
         header = html[html.index("document-detail-header") : html.index("</header>")]
         self.assertIn("אנשים קשורים לפריט", header)
         self.assertIn("Item Related Person", header)
-        self.assertIn(_person_href_html(related), header)
+        self.assertIn(
+            _person_href_html(related, from_item_id=item.id, from_photo_id=photo.id),
+            header,
+        )
         self.assertNotIn("אנשים בתמונה", header)
         self.assertNotIn("Photo Identified Person", header)
         identified_idx = html.index("אנשים בתמונה")
@@ -310,13 +339,25 @@ class ArchivePersonPublicDetailTests(TestCase):
         identified_block = html[identified_idx : html.index("</div>", identified_idx)]
         related_block = html[related_idx : html.index("</div>", related_idx)]
         self.assertIn("Photo Identified Person", identified_block)
-        self.assertIn(_person_href_html(identified), identified_block)
+        self.assertIn(
+            _person_href_html(identified, from_item_id=item.id, from_photo_id=photo.id),
+            identified_block,
+        )
         self.assertNotIn("Item Related Person", identified_block)
-        self.assertNotIn(_person_href_html(related), identified_block)
+        self.assertNotIn(
+            _person_href_html(related, from_item_id=item.id, from_photo_id=photo.id),
+            identified_block,
+        )
         self.assertIn("Item Related Person", related_block)
-        self.assertIn(_person_href_html(related), related_block)
+        self.assertIn(
+            _person_href_html(related, from_item_id=item.id, from_photo_id=photo.id),
+            related_block,
+        )
         self.assertNotIn("Photo Identified Person", related_block)
-        self.assertNotIn(_person_href_html(identified), related_block)
+        self.assertNotIn(
+            _person_href_html(identified, from_item_id=item.id, from_photo_id=photo.id),
+            related_block,
+        )
         self.assertNotEqual(
             html.rfind("archive-detail-meta-block--photo", 0, identified_idx),
             -1,
@@ -340,12 +381,16 @@ class ArchivePersonPublicDetailTests(TestCase):
         ocr_resp = self.client.get(
             reverse("documents-detail-page", kwargs={"doc_id": ocr.id})
         )
-        for resp in (manual_resp, video_resp, ocr_resp):
+        for resp, item in (
+            (manual_resp, manual),
+            (video_resp, video),
+            (ocr_resp, ocr.archive_item),
+        ):
             self.assertEqual(resp.status_code, 200)
             self.assertContains(resp, "אנשים קשורים")
             self.assertNotContains(resp, "אנשים קשורים לפריט")
             self.assertNotContains(resp, "אנשים בתמונה")
-            self.assertContains(resp, _person_href_html(person))
+            self.assertContains(resp, _person_href_html(person, from_item_id=item.id))
 
     @patch("documents.views.create_presigned_get", return_value=PRESIGNED_URL)
     def test_overlapping_photoperson_and_aip_shows_one_list(self, _mock_presign):
@@ -360,7 +405,10 @@ class ArchivePersonPublicDetailTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "אנשים בתמונה")
         self.assertContains(resp, "Both Relations Person")
-        self.assertContains(resp, _person_href_html(person))
+        self.assertContains(
+            resp,
+            _person_href_html(person, from_item_id=item.id, from_photo_id=photo.id),
+        )
         self.assertNotContains(resp, "אנשים קשורים לפריט")
         self.assertEqual(html.count("Both Relations Person"), 1)
 
@@ -383,12 +431,21 @@ class ArchivePersonPublicDetailTests(TestCase):
         identified_block = html[identified_idx : html.index("</div>", identified_idx)]
         related_block = html[related_idx : html.index("</div>", related_idx)]
         self.assertIn("In Photo Person", identified_block)
-        self.assertIn(_person_href_html(in_photo), identified_block)
+        self.assertIn(
+            _person_href_html(in_photo, from_item_id=item.id, from_photo_id=photo.id),
+            identified_block,
+        )
         self.assertNotIn("Extra Item Person", identified_block)
         self.assertIn("Extra Item Person", related_block)
-        self.assertIn(_person_href_html(extra), related_block)
+        self.assertIn(
+            _person_href_html(extra, from_item_id=item.id, from_photo_id=photo.id),
+            related_block,
+        )
         self.assertNotIn("In Photo Person", related_block)
-        self.assertNotIn(_person_href_html(in_photo), related_block)
+        self.assertNotIn(
+            _person_href_html(in_photo, from_item_id=item.id, from_photo_id=photo.id),
+            related_block,
+        )
 
     @patch("documents.views.create_presigned_get", return_value=PRESIGNED_URL)
     def test_other_photo_person_stays_in_item_list_on_selected_photo(
@@ -406,7 +463,7 @@ class ArchivePersonPublicDetailTests(TestCase):
         self.assertNotContains(album, "אנשים בתמונה")
         self.assertContains(album, "אנשים קשורים לפריט")
         self.assertContains(album, "Only On Second")
-        self.assertContains(album, _person_href_html(on_second))
+        self.assertContains(album, _person_href_html(on_second, from_item_id=item.id))
 
         first_view = self.client.get(
             reverse("archive-detail", kwargs={"item_id": item.id}),
@@ -423,7 +480,10 @@ class ArchivePersonPublicDetailTests(TestCase):
             )
         ]
         self.assertIn("Only On Second", related_block)
-        self.assertIn(_person_href_html(on_second), related_block)
+        self.assertIn(
+            _person_href_html(on_second, from_item_id=item.id, from_photo_id=first.id),
+            related_block,
+        )
 
     @patch("documents.views.create_presigned_get", return_value=PRESIGNED_URL)
     def test_same_canonical_name_distinct_ids_remain_visible(self, _mock_presign):
@@ -443,10 +503,22 @@ class ArchivePersonPublicDetailTests(TestCase):
         related_idx = html.index("אנשים קשורים לפריט")
         identified_block = html[identified_idx : html.index("</div>", identified_idx)]
         related_block = html[related_idx : html.index("</div>", related_idx)]
-        self.assertIn(_person_href_html(in_photo), identified_block)
-        self.assertNotIn(_person_href_html(item_only), identified_block)
-        self.assertIn(_person_href_html(item_only), related_block)
-        self.assertNotIn(_person_href_html(in_photo), related_block)
+        self.assertIn(
+            _person_href_html(in_photo, from_item_id=item.id, from_photo_id=photo.id),
+            identified_block,
+        )
+        self.assertNotIn(
+            _person_href_html(item_only, from_item_id=item.id, from_photo_id=photo.id),
+            identified_block,
+        )
+        self.assertIn(
+            _person_href_html(item_only, from_item_id=item.id, from_photo_id=photo.id),
+            related_block,
+        )
+        self.assertNotIn(
+            _person_href_html(in_photo, from_item_id=item.id, from_photo_id=photo.id),
+            related_block,
+        )
 
 
 class ArchivePersonPublicQueryCountTests(TestCase):

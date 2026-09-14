@@ -187,6 +187,35 @@ code {
   color: var(--text-heading);
 }
 
+@media (min-width: 769px) {
+  .archive-person-detail-page {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
+    column-gap: var(--space-4);
+    align-items: start;
+  }
+
+  .archive-person-detail-page > .document-detail-header {
+    display: contents;
+  }
+
+  .archive-person-detail-page .document-detail-header-main {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
+  }
+
+  .archive-person-detail-page .document-detail-toolbar {
+    grid-column: 2;
+    grid-row: 1 / -1;
+    align-self: start;
+  }
+
+  .archive-person-detail-page > :not(.document-detail-header) {
+    grid-column: 1;
+  }
+}
+
 .page-subtitle {
   margin: 0;
   padding-top: var(--space-1);
@@ -2994,25 +3023,49 @@ pre {
 
 .archive-people-index-row {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2);
   min-width: 0;
+  margin: 0;
+  padding: 0;
 }
 
 .archive-people-index-name {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: var(--space-1);
+  box-sizing: border-box;
+  width: 100%;
+  padding: var(--space-3);
   color: var(--text);
   font-weight: 600;
   text-decoration: none;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  background: var(--card);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.archive-people-index-name:hover {
+.archive-people-index-name:hover,
+.archive-people-index-name:focus-visible {
+  text-decoration: none;
+  border-color: var(--accent-muted, var(--border-strong));
+  box-shadow: var(--shadow-md);
+}
+
+.archive-people-index-name-text {
+  overflow-wrap: anywhere;
+}
+
+.archive-people-index-name:hover .archive-people-index-name-text,
+.archive-people-index-name:focus-visible .archive-people-index-name-text {
   text-decoration: underline;
 }
 
 .archive-people-index-count {
   flex: 0 0 auto;
+  font-weight: 400;
 }
 
 .archive-authors-index-list {

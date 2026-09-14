@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from html import escape
 from unittest.mock import patch
 
 from django.contrib.auth.models import Group, User
@@ -50,8 +51,15 @@ def _people_sql(captured_queries) -> list[str]:
     ]
 
 
-def _identified_person_link_html(person: Person) -> str:
-    return f'<a href="{person_public_page_url(person.pk)}">{person.name}</a>'
+def _identified_person_link_html(
+    person: Person, *, from_item_id: int, from_photo_id: int
+) -> str:
+    href = person_public_page_url(
+        person.pk,
+        from_item_id=from_item_id,
+        from_photo_id=from_photo_id,
+    )
+    return f'<a href="{escape(href)}">{person.name}</a>'
 
 
 def _create_photo_item(
@@ -522,7 +530,7 @@ class PhotoPublicGalleryTests(TestCase):
         resp = self._detail(photo=self.p1.id)
         self.assertContains(
             resp,
-            f"{_identified_person_link_html(self.ada)}, {_identified_person_link_html(self.rivka)}",
+            f"{_identified_person_link_html(self.ada, from_item_id=self.item.id, from_photo_id=self.p1.id)}, {_identified_person_link_html(self.rivka, from_item_id=self.item.id, from_photo_id=self.p1.id)}",
         )
         self.assertNotContains(resp, "Ada Lovelace")
         self.assertNotContains(resp, "Rivka Cohen")
@@ -551,9 +559,16 @@ class PhotoPublicGalleryTests(TestCase):
 
         resp = self._detail(photo=self.p1.id)
         self.assertContains(resp, "אנשים בתמונה")
-        ada_html = _identified_person_link_html(self.ada)
-        rivka_html = _identified_person_link_html(self.rivka)
-        self.assertContains(resp, f"{ada_html}, {rivka_html}")
+        ada_html = _identified_person_link_html(
+            self.ada, from_item_id=self.item.id, from_photo_id=self.p1.id
+        )
+        rivka_on_p1 = _identified_person_link_html(
+            self.rivka, from_item_id=self.item.id, from_photo_id=self.p1.id
+        )
+        rivka_on_p2 = _identified_person_link_html(
+            self.rivka, from_item_id=self.item.id, from_photo_id=self.p2.id
+        )
+        self.assertContains(resp, f"{ada_html}, {rivka_on_p1}")
         self.assertContains(resp, person_public_page_url(self.ada.pk))
         self.assertContains(resp, person_public_page_url(self.rivka.pk))
         self.assertContains(resp, "נוכחים:")
@@ -562,7 +577,7 @@ class PhotoPublicGalleryTests(TestCase):
         identified = html[html.index("אנשים בתמונה") : html.index("נוכחים:")]
         self.assertIn("Ada", identified)
         self.assertIn(ada_html, identified)
-        self.assertIn(rivka_html, identified)
+        self.assertIn(rivka_on_p1, identified)
         self.assertNotIn("someone in the back", identified)
         identified_value = identified.split("</span>", 1)[0]
         self.assertNotIn("person", identified_value.lower())
@@ -572,10 +587,10 @@ class PhotoPublicGalleryTests(TestCase):
 
         second = self._detail(photo=self.p2.id)
         self.assertContains(second, "אנשים בתמונה")
-        self.assertContains(second, rivka_html)
+        self.assertContains(second, rivka_on_p2)
         self.assertContains(second, person_public_page_url(self.rivka.pk))
         self.assertNotContains(second, ada_html)
-        self.assertNotContains(second, f"{ada_html}, {rivka_html}")
+        self.assertNotContains(second, f"{ada_html}, {rivka_on_p1}")
         self.assertNotContains(second, "someone in the back")
 
     def test_duplicate_identified_person_names_use_distinct_hrefs(self):
@@ -583,8 +598,12 @@ class PhotoPublicGalleryTests(TestCase):
         second = Person.objects.create(name="Same Name")
         PhotoPerson.objects.create(photo_content=self.p3, person=second)
         PhotoPerson.objects.create(photo_content=self.p3, person=first)
-        first_html = _identified_person_link_html(first)
-        second_html = _identified_person_link_html(second)
+        first_html = _identified_person_link_html(
+            first, from_item_id=self.item.id, from_photo_id=self.p3.id
+        )
+        second_html = _identified_person_link_html(
+            second, from_item_id=self.item.id, from_photo_id=self.p3.id
+        )
         self.assertNotEqual(first.pk, second.pk)
         self.assertNotEqual(
             person_public_page_url(first.pk),
@@ -616,8 +635,24 @@ class PhotoPublicGalleryTests(TestCase):
                 for link in gallery.identified_people
             ],
             [
-                (first.pk, "Same Name", person_public_page_url(first.pk)),
-                (second.pk, "Same Name", person_public_page_url(second.pk)),
+                (
+                    first.pk,
+                    "Same Name",
+                    person_public_page_url(
+                        first.pk,
+                        from_item_id=self.item.id,
+                        from_photo_id=self.p3.id,
+                    ),
+                ),
+                (
+                    second.pk,
+                    "Same Name",
+                    person_public_page_url(
+                        second.pk,
+                        from_item_id=self.item.id,
+                        from_photo_id=self.p3.id,
+                    ),
+                ),
             ],
         )
 
@@ -826,7 +861,11 @@ class PhotoPublicGalleryTests(TestCase):
         self.assertEqual(gallery.identified_people[0].name, "Rivka")
         self.assertEqual(
             gallery.identified_people[0].href,
-            person_public_page_url(self.rivka.pk),
+            person_public_page_url(
+                self.rivka.pk,
+                from_item_id=self.item.id,
+                from_photo_id=self.p2.id,
+            ),
         )
         self.assertEqual(_people_sql(ctx.captured_queries), [])
         self.assertEqual(len(ctx.captured_queries), 0)

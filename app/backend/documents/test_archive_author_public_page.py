@@ -157,12 +157,16 @@ class AuthorPublicPageAuthorizedTests(TestCase):
         self.assertContains(resp, "Ada public letter")
         self.assertContains(resp, "Ada public note")
         self.assertContains(resp, "חזרה לארכיון")
+        self.assertContains(resp, "חזרה לאנשים")
         html = resp.content.decode("utf-8")
         header = html[html.index("document-detail-header") : html.index("</header>")]
+        self.assertIn("document-detail-navigation-actions", header)
         self.assertIn("btn-primary", header)
         self.assertIn("←", header)
+        self.assertLess(header.index("חזרה לארכיון"), header.index("חזרה לאנשים"))
         self.assertNotIn("הוספת מידע על הפריט", html)
         self.assertNotIn("עריכת מחבר", html)
+        self.assertNotIn("עריכת הפרטים", header)
         self.assertNotIn(
             reverse("archive-manage-author-edit", kwargs={"author_id": author.id}),
             html,
@@ -173,6 +177,55 @@ class AuthorPublicPageAuthorizedTests(TestCase):
                 reverse("archive-detail", kwargs={"item_id": first.id}),
                 reverse("archive-detail", kwargs={"item_id": second.id}),
             },
+        )
+
+    def test_staff_author_detail_shows_edit_control_with_shared_nav_buttons(self):
+        author = Author.objects.create(name="Staff Edit Author")
+        _link(_public_manual("Staff visible authored letter"), author)
+        staff = User.objects.create_user(
+            username="author-page-staff",
+            password="x",
+            is_staff=True,
+        )
+        self.client.force_login(staff)
+
+        resp = self.client.get(_author_page(author))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+        header = html[html.index("document-detail-header") : html.index("</header>")]
+        edit_href = reverse(
+            "archive-manage-author-edit", kwargs={"author_id": author.id}
+        )
+        self.assertIn("document-detail-navigation-actions", header)
+        self.assertIn("חזרה לארכיון", header)
+        self.assertIn("חזרה לאנשים", header)
+        self.assertIn("עריכת הפרטים", header)
+        self.assertIn(edit_href, header)
+        self.assertNotIn("עריכת מחבר", header)
+        self.assertNotIn("הוספת מידע על הפריט", html)
+        nav_start = header.index("document-detail-navigation-actions")
+        nav_end = header.index("</div>", nav_start)
+        nav = header[nav_start:nav_end]
+        self.assertLess(nav.index("חזרה לארכיון"), nav.index("חזרה לאנשים"))
+        self.assertLess(nav.index("חזרה לאנשים"), nav.index("עריכת הפרטים"))
+        self.assertEqual(nav.count("btn-primary"), 3)
+        self.assertNotIn("btn-secondary", nav)
+
+    def test_family_user_does_not_see_author_edit_control(self):
+        family_group, _ = Group.objects.get_or_create(name=ARCHIVE_FAMILY_GROUP_NAME)
+        family = User.objects.create_user(username="author-page-family", password="x")
+        family.groups.add(family_group)
+        author = Author.objects.create(name="Family Visible Author")
+        _link(_private_manual("Family authored letter"), author)
+        self.client.force_login(family)
+
+        resp = self.client.get(_author_page(author))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "חזרה לאנשים")
+        self.assertNotContains(resp, "עריכת הפרטים")
+        self.assertNotContains(
+            resp,
+            reverse("archive-manage-author-edit", kwargs={"author_id": author.id}),
         )
 
     def test_duplicate_names_use_distinct_id_urls(self):

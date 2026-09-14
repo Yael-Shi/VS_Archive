@@ -400,6 +400,15 @@ class ManualTextPublicDetailLayoutStyleTests(SimpleTestCase):
         css_path = settings.BASE_DIR / "public" / "static" / "public" / "app.css"
         return css_path.read_text(encoding="utf-8")
 
+    @staticmethod
+    def _global_css_rule(css: str, selector: str) -> str:
+        needle = f"\n{selector} {{"
+        start = css.find(needle)
+        if start < 0:
+            raise AssertionError(f"missing global CSS selector {selector!r}")
+        start += 1
+        return css[start : css.index("}", start)]
+
     def test_manual_text_header_actions_reuse_document_detail_column_pattern(self):
         css = self._css()
 
@@ -410,23 +419,19 @@ class ManualTextPublicDetailLayoutStyleTests(SimpleTestCase):
             css,
         )
 
-        header_start = css.index(".document-detail-header {")
-        header_rule = css[header_start : css.index("}", header_start)]
+        header_rule = self._global_css_rule(css, ".document-detail-header")
         self.assertIn("display: flex;", header_rule)
         self.assertIn("flex-wrap: wrap;", header_rule)
         self.assertIn("align-items: flex-start;", header_rule)
 
-        main_start = css.index(".document-detail-header-main {")
-        main_rule = css[main_start : css.index("}", main_start)]
+        main_rule = self._global_css_rule(css, ".document-detail-header-main")
         self.assertIn("flex: 1 1 16rem;", main_rule)
 
-        top_start = css.index(".document-detail-toolbar {")
-        top_rule = css[top_start : css.index("}", top_start)]
+        top_rule = self._global_css_rule(css, ".document-detail-toolbar")
         self.assertIn("justify-content: flex-end;", top_rule)
         self.assertIn("align-items: flex-start;", top_rule)
 
-        public_start = css.index(".document-detail-navigation-actions {")
-        public_rule = css[public_start : css.index("}", public_start)]
+        public_rule = self._global_css_rule(css, ".document-detail-navigation-actions")
         self.assertIn("flex-direction: column;", public_rule)
         self.assertIn("inline-size: max-content;", public_rule)
 
@@ -734,10 +739,6 @@ class ManualTextPublicDetailLayoutStyleTests(SimpleTestCase):
     def test_photo_and_manual_text_share_document_header_selectors(self):
         css = self._css()
         self.assertNotIn(".archive-detail-photo-header {", css)
-        header = css[
-            css.index(".document-detail-header {") : css.index(
-                "}", css.index(".document-detail-header {")
-            )
-        ]
+        header = self._global_css_rule(css, ".document-detail-header")
         self.assertIn("display: flex;", header)
         self.assertNotIn("archive-detail-manual-text", header)

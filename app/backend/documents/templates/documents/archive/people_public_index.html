@@ -46,10 +46,12 @@
       <ul class="archive-people-index-list">
         {% for row in people_rows %}
           <li class="archive-people-index-row">
-            <a class="archive-people-index-name" href="{{ row.href }}">{{ row.name }}</a>
-            <span class="archive-people-index-count muted">
-              {% if row.item_count == 1 %}1 פריט{% else %}{{ row.item_count }} פריטים{% endif %}
-            </span>
+            <a class="archive-people-index-name" href="{{ row.href }}">
+              <span class="archive-people-index-name-text">{{ row.name }}</span>
+              <span class="archive-people-index-count muted">
+                {% if row.item_count == 1 %}1 פריט{% else %}{{ row.item_count }} פריטים{% endif %}
+              </span>
+            </a>
           </li>
         {% endfor %}
       </ul>
