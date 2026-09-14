@@ -35,6 +35,7 @@ from documents.services.photo_content_management import (
     PERSON_ALIAS_MATCHES_CANONICAL_ERROR,
     PERSON_ALIAS_REQUIRED_ERROR,
     PERSON_ALIAS_TOO_LONG_ERROR,
+    PERSON_HONORIFIC_TOO_LONG_ERROR,
     PERSON_NAME_REQUIRED_ERROR,
     PERSON_NAME_TOO_LONG_ERROR,
     PhotoContentManagementError,
@@ -43,6 +44,7 @@ from documents.services.photo_content_management import (
     person_staff_picker_label,
     update_person_alias,
     update_person_biography,
+    update_person_honorific,
     update_person_name,
 )
 from documents.views import (
@@ -50,6 +52,7 @@ from documents.views import (
     PERSON_ALIAS_DELETED_MSG,
     PERSON_ALIAS_UPDATED_MSG,
     PERSON_BIOGRAPHY_UPDATED_MSG,
+    PERSON_HONORIFIC_UPDATED_MSG,
     PERSON_NAME_UPDATED_MSG,
 )
 
@@ -149,9 +152,18 @@ def _alias_delete_url(person: Person, alias: PersonAlias) -> str:
 
 
 class PersonStaffPickerLabelTests(TestCase):
-    def test_label_without_aliases_is_canonical_name_only(self):
+    def test_label_without_aliases_is_display_name_only(self):
         person = Person.objects.create(name="רחל כהן")
         self.assertEqual(person_staff_picker_label(person), "רחל כהן")
+
+    def test_label_includes_honorific_then_aliases(self):
+        person = Person.objects.create(name="חיים סעדיה", honorific='ד"ר')
+        PersonAlias.objects.create(person=person, name='ד"ר חיים סעדיה')
+        person = Person.objects.prefetch_related("aliases").get(pk=person.pk)
+        self.assertEqual(
+            person_staff_picker_label(person),
+            'חיים סעדיה, ד"ר (ד"ר חיים סעדיה)',
+        )
 
     def test_label_with_aliases_is_canonical_then_aliases(self):
         person = Person.objects.create(name="יעקב כהן")
@@ -702,6 +714,69 @@ class PersonStaffCanonicalNameTests(TestCase):
         self.assertEqual(self.alias.name, "ExistingAliasToken")
         self.assertContains(resp, "ExistingAliasToken")
         self.assertEqual(self.person.aliases.count(), 1)
+
+
+@override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")
+class PersonStaffHonorificTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="person_honorific_staff",
+            password="test-pass",
+            is_staff=True,
+        )
+        self.item = _create_photo_item(title="Honorific album")
+        self.photo = _add_photo(self.item, position=1)
+        self.person = Person.objects.create(name="HonorificNameToken")
+        self.alias = PersonAlias.objects.create(
+            person=self.person, name="HonorificAliasToken"
+        )
+        PhotoPerson.objects.create(photo_content=self.photo, person=self.person)
+        _rebuild(self.item.pk)
+        self.client.force_login(self.staff)
+        self.url = _edit_url(self.person)
+
+    def test_successful_honorific_save_trims_and_leaves_name_and_aliases(self):
+        with patch(
+            "documents.views.update_person_honorific", wraps=update_person_honorific
+        ) as mocked:
+            resp = self.client.post(
+                self.url,
+                data={"action": "update_honorific", "honorific": '  ד"ר  '},
+                follow=True,
+            )
+        mocked.assert_called_once()
+        self.assertContains(resp, PERSON_HONORIFIC_UPDATED_MSG)
+        self.person.refresh_from_db()
+        self.alias.refresh_from_db()
+        self.assertEqual(self.person.name, "HonorificNameToken")
+        self.assertEqual(self.person.honorific, 'ד"ר')
+        self.assertEqual(self.alias.name, "HonorificAliasToken")
+        self.assertEqual(_search_ids("HonorificNameToken"), [self.item.pk])
+        self.assertEqual(_search_ids('ד"ר'), [])
+
+    def test_clearing_honorific_is_allowed(self):
+        self.person.honorific = "רב"
+        self.person.save(update_fields=["honorific", "updated_at"])
+        resp = self.client.post(
+            self.url,
+            data={"action": "update_honorific", "honorific": "   "},
+            follow=True,
+        )
+        self.assertContains(resp, PERSON_HONORIFIC_UPDATED_MSG)
+        self.person.refresh_from_db()
+        self.assertEqual(self.person.honorific, "")
+        self.assertEqual(self.person.name, "HonorificNameToken")
+
+    def test_too_long_honorific_is_rejected(self):
+        resp = self.client.post(
+            self.url,
+            data={"action": "update_honorific", "honorific": "x" * 256},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, PERSON_HONORIFIC_TOO_LONG_ERROR)
+        self.person.refresh_from_db()
+        self.assertEqual(self.person.honorific, "")
+        self.assertEqual(self.person.name, "HonorificNameToken")
 
 
 @override_settings(UPLOADS_BUCKET_NAME="test-uploads-bucket")

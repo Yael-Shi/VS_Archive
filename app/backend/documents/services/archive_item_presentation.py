@@ -40,6 +40,7 @@ from documents.services.archive_advanced_search import (
 from documents.services.archive_search_index import SEARCH_VECTOR_CONFIG
 from documents.services.author_public import author_public_page_url
 from documents.services.document_date import format_document_date
+from documents.services.person_display import person_public_display_name
 from documents.services.text_presentation import (
     archive_item_displayable_text_results_prefetch,
     get_displayed_transcription_text,
@@ -726,7 +727,7 @@ def archive_public_list_active_filter_summary_context(
     )
     chips: list[dict[str, object]] = []
     person_name_by_id = {
-        getattr(choice, "pk"): str(getattr(choice, "name", getattr(choice, "pk")))
+        getattr(choice, "pk"): person_public_display_name(choice)
         for choice in person_choices
         if getattr(choice, "pk", None) is not None
     }
@@ -1115,7 +1116,7 @@ def archive_item_author_links_prefetch(*, lookup: str = "author_links") -> Prefe
     """Prefetch ordered ``ArchiveItemAuthor`` rows with ``Author`` (avoids N+1)."""
     return Prefetch(
         lookup,
-        queryset=ArchiveItemAuthor.objects.select_related("author").order_by(
+        queryset=ArchiveItemAuthor.objects.select_related("author__person").order_by(
             "position", "id"
         ),
     )
@@ -1134,7 +1135,9 @@ def _ordered_author_links(archive_item: ArchiveItem) -> list[ArchiveItemAuthor]:
             key=lambda link: (link.position, link.id),
         )
     return list(
-        archive_item.author_links.select_related("author").order_by("position", "id")
+        archive_item.author_links.select_related("author__person").order_by(
+            "position", "id"
+        )
     )
 
 
@@ -1150,6 +1153,15 @@ def public_structured_author_href(
     return author_public_page_url(author_id)
 
 
+def public_structured_author_label(author) -> str:
+    """Public chip label: Person display name when linked, else Author.name."""
+    if getattr(author, "person_id", None) is not None:
+        person = getattr(author, "person", None)
+        if person is not None:
+            return person_public_display_name(person)
+    return author.name
+
+
 def author_links_for_item(
     archive_item: ArchiveItem,
     *,
@@ -1158,13 +1170,14 @@ def author_links_for_item(
     """Ordered ``ArchiveItemAuthor`` names linking to Person or Author pages.
 
     Identity is ``Author.id``. Duplicate names stay distinct. An explicit
-    ``Author.person_id`` retargets the href to the Person page; names are
-    never used to infer that link. Does not read, split, or infer Authors
-    from ``author_name``.
+    ``Author.person_id`` retargets the href to the Person page and uses that
+    Person's public display name (name + honorific). Names are never used to
+    infer that link. Does not read, split, or infer Authors from
+    ``author_name``. Does not rename ``Author.name``.
     """
     return tuple(
         ArchiveBrowseLink(
-            name=link.author.name,
+            name=public_structured_author_label(link.author),
             href=public_structured_author_href(
                 author_id=link.author_id,
                 person_id=link.author.person_id,
@@ -1314,7 +1327,7 @@ def person_links_for_item(
     )
     return tuple(
         ArchiveBrowseLink(
-            name=person.name,
+            name=person_public_display_name(person),
             href=person_public_page_url(
                 person.id,
                 from_item_id=from_item_id,

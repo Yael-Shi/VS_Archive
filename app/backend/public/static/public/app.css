@@ -3012,13 +3012,132 @@ pre {
   gap: var(--space-3);
 }
 
+.archive-people-index-page {
+  padding-inline: 56px;
+}
+
+.archive-people-index-header {
+  position: relative;
+  display: block;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.archive-people-index-back {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: auto;
+  z-index: 1;
+}
+
+.archive-people-index-heading {
+  text-align: center;
+  height: auto;
+  min-height: 0;
+  padding-top: 16px;
+  padding-inline: 13rem;
+}
+
+.archive-people-index-heading .page-title {
+  margin: 0 0 var(--space-1);
+}
+
+.archive-people-index-lede {
+  margin: 0 auto;
+  max-width: 36rem;
+  font-size: var(--font-sm);
+  line-height: var(--line-normal);
+}
+
+.archive-people-index-heading .archive-search-results-count {
+  margin: var(--space-1) 0 0;
+}
+
+.archive-people-index-body {
+  max-width: 1140px;
+  margin-inline: auto;
+  margin-top: 38px;
+}
+
+.archive-people-index-search {
+  margin-top: 0;
+  margin-bottom: var(--space-3);
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.archive-people-index-alphabet {
+  margin: 0 0 var(--space-6);
+}
+
+.archive-people-index-alphabet-list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-1);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.archive-people-index-alphabet-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 2.25rem;
+  min-block-size: 2.25rem;
+  padding: var(--space-1);
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+}
+
+.archive-people-index-alphabet-item:hover {
+  background: var(--accent-soft);
+  text-decoration: none;
+}
+
+.archive-people-index-alphabet-item:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+.archive-people-index-alphabet-item.is-empty {
+  color: var(--muted);
+  font-weight: 500;
+  pointer-events: none;
+}
+
+.archive-people-index-columns {
+  column-count: 1;
+  column-gap: 52px;
+}
+
+.archive-people-index-letter {
+  break-inside: avoid;
+  page-break-inside: avoid;
+  margin: 0 0 var(--space-5);
+  scroll-margin-top: var(--space-4);
+}
+
+.archive-people-index-letter-title {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-heading);
+  font-size: var(--font-xl);
+  font-weight: 700;
+  line-height: var(--line-tight);
+  color: var(--accent);
+}
+
 .archive-people-index-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-3);
 }
 
 .archive-people-index-row {
@@ -3030,31 +3149,38 @@ pre {
 
 .archive-people-index-name {
   display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  align-items: flex-start;
-  gap: var(--space-1);
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: baseline;
+  gap: var(--space-2);
   box-sizing: border-box;
   width: 100%;
-  padding: var(--space-3);
+  padding-block: var(--space-2);
+  padding-inline: var(--space-1);
   color: var(--text);
   font-weight: 600;
   text-decoration: none;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-soft);
-  background: var(--card);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
 }
 
 .archive-people-index-name:hover,
 .archive-people-index-name:focus-visible {
   text-decoration: none;
-  border-color: var(--accent-muted, var(--border-strong));
-  box-shadow: var(--shadow-md);
+  background: var(--accent-soft);
+}
+
+.archive-people-index-name:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: none;
 }
 
 .archive-people-index-name-text {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 
@@ -3064,8 +3190,28 @@ pre {
 }
 
 .archive-people-index-count {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  margin-inline-start: auto;
+  max-width: 55%;
+  font-size: var(--font-xs);
   font-weight: 400;
+}
+
+.archive-people-index-chevron {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+@media (max-width: 768px) {
+  .archive-people-index-page {
+    padding-inline: var(--space-5);
+  }
+
+  .archive-people-index-heading {
+    padding-inline: 0;
+    padding-top: calc(3.25rem + 16px);
+  }
 }
 
 .archive-authors-index-list {
@@ -3532,9 +3678,8 @@ pre {
     gap: var(--space-4);
   }
 
-  .archive-people-index-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-4);
+  .archive-people-index-columns {
+    column-count: 2;
   }
 
   .archive-authors-index-list {

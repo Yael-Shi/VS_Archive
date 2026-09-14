@@ -10,6 +10,7 @@ from django.urls import reverse
 from documents.models import (
     ArchiveItem,
     ArchiveItemAuthor,
+    ArchiveItemPerson,
     Author,
     Document,
     Person,
@@ -19,6 +20,7 @@ from documents.services.archive_item_presentation import (
     ArchiveBrowseLink,
     author_presentation_for_item,
     build_archive_browse_card,
+    person_links_for_item,
     person_public_page_url,
 )
 from documents.services.archive_search_index import sync_archive_item_search_index
@@ -312,7 +314,7 @@ class PublicArchiveItemAuthorPresentationTests(TestCase):
         )
         self.assertEqual(
             [link.name for link in links],
-            ["Linked Card Author", "Unlinked Card Author"],
+            ["Canonical Linked Person", "Unlinked Card Author"],
         )
 
         detail = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
@@ -321,3 +323,30 @@ class PublicArchiveItemAuthorPresentationTests(TestCase):
         listing = self.client.get(reverse("archive-list"))
         self.assertContains(listing, person_public_page_url(person.id))
         self.assertContains(listing, author_public_page_url(unlinked.id))
+
+    def test_linked_author_label_uses_person_display_name_without_renaming_author(self):
+        person = Person.objects.create(name="חיים סעדיה", honorific='ד"ר')
+        linked = Author.objects.create(name='ד"ר חיים סעדיה', person=person)
+        item = _public_manual("Honorific author chip")
+        _link(item, linked, position=0)
+
+        links, fallback = author_presentation_for_item(item)
+        self.assertEqual(fallback, "")
+        self.assertEqual([link.name for link in links], ['חיים סעדיה, ד"ר'])
+        self.assertEqual(links[0].href, person_public_page_url(person.id))
+        linked.refresh_from_db()
+        self.assertEqual(linked.name, 'ד"ר חיים סעדיה')
+        self.assertEqual(linked.person_id, person.id)
+
+        detail = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
+        self.assertContains(detail, 'חיים סעדיה, ד"ר', html=True)
+        self.assertContains(detail, person_public_page_url(person.id))
+        self.assertNotContains(detail, linked.name, html=True)
+
+    def test_item_person_chips_use_display_name(self):
+        person = Person.objects.create(name="ונטורה", honorific="רב")
+        item = _public_manual("Person chip letter")
+        ArchiveItemPerson.objects.create(archive_item=item, person=person)
+        links = person_links_for_item(item)
+        self.assertEqual([link.name for link in links], ["ונטורה, רב"])
+        self.assertEqual(links[0].href, person_public_page_url(person.id))

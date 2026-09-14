@@ -60,10 +60,17 @@ class PersonModelTests(TestCase):
     def test_person_can_be_created(self):
         person = Person.objects.create(name="רחל כהן")
         self.assertEqual(person.name, "רחל כהן")
+        self.assertEqual(person.honorific, "")
         self.assertEqual(person.biography, "")
         self.assertIsNotNone(person.created_at)
         self.assertIsNotNone(person.updated_at)
         self.assertEqual(str(person), "רחל כהן")
+
+    def test_honorific_defaults_to_empty_string(self):
+        person = Person.objects.create(name="Ada Lovelace")
+        person.refresh_from_db()
+        self.assertEqual(person.honorific, "")
+        self.assertIsNotNone(person.honorific)
 
     def test_biography_defaults_to_empty_string(self):
         person = Person.objects.create(name="Ada Lovelace")
@@ -101,6 +108,7 @@ class PersonModelTests(TestCase):
     def test_same_display_name_may_identify_distinct_people(self):
         first = Person.objects.create(name="משה כהן")
         second = Person.objects.create(name="משה כהן")
+        self.assertFalse(Person._meta.get_field("name").unique)
         self.assertNotEqual(first.pk, second.pk)
         self.assertEqual(Person.objects.filter(name="משה כהן").count(), 2)
 
@@ -304,3 +312,31 @@ class PersonBiographyMigrationTests(TestCase):
         self.assertTrue(add_op.field.blank)
         self.assertEqual(add_op.field.default, "")
         self.assertFalse(add_op.field.null)
+
+
+class PersonHonorificMigrationTests(TestCase):
+    def test_migration_is_additive_charfield_without_data_cleanup(self):
+        import importlib
+
+        from django.db.migrations.operations.special import RunPython
+        from django.db.models import CharField
+
+        migration_module = importlib.import_module(
+            "documents.migrations.0067_person_honorific"
+        )
+        Migration = migration_module.Migration
+        self.assertEqual(
+            Migration.dependencies,
+            [("documents", "0066_documentsourcefile_include_in_ocr")],
+        )
+        self.assertEqual(len(Migration.operations), 1)
+        add_op = Migration.operations[0]
+        self.assertEqual(add_op.__class__.__name__, "AddField")
+        self.assertEqual(add_op.name, "honorific")
+        self.assertEqual(add_op.model_name, "person")
+        self.assertIsInstance(add_op.field, CharField)
+        self.assertTrue(add_op.field.blank)
+        self.assertEqual(add_op.field.default, "")
+        self.assertEqual(add_op.field.max_length, 255)
+        self.assertFalse(add_op.field.null)
+        self.assertFalse(any(isinstance(op, RunPython) for op in Migration.operations))

@@ -21,6 +21,12 @@ from documents.models import (
     PhotoContent,
     PhotoPerson,
 )
+from documents.services.person_display import person_public_display_name
+from documents.services.public_holdings import (
+    EMPTY_PUBLIC_HOLDINGS,
+    PublicHoldingsCounts,
+    holdings_from_item_type_pairs,
+)
 from documents.services.archive_item_access import archive_browse_queryset_for_user
 from documents.services.author_public import author_public_membership_q
 from documents.services.archive_item_presentation import (
@@ -202,17 +208,17 @@ def public_person_archive_items_queryset(user, person_id: int) -> QuerySet[Archi
     )
 
 
-def public_people_item_counts_for_person_ids(
+def public_people_holdings_counts_for_person_ids(
     user,
     person_ids: Iterable[int],
-) -> dict[int, int]:
-    """DISTINCT authorized+renderable ArchiveItem counts for a page of Person ids.
+) -> dict[int, PublicHoldingsCounts]:
+    """DISTINCT authorized+renderable ArchiveItem holdings for a page of Person ids.
 
     UNION DISTINCT of ``(person_id, archive_item_id)`` from ArchiveItemPerson,
     renderable PhotoPerson, and ArchiveItemAuthor via explicit
     ``Author.person_id``. Applied in Python over restricted pair queries so
     empty sides cannot drop the others. Multiple photos, dual AIP+PP, and
-    authored overlap count once.
+    authored overlap count once. Item type is taken from ``ArchiveItem.item_type``.
     """
     page_ids = [int(person_id) for person_id in person_ids]
     if not page_ids:
@@ -223,31 +229,56 @@ def public_people_item_counts_for_person_ids(
     aip_pairs = ArchiveItemPerson.objects.filter(
         person_id__in=page_ids,
         archive_item_id__in=authorized_pks,
-    ).values_list("person_id", "archive_item_id")
+    ).values_list("person_id", "archive_item_id", "archive_item__item_type")
     pp_pairs = PhotoPerson.objects.filter(
         person_id__in=page_ids,
         photo_content__in=renderable_photos,
         photo_content__archive_item_id__in=authorized_pks,
-    ).values_list("person_id", "photo_content__archive_item_id")
-    distinct_pairs = {
-        (int(person_id), int(item_id)) for person_id, item_id in aip_pairs
-    }
-    distinct_pairs.update(
-        (int(person_id), int(item_id)) for person_id, item_id in pp_pairs
+    ).values_list(
+        "person_id",
+        "photo_content__archive_item_id",
+        "photo_content__archive_item__item_type",
     )
     aia_pairs = ArchiveItemAuthor.objects.filter(
         author__person_id__in=page_ids,
         archive_item_id__in=authorized_pks,
-    ).values_list("author__person_id", "archive_item_id")
-    distinct_pairs.update(
-        (int(person_id), int(item_id))
-        for person_id, item_id in aia_pairs
+    ).values_list(
+        "author__person_id",
+        "archive_item_id",
+        "archive_item__item_type",
+    )
+    typed_pairs: list[tuple[int, int, str]] = []
+    typed_pairs.extend(
+        (int(person_id), int(item_id), str(item_type))
+        for person_id, item_id, item_type in aip_pairs
+    )
+    typed_pairs.extend(
+        (int(person_id), int(item_id), str(item_type))
+        for person_id, item_id, item_type in pp_pairs
+    )
+    typed_pairs.extend(
+        (int(person_id), int(item_id), str(item_type))
+        for person_id, item_id, item_type in aia_pairs
         if person_id is not None
     )
-    counts: dict[int, int] = {}
-    for person_id, _item_id in distinct_pairs:
-        counts[person_id] = counts.get(person_id, 0) + 1
-    return counts
+    holdings = holdings_from_item_type_pairs(typed_pairs)
+    return {
+        person_id: holdings.get(person_id, EMPTY_PUBLIC_HOLDINGS)
+        for person_id in page_ids
+    }
+
+
+def public_people_item_counts_for_person_ids(
+    user,
+    person_ids: Iterable[int],
+) -> dict[int, int]:
+    """DISTINCT authorized+renderable ArchiveItem totals for a page of Person ids."""
+    return {
+        person_id: holdings.total
+        for person_id, holdings in public_people_holdings_counts_for_person_ids(
+            user, person_ids
+        ).items()
+    }
 
 
 def build_public_people_index_rows(
@@ -260,7 +291,7 @@ def build_public_people_index_rows(
     )
     return [
         PublicPersonIndexRow(
-            name=person.name,
+            name=person_public_display_name(person),
             href=person_public_page_url(person.pk),
             item_count=counts.get(person.pk, 0),
         )

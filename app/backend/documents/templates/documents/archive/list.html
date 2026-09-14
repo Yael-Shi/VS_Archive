@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load archive_labels %}
 {% block title %}VSArchive - ארכיון{% endblock %}
 
 {% block content %}
@@ -234,7 +235,7 @@
                     <option
                       value="{{ person.id }}"
                       {% if person.id in advanced_filter_person_ids %}selected{% endif %}
-                    >{{ person.name }}</option>
+                    >{{ person|person_display_name }}</option>
                   {% endfor %}
                 </select>
                 <div class="field-hint" data-archive-choice-filter-empty hidden>

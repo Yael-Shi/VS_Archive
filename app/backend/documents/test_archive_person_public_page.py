@@ -1118,14 +1118,30 @@ class PersonPublicPageLinkedAuthorTests(TestCase):
         self.assertIn("page-title", h1)
         self.assertIn("document-detail-title", h1)
         self.assertIn("Authored Only Person", h1)
-        self.assertContains(resp, "Bibliographic Name")
+        self.assertContains(resp, "Authored Only Person")
         person_href = person_public_page_url(person.id)
         self.assertContains(
             resp,
-            f'<a href="{person_href}">Bibliographic Name</a>',
+            f'<a href="{person_href}">Authored Only Person</a>',
             html=True,
         )
+        self.assertNotContains(resp, "Bibliographic Name")
         self.assertNotContains(resp, author_public_page_url(author.id))
+
+    def test_h1_and_title_use_honorific_display_name(self):
+        person = Person.objects.create(name="חיים סעדיה", honorific='ד"ר')
+        _link(_public_manual("Honorific letter"), person)
+        resp = self.client.get(_person_page(person))
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode("utf-8")
+        h1 = unescape(html[html.index("<h1") : html.index("</h1>") + len("</h1>")])
+        title = unescape(
+            html[html.index("<title") : html.index("</title>") + len("</title>")]
+        )
+        self.assertIn('חיים סעדיה, ד"ר', h1)
+        self.assertIn('חיים סעדיה, ד"ר', title)
+        self.assertNotIn('ד"ר חיים סעדיה', h1)
+        self.assertContains(resp, 'חיים סעדיה, ד"ר', html=True)
 
     def test_aip_photoperson_and_authored_overlap_is_deduped_with_photo_deeplink(self):
         person = Person.objects.create(name="Overlap Linked Person")

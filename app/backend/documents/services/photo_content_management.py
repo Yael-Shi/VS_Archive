@@ -11,6 +11,7 @@ from django.db.models import Count, Max, Prefetch
 
 from documents.models import ArchiveItem, Person, PersonAlias, PhotoContent
 from documents.s3 import create_presigned_get
+from documents.services.person_display import person_public_display_name
 from documents.services.person_search import person_canonical_or_alias_icontains_q
 from documents.services.photo_s3_cleanup import schedule_photo_s3_cleanup_after_commit
 
@@ -23,6 +24,7 @@ PHOTO_POSITION_CONFLICT_ERROR = "מיקום התמונה כבר תפוס. נסו
 PERSON_NOT_FOUND_ERROR = "אדם מזוהה לא נמצא."
 PERSON_NAME_REQUIRED_ERROR = "שם האדם המזוהה נדרש."
 PERSON_NAME_TOO_LONG_ERROR = "שם האדם המזוהה חייב להיות עד 255 תווים."
+PERSON_HONORIFIC_TOO_LONG_ERROR = "התואר חייב להיות עד 255 תווים."
 PERSON_NAMES_COMMAS_ONLY_ERROR = (
     "יש להזין לפחות שם אדם אחד. לא ניתן לשמור קלט שמכיל רק פסיקים או רווחים."
 )
@@ -96,17 +98,18 @@ def staff_person_index_queryset(*, search_query: str = ""):
 
 
 def person_staff_picker_label(person: Person) -> str:
-    """Canonical name, plus aliases in ``(name, id)`` order when present.
+    """Display name (name + honorific), plus aliases in ``(name, id)`` order.
 
     Does not include Person ids. Empty/whitespace-only alias names are omitted.
     Callers must prefetch ``aliases`` when rendering many people.
     """
+    display_name = person_public_display_name(person)
     alias_names = [
         alias.name for alias in person.aliases.all() if (alias.name or "").strip()
     ]
     if not alias_names:
-        return person.name
-    return f"{person.name} ({', '.join(alias_names)})"
+        return display_name
+    return f"{display_name} ({', '.join(alias_names)})"
 
 
 def build_staff_person_choices(
@@ -344,6 +347,24 @@ def update_person_biography(person: Person, *, biography: str | None) -> Person:
         return person
     person.biography = normalized
     person.save(update_fields=["biography", "updated_at"])
+    return person
+
+
+@transaction.atomic
+def update_person_honorific(person: Person, *, honorific: str | None) -> Person:
+    """Set or clear a Person's optional public honorific/title.
+
+    Empty is valid and clears the field. Does not rewrite ``Person.name`` or
+    aliases, does not infer titles from the name, and does not refresh search
+    indexes (honorific is not an independent search field).
+    """
+    normalized = "" if honorific is None else str(honorific).strip()
+    if len(normalized) > 255:
+        raise PhotoContentManagementError(PERSON_HONORIFIC_TOO_LONG_ERROR)
+    if person.honorific == normalized:
+        return person
+    person.honorific = normalized
+    person.save(update_fields=["honorific", "updated_at"])
     return person
 
 
@@ -636,7 +657,9 @@ def build_staff_photo_manage_rows(
                 ),
                 move_up_ids=move_up_ids,
                 move_down_ids=move_down_ids,
-                identified_people_summary=", ".join(person.name for person in people),
+                identified_people_summary=", ".join(
+                    person_public_display_name(person) for person in people
+                ),
             )
         )
     return rows

@@ -1,5 +1,30 @@
 # VS-Archive Decision Log
 
+## Public People index A–Z layout
+
+**Decision / implemented:** `/archive/people/` presents the current page of
+unified Person-backed and Author-only rows as a dense Hebrew A–Z index, not
+as per-person cards.
+
+**Current behavior:**
+- Grouping and section order use the raw identity name (`Person.name` /
+  `Author.name` / `sort_name`). Honorific does not affect grouping, order, or
+  search.
+- Hebrew letters א–ת (finals mapped to regular forms) are section keys.
+  Non-Hebrew letters use the Latin/uppercase first letter; other first
+  characters use an **אחר** bucket.
+- A jump row lists all 22 Hebrew letters; letters absent on this page are
+  non-link placeholders. Grouping is the current paginated page only.
+- Desktop/tablet: two CSS columns (`column-count`) so letter sections stack
+  without equal row heights. Mobile: one column.
+- Each identity remains one full-row link to the existing Person or Author
+  URL. Holdings summary copy is unchanged.
+
+**Unchanged:** directory membership, DISTINCT holdings, query batching,
+pagination size, empty states, linked-Author absorption.
+
+**Tests:** `documents/test_archive_people_public_index.py`.
+
 ## Bounded Hebrew printed RECITATION crop recovery
 
 **Decision / implemented:** Checkpoint-backed Hebrew printed Gemini OCR gains a
@@ -54,6 +79,46 @@ permanent PR A failures.
 cost-aware fallback, French 3.6, Transkribus routing, `READY`/`PARTIAL`
 rollup semantics, and full-page behavior when the primary or 3.6 fallback
 succeeds without exhausting `RECITATION`.
+
+## Person honorific + linked Author public labels + People-directory type holdings
+
+**Decision / implemented:** `Person.name` is the actual person name only.
+Optional `Person.honorific` is a separate blank `CharField(max_length=255)`.
+Public display is `name` or `name, honorific` via one shared helper
+(`documents/services/person_display.py`). Honorifics are **not** inferred or
+stripped from `Person.name` on save. Existing rows stay unchanged until a
+separately approved cleanup. `PersonAlias` remains lookup/search-only.
+
+**Author policy (unchanged storage):** `Author.name` stays the bibliographic
+identity. Structured public Author chips/links: if `Author.person` is set,
+the **label** is the linked Person display name and the **href** is the
+Person page; unlinked Authors still use `Author.name` and the Author page.
+Staff Author editing/pickers keep `Author.name`. No Author rename, merge,
+or `ArchiveItem.author_name` compatibility change in this work.
+
+**People directory `/archive/people/`:** Person-backed rows show the Person
+display name. Ordering remains raw `Person.name` / `Author.name`, then kind,
+then id — not honorific and not the holdings string. The row UI replaces a
+generic “N פריטים” with a compact per-`ArchiveItem.item_type` DISTINCT count
+summary (MANUAL_TEXT / OCR_DOCUMENT / PHOTO / VIDEO; Hebrew singular/plural;
+zeros omitted; joined with ` · `). AIP ∪ PhotoPerson ∪ linked-Author AIA
+still union-dedupe ArchiveItem ids before counting. Author-only rows use the
+same type summary over public AIA. Internal `item_count` totals remain.
+Querying stays page-bounded pair queries plus Python dedupe (no per-row N+1).
+
+**Deferred (explicit):** no production-data honorific cleanup; no Person merge
+in this work; no linking of the known חיים סעדיה Author; no honorific-only
+search field; no automatic frozen-Person normalization.
+
+**Tests:** `documents/test_person.py`, `documents/test_person_honorific.py`,
+`documents/test_person_staff_ui.py`, `documents/test_archive_people_public_index.py`,
+`documents/test_archive_person_public_page.py`,
+`documents/test_archive_item_author_public_display.py`,
+`documents/test_photo_public_gallery.py`,
+`documents/test_archive_advanced_search_person.py`,
+`documents/test_archive_advanced_search_author.py`,
+`documents/test_archive_search_archive_item_person.py`,
+`documents/test_author_person_link.py`.
 
 ## Bounded RECITATION model fallback for Hebrew printed OCR
 

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from functools import wraps
+from pathlib import Path
 
 import pytest
 
@@ -71,6 +72,22 @@ def _install_transaction_testcase_tag_pk_guard() -> None:
     setattr(TransactionTestCase, "_reset_sequences", staticmethod(_reset_sequences))
 
 
+def _ensure_empty_static_root_exists() -> None:
+    """Create ``STATIC_ROOT`` so WhiteNoise does not warn on every test client.
+
+    Production still requires ``collectstatic`` (Dockerfile). Tests do not commit
+    generated files; an empty local directory is enough to skip WhiteNoise's
+    missing-root ``UserWarning`` while ``test_static_files`` still runs
+    ``collectstatic`` when it needs real assets.
+    """
+    from django.conf import settings
+
+    static_root = getattr(settings, "STATIC_ROOT", None)
+    if not static_root:
+        return
+    Path(static_root).mkdir(parents=True, exist_ok=True)
+
+
 def pytest_configure() -> None:
     from django.conf import settings
     from django.core.exceptions import AppRegistryNotReady, ImproperlyConfigured
@@ -78,6 +95,7 @@ def pytest_configure() -> None:
     if not settings.configured:
         return
     try:
+        _ensure_empty_static_root_exists()
         _install_transaction_testcase_tag_pk_guard()
     except (AppRegistryNotReady, ImproperlyConfigured):
         return

@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% load archive_labels %}
-{% block title %}VSArchive - {{ person.name }}{% endblock %}
+{% block title %}VSArchive - {{ person|person_display_name }}{% endblock %}
 
 {% block content %}
   <div class="card page-header archive-person-detail-page" id="archive-top">
     <header class="document-detail-header">
       <div class="document-detail-header-main">
-        <h1 class="page-title document-detail-title">{{ person.name }}</h1>
+        <h1 class="page-title document-detail-title">{{ person|person_display_name }}</h1>
         {% with biography=person.biography|meaningful_archive_metadata %}
           {% if biography %}
             <div class="archive-detail-meta-block archive-detail-meta-block--person-biography">

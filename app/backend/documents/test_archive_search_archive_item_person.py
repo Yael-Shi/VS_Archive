@@ -180,6 +180,21 @@ class ArchiveItemPersonSearchBuilderTests(TestCase):
             ],
         )
 
+    def test_honorific_is_not_an_independent_search_segment(self):
+        item = create_manual_text_archive_item(
+            title="Honorific search item",
+            body="body",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        person = Person.objects.create(
+            name="HonorificIndexPerson",
+            honorific="UniqueHonorificToken",
+        )
+        ArchiveItemPerson.objects.create(archive_item=item, person=person)
+        content = build_archive_item_search_content(_load_item(item.pk))
+        self.assertIn("HonorificIndexPerson", content.metadata_text)
+        self.assertNotIn("UniqueHonorificToken", content.metadata_text)
+
     def test_tag_and_archive_item_person_same_name_is_one_segment(self):
         item = create_manual_text_archive_item(
             title="Shared name",
