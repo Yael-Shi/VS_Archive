@@ -367,6 +367,43 @@ class GeminiPageCheckpointIdentityTests(TestCase):
             english.config_fingerprint,
         )
 
+    def test_hebrew_printed_mixed_script_policy_changes_config_identity(self):
+        pages = _pages(b"hebrew printed page")
+        baseline = _identity(
+            pages,
+            language_hint=Document.Language.HEBREW,
+            text_input_type=Document.TextInputType.PRINTED,
+            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+        )
+        with patch(
+            "documents.services.gemini_page_checkpoints."
+            "hebrew_printed_mixed_script_region_fallback_policy",
+            return_value="",
+        ):
+            without_mixed_script = _identity(
+                pages,
+                language_hint=Document.Language.HEBREW,
+                text_input_type=Document.TextInputType.PRINTED,
+                prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+            )
+        english = _identity(pages)
+        self.assertEqual(
+            baseline.prompt_contract_version,
+            GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION,
+        )
+        self.assertNotEqual(
+            baseline.config_fingerprint,
+            without_mixed_script.config_fingerprint,
+        )
+        self.assertNotEqual(
+            baseline.identity_fingerprint,
+            without_mixed_script.identity_fingerprint,
+        )
+        self.assertNotEqual(
+            baseline.config_fingerprint,
+            english.config_fingerprint,
+        )
+
     def test_identity_requires_contiguous_one_based_pages(self):
         pages = [
             PageImage(

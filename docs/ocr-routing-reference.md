@@ -102,7 +102,16 @@ overlapping horizontal crops with the same candidate order (one call per crop
 per candidate) and assemble a single page checkpoint. Crop recovery does not
 run for `SAFETY` or other permanent classifications, is not used on English
 handwriting, and is not used on legacy adapter calls without document identity.
-French handwriting uses one direct full-page `gemini-3.6-flash` candidate. Hebrew
+If a crop still ends in `RECITATION` after a sibling crop succeeded as
+Hebrew-dominant text, a bounded mixed-script fallback may OCR one
+layout-detected structural candidate through the existing English printed
+path (`gemini-2.5-flash`, one call) when that failed crop has exactly one
+substantial content span. Pillow does not classify script; Latin acceptance
+comes only from that OCR output plus script dominance. Zero spans skip the
+fallback. Two or more spans keep the original `RECITATION` failure without a
+mixed-script failure code. Incidental Latin in the Hebrew crop text, a
+non-Latin-dominant probe, or a failed required region fail closed without
+persisting partial crop text. French handwriting uses one direct full-page `gemini-3.6-flash` candidate. Hebrew
 general handwriting uses one 4096-token `gemini-2.5-flash` call first; success
 ends processing, while `MAX_TOKENS` or `RECITATION` advances to
 `gemini-3.6-flash` with at most two calls left in the shared three-call budget.
@@ -146,6 +155,12 @@ configuration identity reuses that success instead of restarting it.
   full-page success still records the concrete model id. Document-level
   `gemini-mixed:` applies when page-level engine/provenance values differ.
   Document-level assembly behavior itself is unchanged.
+- A Hebrew printed page that also used mixed-script region fallback records
+  `HEBREW_PRINTED_MIXED_SCRIPT_REGION_FALLBACK` and page-level
+  `gemini-regions:<fingerprint>` hashing ordered region
+  script/model/source/`region_box` provenance. The Latin region's box is the
+  structural candidate rectangle; the reused Hebrew crop records a null box.
+  Crop-only successes keep `gemini-crop:`.
 - French handwritten successes record `gemini-3.6-flash` directly.
 - Hebrew general handwritten pages record whichever model succeeded:
   `gemini-2.5-flash` or fallback `gemini-3.6-flash`.

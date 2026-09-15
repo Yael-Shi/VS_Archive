@@ -104,7 +104,9 @@ OCR route** — including PR C Hebrew printed, which stays on
 `gemini-hebrew-printed-prompt-v2`; PR D adds a new config-identity boundary on
 top of that route-specific prompt version. Hebrew printed crop recovery later
 adds `recitation_crop_recovery_policy` only on that route and does not bump
-`gemini-ocr-page-retry-v2` or `max_provider_calls_per_page`. Source, route, prompt, page,
+`gemini-ocr-page-retry-v2` or `max_provider_calls_per_page`. Mixed-script
+region fallback later adds `mixed_script_region_fallback_policy` the same way.
+Source, route, prompt, page,
 fencing, lease, persistence, and assembly semantics are unchanged. No
 page-level `DocumentTextResult` rows are created.
 
