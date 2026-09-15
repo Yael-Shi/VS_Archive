@@ -172,3 +172,155 @@ curl -sS -X POST "https://generativelanguage.googleapis.com/v1beta/interactions"
 - [Gemini Interactions API](https://ai.google.dev/api/interactions-api)
 - [Antigravity Agent](https://ai.google.dev/gemini-api/docs/antigravity-agent)
 - In-repo OCR client: `app/backend/documents/services/gemini_engine.py`
+
+## SDK v1 diagnostic preflight (google-genai ≥ 2.3)
+
+Isolated script: `scripts/dev/gemini_interactions_sdk_preflight.py`.
+
+Purpose: empirically record how the **Python SDK** exposes Interactions **v1** unary
+`store=false` responses — especially `incomplete`, usage attributes, and inline
+image request shape. Output is **diagnostic JSON**: types, status, documented
+`code`/`reason`/`type`/`finish_reason`/`stop_reason` fields, usage numbers,
+present/length for `output_text`, public attribute names, Pydantic
+`model_fields` / `model_dump` keys, and nested object types/keys. It does not
+print output-text previews, prompts, source, image bytes, or API keys directly. For
+Python API exceptions, it may print the provider-supplied `body.error.code` and
+`body.error.message` fields as diagnostic metadata; provider error text is free-form
+and should be treated accordingly.
+
+Returned Interactions include `deep_structure` for the Interaction and each
+step. That exists to find a typed incomplete/reason discriminator that shallow
+status/usage fields might miss.
+
+This is **not** production OCR. It does **not** import `gemini_engine`, change
+routing, checkpoints, prompts, models, or `app/backend` dependencies.
+
+### Why a separate environment
+
+`app/backend/pyproject.toml` still pins `google-genai (>=1.63.0,<2.0.0)`
+(lock: **1.63.0**). Official Interactions Python support starts at
+[`google-genai` 2.3.0](https://ai.google.dev/gemini-api/docs/interactions-overview).
+`Client.interactions.create` is not available on 1.63.0.
+
+The script accepts any installed `google-genai>=2.3.0` and always reports the
+**exact installed version** in JSON (`sdk_version`).
+
+**Do not bump `pyproject.toml` / `poetry.lock` for this spike.** Use a throwaway
+venv pinned to the current PyPI 2.x release
+[`google-genai==2.23.0`](https://pypi.org/project/google-genai/2.23.0/)
+(released 2026-09-10; no documented Interactions v1 incompatibility vs 2.3+):
+
+```bash
+python3 -m venv /tmp/vs-archive-genai23
+/tmp/vs-archive-genai23/bin/pip install 'google-genai==2.23.0' python-dotenv
+```
+
+### What it calls
+
+- `genai.Client(api_key=..., http_options={"api_version": "v1"})`
+- `client.interactions.create(..., store=False)` (non-streaming)
+- Diagnostic model default: `gemini-2.5-flash-lite` (not a production route change)
+- Inline image: `{"type": "image", "data": "<base64>", "mime_type": "..."}` with
+  `resolution` unset
+
+### Cases
+
+| `--case` | What it sends | What to look for in JSON |
+|---|---|---|
+| `success` | Short text, no token cap | `delivery`, `status`, `output_text` present/length, `usage`, `deep_structure` |
+| `incomplete` | Long prompt, `max_output_tokens=1` | `status=incomplete` vs exception; `deep_structure` on Interaction and steps |
+| `ocr-shape` | Spike-only caption + repo fixture image | Inline image request form; success/error shape |
+| `negative-control` | Harmless text only (alias: `blocked-probe`) | Negative control only. See below. |
+| `recitation-probe` | Caller-supplied `--image`, `--prompt-file`, `--model`, optional generation-config flags | Structural delivery; `generation_config_keys` / `generation_config_values`. **Not** in default `all`. |
+| `all` (default) | Built-in four (not `recitation-probe`) | Combined report |
+
+**`negative-control` is not a generation-blocked test.** It is a benign
+negative control. It never attempts to force recitation, safety, or other
+documented generation-blocked codes. A successful response (or any
+NOT-OBSERVED block) is **not evidence** of how those errors are delivered.
+
+### Deep incomplete inspection
+
+The `incomplete` case still uses a tiny `max_output_tokens` cap. Diagnostics now
+walk the Interaction and every returned step for:
+
+- Python type/module
+- public field names
+- `model_fields` / `model_dump` keys
+- enum/scalar values only for `type`, `status`, `code`, `reason`,
+  `finish_reason`, `stop_reason`
+- numeric usage/token fields
+- nested object types and keys
+
+This is how to see whether `incomplete` carries a hidden/typed reason the
+shallow `status` field does not show.
+
+### Generic `recitation-probe`
+
+Diagnostic only. **No document-specific logic**: no hardcoded document ids,
+page numbers, coordinates, or production IDs. You must pass an image path,
+a prompt file, and a model. There is no production-document default image.
+
+```bash
+/tmp/vs-archive-genai23/bin/python scripts/dev/gemini_interactions_sdk_preflight.py \
+  --env-file app/backend/.env.local \
+  --case recitation-probe \
+  --image /path/to/image.png \
+  --prompt-file /path/to/prompt.txt \
+  --model gemini-2.5-flash \
+  --temperature 0.0 \
+  --top-p 0.95 \
+  --top-k 40 \
+  --max-output-tokens 4096
+```
+
+Supply only generation-config fields you intend to send. Each flag is included
+in `generation_config` **only if passed**. Do not invent equivalents: there is
+no `thinking_budget` flag, and `thinking-level` is **not** mapped from
+production `thinking_budget=0`. If Interactions v1 / the SDK rejects a supplied
+field (for example `top_k`), that rejection is captured structurally; the spike
+does not drop it.
+
+Prefer documented Interactions `generation_config` fields
+([REST v1](https://ai.google.dev/api/interactions-api-v1),
+[text generation](https://ai.google.dev/gemini-api/docs/text-generation)).
+`top_k` is included so a production-shaped request can be compared; it may not
+be a documented Interactions v1 sampling field.
+
+The prompt file is sent as the text part and is never printed. Media
+`resolution` is left unset. Same Interactions v1 / `store=False` / non-streaming
+client as the other cases. JSON reports `generation_config_keys` and
+`generation_config_values` (caller-supplied scalars only).
+
+### Commands (do not run until explicitly asked)
+
+From repo root, after the temporary venv exists:
+
+```bash
+/tmp/vs-archive-genai23/bin/python scripts/dev/gemini_interactions_sdk_preflight.py \
+  --env-file app/backend/.env.local
+```
+
+One case:
+
+```bash
+/tmp/vs-archive-genai23/bin/python scripts/dev/gemini_interactions_sdk_preflight.py \
+  --env-file app/backend/.env.local \
+  --case incomplete
+```
+
+OCR-shape against the tracked fixture:
+
+```bash
+/tmp/vs-archive-genai23/bin/python scripts/dev/gemini_interactions_sdk_preflight.py \
+  --env-file app/backend/.env.local \
+  --case ocr-shape \
+  --image scripts/dev/fixtures/printed_arabic_smoke.png
+```
+
+The current Poetry env is expected to **exit 2** with `spike_error_kind` /
+`google_genai_below_2_3` (and still reports `sdk_version`):
+
+```bash
+cd app/backend && poetry run python ../../scripts/dev/gemini_interactions_sdk_preflight.py
+```
