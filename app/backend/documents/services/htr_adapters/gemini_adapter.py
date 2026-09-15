@@ -41,12 +41,12 @@ from documents.services.gemini_hebrew_printed_mixed_script import (
     MixedScriptRegionBox,
     MixedScriptRegionProvenance,
     REVIEW_REASON_HEBREW_PRINTED_MIXED_SCRIPT_REGION_FALLBACK,
+    ScriptDominance,
+    evaluate_script_dominance,
     hebrew_printed_mixed_script_region_fallback_policy,
     hebrew_text_is_reusable_for_mixed_script,
-    latin_text_is_acceptably_dominant,
     mixed_script_assembly_engine_name,
     plan_structural_candidate_region,
-    script_dominance,
 )
 from documents.services.gemini_page_checkpoints import (
     GeminiPageClaimAction,
@@ -792,13 +792,40 @@ class GeminiAdapter:
             return None, latin_region_calls_used + 1, exc, None
 
         latin_region_calls_used += 1
-        if latin_text_is_acceptably_dominant(latin_result.text):
+        evaluation = evaluate_script_dominance(latin_result.text)
+        logger.warning(
+            "Hebrew printed mixed-script Latin OCR dominance evaluated: "
+            "crop_index=%s dominance=%s latin_letters=%s hebrew_letters=%s "
+            "identified_letters=%s latin_ratio=%s hebrew_ratio=%s "
+            "technical_token_letters_excluded=%s",
+            crop_index,
+            evaluation.dominance.value,
+            evaluation.latin_letters,
+            evaluation.hebrew_letters,
+            evaluation.identified_letters,
+            evaluation.latin_ratio,
+            evaluation.hebrew_ratio,
+            evaluation.technical_token_letters_excluded,
+            extra={
+                "crop_index": crop_index,
+                "dominance": evaluation.dominance.value,
+                "latin_letters": evaluation.latin_letters,
+                "hebrew_letters": evaluation.hebrew_letters,
+                "identified_letters": evaluation.identified_letters,
+                "latin_ratio": evaluation.latin_ratio,
+                "hebrew_ratio": evaluation.hebrew_ratio,
+                "technical_token_letters_excluded": (
+                    evaluation.technical_token_letters_excluded
+                ),
+            },
+        )
+        if evaluation.dominance == ScriptDominance.LATIN:
             return latin_result, latin_region_calls_used, None, plan.box
         logger.warning(
             "Hebrew printed mixed-script fallback fail-closed; Latin OCR was "
             "not Latin-dominant: crop_index=%s dominance=%s",
             crop_index,
-            script_dominance(latin_result.text).value,
+            evaluation.dominance.value,
         )
         # Only after mixed-script preconditions and a Latin printed probe.
         return (

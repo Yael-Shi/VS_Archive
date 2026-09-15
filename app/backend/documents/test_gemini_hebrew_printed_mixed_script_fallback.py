@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import uuid
 from unittest.mock import patch
 
@@ -24,6 +25,7 @@ from documents.services.gemini_hebrew_printed_mixed_script import (
     REVIEW_REASON_HEBREW_PRINTED_MIXED_SCRIPT_REGION_FALLBACK,
     ScriptDominance,
     count_script_letters,
+    evaluate_script_dominance,
     hebrew_printed_mixed_script_region_fallback_policy,
     hebrew_text_is_reusable_for_mixed_script,
     mixed_script_assembly_engine_name,
@@ -98,6 +100,29 @@ def _three_region_crop_page() -> PageImage:
     return _band_page(bands=((0, 80), (140, 200), (230, 290), (330, 400)))
 
 
+def _alpha_letter_count(text: str) -> int:
+    return sum(1 for char in text if char.isalpha())
+
+
+def _hebrew_letter_count(text: str) -> int:
+    return sum(1 for char in text if char.isalpha() and 0x0590 <= ord(char) <= 0x05FF)
+
+
+def _latin_letter_count(text: str) -> int:
+    return sum(
+        1
+        for char in text
+        if char.isalpha()
+        and not (0x0590 <= ord(char) <= 0x05FF)
+        and (
+            0x0041 <= ord(char) <= 0x005A
+            or 0x0061 <= ord(char) <= 0x007A
+            or 0x00C0 <= ord(char) <= 0x024F
+            or 0x1E00 <= ord(char) <= 0x1EFF
+        )
+    )
+
+
 class MixedScriptDetectionTests(SimpleTestCase):
     def test_hebrew_only_text_is_hebrew_dominant(self):
         self.assertEqual(script_dominance(HEBREW_SUBSTANTIAL), ScriptDominance.HEBREW)
@@ -159,6 +184,91 @@ class MixedScriptDetectionTests(SimpleTestCase):
     def test_ambiguous_bilingual_block_is_fail_closed(self):
         text = f"{HEBREW_SUBSTANTIAL}\n{LATIN_SUBSTANTIAL}"
         self.assertEqual(script_dominance(text), ScriptDominance.AMBIGUOUS)
+
+    def test_dominance_diagnostics_match_counted_hebrew_and_latin_letters(self):
+        text = f"{LATIN_SUBSTANTIAL} שלום"
+        counted = count_script_letters(text)
+        evaluation = evaluate_script_dominance(text)
+        expected_latin = _latin_letter_count(text)
+        expected_hebrew = _hebrew_letter_count(text)
+        self.assertEqual(evaluation.dominance, ScriptDominance.LATIN)
+        self.assertEqual(script_dominance(text), evaluation.dominance)
+        self.assertEqual(evaluation.latin_letters, expected_latin)
+        self.assertEqual(evaluation.hebrew_letters, expected_hebrew)
+        self.assertEqual(evaluation.latin_letters, counted.latin)
+        self.assertEqual(evaluation.hebrew_letters, counted.hebrew)
+        self.assertEqual(
+            evaluation.identified_letters,
+            expected_latin + expected_hebrew,
+        )
+        self.assertEqual(
+            evaluation.latin_ratio,
+            expected_latin / (expected_latin + expected_hebrew),
+        )
+        self.assertEqual(
+            evaluation.hebrew_ratio,
+            expected_hebrew / (expected_latin + expected_hebrew),
+        )
+        self.assertEqual(evaluation.technical_token_letters_excluded, 0)
+
+    def test_technical_token_letters_are_reported_as_excluded(self):
+        url_text = f"{HEBREW_SUBSTANTIAL} {LATIN_INCIDENTAL}"
+        email_text = f"{HEBREW_SUBSTANTIAL} name.surname@archive.example.org"
+        domain_text = f"{HEBREW_SUBSTANTIAL} archive.example.org"
+        names_text = f"{HEBREW_SUBSTANTIAL} John Smith"
+
+        url_eval = evaluate_script_dominance(url_text)
+        email_eval = evaluate_script_dominance(email_text)
+        domain_eval = evaluate_script_dominance(domain_text)
+        names_eval = evaluate_script_dominance(names_text)
+
+        self.assertEqual(url_eval.dominance, ScriptDominance.HEBREW)
+        self.assertEqual(email_eval.dominance, ScriptDominance.HEBREW)
+        self.assertEqual(domain_eval.dominance, ScriptDominance.HEBREW)
+        self.assertEqual(names_eval.dominance, ScriptDominance.HEBREW)
+        self.assertEqual(script_dominance(url_text), ScriptDominance.HEBREW)
+        self.assertEqual(url_eval.latin_letters, 0)
+        self.assertEqual(email_eval.latin_letters, 0)
+        self.assertEqual(domain_eval.latin_letters, 0)
+        self.assertEqual(names_eval.latin_letters, len("JohnSmith"))
+        self.assertEqual(
+            url_eval.technical_token_letters_excluded,
+            _alpha_letter_count(LATIN_INCIDENTAL),
+        )
+        self.assertEqual(
+            email_eval.technical_token_letters_excluded,
+            _alpha_letter_count("name.surname@archive.example.org"),
+        )
+        self.assertEqual(
+            domain_eval.technical_token_letters_excluded,
+            _alpha_letter_count("archive.example.org"),
+        )
+        self.assertEqual(names_eval.technical_token_letters_excluded, 0)
+        self.assertEqual(
+            url_eval.hebrew_letters,
+            _hebrew_letter_count(HEBREW_SUBSTANTIAL),
+        )
+
+    def test_ambiguous_diagnostics_keep_ambiguous_classification(self):
+        text = f"{HEBREW_SUBSTANTIAL}\n{LATIN_SUBSTANTIAL}"
+        evaluation = evaluate_script_dominance(text)
+        identified = evaluation.latin_letters + evaluation.hebrew_letters
+        self.assertEqual(evaluation.dominance, ScriptDominance.AMBIGUOUS)
+        self.assertEqual(script_dominance(text), ScriptDominance.AMBIGUOUS)
+        self.assertEqual(
+            evaluation.latin_letters,
+            _latin_letter_count(LATIN_SUBSTANTIAL),
+        )
+        self.assertEqual(
+            evaluation.hebrew_letters,
+            _hebrew_letter_count(HEBREW_SUBSTANTIAL),
+        )
+        self.assertEqual(evaluation.identified_letters, identified)
+        self.assertGreaterEqual(evaluation.latin_letters, 40)
+        self.assertGreaterEqual(evaluation.hebrew_letters, 40)
+        self.assertLess(evaluation.latin_ratio, 0.80)
+        self.assertLess(evaluation.hebrew_ratio, 0.80)
+        self.assertEqual(evaluation.technical_token_letters_excluded, 0)
 
     def test_zero_ink_spans_are_not_a_structural_candidate(self):
         page = _png_page()
@@ -566,6 +676,97 @@ class MixedScriptAdapterTests(SimpleTestCase):
         ):
             self._execute(adapter, page)
 
+        mock_persist_success.assert_not_called()
+        self.assertEqual(
+            str(mock_persist_failure.call_args.kwargs["exc"]),
+            "MIXED_SCRIPT_REGION_AMBIGUOUS",
+        )
+
+    def test_latin_ocr_dominance_logs_structured_diagnostics_when_ambiguous(self):
+        adapter = GeminiAdapter()
+        page = _lower_one_span_page()
+        recitation = _response_error(
+            GeminiResponseFailureCode.RECITATION,
+            model="gemini-3.1-flash-lite",
+            attempt=1,
+            max_output_tokens=4096,
+        )
+        plan = _require_crop_plan(page)
+        candidate_plan = plan_structural_candidate_region(plan.crops[1])
+        candidate_region = candidate_plan.region
+        self.assertIsNotNone(candidate_region)
+        assert candidate_region is not None
+        latin_text = f"{HEBREW_SUBSTANTIAL}\n{LATIN_SUBSTANTIAL}"
+        expected = evaluate_script_dominance(latin_text)
+        self.assertEqual(expected.dominance, ScriptDominance.AMBIGUOUS)
+
+        def execute(*, pages, model_name, language_hint, **_kwargs):
+            image_bytes = pages[0].image_bytes
+            if image_bytes == page.image_bytes:
+                raise recitation
+            if image_bytes == plan.crops[0].image_bytes:
+                return GeminiResult(text=HEBREW_SUBSTANTIAL, engine_name=model_name)
+            if image_bytes == plan.crops[1].image_bytes:
+                raise recitation
+            if image_bytes == candidate_region.image_bytes:
+                return GeminiResult(
+                    text=latin_text,
+                    engine_name=LATIN_PRINTED_GEMINI_MODEL,
+                )
+            raise AssertionError("unexpected provider image")
+
+        records: list[logging.LogRecord] = []
+
+        class ExtraHandler(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record)
+
+        logger = logging.getLogger("documents.services.htr_adapters.gemini_adapter")
+        handler = ExtraHandler()
+        logger.addHandler(handler)
+        try:
+            with (
+                patch(
+                    "documents.services.htr_adapters.gemini_adapter."
+                    "transcribe_pages_with_gemini",
+                    side_effect=execute,
+                ),
+                patch(
+                    "documents.services.htr_adapters.gemini_adapter."
+                    "persist_gemini_page_success"
+                ) as mock_persist_success,
+                patch.object(adapter, "_persist_page_failure") as mock_persist_failure,
+                patch.object(
+                    adapter,
+                    "_raise_incomplete",
+                    side_effect=_ExpectedIncomplete,
+                ),
+                self.assertRaises(_ExpectedIncomplete),
+            ):
+                self._execute(adapter, page)
+        finally:
+            logger.removeHandler(handler)
+
+        evaluated = [
+            record
+            for record in records
+            if isinstance(record.msg, str)
+            and record.msg.startswith(
+                "Hebrew printed mixed-script Latin OCR dominance evaluated:"
+            )
+        ]
+        self.assertEqual(len(evaluated), 1)
+        record = evaluated[0]
+        self.assertEqual(record.dominance, "ambiguous")
+        self.assertEqual(record.latin_letters, expected.latin_letters)
+        self.assertEqual(record.hebrew_letters, expected.hebrew_letters)
+        self.assertEqual(record.identified_letters, expected.identified_letters)
+        self.assertEqual(record.latin_ratio, expected.latin_ratio)
+        self.assertEqual(record.hebrew_ratio, expected.hebrew_ratio)
+        self.assertEqual(
+            record.technical_token_letters_excluded,
+            expected.technical_token_letters_excluded,
+        )
         mock_persist_success.assert_not_called()
         self.assertEqual(
             str(mock_persist_failure.call_args.kwargs["exc"]),

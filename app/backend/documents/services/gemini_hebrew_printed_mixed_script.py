@@ -76,10 +76,22 @@ class ScriptLetterCounts:
     hebrew: int
     latin: int
     other: int
+    technical_token_letters_excluded: int = 0
 
     @property
     def identified(self) -> int:
         return self.hebrew + self.latin
+
+
+@dataclass(frozen=True)
+class ScriptDominanceEvaluation:
+    dominance: ScriptDominance
+    latin_letters: int
+    hebrew_letters: int
+    identified_letters: int
+    latin_ratio: float
+    hebrew_ratio: float
+    technical_token_letters_excluded: int
 
 
 @dataclass(frozen=True)
@@ -120,10 +132,12 @@ def hebrew_printed_mixed_script_region_fallback_policy(
 
 
 def count_script_letters(text: str) -> ScriptLetterCounts:
+    source = text or ""
+    stripped = _text_without_technical_latin_tokens(source)
     hebrew = 0
     latin = 0
     other = 0
-    for char in _text_without_technical_latin_tokens(text):
+    for char in stripped:
         if not char.isalpha():
             continue
         code = ord(char)
@@ -133,31 +147,56 @@ def count_script_letters(text: str) -> ScriptLetterCounts:
             latin += 1
         else:
             other += 1
-    return ScriptLetterCounts(hebrew=hebrew, latin=latin, other=other)
+    return ScriptLetterCounts(
+        hebrew=hebrew,
+        latin=latin,
+        other=other,
+        technical_token_letters_excluded=(
+            _alpha_letter_count(source) - _alpha_letter_count(stripped)
+        ),
+    )
 
 
-def script_dominance(text: str) -> ScriptDominance:
+def evaluate_script_dominance(text: str) -> ScriptDominanceEvaluation:
     counts = count_script_letters(text)
+    identified = counts.identified
+    if identified > 0:
+        hebrew_ratio = counts.hebrew / identified
+        latin_ratio = counts.latin / identified
+    else:
+        hebrew_ratio = 0.0
+        latin_ratio = 0.0
     if counts.hebrew < MIN_DOMINANT_SCRIPT_LETTERS and (
         counts.latin < MIN_DOMINANT_SCRIPT_LETTERS
     ):
-        return ScriptDominance.EMPTY
-    identified = counts.identified
-    if identified <= 0:
-        return ScriptDominance.EMPTY
-    hebrew_ratio = counts.hebrew / identified
-    latin_ratio = counts.latin / identified
-    if (
+        dominance = ScriptDominance.EMPTY
+    elif identified <= 0:
+        dominance = ScriptDominance.EMPTY
+    elif (
         counts.hebrew >= MIN_DOMINANT_SCRIPT_LETTERS
         and hebrew_ratio >= SCRIPT_DOMINANCE_RATIO
     ):
-        return ScriptDominance.HEBREW
-    if (
+        dominance = ScriptDominance.HEBREW
+    elif (
         counts.latin >= MIN_DOMINANT_SCRIPT_LETTERS
         and latin_ratio >= SCRIPT_DOMINANCE_RATIO
     ):
-        return ScriptDominance.LATIN
-    return ScriptDominance.AMBIGUOUS
+        dominance = ScriptDominance.LATIN
+    else:
+        dominance = ScriptDominance.AMBIGUOUS
+    return ScriptDominanceEvaluation(
+        dominance=dominance,
+        latin_letters=counts.latin,
+        hebrew_letters=counts.hebrew,
+        identified_letters=identified,
+        latin_ratio=latin_ratio,
+        hebrew_ratio=hebrew_ratio,
+        technical_token_letters_excluded=counts.technical_token_letters_excluded,
+    )
+
+
+def script_dominance(text: str) -> ScriptDominance:
+    return evaluate_script_dominance(text).dominance
 
 
 def hebrew_text_is_reusable_for_mixed_script(text: str) -> bool:
@@ -275,6 +314,10 @@ def _canonical_region_box(
         "right": box.right,
         "top": box.top,
     }
+
+
+def _alpha_letter_count(text: str) -> int:
+    return sum(1 for char in text if char.isalpha())
 
 
 def _text_without_technical_latin_tokens(text: str) -> str:
