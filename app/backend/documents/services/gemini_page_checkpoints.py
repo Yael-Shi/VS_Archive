@@ -25,6 +25,9 @@ from documents.services.gemini_engine import (
 from documents.services.gemini_hebrew_printed_crop_recovery import (
     hebrew_printed_recitation_crop_recovery_policy,
 )
+from documents.services.gemini_hebrew_printed_mixed_script import (
+    hebrew_printed_mixed_script_region_fallback_policy,
+)
 from documents.services.page_extraction import PageImage
 from documents.services.process_document_request_persist import (
     StaleProcessDocumentPageClaimError,
@@ -126,6 +129,10 @@ def build_gemini_attempt_identity(
         language_hint=language_hint,
         text_input_type=text_input_type,
     )
+    mixed_script_policy = hebrew_printed_mixed_script_region_fallback_policy(
+        language_hint=language_hint,
+        text_input_type=text_input_type,
+    )
     config_payload: dict[str, Any] = {
         "api_version": contract.api_version,
         "consistency_min_ratio": consistency_min_ratio,
@@ -146,6 +153,10 @@ def build_gemini_attempt_identity(
         # Hebrew printed only. Omitting the key on other routes keeps their
         # existing configuration fingerprints unchanged.
         config_payload["recitation_crop_recovery_policy"] = crop_recovery_policy
+    if mixed_script_policy:
+        # Hebrew printed only. A new policy identity so prior crop-recovery
+        # attempts are not reused under mixed-script semantics.
+        config_payload["mixed_script_region_fallback_policy"] = mixed_script_policy
     config_fingerprint = _canonical_sha256(config_payload)
     identity_fingerprint = _canonical_sha256(
         {

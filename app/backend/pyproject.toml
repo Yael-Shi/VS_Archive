@@ -62,7 +62,7 @@ python_files = ["test_*.py", "*_test.py", "tests.py"]
 [dependency-groups]
 dev = [
     "ruff (==0.14.14)",
-    "pyright (>=1.1.408,<2.0.0)",
+    "pyright (==1.1.414)",
     "pytest (>=9.0.2,<10.0.0)",
     "pytest-django (>=4.11.1,<5.0.0)",
     "mypy (>=1.19.1,<2.0.0)",

@@ -242,6 +242,7 @@ class HebrewPrintedCropRecoveryAdapterTests(SimpleTestCase):
             lease_token=uuid.uuid4(),
             attempt_id=2,
             hebrew_printed_crop_recovery_enabled=(hebrew_printed_crop_recovery_enabled),
+            hebrew_printed_mixed_script_enabled=True,
         )
 
     def test_crop_recovery_runs_only_after_full_page_recitation_chain(self):

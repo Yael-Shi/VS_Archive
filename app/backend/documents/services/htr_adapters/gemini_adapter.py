@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, List, Optional
 
 from django.db import DatabaseError
 
-from documents.models import Document
+from documents.models import Document, DocumentTextResult
 from documents.services.gemini_defaults import (
     DEFAULT_GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP,
     DEFAULT_GEMINI_TEMPERATURE,
@@ -24,13 +24,29 @@ from documents.services.gemini_engine import (
     gemini_transcription_contract,
     transcribe_pages_with_gemini,
 )
-from documents.services.gemini_models import DEFAULT_GEMINI_MODEL_CANDIDATES
+from documents.services.gemini_models import (
+    DEFAULT_GEMINI_MODEL_CANDIDATES,
+    LATIN_PRINTED_GEMINI_MODEL,
+)
 from documents.services.gemini_hebrew_printed_crop_recovery import (
     REVIEW_REASON_HEBREW_PRINTED_RECITATION_CROP_RECOVERY,
     crop_assembly_engine_name,
     hebrew_printed_recitation_crop_recovery_policy,
     merge_overlapping_crop_texts,
     plan_hebrew_printed_recitation_crops,
+)
+from documents.services.gemini_hebrew_printed_mixed_script import (
+    MAX_LATIN_REGION_PROVIDER_CALLS,
+    MixedScriptPlanDecision,
+    MixedScriptRegionBox,
+    MixedScriptRegionProvenance,
+    REVIEW_REASON_HEBREW_PRINTED_MIXED_SCRIPT_REGION_FALLBACK,
+    hebrew_printed_mixed_script_region_fallback_policy,
+    hebrew_text_is_reusable_for_mixed_script,
+    latin_text_is_acceptably_dominant,
+    mixed_script_assembly_engine_name,
+    plan_structural_candidate_region,
+    script_dominance,
 )
 from documents.services.gemini_page_checkpoints import (
     GeminiPageClaimAction,
@@ -120,6 +136,12 @@ class GeminiAdapter:
         )
         hebrew_printed_crop_recovery_enabled = bool(
             hebrew_printed_recitation_crop_recovery_policy(
+                language_hint=language_hint,
+                text_input_type=text_input_type,
+            )
+        )
+        hebrew_printed_mixed_script_enabled = bool(
+            hebrew_printed_mixed_script_region_fallback_policy(
                 language_hint=language_hint,
                 text_input_type=text_input_type,
             )
@@ -242,6 +264,9 @@ class GeminiAdapter:
                 hebrew_printed_crop_recovery_enabled=(
                     hebrew_printed_crop_recovery_enabled
                 ),
+                hebrew_printed_mixed_script_enabled=(
+                    hebrew_printed_mixed_script_enabled
+                ),
                 kwargs=kwargs,
                 checkpoint_id=claim.checkpoint_id,
                 lease_token=claim.lease_token,
@@ -280,6 +305,7 @@ class GeminiAdapter:
         lease_token: uuid.UUID,
         attempt_id: int,
         hebrew_printed_crop_recovery_enabled: bool = False,
+        hebrew_printed_mixed_script_enabled: bool = False,
     ) -> None:
         last_error: Exception | None = None
         remaining_provider_calls = GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS
@@ -401,6 +427,9 @@ class GeminiAdapter:
                         checkpoint_id=checkpoint_id,
                         lease_token=lease_token,
                         attempt_id=attempt_id,
+                        hebrew_printed_mixed_script_enabled=(
+                            hebrew_printed_mixed_script_enabled
+                        ),
                     )
                     if recovered is not None:
                         try:
@@ -505,6 +534,7 @@ class GeminiAdapter:
         checkpoint_id: int,
         lease_token: uuid.UUID,
         attempt_id: int,
+        hebrew_printed_mixed_script_enabled: bool = False,
     ) -> GeminiResult | None:
         plan = plan_hebrew_printed_recitation_crops(page)
         if plan is None:
@@ -526,12 +556,15 @@ class GeminiAdapter:
         crop_kwargs["double_pass"] = False
         crop_texts: list[str] = []
         crop_models: list[str] = []
-        any_review = False
+        mixed_script_provenances: list[MixedScriptRegionProvenance] = []
+        used_mixed_script = False
+        latin_region_calls_used = 0
         engine_reasons: list[str] = []
 
         for crop_index, crop in enumerate(plan.crops, start=1):
             crop_result: GeminiResult | None = None
             last_error: Exception | None = None
+            recitation_exhausted = False
             for model_index, model_name in enumerate(model_candidates):
                 try:
                     crop_result = transcribe_pages_with_gemini(
@@ -575,6 +608,12 @@ class GeminiAdapter:
                             model_candidates[model_index + 1],
                         )
                         continue
+                    recitation_exhausted = (
+                        response_failure_code == GeminiResponseFailureCode.RECITATION
+                        and not has_next_model
+                    )
+                    if recitation_exhausted:
+                        break
                     logger.warning(
                         "Hebrew printed crop recovery failed: page=%s "
                         "crop_index=%s model=%s failure=%s",
@@ -603,6 +642,29 @@ class GeminiAdapter:
                     )
                     self._raise_incomplete(attempt_id)
 
+            recovered_via_mixed_script = False
+            recovered_region_box: MixedScriptRegionBox | None = None
+            if crop_result is None and recitation_exhausted:
+                mixed_result, latin_region_calls_used, mixed_failure, mixed_box = (
+                    self._recover_hebrew_printed_mixed_script_region(
+                        failed_crop=crop,
+                        crop_index=crop_index,
+                        successful_crop_texts=crop_texts,
+                        crop_kwargs=crop_kwargs,
+                        hebrew_printed_mixed_script_enabled=(
+                            hebrew_printed_mixed_script_enabled
+                        ),
+                        latin_region_calls_used=latin_region_calls_used,
+                    )
+                )
+                if mixed_result is not None:
+                    crop_result = mixed_result
+                    used_mixed_script = True
+                    recovered_via_mixed_script = True
+                    recovered_region_box = mixed_box
+                elif mixed_failure is not None:
+                    last_error = mixed_failure
+
             if crop_result is None:
                 self._persist_page_failure(
                     checkpoint_id=checkpoint_id,
@@ -615,8 +677,26 @@ class GeminiAdapter:
 
             crop_texts.append(crop_result.text)
             crop_models.append(crop_result.engine_name)
-            any_review = any_review or crop_result.needs_review
             engine_reasons.extend(crop_result.review_reasons or [])
+            if recovered_via_mixed_script:
+                mixed_script_provenances.append(
+                    MixedScriptRegionProvenance(
+                        order=crop_index,
+                        script="latn",
+                        model=crop_result.engine_name,
+                        source="region",
+                        region_box=recovered_region_box,
+                    )
+                )
+            elif hebrew_text_is_reusable_for_mixed_script(crop_result.text):
+                mixed_script_provenances.append(
+                    MixedScriptRegionProvenance(
+                        order=crop_index,
+                        script="he",
+                        model=crop_result.engine_name,
+                        source="crop",
+                    )
+                )
 
         assembled = merge_overlapping_crop_texts(crop_texts[0], crop_texts[1])
         if not assembled:
@@ -630,17 +710,102 @@ class GeminiAdapter:
             raise AssertionError("unreachable")
 
         reasons: list[str] = []
-        for reason in (
-            REVIEW_REASON_HEBREW_PRINTED_RECITATION_CROP_RECOVERY,
-            *engine_reasons,
-        ):
+        reason_candidates = [REVIEW_REASON_HEBREW_PRINTED_RECITATION_CROP_RECOVERY]
+        if used_mixed_script:
+            reason_candidates.append(
+                REVIEW_REASON_HEBREW_PRINTED_MIXED_SCRIPT_REGION_FALLBACK
+            )
+        reason_candidates.extend(engine_reasons)
+        for reason in reason_candidates:
             if reason and reason not in reasons:
                 reasons.append(reason)
+        if used_mixed_script:
+            engine_name = mixed_script_assembly_engine_name(
+                tuple(sorted(mixed_script_provenances, key=lambda region: region.order))
+            )
+        else:
+            engine_name = crop_assembly_engine_name(crop_models)
         return GeminiResult(
             text=assembled,
             needs_review=True,
-            engine_name=crop_assembly_engine_name(crop_models),
+            engine_name=engine_name,
             review_reasons=reasons,
+        )
+
+    def _recover_hebrew_printed_mixed_script_region(
+        self,
+        *,
+        failed_crop: PageImage,
+        crop_index: int,
+        successful_crop_texts: list[str],
+        crop_kwargs: dict[str, Any],
+        hebrew_printed_mixed_script_enabled: bool,
+        latin_region_calls_used: int,
+    ) -> tuple[GeminiResult | None, int, Exception | None, MixedScriptRegionBox | None]:
+        if not hebrew_printed_mixed_script_enabled:
+            return None, latin_region_calls_used, None, None
+        if latin_region_calls_used >= MAX_LATIN_REGION_PROVIDER_CALLS:
+            return None, latin_region_calls_used, None, None
+        if not any(
+            hebrew_text_is_reusable_for_mixed_script(text)
+            for text in successful_crop_texts
+        ):
+            return None, latin_region_calls_used, None, None
+
+        plan = plan_structural_candidate_region(failed_crop)
+        if plan.decision == MixedScriptPlanDecision.NO_REGION:
+            logger.warning(
+                "Hebrew printed mixed-script fallback skipped; no substantial "
+                "structural candidate: crop_index=%s",
+                crop_index,
+            )
+            return None, latin_region_calls_used, None, None
+        if (
+            plan.decision == MixedScriptPlanDecision.STRUCTURAL_AMBIGUOUS
+            or plan.region is None
+        ):
+            logger.warning(
+                "Hebrew printed mixed-script fallback skipped; structurally "
+                "ambiguous candidate spans: crop_index=%s",
+                crop_index,
+            )
+            return None, latin_region_calls_used, None, None
+
+        logger.warning(
+            "Starting Hebrew printed mixed-script Latin OCR on a structural "
+            "candidate: crop_index=%s model=%s",
+            crop_index,
+            LATIN_PRINTED_GEMINI_MODEL,
+        )
+        region_kwargs = dict(crop_kwargs)
+        try:
+            latin_result = transcribe_pages_with_gemini(
+                pages=[plan.region],
+                language_hint=Document.Language.ENGLISH,
+                prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+                model_name=LATIN_PRINTED_GEMINI_MODEL,
+                max_provider_calls=1,
+                provider_call_offset=0,
+                **region_kwargs,
+            )
+        except Exception as exc:
+            return None, latin_region_calls_used + 1, exc, None
+
+        latin_region_calls_used += 1
+        if latin_text_is_acceptably_dominant(latin_result.text):
+            return latin_result, latin_region_calls_used, None, plan.box
+        logger.warning(
+            "Hebrew printed mixed-script fallback fail-closed; Latin OCR was "
+            "not Latin-dominant: crop_index=%s dominance=%s",
+            crop_index,
+            script_dominance(latin_result.text).value,
+        )
+        # Only after mixed-script preconditions and a Latin printed probe.
+        return (
+            None,
+            latin_region_calls_used,
+            ValueError("MIXED_SCRIPT_REGION_AMBIGUOUS"),
+            None,
         )
 
     def _persist_page_failure(
@@ -661,8 +826,13 @@ class GeminiAdapter:
             failure_code = "GEMINI_ERROR"
             failure_message = f"exception_class={type(exc).__name__}"
         else:
-            failure_code = "API_ERROR"
             failure_message = f"exception_class={type(exc).__name__}"
+            message = str(exc).strip()
+            if message == "MIXED_SCRIPT_REGION_AMBIGUOUS":
+                failure_code = "MIXED_SCRIPT_REGION_AMBIGUOUS"
+                failure_message = "mixed_script_region_ambiguous"
+            else:
+                failure_code = "API_ERROR"
         try:
             persist_gemini_page_failure(
                 checkpoint_id=checkpoint_id,

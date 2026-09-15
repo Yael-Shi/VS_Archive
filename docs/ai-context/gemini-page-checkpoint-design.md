@@ -46,6 +46,15 @@ Approved and implemented by PR B in the Gemini OCR root-cause sequence:
    `recitation_crop_recovery_policy=hebrew-printed-recitation-horizontal-crops-v1`;
    other Gemini routes omit that key.
 
+9. Bounded Hebrew printed mixed-script region fallback — after crop recovery,
+   a failed crop with exactly one substantial ink span is a structural
+   candidate for the existing Latin printed Gemini path when a sibling crop
+   already succeeded as Hebrew-dominant text. Two or more spans fail closed.
+   Hebrew printed configuration identity gains
+   `mixed_script_region_fallback_policy=hebrew-printed-mixed-script-region-fallback-v1`
+   without bumping `gemini-ocr-page-retry-v2` or
+   `gemini-hebrew-printed-prompt-v2`.
+
 This design changes persistence and resume behavior only. It does not authorize a
 production retry or deployment by itself.
 
@@ -200,7 +209,8 @@ candidate changes the French handwritten identity again without changing the
 shared retry marker. Historical attempt/checkpoint rows remain immutable.
 Hebrew printed crop recovery adds `recitation_crop_recovery_policy` only to
 that route's configuration fingerprint and does not bump the shared retry
-marker.
+marker. Mixed-script region fallback adds
+`mixed_script_region_fallback_policy` the same way, only on Hebrew printed.
 
 The overall attempt identity hashes the source, route, prompt and configuration
 fingerprints, prompt version, ordered candidates, and expected page count.
@@ -583,6 +593,34 @@ configuration fingerprint only. Prior Hebrew printed attempts cannot be reused
 under the new semantics. The shared `gemini-ocr-page-retry-v2` marker and the
 three-call full-page budget are unchanged; crop calls are a separate bounded
 budget (at most four additional engine invocations).
+
+## Bounded Hebrew printed mixed-script region fallback
+
+If crop recovery leaves a crop in `RECITATION` after a sibling crop already
+succeeded as Hebrew-dominant text, checkpoint-backed execution may plan one
+structural candidate region from a local ink profile on that failed crop.
+Pillow detects structure only; it does not classify script. Exactly one
+substantial content span is required before a Latin printed OCR probe. Zero
+spans skip mixed-script recovery. Two or more substantial spans fail closed
+without a Latin call and keep the original `RECITATION` failure. They do not
+record `MIXED_SCRIPT_REGION_AMBIGUOUS`. Incidental Latin in the successful
+Hebrew text does not create a probe by itself. There is no crop1-failed
+recovery path.
+
+The structural candidate is OCRed with the existing English printed Gemini
+path (`gemini-2.5-flash`, printed prompt, one call). That output is kept only
+when it is Latin-dominant (at least 40 Latin letters and at least 80% of
+identified Hebrew+Latin letters). A minority of Hebrew letters does not reject
+an otherwise Latin-dominant probe. Successful Hebrew crop text is reused.
+`MIXED_SCRIPT_REGION_AMBIGUOUS` is used only after those mixed-script
+preconditions and a Latin probe whose text is not Latin-dominant. Latin
+`RECITATION` or a missing required region persist page `FAILED` and do not
+save partial crop text.
+
+Mixed-script success stores `gemini-regions:<fingerprint>` and review reasons
+`HEBREW_PRINTED_RECITATION_CROP_RECOVERY` plus
+`HEBREW_PRINTED_MIXED_SCRIPT_REGION_FALLBACK`. Ordinary crop-only success is
+unchanged. The extra provider budget is at most one call per page.
 
 ## Attempt lifecycle and observability clarification
 

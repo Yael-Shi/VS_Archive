@@ -1,5 +1,72 @@
 # VS-Archive Decision Log
 
+## Bounded Hebrew printed mixed-script region fallback
+
+**Decision / implemented:** After Hebrew printed `RECITATION` crop recovery,
+checkpoint-backed Gemini OCR may recover a failed crop by using local Pillow
+layout evidence to identify a substantial structural candidate, OCRing that
+candidate through the existing Latin printed path, and then validating the
+OCR output with Unicode script dominance. Hebrew-dominant crops stay on
+Hebrew printed. This is not a document-level `MIXED` route, not a third
+Gemini model, not Cloud Vision, not a Gemini→Transkribus fallback, and not
+another blind midpoint crop as the primary split.
+
+**Current behavior:**
+- Activation: Hebrew printed, checkpoint-backed, crop recovery only, and only
+  after at least one crop has already succeeded as Hebrew-dominant text and a
+  later crop has exhausted the Hebrew printed `RECITATION` chain. Full-page
+  success never enters this path. A first crop that recites on both models
+  still fails before crop 2.
+- Detection: local horizontal ink-profile segmentation of the failed crop
+  (Pillow). A few Latin words, names, URLs, or citations in successful Hebrew
+  text are incidental and do not split. On the failed crop, exactly **one**
+  substantial content span is a structural candidate for a Latin printed
+  OCR probe. Pillow ink analysis does not classify script. Zero spans skip
+  mixed-script recovery and keep the original `RECITATION` failure. Two or
+  more substantial spans are structurally ambiguous: fail closed without a
+  Latin provider call, and keep the original `RECITATION` failure. They do
+  not record `MIXED_SCRIPT_REGION_AMBIGUOUS`. This is not a crop1-failed
+  recovery path.
+- Threshold: a script is dominant only when it has at least **40** letters and
+  at least **80%** of identified Hebrew+Latin letters. Successful crop reuse
+  requires Hebrew dominance. Latin-path output is accepted only when it is
+  Latin-dominant under that same threshold, including when a minority of
+  Hebrew letters remain. `MIXED_SCRIPT_REGION_AMBIGUOUS` is recorded only
+  after mixed-script preconditions were met and the Latin printed probe
+  output was not Latin-dominant. Genuinely mixed substantial Hebrew+Latin
+  probe text fail-closes.
+- Routing: that single failed-crop span is OCRed once with `language_hint=en`,
+  `prompt_variant=printed`, and `LATIN_PRINTED_GEMINI_MODEL`
+  (`gemini-2.5-flash`). Successful Hebrew crop text is reused. The same Hebrew
+  printed crop image is not retried unchanged.
+- Assembly: crop/region texts are joined in reading order with the existing
+  overlapping-crop merger. One required region failure, empty assembly, or
+  ambiguous dominance persists page `FAILED` and does not keep sibling crop
+  text as a final page result.
+- Bound: mixed-script adds **at most one** extra provider call per page. Worst
+  case remains the crop-recovery ceiling **plus one** (3 full-page + 4 crop +
+  1 Latin region = **8**). Latin `RECITATION` does not switch models.
+- Provenance: mixed-script success records `gemini-regions:<48 hex>` hashing
+  ordered `(order, script, model, source, region_box)` provenance.
+  `region_box` is the structural candidate rectangle for the Latin region and
+  `null` for the reused Hebrew crop. `needs_review` is true, with review
+  reasons `HEBREW_PRINTED_RECITATION_CROP_RECOVERY` plus
+  `HEBREW_PRINTED_MIXED_SCRIPT_REGION_FALLBACK`. Ordinary crop-only success
+  still uses `gemini-crop:<fingerprint>` and the crop-recovery reason only.
+- Identity: Hebrew printed configuration fingerprints add
+  `mixed_script_region_fallback_policy=hebrew-printed-mixed-script-region-fallback-v1`
+  beside the existing crop-recovery policy key. Other Gemini routes omit both
+  keys. `gemini-ocr-page-retry-v2` and `gemini-hebrew-printed-prompt-v2` are
+  unchanged. Prior Hebrew printed crop-recovery attempts cannot be reused.
+
+**Unchanged:** English handwritten `RECITATION` fallback, Hebrew GENERAL
+cost-aware fallback, document-level `MIXED` routing, Transkribus, Antigravity,
+and full-page / crop-recovery behavior when mixed-script does not activate.
+
+**Tests:** `documents/test_gemini_hebrew_printed_mixed_script_fallback.py`,
+`documents/test_gemini_hebrew_printed_recitation_crop_recovery.py`,
+`documents/test_gemini_page_checkpoints.py`.
+
 ## Public People index A–Z layout
 
 **Decision / implemented:** `/archive/people/` presents the current page of
