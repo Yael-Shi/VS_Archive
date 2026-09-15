@@ -33,13 +33,6 @@ class VsArchiveDataStack(Stack):
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
             removal_policy=RemovalPolicy.RETAIN,
             auto_delete_objects=False,
-            lifecycle_rules=[
-                s3.LifecycleRule(
-                    enabled=True,
-                    noncurrent_version_expiration=Duration.days(14),
-                    expiration=Duration.days(90),
-                )
-            ],
             cors=[
                 s3.CorsRule(
                     allowed_methods=[
