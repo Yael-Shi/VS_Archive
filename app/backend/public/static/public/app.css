@@ -3037,7 +3037,7 @@ pre {
   text-align: center;
   height: auto;
   min-height: 0;
-  padding-top: 16px;
+  padding-top: 32px;
   padding-inline: 13rem;
 }
 
@@ -3210,7 +3210,7 @@ pre {
 
   .archive-people-index-heading {
     padding-inline: 0;
-    padding-top: calc(3.25rem + 16px);
+    padding-top: calc(3.25rem + 32px);
   }
 }
 

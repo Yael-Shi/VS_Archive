@@ -27,6 +27,8 @@ from documents.services.public_people_directory import (
     HEBREW_INDEX_LETTERS,
     PublicDirectoryIdentityKind,
     directory_index_letter,
+    first_directory_letter_pages,
+    hebrew_alphabet_nav_items,
 )
 from documents.services.archive_item_access import (
     ARCHIVE_FAMILY_GROUP_NAME,
@@ -180,6 +182,63 @@ class PeopleDirectoryIndexLetterTests(SimpleTestCase):
         self.assertEqual(directory_index_letter("Ada"), "A")
         self.assertEqual(directory_index_letter("123"), "#")
         self.assertEqual(directory_index_letter("   "), "#")
+
+    def test_alphabet_nav_links_to_first_page_of_letter(self):
+        index_path = "/archive/people/"
+        names = ["אהרון", "אהרון ב", "גיא", "גיא ב", "תמר"]
+        first_pages = first_directory_letter_pages(names, per_page=2)
+        self.assertEqual(first_pages["א"], 1)
+        self.assertEqual(first_pages["ג"], 2)
+        self.assertEqual(first_pages["ת"], 3)
+
+        page1 = dict(
+            hebrew_alphabet_nav_items(
+                first_pages,
+                page=1,
+                per_page=2,
+                search_query="",
+                index_path=index_path,
+            )
+        )
+        self.assertEqual(page1["א"], "#people-letter-א")
+        self.assertEqual(page1["ג"], f"{index_path}?page=2&per_page=2#people-letter-ג")
+        self.assertEqual(page1["ת"], f"{index_path}?page=3&per_page=2#people-letter-ת")
+        self.assertEqual(page1["ב"], "")
+        self.assertEqual(list(page1), list(HEBREW_INDEX_LETTERS))
+
+        page2 = dict(
+            hebrew_alphabet_nav_items(
+                first_pages,
+                page=2,
+                per_page=2,
+                search_query="",
+                index_path=index_path,
+            )
+        )
+        self.assertEqual(page2["א"], f"{index_path}?per_page=2#people-letter-א")
+        self.assertEqual(page2["ג"], "#people-letter-ג")
+        self.assertEqual(page2["ת"], f"{index_path}?page=3&per_page=2#people-letter-ת")
+        self.assertEqual(page2["ב"], "")
+
+        searched = dict(
+            hebrew_alphabet_nav_items(
+                first_directory_letter_pages(
+                    ["אהרון LetterNavToken", "אהרון LetterNavToken ב", "תמר LetterNavToken"],
+                    per_page=2,
+                ),
+                page=1,
+                per_page=2,
+                search_query="LetterNavToken",
+                index_path=index_path,
+            )
+        )
+        self.assertEqual(searched["א"], "#people-letter-א")
+        self.assertEqual(
+            searched["ת"],
+            f"{index_path}?q=LetterNavToken&page=2&per_page=2#people-letter-ת",
+        )
+        self.assertEqual(searched["ג"], "")
+        self.assertEqual(searched["ב"], "")
 
 
 class PeoplePublicIndexRouteTests(TestCase):
@@ -467,6 +526,10 @@ class PeoplePublicIndexLayoutTests(TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn(".archive-people-index-columns", css)
         self.assertIn(
+            ".archive-people-index-heading {\n  text-align: center;\n  height: auto;\n  min-height: 0;\n  padding-top: 32px;",
+            css,
+        )
+        self.assertIn(
             ".archive-people-index-columns {\n    column-count: 2;",
             css,
         )
@@ -520,6 +583,80 @@ class PeoplePublicIndexLayoutTests(TestCase):
         self.assertIn('id="people-letter-א"', html)
         self.assertIn('href="#people-letter-א"', html)
         self.assertIn("archive-people-index-alphabet-item is-empty", html)
+
+    def test_alphabet_nav_stays_active_for_letters_on_other_pages(self):
+        for index in range(ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE):
+            person = Person.objects.create(name=f"אהרון {index:02d}")
+            _link(_public_manual(f"Aleph page letter {index:02d}"), person)
+        _link(_public_manual("Tav other page letter"), Person.objects.create(name="תמר"))
+        _link(_public_manual("Gimel unused letter"), Person.objects.create(name="גיא"))
+
+        page1 = self.client.get(_index_url())
+        self.assertEqual(len(page1.context["people_rows"]), 48)
+        self.assertEqual(
+            [group.letter for group in page1.context["people_letter_groups"]],
+            ["א"],
+        )
+        page1_nav = dict(page1.context["people_alphabet_nav"])
+        self.assertEqual(page1_nav["א"], "#people-letter-א")
+        self.assertEqual(
+            page1_nav["ת"],
+            f"{_index_url()}?page=2#people-letter-ת",
+        )
+        self.assertEqual(
+            page1_nav["ג"],
+            f"{_index_url()}?page=2#people-letter-ג",
+        )
+        self.assertEqual(page1_nav["ב"], "")
+        page1_html = page1.content.decode("utf-8")
+        self.assertIn('href="/archive/people/?page=2#people-letter-ת"', page1_html)
+        self.assertNotIn('id="people-letter-ת"', page1_html)
+
+        page2 = self.client.get(_index_url(), {"page": "2"})
+        self.assertEqual(_row_names(page2), ["גיא", "תמר"])
+        self.assertEqual(
+            [group.letter for group in page2.context["people_letter_groups"]],
+            ["ג", "ת"],
+        )
+        page2_nav = dict(page2.context["people_alphabet_nav"])
+        self.assertEqual(page2_nav["א"], f"{_index_url()}#people-letter-א")
+        self.assertEqual(page2_nav["ג"], "#people-letter-ג")
+        self.assertEqual(page2_nav["ת"], "#people-letter-ת")
+        self.assertEqual(page2_nav["ב"], "")
+        page2_html = page2.content.decode("utf-8")
+        self.assertIn('href="/archive/people/#people-letter-א"', page2_html)
+        self.assertNotIn('id="people-letter-א"', page2_html)
+
+        token = "LetterNavToken"
+        for index in range(ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE):
+            person = Person.objects.create(name=f"דוד {token} {index:02d}")
+            _link(_public_manual(f"Dalet search letter {index:02d}"), person)
+        _link(
+            _public_manual("Tav search other page"),
+            Person.objects.create(name=f"תמר {token}"),
+        )
+        searched_page1 = self.client.get(_index_url(), {"q": token})
+        searched_page1_nav = dict(searched_page1.context["people_alphabet_nav"])
+        self.assertEqual(searched_page1_nav["ד"], "#people-letter-ד")
+        self.assertEqual(
+            searched_page1_nav["ת"],
+            f"{_index_url()}?q={token}&page=2#people-letter-ת",
+        )
+        self.assertEqual(searched_page1_nav["א"], "")
+        self.assertEqual(searched_page1_nav["ב"], "")
+        searched_page1_html = searched_page1.content.decode("utf-8")
+        self.assertIn(f"q={token}", searched_page1_html)
+        self.assertIn('href="/archive/people/?q=LetterNavToken&amp;page=2#people-letter-ת"', searched_page1_html)
+
+        searched_page2 = self.client.get(_index_url(), {"q": token, "page": "2"})
+        searched_page2_nav = dict(searched_page2.context["people_alphabet_nav"])
+        self.assertEqual(
+            searched_page2_nav["ד"],
+            f"{_index_url()}?q={token}#people-letter-ד",
+        )
+        self.assertEqual(searched_page2_nav["ת"], "#people-letter-ת")
+        self.assertEqual(searched_page2_nav["א"], "")
+        self.assertEqual(_row_names(searched_page2), [f"תמר {token}"])
 
 
 class PeoplePublicIndexQueryCountTests(TestCase):
