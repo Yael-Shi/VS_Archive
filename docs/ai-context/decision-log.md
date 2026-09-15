@@ -13,8 +13,14 @@ as per-person cards.
 - Hebrew letters א–ת (finals mapped to regular forms) are section keys.
   Non-Hebrew letters use the Latin/uppercase first letter; other first
   characters use an **אחר** bucket.
-- A jump row lists all 22 Hebrew letters; letters absent on this page are
-  non-link placeholders. Grouping is the current paginated page only.
+- A jump row lists all 22 Hebrew letters. Active letters are computed from
+  the full filtered ordered result set **before** pagination. Each present
+  Hebrew letter links to the first page that contains it, plus the existing
+  `#people-letter-…` section anchor, preserving
+  `q` and other people-index query params via the shared public list query
+  builder. Letters already on the current page keep the in-page hash.
+  Letters with no results in that full set stay non-link placeholders.
+  Grouping of the visible list remains the current paginated page.
 - Desktop/tablet: two CSS columns (`column-count`) so letter sections stack
   without equal row heights. Mobile: one column.
 - Each identity remains one full-row link to the existing Person or Author

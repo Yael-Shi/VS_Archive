@@ -10,10 +10,12 @@ Name equality is not identity. Directory order uses raw identity names
 from __future__ import annotations
 
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from documents.services.archive_item_presentation import (
     ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
+    build_archive_public_list_query,
     normalize_archive_public_list_page,
     person_public_page_url,
 )
@@ -146,18 +148,53 @@ def group_directory_rows_by_index_letter(
     return groups
 
 
+def first_directory_letter_pages(
+    sort_names: Iterable[str],
+    *,
+    per_page: int,
+) -> dict[str, int]:
+    """First 1-based page of each index letter in an already-ordered name list."""
+    first_pages: dict[str, int] = {}
+    for index, name in enumerate(sort_names):
+        letter = directory_index_letter(name)
+        if letter not in first_pages:
+            first_pages[letter] = index // per_page + 1
+    return first_pages
+
+
 def hebrew_alphabet_nav_items(
-    groups: list[PublicDirectoryLetterGroup],
+    letter_first_pages: dict[str, int],
+    *,
+    page: int,
+    per_page: int,
+    search_query: str = "",
+    index_path: str,
 ) -> list[tuple[str, str]]:
-    """``(letter, href_or_empty)`` for the Hebrew jump row on the current page."""
-    present = {group.letter for group in groups}
-    return [
-        (
-            letter,
-            f"#{people_letter_anchor_id(letter)}" if letter in present else "",
+    """``(letter, href_or_empty)`` for the Hebrew jump row.
+
+    ``letter_first_pages`` comes from the full filtered ordered result set
+    before pagination. Present letters link to that first page plus the
+    existing section anchor. Same-page letters keep the in-page hash.
+    Empty letters stay inactive.
+    """
+    items: list[tuple[str, str]] = []
+    for letter in HEBREW_INDEX_LETTERS:
+        target_page = letter_first_pages.get(letter)
+        if target_page is None:
+            items.append((letter, ""))
+            continue
+        anchor = f"#{people_letter_anchor_id(letter)}"
+        if target_page == page:
+            items.append((letter, anchor))
+            continue
+        query = build_archive_public_list_query(
+            q=search_query,
+            page=target_page,
+            per_page=per_page,
         )
-        for letter in HEBREW_INDEX_LETTERS
-    ]
+        suffix = f"?{query}" if query else ""
+        items.append((letter, f"{index_path}{suffix}{anchor}"))
+    return items
 
 
 def _letter_group(
@@ -238,9 +275,13 @@ def build_paginated_public_directory_rows(
     search_query: str = "",
     page_raw=None,
     per_page: int = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
-) -> tuple[list[PublicDirectoryRow], int, int]:
-    """Return the current page of directory rows, total count, and normalized page."""
+) -> tuple[list[PublicDirectoryRow], int, int, dict[str, int]]:
+    """Return the current page of rows, total count, page, and first letter pages."""
     identities = list_public_directory_identities(user, search_query=search_query)
+    letter_first_pages = first_directory_letter_pages(
+        (identity.name for identity in identities),
+        per_page=per_page,
+    )
     total_count = len(identities)
     page = normalize_archive_public_list_page(
         page_raw,
@@ -279,4 +320,4 @@ def build_paginated_public_directory_rows(
                 holdings_summary=holdings.summary,
             )
         )
-    return rows, total_count, page
+    return rows, total_count, page, letter_first_pages

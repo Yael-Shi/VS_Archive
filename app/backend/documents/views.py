@@ -5898,11 +5898,13 @@ def archive_authors_index_page(request):
 def archive_people_index_page(request):
     search_query = (request.GET.get("q") or "").strip()
     per_page = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE
-    people_rows, total_count, page = build_paginated_public_directory_rows(
-        request.user,
-        search_query=search_query,
-        page_raw=request.GET.get("page"),
-        per_page=per_page,
+    people_rows, total_count, page, letter_first_pages = (
+        build_paginated_public_directory_rows(
+            request.user,
+            search_query=search_query,
+            page_raw=request.GET.get("page"),
+            per_page=per_page,
+        )
     )
     letter_groups = group_directory_rows_by_index_letter(people_rows)
     return render(
@@ -5911,7 +5913,13 @@ def archive_people_index_page(request):
         context={
             "people_rows": people_rows,
             "people_letter_groups": letter_groups,
-            "people_alphabet_nav": hebrew_alphabet_nav_items(letter_groups),
+            "people_alphabet_nav": hebrew_alphabet_nav_items(
+                letter_first_pages,
+                page=page,
+                per_page=per_page,
+                search_query=search_query,
+                index_path=reverse("archive-people-index"),
+            ),
             "q": search_query,
             "page_title": "אנשים",
             **archive_public_list_pagination_context(
