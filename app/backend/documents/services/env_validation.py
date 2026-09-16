@@ -264,8 +264,9 @@ class WorkerEnvConfig:
     google_cloud_vision_api_key: Optional[str] = field(default=None)
 
     # Hebrew printed OpenAI fallback (worker execution; not routing). Default off.
-    # OPENAI_API_KEY is required only when the flag is true. Not wired to
-    # GeminiAdapter in phase 1.
+    # OPENAI_API_KEY is required only when the flag is true. GeminiAdapter
+    # checkpointed Hebrew PRINTED OCR may call the helper after full-page
+    # Gemini content failure when this flag is true.
     enable_hebrew_printed_openai_fallback: bool = field(default=False)
     openai_api_key: Optional[str] = field(default=None)
     openai_hebrew_printed_model: str = field(

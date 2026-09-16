@@ -21,6 +21,7 @@ from documents.services.gemini_engine import (
     GeminiResponseError,
     GeminiResponseFailureCode,
     GeminiResult,
+    _effective_transcription_prompt,
     gemini_transcription_contract,
     transcribe_pages_with_gemini,
 )
@@ -134,17 +135,31 @@ class GeminiAdapter:
             language_hint == Document.Language.HEBREW
             and text_input_type == Document.TextInputType.PRINTED
         )
-        hebrew_printed_crop_recovery_enabled = bool(
-            hebrew_printed_recitation_crop_recovery_policy(
-                language_hint=language_hint,
-                text_input_type=text_input_type,
-            )
+        hebrew_printed_openai_fallback_enabled = (
+            language_hint == Document.Language.HEBREW
+            and text_input_type == Document.TextInputType.PRINTED
+            and worker_env is not None
+            and bool(worker_env.enable_hebrew_printed_openai_fallback)
         )
-        hebrew_printed_mixed_script_enabled = bool(
-            hebrew_printed_mixed_script_region_fallback_policy(
-                language_hint=language_hint,
-                text_input_type=text_input_type,
+        # Crop/mixed recovery stay in the tree. The OpenAI full-page fallback
+        # replaces those branches only while the worker flag is on.
+        hebrew_printed_crop_recovery_enabled = (
+            bool(
+                hebrew_printed_recitation_crop_recovery_policy(
+                    language_hint=language_hint,
+                    text_input_type=text_input_type,
+                )
             )
+            and not hebrew_printed_openai_fallback_enabled
+        )
+        hebrew_printed_mixed_script_enabled = (
+            bool(
+                hebrew_printed_mixed_script_region_fallback_policy(
+                    language_hint=language_hint,
+                    text_input_type=text_input_type,
+                )
+            )
+            and not hebrew_printed_openai_fallback_enabled
         )
         hebrew_general_model_fallback_enabled = (
             language_hint == Document.Language.HEBREW
@@ -267,6 +282,17 @@ class GeminiAdapter:
                 hebrew_printed_mixed_script_enabled=(
                     hebrew_printed_mixed_script_enabled
                 ),
+                hebrew_printed_openai_fallback_enabled=(
+                    hebrew_printed_openai_fallback_enabled
+                ),
+                openai_api_key=(
+                    worker_env.openai_api_key if worker_env is not None else None
+                ),
+                openai_hebrew_printed_model=(
+                    worker_env.openai_hebrew_printed_model
+                    if worker_env is not None
+                    else None
+                ),
                 kwargs=kwargs,
                 checkpoint_id=claim.checkpoint_id,
                 lease_token=claim.lease_token,
@@ -306,6 +332,9 @@ class GeminiAdapter:
         attempt_id: int,
         hebrew_printed_crop_recovery_enabled: bool = False,
         hebrew_printed_mixed_script_enabled: bool = False,
+        hebrew_printed_openai_fallback_enabled: bool = False,
+        openai_api_key: str | None = None,
+        openai_hebrew_printed_model: str | None = None,
     ) -> None:
         last_error: Exception | None = None
         remaining_provider_calls = GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS
@@ -413,6 +442,22 @@ class GeminiAdapter:
                     )
                     continue
 
+                if self._persist_hebrew_printed_openai_fallback(
+                    page=page,
+                    language_hint=language_hint,
+                    prompt_variant=prompt_variant,
+                    exc=exc,
+                    hebrew_printed_openai_fallback_enabled=(
+                        hebrew_printed_openai_fallback_enabled
+                    ),
+                    openai_api_key=openai_api_key,
+                    openai_hebrew_printed_model=openai_hebrew_printed_model,
+                    checkpoint_id=checkpoint_id,
+                    lease_token=lease_token,
+                    attempt_id=attempt_id,
+                ):
+                    return
+
                 if (
                     hebrew_printed_crop_recovery_enabled
                     and response_failure_code == GeminiResponseFailureCode.RECITATION
@@ -503,6 +548,22 @@ class GeminiAdapter:
                 ) from exc
             return
 
+        if self._persist_hebrew_printed_openai_fallback(
+            page=page,
+            language_hint=language_hint,
+            prompt_variant=prompt_variant,
+            exc=last_error,
+            hebrew_printed_openai_fallback_enabled=(
+                hebrew_printed_openai_fallback_enabled
+            ),
+            openai_api_key=openai_api_key,
+            openai_hebrew_printed_model=openai_hebrew_printed_model,
+            checkpoint_id=checkpoint_id,
+            lease_token=lease_token,
+            attempt_id=attempt_id,
+        ):
+            return
+
         try:
             persist_gemini_page_failure(
                 checkpoint_id=checkpoint_id,
@@ -522,6 +583,109 @@ class GeminiAdapter:
                 page_index=page.page_index,
             ) from exc
         self._raise_incomplete(attempt_id)
+
+    def _persist_hebrew_printed_openai_fallback(
+        self,
+        *,
+        page: PageImage,
+        language_hint: Optional[str],
+        prompt_variant: str,
+        exc: Exception | None,
+        hebrew_printed_openai_fallback_enabled: bool,
+        openai_api_key: str | None,
+        openai_hebrew_printed_model: str | None,
+        checkpoint_id: int,
+        lease_token: uuid.UUID,
+        attempt_id: int,
+    ) -> bool:
+        if not hebrew_printed_openai_fallback_enabled:
+            return False
+        if not isinstance(exc, GeminiResponseError):
+            return False
+
+        recovered = self._transcribe_hebrew_printed_openai_page(
+            page=page,
+            language_hint=language_hint,
+            prompt_variant=prompt_variant,
+            openai_api_key=openai_api_key,
+            openai_hebrew_printed_model=openai_hebrew_printed_model,
+        )
+        if recovered is None:
+            return False
+
+        try:
+            persist_gemini_page_success(
+                checkpoint_id=checkpoint_id,
+                lease_token=lease_token,
+                actual_model=recovered.engine_name,
+                text=recovered.text,
+                needs_review=recovered.needs_review,
+                review_reasons=list(recovered.review_reasons),
+            )
+        except StaleGeminiPageClaimError as stale_exc:
+            raise EnginePageCheckpointBusyError(page.page_index) from stale_exc
+        except ValueError as persist_exc:
+            self._persist_page_failure(
+                checkpoint_id=checkpoint_id,
+                lease_token=lease_token,
+                exc=persist_exc,
+                page_index=page.page_index,
+            )
+            self._raise_incomplete(attempt_id)
+        except DatabaseError as db_exc:
+            raise EnginePageCheckpointPersistenceRetryableError(
+                stage="success",
+                page_index=page.page_index,
+            ) from db_exc
+        return True
+
+    def _transcribe_hebrew_printed_openai_page(
+        self,
+        *,
+        page: PageImage,
+        language_hint: Optional[str],
+        prompt_variant: str,
+        openai_api_key: str | None,
+        openai_hebrew_printed_model: str | None,
+    ):
+        from documents.services.openai_hebrew_printed_fallback import (
+            HebrewPrintedOpenAIFallbackError,
+            transcribe_hebrew_printed_page_with_openai,
+        )
+
+        key = str(openai_api_key or "").strip()
+        model = str(openai_hebrew_printed_model or "").strip()
+        if not key or not model:
+            logger.warning(
+                "Hebrew printed OpenAI fallback skipped; missing worker config: "
+                "page=%s",
+                page.page_index,
+            )
+            return None
+
+        prompt, _uses_plain_text = _effective_transcription_prompt(
+            prompt_variant,
+            language_hint,
+        )
+        try:
+            result = transcribe_hebrew_printed_page_with_openai(
+                image_bytes=page.image_bytes,
+                mime_type=page.mime_type or "image/png",
+                prompt=prompt,
+                model=model,
+                api_key=key,
+            )
+        except HebrewPrintedOpenAIFallbackError as fallback_exc:
+            logger.warning(
+                "Hebrew printed OpenAI fallback failed: page=%s failure_code=%s "
+                "http_status=%s response_status=%s",
+                page.page_index,
+                fallback_exc.failure_code.value,
+                fallback_exc.http_status,
+                fallback_exc.response_status,
+            )
+            return None
+        return result
 
     def _recover_hebrew_printed_recitation_crops(
         self,

@@ -1,6 +1,41 @@
 # VS-Archive Decision Log
 
+## Hebrew printed OpenAI fallback — phase 2 wiring
+
+**Decision / implemented:** Checkpointed Hebrew PRINTED Gemini OCR may try
+one full-page OpenAI Responses call after the **full-page Gemini** candidate
+chain reaches a final **content/OCR** failure. Gemini remains primary.
+Routing stays `GEMINI` / `printed`. Runtime provenance is
+`actual_model=openai:<model>` plus review reason
+`HEBREW_PRINTED_OPENAI_FALLBACK`.
+
+**Current behavior:**
+- Gate: `language=he`, `text_input_type=PRINTED`, checkpointed
+  `GeminiAdapter._execute_claimed_page`, and
+  `ENABLE_HEBREW_PRINTED_OPENAI_FALLBACK=true` on `WorkerEnvConfig`.
+- Gemini full-page success never calls OpenAI.
+- OpenAI runs only for final `GeminiResponseError` (e.g. `RECITATION`,
+  `SAFETY`, `EMPTY_RESPONSE`, `MAX_TOKENS`, `BLOCKED`, `LANGUAGE`). It does
+  **not** run for `GeminiQuotaError` / quota-or-429 handling, `GeminiApiError`,
+  or other non-response exceptions.
+- While the flag is on, recitation crop recovery and mixed-script region
+  fallback are not entered for that page. Those modules and tests remain;
+  flag off keeps the previous crop/mixed path.
+- OpenAI uses the original full-page image and the same Hebrew printed
+  transcription prompt as the Gemini full-page request. Success persists
+  through `persist_gemini_page_success`. Resume reuses `SUCCEEDED`
+  checkpoints (no second Gemini or OpenAI call). OpenAI failure keeps the
+  existing page-failure / `EnginePageIncompleteError` / document `PARTIAL`
+  path. No new `engine_key`. No checkpoint identity change.
+
+**Deferred:** CDK/Secrets Manager injection; whether crop/mixed should be
+removed later.
+
 ## Hebrew printed OpenAI fallback — phase 1 helper (not wired)
+
+**Superseded for adapter wiring:** see **Hebrew printed OpenAI fallback —
+phase 2 wiring**. The helper module, env flag, and review reason from
+phase 1 remain.
 
 **Decision / implemented (phase 1 only):** Isolated worker-only OpenAI
 Responses helper for a future Hebrew PRINTED full-page fallback after Gemini

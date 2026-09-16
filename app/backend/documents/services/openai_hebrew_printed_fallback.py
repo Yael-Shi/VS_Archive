@@ -1,8 +1,9 @@
 """Isolated OpenAI Responses helper for Hebrew printed OCR fallback.
 
-Phase 1: not called from GeminiAdapter, routing, checkpoints, or the worker.
-Web/Gunicorn must not import this module for request handling. Env validation
-may import constants from this module; the OpenAI SDK is loaded lazily.
+Worker-only. Web/Gunicorn must not import this module for request handling.
+Env validation may import constants from this module; the OpenAI SDK is loaded
+lazily. GeminiAdapter may call ``transcribe_hebrew_printed_page_with_openai``
+for checkpointed Hebrew PRINTED pages when the worker flag is enabled.
 """
 
 from __future__ import annotations
