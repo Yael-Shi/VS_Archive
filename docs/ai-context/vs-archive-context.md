@@ -118,3 +118,18 @@ Non-Hebrew documents may remain **`PARTIAL`** when **`HEBREW_TEXT`** is missing 
 6. Broader Transkribus production routing only with explicit approval.
 
 OCR quality/fidelity validation against the Transkribus UI is important but **not** the current docs/rules task.
+### Corrected/current activation: replacing VERIFIED text
+
+Current policy (2026-09-16):
+
+- Staff may activate a newer/current Transkribus corrected snapshot over `VERIFIED` text, but only with the dedicated explicit verified-replacement confirmation.
+- Generic replacement confirmation alone does not authorize destroying human approval.
+- Only verified rows whose **text bytes change** are reset to `UNVERIFIED`; binding-only and revision-link-only repairs preserve approval.
+- A Hebrew activation applies the same rule independently to SOURCE_TEXT and the paired HEBREW_TEXT mirror.
+- `HUMAN_EDITED_BLOCKED` is still a hard block. The verified override does not bypass binding-integrity or human-edit-history protections.
+- Existing source revision/SHA stale-preview protection remains mandatory and authoritative in the service transaction.
+- After a genuine replacement, bindings point at the activated snapshot so corrected/current freshness and Transkribus hover can become fresh again.
+- The service flag is `allow_verified_replacement` and defaults to `False`.
+- Staff UI field for the additional consent is `confirm_replace_verified`.
+
+This supersedes the older current-policy statement that `VERIFIED_BLOCKED` was always an unconditional activation block; that older statement remains useful as historical PR context.

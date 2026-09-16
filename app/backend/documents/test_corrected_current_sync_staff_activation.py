@@ -238,6 +238,7 @@ class CorrectedCurrentSyncStaffActivationUITests(TestCase):
         source: DocumentTextResult,
         *,
         confirm: str | None = "1",
+        confirm_verified: str | None = None,
         source_text_result_id: int | None = None,
         expected_source_revision: int | None = None,
         expected_source_sha256: str | None = None,
@@ -259,6 +260,8 @@ class CorrectedCurrentSyncStaffActivationUITests(TestCase):
         }
         if confirm is not None:
             data["confirm_replace"] = confirm
+        if confirm_verified is not None:
+            data["confirm_replace_verified"] = confirm_verified
         return data
 
     def test_get_detail_is_read_only(self):
@@ -284,6 +287,7 @@ class CorrectedCurrentSyncStaffActivationUITests(TestCase):
         self.assertContains(resp, "corrected-sync-activation-form")
         self.assertContains(resp, _ACTION_LABEL)
         self.assertContains(resp, 'name="confirm_replace"')
+        self.assertNotContains(resp, 'name="confirm_replace_verified"')
         self.assertContains(resp, f'value="{source.id}"')
         self.assertContains(resp, f'value="{source.source_revision}"')
         self.assertContains(resp, compute_sha256_hex(source.text or ""))
@@ -293,6 +297,84 @@ class CorrectedCurrentSyncStaffActivationUITests(TestCase):
         )
         self.assertNotContains(resp, "STALE_PREVIEW")
         self.assertNotContains(resp, "VERIFIED_BLOCKED")
+
+    def test_verified_text_change_shows_second_confirmation(self):
+        doc, attempt, source, _hebrew, _snapshot = self._eligible_fixture()
+        source.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
+        source.save(update_fields=["verification_status", "updated_at"])
+
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id, attempt.id))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.context["activation_verified_replacement_required"])
+        self.assertContains(resp, 'name="confirm_replace_verified"')
+        self.assertContains(
+            resp,
+            "הטקסט שעומד להיות מוחלף אושר בעבר על ידי אדם",
+        )
+
+    def test_verified_identical_text_does_not_show_second_confirmation(self):
+        doc, attempt, source, hebrew, snapshot = self._eligible_fixture()
+        source.text = snapshot.canonical_text
+        source.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
+        source.save(update_fields=["text", "verification_status", "updated_at"])
+
+        hebrew.text = snapshot.canonical_text
+        hebrew.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
+        hebrew.save(update_fields=["text", "verification_status", "updated_at"])
+
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id, attempt.id))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.context["activation_verified_replacement_required"])
+        self.assertNotContains(resp, 'name="confirm_replace_verified"')
+
+    def test_verified_text_change_without_second_confirmation_is_blocked(self):
+        doc, attempt, source, _hebrew, _snapshot = self._eligible_fixture()
+        source.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
+        source.save(update_fields=["verification_status", "updated_at"])
+
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self._activate_url(doc.id, attempt.id),
+            data=self._post_data(source),
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        source.refresh_from_db()
+        self.assertEqual(source.text, _OLD_TEXT)
+        self.assertEqual(
+            source.verification_status,
+            DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        messages = [str(m) for m in get_messages(resp.wsgi_request)]
+        self.assertEqual(messages, [_CORRECTED_CURRENT_ACTIVATION_MSG_VERIFIED])
+
+    def test_verified_text_change_with_second_confirmation_applies_and_unverifies(self):
+        doc, attempt, source, hebrew, _snapshot = self._eligible_fixture()
+        source.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
+        source.save(update_fields=["verification_status", "updated_at"])
+
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self._activate_url(doc.id, attempt.id),
+            data=self._post_data(source, confirm_verified="1"),
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        source.refresh_from_db()
+        hebrew.refresh_from_db()
+        self.assertEqual(source.text, _CANONICAL)
+        self.assertEqual(hebrew.text, _CANONICAL)
+        self.assertEqual(
+            source.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
+        self.assertContains(resp, _CORRECTED_CURRENT_ACTIVATION_MSG_APPLIED_SOURCE)
 
     def test_no_form_on_attempts_list(self):
         doc, attempt, _source, _hebrew, _snapshot = self._eligible_fixture()
@@ -401,6 +483,7 @@ class CorrectedCurrentSyncStaffActivationUITests(TestCase):
             activated_by=self.staff,
             expected_source_revision=source.source_revision,
             expected_source_sha256=expected_sha,
+            allow_verified_replacement=False,
         )
 
     @patch(
