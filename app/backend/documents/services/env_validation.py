@@ -20,6 +20,11 @@ from documents.services.gemini_defaults import (
 )
 from documents.services.gemini_models import DEFAULT_HEBREW_PRINTED_GEMINI_MODEL
 from documents.services.antigravity_defaults import DEFAULT_ANTIGRAVITY_AGENT_ID
+from documents.services.openai_hebrew_printed_fallback import (
+    DEFAULT_OPENAI_HEBREW_PRINTED_MODEL,
+    HebrewPrintedOpenAIFallbackError,
+    openai_runtime_engine_name,
+)
 
 
 class EnvConfigError(RuntimeError):
@@ -258,6 +263,16 @@ class WorkerEnvConfig:
     enable_antigravity_arabic_printed_banded: bool = field(default=False)
     google_cloud_vision_api_key: Optional[str] = field(default=None)
 
+    # Hebrew printed OpenAI fallback (worker execution; not routing). Default off.
+    # OPENAI_API_KEY is required only when the flag is true. GeminiAdapter
+    # checkpointed Hebrew PRINTED OCR may call the helper after full-page
+    # Gemini content failure when this flag is true.
+    enable_hebrew_printed_openai_fallback: bool = field(default=False)
+    openai_api_key: Optional[str] = field(default=None)
+    openai_hebrew_printed_model: str = field(
+        default=DEFAULT_OPENAI_HEBREW_PRINTED_MODEL
+    )
+
 
 def validate_required_env() -> WorkerEnvConfig:
     enable_hybrid_htr = _get_bool("ENABLE_HYBRID_HTR", default=False)
@@ -390,6 +405,23 @@ def validate_required_env() -> WorkerEnvConfig:
     google_cloud_vision_api_key = None
     if enable_antigravity_arabic_printed_banded:
         google_cloud_vision_api_key = _require("GOOGLE_CLOUD_VISION_API_KEY")
+    enable_hebrew_printed_openai_fallback = _get_bool(
+        "ENABLE_HEBREW_PRINTED_OPENAI_FALLBACK", default=False
+    )
+    openai_api_key = None
+    openai_hebrew_printed_model = DEFAULT_OPENAI_HEBREW_PRINTED_MODEL
+    if enable_hebrew_printed_openai_fallback:
+        openai_api_key = _require("OPENAI_API_KEY")
+        openai_hebrew_printed_model = (
+            _get("OPENAI_HEBREW_PRINTED_MODEL") or DEFAULT_OPENAI_HEBREW_PRINTED_MODEL
+        )
+        try:
+            openai_runtime_engine_name(openai_hebrew_printed_model)
+        except HebrewPrintedOpenAIFallbackError as exc:
+            raise EnvConfigError(
+                "Env var OPENAI_HEBREW_PRINTED_MODEL must be a non-empty model id "
+                "whose openai:<model> runtime name is at most 64 characters."
+            ) from exc
 
     if enable_hybrid_htr and not (
         transkribus_api_token or (transkribus_username and transkribus_password)
@@ -445,4 +477,7 @@ def validate_required_env() -> WorkerEnvConfig:
             enable_antigravity_arabic_printed_banded
         ),
         google_cloud_vision_api_key=google_cloud_vision_api_key,
+        enable_hebrew_printed_openai_fallback=enable_hebrew_printed_openai_fallback,
+        openai_api_key=openai_api_key,
+        openai_hebrew_printed_model=openai_hebrew_printed_model,
     )
