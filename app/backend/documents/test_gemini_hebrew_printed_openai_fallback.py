@@ -263,6 +263,7 @@ class HebrewPrintedOpenAIFallbackClaimedPageTests(SimpleTestCase):
             HebrewPrintedOpenAIFallbackFailureCode.INCOMPLETE,
             HebrewPrintedOpenAIFallbackFailureCode.REFUSAL,
             HebrewPrintedOpenAIFallbackFailureCode.EMPTY_OUTPUT,
+            HebrewPrintedOpenAIFallbackFailureCode.META_OUTPUT,
             HebrewPrintedOpenAIFallbackFailureCode.PROVIDER_ERROR,
             HebrewPrintedOpenAIFallbackFailureCode.INVALID_REQUEST,
         )
