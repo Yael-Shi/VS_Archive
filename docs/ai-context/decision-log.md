@@ -8112,3 +8112,22 @@ Production public-view verification confirmed that the cleaned/linked identities
 **Unchanged:** Transkribus corrected/current `VERIFIED_BLOCKED` / `HUMAN_EDITED_BLOCKED` activation policy; hover/freshness predicates; OCR/worker.
 
 **Tests:** `documents.test_review_text_result_async_verify`, `documents.test_pending_text_result_edit` (CRLF), `documents.test_review_verify_user_edit_intent`, `documents.test_review_textarea_browser_restoration`.
+## Transkribus corrected/current VERIFIED activation override (2026-09-16)
+
+**Decision:** Supersedes the earlier corrected/current activation rule that treated `VERIFIED_BLOCKED` as an unconditional hard block. A newer/current Transkribus snapshot may replace human-verified text only through an explicit, dedicated staff override.
+
+- The activation service accepts `allow_verified_replacement=False` by default. Existing/non-UI callers therefore remain safe by default.
+- `VERIFIED_BLOCKED` is raised only when activation would actually change the bytes of a `VERIFIED` SOURCE_TEXT row or paired Hebrew mirror and the explicit override was not supplied.
+- The ordinary activation confirmation (`confirm_replace`) is not sufficient for verified replacement. The attempt detail page shows a second required checkbox, `confirm_replace_verified`, only when the preview indicates that verified text bytes would change.
+- When the explicit override is used, only `VERIFIED` rows whose text bytes actually change are demoted atomically to `UNVERIFIED`. The replacement text must then be reviewed and approved again.
+- Binding-only repair does not invalidate verification. Likewise, a Hebrew revision-link-only repair that does not change Hebrew text bytes does not invalidate verification.
+- `REJECTED` and other non-VERIFIED verification states are preserved.
+- `HUMAN_EDITED_BLOCKED` remains a hard provenance-safety block and is not bypassed by the verified override. Trustworthy-binding and human-edit-history protections are unchanged.
+- `STALE_PREVIEW` remains authoritative under the existing transaction/locks; explicit verified consent does not allow replacing a SOURCE row whose revision/hash changed after preview.
+- `ALREADY_ACTIVE` remains idempotent and is still resolved before stale-preview/verified checks.
+- Successful replacement continues to bind SOURCE/HEBREW rows to the activated snapshot, preserving Transkribus freshness/hover semantics.
+- No model, migration, worker, SQS, selector, snapshot-storage, or provider behavior changes are part of this decision.
+
+**UI:** The dedicated warning explains that previously human-approved text is being replaced and that the changed replacement becomes unverified. GET preview detection mirrors the service's byte comparison (`source_row.text` / paired Hebrew text versus snapshot canonical text), but the service remains authoritative under locks.
+
+**Validation:** `documents/test_transkribus_corrected_current_activation.py` and `documents/test_corrected_current_sync_staff_activation.py`: 67 tests passed. Ruff check and `git diff --check` passed.

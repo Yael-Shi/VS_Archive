@@ -234,6 +234,7 @@ class CorrectedCurrentActivationTests(TestCase):
         activated_by: object | None = _ACTIVATED_BY_DEFAULT,
         expected_source_revision: int | None = None,
         expected_source_sha256: str | None = None,
+        allow_verified_replacement: bool = False,
     ) -> CorrectedCurrentActivationResult:
         return activate_corrected_current_sync_attempt(
             document_id=self.doc.pk if document_id is None else document_id,
@@ -256,6 +257,7 @@ class CorrectedCurrentActivationTests(TestCase):
                 if expected_source_sha256 is None
                 else expected_source_sha256
             ),
+            allow_verified_replacement=allow_verified_replacement,
         )
 
     def test_hebrew_happy_path_applies_text_mirror_bindings_and_audit(self):
@@ -462,22 +464,106 @@ class CorrectedCurrentActivationTests(TestCase):
             ctx.exception.code, CorrectedCurrentActivationErrorCode.STALE_PREVIEW
         )
 
-    def test_verified_source_blocked(self):
+    def test_verified_source_text_change_blocked_without_override(self):
         self.source.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
         self.source.save(update_fields=["verification_status", "updated_at"])
+
         with self.assertRaises(CorrectedCurrentActivationError) as ctx:
             self._activate()
+
         self.assertEqual(
             ctx.exception.code, CorrectedCurrentActivationErrorCode.VERIFIED_BLOCKED
         )
+        self.source.refresh_from_db()
+        self.assertEqual(self.source.text, _OLD_TEXT)
+        self.assertEqual(
+            self.source.verification_status,
+            DocumentTextResult.VerificationStatus.VERIFIED,
+        )
 
-    def test_verified_hebrew_mirror_blocked(self):
+    def test_verified_source_text_change_allowed_with_override_and_unverifies(self):
+        self.source.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
+        self.source.save(update_fields=["verification_status", "updated_at"])
+
+        result = self._activate(allow_verified_replacement=True)
+
+        self.assertEqual(result.outcome, "APPLIED")
+        self.assertTrue(result.source_text_changed)
+        self.source.refresh_from_db()
+        self.assertEqual(self.source.text, _CANONICAL)
+        self.assertEqual(
+            self.source.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
+
+    def test_verified_hebrew_mirror_text_change_blocked_without_override(self):
+        self.source.text = _CANONICAL
+        self.source.save(update_fields=["text", "updated_at"])
         self.hebrew.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
         self.hebrew.save(update_fields=["verification_status", "updated_at"])
+
         with self.assertRaises(CorrectedCurrentActivationError) as ctx:
-            self._activate()
+            self._activate(
+                expected_source_sha256=compute_sha256_hex(_CANONICAL),
+            )
+
         self.assertEqual(
             ctx.exception.code, CorrectedCurrentActivationErrorCode.VERIFIED_BLOCKED
+        )
+        self.hebrew.refresh_from_db()
+        self.assertEqual(self.hebrew.text, _OLD_TEXT)
+        self.assertEqual(
+            self.hebrew.verification_status,
+            DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+
+    def test_verified_hebrew_mirror_text_change_allowed_with_override_and_unverifies(
+        self,
+    ):
+        self.source.text = _CANONICAL
+        self.source.save(update_fields=["text", "updated_at"])
+        self.hebrew.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
+        self.hebrew.save(update_fields=["verification_status", "updated_at"])
+
+        result = self._activate(
+            expected_source_sha256=compute_sha256_hex(_CANONICAL),
+            allow_verified_replacement=True,
+        )
+
+        self.assertEqual(result.outcome, "APPLIED")
+        self.assertFalse(result.source_text_changed)
+        self.assertTrue(result.hebrew_mirror_updated)
+        self.hebrew.refresh_from_db()
+        self.assertEqual(self.hebrew.text, _CANONICAL)
+        self.assertEqual(
+            self.hebrew.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
+
+    def test_verified_identical_text_binding_repair_preserves_verification(self):
+        self.source.text = _CANONICAL
+        self.source.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
+        self.source.save(update_fields=["text", "verification_status", "updated_at"])
+        self.hebrew.text = _CANONICAL
+        self.hebrew.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
+        self.hebrew.save(update_fields=["text", "verification_status", "updated_at"])
+
+        result = self._activate(
+            expected_source_sha256=compute_sha256_hex(_CANONICAL),
+        )
+
+        self.assertEqual(result.outcome, "APPLIED")
+        self.assertFalse(result.source_text_changed)
+        self.assertFalse(result.hebrew_mirror_updated)
+        self.source.refresh_from_db()
+        self.hebrew.refresh_from_db()
+        self.assertEqual(
+            self.source.verification_status,
+            DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        self.assertEqual(
+            self.hebrew.verification_status,
+            DocumentTextResult.VerificationStatus.VERIFIED,
         )
 
     def test_human_edited_after_bind_blocked(self):
@@ -504,6 +590,36 @@ class CorrectedCurrentActivationTests(TestCase):
                 expected_source_revision=3,
                 expected_source_sha256=compute_sha256_hex(_OLD_TEXT),
             )
+        self.assertEqual(
+            ctx.exception.code,
+            CorrectedCurrentActivationErrorCode.HUMAN_EDITED_BLOCKED,
+        )
+
+    def test_verified_override_does_not_bypass_human_drift_block(self):
+        other_snap = _ready_snapshot(
+            document=self.doc,
+            run=self.transkribus_run,
+            text=_OLD_TEXT,
+            source_kind=TranskribusTranscriptSnapshot.SourceKind.AUTOMATIC_HTR,
+        )
+        _add_snapshot_page(other_snap, transcript_ts_id="ts-old")
+        _bind(
+            text_result=self.source,
+            snapshot=other_snap,
+            role=TranskribusTextResultBinding.BindingRole.SNAPSHOT_SOURCE,
+            bound_source_revision=2,
+            text_for_hash=_OLD_TEXT,
+        )
+        self.source.source_revision = 3
+        self.source.save(update_fields=["source_revision", "updated_at"])
+
+        with self.assertRaises(CorrectedCurrentActivationError) as ctx:
+            self._activate(
+                expected_source_revision=3,
+                expected_source_sha256=compute_sha256_hex(_OLD_TEXT),
+                allow_verified_replacement=True,
+            )
+
         self.assertEqual(
             ctx.exception.code,
             CorrectedCurrentActivationErrorCode.HUMAN_EDITED_BLOCKED,
@@ -873,6 +989,11 @@ class CorrectedCurrentActivationTests(TestCase):
                 raise TranskribusSnapshotBindingError("simulated hebrew bind failure")
             return real_bind(**kwargs)
 
+        self.source.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
+        self.source.save(update_fields=["verification_status", "updated_at"])
+        self.hebrew.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
+        self.hebrew.save(update_fields=["verification_status", "updated_at"])
+
         source_before = (
             self.source.text,
             self.source.source_revision,
@@ -888,7 +1009,7 @@ class CorrectedCurrentActivationTests(TestCase):
             mod, "bind_text_result_to_snapshot", side_effect=_bind_side_effect
         ):
             with self.assertRaises(CorrectedCurrentActivationError) as ctx:
-                self._activate()
+                self._activate(allow_verified_replacement=True)
 
         self.assertEqual(
             ctx.exception.code, CorrectedCurrentActivationErrorCode.BINDING_FAILED

@@ -422,6 +422,7 @@ from documents.services.transkribus_corrected_current_sync_enqueue import (
     enqueue_transkribus_corrected_current_sync,
 )
 from documents.services.transkribus_snapshot_parser import compute_sha256_hex
+from documents.services.verified_text_result_edit import find_paired_hebrew_row
 from documents.services.transcription_edit_suggestions import (
     IDENTICAL_TEXT_ERROR,
     NAME_REQUIRED_ERROR,
@@ -2770,6 +2771,7 @@ def _corrected_current_sync_attempts_queryset(*, with_pages: bool = False):
 
 
 _CORRECTED_CURRENT_ACTIVATION_CONFIRM_FIELD = "confirm_replace"
+_CORRECTED_CURRENT_ACTIVATION_VERIFIED_CONFIRM_FIELD = "confirm_replace_verified"
 _CORRECTED_CURRENT_ACTIVATION_CONFIRM_VALUE = "1"
 
 _CORRECTED_CURRENT_ACTIVATION_MSG_MISSING_CONFIRM = (
@@ -2784,7 +2786,10 @@ _CORRECTED_CURRENT_ACTIVATION_MSG_GENERIC = (
 _CORRECTED_CURRENT_ACTIVATION_MSG_STALE = (
     "התעתוק המוצג השתנה מאז התצוגה המקדימה. רעננו את הדף ובדקו שוב לפני ההחלפה."
 )
-_CORRECTED_CURRENT_ACTIVATION_MSG_VERIFIED = "לא ניתן להחליף תעתוק שאומת על ידי אדם."
+_CORRECTED_CURRENT_ACTIVATION_MSG_VERIFIED = (
+    "התעתוק הנוכחי אושר על ידי אדם. כדי להחליף את הטקסט המאושר "
+    "יש לאשר במפורש את ביטול האישור האנושי."
+)
 _CORRECTED_CURRENT_ACTIVATION_MSG_HUMAN_EDITED = (
     "לא ניתן להחליף תעתוק שנערך ידנית ומוגן."
 )
@@ -3109,11 +3114,38 @@ def corrected_current_sync_attempt_detail_page(request, doc_id: int, attempt_id:
     activation_source_text_result_id: int | None = None
     activation_expected_source_revision: int | None = None
     activation_expected_source_sha256: str | None = None
+    activation_verified_replacement_required = False
     if show_activation_section and source_row is not None:
         activation_form_available = True
         activation_source_text_result_id = source_row.id
         activation_expected_source_revision = source_row.source_revision
         activation_expected_source_sha256 = compute_sha256_hex(source_row.text or "")
+
+        source_text_will_change = (source_row.text or "") != (
+            snapshot.canonical_text or ""
+        )
+        source_verified_replacement = (
+            source_text_will_change
+            and source_row.verification_status
+            == DocumentTextResult.VerificationStatus.VERIFIED
+        )
+
+        hebrew_verified_replacement = False
+        if doc.language == Document.Language.HEBREW:
+            hebrew_row = find_paired_hebrew_row(doc, engine=source_row.engine)
+            if hebrew_row is not None:
+                hebrew_text_will_change = (hebrew_row.text or "") != (
+                    snapshot.canonical_text or ""
+                )
+                hebrew_verified_replacement = (
+                    hebrew_text_will_change
+                    and hebrew_row.verification_status
+                    == DocumentTextResult.VerificationStatus.VERIFIED
+                )
+
+        activation_verified_replacement_required = (
+            source_verified_replacement or hebrew_verified_replacement
+        )
     snapshot_text = snapshot.canonical_text if show_snapshot_preview else ""
     diff_html = None
     if show_snapshot_preview and source_row is not None:
@@ -3155,6 +3187,9 @@ def corrected_current_sync_attempt_detail_page(request, doc_id: int, attempt_id:
             "activation_source_text_result_id": activation_source_text_result_id,
             "activation_expected_source_revision": activation_expected_source_revision,
             "activation_expected_source_sha256": activation_expected_source_sha256,
+            "activation_verified_replacement_required": (
+                activation_verified_replacement_required
+            ),
             "is_started": (
                 attempt.status == TranskribusCorrectedCurrentSyncAttempt.Status.STARTED
             ),
@@ -3225,6 +3260,15 @@ def corrected_current_sync_attempt_activate(request, doc_id: int, attempt_id: in
             activated_by=request.user,
             expected_source_revision=expected_source_revision,
             expected_source_sha256=expected_source_sha256,
+            allow_verified_replacement=(
+                (
+                    request.POST.get(
+                        _CORRECTED_CURRENT_ACTIVATION_VERIFIED_CONFIRM_FIELD
+                    )
+                    or ""
+                ).strip()
+                == _CORRECTED_CURRENT_ACTIVATION_CONFIRM_VALUE
+            ),
         )
     except CorrectedCurrentActivationError as exc:
         messages.error(

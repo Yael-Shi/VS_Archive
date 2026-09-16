@@ -374,6 +374,7 @@ def activate_corrected_current_sync_attempt(
     activated_by: object | None,
     expected_source_revision: int,
     expected_source_sha256: str,
+    allow_verified_replacement: bool = False,
 ) -> CorrectedCurrentActivationResult:
     """Activate an explicit COMPLETED corrected/current attempt into SOURCE_TEXT.
 
@@ -517,9 +518,17 @@ def activate_corrected_current_sync_attempt(
         ):
             _raise(CorrectedCurrentActivationErrorCode.STALE_PREVIEW)
 
-        if _is_verified(source_row) or (
-            hebrew_row is not None and _is_verified(hebrew_row)
-        ):
+        source_text_changed = (source_row.text or "") != canonical_text
+        hebrew_text_changed = (
+            hebrew_row is not None and (hebrew_row.text or "") != canonical_text
+        )
+
+        verified_replacement_required = (
+            source_text_changed and _is_verified(source_row)
+        ) or (
+            hebrew_text_changed and hebrew_row is not None and _is_verified(hebrew_row)
+        )
+        if verified_replacement_required and not allow_verified_replacement:
             _raise(CorrectedCurrentActivationErrorCode.VERIFIED_BLOCKED)
 
         if _binding_indicates_human_drift(
@@ -537,9 +546,31 @@ def activate_corrected_current_sync_attempt(
         if _human_edit_history_blocks_activation(source_row):
             _raise(CorrectedCurrentActivationErrorCode.HUMAN_EDITED_BLOCKED)
 
-        source_text_changed = (source_row.text or "") != canonical_text
         hebrew_mirror_updated = False
         bound_revision = int(source_row.source_revision)
+
+        # Replacing human-approved text invalidates approval for the bytes that
+        # actually change. Binding-only/revision-link repair does not.
+        if (
+            allow_verified_replacement
+            and source_text_changed
+            and _is_verified(source_row)
+        ):
+            source_row.verification_status = (
+                DocumentTextResult.VerificationStatus.UNVERIFIED
+            )
+            source_row.save(update_fields=["verification_status", "updated_at"])
+
+        if (
+            allow_verified_replacement
+            and hebrew_text_changed
+            and hebrew_row is not None
+            and _is_verified(hebrew_row)
+        ):
+            hebrew_row.verification_status = (
+                DocumentTextResult.VerificationStatus.UNVERIFIED
+            )
+            hebrew_row.save(update_fields=["verification_status", "updated_at"])
 
         if source_text_changed:
             bound_revision = _apply_source_text_change(
