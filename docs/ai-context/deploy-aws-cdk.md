@@ -51,6 +51,7 @@ Some OCR routes are activated by environment flags read in `select_ocr_route` (n
 | `ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN` | `false` (SSM; see below) | see SSM | `he` + `HANDWRITTEN` → Transkribus |
 | `ENABLE_ANTIGRAVITY_ARABIC_PRINTED` | `false` | `true` | `ar` + `PRINTED` → Antigravity |
 | `ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED` | `false` | `true` | execution only; does not change routing |
+| `ENABLE_HEBREW_PRINTED_OPENAI_FALLBACK` | `false` | `true` | execution only; Hebrew PRINTED Gemini fallback; does not change routing |
 
 The worker CDK column is `app_stack.py` desired configuration, not a live ECS inspection. Values become effective in runtime after deployment; verify deployed runtime separately.
 
@@ -64,6 +65,7 @@ The worker CDK column is `app_stack.py` desired configuration, not a live ECS in
 - **`ar` + `HANDWRITTEN`** is not routed to Antigravity regardless of the flag.
 - The adapter also validates `worker_env.enable_antigravity_arabic_printed` as a second safety check.
 - **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED=false`** is the execution-code / env default when the variable is absent. Worker CDK config sets **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED=true`** on the worker task only (web remains unset). That desired value is effective in runtime after deployment; verify deployed runtime separately. Worker CDK injects **`GOOGLE_CLOUD_VISION_API_KEY`** from existing Secrets Manager secret **`vs-archive/google-vision-key`**. The credential is injected into the worker container only; the web container does not receive it. Web and worker share the existing ECS execution role.
+- **`ENABLE_HEBREW_PRINTED_OPENAI_FALLBACK=false`** is the execution-code / env default when the variable is absent. Worker CDK config sets **`ENABLE_HEBREW_PRINTED_OPENAI_FALLBACK=true`** on the worker task only (web remains unset). That desired value is effective in runtime after deployment; verify deployed runtime separately. Worker CDK injects **`OPENAI_API_KEY`** from existing Secrets Manager secret **`vs-archive-dev/openai_api_key`**. The credential is injected into the worker container only; the web container does not receive it. CDK imports the secret; the operator must create it in Secrets Manager before deploy. **`OPENAI_HEBREW_PRINTED_MODEL`** is not set in CDK; the worker uses the backend default **`gpt-5.6-sol`** unless that env var is added later. Web and worker share the existing ECS execution role.
 
 Local template: `app/backend/.env.template`. Routing reference: `docs/ocr-routing-reference.md`.
 
@@ -83,6 +85,7 @@ Local template: `app/backend/.env.template`. Routing reference: `docs/ocr-routin
 - `vs-archive/dev/transkribus/password`
 - `vs-archive/dev/transkribus/api-token`
 - `vs-archive/google-vision-key` (injected into the worker container only as `GOOGLE_CLOUD_VISION_API_KEY`; the web container does not receive it; banded flag remains false)
+- `vs-archive-dev/openai_api_key` (must exist before deploy; CDK imports it and injects into the worker container only as `OPENAI_API_KEY`; the web container does not receive it; model uses backend default unless `OPENAI_HEBREW_PRINTED_MODEL` is set later)
 
 ## Preflight checks before deploy
 
