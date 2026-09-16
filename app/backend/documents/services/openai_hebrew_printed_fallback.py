@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import Any
@@ -24,11 +25,45 @@ OPENAI_IMAGE_DETAIL = "original"
 CHECKPOINT_ACTUAL_MODEL_MAX_LEN = 64
 _ALLOWED_IMAGE_MIMES = frozenset({"image/png", "image/jpeg", "image/webp"})
 
+OPENAI_HEBREW_PRINTED_INSTRUCTIONS = (
+    "You are a transcription engine, not a conversational assistant. "
+    "Return only the transcription of text visibly present in the supplied "
+    "image, plus any explicit uncertainty markers required by the caller's "
+    "transcription prompt. Do not add any other text. "
+    "Never describe, analyze, summarize, explain, introduce, or comment on "
+    "the image. Never say what you are about to do. "
+    'Do not output observations such as "the image contains...", '
+    '"the text in the image...", numbered image descriptions, or similar '
+    "meta-commentary. For tables, charts, captions, or mixed-language areas, "
+    "transcribe visible text rather than describing the visual element. "
+    "The response must begin directly with the transcription and end with "
+    "the transcription."
+)
+
+_LEADING_LIST_MARKER = re.compile(r"^(?:\d+[\.)]\s+)+")
+_META_OUTPUT_PREFIXES = (
+    "i will now transcribe",
+    "i will transcribe",
+    "i'll now transcribe",
+    "i'll transcribe",
+    "the text in the image",
+    "the text in this image",
+    "the image contains",
+    "the image shows",
+    "the image depicts",
+    "this image contains",
+    "this image shows",
+    "here is the transcription",
+    "here is a transcription",
+    "here is the transcribed",
+)
+
 
 class HebrewPrintedOpenAIFallbackFailureCode(StrEnum):
     EMPTY_OUTPUT = "EMPTY_OUTPUT"
     INCOMPLETE = "INCOMPLETE"
     INVALID_REQUEST = "INVALID_REQUEST"
+    META_OUTPUT = "META_OUTPUT"
     PROVIDER_ERROR = "PROVIDER_ERROR"
     REFUSAL = "REFUSAL"
 
@@ -108,6 +143,7 @@ def transcribe_hebrew_printed_page_with_openai(
     )
     request_kwargs = {
         "model": str(model).strip(),
+        "instructions": OPENAI_HEBREW_PRINTED_INSTRUCTIONS,
         "store": False,
         "stream": False,
         "input": [
@@ -195,12 +231,39 @@ def _result_from_response(
             HebrewPrintedOpenAIFallbackFailureCode.EMPTY_OUTPUT,
             response_status=response_status,
         )
+    stripped_text = output_text.strip()
+    if _output_starts_with_meta_commentary(stripped_text):
+        _log_provider_failure(
+            HebrewPrintedOpenAIFallbackFailureCode.META_OUTPUT,
+            response_status=response_status,
+        )
+        raise HebrewPrintedOpenAIFallbackError(
+            HebrewPrintedOpenAIFallbackFailureCode.META_OUTPUT,
+            response_status=response_status,
+        )
     return HebrewPrintedOpenAIFallbackResult(
-        text=output_text.strip(),
+        text=stripped_text,
         engine_name=engine_name,
         review_reasons=(HEBREW_PRINTED_OPENAI_FALLBACK,),
         needs_review=True,
     )
+
+
+def _output_starts_with_meta_commentary(text: str) -> bool:
+    """True only for unmistakable assistant framing at the start of output.
+
+    Does not inspect later lines, does not strip commentary from accepted
+    text, and does not reject numbering or English by themselves.
+    """
+    first_line = next(
+        (line.strip() for line in text.splitlines() if line.strip()),
+        "",
+    )
+    for candidate in (text, first_line):
+        normalized = _LEADING_LIST_MARKER.sub("", candidate, count=1).strip().lower()
+        if any(normalized.startswith(prefix) for prefix in _META_OUTPUT_PREFIXES):
+            return True
+    return False
 
 
 def _log_provider_failure(

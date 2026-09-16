@@ -11,6 +11,7 @@ from django.test import SimpleTestCase
 from documents.services.env_validation import EnvConfigError, validate_required_env
 from documents.services.openai_hebrew_printed_fallback import (
     DEFAULT_OPENAI_HEBREW_PRINTED_MODEL,
+    OPENAI_HEBREW_PRINTED_INSTRUCTIONS,
     OPENAI_IMAGE_DETAIL,
     HebrewPrintedOpenAIFallbackError,
     HebrewPrintedOpenAIFallbackFailureCode,
@@ -269,6 +270,7 @@ class HebrewPrintedOpenAIFallbackHelperTests(SimpleTestCase):
         self.assertEqual(len(responses.calls), 1)
         kwargs = responses.calls[0]
         self.assertEqual(kwargs["model"], DEFAULT_OPENAI_HEBREW_PRINTED_MODEL)
+        self.assertEqual(kwargs["instructions"], OPENAI_HEBREW_PRINTED_INSTRUCTIONS)
         self.assertIs(kwargs["store"], False)
         self.assertIs(kwargs["stream"], False)
         self.assertNotIn("tools", kwargs)
@@ -276,6 +278,7 @@ class HebrewPrintedOpenAIFallbackHelperTests(SimpleTestCase):
         content = kwargs["input"][0]["content"]
         self.assertEqual(content[0]["type"], "input_text")
         self.assertEqual(content[0]["text"], prompt)
+        self.assertEqual(prompt, "Caller-supplied archival prompt.")
         self.assertEqual(content[1]["type"], "input_image")
         self.assertEqual(content[1]["detail"], OPENAI_IMAGE_DETAIL)
         self.assertTrue(content[1]["image_url"].startswith("data:image/png;base64,"))
@@ -290,3 +293,44 @@ class HebrewPrintedOpenAIFallbackHelperTests(SimpleTestCase):
             review_reason_label(HEBREW_PRINTED_OPENAI_FALLBACK),
             HEBREW_PRINTED_OPENAI_FALLBACK,
         )
+
+    def test_leading_meta_commentary_is_typed_meta_output_failure(self):
+        cases = (
+            "The text in the image is in English.\nשורה",
+            "I will now transcribe the text as requested.\nשורה",
+            "The image contains a table of names.\nשורה",
+            "1. The image contains a chart.\n2. A caption.",
+        )
+        for output_text in cases:
+            with self.subTest(output_text=output_text.splitlines()[0]):
+                responses = _FakeResponses(
+                    response=SimpleNamespace(
+                        status="completed",
+                        output_text=output_text,
+                        output=[],
+                    )
+                )
+                with self.assertRaises(HebrewPrintedOpenAIFallbackError) as raised:
+                    _transcribe(client=_FakeOpenAIClient(responses))
+
+                self.assertEqual(
+                    raised.exception.failure_code,
+                    HebrewPrintedOpenAIFallbackFailureCode.META_OUTPUT,
+                )
+                self.assertEqual(str(raised.exception), "META_OUTPUT")
+                self.assertNotIn("transcribe", str(raised.exception).lower())
+
+    def test_numbered_legitimate_source_text_is_accepted(self):
+        source = "1. ישיבה\n2. סדר יום\n3. English caption under the table"
+        responses = _FakeResponses(
+            response=SimpleNamespace(
+                status="completed",
+                output_text=source,
+                output=[],
+            )
+        )
+        result = _transcribe(client=_FakeOpenAIClient(responses))
+
+        self.assertEqual(result.text, source)
+        self.assertEqual(result.engine_name, "openai:gpt-5.6-sol")
+        self.assertEqual(result.review_reasons, (HEBREW_PRINTED_OPENAI_FALLBACK,))

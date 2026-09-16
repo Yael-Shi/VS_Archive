@@ -1,5 +1,31 @@
 # VS-Archive Decision Log
 
+## Hebrew printed OpenAI fallback — output contract
+
+**Decision / implemented:** The isolated OpenAI Hebrew PRINTED helper sends a
+provider-specific transcription contract on the Responses API
+`instructions` field. The Gemini-derived Hebrew printed prompt remains
+unchanged user `input_text`. Usable OpenAI output that clearly **starts**
+with assistant meta-commentary is rejected as typed `META_OUTPUT`; accepted
+text is not sanitized.
+
+**Current behavior:**
+- `instructions` tell the model it is a transcription engine: return only
+  visible source text, no description/analysis/introduction, no “I will now
+  transcribe…”, transcribe tables/charts rather than describing them.
+- After `completed` + non-empty strip, a conservative prefix check rejects
+  unmistakable framing such as “The text in the image is…”, “The image
+  contains…”, or “I will now transcribe…”. Leading `1.` / `2.` markers are
+  ignored only for that match. Numbering or English in legitimate source
+  text is not rejected by itself.
+- `META_OUTPUT` follows the same typed-failure path as refusal/empty: no
+  provider body in the exception, no OpenAI success is persisted; the
+  existing Gemini page-failure / `PARTIAL` path continues.
+
+**Deferred:** Broader meta-output detection (mid-document commentary,
+Hebrew assistant phrasing, visual descriptions that do not use the known
+English prefixes). No prompt rewrite of `_HEBREW_PRINTED_PROMPT`.
+
 ## Hebrew printed OpenAI fallback — production infra wiring
 
 **Decision / implemented:** Worker ECS enables the existing Hebrew PRINTED
