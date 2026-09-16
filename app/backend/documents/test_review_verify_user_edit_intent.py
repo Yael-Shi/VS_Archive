@@ -623,6 +623,18 @@ class ReviewVerifyUserEditIntentTests(TestCase):
             **_async_headers(),
         )
         self.assertEqual(resp.status_code, 200)
+        payload = json.loads(resp.content)
+        self.assertFalse(payload.get("text_saved"))
+        hebrew_html = None
+        for card in payload.get("cards") or []:
+            if card.get("result_id") == hebrew.id:
+                hebrew_html = card.get("html") or ""
+                break
+        self.assertIsNotNone(hebrew_html)
+        self.assertEqual(len(payload.get("cards") or []), 1)
+        self.assertEqual(payload["cards"][0]["result_id"], hebrew.id)
+        self.assertIn("עריכת תרגום מאושר", hebrew_html)
+        self.assertNotIn("אשר תעתוק", hebrew_html)
 
         source.refresh_from_db()
         hebrew.refresh_from_db()

@@ -18,6 +18,7 @@ from documents.services.verified_text_result_edit import (
     edit_pending_text_result,
     is_hebrew_translation_stale,
     review_form_text_post_data,
+    verify_pending_text_result,
 )
 
 
@@ -545,3 +546,73 @@ class PendingTextResultEditTests(TestCase):
         )
         source.refresh_from_db()
         self.assertEqual(source.text, "Eligible row")
+
+    def test_crlf_form_serialization_is_not_a_pending_text_edit(self):
+        doc = self._create_english_doc()
+        source = self._create_pending_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="line1\nline2",
+            source_revision=2,
+        )
+
+        outcome = edit_pending_text_result(
+            result_id=source.id,
+            new_text="line1\r\nline2",
+            editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
+        )
+
+        source.refresh_from_db()
+        self.assertFalse(outcome.text_saved)
+        self.assertEqual(source.text, "line1\nline2")
+        self.assertEqual(source.source_revision, 2)
+        self.assertEqual(DocumentTextResultEdit.objects.count(), 0)
+
+    def test_crlf_real_edit_persists_lf_newlines(self):
+        doc = self._create_english_doc()
+        source = self._create_pending_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="line1\nline2",
+            source_revision=2,
+        )
+
+        outcome = edit_pending_text_result(
+            result_id=source.id,
+            new_text="line1\r\nchanged",
+            editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
+        )
+
+        source.refresh_from_db()
+        self.assertTrue(outcome.text_saved)
+        self.assertEqual(source.text, "line1\nchanged")
+        self.assertEqual(source.source_revision, 3)
+
+    def test_verify_with_user_edit_flag_and_crlf_does_not_rewrite(self):
+        doc = self._create_english_doc()
+        source = self._create_pending_text_result(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="line1\nline2",
+            source_revision=5,
+        )
+
+        outcome = verify_pending_text_result(
+            result_id=source.id,
+            new_text="line1\r\nline2",
+            editor=self.staff,
+            baseline=review_form_baseline_for_result_id(source.id),
+            text_was_user_edited=True,
+        )
+
+        source.refresh_from_db()
+        self.assertFalse(outcome.text_saved)
+        self.assertEqual(source.text, "line1\nline2")
+        self.assertEqual(source.source_revision, 5)
+        self.assertEqual(
+            source.verification_status,
+            DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        self.assertEqual(DocumentTextResultEdit.objects.count(), 0)

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+from html import unescape
 from typing import TypedDict
 from unittest.mock import patch
 
@@ -25,6 +27,7 @@ from documents.services.verified_text_result_edit import (
     review_form_text_post_data,
     verify_pending_text_result,
 )
+from documents.services.transkribus_snapshot_parser import compute_sha256_hex
 
 
 def _select_for_update_model_order(captured_queries):
@@ -46,6 +49,52 @@ class _AsyncClientHeaders(TypedDict):
 
 def _async_headers() -> _AsyncClientHeaders:
     return {"HTTP_X_REQUESTED_WITH": "XMLHttpRequest"}
+
+
+def _card_ids(payload: dict) -> list[int]:
+    return [int(card["result_id"]) for card in payload.get("cards") or []]
+
+
+def _card_html(payload: dict, result_id: int) -> str:
+    for card in payload.get("cards") or []:
+        if card.get("result_id") == result_id:
+            return str(card.get("html") or "")
+    raise AssertionError(f"no card html for result_id={result_id}")
+
+
+def _hidden_value(html: str, name: str) -> str | None:
+    match = re.search(rf'name="{re.escape(name)}" value="([^"]*)"', html)
+    if match is None:
+        return None
+    return match.group(1)
+
+
+def _textarea_default(html: str) -> str:
+    match = re.search(
+        r'<textarea class="review-textarea"[^>]*>(.*?)</textarea>',
+        html,
+        flags=re.DOTALL,
+    )
+    if match is None:
+        raise AssertionError("no review textarea in card html")
+    return unescape(match.group(1))
+
+
+def _post_from_card_html(
+    html: str, *, text_was_user_edited: bool = False
+) -> dict[str, str]:
+    sha = _hidden_value(html, "expected_text_sha256")
+    if sha is None:
+        raise AssertionError("missing expected_text_sha256")
+    data = {
+        "expected_text_sha256": sha,
+        "text": _textarea_default(html),
+        "text_was_user_edited": "1" if text_was_user_edited else "0",
+    }
+    revision = _hidden_value(html, "expected_source_revision")
+    if revision is not None:
+        data["expected_source_revision"] = revision
+    return data
 
 
 @override_settings(UPLOADS_BUCKET_NAME="")
@@ -482,17 +531,24 @@ class ReviewCombinedVerifyAndAsyncTests(TestCase):
         )
         self.assertEqual(save.status_code, 200)
         save_body = json.loads(save.content)
+        self.assertEqual(save_body["ok"], True)
+        self.assertEqual(save_body["action"], "save")
+        self.assertEqual(save_body["result_id"], source.id)
+        self.assertEqual(save_body["document_id"], doc.id)
         self.assertEqual(
-            save_body,
-            {
-                "ok": True,
-                "action": "save",
-                "result_id": source.id,
-                "document_id": doc.id,
-                "verification_status": DocumentTextResult.VerificationStatus.UNVERIFIED,
-                "text_saved": True,
-            },
+            save_body["verification_status"],
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
         )
+        self.assertTrue(save_body["text_saved"])
+        self.assertEqual(len(save_body["cards"]), 1)
+        save_html = _card_html(save_body, source.id)
+        self.assertEqual(_textarea_default(save_html), "async saved")
+        self.assertEqual(_hidden_value(save_html, "text_was_user_edited"), "0")
+        self.assertEqual(
+            _hidden_value(save_html, "expected_text_sha256"),
+            compute_sha256_hex("async saved"),
+        )
+        self.assertEqual(_hidden_value(save_html, "expected_source_revision"), "2")
 
         source.refresh_from_db()
         verify = self.client.post(
@@ -511,6 +567,10 @@ class ReviewCombinedVerifyAndAsyncTests(TestCase):
             DocumentTextResult.VerificationStatus.VERIFIED,
         )
         self.assertFalse(verify_body["text_saved"])
+        verify_html = _card_html(verify_body, source.id)
+        self.assertIn("עריכת תעתוק מאושר", verify_html)
+        self.assertNotIn("אשר תעתוק", verify_html)
+        self.assertEqual(_textarea_default(verify_html), "async saved")
 
         pending = self._create_pending(
             doc,
@@ -524,17 +584,19 @@ class ReviewCombinedVerifyAndAsyncTests(TestCase):
         )
         self.assertEqual(reject.status_code, 200)
         reject_body = json.loads(reject.content)
+        self.assertEqual(reject_body["ok"], True)
+        self.assertEqual(reject_body["action"], "reject")
+        self.assertEqual(reject_body["result_id"], pending.id)
+        self.assertEqual(reject_body["document_id"], doc.id)
         self.assertEqual(
-            reject_body,
-            {
-                "ok": True,
-                "action": "reject",
-                "result_id": pending.id,
-                "document_id": doc.id,
-                "verification_status": DocumentTextResult.VerificationStatus.REJECTED,
-                "text_saved": False,
-            },
+            reject_body["verification_status"],
+            DocumentTextResult.VerificationStatus.REJECTED,
         )
+        self.assertFalse(reject_body["text_saved"])
+        reject_html = _card_html(reject_body, pending.id)
+        self.assertEqual(_textarea_default(reject_html), "async reject")
+        self.assertNotIn("דחה תעתוק", reject_html)
+        self.assertIn("אשר תעתוק", reject_html)
 
     def test_reject_does_not_persist_posted_textarea_text(self):
         doc = self._create_english_doc()
@@ -609,4 +671,292 @@ class ReviewCombinedVerifyAndAsyncTests(TestCase):
         js = js_path.read_text(encoding="utf-8")
         self.assertNotIn("/api/ui/admin/review/text-results/", js)
         self.assertNotIn("verified-edit/", js)
-        self.assertIn("data-verified-edit-url", js)
+        self.assertIn("applyAuthoritativeReviewCards", js)
+        self.assertIn("existing.replaceWith(next)", js)
+        self.assertNotIn("function applyVerifiedUi", js)
+        self.assertNotIn("function applyRejectedUi", js)
+
+    def test_async_save_tokens_allow_immediate_approve_without_refresh(self):
+        doc = self._create_english_doc()
+        source = self._create_pending(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="before save",
+            source_revision=1,
+        )
+        stale = review_form_text_post_data(source, "after save")
+        self.client.force_login(self.staff)
+
+        save = self.client.post(
+            self._save_url(source.id),
+            stale,
+            **_async_headers(),
+        )
+        self.assertEqual(save.status_code, 200)
+        save_body = json.loads(save.content)
+        save_html = _card_html(save_body, source.id)
+        self.assertEqual(_hidden_value(save_html, "text_was_user_edited"), "0")
+        self.assertEqual(_textarea_default(save_html), "after save")
+
+        reuse_stale = self.client.post(
+            self._verify_url(source.id),
+            {**stale, "text_was_user_edited": "0"},
+            **_async_headers(),
+        )
+        self.assertEqual(reuse_stale.status_code, 400)
+
+        verify = self.client.post(
+            self._verify_url(source.id),
+            _post_from_card_html(save_html),
+            **_async_headers(),
+        )
+        self.assertEqual(verify.status_code, 200)
+        verify_body = json.loads(verify.content)
+        self.assertFalse(verify_body["text_saved"])
+        source.refresh_from_db()
+        self.assertEqual(source.text, "after save")
+        self.assertEqual(source.source_revision, 2)
+        self.assertEqual(
+            source.verification_status,
+            DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+
+    def test_hebrew_mirror_sibling_card_is_returned_after_source_save(self):
+        doc = self._create_hebrew_doc()
+        engine = "engine-he-ajax-mirror"
+        source = self._create_pending(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="מקור",
+            engine=engine,
+            source_revision=1,
+        )
+        hebrew = self._create_pending(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="מקור",
+            engine=engine,
+            based_on_source_revision=1,
+        )
+        unrelated = self._create_pending(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="מנוע אחר",
+            engine="engine-unrelated-he",
+            source_revision=1,
+        )
+        self.client.force_login(self.staff)
+        save = self.client.post(
+            self._save_url(source.id),
+            review_form_text_post_data(source, "מקור מתוקן"),
+            **_async_headers(),
+        )
+        self.assertEqual(save.status_code, 200)
+        body = json.loads(save.content)
+        self.assertCountEqual(_card_ids(body), [source.id, hebrew.id])
+        self.assertNotIn(unrelated.id, _card_ids(body))
+        self.assertEqual(len(body["cards"]), 2)
+        source_html = _card_html(body, source.id)
+        hebrew_html = _card_html(body, hebrew.id)
+        self.assertEqual(_textarea_default(source_html), "מקור מתוקן")
+        self.assertEqual(_textarea_default(hebrew_html), "מקור מתוקן")
+        self.assertEqual(_hidden_value(source_html, "expected_source_revision"), "2")
+        self.assertEqual(_hidden_value(hebrew_html, "expected_source_revision"), "2")
+        self.assertEqual(_hidden_value(source_html, "text_was_user_edited"), "0")
+        self.assertEqual(_hidden_value(hebrew_html, "text_was_user_edited"), "0")
+        hebrew.refresh_from_db()
+        self.assertEqual(hebrew.text, "מקור מתוקן")
+        self.assertEqual(hebrew.based_on_source_revision, 2)
+        self.assertEqual(
+            hebrew.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
+
+    def test_hebrew_hebrew_save_returns_mirrored_source_card(self):
+        doc = self._create_hebrew_doc()
+        engine = "engine-he-ajax-he-edit"
+        source = self._create_pending(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="מקור",
+            engine=engine,
+            source_revision=1,
+        )
+        hebrew = self._create_pending(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="מקור",
+            engine=engine,
+            based_on_source_revision=1,
+        )
+        self.client.force_login(self.staff)
+        save = self.client.post(
+            self._save_url(hebrew.id),
+            review_form_text_post_data(hebrew, "עברית מתוקנת"),
+            **_async_headers(),
+        )
+        self.assertEqual(save.status_code, 200)
+        body = json.loads(save.content)
+        self.assertCountEqual(_card_ids(body), [source.id, hebrew.id])
+        self.assertEqual(_textarea_default(_card_html(body, source.id)), "עברית מתוקנת")
+        source.refresh_from_db()
+        self.assertEqual(source.text, "עברית מתוקנת")
+        self.assertEqual(source.source_revision, 2)
+
+    def test_async_mutation_does_not_return_unrelated_engine_card(self):
+        doc = self._create_english_doc()
+        source = self._create_pending(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="engine a source",
+            engine="engine-a",
+            source_revision=1,
+        )
+        unrelated = self._create_pending(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="engine b unsaved local edit",
+            engine="engine-b",
+            source_revision=1,
+        )
+        self.client.force_login(self.staff)
+
+        save = self.client.post(
+            self._save_url(source.id),
+            review_form_text_post_data(source, "engine a saved"),
+            **_async_headers(),
+        )
+        self.assertEqual(save.status_code, 200)
+        save_ids = _card_ids(json.loads(save.content))
+        self.assertEqual(save_ids, [source.id])
+        self.assertNotIn(unrelated.id, save_ids)
+
+        source.refresh_from_db()
+        verify = self.client.post(
+            self._verify_url(source.id),
+            review_form_text_post_data(source, "engine a saved"),
+            **_async_headers(),
+        )
+        self.assertEqual(verify.status_code, 200)
+        verify_ids = _card_ids(json.loads(verify.content))
+        self.assertEqual(verify_ids, [source.id])
+        self.assertNotIn(unrelated.id, verify_ids)
+
+        reject = self.client.post(
+            self._reject_url(unrelated.id),
+            **_async_headers(),
+        )
+        self.assertEqual(reject.status_code, 200)
+        reject_ids = _card_ids(json.loads(reject.content))
+        self.assertEqual(reject_ids, [unrelated.id])
+        self.assertNotIn(source.id, reject_ids)
+
+    def test_verify_only_returns_target_card_not_hebrew_mirror(self):
+        doc = self._create_hebrew_doc()
+        engine = "engine-he-verify-only"
+        source = self._create_pending(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="מקור יציב",
+            engine=engine,
+            source_revision=2,
+        )
+        hebrew = self._create_pending(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="מקור יציב",
+            engine=engine,
+            based_on_source_revision=2,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self._verify_url(hebrew.id),
+            {
+                **review_form_text_post_data(hebrew, "מקור יציב"),
+                "text_was_user_edited": "0",
+            },
+            **_async_headers(),
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = json.loads(resp.content)
+        self.assertFalse(body["text_saved"])
+        self.assertEqual(_card_ids(body), [hebrew.id])
+        self.assertNotIn(source.id, _card_ids(body))
+        source.refresh_from_db()
+        hebrew.refresh_from_db()
+        self.assertEqual(source.source_revision, 2)
+        self.assertEqual(
+            hebrew.verification_status,
+            DocumentTextResult.VerificationStatus.VERIFIED,
+        )
+        self.assertEqual(
+            source.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
+
+    def test_non_hebrew_source_save_returns_dependent_translation_card(self):
+        doc = self._create_english_doc()
+        engine = "engine-en-stale"
+        source = self._create_pending(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="English source",
+            engine=engine,
+            source_revision=3,
+        )
+        hebrew = self._create_pending(
+            doc,
+            result_type=DocumentTextResult.ResultType.HEBREW_TEXT,
+            text="תרגום ישן",
+            engine=engine,
+            based_on_source_revision=3,
+        )
+        unrelated = self._create_pending(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="other engine",
+            engine="engine-other",
+            source_revision=1,
+        )
+        self.client.force_login(self.staff)
+        save = self.client.post(
+            self._save_url(source.id),
+            review_form_text_post_data(source, "English source revised"),
+            **_async_headers(),
+        )
+        self.assertEqual(save.status_code, 200)
+        body = json.loads(save.content)
+        ids = _card_ids(body)
+        self.assertCountEqual(ids, [source.id, hebrew.id])
+        self.assertNotIn(unrelated.id, ids)
+        hebrew.refresh_from_db()
+        source.refresh_from_db()
+        self.assertEqual(hebrew.text, "תרגום ישן")
+        self.assertTrue(is_hebrew_translation_stale(hebrew, source))
+
+    def test_async_reject_card_keeps_original_textarea_text(self):
+        doc = self._create_english_doc()
+        source = self._create_pending(
+            doc,
+            result_type=DocumentTextResult.ResultType.SOURCE_TEXT,
+            text="keep original",
+            source_revision=4,
+        )
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self._reject_url(source.id),
+            {"text": "should not save"},
+            **_async_headers(),
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = json.loads(resp.content)
+        self.assertFalse(body["text_saved"])
+        html = _card_html(body, source.id)
+        self.assertEqual(_textarea_default(html), "keep original")
+        source.refresh_from_db()
+        self.assertEqual(source.text, "keep original")
+        self.assertEqual(source.source_revision, 4)
+        self.assertEqual(
+            source.verification_status,
+            DocumentTextResult.VerificationStatus.REJECTED,
+        )

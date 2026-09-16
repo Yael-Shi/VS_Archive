@@ -57,107 +57,45 @@
     }
   }
 
-  function setVerificationBadge(card, status, label) {
-    var badge = card.querySelector(".badge-verify");
-    if (!badge) {
-      return;
+  function reviewCardByResultId(resultId) {
+    if (resultId == null || resultId === "") {
+      return null;
     }
-    badge.textContent = label;
-    badge.classList.remove("badge-ok", "badge-warn", "badge-bad");
-    if (status === "VERIFIED") {
-      badge.classList.add("badge-ok");
-    } else if (status === "REJECTED") {
-      badge.classList.add("badge-bad");
-    } else {
-      badge.classList.add("badge-warn");
-    }
+    return document.querySelector(
+      '[data-review-card][data-result-id="' + String(resultId) + '"]'
+    );
   }
 
-  function applyVerifiedUi(card) {
-    var textForm = card.querySelector("[data-review-text-form]");
-    var verifyZone = card.querySelector(".review-verify-zone");
-    var pendingBadge = card.querySelector(".review-pending-badge");
-    var verifyBtn = card.querySelector('[data-review-action="verify"]');
-    var saveBtn = card.querySelector('[data-review-action="save"]');
-    var verifiedLabel =
-      card.getAttribute("data-label-verified") || "אושר";
-    var verifiedEditUrl = textForm
-      ? textForm.getAttribute("data-verified-edit-url")
-      : null;
-    var verifiedEditTitle = textForm
-      ? textForm.getAttribute("data-verified-edit-title")
-      : null;
-    var verifiedSaveLabel = textForm
-      ? textForm.getAttribute("data-verified-save-label")
-      : null;
-
-    card.classList.remove("review-result-card--pending");
-    card.removeAttribute("data-pending-review");
-    card.setAttribute("data-verification-status", "VERIFIED");
-    setVerificationBadge(card, "VERIFIED", verifiedLabel);
-    if (pendingBadge) {
-      pendingBadge.remove();
+  function applyAuthoritativeReviewCards(cards) {
+    // Replace only cards in the server payload. Omitted cards keep local edits.
+    if (!Array.isArray(cards)) {
+      return false;
     }
-    if (verifyZone) {
-      verifyZone.remove();
+    var i;
+    var item;
+    var existing;
+    var wrap;
+    var next;
+    var replaced = 0;
+    for (i = 0; i < cards.length; i++) {
+      item = cards[i];
+      if (!item || item.html == null) {
+        continue;
+      }
+      existing = reviewCardByResultId(item.result_id);
+      if (!existing) {
+        continue;
+      }
+      wrap = document.createElement("div");
+      wrap.innerHTML = String(item.html).trim();
+      next = wrap.querySelector("[data-review-card]");
+      if (!next) {
+        continue;
+      }
+      existing.replaceWith(next);
+      replaced += 1;
     }
-    if (verifyBtn) {
-      verifyBtn.remove();
-    }
-    if (textForm && verifiedEditUrl) {
-      textForm.action = verifiedEditUrl;
-      textForm.removeAttribute("data-review-text-form");
-      textForm.classList.remove("review-pending-text-form");
-      textForm.removeAttribute("data-verified-edit-url");
-      textForm.removeAttribute("data-verified-edit-title");
-      textForm.removeAttribute("data-verified-save-label");
-
-      var title = textForm.querySelector(".review-verified-edit-title");
-      var textarea = textForm.querySelector("textarea[name=text]");
-      if (!title) {
-        title = document.createElement("div");
-        title.className = "review-zone-title review-verified-edit-title";
-        title.style.marginBottom = "8px";
-        if (textarea && textarea.parentNode === textForm) {
-          textForm.insertBefore(title, textarea);
-        } else {
-          textForm.appendChild(title);
-        }
-      }
-      if (verifiedEditTitle) {
-        title.textContent = verifiedEditTitle;
-      }
-
-      if (saveBtn) {
-        if (verifiedSaveLabel) {
-          saveBtn.textContent = verifiedSaveLabel;
-        }
-        saveBtn.removeAttribute("data-review-action");
-        // setBusy(true) disabled this before data-review-action was removed;
-        // re-enable so post-verify full-page save still works.
-        saveBtn.disabled = false;
-        saveBtn.removeAttribute("aria-busy");
-      }
-      if (textarea) {
-        textarea.disabled = false;
-      }
-    }
-  }
-
-  function applyRejectedUi(card) {
-    var rejectedLabel =
-      card.getAttribute("data-label-rejected") || "נדחה בבקרה";
-    card.setAttribute("data-verification-status", "REJECTED");
-    setVerificationBadge(card, "REJECTED", rejectedLabel);
-    var rejectForm = card.querySelector("[data-review-reject-form]");
-    if (rejectForm) {
-      var zone = closest(rejectForm, ".review-verify-zone");
-      if (zone) {
-        zone.remove();
-      } else {
-        rejectForm.remove();
-      }
-    }
+    return replaced > 0;
   }
 
   function parseJsonSafe(text) {
@@ -323,6 +261,7 @@
     // Capture payload before disabling controls — disabled fields are omitted
     // from FormData constructed from a form.
     var body = new FormData(form);
+    var resultId = card.getAttribute("data-result-id");
 
     card.setAttribute("data-review-busy", "1");
     setBusy(card, true);
@@ -347,35 +286,41 @@
         if (!payload.res.ok || !data || !data.ok) {
           throw new Error(asyncFailureMessage(payload));
         }
-
+        if (!applyAuthoritativeReviewCards(data.cards)) {
+          throw new Error("הפעולה נכשלה. נסו שוב.");
+        }
+        var updated = reviewCardByResultId(resultId);
+        if (!updated) {
+          throw new Error("הפעולה נכשלה. נסו שוב.");
+        }
         if (action === "save") {
           setFeedback(
-            card,
+            updated,
             data.text_saved ? "הטקסט נשמר." : "אין שינוי לשמירה.",
             "ok"
           );
           return;
         }
         if (action === "verify") {
-          applyVerifiedUi(card);
-          setFeedback(card, "התעתוק אושר.", "ok");
+          setFeedback(updated, "התעתוק אושר.", "ok");
           return;
         }
         if (action === "reject") {
-          applyRejectedUi(card);
-          setFeedback(card, "התעתוק נדחה.", "ok");
+          setFeedback(updated, "התעתוק נדחה.", "ok");
         }
       })
       .catch(function (err) {
+        var current = reviewCardByResultId(resultId) || card;
         setFeedback(
-          card,
+          current,
           (err && err.message) || "הפעולה נכשלה. נסו שוב.",
           "error"
         );
       })
       .then(function () {
-        card.removeAttribute("data-review-busy");
-        setBusy(card, false);
+        var current = reviewCardByResultId(resultId) || card;
+        current.removeAttribute("data-review-busy");
+        setBusy(current, false);
       });
   }
 
