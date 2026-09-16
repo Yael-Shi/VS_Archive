@@ -416,6 +416,9 @@ review card/row** after write locks, not `get_displayed_transcription_text`.
 - Stale rejection does not change SOURCE/HEBREW text, revisions, verification
   status, bindings, or `DocumentTextResultEdit` rows.
 - Reject-transcription POSTs are unchanged (they do not persist textarea text).
+- Async save/verify/reject success returns the same GET card HTML and the
+  browser replaces cards in place (see **Staff review authoritative AJAX
+  projection**). Stale-form still rejects deliberately reused old tokens.
 - `_submitted_text_differs_from_current` still uses displayed transcription for
   Hebrew-language **whether-to-save** after a fresh baseline match. Follow-up:
   that helper is multi-engine/display-based and is not the stale-form baseline;
@@ -8085,3 +8088,27 @@ Post-cleanup production audits found:
 - Author 43 `א. פלג` was reviewed as a possible match for Person 4 `אלי פלג`, but the identity is not sufficiently supported and must remain unlinked unless stronger evidence is found.
 
 Production public-view verification confirmed that the cleaned/linked identities appear once each in `/archive/people/` with merged holdings and the expected public display names.
+
+## Staff review authoritative AJAX projection
+
+**Decision / implemented:** After async pending save, verify, or reject, the review page must hold the same card state a fresh GET would render. The browser must not invent verification, editability, or concurrency tokens.
+
+**Current behavior:**
+
+- GET `review_detail_page` and AJAX success both use `build_review_text_result_cards` and `documents/partials/review_text_result_card.html`.
+- JSON success includes the previous keys plus `cards: [{result_id, html}, ...]`
+  only for **affected** cards. The server computes that set in
+  `affected_review_card_result_ids` (`text_saved=False` → target only;
+  Hebrew-language text write → same-engine SOURCE+HEBREW mirror; non-Hebrew
+  SOURCE text write → same-engine HEBREW stale-translation card when present).
+  Unrelated engines/rows are omitted so unsaved textarea edits on those cards
+  are not replaced.
+- `review_detail_actions.js` replaces only the returned `[data-review-card]` nodes with the server HTML (`replaceWith`). That updates textarea `.value` and `.defaultValue`, hidden SHA/revision, and resets `text_was_user_edited` to `0` because the partial always renders `value="0"`. Cards omitted from `cards` are left untouched.
+- Non-JS POST still redirects to review GET (PRG). No `location.reload()`.
+- Stale-form SHA/revision guards are unchanged. Deliberately reusing pre-mutation tokens still returns `STALE_REVIEW_FORM`.
+- Approve remains save-if-user-edited then verify. Verify with `text_was_user_edited=0` still ignores textarea text (no revision bump, no binding rewrite).
+- Review-edit compare/persist canonicalizes `\r\n` / `\r` to `\n` only (`canonicalize_review_submitted_text`). It does not strip inner whitespace. Browser CRLF serialization of unchanged LF text is not a transcription edit and does not stale Transkribus bindings/hover.
+
+**Unchanged:** Transkribus corrected/current `VERIFIED_BLOCKED` / `HUMAN_EDITED_BLOCKED` activation policy; hover/freshness predicates; OCR/worker.
+
+**Tests:** `documents.test_review_text_result_async_verify`, `documents.test_pending_text_result_edit` (CRLF), `documents.test_review_verify_user_edit_intent`, `documents.test_review_textarea_browser_restoration`.

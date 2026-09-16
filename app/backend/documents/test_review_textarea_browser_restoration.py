@@ -378,6 +378,10 @@ class ReviewDetailActionsJsRestorationContractTests(SimpleTestCase):
         self.assertNotIn("get_displayed_transcription_text", js)
         self.assertIn('input[name="text_was_user_edited"]', js)
         self.assertIn("isFormMarkedUserEdited(textarea.form)", js)
+        self.assertIn("function applyAuthoritativeReviewCards", js)
+        self.assertIn("existing.replaceWith(next)", js)
+        self.assertNotIn("function applyVerifiedUi", js)
+        self.assertNotIn("location.reload", js)
         self.assertNotIn("flag.value = flag.defaultValue", js)
         self.assertIn(
             'document.addEventListener("beforeinput", onReviewTextareaContentMutation, false);',

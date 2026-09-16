@@ -20,6 +20,15 @@ from documents.services.transcription_edit_suggestions import (
 from documents.services.transkribus_snapshot_parser import compute_sha256_hex
 
 
+def canonicalize_review_submitted_text(text: str) -> str:
+    """Normalize browser form newlines only; do not strip inner whitespace.
+
+    HTML form POSTs often serialize textarea line breaks as CRLF. Stored OCR
+    text is typically LF. That must not count as a transcription edit.
+    """
+    return (text or "").replace("\r\n", "\n").replace("\r", "\n")
+
+
 class VerifiedTextResultEditError(Exception):
     """Validation or eligibility failure for verified text edits."""
 
@@ -407,11 +416,12 @@ def _submitted_text_differs_from_current(
     normalized: str,
 ) -> bool:
     if _is_hebrew_document(doc):
-        return not texts_are_equivalent(
-            get_displayed_transcription_text(doc),
-            normalized,
+        current = canonicalize_review_submitted_text(
+            get_displayed_transcription_text(doc)
         )
-    return not texts_are_equivalent(target.text or "", normalized)
+        return not texts_are_equivalent(current, normalized)
+    current = canonicalize_review_submitted_text(target.text or "")
+    return not texts_are_equivalent(current, normalized)
 
 
 def edit_verified_text_result(
@@ -421,7 +431,9 @@ def edit_verified_text_result(
     editor,
     baseline: ReviewFormBaseline,
 ) -> DocumentTextResult:
-    normalized = normalize_transcription_text(new_text)
+    normalized = normalize_transcription_text(
+        canonicalize_review_submitted_text(new_text)
+    )
     if not normalized:
         raise VerifiedTextResultEditError("יש להזין טקסט.")
 
@@ -466,7 +478,8 @@ def edit_pending_text_result(
     editor,
     baseline: ReviewFormBaseline,
 ) -> PendingTextResultEditResult:
-    normalized = normalize_transcription_text(new_text)
+    submitted = canonicalize_review_submitted_text(new_text)
+    normalized = normalize_transcription_text(submitted)
     if not normalized:
         raise PendingTextResultEditError("text is required and must be non-empty")
 
@@ -488,8 +501,8 @@ def edit_pending_text_result(
             target = _apply_text_result_edit(
                 target=target,
                 doc=doc,
-                persist_text=new_text,
-                audit_new_text=new_text,
+                persist_text=submitted,
+                audit_new_text=submitted,
                 editor=editor,
                 force_verified=False,
             )

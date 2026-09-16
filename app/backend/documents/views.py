@@ -128,7 +128,11 @@ from documents.services.review_backlog import (
     documents_in_review_backlog,
     is_review_editable_text_result,
     is_review_pending_text_result,
-    parse_review_reasons,
+)
+from documents.services.review_detail import (
+    affected_review_card_result_ids,
+    build_review_text_result_cards,
+    review_mutation_card_payload,
 )
 from documents.services.archive_date_input import (
     archive_date_form_data,
@@ -462,11 +466,8 @@ from documents.services.verified_text_result_edit import (
     VerifiedTextResultEditError,
     edit_pending_text_result,
     edit_verified_text_result,
-    is_hebrew_translation_stale,
-    is_verified_editable_text_result,
     parse_review_form_baseline,
     parse_review_text_was_user_edited,
-    review_form_revision_for_row,
     verify_pending_text_result,
 )
 
@@ -2639,61 +2640,6 @@ def review_backlog_page(request):
     return render(request, "documents/review_backlog.html", context)
 
 
-def _review_result_type_label(doc: Document, result_type: str) -> str:
-    if doc.language == Document.Language.HEBREW:
-        if result_type == DocumentTextResult.ResultType.SOURCE_TEXT:
-            return "תעתוק מקור (עברית כפי שחולצה)"
-        if result_type == DocumentTextResult.ResultType.HEBREW_TEXT:
-            return "טקסט עברי לבדיקה"
-
-    if result_type == DocumentTextResult.ResultType.SOURCE_TEXT:
-        return "תעתוק מקור"
-    if result_type == DocumentTextResult.ResultType.HEBREW_TEXT:
-        return "טקסט עברי"
-    return result_type
-
-
-def _review_result_type_description(doc: Document, result_type: str) -> str:
-    """One-line reviewer-facing explanation of what a text result represents."""
-    if doc.language == Document.Language.HEBREW:
-        if result_type == DocumentTextResult.ResultType.SOURCE_TEXT:
-            return "טקסט המקור כפי שחולץ אוטומטית מן המסמך."
-        if result_type == DocumentTextResult.ResultType.HEBREW_TEXT:
-            return "הטקסט העברי שמיועד לבדיקה ולאישור."
-
-    if result_type == DocumentTextResult.ResultType.SOURCE_TEXT:
-        return "טקסט בשפת המקור כפי שחולץ אוטומטית."
-    if result_type == DocumentTextResult.ResultType.HEBREW_TEXT:
-        return "תרגום לעברית (אם קיים)."
-    return ""
-
-
-def _review_non_actionable_reason(row: DocumentTextResult) -> Optional[str]:
-    """
-    Human-readable reason when edit/approve/reject controls are unavailable.
-
-    Display-only; uses the same eligibility rules as ``is_review_pending_text_result``.
-    """
-    if is_review_pending_text_result(row):
-        return None
-
-    if row.verification_status == DocumentTextResult.VerificationStatus.VERIFIED:
-        if is_verified_editable_text_result(row):
-            return None
-        return "התעתוק כבר אושר אנושית — אין פעולות בקרה זמינות במסך זה."
-
-    if row.status == DocumentTextResult.Status.FAILED:
-        return "תעתוק זה נכשל בעיבוד — לא ניתן לבדוק או לאשר."
-
-    if not (row.text or "").strip():
-        return "אין טקסט זמין לבדיקה."
-
-    if row.status != DocumentTextResult.Status.NEEDS_REVIEW:
-        return "תוצאה זו אינה ממתינה לבקרה."
-
-    return "פעולות בקרה אינן זמינות לתוצאה זו."
-
-
 def _document_source_preview_context(doc: Document) -> dict:
     bucket = getattr(settings, "UPLOADS_BUCKET_NAME", "")
     source_preview = build_source_preview(doc, bucket)
@@ -2730,45 +2676,8 @@ def review_detail_page(request, doc_id: int):
     admin_meta = getattr(doc, "admin_meta", None)
 
     source_context = _document_source_preview_context(doc)
-
-    text_results = sorted(
-        doc.text_results.all(),
-        key=lambda r: (r.result_type, r.engine, -r.updated_at.timestamp()),
-    )
-    source_by_engine = {
-        r.engine: r
-        for r in text_results
-        if r.result_type == DocumentTextResult.ResultType.SOURCE_TEXT
-    }
-    text_result_cards = []
-    for row in text_results:
-        paired_source = (
-            source_by_engine.get(row.engine)
-            if row.result_type == DocumentTextResult.ResultType.HEBREW_TEXT
-            else None
-        )
-        text_result_cards.append(
-            {
-                "row": row,
-                "result_type_label": _review_result_type_label(doc, row.result_type),
-                "result_type_description": _review_result_type_description(
-                    doc, row.result_type
-                ),
-                "review_reasons": parse_review_reasons(row.review_reasons),
-                "text_length": len((row.text or "").strip()),
-                "is_pending_review": is_review_pending_text_result(row),
-                "is_editable": is_review_editable_text_result(row),
-                "is_verified_editable": is_verified_editable_text_result(row),
-                "hebrew_translation_stale": is_hebrew_translation_stale(
-                    row, paired_source
-                ),
-                "non_actionable_reason": _review_non_actionable_reason(row),
-                "expected_text_sha256": compute_sha256_hex(row.text or ""),
-                "expected_source_revision": review_form_revision_for_row(
-                    row, doc, paired_source=paired_source
-                ),
-            }
-        )
+    text_result_cards = build_review_text_result_cards(doc)
+    text_results = [card["row"] for card in text_result_cards]
 
     transkribus_runs = sorted(
         doc.transkribus_runs.all(),
@@ -3385,6 +3294,14 @@ def _review_mutation_success(
                 "document_id": row.document_id,
                 "verification_status": row.verification_status,
                 "text_saved": text_saved,
+                "cards": review_mutation_card_payload(
+                    request,
+                    document_id=row.document_id,
+                    result_ids=affected_review_card_result_ids(
+                        target=row,
+                        text_saved=text_saved,
+                    ),
+                ),
             }
         )
     return redirect(reverse("review-detail-page", kwargs={"doc_id": row.document_id}))
