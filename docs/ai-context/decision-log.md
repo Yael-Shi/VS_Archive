@@ -1,5 +1,31 @@
 # VS-Archive Decision Log
 
+## Hebrew printed OpenAI fallback — phase 1 helper (not wired)
+
+**Decision / implemented (phase 1 only):** Isolated worker-only OpenAI
+Responses helper for a future Hebrew PRINTED full-page fallback after Gemini
+is exhausted. **Not connected** to `GeminiAdapter`, `select_ocr_route`,
+checkpoints, crop recovery, or mixed-script recovery.
+
+**Current behavior:**
+- Module: `documents/services/openai_hebrew_printed_fallback.py`.
+- Official `openai` SDK, Responses API, `store=False`, `stream=False`, no
+  tools, one full-page image, `detail="original"`. Default model
+  `gpt-5.6-sol`.
+- Usable success only when response `status=completed` and output text is
+  non-empty after strip. Runtime identity is `openai:<model>` (≤64 chars).
+  Success includes review reason `HEBREW_PRINTED_OPENAI_FALLBACK`.
+- Incomplete, refusal, empty output, and provider exceptions raise
+  `HebrewPrintedOpenAIFallbackError` with a typed `failure_code` and no
+  prompt/image/key/response-body logging.
+- Flag `ENABLE_HEBREW_PRINTED_OPENAI_FALLBACK` defaults **false**.
+  `OPENAI_API_KEY` is required in `validate_required_env` only when the flag
+  is true. Intended worker-only; web must not enable the flag.
+- No CDK / Secrets Manager wiring in this phase.
+
+**Deferred:** GeminiAdapter insertion after full-page Gemini exhaustion;
+whether crop/mixed-script recovery is paused; production secret injection.
+
 ## Bounded Hebrew printed mixed-script region fallback
 
 **Decision / implemented:** After Hebrew printed `RECITATION` crop recovery,

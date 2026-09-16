@@ -21,6 +21,7 @@ from documents.services.archive_item_validation import TEXT_INPUT_TYPE_UI_CHOICE
 from documents.services.review_reasons import (
     AUTOMATIC_OCR_REQUIRES_HUMAN_REVIEW,
     HAS_UNCLEAR,
+    HEBREW_PRINTED_OPENAI_FALLBACK,
     MIN_TEXT_LENGTH,
     NEEDS_REVIEW_FLAG,
 )
@@ -79,6 +80,7 @@ _REVIEW_REASON: dict[str, str] = {
     NEEDS_REVIEW_FLAG: "סימון חוסר ודאות מהמנוע",
     MIN_TEXT_LENGTH: "טקסט קצר מדי",
     HAS_UNCLEAR: "יש קטעים לא ברורים",
+    HEBREW_PRINTED_OPENAI_FALLBACK: "תעתוק OpenAI (גיבוי למודפס עברי)",
 }
 
 _VERIFICATION_STATUS: dict[str, Tuple[str, str]] = {
