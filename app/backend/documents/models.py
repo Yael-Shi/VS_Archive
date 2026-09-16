@@ -2023,6 +2023,7 @@ class TranskribusTranscriptSnapshot(models.Model):
     class SourceKind(models.TextChoices):
         AUTOMATIC_HTR = "AUTOMATIC_HTR", "Automatic HTR"
         CORRECTED_CURRENT_SYNC = "CORRECTED_CURRENT_SYNC", "Corrected-current sync"
+        LEGACY_IMPORT = "LEGACY_IMPORT", "Legacy Transkribus import"
 
     class StorageStatus(models.TextChoices):
         PENDING_UPLOAD = "PENDING_UPLOAD", "Pending upload"
