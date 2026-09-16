@@ -70,6 +70,9 @@ class VsArchiveAppStack(Stack):
         google_cloud_vision_secret = secretsmanager.Secret.from_secret_name_v2(
             self, "GoogleCloudVisionApiKeySecret", "vs-archive/google-vision-key"
         )
+        openai_api_key_secret = secretsmanager.Secret.from_secret_name_v2(
+            self, "OpenAIApiKeySecret", "vs-archive-dev/openai_api_key"
+        )
         django_secret_key = secretsmanager.Secret.from_secret_name_v2(
             self, "DjangoSecretKeySecret", "vs-archive-dev/django_secret_key"
         )
@@ -194,6 +197,7 @@ class VsArchiveAppStack(Stack):
             )
         )
         gemini_secret.grant_read(exec_role)
+        openai_api_key_secret.grant_read(exec_role)
         django_secret_key.grant_read(exec_role)
         transkribus_enable_hebrew_handwritten_param.grant_read(exec_role)
         transkribus_dev_upload_mode_param.grant_read(exec_role)
@@ -313,6 +317,7 @@ class VsArchiveAppStack(Stack):
                 "ENABLE_HYBRID_HTR": "false",
                 "ENABLE_ANTIGRAVITY_ARABIC_PRINTED": "true",
                 "ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED": "true",
+                "ENABLE_HEBREW_PRINTED_OPENAI_FALLBACK": "true",
                 "ENABLE_DAILY_REPORT": "false",
                 "GEMINI_DOUBLE_PASS": "true",
                 "GEMINI_TEMPERATURE": "0.0",
@@ -340,6 +345,9 @@ class VsArchiveAppStack(Stack):
                 "GEMINI_API_KEY": ecs.Secret.from_secrets_manager(gemini_secret),
                 "GOOGLE_CLOUD_VISION_API_KEY": ecs.Secret.from_secrets_manager(
                     google_cloud_vision_secret
+                ),
+                "OPENAI_API_KEY": ecs.Secret.from_secrets_manager(
+                    openai_api_key_secret
                 ),
                 "DJANGO_SECRET_KEY": ecs.Secret.from_secrets_manager(django_secret_key),
                 "ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": ecs.Secret.from_ssm_parameter(

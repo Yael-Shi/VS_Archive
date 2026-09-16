@@ -1,5 +1,25 @@
 # VS-Archive Decision Log
 
+## Hebrew printed OpenAI fallback — production infra wiring
+
+**Decision / implemented:** Worker ECS enables the existing Hebrew PRINTED
+OpenAI fallback flag and injects `OPENAI_API_KEY` from Secrets Manager.
+Web does not receive the flag or the key. Routing, checkpoints, and
+GeminiAdapter behavior are unchanged.
+
+**Current behavior:**
+- Worker CDK env: `ENABLE_HEBREW_PRINTED_OPENAI_FALLBACK=true`.
+- Worker CDK secret: `OPENAI_API_KEY` from imported
+  `vs-archive-dev/openai_api_key` (`OpenAIApiKeySecret`).
+- ECS execution role is granted read on that imported secret.
+- Web container omits the flag and `OPENAI_API_KEY`.
+- `OPENAI_HEBREW_PRINTED_MODEL` is not set in CDK; backend default
+  `gpt-5.6-sol` is used.
+- CDK does not create the secret. The operator must create
+  `vs-archive-dev/openai_api_key` before deploy.
+
+**Deferred:** Deploy itself; confirming the secret exists in AWS.
+
 ## Hebrew printed OpenAI fallback — phase 2 wiring
 
 **Decision / implemented:** Checkpointed Hebrew PRINTED Gemini OCR may try
@@ -28,8 +48,9 @@ Routing stays `GEMINI` / `printed`. Runtime provenance is
   existing page-failure / `EnginePageIncompleteError` / document `PARTIAL`
   path. No new `engine_key`. No checkpoint identity change.
 
-**Deferred:** CDK/Secrets Manager injection; whether crop/mixed should be
-removed later.
+**Deferred:** Whether crop/mixed should be removed later.
+CDK/Secrets Manager injection is implemented; see **Hebrew printed OpenAI
+fallback — production infra wiring**.
 
 ## Hebrew printed OpenAI fallback — phase 1 helper (not wired)
 

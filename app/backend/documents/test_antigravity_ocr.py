@@ -1613,6 +1613,32 @@ class AntigravityBandedCdkWiringTests(SimpleTestCase):
         self.assertNotIn("google-vision", web_block)
         self.assertNotIn("google_cloud_vision", web_block)
 
+    def test_cdk_sets_worker_hebrew_printed_openai_fallback_and_does_not_expose_to_web(
+        self,
+    ):
+        stack_path = (
+            Path(__file__).resolve().parents[3]
+            / "infra"
+            / "vs_archive_infra"
+            / "app_stack.py"
+        )
+        source = stack_path.read_text(encoding="utf-8")
+        web_start = source.index("web_task.add_container")
+        worker_start = source.index("worker_task.add_container")
+        web_block = source[web_start:worker_start]
+        worker_block = source[worker_start:]
+        self.assertIn(
+            '"ENABLE_HEBREW_PRINTED_OPENAI_FALLBACK": "true"',
+            worker_block,
+        )
+        self.assertNotIn("ENABLE_HEBREW_PRINTED_OPENAI_FALLBACK", web_block)
+        self.assertIn("OPENAI_API_KEY", worker_block)
+        self.assertIn("vs-archive-dev/openai_api_key", source)
+        self.assertIn("openai_api_key_secret.grant_read(exec_role)", source)
+        self.assertIn("openai_api_key_secret", worker_block)
+        self.assertNotIn("OPENAI_API_KEY", web_block)
+        self.assertNotIn("openai_api_key", web_block)
+
 
 class ProcessDocumentLeaseDeadlineTests(SimpleTestCase):
     def test_future_lease_converts_remaining_seconds_to_monotonic(self):
