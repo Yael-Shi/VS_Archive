@@ -58,8 +58,10 @@
     </form>
 
     <h2 class="section-title archive-item-edit__section-title">תמונות בפריט זה</h2>
-    {% include "documents/archive/partials/photo_contents_staff_selector.html" %}
-    {% include "documents/archive/partials/photo_contents_manage_list.html" %}
+    <section id="photo-editor">
+      {% include "documents/archive/partials/photo_contents_staff_selector.html" %}
+      {% include "documents/archive/partials/photo_contents_manage_list.html" %}
+    </section>
     <div class="spacer"></div>
     <a class="btn btn-primary" href="{% url 'archive-manage-photo-add' item_id=item.id %}">הוספת תמונה</a>
   </div>

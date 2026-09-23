@@ -124,6 +124,10 @@ def _staff_item_edit_url(item_id: int, photo: PhotoContent | None = None) -> str
     return f"{url}?{PUBLIC_PHOTO_QUERY_PARAM}={photo.id}"
 
 
+def _staff_selector_nav_url(item_id: int, photo: PhotoContent) -> str:
+    return f"{_staff_item_edit_url(item_id, photo)}#photo-editor"
+
+
 def _photo_content_post(**overrides):
     payload = {
         "description": "",
@@ -187,6 +191,7 @@ class PhotoMultiManagePageTests(TestCase):
             ),
         )
         self.assertNotContains(resp, "staff-photo-selector")
+        self.assertEqual(resp.content.decode().count('id="photo-editor"'), 1)
         self.assertNotContains(resp, ">למעלה<")
         self.assertNotContains(resp, ">למטה<")
 
@@ -207,14 +212,16 @@ class PhotoMultiManagePageTests(TestCase):
         self.assertNotIn('name="person_ids"', shared)
         self.assertNotIn('name="inline_photo_edit"', shared)
         selected = _fragment_by_id(html, f"photo-{self.first.id}")
+        self.assertEqual(html.count('id="photo-editor"'), 1)
         self.assertIn('class="staff-photo-selector-link is-selected"', html)
         self.assertIn(
-            f'href="{_staff_item_edit_url(self.item.id, self.first)}"',
+            f'href="{_staff_selector_nav_url(self.item.id, self.first)}"',
             html,
         )
         for photo in (self.first, self.second, self.third):
-            selector_url = _staff_item_edit_url(self.item.id, photo)
+            selector_url = _staff_selector_nav_url(self.item.id, photo)
             self.assertIn(f'href="{selector_url}"', html)
+            self.assertIn(f"?{PUBLIC_PHOTO_QUERY_PARAM}={photo.id}#photo-editor", html)
             self.assertIn(photo.original_filename, html)
         self.assertNotIn(f'id="photo-{self.second.id}"', html)
         self.assertNotIn(f'id="photo-{self.third.id}"', html)
@@ -226,7 +233,9 @@ class PhotoMultiManagePageTests(TestCase):
         self.assertIn(f'id="photo{self.first.id}_description"', selected)
         self.assertIn(f'id="photo{self.first.id}_person_ids"', selected)
         self.assertIn("one.jpg", selected)
-        self.assertIn(f"?photo={self.first.id}", selected)
+        public_view = reverse("archive-detail", kwargs={"item_id": self.item.id})
+        self.assertIn(f'href="{public_view}?photo={self.first.id}"', selected)
+        self.assertNotIn("#photo-editor", selected)
         self.assertIn(">צפייה<", selected)
         self.assertIn(">מחיקה<", selected)
         self.assertIn("שמירת תמונה זו", selected)
@@ -246,9 +255,10 @@ class PhotoMultiManagePageTests(TestCase):
         self.assertNotIn(f'id="photo-{self.third.id}"', html)
         self.assertEqual(html.count('name="inline_photo_edit"'), 1)
         self.assertEqual(html.count("staff-photo-selector-link is-selected"), 1)
+        self.assertEqual(html.count('id="photo-editor"'), 1)
         self.assertIn('aria-current="page"', html)
         self.assertIn(
-            f'href="{_staff_item_edit_url(self.item.id, self.second)}"',
+            f'href="{_staff_selector_nav_url(self.item.id, self.second)}"',
             html,
         )
         self.assertIn(">למעלה<", selected)
@@ -1235,7 +1245,7 @@ class PhotoUnifiedInlineEditTests(TestCase):
         self.assertNotIn(f'id="photo-{self.first.id}"', html)
         self.assertEqual(html.count('name="inline_photo_edit"'), 1)
         self.assertIn(
-            f'href="{_staff_item_edit_url(self.item.id, self.second)}"',
+            f'href="{_staff_selector_nav_url(self.item.id, self.second)}"',
             html,
         )
 
