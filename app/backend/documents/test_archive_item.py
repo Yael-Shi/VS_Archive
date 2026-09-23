@@ -3307,7 +3307,7 @@ class UnifiedArchiveItemCreatePageTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(self.NEW_URL, {"item_type": "ocr_document"})
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "קטגוריות, אירועים ותגיות")
+        self.assertContains(resp, "סיווג וקישור")
         for needle in (
             'id="categories"',
             'id="events"',
@@ -5948,7 +5948,7 @@ class ManualTextCreateDiscoveryMetadataTests(TestCase):
         self.assertContains(resp, 'name="categories"')
         self.assertContains(resp, 'name="events"')
         self.assertContains(resp, 'name="tags"')
-        self.assertContains(resp, "קטגוריות, אירועים ותגיות")
+        self.assertContains(resp, "סיווג וקישור")
 
     def test_unified_manage_new_get_renders_discovery_metadata_fields(self):
         self.client.force_login(self.staff)
@@ -5959,7 +5959,7 @@ class ManualTextCreateDiscoveryMetadataTests(TestCase):
         self.assertContains(resp, 'name="categories"')
         self.assertContains(resp, 'name="events"')
         self.assertContains(resp, 'name="tags"')
-        self.assertContains(resp, "קטגוריות, אירועים ותגיות")
+        self.assertContains(resp, "סיווג וקישור")
 
     def test_unified_manage_new_post_saves_discovery_metadata(self):
         self.client.force_login(self.staff)

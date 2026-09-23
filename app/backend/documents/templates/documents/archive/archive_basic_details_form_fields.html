@@ -1,0 +1,49 @@
+<section class="archive-metadata-section" aria-labelledby="archive-basic-details-heading">
+  <h2 id="archive-basic-details-heading" class="archive-metadata-section__title">פרטים בסיסיים</h2>
+  <p class="archive-metadata-section__hint">זיהוי הפריט, נראות ותאריך.</p>
+
+  <div class="field">
+    <label for="title">{{ title_label }}</label>
+    <input id="title" name="title" type="text" value="{{ form_data.title }}" />
+  </div>
+
+  <div class="field">
+    <label for="public_note">הערת הארכיון</label>
+    <textarea id="public_note" name="public_note" rows="3">{{ form_data.public_note }}</textarea>
+  </div>
+
+  <div class="archive-metadata-grid">
+    {% if show_source %}
+      <div class="field archive-metadata-source">
+        <label for="source_title">מקור</label>
+        <input id="source_title" name="source_title" type="text" value="{{ form_data.source_title }}" />
+      </div>
+    {% endif %}
+
+    <div class="field archive-metadata-compact">
+      <label for="visibility">נראות / גישה</label>
+      <select id="visibility" name="visibility">
+        {% for value, label in visibility_choices %}
+          <option value="{{ value }}" {% if form_data.visibility == value %}selected{% endif %}>
+            {{ label }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="field archive-metadata-compact">
+      <label for="metadata_status">השלמת פרטים</label>
+      <select id="metadata_status" name="metadata_status">
+        {% for value, label in metadata_status_choices %}
+          <option value="{{ value }}" {% if form_data.metadata_status == value %}selected{% endif %}>
+            {{ label }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <div class="archive-metadata-date-cluster">
+    {% include "documents/archive/archive_date_form_fields.html" %}
+  </div>
+</section>

@@ -1,0 +1,29 @@
+<div class="field searchable-multi-select" data-searchable-multi-select>
+  <label for="{{ searchable_id }}">{{ searchable_label }}</label>
+  <input
+    type="search"
+    class="searchable-multi-select__search"
+    data-searchable-multi-select-search
+    autocomplete="off"
+    placeholder="{{ searchable_placeholder }}"
+    aria-label="{{ searchable_search_label }}"
+    aria-controls="{{ searchable_id }}"
+  />
+  <select
+    id="{{ searchable_id }}"
+    name="{{ searchable_name }}"
+    multiple
+    size="{{ searchable_size|default:'6' }}"
+    data-searchable-multi-select-control
+  >
+    {% for option in searchable_options %}
+      {% if not searchable_unselected_only or not option.selected %}
+        <option value="{{ option.id }}"{% if option.selected or option.id in searchable_selected_ids %} selected{% endif %}>{% firstof option.label option.name %}</option>
+      {% endif %}
+    {% endfor %}
+  </select>
+  {% if searchable_hint %}
+    <div class="field-hint">{{ searchable_hint }}</div>
+  {% endif %}
+  <div class="field-hint" data-searchable-multi-select-empty hidden>{{ searchable_empty_message }}</div>
+</div>

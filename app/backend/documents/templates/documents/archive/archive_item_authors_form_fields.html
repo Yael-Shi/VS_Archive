@@ -1,48 +1,47 @@
-{% if archive_item_selected_authors %}
-<div class="field">
-  <fieldset class="staff-linked-authors-fieldset">
-    <legend>מחברים משויכים לפריט זה</legend>
-    <ul class="staff-linked-authors">
-      {% for author in archive_item_selected_authors %}
-        <li>
-          <label for="author_keep_{{ author.id }}">
-            <input
-              id="author_keep_{{ author.id }}"
-              type="checkbox"
-              name="author_ids"
-              value="{{ author.id }}"
-              {% if author.selected %}checked{% endif %}
-            />
-            {{ author.name }}
-          </label>
-          <a href="{% url 'archive-manage-author-edit' author_id=author.id %}">עריכת מחבר/ת</a>
-        </li>
-      {% endfor %}
-    </ul>
-  </fieldset>
-  <div class="field-hint">סימון משאיר את המחבר/ת על הפריט. ביטול הסימון מנתק מהפריט בלבד ואינו מוחק את רשומת המחבר/ת מהארכיון. אין צורך ב-Ctrl.</div>
-</div>
-{% endif %}
+<section class="archive-metadata-section" aria-labelledby="archive-authors-heading">
+  <h2 id="archive-authors-heading" class="archive-metadata-section__title">מחברים</h2>
+  <p class="archive-metadata-section__hint">המחברים המשויכים כרגע, בחירה מרשומה קיימת, או שם חדש.</p>
 
-<div class="field">
-  <label for="author_ids">הוספת מחבר/ת קיים/ת</label>
-  <select id="author_ids" name="author_ids" multiple size="8">
-    {% for author in archive_item_author_choices %}
-      {% if not author.selected %}
-        <option value="{{ author.id }}">{{ author.name }}</option>
-      {% endif %}
-    {% endfor %}
-  </select>
-  <div class="field-hint">בחירה מרשומות מחבר/ת שאינן משויכות כרגע. מחברים משויכים מופיעים למעלה לפי הסדר השמור.</div>
-</div>
+  {% if archive_item_selected_authors %}
+    <div class="archive-metadata-current">
+      <fieldset class="staff-linked-authors-fieldset">
+        <legend>מחברים משויכים לפריט זה</legend>
+        <ul class="staff-linked-authors archive-metadata-current__list">
+          {% for author in archive_item_selected_authors %}
+            <li class="archive-metadata-current__item">
+              <label for="author_keep_{{ author.id }}">
+                <input
+                  id="author_keep_{{ author.id }}"
+                  type="checkbox"
+                  name="author_ids"
+                  value="{{ author.id }}"
+                  {% if author.selected %}checked{% endif %}
+                />
+                {{ author.name }}
+              </label>
+              <a class="archive-metadata-edit-link" href="{% url 'archive-manage-author-edit' author_id=author.id %}">עריכת מחבר/ת</a>
+            </li>
+          {% endfor %}
+        </ul>
+      </fieldset>
+      <div class="field-hint">סימון משאיר את המחבר/ת על הפריט. ביטול הסימון מנתק מהפריט בלבד ואינו מוחק את רשומת המחבר/ת מהארכיון. אין צורך ב-Ctrl.</div>
+    </div>
+  {% endif %}
 
-<div class="field">
-  <label for="new_author_name">הוספת מחבר/ת</label>
-  <input
-    id="new_author_name"
-    name="new_author_name"
-    type="text"
-    value="{{ form_data.new_author_name }}"
-  />
-  <div class="field-hint">ניתן להזין כמה שמות מופרדים בפסיקים. שם שכבר קיים במדויק ישויך מחדש; שם חדש ייצור רשומה. אם אותו שם מופיע יותר מפעם אחת בארכיון, השמירה תיחסם.</div>
-</div>
+  <div class="archive-metadata-add">
+    {% include "documents/archive/searchable_multi_select.html" with searchable_id="author_ids" searchable_name="author_ids" searchable_label="הוספת מחבר/ת קיים/ת" searchable_search_label="חיפוש במחברים קיימים" searchable_placeholder="חיפוש במחברים קיימים…" searchable_empty_message="לא נמצאו מחברים תואמים." searchable_hint="בחירה מרשומות מחבר/ת שאינן משויכות כרגע. מחברים משויכים מופיעים למעלה לפי הסדר השמור." searchable_options=archive_item_author_choices searchable_selected_ids=form_data.author_ids searchable_unselected_only=True searchable_size="6" %}
+  </div>
+
+  <div class="archive-metadata-secondary">
+    <div class="field">
+      <label class="archive-metadata-subsection-title" for="new_author_name">הוספת מחבר/ת</label>
+      <input
+        id="new_author_name"
+        name="new_author_name"
+        type="text"
+        value="{{ form_data.new_author_name }}"
+      />
+      <div class="field-hint">ניתן להזין כמה שמות מופרדים בפסיקים. שם שכבר קיים במדויק ישויך מחדש; שם חדש ייצור רשומה. אם אותו שם מופיע יותר מפעם אחת בארכיון, השמירה תיחסם.</div>
+    </div>
+  </div>
+</section>

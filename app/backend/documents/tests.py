@@ -10840,7 +10840,7 @@ class UploadPageTemplateTests(TestCase):
     def test_upload_page_renders_archive_item_discovery_metadata_section(self):
         resp = self._get_page()
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "קטגוריות, אירועים ותגיות")
+        self.assertContains(resp, "סיווג וקישור")
         self.assertContains(resp, 'name="categories"')
         self.assertContains(resp, 'name="events"')
         self.assertContains(resp, 'name="discovery_tags"')

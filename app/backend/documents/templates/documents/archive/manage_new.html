@@ -40,19 +40,16 @@
 
       <p class="page-subtitle">פריט ארכיון מסוג טקסט — ללא העלאת קובץ.</p>
 
-      <form method="post">
+      <form method="post" class="archive-metadata-edit">
         {% csrf_token %}
         <input type="hidden" name="item_type" value="manual_text" />
         {% include "documents/archive/manual_text_form_fields.html" %}
         {% if show_discovery_metadata %}
-          <div class="spacer"></div>
           {% include "documents/archive/discovery_metadata_form_fields.html" %}
         {% endif %}
         {% if show_archive_item_people %}
-          <div class="spacer"></div>
           {% include "documents/archive/archive_item_people_form_fields.html" %}
         {% endif %}
-        <div class="spacer"></div>
         <button type="submit" class="btn btn-primary">{{ submit_label }}</button>
       </form>
     {% elif item_type == "ocr_document" %}
@@ -91,35 +88,36 @@
 
       <p class="page-subtitle">פריט ארכיון מסוג סרטון — הוספה באמצעות קישור, ללא העלאת קובץ.</p>
 
-      <form method="post">
+      <form method="post" class="archive-metadata-edit">
         {% csrf_token %}
         <input type="hidden" name="item_type" value="video" />
         {% include "documents/archive/video_form_fields.html" %}
         {% if show_discovery_metadata %}
-          <div class="spacer"></div>
           {% include "documents/archive/discovery_metadata_form_fields.html" %}
         {% endif %}
         {% if show_archive_item_people %}
-          <div class="spacer"></div>
           {% include "documents/archive/archive_item_people_form_fields.html" %}
         {% endif %}
-        <div class="spacer"></div>
         <button type="submit" class="btn btn-primary">{{ submit_label }}</button>
       </form>
     {% endif %}
   </div>
   {% if item_type == "manual_text" %}
     {% include "documents/archive/archive_date_form_script.html" %}
+    {% include "documents/archive/searchable_multi_select_script.html" %}
   {% elif item_type == "ocr_document" %}
     <script src="{% static 'public/person_name_duplicate.js' %}"></script>
     {% include "documents/upload/_upload_script.html" %}
     {% include "documents/archive/archive_date_form_script.html" %}
+    {% include "documents/archive/searchable_multi_select_script.html" %}
   {% elif item_type == "photo" %}
     <script src="{% static 'public/person_name_duplicate.js' %}"></script>
     {% include "documents/archive/_photo_upload_script.html" %}
     {% include "documents/archive/archive_date_form_script.html" %}
+    {% include "documents/archive/searchable_multi_select_script.html" %}
   {% elif item_type == "video" %}
     {% include "documents/archive/archive_date_form_script.html" %}
+    {% include "documents/archive/searchable_multi_select_script.html" %}
     {% include "documents/archive/_video_form_script.html" %}
   {% endif %}
 {% endblock %}

@@ -2,26 +2,30 @@
 {% block title %}VSArchive - {{ page_title }}{% endblock %}
 
 {% block content %}
-  <div class="card page-header">
-    <div class="page-toolbar">
-      <a class="btn" href="{% url 'archive-detail' item_id=item.id %}">חזרה לפריט</a>
-      <a class="btn" href="{% url 'archive-manage-list' %}">חזרה לניהול</a>
-    </div>
-
-    <h1 class="page-title">{{ page_title }}</h1>
-    <p class="page-subtitle">
-      פריט ארכיון מסוג תמונה — עריכת מטא־דאטה בלבד, ללא החלפת קובץ התמונה.
-      מטא־דאטה משותף לפריט נשמר בטופס העליון; מטא־דאטה של התמונה נערך בטופס נפרד מתחת.
-      בפריט עם כמה תמונות בוחרים תמונה לעריכה מעל העורך.
-    </p>
-    <p class="muted">
-      דף זה מאפשר עריכת מטא־דאטה בלבד (תיאור קצר, נראות, תאריכים, קטגוריות וכו׳).
-      לא ניתן להחליף או להעלות מחדש את קובץ התמונה מדף זה.
-      התמונה תופיע בארכיון הציבורי רק לאחר שההעלאה הושלמה בהצלחה.
-    </p>
+  <div class="card page-header archive-item-edit">
+    <header class="archive-item-edit__header">
+      <div class="page-toolbar archive-item-edit__toolbar">
+        <a class="btn" href="{% url 'archive-detail' item_id=item.id %}">חזרה לפריט</a>
+        <a class="btn" href="{% url 'archive-manage-list' %}">חזרה לניהול</a>
+      </div>
+      <div class="archive-item-edit__heading">
+        <h1 class="page-title">{{ page_title }}</h1>
+      </div>
+      <div class="archive-item-edit__help" role="note">
+        <p>
+          פריט ארכיון מסוג תמונה — עריכת מטא־דאטה בלבד, ללא החלפת קובץ התמונה.
+          מטא־דאטה משותף לפריט נשמר בטופס העליון; מטא־דאטה של התמונה נערך בטופס נפרד מתחת.
+          בפריט עם כמה תמונות בוחרים תמונה לעריכה מעל העורך.
+        </p>
+        <p>
+          דף זה מאפשר עריכת מטא־דאטה בלבד (תיאור קצר, נראות, תאריכים, קטגוריות וכו׳).
+          לא ניתן להחליף או להעלות מחדש את קובץ התמונה מדף זה.
+          התמונה תופיע בארכיון הציבורי רק לאחר שההעלאה הושלמה בהצלחה.
+        </p>
+      </div>
+    </header>
 
     {% if messages %}
-      <div class="spacer"></div>
       {% for message in messages %}
         <div class="alert{% if message.tags == 'error' %} alert-danger{% elif message.tags == 'success' %} alert-ok{% endif %}">
           {{ message }}
@@ -30,7 +34,6 @@
     {% endif %}
 
     {% if form_errors %}
-      <div class="spacer"></div>
       <div class="alert alert-danger">
         <div class="alert-title">שגיאה בטופס</div>
         <ul>
@@ -41,29 +44,25 @@
       </div>
     {% endif %}
 
-    <div class="spacer"></div>
-    <h2 class="section-title">מטא־דאטה משותף לפריט</h2>
-    <form method="post" id="archive-item-shared-form">
+    <h2 class="section-title archive-item-edit__section-title">מטא־דאטה משותף לפריט</h2>
+    <form method="post" id="archive-item-shared-form" class="archive-metadata-edit">
       {% csrf_token %}
       {% include "documents/archive/photo_item_shared_form_fields.html" %}
       {% if show_discovery_metadata %}
-        <div class="spacer"></div>
         {% include "documents/archive/discovery_metadata_form_fields.html" %}
       {% endif %}
       {% if show_archive_item_people %}
-        <div class="spacer"></div>
         {% include "documents/archive/archive_item_people_form_fields.html" %}
       {% endif %}
-      <div class="spacer"></div>
       <button type="submit" class="btn btn-primary">{{ submit_label }}</button>
     </form>
 
-    <div class="spacer"></div>
-    <h2 class="section-title">תמונות בפריט זה</h2>
+    <h2 class="section-title archive-item-edit__section-title">תמונות בפריט זה</h2>
     {% include "documents/archive/partials/photo_contents_staff_selector.html" %}
     {% include "documents/archive/partials/photo_contents_manage_list.html" %}
     <div class="spacer"></div>
     <a class="btn btn-primary" href="{% url 'archive-manage-photo-add' item_id=item.id %}">הוספת תמונה</a>
   </div>
   {% include "documents/archive/archive_date_form_script.html" %}
+  {% include "documents/archive/searchable_multi_select_script.html" %}
 {% endblock %}

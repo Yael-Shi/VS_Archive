@@ -2,12 +2,15 @@
 {% block title %}VSArchive - {{ page_title }}{% endblock %}
 
 {% block content %}
-  <div class="card page-header">
-    <h1 class="page-title">{{ page_title }}</h1>
-    <p class="page-subtitle">פריט ארכיון מסוג טקסט — ללא העלאת קובץ.</p>
+  <div class="card page-header archive-item-edit">
+    <header class="archive-item-edit__header">
+      <div class="archive-item-edit__heading">
+        <h1 class="page-title">{{ page_title }}</h1>
+        <p class="page-subtitle archive-item-edit__lede">פריט ארכיון מסוג טקסט — ללא העלאת קובץ.</p>
+      </div>
+    </header>
 
     {% if form_errors %}
-      <div class="spacer"></div>
       <div class="alert alert-danger">
         <div class="alert-title">שגיאה בטופס</div>
         <ul>
@@ -18,22 +21,18 @@
       </div>
     {% endif %}
 
-    <div class="spacer"></div>
-
-    <form method="post">
+    <form method="post" class="archive-metadata-edit">
       {% csrf_token %}
       {% include "documents/archive/manual_text_form_fields.html" %}
       {% if show_discovery_metadata %}
-        <div class="spacer"></div>
         {% include "documents/archive/discovery_metadata_form_fields.html" %}
       {% endif %}
       {% if show_archive_item_people %}
-        <div class="spacer"></div>
         {% include "documents/archive/archive_item_people_form_fields.html" %}
       {% endif %}
-      <div class="spacer"></div>
       <button type="submit" class="btn btn-primary">{{ submit_label }}</button>
     </form>
   </div>
   {% include "documents/archive/archive_date_form_script.html" %}
+  {% include "documents/archive/searchable_multi_select_script.html" %}
 {% endblock %}
