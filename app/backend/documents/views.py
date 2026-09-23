@@ -5191,6 +5191,9 @@ def _staff_photo_edit_url(item_id: int, *, photo_id: int | None = None) -> str:
     return f"{url}?{urlencode({PUBLIC_PHOTO_QUERY_PARAM: photo_id})}"
 
 
+STAFF_PHOTO_EDITOR_ANCHOR = "photo-editor"
+
+
 def _staff_photo_selector_items(
     item: ArchiveItem,
     rows: list,
@@ -5203,7 +5206,10 @@ def _staff_photo_selector_items(
             {
                 "row": row,
                 "label": f"תמונה {index}",
-                "url": _staff_photo_edit_url(item.id, photo_id=photo.id),
+                "url": (
+                    f"{_staff_photo_edit_url(item.id, photo_id=photo.id)}"
+                    f"#{STAFF_PHOTO_EDITOR_ANCHOR}"
+                ),
                 "is_selected": photo.id == selected_photo_id,
             }
         )
