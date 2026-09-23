@@ -1,43 +1,38 @@
 {% if show_archive_item_people %}
-<div class="section-title">{{ archive_item_people_heading }}</div>
-<p class="page-subtitle">{{ archive_item_people_hint }}</p>
+<section class="archive-metadata-section" aria-labelledby="archive-people-heading">
+  <h2 id="archive-people-heading" class="archive-metadata-section__title">{{ archive_item_people_heading }}</h2>
+  <p class="archive-metadata-section__hint">{{ archive_item_people_hint }}</p>
 
-<div class="field">
-  <label for="archive_item_person_ids">{{ archive_item_people_heading }}</label>
-  <select id="archive_item_person_ids" name="archive_item_person_ids" multiple size="8">
-    {% for person in archive_item_person_choices %}
-      <option value="{{ person.id }}" {% if person.selected %}selected{% endif %}>
-        {{ person.label }}
-      </option>
-    {% endfor %}
-  </select>
-  <div class="field-hint">בחירה מרשומות אדם קיימות. שמות חלופיים מוצגים בסוגריים לזיהוי, ואינם זהויות נפרדות.</div>
-</div>
+  {% if archive_item_selected_people %}
+    <div class="archive-metadata-current">
+      <h3 class="archive-metadata-subsection-title">{{ archive_item_people_current_heading }}</h3>
+      <ul class="archive-metadata-current__list">
+        {% for person in archive_item_selected_people %}
+          <li class="archive-metadata-current__item">
+            <span class="archive-metadata-current__label">{{ person.label }}</span>
+            <a class="archive-metadata-edit-link" href="{% url 'archive-manage-person-edit' person_id=person.id %}">עריכת אדם</a>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
 
-{% if archive_item_selected_people %}
-  <div class="field">
-    <p>{{ archive_item_people_current_heading }}</p>
-    <ul>
-      {% for person in archive_item_selected_people %}
-        <li>
-          {{ person.label }}
-          —
-          <a href="{% url 'archive-manage-person-edit' person_id=person.id %}">עריכת אדם</a>
-        </li>
-      {% endfor %}
-    </ul>
+  <div class="archive-metadata-add">
+    {% include "documents/archive/searchable_multi_select.html" with searchable_id="archive_item_person_ids" searchable_name="archive_item_person_ids" searchable_label="בחירת אנשים קיימים" searchable_search_label="חיפוש באנשים קיימים" searchable_placeholder="חיפוש באנשים קיימים…" searchable_empty_message="לא נמצאו אנשים תואמים." searchable_hint="אנשים מסומנים מקושרים לפריט. בחירה מוסיפה קישור; ביטול סימון מנתק מהפריט בלבד ואינו מוחק את רשומת האדם מהארכיון. שמות חלופיים מוצגים בסוגריים לזיהוי, ואינם זהויות נפרדות." searchable_options=archive_item_person_choices searchable_selected_ids=form_data.archive_item_person_ids searchable_size="6" %}
   </div>
-{% endif %}
 
-<div class="field">
-  <label for="new_archive_item_person_name">הוספת אדם חדש</label>
-  <input
-    id="new_archive_item_person_name"
-    name="new_archive_item_person_name"
-    type="text"
-    value="{{ form_data.new_archive_item_person_name }}"
-  />
-  <div class="field-hint">ניתן להזין כמה שמות מופרדים בפסיקים. שם חדש שלא תואם רשומה קיימת יוצר אדם חדש ומקשר אותו לפריט. אם השם תואם שם תצוגה או שם חלופי קיים, תוצג אזהרה — בחרו אדם קיים בבורר והסירו את השם, או אשרו יצירה במכוון. אין מיזוג לפי שם ואין יצירת שמות חלופיים.</div>
-  {% include "documents/archive/person_name_duplicate_warning.html" with person_name_conflicts=form_data.person_name_conflicts field_id_prefix="" %}
-</div>
+  <div class="archive-metadata-secondary">
+    <div class="field">
+      <label class="archive-metadata-subsection-title" for="new_archive_item_person_name">הוספת אדם חדש</label>
+      <input
+        id="new_archive_item_person_name"
+        name="new_archive_item_person_name"
+        type="text"
+        value="{{ form_data.new_archive_item_person_name }}"
+      />
+      <div class="field-hint">ניתן להזין כמה שמות מופרדים בפסיקים. שם חדש שלא תואם רשומה קיימת יוצר אדם חדש ומקשר אותו לפריט. אם השם תואם שם תצוגה או שם חלופי קיים, תוצג אזהרה — בחרו אדם קיים בבורר והסירו את השם, או אשרו יצירה במכוון. אין מיזוג לפי שם ואין יצירת שמות חלופיים.</div>
+      {% include "documents/archive/person_name_duplicate_warning.html" with person_name_conflicts=form_data.person_name_conflicts field_id_prefix="" %}
+    </div>
+  </div>
+</section>
 {% endif %}

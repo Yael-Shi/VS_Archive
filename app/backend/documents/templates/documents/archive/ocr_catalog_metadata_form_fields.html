@@ -1,21 +1,26 @@
-<div class="section-title">מטא־דאטה קטלוגי</div>
+<section class="archive-metadata-section" aria-labelledby="archive-catalog-heading">
+  <h2 id="archive-catalog-heading" class="archive-metadata-section__title">מטא־דאטה קטלוגי</h2>
+  <p class="archive-metadata-section__hint">תורם, אוסף ומיקום מקורי.</p>
 
-<div class="field">
-  <label for="donor">תורם/ת</label>
-  <input id="donor" name="donor" type="text" value="{{ form_data.donor }}" />
-</div>
+  <div class="archive-metadata-grid">
+    <div class="field">
+      <label for="donor">תורם/ת</label>
+      <input id="donor" name="donor" type="text" value="{{ form_data.donor }}" />
+    </div>
 
-<div class="field">
-  <label for="collection">אוסף</label>
-  <input id="collection" name="collection" type="text" value="{{ form_data.collection }}" />
-</div>
+    <div class="field">
+      <label for="collection">אוסף</label>
+      <input id="collection" name="collection" type="text" value="{{ form_data.collection }}" />
+    </div>
 
-<div class="field">
-  <label for="original_location">מיקום מקורי</label>
-  <input id="original_location" name="original_location" type="text" value="{{ form_data.original_location }}" />
-</div>
+    <div class="field">
+      <label for="original_location">מיקום מקורי</label>
+      <input id="original_location" name="original_location" type="text" value="{{ form_data.original_location }}" />
+    </div>
 
-<div class="field">
-  <label for="notes">הערות</label>
-  <textarea id="notes" name="notes">{{ form_data.notes }}</textarea>
-</div>
+    <div class="field archive-metadata-span">
+      <label for="notes">הערות</label>
+      <textarea id="notes" name="notes">{{ form_data.notes }}</textarea>
+    </div>
+  </div>
+</section>

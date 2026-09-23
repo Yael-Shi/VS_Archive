@@ -14,6 +14,7 @@ from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from documents.models import (
+    ArchiveCategory,
     ArchiveItem,
     ArchiveItemPerson,
     ArchiveItemSearchIndex,
@@ -1384,6 +1385,49 @@ class ArchiveItemPersonStaffCreateTests(ArchiveItemPersonStaffUiHarness, TestCas
                     ).count(),
                     0,
                 )
+
+    def test_edit_validation_error_preserves_selected_searchable_multi_select_ids(self):
+        item = self._create_manual(title="Preserve selected searchable ids")
+        person = Person.objects.create(name="PreservedPerson")
+        category = ArchiveCategory.objects.create(
+            name="PreservedCategory",
+            slug="preserved-category",
+        )
+        tag = Tag.objects.create(name="preserved-selected-tag")
+
+        resp = self.client.post(
+            _edit_url(item),
+            data=self._payload_for(
+                item,
+                title="",
+                **{
+                    ARCHIVE_ITEM_PERSON_IDS_FIELD: [str(person.id)],
+                    "selected_categories": [str(category.id)],
+                    "selected_tags": [str(tag.id)],
+                },
+            ),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "title is required")
+        self.assertContains(resp, "data-searchable-multi-select")
+        self.assertContains(
+            resp,
+            f'<option value="{person.id}" selected>{person.name}</option>',
+            html=True,
+        )
+        self.assertContains(
+            resp,
+            f'<option value="{category.id}" selected>{category.name}</option>',
+            html=True,
+        )
+        self.assertContains(
+            resp,
+            f'<option value="{tag.id}" selected>{tag.name}</option>',
+            html=True,
+        )
+        self.assertEqual(item.people.count(), 0)
+        self.assertEqual(item.categories.count(), 0)
+        self.assertEqual(item.tags.count(), 0)
 
     def test_validation_error_preserves_create_form_state(self):
         existing = Person.objects.create(name="ValidCreatePerson")

@@ -537,11 +537,11 @@ label {
 }
 
 .staff-linked-authors-fieldset legend {
-  font-weight: 600;
+  font-weight: 700;
   font-size: var(--font-sm);
-  color: var(--text-soft);
+  color: var(--text-heading);
   padding: 0;
-  margin: 0 0 0.5rem;
+  margin: 0 0 var(--space-2);
 }
 
 .staff-linked-authors {
@@ -551,7 +551,7 @@ label {
 }
 
 .staff-linked-authors li {
-  margin: 0 0 0.5rem;
+  margin: 0;
 }
 
 .staff-linked-authors label {
@@ -559,6 +559,8 @@ label {
   align-items: flex-start;
   gap: 0.5rem;
   font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .selected-files-summary {
@@ -743,9 +745,9 @@ textarea {
   resize: vertical;
 }
 
-/* Existing-tags list filter only. Do not reuse for category/event/new-tag fields
-   or other type=search inputs — those stay on their own styles. */
-[data-existing-tags-field] > .existing-tags-search {
+/* Staff archive-item searchable multi-select. Scoped to the widget so other
+   type=search inputs keep their own styles. */
+[data-searchable-multi-select] > .searchable-multi-select__search {
   align-self: start;
   width: min(20rem, 100%);
   max-width: 100%;
@@ -762,10 +764,250 @@ textarea {
   transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
 }
 
-[data-existing-tags-field] > .existing-tags-search:focus {
+[data-searchable-multi-select] > .searchable-multi-select__search:focus {
   border-color: var(--accent-muted);
   background: var(--card-elevated);
   box-shadow: var(--focus-ring);
+}
+
+/* Staff archive-item metadata edit layout. Classes are used only on those forms. */
+.archive-metadata-edit {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.archive-metadata-edit > .btn {
+  margin-top: var(--space-4);
+}
+
+.archive-metadata-section {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  background: var(--card-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.archive-metadata-edit > .archive-metadata-section:first-child {
+  margin-top: 0;
+}
+
+.archive-metadata-section .field {
+  min-width: 0;
+}
+
+.archive-metadata-section__title {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-heading);
+  font-size: var(--font-lg);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-heading);
+}
+
+.archive-metadata-section__hint {
+  margin: 0 0 var(--space-3);
+  color: var(--muted);
+  font-size: var(--font-sm);
+  line-height: var(--line-normal);
+}
+
+.archive-metadata-subsection-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-sm);
+  font-weight: 700;
+  color: var(--text-heading);
+}
+
+label.archive-metadata-subsection-title {
+  display: block;
+}
+
+.archive-metadata-grid,
+.archive-metadata-discovery {
+  display: grid;
+  gap: var(--space-3) var(--space-4);
+  align-items: start;
+}
+
+.archive-metadata-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.archive-metadata-discovery {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.archive-metadata-discovery__group,
+.archive-metadata-span {
+  min-width: 0;
+}
+
+.archive-metadata-span {
+  grid-column: 1 / -1;
+}
+
+.archive-metadata-compact {
+  max-width: min(20rem, 100%);
+}
+
+.archive-metadata-source,
+.archive-metadata-secondary .field {
+  max-width: min(32rem, 100%);
+}
+
+[data-searchable-multi-select] > select {
+  width: 100%;
+  max-width: 100%;
+}
+
+.archive-metadata-date-cluster,
+.archive-metadata-add,
+.archive-metadata-secondary {
+  margin-top: var(--space-3);
+}
+
+.archive-metadata-date-cluster {
+  max-width: min(40rem, 100%);
+}
+
+.archive-metadata-section .archive-date-widget > .field {
+  max-width: min(16rem, 100%);
+}
+
+.archive-metadata-current {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  background: var(--primary-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.archive-metadata-current__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 16rem;
+  overflow: auto;
+}
+
+.archive-metadata-current__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.archive-metadata-current__item:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.archive-metadata-current__label {
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.archive-metadata-current .staff-linked-authors label {
+  flex: 1 1 12rem;
+}
+
+.archive-metadata-edit-link {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  overflow-wrap: anywhere;
+}
+
+.archive-metadata-secondary {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Staff archive-item edit page chrome. Scoped to those edit templates only. */
+.archive-item-edit.page-header {
+  padding-block: var(--space-4);
+}
+
+.archive-item-edit__header {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  min-width: 0;
+}
+
+.archive-item-edit__toolbar.page-toolbar {
+  margin-bottom: 0;
+}
+
+.archive-item-edit__heading {
+  min-width: 0;
+}
+
+.archive-item-edit__heading .page-title {
+  margin-bottom: var(--space-1);
+}
+
+.archive-item-edit__lede.page-subtitle {
+  margin: 0;
+  font-size: var(--font-sm);
+  line-height: var(--line-normal);
+  color: var(--muted);
+}
+
+.archive-item-edit__help {
+  margin: 0;
+  padding: var(--space-3);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: var(--font-sm);
+  line-height: var(--line-normal);
+}
+
+.archive-item-edit__help p {
+  margin: 0 0 var(--space-2);
+}
+
+.archive-item-edit__help p:last-child {
+  margin-bottom: 0;
+}
+
+.archive-item-edit > .alert,
+.archive-item-edit__header + .alert {
+  margin-top: 0;
+  margin-bottom: var(--space-3);
+}
+
+.archive-item-edit__section-title.section-title {
+  margin: var(--space-4) 0 var(--space-3);
+}
+
+.archive-item-edit__section-title.section-title:first-of-type {
+  margin-top: 0;
+}
+
+@media (max-width: 900px) {
+  .archive-item-edit.page-header {
+    padding-inline: var(--space-4);
+  }
+
+  .archive-item-edit__toolbar.page-toolbar {
+    width: 100%;
+  }
+
+  .archive-item-edit__toolbar .btn {
+    flex: 1 1 auto;
+  }
 }
 
 /* Tables */
@@ -2388,6 +2630,12 @@ pre {
   }
 }
 
+@media (max-width: 1100px) {
+  .archive-metadata-discovery {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 900px) {
   .grid-3 {
     grid-template-columns: 1fr;
@@ -2395,6 +2643,19 @@ pre {
 
   .meta-grid {
     grid-template-columns: 1fr;
+  }
+
+  .archive-metadata-grid,
+  .archive-metadata-discovery {
+    grid-template-columns: 1fr;
+  }
+
+  .archive-metadata-source,
+  .archive-metadata-compact,
+  .archive-metadata-secondary .field,
+  .archive-metadata-date-cluster,
+  .archive-metadata-section .archive-date-widget > .field {
+    max-width: none;
   }
 
   .page-title {

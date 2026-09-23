@@ -1,101 +1,42 @@
-<div class="section-title">קטגוריות, אירועים ותגיות</div>
-<p class="page-subtitle">בחרי ערכים קיימים או הוסיפי חדשים כדי לעזור למצוא פריטים בארכיון.</p>
+<section class="archive-metadata-section" aria-labelledby="archive-discovery-heading">
+  <h2 id="archive-discovery-heading" class="archive-metadata-section__title">סיווג וקישור</h2>
+  <p class="archive-metadata-section__hint">בחרי ערכים קיימים או הוסיפי חדשים כדי לעזור למצוא פריטים בארכיון.</p>
 
-<div class="field">
-  <label for="selected_categories">קטגוריות קיימות</label>
-  <select id="selected_categories" name="selected_categories" multiple size="6">
-    {% for category in discovery_all_categories %}
-      <option value="{{ category.id }}"{% if category.id in form_data.selected_category_ids %} selected{% endif %}>{{ category.name }}</option>
-    {% endfor %}
-  </select>
-  <div class="field-hint">אפשר לבחור כמה ערכים קיימים.</div>
-</div>
+  <div class="archive-metadata-discovery">
+    <div class="archive-metadata-discovery__group">
+      <h3 class="archive-metadata-subsection-title">קטגוריות</h3>
+      {% include "documents/archive/searchable_multi_select.html" with searchable_id="selected_categories" searchable_name="selected_categories" searchable_label="קטגוריות קיימות" searchable_search_label="חיפוש בקטגוריות קיימות" searchable_placeholder="חיפוש בקטגוריות קיימות…" searchable_empty_message="לא נמצאו קטגוריות תואמות." searchable_hint="אפשר לבחור כמה ערכים קיימים." searchable_options=discovery_all_categories searchable_selected_ids=form_data.selected_category_ids %}
+      <div class="archive-metadata-secondary">
+        <div class="field">
+          <label for="categories">הוספת קטגוריות חדשות</label>
+          <input id="categories" name="categories" type="text" value="{{ form_data.categories }}" placeholder="למשל: יהדות מצרים, הפרשה" />
+          <div class="field-hint">להוספת ערכים חדשים, הפרידי בפסיקים.</div>
+        </div>
+      </div>
+    </div>
 
-<div class="field">
-  <label for="categories">הוספת קטגוריות חדשות</label>
-  <input id="categories" name="categories" type="text" value="{{ form_data.categories }}" placeholder="למשל: יהדות מצרים, הפרשה" />
-  <div class="field-hint">להוספת ערכים חדשים, הפרידי בפסיקים.</div>
-</div>
+    <div class="archive-metadata-discovery__group">
+      <h3 class="archive-metadata-subsection-title">אירועים</h3>
+      {% include "documents/archive/searchable_multi_select.html" with searchable_id="selected_events" searchable_name="selected_events" searchable_label="אירועים קיימים" searchable_search_label="חיפוש באירועים קיימים" searchable_placeholder="חיפוש באירועים קיימים…" searchable_empty_message="לא נמצאו אירועים תואמים." searchable_hint="אפשר לבחור כמה ערכים קיימים." searchable_options=discovery_all_events searchable_selected_ids=form_data.selected_event_ids %}
+      <div class="archive-metadata-secondary">
+        <div class="field">
+          <label for="events">הוספת אירועים חדשים</label>
+          <input id="events" name="events" type="text" value="{{ form_data.events }}" placeholder="למשל: חתונה של דוד, עליה ממצרים" />
+          <div class="field-hint">להוספת ערכים חדשים, הפרידי בפסיקים.</div>
+        </div>
+      </div>
+    </div>
 
-<div class="field">
-  <label for="selected_events">אירועים קיימים</label>
-  <select id="selected_events" name="selected_events" multiple size="6">
-    {% for event in discovery_all_events %}
-      <option value="{{ event.id }}"{% if event.id in form_data.selected_event_ids %} selected{% endif %}>{{ event.name }}</option>
-    {% endfor %}
-  </select>
-  <div class="field-hint">אפשר לבחור כמה ערכים קיימים.</div>
-</div>
-
-<div class="field">
-  <label for="events">הוספת אירועים חדשים</label>
-  <input id="events" name="events" type="text" value="{{ form_data.events }}" placeholder="למשל: חתונה של דוד, עליה ממצרים" />
-  <div class="field-hint">להוספת ערכים חדשים, הפרידי בפסיקים.</div>
-</div>
-
-<div class="field" data-existing-tags-field>
-  <label for="selected_tags">תגיות קיימות</label>
-  <input
-    type="search"
-    class="existing-tags-search"
-    data-existing-tags-search
-    autocomplete="off"
-    placeholder="חיפוש בתגיות קיימות…"
-    aria-label="חיפוש בתגיות קיימות"
-  />
-  <select id="selected_tags" name="selected_tags" multiple size="6" data-existing-tags-select>
-    {% for tag in discovery_all_tags %}
-      <option value="{{ tag.id }}"{% if tag.id in form_data.selected_tag_ids %} selected{% endif %}>{{ tag.name }}</option>
-    {% endfor %}
-  </select>
-  <div class="field-hint">אפשר לבחור כמה ערכים קיימים.</div>
-  <div class="field-hint" data-existing-tags-empty hidden>לא נמצאו תגיות תואמות.</div>
-</div>
-
-<div class="field">
-  <label for="{{ discovery_tags_input_id }}">הוספת תגיות חדשות</label>
-  <input id="{{ discovery_tags_input_id }}" name="{{ discovery_tags_input_name }}" type="text" value="{{ form_data.discovery_tags }}" placeholder="למשל: משפחה, ירושלים, 1948" />
-  <div class="field-hint">להוספת ערכים חדשים, הפרידי בפסיקים.</div>
-</div>
-
-<script>
-  (function () {
-    document.querySelectorAll("[data-existing-tags-field]").forEach(function (field) {
-      if (field.dataset.existingTagsSearchReady === "1") {
-        return;
-      }
-      field.dataset.existingTagsSearchReady = "1";
-
-      const searchInput = field.querySelector("[data-existing-tags-search]");
-      const select = field.querySelector("[data-existing-tags-select]");
-      const emptyMessage = field.querySelector("[data-existing-tags-empty]");
-
-      if (!searchInput || !select || !emptyMessage) {
-        return;
-      }
-
-      function applyFilter() {
-        const query = searchInput.value.trim().toLocaleLowerCase();
-        let matchCount = 0;
-
-        Array.from(select.options).forEach(function (option) {
-          const matches =
-            !query || option.textContent.toLocaleLowerCase().includes(query);
-
-          if (matches) {
-            matchCount += 1;
-          }
-
-          const shouldHide = !matches && !option.selected;
-          option.hidden = shouldHide;
-          option.style.display = shouldHide ? "none" : "";
-        });
-
-        emptyMessage.hidden = !query || matchCount > 0;
-      }
-
-      searchInput.addEventListener("input", applyFilter);
-      select.addEventListener("change", applyFilter);
-    });
-  })();
-</script>
+    <div class="archive-metadata-discovery__group">
+      <h3 class="archive-metadata-subsection-title">תגיות</h3>
+      {% include "documents/archive/searchable_multi_select.html" with searchable_id="selected_tags" searchable_name="selected_tags" searchable_label="תגיות קיימות" searchable_search_label="חיפוש בתגיות קיימות" searchable_placeholder="חיפוש בתגיות קיימות…" searchable_empty_message="לא נמצאו תגיות תואמות." searchable_hint="אפשר לבחור כמה ערכים קיימים." searchable_options=discovery_all_tags searchable_selected_ids=form_data.selected_tag_ids %}
+      <div class="archive-metadata-secondary">
+        <div class="field">
+          <label for="{{ discovery_tags_input_id }}">הוספת תגיות חדשות</label>
+          <input id="{{ discovery_tags_input_id }}" name="{{ discovery_tags_input_name }}" type="text" value="{{ form_data.discovery_tags }}" placeholder="למשל: משפחה, ירושלים, 1948" />
+          <div class="field-hint">להוספת ערכים חדשים, הפרידי בפסיקים.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
