@@ -158,7 +158,6 @@ class ArchivePersonPublicCardTests(TestCase):
         resp = self.client.get(reverse("archive-list"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "אנשים קשורים")
-        self.assertNotContains(resp, "אנשים קשורים לפריט")
         self.assertContains(resp, _person_href_html(person), count=4)
         self.assertContains(resp, "Card Linked Person")
         self.assertIn(f"/archive/people/{person.id}/", resp.content.decode())
@@ -313,29 +312,29 @@ class ArchivePersonPublicDetailTests(TestCase):
         resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
-        self.assertContains(resp, "אנשים קשורים לפריט")
+        self.assertContains(resp, "אנשים קשורים")
         self.assertContains(resp, "Item Related Person")
         self.assertContains(
             resp,
             _person_href_html(related, from_item_id=item.id, from_photo_id=photo.id),
         )
-        self.assertContains(resp, "אנשים בתמונה")
+        self.assertContains(resp, "מופיעים:")
         self.assertContains(resp, "Photo Identified Person")
         self.assertContains(
             resp,
             _person_href_html(identified, from_item_id=item.id, from_photo_id=photo.id),
         )
         header = html[html.index("document-detail-header") : html.index("</header>")]
-        self.assertIn("אנשים קשורים לפריט", header)
+        self.assertIn("אנשים קשורים", header)
         self.assertIn("Item Related Person", header)
         self.assertIn(
             _person_href_html(related, from_item_id=item.id, from_photo_id=photo.id),
             header,
         )
-        self.assertNotIn("אנשים בתמונה", header)
+        self.assertNotIn("מופיעים:", header)
         self.assertNotIn("Photo Identified Person", header)
-        identified_idx = html.index("אנשים בתמונה")
-        related_idx = html.index("אנשים קשורים לפריט")
+        identified_idx = html.index("מופיעים:")
+        related_idx = html.index("אנשים קשורים")
         identified_block = html[identified_idx : html.index("</div>", identified_idx)]
         related_block = html[related_idx : html.index("</div>", related_idx)]
         self.assertIn("Photo Identified Person", identified_block)
@@ -388,8 +387,7 @@ class ArchivePersonPublicDetailTests(TestCase):
         ):
             self.assertEqual(resp.status_code, 200)
             self.assertContains(resp, "אנשים קשורים")
-            self.assertNotContains(resp, "אנשים קשורים לפריט")
-            self.assertNotContains(resp, "אנשים בתמונה")
+            self.assertNotContains(resp, "מופיעים:")
             self.assertContains(resp, _person_href_html(person, from_item_id=item.id))
 
     @patch("documents.views.create_presigned_get", return_value=PRESIGNED_URL)
@@ -403,13 +401,12 @@ class ArchivePersonPublicDetailTests(TestCase):
         resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
         html = resp.content.decode()
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "אנשים בתמונה")
+        self.assertContains(resp, "מופיעים:")
         self.assertContains(resp, "Both Relations Person")
         self.assertContains(
             resp,
             _person_href_html(person, from_item_id=item.id, from_photo_id=photo.id),
         )
-        self.assertNotContains(resp, "אנשים קשורים לפריט")
         self.assertEqual(html.count("Both Relations Person"), 1)
 
     @patch("documents.views.create_presigned_get", return_value=PRESIGNED_URL)
@@ -424,10 +421,10 @@ class ArchivePersonPublicDetailTests(TestCase):
 
         resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
         html = resp.content.decode()
-        self.assertContains(resp, "אנשים בתמונה")
-        self.assertContains(resp, "אנשים קשורים לפריט")
-        identified_idx = html.index("אנשים בתמונה")
-        related_idx = html.index("אנשים קשורים לפריט")
+        self.assertContains(resp, "מופיעים:")
+        self.assertContains(resp, "אנשים קשורים")
+        identified_idx = html.index("מופיעים:")
+        related_idx = html.index("אנשים קשורים")
         identified_block = html[identified_idx : html.index("</div>", identified_idx)]
         related_block = html[related_idx : html.index("</div>", related_idx)]
         self.assertIn("In Photo Person", identified_block)
@@ -460,8 +457,8 @@ class ArchivePersonPublicDetailTests(TestCase):
 
         album = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
         self.assertEqual(album.status_code, 200)
-        self.assertNotContains(album, "אנשים בתמונה")
-        self.assertContains(album, "אנשים קשורים לפריט")
+        self.assertNotContains(album, "מופיעים:")
+        self.assertContains(album, "אנשים קשורים")
         self.assertContains(album, "Only On Second")
         self.assertContains(album, _person_href_html(on_second, from_item_id=item.id))
 
@@ -470,13 +467,13 @@ class ArchivePersonPublicDetailTests(TestCase):
             {"photo": str(first.id)},
         )
         html = first_view.content.decode()
-        self.assertNotContains(first_view, "אנשים בתמונה")
-        self.assertContains(first_view, "אנשים קשורים לפריט")
+        self.assertNotContains(first_view, "מופיעים:")
+        self.assertContains(first_view, "אנשים קשורים")
         self.assertContains(first_view, "Only On Second")
-        self.assertIn("אנשים קשורים לפריט", html)
+        self.assertIn("אנשים קשורים", html)
         related_block = html[
-            html.index("אנשים קשורים לפריט") : html.index(
-                "</div>", html.index("אנשים קשורים לפריט")
+            html.index("אנשים קשורים") : html.index(
+                "</div>", html.index("אנשים קשורים")
             )
         ]
         self.assertIn("Only On Second", related_block)
@@ -497,10 +494,10 @@ class ArchivePersonPublicDetailTests(TestCase):
 
         resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
         html = resp.content.decode()
-        self.assertContains(resp, "אנשים בתמונה")
-        self.assertContains(resp, "אנשים קשורים לפריט")
-        identified_idx = html.index("אנשים בתמונה")
-        related_idx = html.index("אנשים קשורים לפריט")
+        self.assertContains(resp, "מופיעים:")
+        self.assertContains(resp, "אנשים קשורים")
+        identified_idx = html.index("מופיעים:")
+        related_idx = html.index("אנשים קשורים")
         identified_block = html[identified_idx : html.index("</div>", identified_idx)]
         related_block = html[related_idx : html.index("</div>", related_idx)]
         self.assertIn(

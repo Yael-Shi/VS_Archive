@@ -501,8 +501,8 @@ class PhotoPublicGalleryTests(TestCase):
         self.assertNotIn("First picnic", facts)
         self.assertIn("מיקום:", facts)
         self.assertIn("Jerusalem", facts)
-        self.assertIn("אנשים בתמונה:", facts)
-        self.assertIn("נוכחים:", facts)
+        self.assertIn("מופיעים:", facts)
+        self.assertIn("מופיעים נוספים:", facts)
         self.assertIn("archive-detail-meta-label", facts)
         self.assertIn("archive-detail-meta-value", facts)
         for marker in (
@@ -574,12 +574,12 @@ class PhotoPublicGalleryTests(TestCase):
 
     def test_identified_people_and_people_present_stay_separate(self):
         album = self._detail()
-        self.assertNotContains(album, "אנשים בתמונה")
-        self.assertNotContains(album, "נוכחים:")
+        self.assertNotContains(album, "מופיעים:")
+        self.assertNotContains(album, "מופיעים נוספים:")
         self.assertNotContains(album, "someone in the back")
 
         resp = self._detail(photo=self.p1.id)
-        self.assertContains(resp, "אנשים בתמונה")
+        self.assertContains(resp, "מופיעים:")
         ada_html = _identified_person_link_html(
             self.ada, from_item_id=self.item.id, from_photo_id=self.p1.id
         )
@@ -592,10 +592,10 @@ class PhotoPublicGalleryTests(TestCase):
         self.assertContains(resp, f"{ada_html}, {rivka_on_p1}")
         self.assertContains(resp, person_public_page_url(self.ada.pk))
         self.assertContains(resp, person_public_page_url(self.rivka.pk))
-        self.assertContains(resp, "נוכחים:")
+        self.assertContains(resp, "מופיעים נוספים:")
         self.assertContains(resp, "someone in the back")
         html = resp.content.decode("utf-8")
-        identified = html[html.index("אנשים בתמונה") : html.index("נוכחים:")]
+        identified = html[html.index("מופיעים:") : html.index("מופיעים נוספים:")]
         self.assertIn("Ada", identified)
         self.assertIn(ada_html, identified)
         self.assertIn(rivka_on_p1, identified)
@@ -607,7 +607,7 @@ class PhotoPublicGalleryTests(TestCase):
         self.assertNotIn(f">{self.rivka.pk}<", identified_value)
 
         second = self._detail(photo=self.p2.id)
-        self.assertContains(second, "אנשים בתמונה")
+        self.assertContains(second, "מופיעים:")
         self.assertContains(second, rivka_on_p2)
         self.assertContains(second, person_public_page_url(self.rivka.pk))
         self.assertNotContains(second, ada_html)
@@ -632,12 +632,12 @@ class PhotoPublicGalleryTests(TestCase):
         )
 
         resp = self._detail(photo=self.p3.id)
-        self.assertContains(resp, "אנשים בתמונה")
+        self.assertContains(resp, "מופיעים:")
         self.assertContains(resp, first_html)
         self.assertContains(resp, second_html)
         self.assertContains(resp, f"{first_html}, {second_html}")
         html = resp.content.decode("utf-8")
-        label_idx = html.index("אנשים בתמונה")
+        label_idx = html.index("מופיעים:")
         identified = html[label_idx : html.index("</span>", label_idx)]
         self.assertLess(identified.index(first_html), identified.index(second_html))
 
@@ -682,19 +682,21 @@ class PhotoPublicGalleryTests(TestCase):
         ArchiveItemPerson.objects.create(archive_item=self.item, person=outsider)
         outsider_href = person_public_page_url(outsider.pk)
         album = self._detail()
-        self.assertContains(album, "אנשים קשורים לפריט")
+        self.assertContains(album, "אנשים קשורים")
         self.assertContains(album, "Item-only person")
         self.assertContains(album, outsider_href)
-        self.assertNotContains(album, "אנשים בתמונה")
+        self.assertNotContains(album, "מופיעים:")
         resp = self._detail(photo=self.p1.id)
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "אנשים קשורים לפריט")
+        self.assertContains(resp, "אנשים קשורים")
         self.assertContains(resp, "Item-only person")
         self.assertContains(resp, outsider_href)
         html = resp.content.decode("utf-8")
-        identified_idx = html.index("אנשים בתמונה")
-        related_idx = html.index("אנשים קשורים לפריט")
-        identified_block = html[identified_idx : html.index("נוכחים:", identified_idx)]
+        identified_idx = html.index("מופיעים:")
+        related_idx = html.index("אנשים קשורים")
+        identified_block = html[
+            identified_idx : html.index("מופיעים נוספים:", identified_idx)
+        ]
         if related_idx < identified_idx:
             related_block = html[related_idx:identified_idx]
         else:

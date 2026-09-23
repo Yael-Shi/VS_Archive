@@ -1044,19 +1044,19 @@ class PersonPublicPageLinkRetargetTests(TestCase):
         self.assertEqual(
             related_query.get(PERSON_PUBLIC_FROM_ITEM_QUERY), [str(item.id)]
         )
-        self.assertContains(resp, "אנשים בתמונה")
+        self.assertContains(resp, "מופיעים:")
         self.assertContains(resp, "Photo Identified Person")
-        self.assertContains(resp, "אנשים קשורים לפריט")
+        self.assertContains(resp, "אנשים קשורים")
         self.assertContains(resp, "Item Related Person")
         header = html[html.index("document-detail-header") : html.index("</header>")]
-        self.assertIn("אנשים קשורים לפריט", header)
+        self.assertIn("אנשים קשורים", header)
         self.assertIn("Item Related Person", header)
         self.assertEqual(_person_page_hrefs_in_html(header, related), related_hrefs)
         self.assertEqual(_person_page_hrefs_in_html(header, identified), [])
-        self.assertNotIn("אנשים בתמונה", header)
+        self.assertNotIn("מופיעים:", header)
         self.assertNotIn("Photo Identified Person", header)
-        self.assertLess(html.index("אנשים בתמונה"), html.index("photo-detail__image"))
-        self.assertEqual(html.count("אנשים בתמונה"), 1)
+        self.assertLess(html.index("מופיעים:"), html.index("photo-detail__image"))
+        self.assertEqual(html.count("מופיעים:"), 1)
         self.assertEqual(html.count("Photo Identified Person"), 1)
         appearance = html[
             html.index("archive-detail-meta-block--photo") : html.index(
