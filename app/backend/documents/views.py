@@ -5372,7 +5372,7 @@ ARCHIVE_ITEM_UPDATED_MSG = "הפריט עודכן."
 PHOTO_CONTENT_UPDATED_MSG = "התמונה עודכנה."
 PHOTO_INLINE_EDIT_FIELD = "inline_photo_edit"
 ARCHIVE_ITEM_PEOPLE_HEADING = "אנשים קשורים"
-PHOTO_ARCHIVE_ITEM_PEOPLE_HEADING = "אנשים קשורים לפריט"
+PHOTO_ARCHIVE_ITEM_PEOPLE_HEADING = "אנשים קשורים"
 ARCHIVE_ITEM_PEOPLE_CURRENT_HEADING = "אנשים קשורים לפריט זה"
 ARCHIVE_ITEM_PEOPLE_HINT = (
     "בחירה מרשומות אדם קיימות. שמות חלופיים מוצגים בסוגריים לזיהוי בלבד, "
