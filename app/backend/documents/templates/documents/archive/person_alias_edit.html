@@ -30,6 +30,37 @@
         <label for="alias_name">שם חלופי</label>
         <input id="alias_name" name="name" type="text" value="{{ alias_name }}" maxlength="255" />
       </div>
+
+      <div class="field">
+        <label for="alias_kind">סוג</label>
+        <select id="alias_kind" name="kind">
+          {% for value, label in alias_kind_choices %}
+            <option value="{{ value }}"{% if alias_kind == value %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="alias_language">שפה</label>
+        <select id="alias_language" name="language">
+          <option value=""{% if not alias_language %} selected{% endif %}>לא צוין</option>
+          {% for value, label in alias_language_choices %}
+            <option value="{{ value }}"{% if alias_language == value %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field">
+        <label>
+          <input
+            type="checkbox"
+            name="display_publicly"
+            {% if alias_display_publicly %}checked{% endif %}
+          />
+          הצגה בעמוד האדם הציבורי
+        </label>
+      </div>
+
       <div class="page-toolbar">
         <button type="submit" class="btn btn-primary">עדכון שם חלופי</button>
         <a class="btn" href="{% url 'archive-manage-person-edit' person_id=person.id %}">ביטול</a>

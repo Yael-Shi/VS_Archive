@@ -322,12 +322,43 @@ class Person(models.Model):
 class PersonAlias(models.Model):
     """Alternate lookup/search name for one Person. Does not replace Person.name."""
 
+    class Kind(models.TextChoices):
+        UNSPECIFIED = "unspecified", "לא צוין"
+        OTHER_LANGUAGE = "other_language", "שם בשפה אחרת"
+        COVER_IDENTITY = "cover_identity", "שם כיסוי"
+        CODE_NAME = "code_name", "שם קוד"
+        UNDERGROUND_NAME = "underground_name", "שם מחתרתי"
+        NICKNAME = "nickname", "כינוי / שם מוכר"
+        NAME_VARIANT = "name_variant", "וריאנט של השם"
+        SPELLING_VARIANT = "spelling_variant", "וריאנט איות"
+        OCR_VARIANT = "ocr_variant", "וריאנט OCR"
+        PARTIAL_NAME = "partial_name", "שם חלקי"
+        OTHER = "other", "אחר"
+
+    class Language(models.TextChoices):
+        HEBREW = "he", "עברית"
+        ENGLISH = "en", "אנגלית"
+        FRENCH = "fr", "צרפתית"
+        ARABIC = "ar", "ערבית"
+
     person = models.ForeignKey(
         Person,
         on_delete=models.CASCADE,
         related_name="aliases",
     )
     name = models.CharField(max_length=255)
+    kind = models.CharField(
+        max_length=32,
+        choices=Kind.choices,
+        default=Kind.UNSPECIFIED,
+    )
+    language = models.CharField(
+        max_length=8,
+        choices=Language.choices,
+        blank=True,
+        default="",
+    )
+    display_publicly = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

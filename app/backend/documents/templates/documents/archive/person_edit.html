@@ -11,8 +11,8 @@
     <h1 class="page-title">{{ page_title }}</h1>
     <p class="page-subtitle">{{ person|person_display_name }}</p>
     <p class="muted">
-      שם האדם הוא השם עצמו בלבד. תואר או כינוי (אם יש) נשמר בנפרד ומוצג בארכיון הציבורי כ־שם, תואר.
-      שמות חלופיים משמשים לחיפוש בלבד ואינם מוצגים לציבור.
+      שם האדם הוא השם עצמו בלבד. תואר (אם יש) נשמר בנפרד ומוצג בארכיון הציבורי כ־שם, תואר.
+      שמות חלופיים משמשים לחיפוש. שמות שסומנו להצגה ציבורית יופיעו גם בעמוד האדם.
       שינוי שם או שם חלופי משפיע על החיפוש בפריטים שבהם אדם זה מזוהה. שינוי תואר אינו משנה את השם או את השמות החלופיים.
     </p>
 
@@ -81,6 +81,9 @@
           <thead>
             <tr>
               <th>שם חלופי</th>
+              <th>סוג</th>
+              <th>שפה</th>
+              <th>מוצג לציבור</th>
               <th>פעולות</th>
             </tr>
           </thead>
@@ -88,6 +91,15 @@
             {% for alias in aliases %}
               <tr>
                 <td>{{ alias.name }}</td>
+                <td>{{ alias.get_kind_display }}</td>
+                <td>
+                  {% if alias.language %}
+                    {{ alias.get_language_display }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>{% if alias.display_publicly %}כן{% else %}לא{% endif %}</td>
                 <td>
                   <a class="btn" href="{% url 'archive-manage-person-alias-edit' person_id=person.id alias_id=alias.id %}">עריכה</a>
                   <a class="btn" href="{% url 'archive-manage-person-alias-delete' person_id=person.id alias_id=alias.id %}">מחיקה</a>
@@ -108,8 +120,39 @@
       <div class="field">
         <label for="alias_name">הוספת שם חלופי</label>
         <input id="alias_name" name="alias_name" type="text" value="{{ alias_name }}" maxlength="255" />
-        <div class="field-hint">שם חיפוש נוסף לאדם זה. לא מחליף את שם האדם ואת התואר, ולא מוצג בארכיון הציבורי.</div>
+        <div class="field-hint">שם נוסף לאדם זה. כל שם חלופי משתתף בחיפוש; תצוגה ציבורית נקבעת בנפרד.</div>
       </div>
+
+      <div class="field">
+        <label for="alias_kind">סוג</label>
+        <select id="alias_kind" name="alias_kind">
+          {% for value, label in alias_kind_choices %}
+            <option value="{{ value }}"{% if alias_kind == value %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="alias_language">שפה</label>
+        <select id="alias_language" name="alias_language">
+          <option value=""{% if not alias_language %} selected{% endif %}>לא צוין</option>
+          {% for value, label in alias_language_choices %}
+            <option value="{{ value }}"{% if alias_language == value %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field">
+        <label>
+          <input
+            type="checkbox"
+            name="alias_display_publicly"
+            {% if alias_display_publicly %}checked{% endif %}
+          />
+          הצגה בעמוד האדם הציבורי
+        </label>
+      </div>
+
       <button type="submit" class="btn btn-primary">הוספת שם חלופי</button>
     </form>
 

@@ -33,6 +33,8 @@ PERSON_ALIAS_REQUIRED_ERROR = "שם חלופי נדרש."
 PERSON_ALIAS_TOO_LONG_ERROR = "השם החלופי חייב להיות עד 255 תווים."
 PERSON_ALIAS_MATCHES_CANONICAL_ERROR = "השם החלופי אינו יכול להיות זהה לשם התצוגה."
 PERSON_ALIAS_DUPLICATE_ERROR = "שם חלופי זה כבר קיים עבור אדם זה."
+PERSON_ALIAS_KIND_INVALID_ERROR = "סוג השם החלופי אינו תקין."
+PERSON_ALIAS_LANGUAGE_INVALID_ERROR = "שפת השם החלופי אינה תקינה."
 ARCHIVE_ITEM_NOT_PHOTO_ERROR = "archive item is not PHOTO"
 
 
@@ -368,18 +370,52 @@ def update_person_honorific(person: Person, *, honorific: str | None) -> Person:
     return person
 
 
+def _normalize_person_alias_metadata(
+    *,
+    kind: str | None,
+    language: str | None,
+) -> tuple[str, str]:
+    normalized_kind = (kind or PersonAlias.Kind.UNSPECIFIED).strip()
+    if normalized_kind not in PersonAlias.Kind.values:
+        raise PhotoContentManagementError(PERSON_ALIAS_KIND_INVALID_ERROR)
+
+    normalized_language = (language or "").strip()
+    if normalized_language and normalized_language not in PersonAlias.Language.values:
+        raise PhotoContentManagementError(PERSON_ALIAS_LANGUAGE_INVALID_ERROR)
+
+    return normalized_kind, normalized_language
+
+
 @transaction.atomic
-def create_person_alias(person: Person, *, name: str) -> PersonAlias:
+def create_person_alias(
+    person: Person,
+    *,
+    name: str,
+    kind: str = PersonAlias.Kind.UNSPECIFIED,
+    language: str = "",
+    display_publicly: bool = False,
+) -> PersonAlias:
     """Create an alias and refresh search indexes for linked ArchiveItems.
 
-    Strips surrounding whitespace only. Does not rewrite ``Person.name`` or
-    touch PhotoPerson / ArchiveItemPerson / Tag rows. Duplicate
-    ``(person, name)`` is a uniqueness error, not a merge. Fan-out covers
-    ArchiveItemPerson and PhotoPerson; one rebuild per ArchiveItem.
+    Strips surrounding whitespace from the name and validates typed metadata.
+    Does not rewrite ``Person.name`` or touch PhotoPerson /
+    ArchiveItemPerson / Tag rows. Duplicate ``(person, name)`` is a
+    uniqueness error, not a merge. Fan-out covers ArchiveItemPerson and
+    PhotoPerson; one rebuild per ArchiveItem.
     """
-    normalized = _normalize_person_alias_name(name, person=person)
+    normalized_name = _normalize_person_alias_name(name, person=person)
+    normalized_kind, normalized_language = _normalize_person_alias_metadata(
+        kind=kind,
+        language=language,
+    )
     try:
-        alias = PersonAlias.objects.create(person=person, name=normalized)
+        alias = PersonAlias.objects.create(
+            person=person,
+            name=normalized_name,
+            kind=normalized_kind,
+            language=normalized_language,
+            display_publicly=bool(display_publicly),
+        )
     except IntegrityError as exc:
         raise PhotoContentManagementError(PERSON_ALIAS_DUPLICATE_ERROR) from exc
     _sync_person_search_indexes(person.pk)
@@ -387,18 +423,55 @@ def create_person_alias(person: Person, *, name: str) -> PersonAlias:
 
 
 @transaction.atomic
-def update_person_alias(alias: PersonAlias, *, name: str) -> PersonAlias:
-    """Rename an alias and refresh search indexes for linked ArchiveItems."""
+def update_person_alias(
+    alias: PersonAlias,
+    *,
+    name: str,
+    kind: str | None = None,
+    language: str | None = None,
+    display_publicly: bool | None = None,
+) -> PersonAlias:
+    """Update an alias and refresh search indexes for linked ArchiveItems.
+
+    Metadata arguments default to ``None`` so existing callers that only
+    rename an alias preserve its current metadata.
+    """
     person = alias.person
-    normalized = _normalize_person_alias_name(name, person=person)
-    if alias.name == normalized:
+    normalized_name = _normalize_person_alias_name(name, person=person)
+    normalized_kind, normalized_language = _normalize_person_alias_metadata(
+        kind=alias.kind if kind is None else kind,
+        language=alias.language if language is None else language,
+    )
+    normalized_public = (
+        alias.display_publicly
+        if display_publicly is None
+        else bool(display_publicly)
+    )
+
+    changed_fields: list[str] = []
+    if alias.name != normalized_name:
+        alias.name = normalized_name
+        changed_fields.append("name")
+    if alias.kind != normalized_kind:
+        alias.kind = normalized_kind
+        changed_fields.append("kind")
+    if alias.language != normalized_language:
+        alias.language = normalized_language
+        changed_fields.append("language")
+    if alias.display_publicly != normalized_public:
+        alias.display_publicly = normalized_public
+        changed_fields.append("display_publicly")
+
+    if not changed_fields:
         return alias
-    alias.name = normalized
+
     try:
-        alias.save(update_fields=["name", "updated_at"])
+        alias.save(update_fields=[*changed_fields, "updated_at"])
     except IntegrityError as exc:
         raise PhotoContentManagementError(PERSON_ALIAS_DUPLICATE_ERROR) from exc
-    _sync_person_search_indexes(person.pk)
+
+    if "name" in changed_fields:
+        _sync_person_search_indexes(person.pk)
     return alias
 
 
