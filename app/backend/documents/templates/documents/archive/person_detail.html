@@ -6,16 +6,46 @@
   <div class="card page-header archive-person-detail-page" id="archive-top">
     <header class="document-detail-header">
       <div class="document-detail-header-main">
-        <h1 class="page-title document-detail-title">{{ person|person_display_name }}</h1>
-        {% with biography=person.biography|meaningful_archive_metadata %}
-          {% if biography %}
-            <div class="archive-detail-meta-block archive-detail-meta-block--person-biography">
-              <div class="archive-detail-meta-row">
-                <span class="archive-detail-meta-value">{{ biography|linebreaksbr }}</span>
-              </div>
-            </div>
-          {% endif %}
-        {% endwith %}
+        <div class="archive-person-profile">
+          <h1 class="page-title document-detail-title">{{ person|person_display_name }}</h1>
+          {% for group in person_additional_name_groups %}
+            <section
+              class="archive-person-additional-names"
+              aria-labelledby="person-additional-names-{{ forloop.counter }}"
+            >
+              <h2
+                id="person-additional-names-{{ forloop.counter }}"
+                class="archive-person-additional-names__label"
+              >{{ group.label }}</h2>
+              <ul class="archive-person-additional-names__list">
+                {% for entry in group.entries %}
+                  <li class="archive-person-name-chip" dir="rtl">
+                    {% if entry.label %}
+                      <span class="archive-person-name-chip__label">{{ entry.label }}</span>
+                      <span class="archive-person-name-chip__sep" aria-hidden="true">·</span>
+                      <bdi class="archive-person-name-chip__value" dir="auto">{{ entry.value }}</bdi>
+                    {% else %}
+                      <bdi class="archive-person-name-chip__value" dir="auto">{{ entry.value }}</bdi>
+                    {% endif %}
+                  </li>
+                {% endfor %}
+              </ul>
+            </section>
+          {% endfor %}
+          <div class="archive-person-biography">
+            {% with biography=person.biography|meaningful_archive_metadata %}
+              {% if biography %}
+                <div class="archive-detail-meta-block archive-detail-meta-block--person-biography">
+                  <div class="archive-detail-meta-row">
+                    <span class="archive-detail-meta-value">{{ biography|linebreaksbr }}</span>
+                  </div>
+                </div>
+              {% else %}
+                <p class="archive-person-biography-empty">טרם הוזנה ביוגרפיה עבור אדם זה.</p>
+              {% endif %}
+            {% endwith %}
+          </div>
+        </div>
       </div>
       <div class="page-toolbar document-detail-toolbar">
         {% include "documents/partials/person_public_nav_actions.html" %}
@@ -23,19 +53,21 @@
     </header>
 
     {% if browse_cards %}
-      <h2 class="archive-person-section-title">פריטים קשורים</h2>
-      <p class="archive-search-results-count" aria-live="polite">
-        נמצאו {{ total_count }} תוצאות
-      </p>
+      <section class="archive-person-related" aria-labelledby="archive-person-related-title">
+        <h2 id="archive-person-related-title" class="archive-person-section-title">פריטים קשורים</h2>
+        <p class="archive-search-results-count" aria-live="polite">
+          נמצאו {{ total_count }} תוצאות
+        </p>
 
-      <div class="spacer"></div>
-
-      {% include "documents/archive/partials/item_list_cards.html" with browse_cards=browse_cards is_admin=is_admin %}
-
-      {% if show_page_nav %}
         <div class="spacer"></div>
-        {% include "documents/archive/partials/person_page_pagination.html" %}
-      {% endif %}
+
+        {% include "documents/archive/partials/item_list_cards.html" with browse_cards=browse_cards is_admin=is_admin %}
+
+        {% if show_page_nav %}
+          <div class="spacer"></div>
+          {% include "documents/archive/partials/person_page_pagination.html" %}
+        {% endif %}
+      </section>
     {% endif %}
   </div>
 {% endblock %}

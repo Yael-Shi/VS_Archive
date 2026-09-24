@@ -315,6 +315,10 @@ from documents.services.archive_item_presentation import (
 from documents.services.author_public import (
     public_author_archive_items_queryset,
 )
+from documents.services.person_display import (
+    public_person_additional_name_groups,
+    public_person_aliases_prefetch,
+)
 from documents.services.person_public import (
     apply_matching_photo_presentation_to_cards,
     build_person_public_item_cards,
@@ -5767,7 +5771,10 @@ def archive_tag_browse_page(request, tag_id: int):
 
 
 def archive_person_detail_page(request, person_id: int):
-    person = get_object_or_404(Person, pk=person_id)
+    person = get_object_or_404(
+        Person.objects.prefetch_related(public_person_aliases_prefetch()),
+        pk=person_id,
+    )
     items = _archive_browse_select_related(
         public_person_archive_items_queryset(request.user, person.pk)
     )
@@ -5799,6 +5806,9 @@ def archive_person_detail_page(request, person_id: int):
         "documents/archive/person_detail.html",
         context={
             "person": person,
+            "person_additional_name_groups": public_person_additional_name_groups(
+                person
+            ),
             "items": page_items,
             "browse_cards": browse_cards,
             "is_admin": _is_admin(request.user),
@@ -6815,6 +6825,43 @@ def archive_manage_author_merge_page(request, author_id: int):
     )
 
 
+def _person_alias_staff_sort_key(alias: PersonAlias) -> tuple[int, str, int]:
+    """Human-friendly alias order for the staff Person edit page only.
+
+    Groups Hebrew first, then Latin-script names, then Arabic, then anything
+    else. Within each group, compares a case-folded, accent-insensitive form.
+    """
+    import unicodedata
+
+    name = (alias.name or "").strip()
+    first_letter = next((char for char in name if char.isalpha()), "")
+
+    if "\u0590" <= first_letter <= "\u05ff":
+        script_order = 0
+    elif (
+        "A" <= first_letter <= "Z"
+        or "a" <= first_letter <= "z"
+        or "\u00c0" <= first_letter <= "\u024f"
+    ):
+        script_order = 1
+    elif (
+        "\u0600" <= first_letter <= "\u06ff"
+        or "\u0750" <= first_letter <= "\u077f"
+        or "\u08a0" <= first_letter <= "\u08ff"
+    ):
+        script_order = 2
+    else:
+        script_order = 3
+
+    normalized_name = "".join(
+        char
+        for char in unicodedata.normalize("NFKD", name.casefold())
+        if not unicodedata.combining(char)
+    )
+
+    return script_order, normalized_name, alias.pk or 0
+
+
 def _person_edit_form_context(
     *,
     person: Person,
@@ -6822,14 +6869,25 @@ def _person_edit_form_context(
     canonical_name: str | None = None,
     honorific: str | None = None,
     alias_name: str = "",
+    alias_kind: str = PersonAlias.Kind.UNSPECIFIED,
+    alias_language: str = "",
+    alias_display_publicly: bool = False,
     biography: str | None = None,
 ) -> dict:
     return {
         "person": person,
-        "aliases": list(person.aliases.all()),
+        "aliases": sorted(
+            person.aliases.all(),
+            key=_person_alias_staff_sort_key,
+        ),
         "canonical_name": person.name if canonical_name is None else canonical_name,
         "honorific": person.honorific if honorific is None else honorific,
         "alias_name": alias_name,
+        "alias_kind": alias_kind,
+        "alias_language": alias_language,
+        "alias_display_publicly": alias_display_publicly,
+        "alias_kind_choices": PersonAlias.Kind.choices,
+        "alias_language_choices": PersonAlias.Language.choices,
         "biography": person.biography if biography is None else biography,
         "form_errors": form_errors,
         "page_title": "עריכת אדם",
@@ -6867,6 +6925,9 @@ def archive_manage_person_edit_page(request, person_id: int):
     canonical_name = person.name
     honorific = person.honorific
     alias_name = ""
+    alias_kind = PersonAlias.Kind.UNSPECIFIED
+    alias_language = ""
+    alias_display_publicly = False
     biography = person.biography
 
     if request.method == "POST":
@@ -6907,11 +6968,27 @@ def archive_manage_person_edit_page(request, person_id: int):
                 return redirect("archive-manage-person-edit", person_id=person.id)
         elif action == "add_alias":
             submitted_alias = request.POST.get("alias_name") or ""
+            submitted_kind = (
+                request.POST.get("alias_kind") or PersonAlias.Kind.UNSPECIFIED
+            )
+            submitted_language = request.POST.get("alias_language") or ""
+            submitted_display_publicly = (
+                request.POST.get("alias_display_publicly") == "on"
+            )
             try:
-                create_person_alias(person, name=submitted_alias)
+                create_person_alias(
+                    person,
+                    name=submitted_alias,
+                    kind=submitted_kind,
+                    language=submitted_language,
+                    display_publicly=submitted_display_publicly,
+                )
             except PhotoContentManagementError as exc:
                 form_errors = [exc.message]
                 alias_name = submitted_alias
+                alias_kind = submitted_kind
+                alias_language = submitted_language
+                alias_display_publicly = submitted_display_publicly
             else:
                 messages.success(request, PERSON_ALIAS_ADDED_MSG)
                 return redirect("archive-manage-person-edit", person_id=person.id)
@@ -6929,6 +7006,9 @@ def archive_manage_person_edit_page(request, person_id: int):
             canonical_name=canonical_name,
             honorific=honorific,
             alias_name=alias_name,
+            alias_kind=alias_kind,
+            alias_language=alias_language,
+            alias_display_publicly=alias_display_publicly,
             biography=biography,
         ),
     )
@@ -7027,14 +7107,33 @@ def archive_manage_person_alias_edit_page(request, person_id: int, alias_id: int
     person, alias = _get_staff_person_alias(person_id, alias_id)
     form_errors: list[str] = []
     alias_name = alias.name
+    alias_kind = alias.kind
+    alias_language = alias.language
+    alias_display_publicly = alias.display_publicly
 
     if request.method == "POST":
         submitted_name = request.POST.get("name") or ""
+        submitted_kind = (
+            request.POST.get("kind") or PersonAlias.Kind.UNSPECIFIED
+        )
+        submitted_language = request.POST.get("language") or ""
+        submitted_display_publicly = (
+            request.POST.get("display_publicly") == "on"
+        )
         try:
-            update_person_alias(alias, name=submitted_name)
+            update_person_alias(
+                alias,
+                name=submitted_name,
+                kind=submitted_kind,
+                language=submitted_language,
+                display_publicly=submitted_display_publicly,
+            )
         except PhotoContentManagementError as exc:
             form_errors = [exc.message]
             alias_name = submitted_name
+            alias_kind = submitted_kind
+            alias_language = submitted_language
+            alias_display_publicly = submitted_display_publicly
         else:
             messages.success(request, PERSON_ALIAS_UPDATED_MSG)
             return redirect("archive-manage-person-edit", person_id=person.id)
@@ -7046,6 +7145,11 @@ def archive_manage_person_alias_edit_page(request, person_id: int, alias_id: int
             "person": person,
             "alias": alias,
             "alias_name": alias_name,
+            "alias_kind": alias_kind,
+            "alias_language": alias_language,
+            "alias_display_publicly": alias_display_publicly,
+            "alias_kind_choices": PersonAlias.Kind.choices,
+            "alias_language_choices": PersonAlias.Language.choices,
             "form_errors": form_errors,
             "page_title": "עריכת שם חלופי",
         },
