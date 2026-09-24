@@ -28,20 +28,22 @@
     </div>
   {% endif %}
 
-  <div class="archive-metadata-add">
-    {% include "documents/archive/searchable_multi_select.html" with searchable_id="author_ids" searchable_name="author_ids" searchable_label="הוספת מחבר/ת קיים/ת" searchable_search_label="חיפוש במחברים קיימים" searchable_placeholder="חיפוש במחברים קיימים…" searchable_empty_message="לא נמצאו מחברים תואמים." searchable_hint="בחירה מרשומות מחבר/ת שאינן משויכות כרגע. מחברים משויכים מופיעים למעלה לפי הסדר השמור." searchable_options=archive_item_author_choices searchable_selected_ids=form_data.author_ids searchable_unselected_only=True searchable_size="6" %}
-  </div>
+  <div class="archive-metadata-association-row">
+    <div class="archive-metadata-add">
+      {% include "documents/archive/searchable_multi_select.html" with searchable_id="author_ids" searchable_name="author_ids" searchable_label="הוספת מחבר/ת קיים/ת" searchable_search_label="חיפוש במחברים קיימים" searchable_placeholder="חיפוש במחברים קיימים…" searchable_empty_message="לא נמצאו מחברים תואמים." searchable_hint="בחירה מרשומות מחבר/ת שאינן משויכות כרגע. מחברים משויכים מופיעים למעלה לפי הסדר השמור." searchable_options=archive_item_author_choices searchable_selected_ids=form_data.author_ids searchable_unselected_only=True searchable_size="6" %}
+    </div>
 
-  <div class="archive-metadata-secondary">
-    <div class="field">
-      <label class="archive-metadata-subsection-title" for="new_author_name">הוספת מחבר/ת</label>
-      <input
-        id="new_author_name"
-        name="new_author_name"
-        type="text"
-        value="{{ form_data.new_author_name }}"
-      />
-      <div class="field-hint">ניתן להזין כמה שמות מופרדים בפסיקים. שם שכבר קיים במדויק ישויך מחדש; שם חדש ייצור רשומה. אם אותו שם מופיע יותר מפעם אחת בארכיון, השמירה תיחסם.</div>
+    <div class="archive-metadata-secondary">
+      <div class="field">
+        <label class="archive-metadata-subsection-title" for="new_author_name">הוספת מחבר/ת</label>
+        <input
+          id="new_author_name"
+          name="new_author_name"
+          type="text"
+          value="{{ form_data.new_author_name }}"
+        />
+        <div class="field-hint">ניתן להזין כמה שמות מופרדים בפסיקים. שם שכבר קיים במדויק ישויך מחדש; שם חדש ייצור רשומה. אם אותו שם מופיע יותר מפעם אחת בארכיון, השמירה תיחסם.</div>
+      </div>
     </div>
   </div>
 </section>

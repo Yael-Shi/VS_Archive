@@ -211,7 +211,7 @@ class SearchableMultiSelectCssTests(SimpleTestCase):
         rule = css[start : css.index("}", start)]
 
         self.assertIn("align-self: start;", rule)
-        self.assertIn("width: min(20rem, 100%);", rule)
+        self.assertIn("width: min(23rem, 100%);", rule)
         self.assertIn("max-width: 100%;", rule)
         self.assertIn("border: 1px solid var(--border-strong);", rule)
         self.assertIn("border-radius: var(--radius-sm);", rule)
@@ -239,7 +239,7 @@ class SearchableMultiSelectCssTests(SimpleTestCase):
             css.count(
                 "[data-searchable-multi-select] > .searchable-multi-select__search"
             ),
-            2,
+            3,
         )
 
         mobile = css[

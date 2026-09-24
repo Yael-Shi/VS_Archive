@@ -17,11 +17,12 @@
     </div>
   {% endif %}
 
-  <div class="archive-metadata-add">
-    {% include "documents/archive/searchable_multi_select.html" with searchable_id="archive_item_person_ids" searchable_name="archive_item_person_ids" searchable_label="בחירת אנשים קיימים" searchable_search_label="חיפוש באנשים קיימים" searchable_placeholder="חיפוש באנשים קיימים…" searchable_empty_message="לא נמצאו אנשים תואמים." searchable_hint="אנשים מסומנים מקושרים לפריט. בחירה מוסיפה קישור; ביטול סימון מנתק מהפריט בלבד ואינו מוחק את רשומת האדם מהארכיון. שמות חלופיים מוצגים בסוגריים לזיהוי, ואינם זהויות נפרדות." searchable_options=archive_item_person_choices searchable_selected_ids=form_data.archive_item_person_ids searchable_size="6" %}
-  </div>
+  <div class="archive-metadata-association-row">
+    <div class="archive-metadata-add">
+      {% include "documents/archive/searchable_multi_select.html" with searchable_id="archive_item_person_ids" searchable_name="archive_item_person_ids" searchable_label="בחירת אנשים קיימים" searchable_search_label="חיפוש באנשים קיימים" searchable_placeholder="חיפוש באנשים קיימים…" searchable_empty_message="לא נמצאו אנשים תואמים." searchable_hint="אנשים מסומנים מקושרים לפריט. בחירה מוסיפה קישור; ביטול סימון מנתק מהפריט בלבד ואינו מוחק את רשומת האדם מהארכיון. שמות חלופיים מוצגים בסוגריים לזיהוי, ואינם זהויות נפרדות." searchable_options=archive_item_person_choices searchable_selected_ids=form_data.archive_item_person_ids searchable_size="6" %}
+    </div>
 
-  <div class="archive-metadata-secondary">
+    <div class="archive-metadata-secondary">
     <div class="field">
       <label class="archive-metadata-subsection-title" for="new_archive_item_person_name">הוספת אדם חדש</label>
       <input
@@ -32,6 +33,7 @@
       />
       <div class="field-hint">ניתן להזין כמה שמות מופרדים בפסיקים. שם חדש שלא תואם רשומה קיימת יוצר אדם חדש ומקשר אותו לפריט. אם השם תואם שם תצוגה או שם חלופי קיים, תוצג אזהרה — בחרו אדם קיים בבורר והסירו את השם, או אשרו יצירה במכוון. אין מיזוג לפי שם ואין יצירת שמות חלופיים.</div>
       {% include "documents/archive/person_name_duplicate_warning.html" with person_name_conflicts=form_data.person_name_conflicts field_id_prefix="" %}
+      </div>
     </div>
   </div>
 </section>
