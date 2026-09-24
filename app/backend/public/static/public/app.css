@@ -976,6 +976,7 @@ label.archive-metadata-subsection-title {
 .archive-metadata-association-row > .archive-metadata-add,
 .archive-metadata-association-row > .archive-metadata-secondary {
   margin-top: 0;
+  min-width: 0;
 }
 
 .archive-metadata-association-row .archive-metadata-secondary {
@@ -984,6 +985,35 @@ label.archive-metadata-subsection-title {
 }
 
 .archive-metadata-association-row .archive-metadata-secondary .field {
+  max-width: none;
+  width: 100%;
+  min-width: 0;
+}
+
+/* Match searchable column label spacing so the new-entry input lines up
+   with the existing-choice search field. */
+.archive-metadata-association-row .archive-metadata-secondary label.archive-metadata-subsection-title {
+  margin: 0;
+}
+
+.archive-metadata-association-row .searchable-multi-select__search,
+.archive-metadata-association-row [data-searchable-multi-select] > select,
+.archive-metadata-association-row .archive-metadata-secondary input[type="text"] {
+  width: 100%;
+  max-width: none;
+}
+
+/* Discovery columns: search, select, and add-new share the same edges. */
+.archive-metadata-discovery .archive-metadata-secondary .field {
+  max-width: none;
+  width: 100%;
+  min-width: 0;
+}
+
+.archive-metadata-discovery .searchable-multi-select__search,
+.archive-metadata-discovery [data-searchable-multi-select] > select,
+.archive-metadata-discovery .archive-metadata-secondary input[type="text"] {
+  width: 100%;
   max-width: none;
 }
 
