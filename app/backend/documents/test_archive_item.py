@@ -682,7 +682,7 @@ class ManualTextArchiveItemTests(TestCase):
         self.client.force_login(self.staff)
         resp = self.client.get(self.CREATE_URL)
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "דיוק תאריך")
+        self.assertContains(resp, "דיוק בתאריך")
         for label in (
             "ללא תאריך",
             "שנה בלבד",

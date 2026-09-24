@@ -845,7 +845,7 @@ textarea {
    type=search inputs keep their own styles. */
 [data-searchable-multi-select] > .searchable-multi-select__search {
   align-self: start;
-  width: min(20rem, 100%);
+  width: min(23rem, 100%);
   max-width: 100%;
   appearance: none;
   -webkit-appearance: none;
@@ -945,18 +945,46 @@ label.archive-metadata-subsection-title {
   grid-column: 1 / -1;
 }
 
-.archive-metadata-compact {
-  max-width: min(20rem, 100%);
+.archive-metadata-compact,
+.archive-metadata-source {
+  width: min(20rem, 100%);
+  max-width: 100%;
 }
 
-.archive-metadata-source,
 .archive-metadata-secondary .field {
   max-width: min(32rem, 100%);
 }
 
 [data-searchable-multi-select] > select {
-  width: 100%;
+  width: min(23rem, 100%);
   max-width: 100%;
+}
+
+.archive-metadata-current {
+  width: min(23rem, 100%);
+  max-width: 100%;
+}
+
+.archive-metadata-association-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 23rem));
+  gap: var(--space-4);
+  align-items: start;
+  margin-top: var(--space-3);
+}
+
+.archive-metadata-association-row > .archive-metadata-add,
+.archive-metadata-association-row > .archive-metadata-secondary {
+  margin-top: 0;
+}
+
+.archive-metadata-association-row .archive-metadata-secondary {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.archive-metadata-association-row .archive-metadata-secondary .field {
+  max-width: none;
 }
 
 .archive-metadata-date-cluster,
@@ -967,6 +995,15 @@ label.archive-metadata-subsection-title {
 
 .archive-metadata-date-cluster {
   max-width: min(40rem, 100%);
+}
+
+.archive-metadata-grid > .archive-metadata-date-cluster {
+  margin-top: 0;
+  max-width: 100%;
+}
+
+.archive-metadata-grid > .archive-metadata-date-cluster .archive-date-widget > .field {
+  max-width: none;
 }
 
 .archive-metadata-section .archive-date-widget > .field {
@@ -2733,6 +2770,17 @@ pre {
 }
 
 @media (max-width: 900px) {
+  .archive-metadata-association-row {
+    grid-template-columns: 1fr;
+  }
+
+  .archive-metadata-current,
+  [data-searchable-multi-select] > .searchable-multi-select__search,
+  [data-searchable-multi-select] > select {
+    width: 100%;
+    max-width: none;
+  }
+
   .grid-3 {
     grid-template-columns: 1fr;
   }
@@ -2752,6 +2800,12 @@ pre {
   .archive-metadata-date-cluster,
   .archive-metadata-section .archive-date-widget > .field {
     max-width: none;
+  }
+
+  .archive-metadata-source,
+  .archive-metadata-compact,
+  .archive-metadata-date-cluster {
+    width: 100%;
   }
 
   .page-title {

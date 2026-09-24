@@ -7,7 +7,7 @@
   id="{{ idp }}archiveDateWidget"
 >
   <div class="field">
-    <label for="{{ idp }}date_precision">דיוק תאריך</label>
+    <label for="{{ idp }}date_precision">דיוק בתאריך</label>
     <select id="{{ idp }}date_precision" name="date_precision">
       {% for value, label in date_precision_choices %}
         <option value="{{ value }}" {% if form_data.date_precision == value %}selected{% endif %}>
