@@ -31,6 +31,10 @@
       </select>
     </div>
 
+    <div class="archive-metadata-date-cluster archive-metadata-compact">
+      {% include "documents/archive/archive_date_form_fields.html" %}
+    </div>
+
     <div class="field archive-metadata-compact">
       <label for="metadata_status">השלמת פרטים</label>
       <select id="metadata_status" name="metadata_status">
@@ -40,10 +44,6 @@
           </option>
         {% endfor %}
       </select>
-    </div>
-
-    <div class="archive-metadata-date-cluster archive-metadata-compact">
-      {% include "documents/archive/archive_date_form_fields.html" %}
     </div>
   </div>
 </section>
