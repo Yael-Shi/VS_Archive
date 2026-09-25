@@ -158,6 +158,64 @@ def public_people_queryset(user, *, search_query: str = "") -> QuerySet[Person]:
     return people
 
 
+def public_person_related_archive_items_queryset(
+    user, person_id: int
+) -> QuerySet[ArchiveItem]:
+    """Authorized+renderable items related to one Person outside authorship.
+
+    Membership is ArchiveItemPerson or renderable PhotoPerson. The earliest
+    matching renderable PhotoContent is annotated for Person-card deep links.
+    """
+    renderable_photos = renderable_photo_contents_queryset()
+    aip_exists = Exists(
+        ArchiveItemPerson.objects.filter(
+            person_id=person_id,
+            archive_item_id=OuterRef("pk"),
+        )
+    )
+    pp_exists = Exists(
+        PhotoPerson.objects.filter(
+            person_id=person_id,
+            photo_content__archive_item_id=OuterRef("pk"),
+            photo_content__in=renderable_photos,
+        )
+    )
+    first_photo_id = Subquery(
+        PhotoPerson.objects.filter(
+            person_id=person_id,
+            photo_content__archive_item_id=OuterRef("pk"),
+            photo_content__in=renderable_photos,
+        )
+        .order_by("photo_content__position", "photo_content_id")
+        .values("photo_content_id")[:1]
+    )
+    return (
+        archive_browse_queryset_for_user(user)
+        .filter(aip_exists | pp_exists)
+        .annotate(
+            **{PERSON_FIRST_MATCHING_PHOTO_ANNOTATION: first_photo_id},
+        )
+        .order_by("-created_at", "pk")
+    )
+
+
+def public_person_authored_archive_items_queryset(
+    user, person_id: int
+) -> QuerySet[ArchiveItem]:
+    """Authorized+renderable items authored by Authors explicitly linked to Person."""
+    aia_exists = Exists(
+        ArchiveItemAuthor.objects.filter(
+            author__person_id=person_id,
+            archive_item_id=OuterRef("pk"),
+        )
+    )
+    return (
+        archive_browse_queryset_for_user(user)
+        .filter(aia_exists)
+        .order_by("-created_at", "pk")
+    )
+
+
 def public_person_archive_items_queryset(user, person_id: int) -> QuerySet[ArchiveItem]:
     """Distinct authorized+renderable ArchiveItems for one Person.
 

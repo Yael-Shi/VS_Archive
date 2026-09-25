@@ -518,11 +518,11 @@ class AuthorPublicPageLinkedPersonRedirectTests(TestCase):
         self.assertIn("page-title", h1)
         self.assertIn("document-detail-title", h1)
         self.assertIn("Canonical Linked Person", h1)
-        self.assertContains(followed, "Linked Bibliographic Author")
+        self.assertNotContains(followed, "Linked Bibliographic Author")
         person_href = person_public_page_url(person.id)
         self.assertContains(
             followed,
-            f'<a href="{person_href}">Linked Bibliographic Author</a>',
+            f'<a href="{person_href}">Canonical Linked Person</a>',
             html=True,
         )
         self.assertNotContains(followed, author_public_page_url(author.id))
