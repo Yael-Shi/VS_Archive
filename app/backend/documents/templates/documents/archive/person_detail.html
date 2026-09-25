@@ -52,20 +52,46 @@
       </div>
     </header>
 
-    {% if browse_cards %}
-      <section class="archive-person-related" aria-labelledby="archive-person-related-title">
+    {% if related_browse_cards %}
+      <section
+        class="archive-person-related"
+        id="person-related-items"
+        aria-labelledby="archive-person-related-title"
+      >
         <h2 id="archive-person-related-title" class="archive-person-section-title">פריטים קשורים</h2>
         <p class="archive-search-results-count" aria-live="polite">
-          נמצאו {{ total_count }} תוצאות
+          נמצאו {{ related_count }} תוצאות
         </p>
 
         <div class="spacer"></div>
 
-        {% include "documents/archive/partials/item_list_cards.html" with browse_cards=browse_cards is_admin=is_admin %}
+        {% include "documents/archive/partials/item_list_cards.html" with browse_cards=related_browse_cards is_admin=is_admin %}
 
-        {% if show_page_nav %}
+        {% if related_pagination.show_page_nav %}
           <div class="spacer"></div>
-          {% include "documents/archive/partials/person_page_pagination.html" %}
+          {% include "documents/archive/partials/person_section_pagination.html" with pagination=related_pagination page_param="related_page" other_page_param="authored_page" other_page=authored_page section_anchor="person-related-items" %}
+        {% endif %}
+      </section>
+    {% endif %}
+
+    {% if authored_browse_cards %}
+      <section
+        class="archive-person-related"
+        id="person-authored-items"
+        aria-labelledby="archive-person-authored-title"
+      >
+        <h2 id="archive-person-authored-title" class="archive-person-section-title">מסמכים שחיבר</h2>
+        <p class="archive-search-results-count" aria-live="polite">
+          נמצאו {{ authored_count }} תוצאות
+        </p>
+
+        <div class="spacer"></div>
+
+        {% include "documents/archive/partials/item_list_cards.html" with browse_cards=authored_browse_cards is_admin=is_admin %}
+
+        {% if authored_pagination.show_page_nav %}
+          <div class="spacer"></div>
+          {% include "documents/archive/partials/person_section_pagination.html" with pagination=authored_pagination page_param="authored_page" other_page_param="related_page" other_page=related_page section_anchor="person-authored-items" %}
         {% endif %}
       </section>
     {% endif %}

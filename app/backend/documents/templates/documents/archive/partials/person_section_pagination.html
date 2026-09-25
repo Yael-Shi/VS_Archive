@@ -1,0 +1,35 @@
+<nav class="archive-list-pagination" aria-label="דפדוף בארכיון">
+  <div class="archive-list-pagination__pages" role="group" aria-label="מספרי עמודים">
+    {% if pagination.prev_page %}
+      <a
+        class="archive-list-pagination__nav-link"
+        href="?{{ page_param }}={{ pagination.prev_page }}{% if other_page > 1 %}&amp;{{ other_page_param }}={{ other_page }}{% endif %}#{{ section_anchor }}"
+      >הקודם</a>
+    {% endif %}
+
+    <div class="archive-list-pagination__page-list">
+      {% for item in pagination.page_number_items %}
+        {% if item.kind == "ellipsis" %}
+          <span class="archive-list-pagination__ellipsis" aria-hidden="true">…</span>
+        {% elif item.is_current %}
+          <span class="archive-list-pagination__page-number is-current" aria-current="page">{{ item.page }}</span>
+        {% else %}
+          <a
+            class="archive-list-pagination__page-number"
+            href="?{{ page_param }}={{ item.page }}{% if other_page > 1 %}&amp;{{ other_page_param }}={{ other_page }}{% endif %}#{{ section_anchor }}"
+            aria-label="עמוד {{ item.page }}"
+          >{{ item.page }}</a>
+        {% endif %}
+      {% endfor %}
+    </div>
+
+    {% if pagination.next_page %}
+      <a
+        class="archive-list-pagination__nav-link"
+        href="?{{ page_param }}={{ pagination.next_page }}{% if other_page > 1 %}&amp;{{ other_page_param }}={{ other_page }}{% endif %}#{{ section_anchor }}"
+      >הבא</a>
+    {% endif %}
+  </div>
+
+  <a class="archive-list-pagination__top-link" href="#archive-top">חזרה לראש העמוד</a>
+</nav>

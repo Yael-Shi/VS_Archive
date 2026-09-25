@@ -323,7 +323,8 @@ from documents.services.person_public import (
     apply_matching_photo_presentation_to_cards,
     build_person_public_item_cards,
     matching_photo_ids_for_selected_persons,
-    public_person_archive_items_queryset,
+    public_person_authored_archive_items_queryset,
+    public_person_related_archive_items_queryset,
     resolve_person_public_source_return_url,
 )
 from documents.services.public_people_directory import (
@@ -5775,32 +5776,84 @@ def archive_person_detail_page(request, person_id: int):
         Person.objects.prefetch_related(public_person_aliases_prefetch()),
         pk=person_id,
     )
-    items = _archive_browse_select_related(
-        public_person_archive_items_queryset(request.user, person.pk)
+
+    related_items = _archive_browse_select_related(
+        public_person_related_archive_items_queryset(request.user, person.pk)
     )
-    total_count = items.count()
-    if total_count == 0:
+    authored_items = _archive_browse_select_related(
+        public_person_authored_archive_items_queryset(request.user, person.pk)
+    )
+
+    related_count = related_items.count()
+    authored_count = authored_items.count()
+    if related_count == 0 and authored_count == 0:
         raise Http404() from None
 
     per_page = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE
-    page = normalize_archive_public_list_page(
-        request.GET.get("page"),
-        total_count=total_count,
+
+    related_page = normalize_archive_public_list_page(
+        request.GET.get("related_page"),
+        total_count=related_count,
         per_page=per_page,
     )
-    offset = (page - 1) * per_page
-    page_items = list(items[offset : offset + per_page])
-    browse_cards = build_person_public_item_cards(
-        page_items,
+    authored_page = normalize_archive_public_list_page(
+        request.GET.get("authored_page"),
+        total_count=authored_count,
+        per_page=per_page,
+    )
+
+    related_offset = (related_page - 1) * per_page
+    authored_offset = (authored_page - 1) * per_page
+
+    related_page_items = list(related_items[related_offset : related_offset + per_page])
+    authored_page_items = list(
+        authored_items[authored_offset : authored_offset + per_page]
+    )
+
+    related_browse_cards = build_person_public_item_cards(
+        related_page_items,
         bucket=getattr(settings, "UPLOADS_BUCKET_NAME", ""),
         expires_in=PRESIGNED_GET_EXPIRY_SECONDS,
     )
+    authored_browse_cards = build_person_public_item_cards(
+        authored_page_items,
+        bucket=getattr(settings, "UPLOADS_BUCKET_NAME", ""),
+        expires_in=PRESIGNED_GET_EXPIRY_SECONDS,
+    )
+
+    related_pagination = archive_public_list_pagination_context(
+        total_count=related_count,
+        page=related_page,
+        per_page=per_page,
+        q="",
+        item_type_filter="",
+    )
+    related_pagination["prev_page"] = related_page - 1 if related_page > 1 else None
+    related_pagination["next_page"] = (
+        related_page + 1 if related_page < related_pagination["total_pages"] else None
+    )
+
+    authored_pagination = archive_public_list_pagination_context(
+        total_count=authored_count,
+        page=authored_page,
+        per_page=per_page,
+        q="",
+        item_type_filter="",
+    )
+    authored_pagination["prev_page"] = authored_page - 1 if authored_page > 1 else None
+    authored_pagination["next_page"] = (
+        authored_page + 1
+        if authored_page < authored_pagination["total_pages"]
+        else None
+    )
+
     source_return_url = resolve_person_public_source_return_url(
         request.user,
         person_id=person.pk,
         from_item_raw=request.GET.get(PERSON_PUBLIC_FROM_ITEM_QUERY),
         from_photo_raw=request.GET.get(PERSON_PUBLIC_FROM_PHOTO_QUERY),
     )
+
     return render(
         request,
         "documents/archive/person_detail.html",
@@ -5809,18 +5862,16 @@ def archive_person_detail_page(request, person_id: int):
             "person_additional_name_groups": public_person_additional_name_groups(
                 person
             ),
-            "items": page_items,
-            "browse_cards": browse_cards,
+            "related_browse_cards": related_browse_cards,
+            "related_count": related_count,
+            "related_page": related_page,
+            "related_pagination": related_pagination,
+            "authored_browse_cards": authored_browse_cards,
+            "authored_count": authored_count,
+            "authored_page": authored_page,
+            "authored_pagination": authored_pagination,
             "is_admin": _is_admin(request.user),
-            "total_count": total_count,
             "person_source_return_url": source_return_url,
-            **archive_public_list_pagination_context(
-                total_count=total_count,
-                page=page,
-                per_page=per_page,
-                q="",
-                item_type_filter="",
-            ),
         },
     )
 

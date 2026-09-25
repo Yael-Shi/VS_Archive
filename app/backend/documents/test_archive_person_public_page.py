@@ -157,11 +157,25 @@ def _add_photo(
 
 
 def _titles(response) -> set[str]:
-    return {item.title for item in response.context["items"]}
+    cards = list(response.context["related_browse_cards"]) + list(
+        response.context["authored_browse_cards"]
+    )
+    return {card.title for card in cards}
 
 
 def _card_urls(response) -> list[str]:
-    return [card.detail_url for card in response.context["browse_cards"]]
+    cards = list(response.context["related_browse_cards"]) + list(
+        response.context["authored_browse_cards"]
+    )
+    return [card.detail_url for card in cards]
+
+
+def _related_titles(response) -> set[str]:
+    return {card.title for card in response.context["related_browse_cards"]}
+
+
+def _authored_titles(response) -> set[str]:
+    return {card.title for card in response.context["authored_browse_cards"]}
 
 
 def _people_select_query_count(captured_queries) -> int:
@@ -207,7 +221,7 @@ class PersonPublicPageAuthorizedTests(TestCase):
         self.assertContains(resp, "פריטים קשורים")
         self.assertNotContains(resp, "תמונות שבהן האדם מופיע")
         self.assertContains(resp, "נמצאו 2 תוצאות")
-        self.assertEqual(resp.context["total_count"], 2)
+        self.assertEqual(resp.context["related_count"], 2)
         self.assertEqual(_titles(resp), {"Ada public letter", "Ada public note"})
         self.assertContains(resp, "Ada public letter")
         self.assertContains(resp, "Ada public note")
@@ -472,7 +486,7 @@ class PersonPublicPageVisibilityTests(TestCase):
     def test_anonymous_sees_public_count_only(self):
         resp = self.client.get(_person_page(self.person))
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.context["total_count"], 1)
+        self.assertEqual(resp.context["related_count"], 1)
         self.assertEqual(_titles(resp), {"PERSON-PUBLIC-TITLE"})
         html = resp.content.decode("utf-8")
         self.assertIn("PERSON-PUBLIC-TITLE", html)
@@ -494,7 +508,7 @@ class PersonPublicPageVisibilityTests(TestCase):
         self.client.force_login(self.family)
         resp = self.client.get(_person_page(self.person))
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.context["total_count"], 2)
+        self.assertEqual(resp.context["related_count"], 2)
         self.assertEqual(_titles(resp), {"PERSON-PUBLIC-TITLE", "PERSON-PRIVATE-TITLE"})
         self.assertNotIn("PERSON-RESTRICTED-TITLE", _titles(resp))
         self.assertContains(resp, "חזרה לארכיון")
@@ -512,7 +526,7 @@ class PersonPublicPageVisibilityTests(TestCase):
         self.client.force_login(self.restricted_user)
         resp = self.client.get(_person_page(self.person))
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.context["total_count"], 2)
+        self.assertEqual(resp.context["related_count"], 2)
         self.assertEqual(
             _titles(resp), {"PERSON-PUBLIC-TITLE", "PERSON-RESTRICTED-TITLE"}
         )
@@ -543,9 +557,9 @@ class PersonPublicPageRelationAndRenderabilityTests(TestCase):
         PhotoPerson.objects.create(photo_content=photo, person=person)
         resp = self.client.get(_person_page(person))
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.context["total_count"], 1)
+        self.assertEqual(resp.context["related_count"], 1)
         self.assertEqual(_titles(resp), {"PhotoPerson only album"})
-        self.assertEqual(len(resp.context["browse_cards"]), 1)
+        self.assertEqual(len(resp.context["related_browse_cards"]), 1)
         self.assertNotIn("photo_appearance_cards", resp.context)
         self.assertContains(resp, "Appearance Only")
         self.assertContains(resp, "פריטים קשורים")
@@ -601,14 +615,14 @@ class PersonPublicPagePhotoPersonTests(TestCase):
 
         resp = self.client.get(_person_page(person))
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.context["total_count"], 1)
-        self.assertEqual(len(resp.context["browse_cards"]), 1)
+        self.assertEqual(resp.context["related_count"], 1)
+        self.assertEqual(len(resp.context["related_browse_cards"]), 1)
         self.assertEqual(
-            resp.context["browse_cards"][0].title,
+            resp.context["related_browse_cards"][0].title,
             "Public appearance album",
         )
         self.assertEqual(
-            resp.context["browse_cards"][0].detail_url,
+            resp.context["related_browse_cards"][0].detail_url,
             f"/archive/{item.id}/?photo={photo.id}",
         )
 
@@ -704,7 +718,7 @@ class PersonPublicPagePhotoPersonTests(TestCase):
         PhotoPerson.objects.create(photo_content=first, person=person)
         resp = self.client.get(_person_page(person))
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.context["total_count"], 1)
+        self.assertEqual(resp.context["related_count"], 1)
         self.assertEqual(
             _card_urls(resp),
             [public_photo_detail_url(item.id, first.id)],
@@ -730,7 +744,7 @@ class PersonPublicPagePhotoPersonTests(TestCase):
         PhotoPerson.objects.create(photo_content=second, person=person)
         resp = self.client.get(_person_page(person))
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.context["total_count"], 1)
+        self.assertEqual(resp.context["related_count"], 1)
         self.assertEqual(
             _card_urls(resp),
             [public_photo_detail_url(item.id, second.id)],
@@ -758,8 +772,8 @@ class PersonPublicPagePhotoPersonTests(TestCase):
 
         resp = self.client.get(_person_page(person))
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.context["total_count"], 1)
-        self.assertEqual(len(resp.context["browse_cards"]), 1)
+        self.assertEqual(resp.context["related_count"], 1)
+        self.assertEqual(len(resp.context["related_browse_cards"]), 1)
         self.assertEqual(
             _card_urls(resp),
             [public_photo_detail_url(item.id, first.id)],
@@ -783,7 +797,7 @@ class PersonPublicPagePhotoPersonTests(TestCase):
 
         resp = self.client.get(_person_page(person))
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.context["total_count"], 3)
+        self.assertEqual(resp.context["related_count"], 3)
         self.assertEqual(
             _titles(resp),
             {"Related letter", "Appearance album", "Linked and appearing album"},
@@ -815,7 +829,7 @@ class PersonPublicPagePhotoPersonTests(TestCase):
         page = self.client.get(_person_page(person))
         self.assertEqual(page.status_code, 200)
         self.assertEqual(
-            {card.title for card in page.context["browse_cards"]},
+            {card.title for card in page.context["related_browse_cards"]},
             {"ArchiveItemPerson filter match", "PhotoPerson filter decoy"},
         )
 
@@ -849,7 +863,7 @@ class PersonPublicPagePhotoPersonTests(TestCase):
         with CaptureQueriesContext(connection) as few_ctx:
             few_resp = self.client.get(_person_page(person))
         self.assertEqual(few_resp.status_code, 200)
-        few_cards = len(few_resp.context["browse_cards"])
+        few_cards = len(few_resp.context["related_browse_cards"])
         few_total = len(few_ctx.captured_queries)
         few_photo_queries = sum(
             1
@@ -864,7 +878,7 @@ class PersonPublicPagePhotoPersonTests(TestCase):
         with CaptureQueriesContext(connection) as many_ctx:
             many_resp = self.client.get(_person_page(person))
         self.assertEqual(many_resp.status_code, 200)
-        many_cards = len(many_resp.context["browse_cards"])
+        many_cards = len(many_resp.context["related_browse_cards"])
         many_total = len(many_ctx.captured_queries)
         many_photo_queries = sum(
             1
@@ -881,7 +895,7 @@ class PersonPublicPagePhotoPersonTests(TestCase):
 
 
 class PersonPublicPagePaginationTests(TestCase):
-    def test_paginates_at_fixed_48_and_clamps_out_of_range_pages(self):
+    def test_related_items_paginate_at_fixed_48_and_clamp_out_of_range_pages(self):
         person = Person.objects.create(name="Paged Person")
         items = []
         for index in range(ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE + 1):
@@ -891,49 +905,50 @@ class PersonPublicPagePaginationTests(TestCase):
 
         page1 = self.client.get(_person_page(person))
         self.assertEqual(page1.status_code, 200)
-        self.assertEqual(page1.context["total_count"], 49)
-        self.assertEqual(len(page1.context["items"]), 48)
-        self.assertTrue(page1.context["show_page_nav"])
+        self.assertEqual(page1.context["related_count"], 49)
+        self.assertEqual(len(page1.context["related_browse_cards"]), 48)
+        self.assertTrue(page1.context["related_pagination"]["show_page_nav"])
         self.assertContains(page1, "נמצאו 49 תוצאות")
-        self.assertContains(page1, "?page=2")
+        self.assertContains(page1, "?related_page=2")
         html1 = page1.content.decode("utf-8")
         self.assertNotIn('name="per_page"', html1)
         self.assertNotIn("archive-type-filter", html1)
         self.assertNotIn('id="archive-filter-q"', html1)
         self.assertNotIn("archive-search-form", html1)
 
-        page2 = self.client.get(_person_page(person), {"page": "2"})
+        page2 = self.client.get(
+            _person_page(person),
+            {"related_page": "2"},
+        )
         self.assertEqual(page2.status_code, 200)
-        self.assertEqual(len(page2.context["items"]), 1)
+        self.assertEqual(len(page2.context["related_browse_cards"]), 1)
         self.assertContains(page2, "הקודם")
-        self.assertContains(
-            page2,
-            f'class="archive-list-pagination__nav-link" href="{_person_page(person)}"',
-        )
-        self.assertEqual(
-            {item.pk for item in page1.context["items"]}
-            | {item.pk for item in page2.context["items"]},
-            {item.pk for item in items},
-        )
-        self.assertFalse(
-            {item.pk for item in page1.context["items"]}
-            & {item.pk for item in page2.context["items"]}
-        )
 
-        clamped = self.client.get(_person_page(person), {"page": "999"})
+        page1_ids = {card.item.pk for card in page1.context["related_browse_cards"]}
+        page2_ids = {card.item.pk for card in page2.context["related_browse_cards"]}
+        self.assertEqual(page1_ids | page2_ids, {item.pk for item in items})
+        self.assertFalse(page1_ids & page2_ids)
+
+        clamped = self.client.get(
+            _person_page(person),
+            {"related_page": "999"},
+        )
         self.assertEqual(clamped.status_code, 200)
-        self.assertEqual(clamped.context["page"], 2)
+        self.assertEqual(clamped.context["related_page"], 2)
         self.assertEqual(
-            [item.pk for item in clamped.context["items"]],
-            [item.pk for item in page2.context["items"]],
+            [card.item.pk for card in clamped.context["related_browse_cards"]],
+            [card.item.pk for card in page2.context["related_browse_cards"]],
         )
 
-        invalid = self.client.get(_person_page(person), {"page": "abc"})
+        invalid = self.client.get(
+            _person_page(person),
+            {"related_page": "abc"},
+        )
         self.assertEqual(invalid.status_code, 200)
-        self.assertEqual(invalid.context["page"], 1)
+        self.assertEqual(invalid.context["related_page"], 1)
         self.assertEqual(
-            [item.pk for item in invalid.context["items"]],
-            [item.pk for item in page1.context["items"]],
+            [card.item.pk for card in invalid.context["related_browse_cards"]],
+            [card.item.pk for card in page1.context["related_browse_cards"]],
         )
 
         ignored = self.client.get(
@@ -941,34 +956,99 @@ class PersonPublicPagePaginationTests(TestCase):
             {"per_page": "24", "q": "ignored", "item_type": "photo"},
         )
         self.assertEqual(ignored.status_code, 200)
-        self.assertEqual(len(ignored.context["items"]), 48)
-        self.assertEqual(ignored.context["per_page"], 48)
+        self.assertEqual(len(ignored.context["related_browse_cards"]), 48)
+        self.assertEqual(ignored.context["related_pagination"]["per_page"], 48)
 
-    def test_single_page_omits_page_nav(self):
+    def test_authored_items_paginate_independently_from_related_items(self):
+        person = Person.objects.create(name="Paged Author Person")
+        author = Author.objects.create(name="Paged Author Identity", person=person)
+
+        related = _public_manual("Related anchor item")
+        _link(related, person)
+
+        authored_items = []
+        for index in range(ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE + 1):
+            item = _public_manual(f"AUTHOREDPAGE-{index:02d}")
+            _link_author(item, author)
+            authored_items.append(item)
+
+        page1 = self.client.get(_person_page(person))
+        self.assertEqual(page1.status_code, 200)
+        self.assertEqual(page1.context["related_count"], 1)
+        self.assertEqual(page1.context["authored_count"], 49)
+        self.assertEqual(len(page1.context["related_browse_cards"]), 1)
+        self.assertEqual(len(page1.context["authored_browse_cards"]), 48)
+        self.assertTrue(page1.context["authored_pagination"]["show_page_nav"])
+        self.assertContains(page1, "?authored_page=2")
+
+        page2 = self.client.get(
+            _person_page(person),
+            {"authored_page": "2"},
+        )
+        self.assertEqual(page2.status_code, 200)
+        self.assertEqual(page2.context["related_page"], 1)
+        self.assertEqual(page2.context["authored_page"], 2)
+        self.assertEqual(len(page2.context["related_browse_cards"]), 1)
+        self.assertEqual(len(page2.context["authored_browse_cards"]), 1)
+
+        page1_ids = {
+            card.item.pk for card in page1.context["authored_browse_cards"]
+        }
+        page2_ids = {
+            card.item.pk for card in page2.context["authored_browse_cards"]
+        }
+        self.assertEqual(
+            page1_ids | page2_ids,
+            {item.pk for item in authored_items},
+        )
+        self.assertFalse(page1_ids & page2_ids)
+
+        self.assertEqual(
+            _related_titles(page1),
+            {"Related anchor item"},
+        )
+        self.assertEqual(
+            _related_titles(page2),
+            {"Related anchor item"},
+        )
+
+    def test_single_related_page_omits_page_nav(self):
         person = Person.objects.create(name="One Page Person")
         _link(_public_manual("Only item"), person)
+
         resp = self.client.get(_person_page(person))
         self.assertEqual(resp.status_code, 200)
-        self.assertFalse(resp.context["show_page_nav"])
+        self.assertFalse(resp.context["related_pagination"]["show_page_nav"])
         self.assertNotContains(resp, "הבא")
 
-    def test_photoperson_only_items_share_unified_pagination(self):
+    def test_photoperson_items_share_related_pagination(self):
         person = Person.objects.create(name="Paged With Photos Person")
         for index in range(ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE + 1):
             _link(_public_manual(f"RELATEDPAGE-{index:02d}"), person)
+
         photo_item = _create_photo_item(title="Unpaged appearance album")
         photo = _add_photo(photo_item)
         PhotoPerson.objects.create(photo_content=photo, person=person)
 
         page1 = self.client.get(_person_page(person))
-        page2 = self.client.get(_person_page(person), {"page": "2"})
+        page2 = self.client.get(
+            _person_page(person),
+            {"related_page": "2"},
+        )
         self.assertEqual(page1.status_code, 200)
         self.assertEqual(page2.status_code, 200)
-        self.assertEqual(page1.context["total_count"], 50)
-        self.assertEqual(len(page1.context["items"]), 48)
-        self.assertEqual(len(page2.context["items"]), 2)
+        self.assertEqual(page1.context["related_count"], 50)
+        self.assertEqual(len(page1.context["related_browse_cards"]), 48)
+        self.assertEqual(len(page2.context["related_browse_cards"]), 2)
+
         href = public_photo_detail_url(photo_item.id, photo.id)
-        all_urls = _card_urls(page1) + _card_urls(page2)
+        all_urls = [
+            card.detail_url
+            for card in (
+                list(page1.context["related_browse_cards"])
+                + list(page2.context["related_browse_cards"])
+            )
+        ]
         self.assertEqual(all_urls.count(href), 1)
         self.assertNotIn("photo_appearance_cards", page1.context)
         self.assertNotIn("photo_appearance_cards", page2.context)
@@ -1109,23 +1189,30 @@ class PersonPublicPageLinkedAuthorTests(TestCase):
 
         resp = self.client.get(_person_page(person))
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(_titles(resp), {"Authored public letter"})
-        self.assertEqual(resp.context["total_count"], 1)
-        self.assertEqual(len(resp.context["browse_cards"]), 1)
+
+        self.assertEqual(resp.context["related_count"], 0)
+        self.assertEqual(resp.context["authored_count"], 1)
+        self.assertEqual(len(resp.context["related_browse_cards"]), 0)
+        self.assertEqual(len(resp.context["authored_browse_cards"]), 1)
+        self.assertEqual(_authored_titles(resp), {"Authored public letter"})
+        self.assertEqual(_related_titles(resp), set())
+
         self.assertContains(resp, "Authored Only Person")
+        self.assertContains(resp, "מסמכים שחיבר")
+        self.assertNotContains(resp, "פריטים קשורים")
+
         html = resp.content.decode("utf-8")
         h1 = html[html.index("<h1") : html.index("</h1>") + len("</h1>")]
         self.assertIn("page-title", h1)
         self.assertIn("document-detail-title", h1)
         self.assertIn("Authored Only Person", h1)
-        self.assertContains(resp, "Authored Only Person")
+
         person_href = person_public_page_url(person.id)
         self.assertContains(
             resp,
             f'<a href="{person_href}">Authored Only Person</a>',
             html=True,
         )
-        self.assertNotContains(resp, "Bibliographic Name")
         self.assertNotContains(resp, author_public_page_url(author.id))
 
     def test_h1_and_title_use_honorific_display_name(self):
@@ -1143,31 +1230,61 @@ class PersonPublicPageLinkedAuthorTests(TestCase):
         self.assertNotIn('ד"ר חיים סעדיה', h1)
         self.assertContains(resp, 'חיים סעדיה, ד"ר', html=True)
 
-    def test_aip_photoperson_and_authored_overlap_is_deduped_with_photo_deeplink(self):
+    def test_related_and_authored_overlap_appears_once_in_each_section(self):
         person = Person.objects.create(name="Overlap Linked Person")
         author = Author.objects.create(name="Overlap Linked Author", person=person)
+
         item = _create_photo_item(title="Overlap authored album")
         photo = _add_photo(item)
         _link(item, person)
         PhotoPerson.objects.create(photo_content=photo, person=person)
         _link_author(item, author)
+
         extra = _public_manual("Authored extra letter")
         _link_author(extra, author)
 
         resp = self.client.get(_person_page(person))
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.context["total_count"], 2)
+
+        self.assertEqual(resp.context["related_count"], 1)
+        self.assertEqual(resp.context["authored_count"], 2)
+
         self.assertEqual(
-            _titles(resp), {"Overlap authored album", "Authored extra letter"}
+            _related_titles(resp),
+            {"Overlap authored album"},
         )
         self.assertEqual(
-            _card_urls(resp).count(public_photo_detail_url(item.id, photo.id)),
+            _authored_titles(resp),
+            {"Overlap authored album", "Authored extra letter"},
+        )
+
+        related_cards = list(resp.context["related_browse_cards"])
+        authored_cards = list(resp.context["authored_browse_cards"])
+
+        self.assertEqual(
+            [card.title for card in related_cards].count("Overlap authored album"),
             1,
+        )
+        self.assertEqual(
+            [card.title for card in authored_cards].count("Overlap authored album"),
+            1,
+        )
+
+        self.assertEqual(
+            related_cards[0].detail_url,
+            public_photo_detail_url(item.id, photo.id),
+        )
+        self.assertIn(
+            reverse("archive-detail", kwargs={"item_id": item.id}),
+            [card.detail_url for card in authored_cards],
         )
         self.assertIn(
             reverse("archive-detail", kwargs={"item_id": extra.id}),
-            _card_urls(resp),
+            [card.detail_url for card in authored_cards],
         )
+
+        self.assertContains(resp, "פריטים קשורים")
+        self.assertContains(resp, "מסמכים שחיבר")
 
     def test_unauthorized_authored_items_do_not_open_person_page(self):
         person = Person.objects.create(name="Private Authored Person")
