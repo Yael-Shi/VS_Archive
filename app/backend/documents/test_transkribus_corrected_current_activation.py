@@ -26,6 +26,7 @@ from documents.services.transkribus_corrected_current_activation import (
     CorrectedCurrentActivationErrorCode,
     CorrectedCurrentActivationResult,
     activate_corrected_current_sync_attempt,
+    human_edited_replacement_required,
 )
 from documents.services.transkribus_snapshot_parser import compute_sha256_hex
 
@@ -235,6 +236,7 @@ class CorrectedCurrentActivationTests(TestCase):
         expected_source_revision: int | None = None,
         expected_source_sha256: str | None = None,
         allow_verified_replacement: bool = False,
+        allow_human_edited_replacement: bool = False,
     ) -> CorrectedCurrentActivationResult:
         return activate_corrected_current_sync_attempt(
             document_id=self.doc.pk if document_id is None else document_id,
@@ -258,6 +260,7 @@ class CorrectedCurrentActivationTests(TestCase):
                 else expected_source_sha256
             ),
             allow_verified_replacement=allow_verified_replacement,
+            allow_human_edited_replacement=allow_human_edited_replacement,
         )
 
     def test_hebrew_happy_path_applies_text_mirror_bindings_and_audit(self):
@@ -590,6 +593,280 @@ class CorrectedCurrentActivationTests(TestCase):
                 expected_source_revision=3,
                 expected_source_sha256=compute_sha256_hex(_OLD_TEXT),
             )
+        self.assertEqual(
+            ctx.exception.code,
+            CorrectedCurrentActivationErrorCode.HUMAN_EDITED_BLOCKED,
+        )
+
+    def test_trustworthy_source_human_drift_allowed_with_override(self):
+        other_snap = _ready_snapshot(
+            document=self.doc,
+            run=self.transkribus_run,
+            text=_OLD_TEXT,
+            source_kind=TranskribusTranscriptSnapshot.SourceKind.AUTOMATIC_HTR,
+        )
+        _add_snapshot_page(other_snap, transcript_ts_id="ts-old")
+        _bind(
+            text_result=self.source,
+            snapshot=other_snap,
+            role=TranskribusTextResultBinding.BindingRole.SNAPSHOT_SOURCE,
+            bound_source_revision=2,
+            text_for_hash=_OLD_TEXT,
+        )
+        self.source.source_revision = 3
+        self.source.save(update_fields=["source_revision", "updated_at"])
+        # Realistic post-binding edit also leaves an audit row.
+        DocumentTextResultEdit.objects.create(
+            text_result=self.source,
+            editor=self.user,
+            old_text=_OLD_TEXT,
+            new_text=_OLD_TEXT,
+            edit_type=DocumentTextResultEdit.EditType.SOURCE_TEXT,
+        )
+
+        result = self._activate(
+            expected_source_revision=3,
+            expected_source_sha256=compute_sha256_hex(_OLD_TEXT),
+            allow_human_edited_replacement=True,
+        )
+
+        self.assertEqual(result.outcome, "APPLIED")
+        self.assertTrue(result.source_text_changed)
+        self.source.refresh_from_db()
+        self.assertEqual(self.source.text, _CANONICAL)
+        self.assertEqual(self.source.source_revision, 4)
+        src_bind = TranskribusTextResultBinding.objects.get(text_result=self.source)
+        self.assertEqual(src_bind.snapshot_id, self.snapshot.pk)
+        self.assertEqual(src_bind.bound_source_revision, 4)
+
+    def test_trustworthy_source_drift_identical_text_does_not_require_override(self):
+        self.source.text = _CANONICAL
+        self.source.save(update_fields=["text", "updated_at"])
+        other_snap = _ready_snapshot(
+            document=self.doc,
+            run=self.transkribus_run,
+            text=_CANONICAL,
+            source_kind=TranskribusTranscriptSnapshot.SourceKind.AUTOMATIC_HTR,
+        )
+        _add_snapshot_page(other_snap, transcript_ts_id="ts-old-identical")
+        _bind(
+            text_result=self.source,
+            snapshot=other_snap,
+            role=TranskribusTextResultBinding.BindingRole.SNAPSHOT_SOURCE,
+            bound_source_revision=2,
+            text_for_hash=_CANONICAL,
+        )
+        self.source.source_revision = 3
+        self.source.save(update_fields=["source_revision", "updated_at"])
+        DocumentTextResultEdit.objects.create(
+            text_result=self.source,
+            editor=self.user,
+            old_text=_CANONICAL,
+            new_text=_CANONICAL,
+            edit_type=DocumentTextResultEdit.EditType.SOURCE_TEXT,
+        )
+
+        self.assertFalse(
+            human_edited_replacement_required(
+                source_row=self.source,
+                hebrew_row=self.hebrew,
+                canonical_text=_CANONICAL,
+            )
+        )
+        result = self._activate(
+            expected_source_revision=3,
+            expected_source_sha256=compute_sha256_hex(_CANONICAL),
+        )
+        self.assertEqual(result.outcome, "APPLIED")
+        self.assertFalse(result.source_text_changed)
+        src_bind = TranskribusTextResultBinding.objects.get(text_result=self.source)
+        self.assertEqual(src_bind.snapshot_id, self.snapshot.pk)
+        self.assertEqual(src_bind.bound_source_revision, 3)
+
+    def test_trustworthy_hebrew_mirror_human_drift_allowed_with_override(self):
+        self.source.text = _CANONICAL
+        self.source.save(update_fields=["text", "updated_at"])
+        other_snap = _ready_snapshot(
+            document=self.doc,
+            run=self.transkribus_run,
+            text=_OLD_TEXT,
+            source_kind=TranskribusTranscriptSnapshot.SourceKind.AUTOMATIC_HTR,
+        )
+        _add_snapshot_page(other_snap, transcript_ts_id="ts-he-old")
+        _bind(
+            text_result=self.hebrew,
+            snapshot=other_snap,
+            role=TranskribusTextResultBinding.BindingRole.HEBREW_MIRROR,
+            bound_source_revision=2,
+            text_for_hash=_OLD_TEXT,
+        )
+        # Drift: Hebrew mirror revision link moved after bind.
+        self.hebrew.based_on_source_revision = 3
+        self.hebrew.save(update_fields=["based_on_source_revision", "updated_at"])
+
+        with self.assertRaises(CorrectedCurrentActivationError) as blocked:
+            self._activate(
+                expected_source_sha256=compute_sha256_hex(_CANONICAL),
+            )
+        self.assertEqual(
+            blocked.exception.code,
+            CorrectedCurrentActivationErrorCode.HUMAN_EDITED_BLOCKED,
+        )
+
+        result = self._activate(
+            expected_source_sha256=compute_sha256_hex(_CANONICAL),
+            allow_human_edited_replacement=True,
+        )
+
+        self.assertEqual(result.outcome, "APPLIED")
+        self.assertFalse(result.source_text_changed)
+        self.assertTrue(result.hebrew_mirror_updated)
+        self.hebrew.refresh_from_db()
+        self.assertEqual(self.hebrew.text, _CANONICAL)
+        self.assertEqual(self.hebrew.based_on_source_revision, 2)
+        he_bind = TranskribusTextResultBinding.objects.get(text_result=self.hebrew)
+        self.assertEqual(he_bind.snapshot_id, self.snapshot.pk)
+        self.assertEqual(he_bind.bound_source_revision, 2)
+
+    def test_trustworthy_hebrew_drift_identical_text_does_not_require_override(self):
+        self.source.text = _CANONICAL
+        self.source.save(update_fields=["text", "updated_at"])
+        self.hebrew.text = _CANONICAL
+        self.hebrew.based_on_source_revision = 3
+        self.hebrew.save(
+            update_fields=["text", "based_on_source_revision", "updated_at"]
+        )
+        other_snap = _ready_snapshot(
+            document=self.doc,
+            run=self.transkribus_run,
+            text=_CANONICAL,
+            source_kind=TranskribusTranscriptSnapshot.SourceKind.AUTOMATIC_HTR,
+        )
+        _add_snapshot_page(other_snap, transcript_ts_id="ts-he-identical")
+        _bind(
+            text_result=self.hebrew,
+            snapshot=other_snap,
+            role=TranskribusTextResultBinding.BindingRole.HEBREW_MIRROR,
+            bound_source_revision=2,
+            text_for_hash=_CANONICAL,
+        )
+
+        self.assertFalse(
+            human_edited_replacement_required(
+                source_row=self.source,
+                hebrew_row=self.hebrew,
+                canonical_text=_CANONICAL,
+            )
+        )
+        result = self._activate(
+            expected_source_sha256=compute_sha256_hex(_CANONICAL),
+        )
+        self.assertEqual(result.outcome, "APPLIED")
+        self.assertFalse(result.source_text_changed)
+        self.assertTrue(result.hebrew_mirror_updated)
+        self.hebrew.refresh_from_db()
+        self.assertEqual(self.hebrew.text, _CANONICAL)
+        self.assertEqual(self.hebrew.based_on_source_revision, 2)
+        he_bind = TranskribusTextResultBinding.objects.get(text_result=self.hebrew)
+        self.assertEqual(he_bind.snapshot_id, self.snapshot.pk)
+        self.assertEqual(he_bind.bound_source_revision, 2)
+
+    def test_verified_and_human_drift_requires_both_overrides(self):
+        other_snap = _ready_snapshot(
+            document=self.doc,
+            run=self.transkribus_run,
+            text=_OLD_TEXT,
+            source_kind=TranskribusTranscriptSnapshot.SourceKind.AUTOMATIC_HTR,
+        )
+        _add_snapshot_page(other_snap, transcript_ts_id="ts-old")
+        _bind(
+            text_result=self.source,
+            snapshot=other_snap,
+            role=TranskribusTextResultBinding.BindingRole.SNAPSHOT_SOURCE,
+            bound_source_revision=2,
+            text_for_hash=_OLD_TEXT,
+        )
+        self.source.source_revision = 3
+        self.source.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
+        self.source.save(
+            update_fields=["source_revision", "verification_status", "updated_at"]
+        )
+
+        with self.assertRaises(CorrectedCurrentActivationError) as verified_only:
+            self._activate(
+                expected_source_revision=3,
+                expected_source_sha256=compute_sha256_hex(_OLD_TEXT),
+                allow_verified_replacement=True,
+            )
+        self.assertEqual(
+            verified_only.exception.code,
+            CorrectedCurrentActivationErrorCode.HUMAN_EDITED_BLOCKED,
+        )
+
+        with self.assertRaises(CorrectedCurrentActivationError) as human_only:
+            self._activate(
+                expected_source_revision=3,
+                expected_source_sha256=compute_sha256_hex(_OLD_TEXT),
+                allow_human_edited_replacement=True,
+            )
+        self.assertEqual(
+            human_only.exception.code,
+            CorrectedCurrentActivationErrorCode.VERIFIED_BLOCKED,
+        )
+
+        result = self._activate(
+            expected_source_revision=3,
+            expected_source_sha256=compute_sha256_hex(_OLD_TEXT),
+            allow_verified_replacement=True,
+            allow_human_edited_replacement=True,
+        )
+        self.assertEqual(result.outcome, "APPLIED")
+        self.source.refresh_from_db()
+        self.assertEqual(self.source.text, _CANONICAL)
+        self.assertEqual(
+            self.source.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
+
+    def test_pre_binding_human_edit_history_not_bypassed_by_override(self):
+        DocumentTextResultEdit.objects.create(
+            text_result=self.source,
+            editor=self.user,
+            old_text="earlier",
+            new_text=_OLD_TEXT,
+            edit_type=DocumentTextResultEdit.EditType.SOURCE_TEXT,
+        )
+        with self.assertRaises(CorrectedCurrentActivationError) as ctx:
+            self._activate(allow_human_edited_replacement=True)
+        self.assertEqual(
+            ctx.exception.code,
+            CorrectedCurrentActivationErrorCode.HUMAN_EDITED_BLOCKED,
+        )
+        self.source.refresh_from_db()
+        self.assertEqual(self.source.text, _OLD_TEXT)
+        self.assertFalse(
+            TranskribusTextResultBinding.objects.filter(
+                text_result=self.source
+            ).exists()
+        )
+
+    def test_malformed_binding_not_bypassed_by_human_edit_override(self):
+        DocumentTextResultEdit.objects.create(
+            text_result=self.source,
+            editor=self.user,
+            old_text="earlier",
+            new_text=_OLD_TEXT,
+            edit_type=DocumentTextResultEdit.EditType.SOURCE_TEXT,
+        )
+        TranskribusTextResultBinding.objects.create(
+            text_result=self.source,
+            snapshot=self.snapshot,
+            binding_role=TranskribusTextResultBinding.BindingRole.SNAPSHOT_SOURCE,
+            bound_text_sha256=_sha256_hex(_OLD_TEXT),
+            bound_source_revision=2,
+        )
+        with self.assertRaises(CorrectedCurrentActivationError) as ctx:
+            self._activate(allow_human_edited_replacement=True)
         self.assertEqual(
             ctx.exception.code,
             CorrectedCurrentActivationErrorCode.HUMAN_EDITED_BLOCKED,

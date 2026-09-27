@@ -420,6 +420,7 @@ from documents.services.transkribus_corrected_current_activation import (
     CorrectedCurrentActivationErrorCode,
     CorrectedCurrentActivationResult,
     activate_corrected_current_sync_attempt,
+    human_edited_replacement_required,
 )
 from documents.services.transkribus_corrected_current_sync_enqueue import (
     CorrectedCurrentSyncEnqueueError,
@@ -2777,6 +2778,9 @@ def _corrected_current_sync_attempts_queryset(*, with_pages: bool = False):
 
 _CORRECTED_CURRENT_ACTIVATION_CONFIRM_FIELD = "confirm_replace"
 _CORRECTED_CURRENT_ACTIVATION_VERIFIED_CONFIRM_FIELD = "confirm_replace_verified"
+_CORRECTED_CURRENT_ACTIVATION_HUMAN_EDITED_CONFIRM_FIELD = (
+    "confirm_replace_human_edited"
+)
 _CORRECTED_CURRENT_ACTIVATION_CONFIRM_VALUE = "1"
 
 _CORRECTED_CURRENT_ACTIVATION_MSG_MISSING_CONFIRM = (
@@ -3120,6 +3124,7 @@ def corrected_current_sync_attempt_detail_page(request, doc_id: int, attempt_id:
     activation_expected_source_revision: int | None = None
     activation_expected_source_sha256: str | None = None
     activation_verified_replacement_required = False
+    activation_human_edited_replacement_required = False
     if show_activation_section and source_row is not None:
         activation_form_available = True
         activation_source_text_result_id = source_row.id
@@ -3135,6 +3140,7 @@ def corrected_current_sync_attempt_detail_page(request, doc_id: int, attempt_id:
             == DocumentTextResult.VerificationStatus.VERIFIED
         )
 
+        hebrew_row = None
         hebrew_verified_replacement = False
         if doc.language == Document.Language.HEBREW:
             hebrew_row = find_paired_hebrew_row(doc, engine=source_row.engine)
@@ -3150,6 +3156,13 @@ def corrected_current_sync_attempt_detail_page(request, doc_id: int, attempt_id:
 
         activation_verified_replacement_required = (
             source_verified_replacement or hebrew_verified_replacement
+        )
+        activation_human_edited_replacement_required = (
+            human_edited_replacement_required(
+                source_row=source_row,
+                hebrew_row=hebrew_row,
+                canonical_text=snapshot.canonical_text or "",
+            )
         )
     snapshot_text = snapshot.canonical_text if show_snapshot_preview else ""
     diff_html = None
@@ -3194,6 +3207,9 @@ def corrected_current_sync_attempt_detail_page(request, doc_id: int, attempt_id:
             "activation_expected_source_sha256": activation_expected_source_sha256,
             "activation_verified_replacement_required": (
                 activation_verified_replacement_required
+            ),
+            "activation_human_edited_replacement_required": (
+                activation_human_edited_replacement_required
             ),
             "is_started": (
                 attempt.status == TranskribusCorrectedCurrentSyncAttempt.Status.STARTED
@@ -3269,6 +3285,15 @@ def corrected_current_sync_attempt_activate(request, doc_id: int, attempt_id: in
                 (
                     request.POST.get(
                         _CORRECTED_CURRENT_ACTIVATION_VERIFIED_CONFIRM_FIELD
+                    )
+                    or ""
+                ).strip()
+                == _CORRECTED_CURRENT_ACTIVATION_CONFIRM_VALUE
+            ),
+            allow_human_edited_replacement=(
+                (
+                    request.POST.get(
+                        _CORRECTED_CURRENT_ACTIVATION_HUMAN_EDITED_CONFIRM_FIELD
                     )
                     or ""
                 ).strip()

@@ -15,10 +15,12 @@ from django.utils import timezone
 from documents.models import (
     Document,
     DocumentTextResult,
+    DocumentTextResultEdit,
     TranskribusCorrectedCurrentSyncAttempt,
     TranskribusCorrectedCurrentSyncPage,
     TranskribusRun,
     TranskribusSnapshotPage,
+    TranskribusTextResultBinding,
     TranskribusTranscriptSnapshot,
 )
 from documents.services.archive_items import create_ocr_document
@@ -239,6 +241,7 @@ class CorrectedCurrentSyncStaffActivationUITests(TestCase):
         *,
         confirm: str | None = "1",
         confirm_verified: str | None = None,
+        confirm_human_edited: str | None = None,
         source_text_result_id: int | None = None,
         expected_source_revision: int | None = None,
         expected_source_sha256: str | None = None,
@@ -262,7 +265,56 @@ class CorrectedCurrentSyncStaffActivationUITests(TestCase):
             data["confirm_replace"] = confirm
         if confirm_verified is not None:
             data["confirm_replace_verified"] = confirm_verified
+        if confirm_human_edited is not None:
+            data["confirm_replace_human_edited"] = confirm_human_edited
         return data
+
+    def _bind_source_with_trustworthy_drift(
+        self,
+        *,
+        doc: Document,
+        run: TranskribusRun,
+        source: DocumentTextResult,
+    ) -> None:
+        """Create a trustworthy prior SOURCE binding, then bump revision (human drift)."""
+        text = source.text or ""
+        unique = f"drift:{doc.pk}:{TranskribusTranscriptSnapshot.objects.count()}"
+        prior = TranskribusTranscriptSnapshot.objects.create(
+            document=doc,
+            transkribus_run=run,
+            source_kind=TranskribusTranscriptSnapshot.SourceKind.AUTOMATIC_HTR,
+            remote_doc_id=str(run.remote_doc_id or ""),
+            collection_id=str(run.collection_id or ""),
+            model_id=str(run.model_id or ""),
+            recognition_job_id=str(run.recognition_job_id or ""),
+            parser_version=_TEST_PARSER_VERSION,
+            provider_identity_fingerprint=_sha256_hex(f"prov:{unique}"),
+            raw_xml_fingerprint=_sha256_hex(f"raw:{unique}"),
+            canonical_text=text,
+            canonical_text_sha256=_sha256_hex(text),
+            geometry_capability=(
+                TranskribusTranscriptSnapshot.GeometryCapability.PARTIAL
+            ),
+            hover_eligible=False,
+            storage_status=TranskribusTranscriptSnapshot.StorageStatus.READY,
+        )
+        TranskribusSnapshotPage.objects.create(
+            snapshot=prior,
+            page_index=1,
+            page_nr=1,
+            transcript_ts_id="ts-old",
+            page_xml_sha256=_sha256_hex(f"xml:{prior.pk}:1"),
+            page_xml_s3_key=f"s3://test/{prior.pk}/1.xml",
+        )
+        TranskribusTextResultBinding.objects.create(
+            text_result=source,
+            snapshot=prior,
+            binding_role=TranskribusTextResultBinding.BindingRole.SNAPSHOT_SOURCE,
+            bound_text_sha256=_sha256_hex(text),
+            bound_source_revision=source.source_revision,
+        )
+        source.source_revision = int(source.source_revision) + 1
+        source.save(update_fields=["source_revision", "updated_at"])
 
     def test_get_detail_is_read_only(self):
         doc, attempt, source, _hebrew, _snapshot = self._eligible_fixture()
@@ -288,6 +340,8 @@ class CorrectedCurrentSyncStaffActivationUITests(TestCase):
         self.assertContains(resp, _ACTION_LABEL)
         self.assertContains(resp, 'name="confirm_replace"')
         self.assertNotContains(resp, 'name="confirm_replace_verified"')
+        self.assertNotContains(resp, 'name="confirm_replace_human_edited"')
+        self.assertFalse(resp.context["activation_human_edited_replacement_required"])
         self.assertContains(resp, f'value="{source.id}"')
         self.assertContains(resp, f'value="{source.source_revision}"')
         self.assertContains(resp, compute_sha256_hex(source.text or ""))
@@ -313,6 +367,58 @@ class CorrectedCurrentSyncStaffActivationUITests(TestCase):
             resp,
             "הטקסט שעומד להיות מוחלף אושר בעבר על ידי אדם",
         )
+
+    def test_human_edited_drift_shows_confirmation(self):
+        doc, attempt, source, _hebrew, _snapshot = self._eligible_fixture()
+        run = TranskribusRun.objects.get(document=doc)
+        self._bind_source_with_trustworthy_drift(doc=doc, run=run, source=source)
+
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id, attempt.id))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.context["activation_human_edited_replacement_required"])
+        self.assertContains(resp, 'name="confirm_replace_human_edited"')
+        self.assertContains(
+            resp,
+            "התעתוק הנוכחי נערך ידנית אחרי קישור לגרסת Transkribus קודמת",
+        )
+        self.assertNotContains(resp, 'name="confirm_replace_verified"')
+
+    def test_identical_text_source_drift_does_not_show_human_edited_confirmation(self):
+        doc, attempt, source, _hebrew, snapshot = self._eligible_fixture()
+        run = TranskribusRun.objects.get(document=doc)
+        source.text = snapshot.canonical_text
+        source.save(update_fields=["text", "updated_at"])
+        self._bind_source_with_trustworthy_drift(doc=doc, run=run, source=source)
+
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id, attempt.id))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.context["activation_human_edited_replacement_required"])
+        self.assertNotContains(resp, 'name="confirm_replace_human_edited"')
+        self.assertNotContains(
+            resp,
+            "התעתוק הנוכחי נערך ידנית אחרי קישור לגרסת Transkribus קודמת",
+        )
+
+    def test_pre_binding_edit_history_does_not_show_human_edited_confirmation(self):
+        doc, attempt, source, _hebrew, _snapshot = self._eligible_fixture()
+        DocumentTextResultEdit.objects.create(
+            text_result=source,
+            editor=self.staff,
+            old_text="earlier",
+            new_text=_OLD_TEXT,
+            edit_type=DocumentTextResultEdit.EditType.SOURCE_TEXT,
+        )
+
+        self.client.force_login(self.staff)
+        resp = self.client.get(self._detail_url(doc.id, attempt.id))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.context["activation_human_edited_replacement_required"])
+        self.assertNotContains(resp, 'name="confirm_replace_human_edited"')
 
     def test_verified_identical_text_does_not_show_second_confirmation(self):
         doc, attempt, source, hebrew, snapshot = self._eligible_fixture()
@@ -375,6 +481,101 @@ class CorrectedCurrentSyncStaffActivationUITests(TestCase):
             DocumentTextResult.VerificationStatus.UNVERIFIED,
         )
         self.assertContains(resp, _CORRECTED_CURRENT_ACTIVATION_MSG_APPLIED_SOURCE)
+
+    def test_human_edited_drift_without_confirmation_is_blocked(self):
+        doc, attempt, source, _hebrew, _snapshot = self._eligible_fixture()
+        run = TranskribusRun.objects.get(document=doc)
+        self._bind_source_with_trustworthy_drift(doc=doc, run=run, source=source)
+
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self._activate_url(doc.id, attempt.id),
+            data=self._post_data(source),
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        source.refresh_from_db()
+        self.assertEqual(source.text, _OLD_TEXT)
+        messages = [str(m) for m in get_messages(resp.wsgi_request)]
+        self.assertEqual(messages, [_CORRECTED_CURRENT_ACTIVATION_MSG_HUMAN_EDITED])
+
+    def test_human_edited_drift_with_confirmation_applies(self):
+        doc, attempt, source, hebrew, _snapshot = self._eligible_fixture()
+        run = TranskribusRun.objects.get(document=doc)
+        self._bind_source_with_trustworthy_drift(doc=doc, run=run, source=source)
+
+        self.client.force_login(self.staff)
+        resp = self.client.post(
+            self._activate_url(doc.id, attempt.id),
+            data=self._post_data(source, confirm_human_edited="1"),
+            follow=True,
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        source.refresh_from_db()
+        hebrew.refresh_from_db()
+        self.assertEqual(source.text, _CANONICAL)
+        self.assertEqual(hebrew.text, _CANONICAL)
+        self.assertContains(resp, _CORRECTED_CURRENT_ACTIVATION_MSG_APPLIED_SOURCE)
+
+    def test_verified_and_human_edited_requires_both_confirmations(self):
+        doc, attempt, source, hebrew, _snapshot = self._eligible_fixture()
+        run = TranskribusRun.objects.get(document=doc)
+        self._bind_source_with_trustworthy_drift(doc=doc, run=run, source=source)
+        source.verification_status = DocumentTextResult.VerificationStatus.VERIFIED
+        source.save(update_fields=["verification_status", "updated_at"])
+
+        self.client.force_login(self.staff)
+
+        detail = self.client.get(self._detail_url(doc.id, attempt.id))
+        self.assertTrue(detail.context["activation_verified_replacement_required"])
+        self.assertTrue(detail.context["activation_human_edited_replacement_required"])
+        self.assertContains(detail, 'name="confirm_replace_verified"')
+        self.assertContains(detail, 'name="confirm_replace_human_edited"')
+
+        verified_only = self.client.post(
+            self._activate_url(doc.id, attempt.id),
+            data=self._post_data(source, confirm_verified="1"),
+            follow=True,
+        )
+        source.refresh_from_db()
+        self.assertEqual(source.text, _OLD_TEXT)
+        self.assertEqual(
+            [str(m) for m in get_messages(verified_only.wsgi_request)],
+            [_CORRECTED_CURRENT_ACTIVATION_MSG_HUMAN_EDITED],
+        )
+
+        human_only = self.client.post(
+            self._activate_url(doc.id, attempt.id),
+            data=self._post_data(source, confirm_human_edited="1"),
+            follow=True,
+        )
+        source.refresh_from_db()
+        self.assertEqual(source.text, _OLD_TEXT)
+        self.assertEqual(
+            [str(m) for m in get_messages(human_only.wsgi_request)],
+            [_CORRECTED_CURRENT_ACTIVATION_MSG_VERIFIED],
+        )
+
+        both = self.client.post(
+            self._activate_url(doc.id, attempt.id),
+            data=self._post_data(
+                source,
+                confirm_verified="1",
+                confirm_human_edited="1",
+            ),
+            follow=True,
+        )
+        source.refresh_from_db()
+        hebrew.refresh_from_db()
+        self.assertEqual(source.text, _CANONICAL)
+        self.assertEqual(hebrew.text, _CANONICAL)
+        self.assertEqual(
+            source.verification_status,
+            DocumentTextResult.VerificationStatus.UNVERIFIED,
+        )
+        self.assertContains(both, _CORRECTED_CURRENT_ACTIVATION_MSG_APPLIED_SOURCE)
 
     def test_no_form_on_attempts_list(self):
         doc, attempt, _source, _hebrew, _snapshot = self._eligible_fixture()
@@ -484,7 +685,37 @@ class CorrectedCurrentSyncStaffActivationUITests(TestCase):
             expected_source_revision=source.source_revision,
             expected_source_sha256=expected_sha,
             allow_verified_replacement=False,
+            allow_human_edited_replacement=False,
         )
+
+    @patch(
+        "documents.views.activate_corrected_current_sync_attempt",
+    )
+    def test_human_edited_confirmation_passed_to_service(self, mock_activate):
+        doc, attempt, source, _hebrew, _snapshot = self._eligible_fixture()
+        mock_activate.return_value = CorrectedCurrentActivationResult(
+            attempt_id=attempt.id,
+            snapshot_id=_snapshot.id,
+            source_result_id=source.id,
+            hebrew_result_id=_hebrew.id if _hebrew else None,
+            engine=_ENGINE,
+            bound_source_revision=3,
+            outcome="APPLIED",
+            source_text_changed=True,
+            hebrew_mirror_updated=True,
+        )
+        self.client.force_login(self.staff)
+
+        resp = self.client.post(
+            self._activate_url(doc.id, attempt.id),
+            data=self._post_data(source, confirm_human_edited="1"),
+        )
+        self.assertEqual(resp.status_code, 302)
+        mock_activate.assert_called_once()
+        self.assertTrue(
+            mock_activate.call_args.kwargs["allow_human_edited_replacement"]
+        )
+        self.assertFalse(mock_activate.call_args.kwargs["allow_verified_replacement"])
 
     @patch(
         "documents.views.activate_corrected_current_sync_attempt",

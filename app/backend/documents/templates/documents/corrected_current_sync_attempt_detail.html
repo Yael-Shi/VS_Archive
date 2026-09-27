@@ -165,6 +165,26 @@
                 </span>
               </label>
             {% endif %}
+
+            {% if activation_human_edited_replacement_required %}
+              <div class="spacer-sm"></div>
+              <div class="alert alert-danger">
+                התעתוק הנוכחי נערך ידנית אחרי קישור לגרסת Transkribus קודמת.
+                ההחלפה תמחק את העריכה האנושית ותתקין במקומה את גרסת Transkribus החדשה.
+              </div>
+              <label class="corrected-sync-activation-confirm">
+                <input
+                  type="checkbox"
+                  name="confirm_replace_human_edited"
+                  value="1"
+                  required
+                >
+                <span>
+                  אני מאשר/ת במפורש להחליף תעתוק שנערך ידנית
+                  בגרסת Transkribus החדשה.
+                </span>
+              </label>
+            {% endif %}
             <div class="spacer-sm"></div>
             <button class="btn btn-primary" type="submit">
               החלפת התעתוק המוצג בגרסת Transkribus

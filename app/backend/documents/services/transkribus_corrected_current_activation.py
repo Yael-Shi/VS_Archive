@@ -199,6 +199,42 @@ def _binding_indicates_human_drift(
     return not binding_matches_current_baseline(row, binding)
 
 
+def human_edited_replacement_required(
+    *,
+    source_row: DocumentTextResult,
+    hebrew_row: DocumentTextResult | None = None,
+    canonical_text: str,
+) -> bool:
+    """True when activation would overwrite trustworthy post-binding human text.
+
+    Requires both trustworthy binding drift and differing text bytes versus the
+    activation target canonical text. Revision/binding repair with identical
+    text does not require ``allow_human_edited_replacement``.
+
+    Does not cover pre-binding edit history or untrustworthy bindings (those stay
+    hard-blocked and must not show an override checkbox).
+    """
+    target = canonical_text or ""
+    if (
+        _binding_indicates_human_drift(
+            source_row,
+            expected_role=TranskribusTextResultBinding.BindingRole.SNAPSHOT_SOURCE,
+        )
+        and (source_row.text or "") != target
+    ):
+        return True
+    if (
+        hebrew_row is not None
+        and _binding_indicates_human_drift(
+            hebrew_row,
+            expected_role=TranskribusTextResultBinding.BindingRole.HEBREW_MIRROR,
+        )
+        and (hebrew_row.text or "") != target
+    ):
+        return True
+    return False
+
+
 def _source_has_human_edit_history(source_row: DocumentTextResult) -> bool:
     """True when staff/activation DocumentTextResultEdit rows exist for SOURCE."""
     return DocumentTextResultEdit.objects.filter(text_result_id=source_row.pk).exists()
@@ -375,6 +411,7 @@ def activate_corrected_current_sync_attempt(
     expected_source_revision: int,
     expected_source_sha256: str,
     allow_verified_replacement: bool = False,
+    allow_human_edited_replacement: bool = False,
 ) -> CorrectedCurrentActivationResult:
     """Activate an explicit COMPLETED corrected/current attempt into SOURCE_TEXT.
 
@@ -383,6 +420,12 @@ def activate_corrected_current_sync_attempt(
 
     ``activated_by`` must be an active document-admin user (``is_document_admin``);
     authorization runs before the ALREADY_ACTIVE fast path.
+
+    ``allow_human_edited_replacement`` overrides only when activation would
+    overwrite text bytes under trustworthy post-binding drift (see
+    ``human_edited_replacement_required``). Identical-text binding/revision
+    repair does not require it. It does not bypass pre-binding edit history or
+    untrustworthy/malformed binding blocks.
 
     Same-request idempotency: if SOURCE (and Hebrew mirror when required) are
     already fresh for this snapshot, returns ALREADY_ACTIVE even when preview
@@ -531,19 +574,25 @@ def activate_corrected_current_sync_attempt(
         if verified_replacement_required and not allow_verified_replacement:
             _raise(CorrectedCurrentActivationErrorCode.VERIFIED_BLOCKED)
 
-        if _binding_indicates_human_drift(
+        human_edited_replacement_needed = human_edited_replacement_required(
+            source_row=source_row,
+            hebrew_row=hebrew_row,
+            canonical_text=canonical_text,
+        )
+        if human_edited_replacement_needed and not allow_human_edited_replacement:
+            _raise(CorrectedCurrentActivationErrorCode.HUMAN_EDITED_BLOCKED)
+
+        # Edit-history hard block covers unbound/untrustworthy SOURCE baselines.
+        # Trustworthy post-binding SOURCE drift is gated above when text would
+        # change; identical-text repair must not be hard-blocked by edit rows
+        # that commonly accompany that drift.
+        source_has_trustworthy_drift = _binding_indicates_human_drift(
             source_row,
             expected_role=TranskribusTextResultBinding.BindingRole.SNAPSHOT_SOURCE,
+        )
+        if not source_has_trustworthy_drift and _human_edit_history_blocks_activation(
+            source_row
         ):
-            _raise(CorrectedCurrentActivationErrorCode.HUMAN_EDITED_BLOCKED)
-
-        if hebrew_row is not None and _binding_indicates_human_drift(
-            hebrew_row,
-            expected_role=TranskribusTextResultBinding.BindingRole.HEBREW_MIRROR,
-        ):
-            _raise(CorrectedCurrentActivationErrorCode.HUMAN_EDITED_BLOCKED)
-
-        if _human_edit_history_blocks_activation(source_row):
             _raise(CorrectedCurrentActivationErrorCode.HUMAN_EDITED_BLOCKED)
 
         hebrew_mirror_updated = False
@@ -633,4 +682,5 @@ __all__ = [
     "CorrectedCurrentActivationErrorCode",
     "CorrectedCurrentActivationResult",
     "activate_corrected_current_sync_attempt",
+    "human_edited_replacement_required",
 ]
