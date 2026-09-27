@@ -8131,3 +8131,20 @@ Production public-view verification confirmed that the cleaned/linked identities
 **UI:** The dedicated warning explains that previously human-approved text is being replaced and that the changed replacement becomes unverified. GET preview detection mirrors the service's byte comparison (`source_row.text` / paired Hebrew text versus snapshot canonical text), but the service remains authoritative under locks.
 
 **Validation:** `documents/test_transkribus_corrected_current_activation.py` and `documents/test_corrected_current_sync_staff_activation.py`: 67 tests passed. Ruff check and `git diff --check` passed.
+
+## Transkribus corrected/current human-edited activation override (2026-09-26)
+
+**Decision:** Supersedes the earlier rule that treated trustworthy post-binding human drift as an unconditional `HUMAN_EDITED_BLOCKED` hard stop. When a trustworthy original binding exists and current text/revision has drifted (`_binding_indicates_human_drift`), and activation would overwrite different text bytes, staff may replace with a newer corrected/current snapshot only through an explicit dedicated override. Unsafe/untrustworthy cases remain hard-blocked.
+
+- The activation service accepts `allow_human_edited_replacement=False` by default. Existing/non-UI callers remain safe by default.
+- Shared helper `human_edited_replacement_required(..., canonical_text=...)` is true only when trustworthy post-binding drift exists **and** the drifted SOURCE/Hebrew text bytes differ from the activation target canonical text. GET preview and the activation service both use this helper.
+- Revision-link / binding repair with identical text does **not** require or show the human-edit confirmation.
+- `_human_edit_history_blocks_activation` remains the hard gate for pre-binding edit history and malformed/untrustworthy bindings (even with `allow_human_edited_replacement=True`). Trustworthy post-binding SOURCE drift is not additionally hard-blocked by accompanying edit-history rows.
+- `VERIFIED_BLOCKED` remains independent. A row that is both VERIFIED and would overwrite human-drifted text requires both `allow_verified_replacement` and `allow_human_edited_replacement`. Replacing changed VERIFIED text still demotes those rows to `UNVERIFIED`.
+- Staff detail POST accepts a dedicated confirmation field `confirm_replace_human_edited` (value `1`), parallel to `confirm_replace_verified`.
+- Snapshot/hash/integrity, `STALE_PREVIEW`, and `ALREADY_ACTIVE` behavior are unchanged. `HUMAN_EDITED_BLOCKED` is not removed or weakened globally.
+- No model, migration, worker, SQS, selector, snapshot-storage, or provider behavior changes are part of this decision.
+
+**UI:** Dedicated warning explains that current text was human-edited after a prior Transkribus binding and that replacement installs the new Transkribus version over that edit.
+
+**Validation:** `documents/test_transkribus_corrected_current_activation.py` and `documents/test_corrected_current_sync_staff_activation.py`: 81 tests passed. Ruff check on changed Python files and `git diff --check` passed. `ruff format --check` passes on the changed service/test modules; `views.py` retains pre-existing `archive_manage_person_alias_edit_page` formatting from HEAD (intentionally not reformatted).
