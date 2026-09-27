@@ -333,6 +333,9 @@ class PersonAlias(models.Model):
         SPELLING_VARIANT = "spelling_variant", "וריאנט איות"
         OCR_VARIANT = "ocr_variant", "וריאנט OCR"
         PARTIAL_NAME = "partial_name", "שם חלקי"
+        TRANSLITERATION = "transliteration", "תעתיק"
+        HONORIFIC_OR_TITLE = "honorific_or_title", "צורה עם תואר"
+        BIRTH_NAME = "birth_name", "שם לידה"
         OTHER = "other", "אחר"
 
     class Language(models.TextChoices):
