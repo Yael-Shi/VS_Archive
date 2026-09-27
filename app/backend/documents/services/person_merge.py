@@ -6,8 +6,13 @@ PhotoPerson are moved independently. After PhotoPerson rows belong to
 the keeper, matching ArchiveItemPerson rows are ensured (add-only).
 ArchiveItemPerson still does not create PhotoPerson.
 ReviewedPersonImportBinding rows on the duplicate are repointed to the
-keeper. Authors explicitly linked to the duplicate Person are repointed
-to the keeper; this is relation repointing, not name inference.
+keeper. PersonRegistryImportBinding rows are repointed the same way.
+``(source, stable_key)`` is unique, so two people cannot hold the same
+key and merge does not dedupe bindings. PersonFamilyName rows move onto
+the keeper, and an identical person/name/role row already on the keeper
+is dropped. Authors explicitly linked to the duplicate
+Person are repointed to the keeper; this is relation repointing, not
+name inference.
 """
 
 from __future__ import annotations
@@ -23,6 +28,8 @@ from documents.models import (
     Author,
     Person,
     PersonAlias,
+    PersonFamilyName,
+    PersonRegistryImportBinding,
     PhotoPerson,
     ReviewedPersonImportBinding,
 )
@@ -116,6 +123,9 @@ class PersonMergeResult:
     author_identities_repointed: int
     suggestions_repointed: int
     import_bindings_repointed: int
+    registry_bindings_repointed: int
+    family_names_moved: int
+    family_names_deduped: int
     biography_copied: bool
     search_indexes_refreshed: int
 
@@ -330,6 +340,16 @@ def _lock_person_dependents(keeper_id: int, duplicate_id: int) -> None:
         .order_by("id")
     )
     list(
+        PersonRegistryImportBinding.objects.select_for_update()
+        .filter(person_id__in=person_ids)
+        .order_by("id")
+    )
+    list(
+        PersonFamilyName.objects.select_for_update()
+        .filter(person_id__in=person_ids)
+        .order_by("id")
+    )
+    list(
         Author.objects.select_for_update()
         .filter(person_id__in=person_ids)
         .order_by("id")
@@ -447,6 +467,35 @@ def _repoint_author_identities(keeper: Person, duplicate: Person) -> int:
     return count
 
 
+def _repoint_registry_bindings(keeper: Person, duplicate: Person) -> int:
+    """Repoint registry bindings. ``(source, stable_key)`` is globally unique."""
+    count = PersonRegistryImportBinding.objects.filter(person_id=duplicate.pk).count()
+    PersonRegistryImportBinding.objects.filter(person_id=duplicate.pk).update(
+        person_id=keeper.pk
+    )
+    return count
+
+
+def _merge_family_names(keeper: Person, duplicate: Person) -> tuple[int, int]:
+    """Move family-name rows. Drop an identical person/name/role on the keeper."""
+    keeper_keys = set(
+        PersonFamilyName.objects.filter(person_id=keeper.pk).values_list("name", "role")
+    )
+    moved = 0
+    deduped = 0
+    rows = PersonFamilyName.objects.filter(person_id=duplicate.pk).order_by("id")
+    for family_name in rows:
+        key = (family_name.name, family_name.role)
+        if key in keeper_keys:
+            family_name.delete()
+            deduped += 1
+            continue
+        PersonFamilyName.objects.filter(pk=family_name.pk).update(person_id=keeper.pk)
+        keeper_keys.add(key)
+        moved += 1
+    return moved, deduped
+
+
 def _repoint_import_bindings(keeper: Person, duplicate: Person) -> int:
     count = ReviewedPersonImportBinding.objects.filter(person_id=duplicate.pk).count()
     ReviewedPersonImportBinding.objects.filter(person_id=duplicate.pk).update(
@@ -486,6 +535,10 @@ def merge_persons(*, keeper_id: int, duplicate_id: int) -> PersonMergeResult:
         _ensure_archive_item_people_for_keeper_photo_people(keeper)
         suggestions_repointed = _repoint_suggestions(keeper, duplicate)
         import_bindings_repointed = _repoint_import_bindings(keeper, duplicate)
+        registry_bindings_repointed = _repoint_registry_bindings(keeper, duplicate)
+        family_names_moved, family_names_deduped = _merge_family_names(
+            keeper, duplicate
+        )
         author_identities_repointed = _repoint_author_identities(keeper, duplicate)
         duplicate.delete()
     except IntegrityError as exc:
@@ -506,6 +559,9 @@ def merge_persons(*, keeper_id: int, duplicate_id: int) -> PersonMergeResult:
         author_identities_repointed=author_identities_repointed,
         suggestions_repointed=suggestions_repointed,
         import_bindings_repointed=import_bindings_repointed,
+        registry_bindings_repointed=registry_bindings_repointed,
+        family_names_moved=family_names_moved,
+        family_names_deduped=family_names_deduped,
         biography_copied=biography_copied,
         search_indexes_refreshed=len(synced),
     )

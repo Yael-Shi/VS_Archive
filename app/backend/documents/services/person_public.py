@@ -37,7 +37,7 @@ from documents.services.archive_item_presentation import (
 from documents.services.document_archive_urls import (
     apply_document_thumbnail_urls_to_browse_cards,
 )
-from documents.services.person_search import person_canonical_or_alias_icontains_q
+from documents.services.person_search import person_identity_icontains_q
 from documents.services.photo_archive_urls import (
     apply_photo_thumbnail_urls_to_browse_cards,
     presign_photo_thumbnail_url,
@@ -151,7 +151,7 @@ def public_people_queryset(user, *, search_query: str = "") -> QuerySet[Person]:
     people = Person.objects.filter(person_unified_public_membership_q(user)).order_by(
         "name", "id"
     )
-    search_q = person_canonical_or_alias_icontains_q(search_query)
+    search_q = person_identity_icontains_q(search_query)
     linked_author_q = _person_linked_author_name_icontains_q(user, search_query)
     if search_q is not None and linked_author_q is not None:
         people = people.filter(search_q | linked_author_q)

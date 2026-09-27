@@ -1,5 +1,19 @@
 # VS-Archive Decision Log
 
+## Person registry import binding and structured family names
+
+**Decision / implemented:** V18/person-registry idempotency and previous/acquired family names are separate from `PersonAlias` and from `ReviewedPersonImportBinding`.
+
+**Current behavior:**
+
+- `PersonRegistryImportBinding` stores `(source, stable_key)` → `Person` (`PROTECT`). The pair is unique, so one registry key cannot bind two people. The same key may exist under another `source`. The row may point at an existing Person or at a Person created later by an apply. It is not searchable and is not the photo-person import binding.
+- `PersonFamilyName` stores `name` plus role `previous_family` or `acquired_family`. Unique `(person, name, role)`. The same string may exist once per role. These rows are not aliases and are not rendered on the public Person page.
+- Staff Person merge repoints every `PersonRegistryImportBinding` from the duplicate to the keeper. `(source, stable_key)` is globally unique, so merge does not dedupe bindings. An identical family-name `(name, role)` already on the keeper is dropped. Frozen-duplicate refusal, biography conflict, and the existing alias / AIP / PhotoPerson / suggestion / `ReviewedPersonImportBinding` / Author behavior are unchanged.
+- Public and staff Person name search (`person_identity_icontains_q`) also matches family-name rows. Archive-item search metadata appends those names after canonical names and aliases for `ArchiveItemPerson` and renderable `PhotoPerson`. Honorific remains one display string and is still not a search field.
+- No title model, no rejected-candidate table, and no contextual/source-only alias storage. V18 apply is not implemented.
+
+**Tests:** `documents/test_person_registry_binding_and_family_name.py`.
+
 ## Hebrew printed OpenAI fallback — output contract
 
 **Decision / implemented:** The isolated OpenAI Hebrew PRINTED helper sends a
