@@ -1177,4 +1177,5 @@ class PhotoSearchIndexPerformanceTests(TestCase):
             with CaptureQueriesContext(connection) as ctx:
                 sync_archive_item_search_index(item.pk)
         self.assertEqual(wrapped.call_count, 1)
-        self.assertLessEqual(len(ctx), 22)
+        # One extra prefetch loads PersonFamilyName rows; still one sync, not per photo.
+        self.assertLessEqual(len(ctx), 23)

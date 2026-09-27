@@ -5,15 +5,16 @@ from __future__ import annotations
 from django.db.models import Exists, OuterRef, Q
 from django.db.models.expressions import Combinable
 
-from documents.models import PersonAlias
+from documents.models import PersonAlias, PersonFamilyName
 
 
-def person_canonical_or_alias_icontains_q(search_query: str) -> Combinable | None:
-    """Case-insensitive canonical name or alias substring match.
+def person_identity_icontains_q(search_query: str) -> Combinable | None:
+    """Case-insensitive canonical name, alias, or family-name substring match.
 
-    Alias matching uses ``Exists`` so joining ``PersonAlias`` cannot duplicate
-    Person rows. Empty/whitespace ``search_query`` yields ``None`` (no filter).
-    Shared by staff and public Person name search.
+    Alias and family-name matching use ``Exists`` so joining those rows cannot
+    duplicate Person rows. Empty/whitespace ``search_query`` yields ``None``
+    (no filter). Shared by staff and public Person name search. Honorifics are
+    not included.
     """
     q = (search_query or "").strip()
     if not q:
@@ -22,4 +23,8 @@ def person_canonical_or_alias_icontains_q(search_query: str) -> Combinable | Non
         person_id=OuterRef("pk"),
         name__icontains=q,
     )
-    return Q(name__icontains=q) | Exists(alias_match)
+    family_name_match = PersonFamilyName.objects.filter(
+        person_id=OuterRef("pk"),
+        name__icontains=q,
+    )
+    return Q(name__icontains=q) | Exists(alias_match) | Exists(family_name_match)

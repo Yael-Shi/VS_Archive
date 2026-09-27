@@ -12,7 +12,7 @@ from django.db.models import Count, Max, Prefetch
 from documents.models import ArchiveItem, Person, PersonAlias, PhotoContent
 from documents.s3 import create_presigned_get
 from documents.services.person_display import person_public_display_name
-from documents.services.person_search import person_canonical_or_alias_icontains_q
+from documents.services.person_search import person_identity_icontains_q
 from documents.services.photo_s3_cleanup import schedule_photo_s3_cleanup_after_commit
 
 LAST_PHOTO_DELETE_ERROR = (
@@ -93,7 +93,7 @@ def staff_person_index_queryset(*, search_query: str = ""):
         .prefetch_related(staff_person_aliases_prefetch())
         .order_by("name", "id")
     )
-    search_q = person_canonical_or_alias_icontains_q(search_query)
+    search_q = person_identity_icontains_q(search_query)
     if search_q is not None:
         people = people.filter(search_q)
     return people
@@ -443,9 +443,7 @@ def update_person_alias(
         language=alias.language if language is None else language,
     )
     normalized_public = (
-        alias.display_publicly
-        if display_publicly is None
-        else bool(display_publicly)
+        alias.display_publicly if display_publicly is None else bool(display_publicly)
     )
 
     changed_fields: list[str] = []

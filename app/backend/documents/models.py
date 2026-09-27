@@ -501,6 +501,72 @@ class PhotoPerson(models.Model):
         )
 
 
+class PersonFamilyName(models.Model):
+    """Structured previous or acquired family name for one Person.
+
+    Not a PersonAlias. Not a public display string by itself. Search may
+    match ``name``. Contextual or source-only spellings do not belong here.
+    """
+
+    class Role(models.TextChoices):
+        PREVIOUS_FAMILY = "previous_family", "שם משפחה קודם"
+        ACQUIRED_FAMILY = "acquired_family", "שם משפחה שנרכש"
+
+    person = models.ForeignKey(
+        Person,
+        on_delete=models.CASCADE,
+        related_name="family_names",
+    )
+    name = models.CharField(max_length=255)
+    role = models.CharField(max_length=32, choices=Role.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["role", "name", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["person", "name", "role"],
+                name="uniq_person_family_name_person_name_role",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class PersonRegistryImportBinding(models.Model):
+    """Maps one registry import stable key to a Person.
+
+    Idempotency for a future person-registry apply. Supports an existing
+    Person or one created by that apply. Not the photo-person import
+    binding. Not searchable. Not a public or staff Person UI surface.
+    """
+
+    source = models.CharField(max_length=255)
+    stable_key = models.CharField(max_length=255)
+    person = models.ForeignKey(
+        Person,
+        on_delete=models.PROTECT,
+        related_name="registry_import_bindings",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source", "stable_key"],
+                name="uniq_person_registry_import_binding_source_key",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return (
+            f"PersonRegistryImportBinding(source={self.source!r}, "
+            f"stable_key={self.stable_key!r}, person_id={self.person_id})"
+        )
+
+
 class ReviewedPersonImportBinding(models.Model):
     """Maps a reviewed create_person operation_id to the Person it created.
 

@@ -6,10 +6,10 @@ Pure builder returns a value object only. Persistence materializes
 PR2a adds id-based synchronization for discovery/manual/taxonomy writers.
 Displayed OCR mutation hooks are deferred to PR2b.
 PHOTO search aggregation indexes public-renderable PhotoContent descriptive
-text, PhotoPerson canonical names, and PersonAlias names onto the owning
-ArchiveItem (one result per item).
-``ArchiveItemPerson`` canonical names and aliases are item-level metadata for
-every item type; they are not photo-appearance search.
+text, PhotoPerson canonical names, PersonAlias names, and PersonFamilyName
+rows onto the owning ArchiveItem (one result per item).
+``ArchiveItemPerson`` canonical names, aliases, and family names are
+item-level metadata for every item type; they are not photo-appearance search.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from documents.models import (
     ArchiveItemSearchIndex,
     Person,
     PersonAlias,
+    PersonFamilyName,
     PhotoContent,
     PhotoPerson,
 )
@@ -54,8 +55,15 @@ def _search_person_aliases_prefetch() -> Prefetch:
     )
 
 
+def _search_person_family_names_prefetch() -> Prefetch:
+    return Prefetch(
+        "family_names",
+        queryset=PersonFamilyName.objects.order_by("role", "name", "id"),
+    )
+
+
 def _search_people_prefetch() -> Prefetch:
-    """Person rows plus aliases in deterministic ``(name, id)`` order.
+    """Person rows plus aliases and family names in deterministic order.
 
     Used for both item-level ``ArchiveItem.people`` and PHOTO
     ``PhotoContent.people``. Search-index only.
@@ -63,7 +71,8 @@ def _search_people_prefetch() -> Prefetch:
     return Prefetch(
         "people",
         queryset=Person.objects.order_by("name", "id").prefetch_related(
-            _search_person_aliases_prefetch()
+            _search_person_aliases_prefetch(),
+            _search_person_family_names_prefetch(),
         ),
     )
 
@@ -90,9 +99,10 @@ def archive_items_for_search_index_build(
     ``build_archive_item_search_content``. Displayable OCR rows use the same
     prefetch contract as browse cards / ``get_displayed_transcription_text``.
     PHOTO items prefetch every ``PhotoContent`` plus identified ``people``
-    and each person's ``aliases``, ordered by ``(position, id)`` then
-    Person ``(name, id)``. Item-level ``ArchiveItem.people`` (ArchiveItemPerson)
-    is prefetched the same way for every item type. Ordered ``author_links``
+    and each person's ``aliases`` and ``family_names``, ordered by
+    ``(position, id)`` then Person ``(name, id)``. Item-level
+    ``ArchiveItem.people`` (ArchiveItemPerson) is prefetched the same way for
+    every item type. Ordered ``author_links``
     (with ``Author``) feed public author discovery text. This alias prefetch is
     search-index only; public gallery/access querysets must not load aliases.
     The builder then keeps only PhotoContent rows that pass
@@ -206,13 +216,20 @@ def _photo_contents_for_search(archive_item: ArchiveItem) -> list[PhotoContent]:
     return [photo for photo in rows if photo_is_archive_renderable(photo)]
 
 
+_FAMILY_NAME_ROLE_ORDER = {
+    PersonFamilyName.Role.PREVIOUS_FAMILY: 0,
+    PersonFamilyName.Role.ACQUIRED_FAMILY: 1,
+}
+
+
 def _person_identity_name_segments(persons: Iterable[Person]) -> list[str]:
-    """Canonical Person.name values then aliases, deterministic.
+    """Canonical Person.name values, then aliases, then family names.
 
     Distinct Persons ordered by ``(name, id)``. Canonical names come first
     in that order, then ``PersonAlias.name`` values for those same persons
-    (same person order, aliases by ``(name, id)``). Outer segment dedupe
-    is applied by the caller.
+    (same person order, aliases by ``(name, id)``), then ``PersonFamilyName``
+    rows (previous family before acquired, then ``name``, then id). Outer
+    segment dedupe is applied by the caller.
     """
     by_id: dict[int, Person] = {}
     for person in persons:
@@ -230,6 +247,19 @@ def _person_identity_name_segments(persons: Iterable[Person]) -> list[str]:
             alias_name = _normalize_segment(alias.name)
             if alias_name:
                 segments.append(alias_name)
+    for person in ordered:
+        family_names = list(person.family_names.all())
+        family_names.sort(
+            key=lambda row: (
+                _FAMILY_NAME_ROLE_ORDER.get(row.role, 99),
+                row.name,
+                row.pk,
+            )
+        )
+        for family_name in family_names:
+            family_name_text = _normalize_segment(family_name.name)
+            if family_name_text:
+                segments.append(family_name_text)
     return segments
 
 
@@ -243,7 +273,7 @@ def _archive_item_person_name_segments(archive_item: ArchiveItem) -> list[str]:
 
 
 def _photo_person_name_segments(photos: list[PhotoContent]) -> list[str]:
-    """Canonical PhotoPerson names then aliases, deterministic.
+    """Canonical PhotoPerson names, aliases, then family names, deterministic.
 
     Distinct Persons attached to the given (already renderable) photos.
     Does not read ArchiveItemPerson.
@@ -258,8 +288,8 @@ def _photo_search_metadata_segments(archive_item: ArchiveItem) -> list[str]:
     """PHOTO component text for ``metadata_text``; empty for other item types.
 
     Only public-renderable PhotoContent rows contribute (same helper as
-    the public gallery). Canonical Person names and PersonAlias names are
-    taken only from those rows.
+    the public gallery). Canonical Person names, PersonAlias names, and
+    PersonFamilyName rows are taken only from those rows.
     Per-photo dates, S3 keys, filenames, MIME, upload status, and other
     technical fields are omitted (ArchiveItem dates are also not in FTS).
     Repeated normalized fragments across photos are kept once (first
@@ -300,14 +330,14 @@ def build_archive_item_search_content(
     ``hebrew_translation_text`` is the current displayed Hebrew translation for
     non-Hebrew OCR only (never concatenated into ``body_text``; empty for
     Hebrew-language documents so mirrored HEBREW/SOURCE is not duplicated).
-    PHOTO descriptive fields, PhotoPerson canonical names, and PersonAlias
-    names from public-renderable photos are appended to ``metadata_text``
-    (weight B, substring) after ArchiveItem discovery fields and
-    ``ArchiveItemPerson`` identities. PHOTO ``body_text`` stays empty.
+    PHOTO descriptive fields, PhotoPerson canonical names, PersonAlias names,
+    and PersonFamilyName rows from public-renderable photos are appended to
+    ``metadata_text`` (weight B, substring) after ArchiveItem discovery fields
+    and ``ArchiveItemPerson`` identities. PHOTO ``body_text`` stays empty.
     Author discovery uses ordered ``ArchiveItemAuthor`` names when any links
-    exist, else trimmed ``author_name``. ``ArchiveItemPerson`` canonical names
-    and aliases apply to every item type and do not depend on photo
-    renderability.
+    exist, else trimmed ``author_name``. ``ArchiveItemPerson`` canonical names,
+    aliases, and family names apply to every item type and do not depend on
+    photo renderability.
     """
     if archive_item.pk is None:
         raise ValueError("archive_item must be saved before building search content")
