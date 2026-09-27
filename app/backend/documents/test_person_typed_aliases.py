@@ -53,6 +53,9 @@ class PersonAliasTypedModelTests(TestCase):
                 "spelling_variant",
                 "ocr_variant",
                 "partial_name",
+                "transliteration",
+                "honorific_or_title",
+                "birth_name",
                 "other",
             },
         )
@@ -75,10 +78,7 @@ class PersonAliasTypedMigrationTests(TestCase):
         )
         self.assertEqual(len(Migration.operations), 3)
 
-        fields = {
-            operation.name: operation.field
-            for operation in Migration.operations
-        }
+        fields = {operation.name: operation.field for operation in Migration.operations}
 
         self.assertEqual(set(fields), {"kind", "language", "display_publicly"})
         self.assertEqual(fields["kind"].default, "unspecified")
@@ -91,8 +91,7 @@ class PersonAliasTypedServiceTests(TestCase):
         person = Person.objects.create(name="אלי כהן")
 
         with patch(
-            "documents.services.photo_content_management."
-            "_sync_person_search_indexes"
+            "documents.services.photo_content_management._sync_person_search_indexes"
         ):
             alias = create_person_alias(
                 person,
@@ -111,8 +110,7 @@ class PersonAliasTypedServiceTests(TestCase):
         person = Person.objects.create(name="אלי כהן")
 
         with patch(
-            "documents.services.photo_content_management."
-            "_sync_person_search_indexes"
+            "documents.services.photo_content_management._sync_person_search_indexes"
         ):
             alias = create_person_alias(person, name="Eli Cohen")
 
@@ -158,8 +156,7 @@ class PersonAliasTypedServiceTests(TestCase):
         )
 
         with patch(
-            "documents.services.photo_content_management."
-            "_sync_person_search_indexes"
+            "documents.services.photo_content_management._sync_person_search_indexes"
         ):
             update_person_alias(alias, name="Eli Kohn")
 
@@ -177,8 +174,7 @@ class PersonAliasTypedServiceTests(TestCase):
         )
 
         with patch(
-            "documents.services.photo_content_management."
-            "_sync_person_search_indexes"
+            "documents.services.photo_content_management._sync_person_search_indexes"
         ) as sync:
             update_person_alias(
                 alias,
@@ -207,8 +203,7 @@ class PersonAliasStaffSortTests(TestCase):
             "إيلي كوهين",
         ]
         aliases = [
-            PersonAlias.objects.create(person=person, name=name)
-            for name in names
+            PersonAlias.objects.create(person=person, name=name) for name in names
         ]
 
         ordered = sorted(aliases, key=_person_alias_staff_sort_key)
@@ -242,8 +237,7 @@ class PersonAliasStaffTypedUITests(TestCase):
 
     def test_add_alias_saves_type_language_and_public_flag(self):
         with patch(
-            "documents.services.photo_content_management."
-            "_sync_person_search_indexes"
+            "documents.services.photo_content_management._sync_person_search_indexes"
         ):
             response = self.client.post(
                 self.person_url,
@@ -274,8 +268,7 @@ class PersonAliasStaffTypedUITests(TestCase):
         )
 
         with patch(
-            "documents.services.photo_content_management."
-            "_sync_person_search_indexes"
+            "documents.services.photo_content_management._sync_person_search_indexes"
         ) as sync:
             response = self.client.post(
                 url,
@@ -365,9 +358,8 @@ class PersonAliasPublicProfileTests(TestCase):
             display_publicly=False,
         )
 
-        person = (
-            Person.objects.prefetch_related(public_person_aliases_prefetch())
-            .get(pk=self.person.pk)
+        person = Person.objects.prefetch_related(public_person_aliases_prefetch()).get(
+            pk=self.person.pk
         )
 
         self.assertEqual(
