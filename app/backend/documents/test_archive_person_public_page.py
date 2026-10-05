@@ -412,12 +412,27 @@ class PersonPublicPageAuthorizedTests(TestCase):
         self.assertNotContains(resp, "עריכת אדם")
         self.assertNotContains(resp, "עריכת הפרטים")
 
-    def test_biography_does_not_open_inaccessible_person_pages(self):
+    def test_whitespace_only_biography_without_holdings_is_404(self):
+        person = Person.objects.create(
+            name="Whitespace Bio Person",
+            biography="  \n\t  ",
+        )
+        self.assertEqual(self.client.get(_person_page(person)).status_code, 404)
+
+    def test_meaningful_biography_opens_page_without_exposing_private_holdings(self):
         unlinked = Person.objects.create(
             name="Unlinked Bio Person",
-            biography="UnlinkedBioToken",
+            biography="UnlinkedBioToken\nsecond line",
         )
-        self.assertEqual(self.client.get(_person_page(unlinked)).status_code, 404)
+        unlinked_resp = self.client.get(_person_page(unlinked))
+        self.assertEqual(unlinked_resp.status_code, 200)
+        self.assertContains(unlinked_resp, "UnlinkedBioToken<br>second line", html=True)
+        self.assertEqual(unlinked_resp.context["related_count"], 0)
+        self.assertEqual(unlinked_resp.context["authored_count"], 0)
+        self.assertEqual(unlinked_resp.context["related_browse_cards"], [])
+        self.assertEqual(unlinked_resp.context["authored_browse_cards"], [])
+        self.assertNotContains(unlinked_resp, "פריטים קשורים")
+        self.assertNotContains(unlinked_resp, "מסמכים שחיבר")
 
         appearance = Person.objects.create(
             name="Appearance Bio Person",
@@ -437,7 +452,66 @@ class PersonPublicPageAuthorizedTests(TestCase):
             biography="PrivateBioToken",
         )
         _link(_private_manual("Hidden private letter"), private_only)
-        self.assertEqual(self.client.get(_person_page(private_only)).status_code, 404)
+        _link(_restricted_manual("Hidden restricted letter"), private_only)
+        private_resp = self.client.get(_person_page(private_only))
+        self.assertEqual(private_resp.status_code, 200)
+        self.assertContains(private_resp, "PrivateBioToken")
+        self.assertEqual(private_resp.context["related_count"], 0)
+        self.assertEqual(private_resp.context["authored_count"], 0)
+        self.assertEqual(private_resp.context["related_browse_cards"], [])
+        self.assertNotContains(private_resp, "Hidden private letter")
+        self.assertNotContains(private_resp, "Hidden restricted letter")
+        self.assertNotContains(private_resp, "פריטים קשורים")
+
+    def test_biography_does_not_authorize_inaccessible_source_return(self):
+        person = Person.objects.create(
+            name="Bio Source Person",
+            biography="Source bio stays public",
+        )
+        private = _private_manual("Hidden source letter")
+        _link(private, person)
+        unrelated = _public_manual("Unrelated public letter")
+        photo_item = _create_photo_item(
+            title="Hidden photo album",
+            visibility=ArchiveItem.Visibility.PRIVATE,
+        )
+        photo = _add_photo(photo_item)
+        PhotoPerson.objects.create(photo_content=photo, person=person)
+
+        private_item = self.client.get(
+            _person_page(person),
+            {PERSON_PUBLIC_FROM_ITEM_QUERY: str(private.id)},
+        )
+        self.assertEqual(private_item.status_code, 200)
+        self.assertIsNone(private_item.context["person_source_return_url"])
+        self.assertNotContains(private_item, "חזרה לפריט")
+        self.assertNotContains(private_item, "Hidden source letter")
+        self.assertNotContains(
+            private_item,
+            reverse("archive-detail", kwargs={"item_id": private.id}),
+        )
+
+        unrelated_item = self.client.get(
+            _person_page(person),
+            {PERSON_PUBLIC_FROM_ITEM_QUERY: str(unrelated.id)},
+        )
+        self.assertEqual(unrelated_item.status_code, 200)
+        self.assertIsNone(unrelated_item.context["person_source_return_url"])
+        self.assertNotContains(unrelated_item, "Unrelated public letter")
+
+        private_photo = self.client.get(
+            _person_page(person),
+            {
+                PERSON_PUBLIC_FROM_ITEM_QUERY: str(photo_item.id),
+                PERSON_PUBLIC_FROM_PHOTO_QUERY: str(photo.id),
+            },
+        )
+        self.assertEqual(private_photo.status_code, 200)
+        self.assertIsNone(private_photo.context["person_source_return_url"])
+        self.assertNotContains(private_photo, "Hidden photo album")
+        self.assertNotContains(
+            private_photo, public_photo_detail_url(photo_item.id, photo.id)
+        )
 
     def test_duplicate_names_use_distinct_id_urls(self):
         first = Person.objects.create(name="Same Name")
@@ -991,12 +1065,8 @@ class PersonPublicPagePaginationTests(TestCase):
         self.assertEqual(len(page2.context["related_browse_cards"]), 1)
         self.assertEqual(len(page2.context["authored_browse_cards"]), 1)
 
-        page1_ids = {
-            card.item.pk for card in page1.context["authored_browse_cards"]
-        }
-        page2_ids = {
-            card.item.pk for card in page2.context["authored_browse_cards"]
-        }
+        page1_ids = {card.item.pk for card in page1.context["authored_browse_cards"]}
+        page2_ids = {card.item.pk for card in page2.context["authored_browse_cards"]}
         self.assertEqual(
             page1_ids | page2_ids,
             {item.pk for item in authored_items},

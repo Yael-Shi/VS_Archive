@@ -1,7 +1,8 @@
 """Public Person catalog and unified Person-detail ArchiveItem relations.
 
-Directory membership is AIP, renderable PhotoPerson, or an explicitly linked
-Author with public ArchiveItemAuthor membership. Name equality is not identity.
+Public identity eligibility is unified holdings membership or a biography
+with at least one non-whitespace character. Holdings querysets stay
+membership-only. Name equality is not identity.
 """
 
 from __future__ import annotations
@@ -116,11 +117,32 @@ def person_linked_author_membership_q_for_item_pks(item_pks: QuerySet) -> Exists
 
 
 def person_unified_public_membership_q(user) -> Combinable:
-    """Directory/detail membership: AIP, renderable PhotoPerson, or linked Author AIA."""
+    """Holdings membership: AIP, renderable PhotoPerson, or linked Author AIA.
+
+    This does not include biography. Public identity eligibility is
+    ``person_public_identity_eligibility_q``.
+    """
     item_pks = authorized_browse_item_pks(user)
     return person_public_membership_q_for_item_pks(
         item_pks
     ) | person_linked_author_membership_q_for_item_pks(item_pks)
+
+
+def person_meaningful_biography_q() -> Q:
+    """``Person.biography`` contains at least one non-whitespace character.
+
+    Placeholder words are not special. Whitespace-only text does not match.
+    """
+    return Q(biography__regex=r"\S")
+
+
+def person_public_identity_eligibility_q(user) -> Q:
+    """Public Person identity: holdings membership or meaningful biography.
+
+    Biography does not create or broaden holdings. ArchiveItem lists stay on
+    the holdings querysets.
+    """
+    return person_unified_public_membership_q(user) | person_meaningful_biography_q()
 
 
 def _person_linked_author_name_icontains_q(user, search_query: str) -> Exists | None:
@@ -142,13 +164,16 @@ def _person_linked_author_name_icontains_q(user, search_query: str) -> Exists | 
 
 
 def public_people_queryset(user, *, search_query: str = "") -> QuerySet[Person]:
-    """Public People-directory Person identities: unified membership and search.
+    """Public People-directory Person identities: eligibility and search.
 
-    Search is canonical name, alias, or an explicitly linked ``Author.name``
-    that itself has authorized+browse-renderable ``ArchiveItemAuthor``
-    membership. Name equality with an unlinked Author is not identity.
+    Eligibility is ``person_public_identity_eligibility_q``: unified holdings
+    membership or a biography with non-whitespace text. Search is canonical
+    name, alias, family name, or an explicitly linked ``Author.name`` that
+    itself has authorized+browse-renderable ``ArchiveItemAuthor`` membership.
+    Name equality with an unlinked Author is not identity. Biography text is
+    not a search field and does not add holdings.
     """
-    people = Person.objects.filter(person_unified_public_membership_q(user)).order_by(
+    people = Person.objects.filter(person_public_identity_eligibility_q(user)).order_by(
         "name", "id"
     )
     search_q = person_identity_icontains_q(search_query)
