@@ -6,6 +6,7 @@ from django.conf import settings
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVectorField
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator, RegexValidator
 from django.db import models, transaction
 
 
@@ -773,6 +774,118 @@ class ReviewedNonPersonEntityDecision(models.Model):
             "ReviewedNonPersonEntityDecision("
             f"source={self.source!r}, candidate_id={self.candidate_id!r}, "
             f"decision={self.decision})"
+        )
+
+
+class ArchiveItemEntityOccurrence(models.Model):
+    """One reviewed mention of a normalized surface in an item's displayed text.
+
+    This is a text pin, not a global alias, search row, or generic item-to-entity
+    relation. Deleting the archive item cascades the pin because the pin is a
+    location in that item. Deleting the entity or the review decision is
+    protected so a stored pin cannot be dropped with them.
+    """
+
+    class TextKind(models.TextChoices):
+        MANUAL_TEXT = "MANUAL_TEXT", "MANUAL_TEXT"
+        OCR_TRANSCRIPTION = "OCR_TRANSCRIPTION", "OCR_TRANSCRIPTION"
+
+    class ResolutionStatus(models.TextChoices):
+        RESOLVED = "RESOLVED", "RESOLVED"
+        UNRESOLVED = "UNRESOLVED", "UNRESOLVED"
+
+    archive_item = models.ForeignKey(
+        ArchiveItem,
+        on_delete=models.CASCADE,
+        related_name="entity_occurrences",
+    )
+    text_kind = models.CharField(max_length=32, choices=TextKind.choices)
+    source_text_sha256 = models.CharField(
+        max_length=64,
+        validators=[RegexValidator(r"^[0-9a-f]{64}$")],
+    )
+    normalization_version = models.CharField(
+        max_length=32,
+        default="surface-v1",
+    )
+    normalized_surface = models.CharField(max_length=255)
+    occurrence_ordinal = models.PositiveIntegerField(
+        validators=[MinValueValidator(1)],
+    )
+    resolution_status = models.CharField(
+        max_length=16,
+        choices=ResolutionStatus.choices,
+    )
+    entity = models.ForeignKey(
+        NonPersonEntity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="archive_item_occurrences",
+    )
+    decision = models.ForeignKey(
+        ReviewedNonPersonEntityDecision,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="archive_item_occurrences",
+    )
+    matched_text = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "archive_item",
+                    "text_kind",
+                    "source_text_sha256",
+                    "normalization_version",
+                    "normalized_surface",
+                    "occurrence_ordinal",
+                ],
+                name="uniq_archive_item_entity_occurrence_identity",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        resolution_status="RESOLVED",
+                        entity__isnull=False,
+                    )
+                    | models.Q(
+                        resolution_status="UNRESOLVED",
+                        entity__isnull=True,
+                    )
+                ),
+                name="archive_item_entity_occurrence_resolution_entity",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(occurrence_ordinal__gte=1),
+                name="archive_item_entity_occurrence_ordinal_gte_1",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        resolved = self.resolution_status == self.ResolutionStatus.RESOLVED
+        unresolved = self.resolution_status == self.ResolutionStatus.UNRESOLVED
+        has_entity = self.entity_id is not None
+        if resolved and not has_entity:
+            raise ValidationError(
+                {"entity": "A RESOLVED occurrence requires an entity."}
+            )
+        if unresolved and has_entity:
+            raise ValidationError(
+                {"entity": "An UNRESOLVED occurrence cannot reference an entity."}
+            )
+
+    def __str__(self) -> str:
+        return (
+            "ArchiveItemEntityOccurrence("
+            f"archive_item_id={self.archive_item_id}, "
+            f"normalized_surface={self.normalized_surface!r}, "
+            f"occurrence_ordinal={self.occurrence_ordinal})"
         )
 
 
