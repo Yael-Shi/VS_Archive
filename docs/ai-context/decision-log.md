@@ -8196,4 +8196,26 @@ Production public-view verification confirmed that the cleaned/linked identities
 
 A workbook with any other SHA is rejected. Aliases and split routes are read only from those structured sheets. `final_notes` and routing notes are not parsed. Candidate identity is the candidate id. Canonical names are compared only after the id resolves. `EC0025` `NEEDS_RESEARCH` is a valid final state and is not an apply blocker. `EC0009` requires exactly 4 `FINAL_SPLIT_ROUTING` rows and `EC0045` exactly 2. Any other distribution fails even when the total is 6. On `ALIAS_REVIEW_REQUIRED`, only the exact closed status sentence is ignored; every other non-empty row is unresolved. Workbook duplicate occurrence checks normalize surfaces with the existing surface-v1 contract: NFC, strip bidi marks, casefold, trim, collapse internal whitespace. Punctuation and Hebrew prefixes stay.
 
-**Deferred:** database apply, dry-run classification, entity/alias/occurrence writes, and checking pinned source-text hashes against a live database. This command performs no database writes.
+**Deferred:** database apply, entity/alias/occurrence writes, and checking pinned source-text hashes against a live database. Dry-run classification is implemented by the following entry. This preflight command performs no database writes.
+
+## Non-person entity review dry-run phase 3A (2026-10-05)
+
+**Decision:** Phase 3A classifies the validated v6 workbook against the current database and, for SPLIT routes, the authoritative displayed source text. It is read-only. Apply is not implemented and must not be inferred from a READY_TO_APPLY row.
+
+**Current behavior:** `non_person_entity_review_dry_run --workbook` calls the existing v6 preflight parser and its fixed SHA-256 gate. If that validation fails, the command stops before candidate classification. A passing preflight is then classified per candidate as `READY_TO_APPLY`, `ALREADY_APPLIED`, `STATE_DRIFT`, or `BLOCKED`.
+
+Decision identity is `(source, candidate_id)` with source `vs_archive_non_person_final_recon_2026_10_05`. The planner does not resolve an entity by `canonical_name`. An existing same-name `NonPersonEntity` is not reused. Only a matching reviewed decision can establish that a candidate is already applied. Two distinct APPROVE decisions for this source that share one `result_entity` are `STATE_DRIFT`. A MERGE decision may share that entity with its APPROVE target. Identical `canonical_name` on two separate entities is not sharing.
+
+Planned APPROVE entity fields come from the structured workbook columns: `canonical_name` is `final_canonical`, `entity_type` and `entity_subtype` are the reviewed values, and `display_name` is blank because v6 has no parser-approved display name. `contextual_surfaces` stores the raw surface cell and `note` stores `final_notes` verbatim. Notes are not parsed into aliases or routes.
+
+**Dependency semantics:** APPROVE, SKIP, and NEEDS_RESEARCH do not depend on other candidates. MERGE resolves its target only by `merge_target` candidate id, which the workbook requires to be APPROVE. SPLIT resolves each route target the same way. If this candidate has no persisted conflict and a required target is `BLOCKED` or `STATE_DRIFT`, this candidate is `BLOCKED`. If this candidate already has a persisted decision that does not match the plan, including a MERGE `result_entity` that is not the target decision's entity, it is `STATE_DRIFT`. A MERGE or SPLIT with no decision yet may be `READY_TO_APPLY` when every target is `READY_TO_APPLY` or `ALREADY_APPLIED`. `ALREADY_APPLIED` for MERGE or SPLIT additionally requires the target decision to already be `ALREADY_APPLIED` and the stored entity ids to match. `STATE_DRIFT` is never repaired.
+
+SKIP and NEEDS_RESEARCH keep `result_entity` null. NEEDS_RESEARCH must stay `UNRESOLVED`. SPLIT keeps `result_entity` null; the route targets live on occurrence rows. No global alias is inferred for a SPLIT surface such as `Palestine` or `ministère de la propagande`.
+
+**Alias comparison:** `NonPersonEntityAlias` is unique on `(entity, name)` and has no source column. An already-applied entity drifts when a planned alias name is missing or the stored kind differs. Extra aliases on that entity are not drift and are not planned for deletion.
+
+**Source text:** MANUAL_TEXT uses `ManualTextContent.body`. OCR_TRANSCRIPTION uses `resolve_displayed_transcription_result(item.ocr_document).text`. The SHA-256 is the exact UTF-8 text before surface-v1 normalization. A hash mismatch on a pinned route is `STATE_DRIFT` for that SPLIT candidate. Missing items, unsupported item types, unavailable text, and surface counts that are not exactly the reviewed set (including extra unreviewed occurrences) are `BLOCKED`. Expected counts are grouped from `FINAL_SPLIT_ROUTING` by item, text kind, source hash, normalization version, and normalized surface.
+
+**matched_text:** surface-v1 offsets are not treated as original offsets. The plan stores an original slice only when the source is already NFC and a linear span map round-trips through surface-v1. Source text that is not already NFC does not get a derived slice. If that slice cannot be recovered safely, the SPLIT candidate is `BLOCKED`. Occurrence counting still uses `normalize_surface_v1`.
+
+**Deferred:** creating or updating `NonPersonEntity`, `NonPersonEntityAlias`, `ReviewedNonPersonEntityDecision`, and `ArchiveItemEntityOccurrence`; search-index writes; any confirm/apply flag. Phase 3A has no write transaction because it has no writes.
