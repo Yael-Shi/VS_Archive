@@ -11,17 +11,17 @@ from documents.services.non_person_entity_review_preflight import (
 
 class Command(BaseCommand):
     help = (
-        "Read-only preflight of the v3 non-person entity review workbook. "
-        "Verifies the fixed SHA-256, parses FINAL_RECON_2026-10-04, and "
-        "prints parser counts plus future apply blockers. "
-        "This command performs no database writes."
+        "Read-only preflight of the v6 non-person entity review workbook. "
+        "Verifies the fixed SHA-256, parses FINAL_RECON_2026-10-04, "
+        "FINAL_ALIASES, ALIAS_REVIEW_REQUIRED, and FINAL_SPLIT_ROUTING, "
+        "and prints parser counts. This command performs no database writes."
     )
 
     def add_arguments(self, parser):
         parser.add_argument(
             "--workbook",
             required=True,
-            help="Path to the authoritative v3 xlsx workbook.",
+            help="Path to the authoritative v6 xlsx workbook.",
         )
 
     def handle(self, *args, **options):
