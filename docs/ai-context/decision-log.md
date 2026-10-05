@@ -8182,3 +8182,18 @@ Production public-view verification confirmed that the cleaned/linked identities
 **UI:** Dedicated warning explains that current text was human-edited after a prior Transkribus binding and that replacement installs the new Transkribus version over that edit.
 
 **Validation:** `documents/test_transkribus_corrected_current_activation.py` and `documents/test_corrected_current_sync_staff_activation.py`: 81 tests passed. Ruff check on changed Python files and `git diff --check` passed. `ruff format --check` passes on the changed service/test modules; `views.py` retains pre-existing `archive_manage_person_alias_edit_page` formatting from HEAD (intentionally not reformatted).
+
+## Non-person entity review preflight v6 (2026-10-05)
+
+**Decision:** The read-only non-person review preflight now treats workbook v6 as the only authoritative contract. The previous v3 SHA gate and v3-only apply blockers are retired. Apply is still not implemented.
+
+**Current behavior:** `non_person_entity_review_preflight` checks SHA-256 `c17a5d52ad531ca144ce113cab5abbdd252f752d62c765451769705ee536f948`, then parses only:
+
+- `FINAL_RECON_2026-10-04` — 109 decision rows: APPROVE 70, MERGE 28, SKIP 8, SPLIT 2, NEEDS_RESEARCH 1
+- `FINAL_ALIASES` — 63 approved alias rows
+- `ALIAS_REVIEW_REQUIRED` — closed; the status sentence is not a candidate; unresolved alias reviews are 0
+- `FINAL_SPLIT_ROUTING` — 6 pinned routes
+
+A workbook with any other SHA is rejected. Aliases and split routes are read only from those structured sheets. `final_notes` and routing notes are not parsed. Candidate identity is the candidate id. Canonical names are compared only after the id resolves. `EC0025` `NEEDS_RESEARCH` is a valid final state and is not an apply blocker. `EC0009` requires exactly 4 `FINAL_SPLIT_ROUTING` rows and `EC0045` exactly 2. Any other distribution fails even when the total is 6. On `ALIAS_REVIEW_REQUIRED`, only the exact closed status sentence is ignored; every other non-empty row is unresolved. Workbook duplicate occurrence checks normalize surfaces with the existing surface-v1 contract: NFC, strip bidi marks, casefold, trim, collapse internal whitespace. Punctuation and Hebrew prefixes stay.
+
+**Deferred:** database apply, dry-run classification, entity/alias/occurrence writes, and checking pinned source-text hashes against a live database. This command performs no database writes.
