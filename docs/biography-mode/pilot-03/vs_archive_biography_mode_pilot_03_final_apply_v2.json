@@ -1,0 +1,2802 @@
+{
+  "schema_version": "vs-archive-biography-mode-pilot-03-final-apply-v2",
+  "generated_at": "2026-10-05T14:51:05.933598+03:00",
+  "package_status": "READY_FOR_PRODUCTION_PREFLIGHT_RECHECK",
+  "source_authority": {
+    "v1_final_apply": {
+      "path": "outputs/biography_mode/pilot_03_final_apply/vs_archive_biography_mode_pilot_03_final_apply_v1.json",
+      "sha256": "ecdc441b53afc366d74f23a7e9b12288c1fe8fe759cd87164408017c50e4dfad"
+    },
+    "v1_validation": {
+      "path": "audit/biography_mode/pilot_03_final_apply/vs_archive_biography_mode_pilot_03_final_apply_validation_v1.json",
+      "sha256": "e64ff21670802839e42543d094e8126da7ce7b7d336139306c7edeceeaf51895"
+    },
+    "production_preflight_facts": {
+      "source": "User-supplied results of a manually executed read-only production preflight",
+      "initial_counts": {
+        "target_count": 100,
+        "safe_write_empty": 89,
+        "safe_no_change": 0,
+        "intentional_blank": 7,
+        "conflict_existing_different": 1,
+        "missing_person": 0,
+        "identity_mismatch": 3,
+        "special_identity_failures": 0,
+        "blocking_failure_count": 4,
+        "ready_for_backup": false
+      },
+      "resolved_spec_omissions": [
+        168,
+        169,
+        221
+      ],
+      "resolved_existing_biography_preservation": [
+        85
+      ]
+    }
+  },
+  "production_identity_apply_completed": true,
+  "production_preflight_completed": false,
+  "production_backup_completed": false,
+  "production_biography_apply_completed": false,
+  "target_count": 100,
+  "nonempty_approved_biography_count": 93,
+  "intentional_blank_count": 7,
+  "targets": [
+    {
+      "final_person_id": 44,
+      "canonical_name": "דוד בן גוריון",
+      "stable_key": "N:B01-N0124",
+      "stable_keys": [
+        "N:B01-N0124"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 61,
+        "person_id": 44,
+        "stable_key": "N:B01-N0124",
+        "canonical": "דוד בן גוריון",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "דוד בן־גוריון (1886–1973) היה מן המנהיגים המרכזיים של התנועה הציונית והיישוב היהודי בארץ ישראל, יושב ראש הנהלת הסוכנות היהודית ומכריז הקמת מדינת ישראל. הוא כיהן כראש הממשלה הראשון של ישראל וכשר הביטחון. בארכיון נזכר בן־גוריון בהקשר למגעים מדיניים סביב עמדת הליגה הערבית בשאלת ארץ ישראל.",
+      "biography_text_sha256": "d48adb2cb5452c378a1538b0097c57c0f7b762567001518e43992be2bd16ce77",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 45,
+      "canonical_name": "משה שרת",
+      "stable_key": "N:B02-N0016",
+      "stable_keys": [
+        "N:B02-N0016"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 80,
+        "person_id": 45,
+        "stable_key": "N:B02-N0016",
+        "canonical": "משה שרת",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "משה שרת (1894–1965), שנודע עד 1949 בשם משה שרתוק, היה מדינאי ומנהיג ציוני, מראשי המערך המדיני של היישוב ומי שעמד במשך שנים בראש המחלקה המדינית של הסוכנות היהודית. עם הקמת מדינת ישראל היה לשר החוץ הראשון שלה. בשנים 1954–1955 כיהן כראש הממשלה השני. בתקופת כהונתו נחשפה במצרים רשת המודיעין והחבלה הישראלית שנודעה לימים כ'עסק הביש' או פרשת לבון. הפרשה עוררה משבר פוליטי וביטחוני בישראל והחריפה את המחלוקת בין שרת, שר הביטחון פנחס לבון וראשי מערכת הביטחון. הארכיון כולל חומר רב הנוגע לשרת ולהשלכות העסק הביש על יהודי מצרים ועל היחסים בין ישראל למצרים.",
+      "biography_text_sha256": "0d362146e319bdad545bc017e25a5b03598b039b795fd1a0049421c9562c1303",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 85,
+      "canonical_name": "חסן אל־בנא",
+      "stable_key": "N:B01-N0023",
+      "stable_keys": [
+        "N:B01-N0023",
+        "N:B02-N0026"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 90,
+        "person_id": 213,
+        "stable_key": "N:B02-N0026",
+        "canonical": "חסן אלבנה",
+        "identity_action": "MERGE"
+      },
+      "human_review_decision": "DEFER_TO_MERGE_SURVIVOR",
+      "approved_biography_text": "חסן אל־בנא (1906–1949) היה איש דת, מורה ופעיל פוליטי מצרי, ומייסד תנועת האחים המוסלמים. הוא הקים את התנועה באסמאעיליה ב־1928, והיא התרחבה בשנות השלושים והארבעים והפכה לאחד הארגונים הפוליטיים־דתיים הבולטים במצרים. אל־בנא קרא לחיזוק מקומו של האסלאם בחברה ובמדינה ופעל נגד ההשפעה הבריטית במצרים. בשנות הארבעים היו האחים המוסלמים מעורבים גם במאבק סביב ארץ ישראל, וב־1948 השתתפו מתנדבים מטעמם בלחימה. במקורות שבארכיון מתואר שמו בהקשר של גיוס כספים ושל הלחץ שהפעילו אנשי האחים המוסלמים גם על יהודי מצרים. לאחר שהממשלה המצרית הוציאה את האחים המוסלמים אל מחוץ לחוק בסוף 1948, נרצח אל־בנא בקהיר בפברואר 1949.",
+      "biography_text_sha256": "837114e444266d075d783d00c1a1601f07adc4c89c82a97aa0463b86e2da80bd",
+      "intentional_blank": false,
+      "planned_apply_action": "NO_CHANGE_EXPECTED",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY_ON_MERGE_SURVIVOR",
+        "identity_remap": {
+          "absorbed_person_id": 213,
+          "survivor_person_id": 85
+        },
+        "production_identity_apply_completed": true
+      },
+      "biography_resolution_provenance": {
+        "resolution": "KEEP_EXISTING_APPROVED_BIOGRAPHY",
+        "reason": "Existing survivor biography was intentionally preserved during identity merge and is the selected final biography; Pilot 03 must not overwrite it.",
+        "existing_final_production_biography": "חסן אל־בנא (1906–1949) היה איש דת, מורה ופעיל פוליטי מצרי, ומייסד תנועת האחים המוסלמים. הוא הקים את התנועה באסמאעיליה ב־1928, והיא התרחבה בשנות השלושים והארבעים והפכה לאחד הארגונים הפוליטיים־דתיים הבולטים במצרים. אל־בנא קרא לחיזוק מקומו של האסלאם בחברה ובמדינה ופעל נגד ההשפעה הבריטית במצרים. בשנות הארבעים היו האחים המוסלמים מעורבים גם במאבק סביב ארץ ישראל, וב־1948 השתתפו מתנדבים מטעמם בלחימה. במקורות שבארכיון מתואר שמו בהקשר של גיוס כספים ושל הלחץ שהפעילו אנשי האחים המוסלמים גם על יהודי מצרים. לאחר שהממשלה המצרית הוציאה את האחים המוסלמים אל מחוץ לחוק בסוף 1948, נרצח אל־בנא בקהיר בפברואר 1949.",
+        "existing_final_production_biography_sha256": "837114e444266d075d783d00c1a1601f07adc4c89c82a97aa0463b86e2da80bd",
+        "existing_final_production_biography_length": 599,
+        "pilot_03_alternative_biography": "חסן אל־בנא (1906–1949) היה מייסד ומנהיגה הראשון של תנועת האחים המוסלמים במצרים, שהקים באסמאעיליה בשנת 1928. בהנהגתו התפתחה התנועה מארגון מקומי לרשת ארצית גדולה בעלת פעילות דתית, חברתית ופוליטית. לאחר רצח ראש הממשלה אחמד מאהר ב־1945 נעצר אל־בנא יחד עם אנשי האחים המוסלמים ושוחרר בהמשך. בסוף 1948 הוצאה התנועה מחוץ לחוק, ובפברואר 1949 נרצח אל־בנא בקהיר.",
+        "pilot_03_alternative_biography_sha256": "9a27d71d992d8227c7e6ab0e56eabaa88f5bdcc21120d85d673f21d79f90f1f5",
+        "pilot_03_alternative_disposition": "AUDIT_PROVENANCE_ONLY_DO_NOT_WRITE"
+      }
+    },
+    {
+      "final_person_id": 124,
+      "canonical_name": "נסים מוסרי",
+      "stable_key": "N:B01-N0062",
+      "stable_keys": [
+        "N:B01-N0062"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 1,
+        "person_id": 124,
+        "stable_key": "N:B01-N0062",
+        "canonical": "נסים מוסרי",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "נסים מוסרי היה בן למשפחת מוסרי, ממשפחות הבנקאים היהודיות הבולטות במצרים. המקורות מתעדים את הופעתו בסביבות 1750 כראשיתה של שושלת בנקאים שממנה צמח בהמשך בית הבנקאות J. Mosseri & Fils, שהיה מעורב בהתפתחות הפיננסית והכלכלית של מצרים.",
+      "biography_text_sha256": "3ffa71f73b1d6284eed74d80df384cac6e153f1dcd3a200b4d1c1c2a72a9c0c4",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 125,
+      "canonical_name": "נסים יוסף מוסרי",
+      "stable_key": "N:B01-N0063",
+      "stable_keys": [
+        "N:B01-N0063"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 2,
+        "person_id": 125,
+        "stable_key": "N:B01-N0063",
+        "canonical": "נסים יוסף מוסרי",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "נסים יוסף מוסרי היה משפטן יהודי־מצרי וכיהן כנשיא בית הדין המעורב למסחר בקהיר. בנו, יוסף מוסרי, המשיך אף הוא בקריירה משפטית ומונה לשופט באותו בית דין.",
+      "biography_text_sha256": "6cc711e1b9fbe283e4b98914e248b41dbdcf13a8a275e5a4b107545bb8d82efe",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 126,
+      "canonical_name": "יוסף מוסרי",
+      "stable_key": "N:B01-N0064",
+      "stable_keys": [
+        "N:B01-N0064"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 3,
+        "person_id": 126,
+        "stable_key": "N:B01-N0064",
+        "canonical": "יוסף מוסרי",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "יוסף מוסרי היה משפטן יהודי־מצרי, בנו של נסים יוסף מוסרי. הוא מונה לשופט בבית הדין המעורב למסחר בקהיר, שבו כיהן אביו כנשיא.",
+      "biography_text_sha256": "d9218ddeb90ae8e24c0f26bf329ba021fd6261424e3dd9168fd2e1d6f4d1be75",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 127,
+      "canonical_name": "ויקטור משה מוסרי",
+      "stable_key": "N:B01-N0065",
+      "stable_keys": [
+        "N:B01-N0065"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 4,
+        "person_id": 127,
+        "stable_key": "N:B01-N0065",
+        "canonical": "ויקטור משה מוסרי",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "ויקטור משה מוסרי היה אגרונום וחוקר חקלאות יהודי־מצרי, שהתמחה במיוחד בגידול ובשיפור הכותנה. הוא מילא תפקיד בכיר בתחום המחקר האגרונומי במצרים והיה מעורב בארגון המחקר החקלאי ובפיתוח זני כותנה. מקור הארכיון מציין כי ממשלת מצרים מינתה אותו למנהל לשכת האגרונומים וכי תרם לפיתוח חקלאות הכותנה במדינה.",
+      "biography_text_sha256": "c99a413a334e1dbe1704c00848e955b691e0b092599de7681ad2da5380e197a7",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 128,
+      "canonical_name": "אלי נסים מוסרי",
+      "stable_key": "N:B01-N0066",
+      "stable_keys": [
+        "N:B01-N0066"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 5,
+        "person_id": 128,
+        "stable_key": "N:B01-N0066",
+        "canonical": "אלי נסים מוסרי",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "אלי נסים מוסרי (1879–1940) היה בנקאי, איש עסקים ומנהיג קהילה יהודי־מצרי. הוא נולד בקהיר, למד במצרים ובאנגליה ולאחר שובו השתלב בבית הבנקאות המשפחתי. הוא כיהן כסגן נשיא הקהילה היהודית בקהיר, היה חבר בגופים כלכליים מרכזיים ושימש דירקטור בחברות פיננסיות ותעשייתיות רבות.",
+      "biography_text_sha256": "30fa4c2c173751ce0d0d42f3e1ea6350c6425bb6f6368e8e293d2b341cbb7e7c",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 129,
+      "canonical_name": "ראובן רולו",
+      "stable_key": "N:B01-N0067",
+      "stable_keys": [
+        "N:B01-N0067"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 6,
+        "person_id": 129,
+        "stable_key": "N:B01-N0067",
+        "canonical": "ראובן רולו",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "ראובן רולו, יליד 1820, היה איש עסקים יהודי ממשפחת רולו, מן המשפחות הספרדיות הבולטות של אלכסנדריה במאה ה־19. יחד עם בניו סימון וג'אקומו ועם משפחות סוארס וקטאווי היה מעורב במיזמים כלכליים מרכזיים במצרים, ובהם מסילת הרכבת לחלואן ובפעילויות פיננסיות וחקלאיות שונות.",
+      "biography_text_sha256": "1e8f808ee5a4be0a1cf8800808f3e5ad94305f30f4f401a9075211420bbff9df",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 130,
+      "canonical_name": "סימון רולו",
+      "stable_key": "N:B01-N0068",
+      "stable_keys": [
+        "N:B01-N0068"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 7,
+        "person_id": 130,
+        "stable_key": "N:B01-N0068",
+        "canonical": "סימון רולו",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "סימון רולו היה איש עסקים יהודי־מצרי, בנו של ראובן רולו ונציג של משפחת רולו מאלכסנדריה. יחד עם אביו ואחיו ג'אקומו היה מעורב במיזמים משותפים עם משפחות סוארס וקטאווי, ובהם מסילת הרכבת לחלואן ויוזמות פיננסיות וכלכליות נוספות.",
+      "biography_text_sha256": "ff77f2d4f8a0839171c7f3690637dbf806c81b8e89b9962f40ab13499551c0df",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 131,
+      "canonical_name": "ג'אקומו רולו",
+      "stable_key": "N:B01-N0069",
+      "stable_keys": [
+        "N:B01-N0069"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 8,
+        "person_id": 131,
+        "stable_key": "N:B01-N0069",
+        "canonical": "ג'אקומו רולו",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "ג'אקומו רולו (1847–1917) היה איש עסקים יהודי־מצרי, בנו של ראובן רולו ונציג של משפחת רולו מאלכסנדריה. יחד עם אביו ואחיו סימון השתתף במיזמים כלכליים עם משפחות סוארס וקטאווי, ובהם מסילת הרכבת לחלואן ויוזמות פיננסיות וחקלאיות שונות.",
+      "biography_text_sha256": "7be12d09f295d14885b671d777d899b00fdb02c74e91690166d4c033c1939ee9",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 132,
+      "canonical_name": "רוברט סימון רולו",
+      "stable_key": "N:B01-N0070",
+      "stable_keys": [
+        "N:B01-N0070"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 9,
+        "person_id": 132,
+        "stable_key": "N:B01-N0070",
+        "canonical": "רוברט ג'ק רולו",
+        "identity_action": "REBIND_RENAME"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "סר רוברט סימון רולו (1869–1944) היה בנקאי ואיש עסקים יהודי־מצרי, בן למשפחת רולו. הוא נולד בקהיר, למד משפטים בפריז ושימש בתפקידי ניהול בכירים בחברות ובמוסדות פיננסיים במצרים. בין היתר כיהן כסגן נשיא Crédit Foncier Egyptien, כנשיא חברת Wadi Kom-Ombo וכדירקטור בבנק הלאומי של מצרים ובחברות כלכליות נוספות. הוא שימש גם יועץ פיננסי פרטי למלך פואד. בשנת 1938 הוענק לו תואר אבירות בריטי על שירותיו לקהילה הבריטית במצרים.",
+      "biography_text_sha256": "f7702c51518088e6fbf58bcc2a6c1df4be9e98ab712df63873ec48203d502261",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 133,
+      "canonical_name": "שבתי עדה",
+      "stable_key": "N:B01-N0071",
+      "stable_keys": [
+        "N:B01-N0071"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 10,
+        "person_id": 133,
+        "stable_key": "N:B01-N0071",
+        "canonical": "שבתי עדה",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "שבתי עדה, המופיע במקור הצרפתי בשם Sabato Adela, היה מראשי הקהילה היהודית במצרים בתקופת הכיבוש הצרפתי. לפי מקור הארכיון, נפוליאון בונפרטה מינה אותו לנשיא ועדה בת שמונה חברים שניהלה את ענייני הקהילה ואת יחסיה עם צבא הכיבוש הצרפתי.",
+      "biography_text_sha256": "11376d29f49f8530deebb94402c8c6bdf7e3733e8bacc7ba4623ce580c63f9ae",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 134,
+      "canonical_name": "נפוליאון בונפרטה",
+      "stable_key": "N:B01-N0072",
+      "stable_keys": [
+        "N:B01-N0072"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 11,
+        "person_id": 134,
+        "stable_key": "N:B01-N0072",
+        "canonical": "נפוליאון בונפרטה",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "נפוליאון בונפרטה (1769–1821) היה מצביא ומדינאי צרפתי, שלימים הוכתר לקיסר צרפת. ב־1798 הוביל את הפלישה הצרפתית למצרים. בתקופת הכיבוש, לפי מקור הארכיון, מינה את שבתי עדה לנשיא ועדה בת שמונה חברים שניהלה את יחסי הקהילה היהודית עם הצבא הצרפתי.",
+      "biography_text_sha256": "ce5de45dfa9bd33b72b6dc3e18c4f0e58034c96ee970747874f9cd6c6ff79d57",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 135,
+      "canonical_name": "אפרים עדה",
+      "stable_key": "N:B01-N0073",
+      "stable_keys": [
+        "N:B01-N0073"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 12,
+        "person_id": 135,
+        "stable_key": "N:B01-N0073",
+        "canonical": "אפרים עדה",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "אפרים עדה נולד בשנת 1858. בשנת 1877 החל לעבוד בשירות המדינה המצרי ובהמשך מונה למפקח במשרד האוצר. הוא השתייך למשפחת עדה, אחת המשפחות היהודיות שפעלו בחיי הציבור והמנהל במצרים.",
+      "biography_text_sha256": "8ebd29dc4862326e8d3f2b264e57c0c825fd4a2352c6234b133527c44d128a40",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 136,
+      "canonical_name": "אפרים עדה",
+      "stable_key": "N:B01-N0074",
+      "stable_keys": [
+        "N:B01-N0074"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 13,
+        "person_id": 136,
+        "stable_key": "N:B01-N0074",
+        "canonical": "אברם עדה",
+        "identity_action": "RENAME_KEEP_DISTINCT"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "אפרים עדה ביי היה בנו של אפרים עדה שנולד ב־1858. הוא נזכר במקור המשפחתי בהקשר לפעילות ציבורית ופילנתרופית באלכסנדריה, ובה בין היתר מוסד רפואת עיניים. יש לשמור אותו כאדם נפרד מאביו אף ששניהם נושאים את אותו שם.",
+      "biography_text_sha256": "1779d4d73c95401ce4d687eccfc58fb2c65700b610969c03e46a414eb5079424",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 137,
+      "canonical_name": "ידידיה ישראל",
+      "stable_key": "N:B01-N0075",
+      "stable_keys": [
+        "N:B01-N0075"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 14,
+        "person_id": 137,
+        "stable_key": "N:B01-N0075",
+        "canonical": "ידידיה ישראל",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "ידידיה ישראל היה הרב הראשי של הקהילה היהודית באלכסנדריה בראשית המאה ה־19. הוא מונה לתפקיד בשנת 1802 ונודע בלמדנותו התלמודית ובהנהגתו הדתית. לאחר מותו הוקם לזכרו 'מדרש ידידיה ישראל', שפעל בעיר עד 1915.",
+      "biography_text_sha256": "7fa9fcb677925fa41379fcf1a781d9ecff0fbed8db2e4a441b1479055046b087",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 138,
+      "canonical_name": "שלמה חזן",
+      "stable_key": "N:B01-N0076",
+      "stable_keys": [
+        "N:B01-N0076"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 15,
+        "person_id": 138,
+        "stable_key": "N:B01-N0076",
+        "canonical": "שלמה חזן",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "שלמה חזן היה רב, מחבר ואיש הנהגה בקהילה היהודית באלכסנדריה במאה ה־19. לאחר מות ידידיה ישראל נבחר לרב הראשי של הקהילה, לאחר מחלוקת בין תומכיו לבין תומכי נתן עמרם. הוא נודע בבקיאותו בהלכה ובשפות שמיות ובפעילותו בארגון מוסדות הקהילה. בין חיבוריו היה 'המעלות לשלמה'.",
+      "biography_text_sha256": "7042c8ebe7f1ce8c0cb331c7eb1c60d3551562485bdc2a3fb6f65a4edd85044b",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 139,
+      "canonical_name": "ישראל משה חזן",
+      "stable_key": "N:B01-N0077",
+      "stable_keys": [
+        "N:B01-N0077"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 16,
+        "person_id": 139,
+        "stable_key": "N:B01-N0077",
+        "canonical": "ישראל משה חזן",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "ישראל משה חזן (1808–1862) היה רב, פוסק ומחבר ספרים ספרדי. הוא נולד באיזמיר וגדל בירושלים, ובהמשך כיהן בתפקידי רבנות ברומא ובקורפו. בשנת 1857 נקרא לכהן כרב באלכסנדריה. הוא חיבר ספרי הלכה, הגות ופולמוס. הוא היה בנו של אליעזר חזן, ולא של שלמה חזן.",
+      "biography_text_sha256": "a4d71df2af0231f24285a03a474751546f7d09ce86d547713599774bb1b5d24d",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 140,
+      "canonical_name": "נתן עמרם",
+      "stable_key": "N:B01-N0078",
+      "stable_keys": [
+        "N:B01-N0078"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 17,
+        "person_id": 140,
+        "stable_key": "N:B01-N0078",
+        "canonical": "נתן עמרם",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "הרב נתן עמרם (נפטר ב־1870) היה רב, דיין, שד״ר, מחבר ורופא, יליד ארץ ישראל, שפעל במשך שנים רבות באלכסנדריה. הוא יצא בשליחויות גיוס כספים למען קהילות ארץ ישראל באירופה, ולאחר שובו לאלכסנדריה שימש רב לקהילת הפרנקוס. בשנת 1863 נבחר לרב הראשי של אלכסנדריה וכיהן בתפקיד עד מותו.",
+      "biography_text_sha256": "1a68d37d528d2f63e3639700aa59011a24f8c00bd75a4410300adb12494dea2f",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 141,
+      "canonical_name": "משה פראדו",
+      "stable_key": "N:B01-N0079",
+      "stable_keys": [
+        "N:B01-N0079"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 18,
+        "person_id": 141,
+        "stable_key": "N:B01-N0079",
+        "canonical": "משה פראדו",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "משה פראדו היה רב וחוקר הלכה. בין חיבוריו נזכר במקור הארכיוני ספר משפטי שעסק בדיני גירושין.",
+      "biography_text_sha256": "d6ac2fda1edfb4ed9d58b0e13cf7d00d7cc865a93bb37ae875f50afeff990a64",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 142,
+      "canonical_name": "משה מתתיה חזן",
+      "stable_key": "N:B01-N0080",
+      "stable_keys": [
+        "N:B01-N0080"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 19,
+        "person_id": 142,
+        "stable_key": "N:B01-N0080",
+        "canonical": "משה מתתיה חזן",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "LEAVE_BLANK",
+      "approved_biography_text": "",
+      "biography_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "intentional_blank": true,
+      "planned_apply_action": "LEAVE_BLANK",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "INTENTIONAL_BLANK",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 143,
+      "canonical_name": "רפאל דלה פרגולה",
+      "stable_key": "N:B01-N0081",
+      "stable_keys": [
+        "N:B01-N0081"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 20,
+        "person_id": 143,
+        "stable_key": "N:B01-N0081",
+        "canonical": "רפאל דלה פרגולה",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "רפאל דלה פרגולה היה רב איטלקי שכיהן כרב הראשי של אלכסנדריה. הוא שימש סמכות דתית לקהילה ונודע בהשכלתו ההומניסטית.",
+      "biography_text_sha256": "27df36fe28537cc228c41790c8c40d62f853e28383a343010e127009e8e07031",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 144,
+      "canonical_name": "דוד פראטו",
+      "stable_key": "N:B01-N0082",
+      "stable_keys": [
+        "N:B01-N0082"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 21,
+        "person_id": 144,
+        "stable_key": "N:B01-N0082",
+        "canonical": "דוד פראטו",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "דוד פראטו היה רב וחוקר יהודי. הוא כתב עבודת דוקטורט על אבן אל־פארד ועל רב סעדיה גאון, וייסד באלכסנדריה את בית הספר החינמי 'מיימונידס'. לאחר שעזב את העיר החליף אותו בתפקיד הרב אהרון אנג׳ל.",
+      "biography_text_sha256": "3ea3741188535f57464d98c808b3a08b08325169e36f9b337ea85bca93853108",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 145,
+      "canonical_name": "גלאצו צ'אנו",
+      "stable_key": "N:B01-N0083",
+      "stable_keys": [
+        "N:B01-N0083"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 22,
+        "person_id": 145,
+        "stable_key": "N:B01-N0083",
+        "canonical": "גלאצו צ'אנו",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "גלאצו צ׳אנו (1903–1944) היה דיפלומט ופוליטיקאי פשיסטי איטלקי, חתנו של בניטו מוסוליני ושר החוץ של איטליה בשנים 1936–1943. בשנת 1938 אימץ המשטר הפשיסטי באיטליה חקיקה אנטי־יהודית. בארכיון נזכר צ׳אנו בהקשר לשיחה עם הרב דוד פראטו, שביקר בפניו את המדיניות האנטי־יהודית.",
+      "biography_text_sha256": "d3dec0c7e09eba60b9ace7c4257af3501310ceee0c4911b285767274cf102d87",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 146,
+      "canonical_name": "בניטו מוסוליני",
+      "stable_key": "N:B01-N0084",
+      "stable_keys": [
+        "N:B01-N0084"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 23,
+        "person_id": 146,
+        "stable_key": "N:B01-N0084",
+        "canonical": "בניטו מוסוליני",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "בניטו מוסוליני (1883–1945) היה מייסד הפשיזם האיטלקי ושליט איטליה משנת 1922 עד 1943. משטרו אימץ ב־1938 חקיקה אנטי־יהודית שהגבילה את זכויותיהם של יהודי איטליה. בארכיון הוא נזכר בהקשר לביקורתו של הרב דוד פראטו על המדיניות האנטי־יהודית של המשטר האיטלקי.",
+      "biography_text_sha256": "b9a97e6032155a1bf80f220fd37ed440ca8215c74b1cc7d8ed7ce042cdb8a706",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 148,
+      "canonical_name": "אהרון אנג’ל",
+      "stable_key": "N:B01-N0086",
+      "stable_keys": [
+        "N:B01-N0086"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 25,
+        "person_id": 148,
+        "stable_key": "N:B01-N0086",
+        "canonical": "אהרון אנג’ל",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "אהרון אנג׳ל היה רב באלכסנדריה ושימש ממלא מקומו של הרב דוד פראטו. לאחר עזיבתו של פראטו ירש אותו בתפקידו הרוחני בקהילה.",
+      "biography_text_sha256": "ca02a54fdd7f80c8d7ef884ff112d942d58a5f478092a995d82db1c56811c508",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 149,
+      "canonical_name": "אברהם אבלאזיז",
+      "stable_key": "N:B01-N0087",
+      "stable_keys": [
+        "N:B01-N0087"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 26,
+        "person_id": 149,
+        "stable_key": "N:B01-N0087",
+        "canonical": "אברהם אבלאזיז",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "אברהם אבלאזיז היה רב באלכסנדריה. בשנת 1926 עזב את רבנות העיר והתמנה לבית הדין הרבני לערעורים בקהיר.",
+      "biography_text_sha256": "15d45cda2b2f9d33ff0dc6fbb23ddb010f631ae4257ae53d545c05c843ac5a0e",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 150,
+      "canonical_name": "יעקב משה טולדאנו",
+      "stable_key": "N:B01-N0088",
+      "stable_keys": [
+        "N:B01-N0088"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 27,
+        "person_id": 150,
+        "stable_key": "N:B01-N0088",
+        "canonical": "יעקב משה טולדאנו",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "יעקב משה טולדאנו היה רב וחוקר. הוא שימש ממלא מקום לרבנים הראשיים דוד פראטו ומשה ונטורה באלכסנדריה, ונזכר כחלק מרצף הנהגת הרבנות בעיר.",
+      "biography_text_sha256": "e0e06738cc618f969ca00b5861953a8e88c557afc7af307ffef14d4e50265165",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 151,
+      "canonical_name": "חיים דואק",
+      "stable_key": "N:B01-N0089",
+      "stable_keys": [
+        "N:B01-N0089"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 28,
+        "person_id": 151,
+        "stable_key": "N:B01-N0089",
+        "canonical": "חיים דואק",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "חיים דואק היה הרב הראשי האחרון של קהילת קהיר. הוא עזב את מצרים במרס 1972, לאחר דורות של הנהגה רבנית יהודית בעיר.",
+      "biography_text_sha256": "34a8f99af5bbee79fb35fec28394b99d2e0763bb30ec00e1ce1ffa711d5299f1",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 152,
+      "canonical_name": "חיים דורה",
+      "stable_key": "N:B01-N0090",
+      "stable_keys": [
+        "N:B01-N0090"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 29,
+        "person_id": 152,
+        "stable_key": "N:B01-N0090",
+        "canonical": "חיים דורה",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "חיים דורה היה תעשיין ונדבן יהודי באלכסנדריה. הוא ייסד בעיר מוסד לילדים ערבים, יהודים ונוצרים בעלי מוגבלויות ותרם למוסדות רווחה יהודיים ולא־יהודיים. גם מפעלי הרווחה של האחים המוסלמים קיבלו מתרומותיו.",
+      "biography_text_sha256": "0d058256ae0c48e66cfd8e91b85d986abffabd6a4950eb5f7e06f380afd0ccdb",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 153,
+      "canonical_name": "עבד אל-חאלק חסונה",
+      "stable_key": "N:B01-N0091",
+      "stable_keys": [
+        "N:B01-N0091"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 30,
+        "person_id": 153,
+        "stable_key": "N:B01-N0091",
+        "canonical": "עבד אל-חאלק חסונה",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "עבד אל־חאלק חסונה היה מושל אלכסנדריה. בתקופת כהונתו הוקם בעיר מוסד לילדים בעלי מוגבלויות ביוזמת חיים דורה. בהמשך כיהן כמזכיר הכללי של הליגה הערבית.",
+      "biography_text_sha256": "2e777d24ba4b96b848c05620f747198aa3d4bc1cc401a35903bbeef4af5d8fa3",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 154,
+      "canonical_name": "יצחק בנארויו",
+      "stable_key": "N:B01-N0093",
+      "stable_keys": [
+        "N:B01-N0093"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 31,
+        "person_id": 154,
+        "stable_key": "N:B01-N0093",
+        "canonical": "יצחק בנארויו",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "יצחק בנארויו היה פעיל רווחה יהודי בקהיר. הוא ייסד ברובע היהודי את מוסד 'טיפת חלב', שסיפק בריאות וחינוך לאלפי יתומים וילדים עניים.",
+      "biography_text_sha256": "a66a9bc27d973865625b906c852007930c14bb455284cea1837b1aadc8ddbc73",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 155,
+      "canonical_name": "עבאס השני חלמי",
+      "stable_key": "N:B01-N0094",
+      "stable_keys": [
+        "N:B01-N0094"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 32,
+        "person_id": 155,
+        "stable_key": "N:B01-N0094",
+        "canonical": "עבאס השני חלמי",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "עבאס השני חלמי (1874–1944) היה הח'דיו האחרון של מצרים וסודאן, וכיהן בשנים 1892–1914. בתקופת שלטונו ניסה לקדם מדיניות עצמאית יותר מול השליטה הבריטית. לאחר פרוץ מלחמת העולם הראשונה הודח בדצמבר 1914 בידי בריטניה. בארכיון הוא נזכר בהקשר לניהול נכסיו בידי משפטן יהודי.",
+      "biography_text_sha256": "a40944bb0f5512796a048b1e51f4c218eccaddc4134c92a2abfd876df358c391",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 156,
+      "canonical_name": "מסעוד חי בן שמעון",
+      "stable_key": "N:B01-N0095",
+      "stable_keys": [
+        "N:B01-N0095"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 33,
+        "person_id": 156,
+        "stable_key": "N:B01-N0095",
+        "canonical": "מסעוד חי בן שמעון",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "מסעוד חי בן שמעון היה רב ודיין. הוא השתתף בעיצוב קוד המעמד האישי של הקהילה היהודית במצרים, לצד משפטן ששירת את נכסי הח׳דיו עבאס חלמי.",
+      "biography_text_sha256": "dce553a278ab7fa76ae3c423535602360ae9c0ef77b7da0ca7bef528ff9b2597",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 157,
+      "canonical_name": "אמילי דיין",
+      "stable_key": "N:B01-N0096",
+      "stable_keys": [
+        "N:B01-N0096"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 34,
+        "person_id": 157,
+        "stable_key": "N:B01-N0096",
+        "canonical": "אמילי דיין",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "אמילי דיין הייתה שחקנית בתיאטרון המצרי המודרני. היא הופיעה לצדו של השחקן והזמר סלאמה חג׳אזי.",
+      "biography_text_sha256": "88c17a755b1aa5e164ccb40a14962ba5d57fbf8a35d7f3e7e22b31dfb41ec6b1",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 158,
+      "canonical_name": "סלאמה חג’אזי",
+      "stable_key": "N:B01-N0097",
+      "stable_keys": [
+        "N:B01-N0097"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 35,
+        "person_id": 158,
+        "stable_key": "N:B01-N0097",
+        "canonical": "סלאמה חג’אזי",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "סלאמה חג׳אזי היה שחקן וזמר מצרי. הוא הופיע בתיאטרון המצרי לצד אמילי דיין ונזכר בארכיון כאחד האמנים הבולטים של התקופה.",
+      "biography_text_sha256": "102018bba457d304225ae5364d5f2ff98a21a04be1338bb6f8d790c22496d031",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 159,
+      "canonical_name": "מוחמד עבד אל-והאב",
+      "stable_key": "N:B01-N0098",
+      "stable_keys": [
+        "N:B01-N0098"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 36,
+        "person_id": 159,
+        "stable_key": "N:B01-N0098",
+        "canonical": "מוחמד עבד אל-והאב",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "מוחמד עבד אל־והאב היה שחקן, זמר ומלחין מצרי. לילה מוראד החלה את דרכה בגיל צעיר כשותפתו להופעות.",
+      "biography_text_sha256": "ce24c34eef0790b16875edc954e3ea32102a10d6d14119307acdc905fa3a241b",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 160,
+      "canonical_name": "עבדו אל־חאמולי",
+      "stable_key": "N:B01-N0099",
+      "stable_keys": [
+        "N:B01-N0099"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 37,
+        "person_id": 160,
+        "stable_key": "N:B01-N0099",
+        "canonical": "עבדו אל־חאמולי",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "עבדו אל־חאמולי (1836–1901) היה זמר ומלחין מצרי מן הדמויות המרכזיות במוזיקה המצרית של המאה ה־19. הוא פעל בחצרו של הח'דיו איסמעיל, נחשף למוזיקה העות'מאנית ושילב ביצירתו יסודות מצריים וטורקיים. הוא היה נשוי לזמרת אלמז.",
+      "biography_text_sha256": "5ad9dc50ee641881cd7757fd16c6a8970c8a665f145b112da41cc0236965dae0",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 161,
+      "canonical_name": "אלמז",
+      "stable_key": "N:B01-N0100",
+      "stable_keys": [
+        "N:B01-N0100"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 38,
+        "person_id": 161,
+        "stable_key": "N:B01-N0100",
+        "canonical": "אלמז",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "אלמז, ששמה הפרטי היה סקינה, הייתה זמרת מצרית מן הבולטות במחצית השנייה של המאה ה־19. היא נודעה כאחת מזמרות הטרב החשובות של תקופתה ונישאה לזמר ולמלחין עבדו אל־חאמולי. השניים היו מן הדמויות הבולטות בחיי המוזיקה המצרית בתקופת הח'דיו איסמעיל.",
+      "biography_text_sha256": "10557317467d779b1b3b912cca494098162644cbfd8086f592efd3c94b66b887",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 162,
+      "canonical_name": "אום כולתום",
+      "stable_key": "N:B01-N0101",
+      "stable_keys": [
+        "N:B01-N0101"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 39,
+        "person_id": 162,
+        "stable_key": "N:B01-N0101",
+        "canonical": "אום כולתום",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "אום כולתום (1898–1975) הייתה זמרת מצרית מן הדמויות המרכזיות והמשפיעות במוזיקה הערבית במאה ה־20. בראשית שנות העשרים עברה לקהיר ופיתחה שם קריירה שנמשכה עשרות שנים בהקלטות, ברדיו ובהופעות. לאחר מלחמת ששת הימים קיימה מסעות הופעות לגיוס כספים עבור מצרים.",
+      "biography_text_sha256": "e06a43b85bac0a2034c692d3b23d2f50417dd41aba253ad5fe968dcdd0a7dd4f",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 163,
+      "canonical_name": "טוגו מזרחי",
+      "stable_key": "N:B01-N0102",
+      "stable_keys": [
+        "N:B01-N0102"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 40,
+        "person_id": 163,
+        "stable_key": "N:B01-N0102",
+        "canonical": "טוגו מזרחי",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "טוגו מזרחי היה במאי ומפיק קולנוע יהודי־מצרי. מקור הארכיון מייחס לו תפקיד בהכנסת אמנות הקולנוע למצרים ומציין שהפיק סרטים בעצמו.",
+      "biography_text_sha256": "8b2a223d0e1a5f69854349eab1acf4a50196222f2b14a6698948c7ff8db4c64d",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 164,
+      "canonical_name": "אנדרה נג'אר",
+      "stable_key": "N:B01-N0103",
+      "stable_keys": [
+        "N:B01-N0103"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 41,
+        "person_id": 164,
+        "stable_key": "N:B01-N0103",
+        "canonical": "אנדרה נג'אר",
+        "identity_action": "KEEP_ALIAS_CLEANUP"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "אנדרה נג'אר (1911–1985) היה טניסאי מצרי בולט. הוא ייצג את מצרים בתחרויות בינלאומיות ובגביע דייוויס, השתתף באליפויות צרפת, וימבלדון ואליפות ארצות הברית, ושימש קפטן נבחרת הדיוויס המצרית. בשנות השלושים והארבעים נמנה עם שחקני הטניס הבולטים במצרים.",
+      "biography_text_sha256": "338692a4903696f3d3e6e067b428a11626faf45b3b6b262082fd9da28c193d3d",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 165,
+      "canonical_name": "מרסל כהן",
+      "stable_key": "N:B01-N0104",
+      "stable_keys": [
+        "N:B01-N0104"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 42,
+        "person_id": 165,
+        "stable_key": "N:B01-N0104",
+        "canonical": "מרסל כהן",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "מרסל כהן היה טניסאי שייצג את מצרים בטורנירים בין־לאומיים וזכה בגביעים. הוא נזכר בארכיון לצד טניסאי נוסף מן הקהילה היהודית.",
+      "biography_text_sha256": "49baddcc63690ff89f6fd8666218836bc5cd45779c39678a837e872404e2bedf",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 166,
+      "canonical_name": "יצחק עמיאל",
+      "stable_key": "N:B01-N0105",
+      "stable_keys": [
+        "N:B01-N0105"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 43,
+        "person_id": 166,
+        "stable_key": "N:B01-N0105",
+        "canonical": "יצחק עמיאל",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "יצחק עמיאל היה מתאגרף יהודי־מצרי וזכה באליפות מצרים באגרוף.",
+      "biography_text_sha256": "80ca4713d92e3f165d9ab2c19f5d76c3b7f15aa23ce91c3e7f8c2844147c6abf",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 167,
+      "canonical_name": "דוד סלוניכיו",
+      "stable_key": "N:B01-N0106",
+      "stable_keys": [
+        "N:B01-N0106"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 44,
+        "person_id": 167,
+        "stable_key": "N:B01-N0106",
+        "canonical": "דוד סלוניכיו",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "דוד סלוניכיו היה מתאגרף יהודי־מצרי וזכה באליפות מצרים באגרוף.",
+      "biography_text_sha256": "108c29a2517f03a6bb0957bc69a6813a8f1f38b02e453d777877fa1b8aff97d1",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 168,
+      "canonical_name": "אחמד רחמי",
+      "stable_key": "N:B01-N0107",
+      "stable_keys": [
+        "N:B01-N0107",
+        "N:B09-N0010"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 45,
+        "person_id": 168,
+        "stable_key": "N:B01-N0107",
+        "canonical": "אחמד רחמי",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "אחמד רחמי היה אלוף מצרי בהיאבקות ובהרמת משקולות. הוא השתתף במשלחת ספורט יהודית שנזכרת בארכיון.",
+      "biography_text_sha256": "b1c2093a4dd4b3079ed85eb83dc633a49a0b0183cd526ba11b2d89bd6606c9db",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      },
+      "stable_key_correction_provenance": {
+        "resolution": "PREFLIGHT_SPEC_OMISSION_CORRECTED",
+        "production_identity_changed": false,
+        "expected_production_stable_keys": [
+          "N:B01-N0107",
+          "N:B09-N0010"
+        ]
+      }
+    },
+    {
+      "final_person_id": 169,
+      "canonical_name": "ז'אק גואר",
+      "stable_key": "N:B01-N0108",
+      "stable_keys": [
+        "N:B01-N0108",
+        "N:B06-N0021"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 46,
+        "person_id": 169,
+        "stable_key": "N:B01-N0108",
+        "canonical": "ז'אק גואר",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "ז'אק גואר היה איש עסקים ופעיל מרכזי בחיי הספורט במצרים. הוא כיהן כסגן נשיא ה־Royal Automobile Club of Egypt והיה חבר בגופים ובמועדוני ספורט שונים. המלך פואד מינה אותו למפקח על הספורט במצרים, והוא המשיך בתפקידו גם בתקופת המלך פארוק.",
+      "biography_text_sha256": "65754dc2a27ab418dc4666158c104cd60918e4e84b586b149e288a043b5a2dac",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      },
+      "stable_key_correction_provenance": {
+        "resolution": "PREFLIGHT_SPEC_OMISSION_CORRECTED",
+        "production_identity_changed": false,
+        "expected_production_stable_keys": [
+          "N:B01-N0108",
+          "N:B06-N0021"
+        ]
+      }
+    },
+    {
+      "final_person_id": 170,
+      "canonical_name": "טאהא חוסיין",
+      "stable_key": "N:B01-N0109",
+      "stable_keys": [
+        "N:B01-N0109"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 47,
+        "person_id": 170,
+        "stable_key": "N:B01-N0109",
+        "canonical": "טאהא חוסיין",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "טאהא חוסיין (1889–1973) היה סופר, מבקר ואיש חינוך מצרי, מן הדמויות המרכזיות בחיי הרוח הערביים במאה ה־20. הוא איבד את ראייתו בילדותו, למד באל־אזהר ובאוניברסיטה המצרית והמשיך ללימודים בצרפת. בשנת 1950 מונה לשר החינוך ופעל להרחבת הנגישות לחינוך במצרים.",
+      "biography_text_sha256": "f889ab273fe51652570be0eba9f8dc37558bb8b8014d2c1004a91a932f43fd3c",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 171,
+      "canonical_name": "אלברט סטרג",
+      "stable_key": "N:B01-N0110",
+      "stable_keys": [
+        "N:B01-N0110"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 48,
+        "person_id": 171,
+        "stable_key": "N:B01-N0110",
+        "canonical": "אלברט סטראסלסקי",
+        "identity_action": "RENAME_ALIAS_CLEANUP"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "אלברט סטרג היה עיתונאי ופעיל ציוני רוויזיוניסטי במצרים. מקור הארכיון מתאר אותו כעורך הראשי של המהדורה האלכסנדרונית של La Bourse Égyptienne וכיושב ראש הארגון הציוני הרוויזיוניסטי בקהיר.",
+      "biography_text_sha256": "d568866909af22e63fb3af9eb007245cd4938f4036c0b415fc60041d8834944d",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 172,
+      "canonical_name": "רפאל סדובסקי",
+      "stable_key": "N:B01-N0111",
+      "stable_keys": [
+        "N:B01-N0111"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 49,
+        "person_id": 172,
+        "stable_key": "N:B01-N0111",
+        "canonical": "רפאל סדובסקי",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "רפאל סדובסקי היה פעיל לח״י במצרים, שפעל בקהיר במסגרת התשתית שסייעה לאנשי המחתרת. במרץ 1945 נעצר בקהיר לאחר שביקר בקברי אליהו חכים ואליהו בית־צורי. בחקירתו עלה כי עסק בארגון מקומות לינה, פגישות וסיוע לוגיסטי לפעילי לח״י במצרים.",
+      "biography_text_sha256": "08046bd80c79738d454a4ce529f199f1a20ea8667494921e912c93578bdb1643",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 173,
+      "canonical_name": "וולטר אדוארד גינס",
+      "stable_key": "N:B01-N0112",
+      "stable_keys": [
+        "N:B01-N0112"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 50,
+        "person_id": 173,
+        "stable_key": "N:B01-N0112",
+        "canonical": "וולטר אדוארד גינס",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "וולטר אדוארד גינס, הלורד מוין (1880–1944), היה פוליטיקאי בריטי שכיהן כשר המדינה לענייני המזרח התיכון. ב־6 בנובמבר 1944 נורה למוות בקהיר בידי אנשי לח״י אליהו חכים ואליהו בית־צורי. ההתנקשות הובילה לחקירה נרחבת במצרים, ובארכיון היא נזכרת בהקשר לחקירת פעילים ציונים ורוויזיוניסטים בקהיר ובאלכסנדריה.",
+      "biography_text_sha256": "986d41601c890b9cc6e4ea2eeb5b9ceef287682588351a485f57cc54fe9d660a",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 174,
+      "canonical_name": "ג'יימס ארמן דה רוטשילד",
+      "stable_key": "N:B01-N0114",
+      "stable_keys": [
+        "N:B01-N0114"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 51,
+        "person_id": 174,
+        "stable_key": "N:B01-N0114",
+        "canonical": "ג'יימס דה רוטשילד",
+        "identity_action": "RENAME"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "ג'יימס ארמן דה רוטשילד (1878–1957), בנו של הברון אדמונד ג'יימס דה רוטשילד, היה איש ציבור, נדבן ופעיל ציוני. במלחמת העולם הראשונה שירת בצבאות צרפת, קנדה ובריטניה והגיע לדרגת מייג'ור. הוא שירת בגדוד ה־39 של ה־Royal Fusiliers, מן הגדודים העבריים, והיה מעורב בגיוס מתנדבים יהודים במצרים ובארץ ישראל. לאחר המלחמה המשיך בפעילות ציונית וציבורית, כיהן בראש פיק״א ובהמשך היה חבר הפרלמנט הבריטי.",
+      "biography_text_sha256": "37088f655d4c8738bff4fbcdc0a2f1678a2b7c11eb09269d92bcb2ba17985852",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 175,
+      "canonical_name": "יוסף טרומפלדור",
+      "stable_key": "N:B01-N0115",
+      "stable_keys": [
+        "N:B01-N0115"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 52,
+        "person_id": 175,
+        "stable_key": "N:B01-N0115",
+        "canonical": "יוסף טרומפלדור",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "יוסף טרומפלדור (1880–1920) היה מראשוני המארגנים של כוח צבאי יהודי בתקופה המודרנית ומן הדמויות המרכזיות בתנועה הציונית בראשית המאה ה־20. במלחמת העולם הראשונה הגיע למצרים לאחר גירוש יהודים מארץ ישראל, וב־1915 היה שותף עם זאב ז'בוטינסקי ליוזמה להקמת יחידה יהודית בצבא הבריטי. טרומפלדור פיקד בגדוד נהגי הפרדות במערכת גליפולי. לאחר המלחמה חזר לארץ ישראל וב־1920 נהרג בקרב תל חי.",
+      "biography_text_sha256": "cf8d7bebae02e2cf550dad07e96248ab27996035f0043274e6485c4d94ac43fa",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 176,
+      "canonical_name": "הרשל גרינשפן",
+      "stable_key": "N:B01-N0116",
+      "stable_keys": [
+        "N:B01-N0116"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 53,
+        "person_id": 176,
+        "stable_key": "N:B01-N0116",
+        "canonical": "הרשל גרינשפן",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "הרשל גרינשפן (1921–; גורלו הסופי אינו ידוע בוודאות) היה צעיר יהודי ממוצא פולני שחי בפריז. לאחר שבני משפחתו גורשו מגרמניה לפולין באוקטובר 1938, ירה ב־7 בנובמבר בדיפלומט הגרמני ארנסט פום ראט בשגרירות גרמניה בפריז. פום ראט מת מפצעיו יומיים לאחר מכן. המשטר הנאצי ניצל את האירוע כתואנה לפרעות ליל הבדולח. גרינשפן הועבר לידי הגרמנים ב־1940, אך גורלו לאחר מכן אינו ידוע בוודאות.",
+      "biography_text_sha256": "621a9c24b19219ec8847a2e7eb9cbde57399e10de043bbc29c445b5a2c9c6e19",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 177,
+      "canonical_name": "הרמן גרינג",
+      "stable_key": "N:B01-N0117",
+      "stable_keys": [
+        "N:B01-N0117"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 54,
+        "person_id": 177,
+        "stable_key": "N:B01-N0117",
+        "canonical": "הרמן גרינג",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "הרמן גרינג (1893–1946) היה מן הבכירים במשטר הנאצי, נשיא הרייכסטאג, ראש ממשלת פרוסיה ומפקד חיל האוויר הגרמני. הוא מילא תפקיד מרכזי בביסוס הדיקטטורה הנאצית וברדיפת היהודים. בארכיון נזכר גרינג בהקשר לפנייה של הנהגת הקהילה היהודית במצרים לשלטונות גרמניה הנאצית ולתשובה האנטי־יהודית שניתנה לה.",
+      "biography_text_sha256": "66419ef1c63bfddd118529625c27a35665d77107bf66334ff9789c6d42c9e8aa",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 178,
+      "canonical_name": "פרידריך גרים",
+      "stable_key": "N:B01-N0118",
+      "stable_keys": [
+        "N:B01-N0118"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 55,
+        "person_id": 178,
+        "stable_key": "N:B01-N0118",
+        "canonical": "פרידריך גרים",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "פרידריך גרים (1888–1959) היה משפטן, פוליטיקאי ותועמלן גרמני שהיה חבר במפלגה הנאצית. ב־1934 נשלח לקהיר כדי לייצג את הצד הגרמני במשפט שהתפתח בעקבות תביעה נגד הפצת התעמולה האנטי־יהודית הנאצית במצרים. פעילותו המשפטית שולבה במאמץ תעמולתי רחב יותר של גרמניה הנאצית במצרים.",
+      "biography_text_sha256": "0e31f3ac3c93b56c79fb2aa65b17c7c5997a4e79cfb7f54f9006514b6d2eb426",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 179,
+      "canonical_name": "יוזף גבלס",
+      "stable_key": "N:B01-N0119",
+      "stable_keys": [
+        "N:B01-N0119"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 56,
+        "person_id": 179,
+        "stable_key": "N:B01-N0119",
+        "canonical": "יוזף גבלס",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "יוזף גבלס (1897–1945) היה מבכירי המשטר הנאצי ושר התעמולה של גרמניה הנאצית משנת 1933. הוא מילא תפקיד מרכזי בהפצת תעמולה אנטישמית ובהסתה נגד יהודים. משרדו היה מעורב גם בפעילות תעמולה מחוץ לגרמניה, ובשנות השלושים נעשו ניסיונות להשפיע על העיתונות והציבור במצרים באמצעות חומרי תעמולה אנטי־יהודיים ופרו־נאציים.",
+      "biography_text_sha256": "5413fb922ea6ad2e656f3f3539c7ba72b8001725d02534c8930e47e6688dc085",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 180,
+      "canonical_name": "רפאל סאקט",
+      "stable_key": "N:B01-N0120",
+      "stable_keys": [
+        "N:B01-N0120"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 57,
+        "person_id": 180,
+        "stable_key": "N:B01-N0120",
+        "canonical": "רפאל סאקט",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "LEAVE_BLANK",
+      "approved_biography_text": "",
+      "biography_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "intentional_blank": true,
+      "planned_apply_action": "LEAVE_BLANK",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "INTENTIONAL_BLANK",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 181,
+      "canonical_name": "וולטר סמארט",
+      "stable_key": "N:B01-N0121",
+      "stable_keys": [
+        "N:B01-N0121"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 58,
+        "person_id": 181,
+        "stable_key": "N:B01-N0121",
+        "canonical": "וולטר סמארט",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "סר וולטר סמארט היה דיפלומט בריטי ששימש במשך שנים רבות יועץ לענייני המזרח בשגרירות בריטניה בקהיר. בשנות הארבעים היה מעורב בדיונים בריטיים בנושאי מצרים, פלשתינה והעולם הערבי. בארכיון הוא נזכר בהקשר להתגבשות שיתוף הפעולה הבין־ערבי בשנים שקדמו להקמת הליגה הערבית.",
+      "biography_text_sha256": "8de95e47db77d9ba204f9cd8aaf93959beb5ccdf8cc362077fb6c0f64037ff35",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 182,
+      "canonical_name": "עזיז עלי אל־מסרי",
+      "stable_key": "N:B01-N0122",
+      "stable_keys": [
+        "N:B01-N0122"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 59,
+        "person_id": 182,
+        "stable_key": "N:B01-N0122",
+        "canonical": "עזיז אל-מסרי",
+        "identity_action": "RENAME"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "עזיז עלי אל־מסרי (1879–1965) היה קצין ומדינאי מצרי, ששירת בצבא העות'מאני והיה פעיל בתנועות לאומיות ערביות בראשית המאה ה־20. בשנת 1939 מונה לרמטכ״ל הצבא המצרי, אך הודח ב־1940 בלחץ בריטי. בשנת 1941 ניסה לעזוב את מצרים ולהגיע אל כוחות מדינות הציר, אך נתפס ונעצר. לאחר מכן היה מקורב לקצינים הצעירים שהובילו את מהפכת 1952.",
+      "biography_text_sha256": "8c605a32fa0423380174b690d3e39e89214bd661f3b8c4d7b1d269349b9c2005",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 183,
+      "canonical_name": "רשיד עלי אל-כילאני",
+      "stable_key": "N:B01-N0123",
+      "stable_keys": [
+        "N:B01-N0123"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 60,
+        "person_id": 183,
+        "stable_key": "N:B01-N0123",
+        "canonical": "רשיד עלי אל-כילאני",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "רשיד עלי אל־כילאני (1892–1965) היה פוליטיקאי ולאומן עיראקי שכיהן כמה פעמים כראש ממשלת עיראק. באפריל 1941 עלה לשלטון בעקבות הפיכה של קצינים לאומנים שהתנגדו להשפעה הבריטית. ממשלתו ביקשה תמיכה מגרמניה הנאצית ומאיטליה הפשיסטית, והמשבר הוביל למלחמה האנגלו־עיראקית.",
+      "biography_text_sha256": "2186d0bf6970f75acd0b73d1a0248f4950b00a5a9a649d66631b072e0ebfd5fb",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 185,
+      "canonical_name": "עבד אל-רחמן עזאם",
+      "stable_key": "N:B01-N0125",
+      "stable_keys": [
+        "N:B01-N0125"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 62,
+        "person_id": 185,
+        "stable_key": "N:B01-N0125",
+        "canonical": "עבד אל-רחמן עזאם",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "עבד אל־רחמן עזאם (1893–1976) היה דיפלומט, פוליטיקאי ולאומן ערבי מצרי. עם הקמת הליגה הערבית ב־1945 נבחר למזכ״ל הראשון שלה וכיהן בתפקיד עד 1952. בשנות הארבעים היה מן הדוברים המרכזיים של העמדה הערבית בסוגיית ארץ ישראל וייצג את הליגה הערבית במגעים בינלאומיים.",
+      "biography_text_sha256": "ee4ee3bbf8f974c7da6bfe54d9c75286df0647d69d21b7573709b8beb33e57f2",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 186,
+      "canonical_name": "מוריס מזרחי",
+      "stable_key": "N:B01-N0126",
+      "stable_keys": [
+        "N:B01-N0126"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 63,
+        "person_id": 186,
+        "stable_key": "N:B01-N0126",
+        "canonical": "מוריס מזרחי",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "LEAVE_BLANK",
+      "approved_biography_text": "",
+      "biography_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "intentional_blank": true,
+      "planned_apply_action": "LEAVE_BLANK",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "INTENTIONAL_BLANK",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 187,
+      "canonical_name": "מוחמד חיידר",
+      "stable_key": "N:B01-N0127",
+      "stable_keys": [
+        "N:B01-N0127"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 64,
+        "person_id": 187,
+        "stable_key": "N:B01-N0127",
+        "canonical": "מוחמד חיידר",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "מוחמד חיידר (1887–1957) היה קצין בכיר ופוליטיקאי מצרי, מקורב למלך פארוק. הוא כיהן כשר המלחמה וכמפקד העליון של הצבא המצרי בתקופה שבה נכנסה מצרים למלחמת 1948. לאחר המלחמה נקשר שמו למחלוקות סביב ניהול הצבא ופרשת הנשק הפגום.",
+      "biography_text_sha256": "7ee258e97f9def03ce2cbdcf84b6c7750cfb426b5a1c32beb240850cefcf204f",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 188,
+      "canonical_name": "יעקב ויסמן",
+      "stable_key": "N:B02-N0001",
+      "stable_keys": [
+        "N:B02-N0001"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 65,
+        "person_id": 188,
+        "stable_key": "N:B02-N0001",
+        "canonical": "יעקב ויסמן",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "יעקב ויסמן בן אשר היה פעיל קהילתי וציוני יהודי במצרים. מקור הארכיון מונה אותו בין מנהיגי הקהילה והתנועה הציונית ומציין כי משפחתו הייתה ממוצא ארץ־ישראלי.",
+      "biography_text_sha256": "78b0e5b0dffe07c9598e4b4045e3641dd9730a98513d1a431cd25d74c302a15b",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 189,
+      "canonical_name": "משה בן אשר",
+      "stable_key": "N:B02-N0002",
+      "stable_keys": [
+        "N:B02-N0002"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 66,
+        "person_id": 189,
+        "stable_key": "N:B02-N0002",
+        "canonical": "משה בן אשר",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "משה בן אשר (נולד ב־1900) היה פעיל ציוני מרכזי במצרים. הוא נולד בפולין למשפחת רבנים, הצטרף בצעירותו לשומר הצעיר והגיע לארץ ישראל, אך לאחר שחלה עבר למצרים והשתקע באלכסנדריה. הוא עסק בהוראת עברית והיה מעורב בארגון הכשרות חלוציות ובהכנת צעירים יהודים לעלייה. שלוש סירות שרכש בנמל אלכסנדריה שימשו מקום מפגש לפעילות ציונית, ובית המלון שניהל עם אשתו אלויר שימש גם אנשי ההגנה ומקום מסתור לפעילים. בני הזוג עלו לבסוף בשנת 1945.",
+      "biography_text_sha256": "cc0466f82547353ec835fe2a0a617b9f7d5289df9f3e88efd5fd1a317db661ea",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 190,
+      "canonical_name": "אלברט מוסרי",
+      "stable_key": "N:B02-N0003",
+      "stable_keys": [
+        "N:B02-N0003"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 67,
+        "person_id": 190,
+        "stable_key": "N:B02-N0003",
+        "canonical": "אלברט מוסרי",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "ד״ר אלברט מוסרי (1867/1868–1933) היה רופא, עיתונאי ומן המנהיגים הבולטים של הציונות במצרים. הוא נולד בקהיר ולמד רפואה בפריז. לאחר שחזר למצרים היה פעיל מרכזי בתנועה הציונית. בשנת 1920 ייסד בקהיר את העיתון היהודי־ציוני 'ישראל', שהתפרסם במהדורות צרפתית, ערבית ועברית.",
+      "biography_text_sha256": "99c283915879e57b8743893f4d5d7539b97881447257c747a35e398b61cc1574",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 191,
+      "canonical_name": "בנימין זאב הרצל",
+      "stable_key": "N:B02-N0004",
+      "stable_keys": [
+        "N:B02-N0004"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 68,
+        "person_id": 191,
+        "stable_key": "N:B02-N0004",
+        "canonical": "בנימין זאב הרצל",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "בנימין זאב הרצל (1860–1904), שנודע בכינוי חוזה מדינת היהודים, היה עיתונאי, סופר ומדינאי יהודי ומייסד הציונות המדינית. בשנת 1896 פרסם את ספרו 'מדינת היהודים', שבו הציג תוכנית להקמת מדינה יהודית באמצעים מדיניים ומאורגנים. בשנת 1897 כינס בבזל את הקונגרס הציוני הראשון והיה לדמות המרכזית בעיצוב התנועה הציונית כמסגרת פוליטית בינלאומית. בשנים שלאחר מכן פעל מול שליטים ומדינאים באירופה ובאימפריה העות'מאנית בניסיון להשיג תמיכה מדינית במפעל הציוני.",
+      "biography_text_sha256": "94e97ece635784b7b82b41f7b13b1d1b90be3351ca0d23d01c7ed6a81ed548b1",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 192,
+      "canonical_name": "מזל מתילדה מוסרי",
+      "stable_key": "N:B02-N0005",
+      "stable_keys": [
+        "N:B02-N0005"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 69,
+        "person_id": 192,
+        "stable_key": "N:B02-N0005",
+        "canonical": "מזל מתילדה מוסרי",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "מזל־מתילדה מוסרי, לבית מני (1893/1894–1981), הייתה עיתונאית ופעילה ציונית יהודייה ילידת חברון. היא הייתה שותפה לבעלה, ד״ר אלברט מוסרי, במפעל העיתונאי 'ישראל' בקהיר. לאחר מותו בשנת 1933 קיבלה עליה את ניהול העיתון והמשיכה להוציאו לאור; היא המשיכה להוציא את המהדורה הצרפתית עד 1939, אז שבה לארץ ישראל.",
+      "biography_text_sha256": "43dc782672c01567c6f1f9cddfe95a944fc2b67dd90c285dcfeca86bbe4fa571",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 193,
+      "canonical_name": "הרברט סמואל",
+      "stable_key": "N:B02-N0006",
+      "stable_keys": [
+        "N:B02-N0006"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 70,
+        "person_id": 193,
+        "stable_key": "N:B02-N0006",
+        "canonical": "הרברט סמואל",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "הרברט סמואל (1870–1963) היה פוליטיקאי ומדינאי בריטי יהודי. בשנים 1920–1925 כיהן כנציב העליון הראשון בארץ ישראל בתקופת המנדט הבריטי. מינויו עורר תקוות בקרב ציונים במצרים בנוגע למימוש הצהרת בלפור ולהקמת בית לאומי יהודי בארץ ישראל.",
+      "biography_text_sha256": "7d86fb37c9600dcdddc57458f1a1756c86b0ba520df38c4828a04ffd5d6cfd2e",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 194,
+      "canonical_name": "יוסף חיים ברנר",
+      "stable_key": "N:B02-N0007",
+      "stable_keys": [
+        "N:B02-N0007"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 71,
+        "person_id": 194,
+        "stable_key": "N:B02-N0007",
+        "canonical": "יוסף חיים ברנר",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "יוסף חיים ברנר (1881–1921) היה סופר, מסאי, מבקר ומתרגם עברי, מן הדמויות המרכזיות בספרות העברית החדשה. הוא עלה לארץ ישראל בשנת 1909 ופעל בכתיבה, בהוראה ובעיתונות. ברנר נרצח במאי 1921 במאורעות באזור יפו, ומותו סוקר גם בעיתונות היהודית במצרים.",
+      "biography_text_sha256": "b81b12a17584a634b1dabd0622a7843620b7a3abeb7a8f208c34288e297d7ddc",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 195,
+      "canonical_name": "נחום סוקולוב",
+      "stable_key": "N:B02-N0008",
+      "stable_keys": [
+        "N:B02-N0008"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 72,
+        "person_id": 195,
+        "stable_key": "N:B02-N0008",
+        "canonical": "נחום סוקולוב",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "נחום סוקולוב (1859–1936) היה סופר, עיתונאי, מתרגם ומנהיג ציוני, מן הדמויות המרכזיות בדיפלומטיה הציונית בראשית המאה ה־20. הוא היה מעורב במאמצים המדיניים שהובילו לתמיכה בינלאומית ברעיון הבית הלאומי היהודי, ובשנים 1931–1935 כיהן כנשיא ההסתדרות הציונית העולמית. בארכיון הוא נזכר גם בפנייתו ליהודי מצרים באפריל 1921 לתמוך בקרן הקיימת לישראל.",
+      "biography_text_sha256": "c9592e7882436b7d0030228a6bb1750f34e38456978f65572010eb3bf35c9535",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 196,
+      "canonical_name": "סעד יעקב מלכי",
+      "stable_key": "N:B02-N0009",
+      "stable_keys": [
+        "N:B02-N0009"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 73,
+        "person_id": 196,
+        "stable_key": "N:B02-N0009",
+        "canonical": "סעד יעקוב מלכי",
+        "identity_action": "RENAME"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "סעד יעקב מלכי (1898–1988) היה עיתונאי ועורך יהודי־מצרי שפעל בעיקר בשפה הערבית. בראשית דרכו היה עורך המהדורה הערבית של העיתון היהודי־ציוני 'ישראל', וב־1934 ייסד בקהיר את העיתון 'אל־שמס', שאותו ערך עד סגירתו ב־1948. בעיתוניו עסק בענייני הקהילה היהודית, בציונות, בפוליטיקה המצרית ובמאבק באנטישמיות ובפשיזם.",
+      "biography_text_sha256": "f36abf3b378551e0b199a436528f5be9dc22df313fd2ec01fda33f20108b0fd7",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 197,
+      "canonical_name": "מוחמד חוסיין היכל",
+      "stable_key": "N:B02-N0010",
+      "stable_keys": [
+        "N:B02-N0010"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 74,
+        "person_id": 197,
+        "stable_key": "N:B02-N0010",
+        "canonical": "מחמד חוסין היקל",
+        "identity_action": "SPLIT"
+      },
+      "human_review_decision": "DEFER_UNTIL_SPLIT",
+      "approved_biography_text": "מוחמד חוסיין היכל (1888–1956) היה סופר, עיתונאי, משפטן ופוליטיקאי מצרי. הוא היה ממייסדי מפלגת הליברלים החוקתיים ושימש עורך העיתון אל־סיאסה. הוא נודע גם בזכות יצירתו הספרותית, ובה הרומן זינב. לאחר מאורעות 1921 בארץ ישראל פרסם באל־סיאסה סדרת מאמרים שעסקה בעימות בין יהודים לערבים בארץ.",
+      "biography_text_sha256": "c27eb22e37592e8037bb6ea5bd1441f766165bfebfa23a536b60e3d124b2ade4",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY_AFTER_SPLIT",
+        "identity_remap": {
+          "split_source_person_id": 197,
+          "split_target_person_id": 197
+        },
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 198,
+      "canonical_name": "חיים ויצמן",
+      "stable_key": "N:B02-N0011",
+      "stable_keys": [
+        "N:B02-N0011"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 75,
+        "person_id": 198,
+        "stable_key": "N:B02-N0011",
+        "canonical": "חיים ויצמן",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "חיים עזריאל ויצמן (1874–1952) היה מדען ומנהיג ציוני, מן הדמויות המרכזיות בתנועה הציונית במחצית הראשונה של המאה ה־20. הוא כיהן כנשיא ההסתדרות הציונית העולמית, היה ממייסדי הסוכנות היהודית ופעל לקידום המפעל הציוני. לצד פעילותו הציבורית היה כימאי בעל שם בינלאומי. לאחר הקמת המדינה נבחר לנשיאה הראשון של מדינת ישראל וכיהן בתפקיד עד מותו.",
+      "biography_text_sha256": "e4c3165de0812a5149c1890b0f0e751f2de594e6eb716d4a26344a9e7472ffe4",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 199,
+      "canonical_name": "זק סיקורל",
+      "stable_key": "N:B02-N0012",
+      "stable_keys": [
+        "N:B02-N0012"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 76,
+        "person_id": 199,
+        "stable_key": "N:B02-N0012",
+        "canonical": "זק סיקורל",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "LEAVE_BLANK",
+      "approved_biography_text": "",
+      "biography_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "intentional_blank": true,
+      "planned_apply_action": "LEAVE_BLANK",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "INTENTIONAL_BLANK",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 200,
+      "canonical_name": "ס. שאול",
+      "stable_key": "N:B02-N0013",
+      "stable_keys": [
+        "N:B02-N0013"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 77,
+        "person_id": 200,
+        "stable_key": "N:B02-N0013",
+        "canonical": "ס. שאול",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "LEAVE_BLANK",
+      "approved_biography_text": "",
+      "biography_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "intentional_blank": true,
+      "planned_apply_action": "LEAVE_BLANK",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "INTENTIONAL_BLANK",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 201,
+      "canonical_name": "יהושע בצלאל קנטרוביץ",
+      "stable_key": "N:B02-N0014",
+      "stable_keys": [
+        "N:B02-N0014"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 78,
+        "person_id": 201,
+        "stable_key": "N:B02-N0014",
+        "canonical": "יהושע בצלאל קנטרוביץ",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "יהושע בצלאל קנטרוביץ (1887–1943) היה סופר, עיתונאי, מורה ופעיל ציוני ארץ־ישראלי. בראשית שנות העשרים הוזמן לקהיר בידי ד״ר אלברט מוסרי לערוך את המהדורה העברית של העיתון היהודי־ציוני 'ישראל', שיצא במקביל בצרפתית, בערבית ובעברית. הוא ערך את המהדורה העברית עד סגירתה ב־1924.",
+      "biography_text_sha256": "e58f3822d5f898528155040a1e73a5de49d33bf0c2c10d50b763fb44782ef488",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 202,
+      "canonical_name": "אברהם אלמליח",
+      "stable_key": "N:B02-N0015",
+      "stable_keys": [
+        "N:B02-N0015"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 79,
+        "person_id": 202,
+        "stable_key": "N:B02-N0015",
+        "canonical": "אברהם אלמליח",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "אברהם אלמליח (1885–1967) היה עיתונאי, עורך, חוקר ואיש ציבור ירושלמי. הוא פעל בעיתונות העברית והספרדית, היה חבר אספת הנבחרים והוועד הלאומי, כיהן כסגן ראש עיריית ירושלים ונבחר לכנסת הראשונה כנציג רשימת הספרדים ועדות המזרח. הוא עסק גם בחקר תולדות יהודי המזרח ובתרגום ופרסום מקורות היסטוריים.",
+      "biography_text_sha256": "964b0e210a36c1cd795325ed4264e880d91bee40b9da9fbdcda9d8f74a147e1d",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 204,
+      "canonical_name": "עמנואל בר חיים",
+      "stable_key": "N:B02-N0017",
+      "stable_keys": [
+        "N:B02-N0017"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 81,
+        "person_id": 204,
+        "stable_key": "N:B02-N0017",
+        "canonical": "עמנואל בר חיים",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "עמנואל בר־חיים (יליד 1902) היה חבר קיבוץ רמת רחל ופעיל בתנועה הציונית. בשנת 1938 נשלח מטעם הסוכנות היהודית למצרים במסגרת הרחבת הפעילות הציונית בקהיר, באלכסנדריה ובפורט סעיד. פעילותו הייתה חלק ממאמץ לחיזוק המסגרות הציוניות המקומיות ולקשר בינן לבין מוסדות היישוב בארץ ישראל. לימים פרסם את ספר הזיכרונות 'בדרך לרמת רחל'.",
+      "biography_text_sha256": "feae21651a48ceaeb5ac811040f58206aa8fa5ebd7641b0a1eecc30279082129",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 205,
+      "canonical_name": "יעקב קצרנוביץ",
+      "stable_key": "N:B02-N0018",
+      "stable_keys": [
+        "N:B02-N0018"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 82,
+        "person_id": 205,
+        "stable_key": "N:B02-N0018",
+        "canonical": "יעקב קצרנוביץ",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "יעקב קצרנוביץ היה שליח ציוני מארץ ישראל שפעל במצרים. בשנת 1939 נשלח לעבודה בקרב התנועה הציונית המקומית וכתב על התנאים המיוחדים שבהם התפתחה הציונות במצרים ועל ההבדלים בינה לבין התנועות הציוניות במדינות אחרות.",
+      "biography_text_sha256": "121332a53721d891bb800b0933a80b446f42f245fc39a8eab1ee4482b5172fc1",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 206,
+      "canonical_name": "עובדיה מברטנורא",
+      "stable_key": "N:B02-N0019",
+      "stable_keys": [
+        "N:B02-N0019"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 83,
+        "person_id": 206,
+        "stable_key": "N:B02-N0019",
+        "canonical": "עובדיה בן אברהם",
+        "identity_action": "RENAME"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "רבי עובדיה מברטנורא, או עובדיה בן אברהם ירא מברטנורא, היה רב ומפרש המשנה מאיטליה במאה ה־15. בדרכו לירושלים עבר במצרים ובשנת 1488 שהה באלכסנדריה ובקהיר. באיגרות שכתב לבני משפחתו תיאר בפירוט את הקהילות היהודיות במצרים. לאחר שהגיע לירושלים היה לאחד ממנהיגי הקהילה היהודית בעיר. פירושו למשנה נעשה לאחד הפירושים המרכזיים והנפוצים ביותר למשנה.",
+      "biography_text_sha256": "52654ac593fc17a67e575ae3123f7a29ec0a610378b69a15072413254cf2d01a",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 207,
+      "canonical_name": "אל-אשרף קאיתבאי",
+      "stable_key": "N:B02-N0020",
+      "stable_keys": [
+        "N:B02-N0020"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 84,
+        "person_id": 207,
+        "stable_key": "N:B02-N0020",
+        "canonical": "אל-אשרף קאיתבאי",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "אל־אשרף קאיתבאי היה סולטאן ממלוכי של מצרים וסוריה בשנים 1468–1496. הוא שלט בתקופה של יציבות יחסית ונודע בפעילות בנייה נרחבת בקהיר, באלכסנדריה ובערים נוספות ברחבי הסולטנות. בתקופת שלטונו, בשנת 1488, עבר במצרים רבי עובדיה מברטנורא ותיאר במכתביו את הקהילות היהודיות באלכסנדריה ובקהיר.",
+      "biography_text_sha256": "dd505bdd6d89e2b35c51c47939d3dcbe7d6b9ed79641cbf4fe5bc6a760178f44",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 208,
+      "canonical_name": "אליהו הנביא",
+      "stable_key": "N:B02-N0021",
+      "stable_keys": [
+        "N:B02-N0021"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 85,
+        "person_id": 208,
+        "stable_key": "N:B02-N0021",
+        "canonical": "אליהו הנביא",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "LEAVE_BLANK",
+      "approved_biography_text": "",
+      "biography_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "intentional_blank": true,
+      "planned_apply_action": "LEAVE_BLANK",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "INTENTIONAL_BLANK",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 209,
+      "canonical_name": "אלי עובדיה",
+      "stable_key": "N:B02-N0022",
+      "stable_keys": [
+        "N:B02-N0022"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 86,
+        "person_id": 209,
+        "stable_key": "N:B02-N0022",
+        "canonical": "אלי עובדיה",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "LEAVE_BLANK",
+      "approved_biography_text": "",
+      "biography_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "intentional_blank": true,
+      "planned_apply_action": "LEAVE_BLANK",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "INTENTIONAL_BLANK",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 210,
+      "canonical_name": "ארווין רומל",
+      "stable_key": "N:B02-N0023",
+      "stable_keys": [
+        "N:B02-N0023"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 87,
+        "person_id": 210,
+        "stable_key": "N:B02-N0023",
+        "canonical": "רומל",
+        "identity_action": "RENAME"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "ארווין רומל (1891–1944) היה קצין גרמני שהגיע לדרגת פילדמרשל ונודע במיוחד כמפקד הכוחות הגרמניים בצפון אפריקה במלחמת העולם השנייה. התקדמות כוחותיו מזרחה בלוב ולעבר מצרים עוררה בשנים 1941–1942 חרדה רבה בקרב יהודי מצרים, במיוחד לקראת קרבות אל־עלמיין. הארכיון מתעד את החשש מפני כיבוש גרמני ואת ניסיונותיהם של יהודים במצרים להתכונן לאפשרות של פינוי או בריחה.",
+      "biography_text_sha256": "8a90040cafc6dca150e1ca39d79bd305f278a80ed70e53fd0b54f74135664b3b",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 211,
+      "canonical_name": "מוסטפא אל־נחאס",
+      "stable_key": "N:B02-N0024",
+      "stable_keys": [
+        "N:B02-N0024"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 88,
+        "person_id": 211,
+        "stable_key": "N:B02-N0024",
+        "canonical": "מוסטפה אל נחאס",
+        "identity_action": "RENAME"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "מוסטפא אל־נחאס (1879–1965) היה מדינאי מצרי וממנהיגיה המרכזיים של מפלגת הוופד. הוא כיהן כמה פעמים כראש ממשלת מצרים והיה במשך שנים אחת הדמויות הבולטות בפוליטיקה המצרית ובמאבק לצמצום ההשפעה הבריטית במדינה. בפברואר 1942 אילצה בריטניה את המלך פארוק למנות ממשלה בראשותו, באירוע שנודע כמשבר ארמון עאבדין.",
+      "biography_text_sha256": "6315def0d0cecdd34ea7ccf7450d1d5467fd4d00d6d1562bcb42266a193ac756",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 212,
+      "canonical_name": "אחמד מאהר",
+      "stable_key": "N:B02-N0025",
+      "stable_keys": [
+        "N:B02-N0025"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 89,
+        "person_id": 212,
+        "stable_key": "N:B02-N0025",
+        "canonical": "אחמד מאהר",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "אחמד מאהר (1885/1886–1945) היה פוליטיקאי מצרי וראש ממשלת מצרים מאוקטובר 1944 ועד מותו. הוא היה ממנהיגי המפלגה הסעדית ולפני כן פעל במסגרת הוופד. במהלך מלחמת העולם השנייה תמך בהצטרפות מצרים למחנה בעלות הברית. ב־24 בפברואר 1945, זמן קצר לאחר שהציג בפרלמנט את החלטת מצרים להכריז מלחמה על גרמניה ויפן, נורה למוות בבניין הפרלמנט בקהיר.",
+      "biography_text_sha256": "e06d72cfdbb3ce02eb51c249a56d859d259036e55e7326fb211272a37ba41695",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 214,
+      "canonical_name": "שארל דה גול",
+      "stable_key": "N:B02-N0027",
+      "stable_keys": [
+        "N:B02-N0027"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 91,
+        "person_id": 214,
+        "stable_key": "N:B02-N0027",
+        "canonical": "שארל דה גול",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "שארל דה גול (1890–1970) היה קצין ומדינאי צרפתי ומנהיג צרפת החופשית במלחמת העולם השנייה. לאחר כניעת צרפת לגרמניה ב־1940 עבר ללונדון וקרא להמשך המאבק נגד גרמניה הנאצית ומשטר וישי. בהמשך עמד בראש המסגרות המדיניות של צרפת החופשית. בארכיון הוא נזכר בהקשר לקריאות בעיתונות היהודית והמצרית לתמוך בצרפת החופשית.",
+      "biography_text_sha256": "2cef8653d235863685298f80e236526b54ec0f33344ab1ffd3ae2ca6a6b2bbe8",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 215,
+      "canonical_name": "אחמד ג'מאל",
+      "stable_key": "N:B02-N0028",
+      "stable_keys": [
+        "N:B02-N0028"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 92,
+        "person_id": 215,
+        "stable_key": "N:B02-N0028",
+        "canonical": "אחמד ג'מאל",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "אחמד ג'מאל (1872–1922), שנודע כג'מאל פאשה, היה קצין ומדינאי עות'מאני מן הדמויות המרכזיות של הנהגת האימפריה העות'מאנית בתקופת מלחמת העולם הראשונה. הוא כיהן כשר הימייה ופיקד על הארמייה הרביעית, שבסיסה היה בסוריה ושלטה גם בארץ ישראל. בתקופת המלחמה היה בעל סמכויות נרחבות באזור סוריה וארץ ישראל. התואר פאשה נשמר כ־honorific נפרד.",
+      "biography_text_sha256": "4a553db829e24f74ac7446726d0614e3a5b72f0d7641526a48c6218935033423",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 216,
+      "canonical_name": "זק מלח",
+      "stable_key": "N:B02-N0029",
+      "stable_keys": [
+        "N:B02-N0029"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 93,
+        "person_id": 216,
+        "stable_key": "N:B02-N0029",
+        "canonical": "זק מלח",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "זק מלח היה עיתונאי ופעיל ציוני יהודי־מצרי. משנת 1924 היה מעורב בעריכת השבועון הצרפתי L’Aurore, מן העיתונים היהודיים־ציוניים שפעלו במצרים. העיתון עסק בענייני הקהילה היהודית, בציונות וביחסי יהודים וערבים ושימש אחת הבמות הציבוריות של התנועה הציונית במצרים בתקופה שבין מלחמות העולם.",
+      "biography_text_sha256": "c93f2c85f61f8dea463dc56e242eedb5361a5fbf9f281fd14b53aa16f8d595e8",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 217,
+      "canonical_name": "מנדל קלוסטין",
+      "stable_key": "N:B02-N0030",
+      "stable_keys": [
+        "N:B02-N0030"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 94,
+        "person_id": 217,
+        "stable_key": "N:B02-N0030",
+        "canonical": "מנדל קלוסטין",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "מנדל קלוסטין היה עיתונאי יהודי־מצרי ופעיל בעיתונות היהודית־ציונית במצרים. משנת 1936 ערך את La Tribune Juive, עיתון יהודי בצרפתית שפעל במצרים ועסק בענייני הקהילה, בציונות ובהתפתחויות הפוליטיות שהשפיעו על יהודי מצרים.",
+      "biography_text_sha256": "cecbdb8e1a2906400de086155a5073897fbf49f4a2b55880534a9af2a8c1a966",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 218,
+      "canonical_name": "ג'ודית סודלובסקי",
+      "stable_key": "N:B02-N0031",
+      "stable_keys": [
+        "N:B02-N0031"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 95,
+        "person_id": 218,
+        "stable_key": "N:B02-N0031",
+        "canonical": "ג'ודית סודלובסקי",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "ג'ודית סודלובסקי הייתה כותבת ממוצא יהודי־מצרי. בשנת 1996 פרסמה את המאמר 'יציאת מצרים בת 3500 שנה', שבו כתבה מזיכרונותיה על חיי יהודי מצרים ועל מנהגי הקהילה, ובפרט על חג הפסח והזיקה האישית של יהודי מצרים לסיפור יציאת מצרים.",
+      "biography_text_sha256": "1ca7254ca3b2ea3db8ba9a3b71ab526f4f1f1b7bef4bfa6fbea455ca0a6a5177",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 219,
+      "canonical_name": "אלכסנדר הגדול",
+      "stable_key": "N:B02-N0032",
+      "stable_keys": [
+        "N:B02-N0032"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 96,
+        "person_id": 219,
+        "stable_key": "N:B02-N0032",
+        "canonical": "אלכסנדר הגדול",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "אלכסנדר הגדול (356–323 לפנה״ס) היה מלך מוקדון ומצביא שהקים בתוך שנים מעטות אימפריה רחבת ידיים. בשנת 332 לפנה״ס כבש את מצרים מידי האימפריה הפרסית, ובשנה שלאחר מכן ייסד לחוף הים התיכון את העיר אלכסנדריה, שנקראה על שמו. בתקופות שלאחר מותו נעשתה אלכסנדריה לאחד המרכזים החשובים בעולם ההלניסטי ולמוקד גדול של אוכלוסייה יהודית.",
+      "biography_text_sha256": "f658fd3e953fa6597a3eb83dfd409bf9ccd2d5835931519cf679eeae7ce4bbc4",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 220,
+      "canonical_name": "צלאח א־דין",
+      "stable_key": "N:B02-N0033",
+      "stable_keys": [
+        "N:B02-N0033"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 97,
+        "person_id": 220,
+        "stable_key": "N:B02-N0033",
+        "canonical": "צלאח א-דין",
+        "identity_action": "RENAME"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "צלאח א־דין (1137/1138–1193) היה מייסד השושלת האיובית ושליט מצרים וסוריה. הוא ביסס את שלטונו במצרים לאחר דעיכת הח'ליפות הפאטמית והרחיב את ממלכתו לסוריה ולאזורים נוספים. בשנת 1187 הביס את הצלבנים בקרב קרני חיטין וכבש מחדש את ירושלים. בתקופת שלטונו במצרים פעל הרמב״ם.",
+      "biography_text_sha256": "9ebe22975b46a105d087406a82b9ea424fba93349fb1ec57b92f76c54bfe3f00",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 221,
+      "canonical_name": "הרמב\"ם",
+      "stable_key": "N:B02-N0034",
+      "stable_keys": [
+        "N:B02-N0034",
+        "N:B03-N0030"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 98,
+        "person_id": 221,
+        "stable_key": "N:B02-N0034",
+        "canonical": "הרמב\"ם",
+        "identity_action": "ALIAS_CLEANUP"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "הרמב״ם, רבי משה בן מימון (1138–1204), היה מגדולי הפוסקים, הפילוסופים והרופאים היהודים בימי הביניים. הוא נולד בקורדובה שבספרד, ולאחר שנות נדודים הגיע עם משפחתו למצרים והשתקע בפוסטאט. במצרים נעשה לאחת הדמויות המרכזיות בהנהגת הקהילה היהודית ושימש פוסק וסמכות הלכתית לקהילות ברחבי העולם היהודי. לצד פעילותו התורנית עסק ברפואה ושימש רופא בחצר השלטון האיובי. במצרים חיבר חלק גדול מיצירותיו המרכזיות, ובהן 'משנה תורה' ו'מורה נבוכים'.",
+      "biography_text_sha256": "415fd8afb1e25f6b807520a18fce2cf76083995c748fe753039777bc4f7626e0",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      },
+      "stable_key_correction_provenance": {
+        "resolution": "PREFLIGHT_SPEC_OMISSION_CORRECTED",
+        "production_identity_changed": false,
+        "expected_production_stable_keys": [
+          "N:B02-N0034",
+          "N:B03-N0030"
+        ]
+      }
+    },
+    {
+      "final_person_id": 222,
+      "canonical_name": "יאסר ערפאת",
+      "stable_key": "N:B02-N0035",
+      "stable_keys": [
+        "N:B02-N0035"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 99,
+        "person_id": 222,
+        "stable_key": "N:B02-N0035",
+        "canonical": "יאסר ערפאת",
+        "identity_action": "NONE"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "יאסר ערפאת (1929–2004) היה מנהיג פלסטיני, ממייסדי תנועת פת״ח ויושב ראש הארגון לשחרור פלסטין משנת 1969 ועד מותו. הוא נולד בקהיר וגדל חלק מילדותו בין קהיר לירושלים. בשנות התשעים היה שותף לתהליך אוסלו ולחתימה על ההסכמים עם ישראל, וב־1994 קיבל את פרס נובל לשלום יחד עם יצחק רבין ושמעון פרס. פרטי השכונה המדויקים המופיעים ב־OCR הארכיוני אינם נכללים בשל חוסר ודאות.",
+      "biography_text_sha256": "f93fde5f6796d4ccb7e816addbee887b1be5560d9bd6b2e37bc3a8f70d77ee24",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 223,
+      "canonical_name": "מייקל מ' לסקיאר",
+      "stable_key": "N:B02-N0036",
+      "stable_keys": [
+        "N:B02-N0036"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 100,
+        "person_id": 223,
+        "stable_key": "N:B02-N0036",
+        "canonical": "מייקל לסקיאר",
+        "identity_action": "RENAME"
+      },
+      "human_review_decision": "APPROVED",
+      "approved_biography_text": "מייקל מ' לסקיאר (נולד ב־1949) הוא היסטוריון וחוקר של יהדות צפון אפריקה והמזרח התיכון, יחסי יהודים ומוסלמים והציונות בארצות ערב. הוא השלים את לימודי הדוקטורט בהיסטוריה באוניברסיטת UCLA והיה פרופסור באוניברסיטת בר־אילן ובמוסדות אקדמיים נוספים בישראל. ספרו The Jews of Egypt, 1920–1970, שראה אור ב־1992, הוא מחקר מקיף על יהודי מצרים בתקופת הציונות, האנטישמיות, הקמת מדינת ישראל והגירת הקהילה ממצרים.",
+      "biography_text_sha256": "ba176d3c7d431422edbcdd852298fb0f9baa2e885d8331d05be9dab2f40e1c0c",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY",
+        "identity_remap": null,
+        "production_identity_apply_completed": true
+      }
+    },
+    {
+      "final_person_id": 967,
+      "canonical_name": "מוחמד חסנין הייכל",
+      "stable_key": "N:P00-N0065",
+      "stable_keys": [
+        "N:P00-N0065"
+      ],
+      "original_pilot_03_source_identity": {
+        "pilot_order": 74,
+        "person_id": 197,
+        "stable_key": "N:B02-N0010",
+        "canonical": "מחמד חוסין היקל",
+        "identity_action": "SPLIT_TARGET_B"
+      },
+      "human_review_decision": "DEFER_UNTIL_SPLIT",
+      "approved_biography_text": "מוחמד חסנין הייכל (1923–2016) היה עיתונאי וסופר מצרי מן הדמויות הבולטות בעיתונות המצרית במאה ה־20. הוא היה מזוהה במיוחד עם העיתון אל־אהראם ועם תקופת נשיאותו של גמאל עבד אל־נאצר. בארכיון הוא נזכר גם כמקור וככותב בהקשר לעסק הביש וליחסי מצרים–ישראל בשנות החמישים.",
+      "biography_text_sha256": "ee15dfc33659a4664aa9accbaa4dc4aa7509905a5b36d7dc6d3871bc725718c5",
+      "intentional_blank": false,
+      "planned_apply_action": "WRITE_BIOGRAPHY",
+      "identity_reconciliation_provenance": {
+        "source_artifact": "outputs/biography_mode/pilot_03_post_identity_reconciliation/vs_archive_biography_mode_pilot_03_biography_ready_after_identity_v1.json",
+        "source_artifact_sha256": "8f91b447998d5ac93a2b586ff67dd84920237bada1b8592cad8c3c0f11a3adcf",
+        "post_identity_biography_status": "READY_AFTER_SPLIT",
+        "identity_remap": {
+          "split_source_person_id": 197,
+          "split_target_person_id": 967
+        },
+        "production_identity_apply_completed": true
+      }
+    }
+  ],
+  "production_write_performed_by_this_task": false,
+  "biography_write_performed_by_this_task": false,
+  "site_write_performed_by_this_task": false,
+  "aws_operation_performed_by_this_task": false,
+  "production_preflight_initial_completed": true,
+  "actual_production_biography_write_count_expected": 92,
+  "expected_no_change_count": 1,
+  "production_preflight_recheck_required": true
+}
