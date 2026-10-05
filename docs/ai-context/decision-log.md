@@ -1,5 +1,22 @@
 # VS-Archive Decision Log
 
+## Public Person identity eligibility
+
+**Decision / implemented:** Public Person identity eligibility is separate from public holdings membership. A Person is publicly eligible when they have unified public holdings membership, or when `Person.biography` contains at least one non-whitespace character.
+
+**Current behavior:**
+
+- `person_public_identity_eligibility_q` is that contract. It is unified holdings membership (`person_unified_public_membership_q`: authorized browse `ArchiveItemPerson`, renderable `PhotoPerson`, or linked-Author `ArchiveItemAuthor`) **or** `biography` matching a non-whitespace character. Placeholder words are not interpreted.
+- The People directory queryset uses that eligibility predicate, then the existing name / alias / family-name / linked-Author search. Pagination and A–Z use the same ordered identity list. Biography text is not a search field.
+- Person detail uses the same eligibility predicate instead of requiring a non-empty related or authored holdings list. A biography-only page renders with zero related and authored cards. Holdings querysets are unchanged, so private and restricted items stay out of the anonymous page and out of directory counts.
+- Advanced `person=` filtering and the Person picker stay AIP or renderable PhotoPerson on the authorized browse queryset. A biography-only Person is not a filter choice and does not match items.
+- Author public pages stay holdings-based. A linked Author with no visible `ArchiveItemAuthor` holding still 404s and does not redirect, including when the linked Person is public only through a biography.
+- `from_item` / `from_photo` still require the item to already be in that Person's public holdings queryset.
+
+**Supersedes:** the People-directory (PR2) statements that directory/detail access required a visible holding and that biography did not affect public access. Holdings membership itself is unchanged.
+
+**Tests:** `documents/test_archive_person_public_page.py`, `documents/test_archive_people_public_index.py`, `documents/test_archive_advanced_search_person.py`, `documents/test_archive_author_public_page.py`.
+
 ## Person registry import binding and structured family names
 
 **Decision / implemented:** V18/person-registry idempotency and previous/acquired family names are separate from `PersonAlias` and from `ReviewedPersonImportBinding`.
@@ -963,7 +980,8 @@ automatic linking or data backfill in this PR.
   (2) Authors with public **`ArchiveItemAuthor`** membership and
   **`Author.person_id` null**. A linked Author is not a separate directory
   row. Same display name on an unlinked Person and an unlinked Author yields
-  two rows.
+  two rows. Person directory eligibility later also includes a meaningful
+  biography; see **Public Person identity eligibility**.
 - Person-backed display name is **`Person.name`**. Author-only display name
   is **`Author.name`**. Identity kind is not shown in the public UI.
   **`item_count`** is DISTINCT authorized/renderable **`ArchiveItem`** ids
@@ -978,10 +996,12 @@ automatic linking or data backfill in this PR.
   current user, and **`Author.name`** for Author-only rows. A private-only
   linked Author name does not match even when the Person is independently
   public via AIP/PhotoPerson.
-- Person detail membership and related holdings are the DISTINCT union of
-  AIP, renderable PhotoPerson, and AIA via **`Author.person_id`**. PhotoPerson
-  deep-links are unchanged: the earliest matching renderable photo is used
-  even when the same item is also authored. Biography is unchanged.
+- Person detail holdings are the DISTINCT union of AIP, renderable
+  PhotoPerson, and AIA via **`Author.person_id`**. PhotoPerson deep-links are
+  unchanged: the earliest matching renderable photo is used even when the
+  same item is also authored. Biography did not affect access in this PR.
+  Public identity eligibility is now holdings **or** meaningful biography;
+  see **Public Person identity eligibility**.
 - **`/archive/authors/`** 302-redirects to **`/archive/people/`** and
   preserves **`q`** only. Linked Author detail 302-redirects to
   **`/archive/people/<person_id>/` only when that Author has at least one

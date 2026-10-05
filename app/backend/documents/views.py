@@ -323,6 +323,7 @@ from documents.services.person_public import (
     apply_matching_photo_presentation_to_cards,
     build_person_public_item_cards,
     matching_photo_ids_for_selected_persons,
+    person_public_identity_eligibility_q,
     public_person_authored_archive_items_queryset,
     public_person_related_archive_items_queryset,
     resolve_person_public_source_return_url,
@@ -5798,7 +5799,9 @@ def archive_tag_browse_page(request, tag_id: int):
 
 def archive_person_detail_page(request, person_id: int):
     person = get_object_or_404(
-        Person.objects.prefetch_related(public_person_aliases_prefetch()),
+        Person.objects.filter(
+            person_public_identity_eligibility_q(request.user)
+        ).prefetch_related(public_person_aliases_prefetch()),
         pk=person_id,
     )
 
@@ -5811,8 +5814,6 @@ def archive_person_detail_page(request, person_id: int):
 
     related_count = related_items.count()
     authored_count = authored_items.count()
-    if related_count == 0 and authored_count == 0:
-        raise Http404() from None
 
     per_page = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE
 
@@ -7189,13 +7190,9 @@ def archive_manage_person_alias_edit_page(request, person_id: int, alias_id: int
 
     if request.method == "POST":
         submitted_name = request.POST.get("name") or ""
-        submitted_kind = (
-            request.POST.get("kind") or PersonAlias.Kind.UNSPECIFIED
-        )
+        submitted_kind = request.POST.get("kind") or PersonAlias.Kind.UNSPECIFIED
         submitted_language = request.POST.get("language") or ""
-        submitted_display_publicly = (
-            request.POST.get("display_publicly") == "on"
-        )
+        submitted_display_publicly = request.POST.get("display_publicly") == "on"
         try:
             update_person_alias(
                 alias,

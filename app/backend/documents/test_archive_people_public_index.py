@@ -223,7 +223,11 @@ class PeopleDirectoryIndexLetterTests(SimpleTestCase):
         searched = dict(
             hebrew_alphabet_nav_items(
                 first_directory_letter_pages(
-                    ["אהרון LetterNavToken", "אהרון LetterNavToken ב", "תמר LetterNavToken"],
+                    [
+                        "אהרון LetterNavToken",
+                        "אהרון LetterNavToken ב",
+                        "תמר LetterNavToken",
+                    ],
                     per_page=2,
                 ),
                 page=1,
@@ -249,7 +253,9 @@ class PeoplePublicIndexRouteTests(TestCase):
         self.assertContains(resp, "אנשים")
         self.assertContains(resp, "אין אנשים להצגה.")
         html = resp.content.decode("utf-8")
-        header = html[html.index("archive-people-index-header") : html.index("</header>")]
+        header = html[
+            html.index("archive-people-index-header") : html.index("</header>")
+        ]
         self.assertIn("חזרה לארכיון", header)
         self.assertIn("btn-primary", header)
         self.assertIn("←", header)
@@ -487,6 +493,89 @@ class PeoplePublicIndexIsolationTests(TestCase):
         self.assertIn(person_public_page_url(person.id), html)
 
 
+class PeoplePublicIndexBiographyEligibilityTests(TestCase):
+    def test_biography_only_person_is_listed_and_searchable(self):
+        biography_only = Person.objects.create(
+            name="BioOnlyCanonicalToken",
+            biography="A public life",
+        )
+        PersonAlias.objects.create(person=biography_only, name="BioOnlyAliasToken")
+        whitespace = Person.objects.create(
+            name="Whitespace Index Person",
+            biography=" \n\t ",
+        )
+        holdings_only = Person.objects.create(name="Holdings Only Person")
+        _link(_public_manual("Holdings only letter"), holdings_only)
+        private_only = Person.objects.create(name="Index Private Without Bio")
+        _link(_private_manual("Index hidden private letter"), private_only)
+        restricted_only = Person.objects.create(name="Index Restricted Without Bio")
+        _link(_restricted_manual("Index hidden restricted letter"), restricted_only)
+        private_bio = Person.objects.create(
+            name="Private Holdings Bio Person",
+            biography="Private identity bio",
+        )
+        _link(_private_manual("Still hidden private letter"), private_bio)
+        _link(_restricted_manual("Still hidden restricted letter"), private_bio)
+
+        index = self.client.get(_index_url())
+        self.assertEqual(index.status_code, 200)
+        self.assertEqual(
+            _row_names(index),
+            [
+                "BioOnlyCanonicalToken",
+                "Holdings Only Person",
+                "Private Holdings Bio Person",
+            ],
+        )
+        self.assertNotIn(whitespace.name, _row_names(index))
+        self.assertNotIn(private_only.name, _row_names(index))
+        self.assertNotIn(restricted_only.name, _row_names(index))
+        self.assertEqual(_count_for(index, "BioOnlyCanonicalToken"), 0)
+        self.assertEqual(_count_for(index, "Holdings Only Person"), 1)
+        self.assertEqual(_count_for(index, "Private Holdings Bio Person"), 0)
+        self.assertNotContains(index, "Still hidden private letter")
+        self.assertNotContains(index, "Still hidden restricted letter")
+        self.assertNotContains(index, "Index hidden private letter")
+
+        canonical = self.client.get(_index_url(), {"q": "BioOnlyCanonicalToken"})
+        self.assertEqual(
+            _row_hrefs(canonical), [person_public_page_url(biography_only.id)]
+        )
+
+        alias = self.client.get(_index_url(), {"q": "BioOnlyAliasToken"})
+        self.assertEqual(_row_names(alias), ["BioOnlyCanonicalToken"])
+        self.assertNotIn("BioOnlyAliasToken", _people_index_list_html(alias))
+
+    def test_biography_only_identity_uses_ordinary_pagination_and_letters(self):
+        for index in range(ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE):
+            person = Person.objects.create(name=f"אהרון {index:02d}")
+            _link(_public_manual(f"Aleph holdings {index:02d}"), person)
+        biography_only = Person.objects.create(
+            name="בנימין ביוגרפיה",
+            biography="עמוד שני",
+        )
+
+        page1 = self.client.get(_index_url())
+        self.assertEqual(len(page1.context["people_rows"]), 48)
+        self.assertEqual(page1.context["total_count"], 49)
+        self.assertEqual(
+            [group.letter for group in page1.context["people_letter_groups"]],
+            ["א"],
+        )
+        self.assertNotIn(biography_only.name, _row_names(page1))
+        page1_nav = dict(page1.context["people_alphabet_nav"])
+        self.assertEqual(page1_nav["א"], "#people-letter-א")
+        self.assertEqual(page1_nav["ב"], f"{_index_url()}?page=2#people-letter-ב")
+
+        page2 = self.client.get(_index_url(), {"page": "2"})
+        self.assertEqual(_row_names(page2), ["בנימין ביוגרפיה"])
+        self.assertEqual(_count_for(page2, "בנימין ביוגרפיה"), 0)
+        self.assertEqual(
+            [group.letter for group in page2.context["people_letter_groups"]],
+            ["ב"],
+        )
+
+
 class PeoplePublicIndexPaginationTests(TestCase):
     def test_paginates_at_48_and_preserves_q(self):
         token = "PeopleIndexSearchToken"
@@ -588,7 +677,9 @@ class PeoplePublicIndexLayoutTests(TestCase):
         for index in range(ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE):
             person = Person.objects.create(name=f"אהרון {index:02d}")
             _link(_public_manual(f"Aleph page letter {index:02d}"), person)
-        _link(_public_manual("Tav other page letter"), Person.objects.create(name="תמר"))
+        _link(
+            _public_manual("Tav other page letter"), Person.objects.create(name="תמר")
+        )
         _link(_public_manual("Gimel unused letter"), Person.objects.create(name="גיא"))
 
         page1 = self.client.get(_index_url())
@@ -646,7 +737,10 @@ class PeoplePublicIndexLayoutTests(TestCase):
         self.assertEqual(searched_page1_nav["ב"], "")
         searched_page1_html = searched_page1.content.decode("utf-8")
         self.assertIn(f"q={token}", searched_page1_html)
-        self.assertIn('href="/archive/people/?q=LetterNavToken&amp;page=2#people-letter-ת"', searched_page1_html)
+        self.assertIn(
+            'href="/archive/people/?q=LetterNavToken&amp;page=2#people-letter-ת"',
+            searched_page1_html,
+        )
 
         searched_page2 = self.client.get(_index_url(), {"q": token, "page": "2"})
         searched_page2_nav = dict(searched_page2.context["people_alphabet_nav"])

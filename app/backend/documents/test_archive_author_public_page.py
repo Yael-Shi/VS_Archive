@@ -563,3 +563,28 @@ class AuthorPublicPageLinkedPersonRedirectTests(TestCase):
         resp = self.client.get(_author_page(author))
         self.assertEqual(resp.status_code, 404)
         self.assertFalse(resp.has_header("Location"))
+
+    def test_person_biography_does_not_open_author_detail(self):
+        person = Person.objects.create(
+            name="Biography Only Linked Person",
+            biography="Person biography is not author membership",
+        )
+        author = Author.objects.create(
+            name="Biography Linked Author",
+            person=person,
+        )
+        _link(_private_manual("Author private letter"), author)
+
+        resp = self.client.get(_author_page(author))
+        self.assertEqual(resp.status_code, 404)
+        self.assertFalse(resp.has_header("Location"))
+        self.assertNotContains(resp, "Biography Only Linked Person", status_code=404)
+        self.assertNotContains(
+            resp, "Person biography is not author membership", status_code=404
+        )
+        self.assertNotContains(resp, "Author private letter", status_code=404)
+
+        person_resp = self.client.get(person_public_page_url(person.id))
+        self.assertEqual(person_resp.status_code, 200)
+        self.assertContains(person_resp, "Person biography is not author membership")
+        self.assertNotContains(person_resp, "Author private letter")

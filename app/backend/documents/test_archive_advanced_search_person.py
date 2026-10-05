@@ -198,6 +198,22 @@ def _person_related_query_count(captured_queries) -> int:
 
 
 class ArchiveAdvancedPersonFilterQuerysetTests(TestCase):
+    def test_biography_only_person_does_not_match_person_filter(self):
+        biography_only = Person.objects.create(
+            name="Biography Filter Person",
+            biography="Public biography",
+        )
+        unrelated = _public_manual("Unrelated public item")
+
+        ids = _ids(
+            filter_archive_items_by_advanced_filters(
+                ArchiveItem.objects.all(),
+                normalize_archive_advanced_filters({"person": str(biography_only.id)}),
+            )
+        )
+        self.assertEqual(ids, [])
+        self.assertNotIn(unrelated.pk, ids)
+
     def test_single_person_id_filters_archive_item_person_links(self):
         ada = Person.objects.create(name="Ada Lovelace")
         charles = Person.objects.create(name="Charles Babbage")
@@ -609,6 +625,28 @@ class ArchiveAdvancedPersonFilterAccessTests(TestCase):
 class ArchiveAdvancedPersonFilterUiTests(TestCase):
     def setUp(self):
         self.url = reverse("archive-list")
+
+    def test_biography_only_person_is_absent_from_picker(self):
+        biography_only = Person.objects.create(
+            name="Biography Picker Person",
+            biography="Picker biography",
+        )
+        holdings = Person.objects.create(name="Holdings Picker Person")
+        item = _public_manual("Picker holdings item")
+        ArchiveItemPerson.objects.create(archive_item=item, person=holdings)
+        private = create_manual_text_archive_item(
+            title="Picker hidden holding",
+            body="Private body",
+            visibility=ArchiveItem.Visibility.PRIVATE,
+        )
+        ArchiveItemPerson.objects.create(archive_item=private, person=biography_only)
+
+        resp = self.client.get(self.url, {"advanced": "1"})
+        choice_ids = [p.pk for p in resp.context["advanced_filter_person_choices"]]
+        self.assertEqual(choice_ids, [holdings.pk])
+        self.assertNotIn(biography_only.pk, choice_ids)
+        self.assertNotContains(resp, "Biography Picker Person")
+        self.assertNotContains(resp, "Picker hidden holding")
 
     def test_canonical_label_and_id_value_in_picker(self):
         person = Person.objects.create(name="יעקב כהן")
