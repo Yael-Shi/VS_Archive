@@ -592,6 +592,190 @@ class ReviewedPersonImportBinding(models.Model):
         )
 
 
+class NonPersonEntity(models.Model):
+    """One canonical non-person entity. Not a Person, Author, or discovery label.
+
+    ``canonical_name`` is the approved name and is not unique. ``display_name``
+    is optional; a blank value means callers should show ``canonical_name``.
+    """
+
+    class EntityType(models.TextChoices):
+        PLACE = "PLACE", "PLACE"
+        ORGANIZATION = "ORGANIZATION", "ORGANIZATION"
+        COMMUNITY = "COMMUNITY", "COMMUNITY"
+        PUBLICATION_WORK = "PUBLICATION_WORK", "PUBLICATION_WORK"
+        LEGAL_INSTRUMENT = "LEGAL_INSTRUMENT", "LEGAL_INSTRUMENT"
+        EVENT = "EVENT", "EVENT"
+
+    class EntitySubtype(models.TextChoices):
+        ASSOCIATION_OR_NGO = "ASSOCIATION_OR_NGO", "ASSOCIATION_OR_NGO"
+        BOOK = "BOOK", "BOOK"
+        BUILDING = "BUILDING", "BUILDING"
+        CAMP = "CAMP", "CAMP"
+        CITY = "CITY", "CITY"
+        COUNTRY = "COUNTRY", "COUNTRY"
+        COURT_OR_JUDICIAL_BODY = "COURT_OR_JUDICIAL_BODY", "COURT_OR_JUDICIAL_BODY"
+        COVERT_OPERATION = "COVERT_OPERATION", "COVERT_OPERATION"
+        EDUCATIONAL_INSTITUTION = (
+            "EDUCATIONAL_INSTITUTION",
+            "EDUCATIONAL_INSTITUTION",
+        )
+        ETHNO_RELIGIOUS_GROUP = "ETHNO_RELIGIOUS_GROUP", "ETHNO_RELIGIOUS_GROUP"
+        GOVERNMENT_BODY = "GOVERNMENT_BODY", "GOVERNMENT_BODY"
+        HOSPITAL = "HOSPITAL", "HOSPITAL"
+        IMMIGRATION_OR_RESCUE_BODY = (
+            "IMMIGRATION_OR_RESCUE_BODY",
+            "IMMIGRATION_OR_RESCUE_BODY",
+        )
+        INTELLIGENCE_ORGANIZATION = (
+            "INTELLIGENCE_ORGANIZATION",
+            "INTELLIGENCE_ORGANIZATION",
+        )
+        JEWISH_COMMUNITY = "JEWISH_COMMUNITY", "JEWISH_COMMUNITY"
+        LAW_OR_STATUTE = "LAW_OR_STATUTE", "LAW_OR_STATUTE"
+        MILITARY_OR_SECURITY_SITE = (
+            "MILITARY_OR_SECURITY_SITE",
+            "MILITARY_OR_SECURITY_SITE",
+        )
+        NEIGHBORHOOD = "NEIGHBORHOOD", "NEIGHBORHOOD"
+        NEWSPAPER = "NEWSPAPER", "NEWSPAPER"
+        ORDER_OR_DECREE = "ORDER_OR_DECREE", "ORDER_OR_DECREE"
+        OTHER = "OTHER", "OTHER"
+        PERIODICAL_OR_JOURNAL = "PERIODICAL_OR_JOURNAL", "PERIODICAL_OR_JOURNAL"
+        PRISON = "PRISON", "PRISON"
+        REGION_OR_HISTORICAL_AREA = (
+            "REGION_OR_HISTORICAL_AREA",
+            "REGION_OR_HISTORICAL_AREA",
+        )
+        RELIGIOUS_SITE = "RELIGIOUS_SITE", "RELIGIOUS_SITE"
+        REPORT_OR_PROTOCOL_NON_LEGAL = (
+            "REPORT_OR_PROTOCOL_NON_LEGAL",
+            "REPORT_OR_PROTOCOL_NON_LEGAL",
+        )
+        SCHOOL = "SCHOOL", "SCHOOL"
+        VERDICT_OR_SENTENCE = "VERDICT_OR_SENTENCE", "VERDICT_OR_SENTENCE"
+        WAR_OR_CAMPAIGN = "WAR_OR_CAMPAIGN", "WAR_OR_CAMPAIGN"
+        YOUTH_MOVEMENT = "YOUTH_MOVEMENT", "YOUTH_MOVEMENT"
+        ZIONIST_FEDERATION_OR_BODY = (
+            "ZIONIST_FEDERATION_OR_BODY",
+            "ZIONIST_FEDERATION_OR_BODY",
+        )
+
+    canonical_name = models.CharField(max_length=255)
+    display_name = models.CharField(max_length=255, blank=True, default="")
+    entity_type = models.CharField(max_length=32, choices=EntityType.choices)
+    entity_subtype = models.CharField(
+        max_length=40,
+        choices=EntitySubtype.choices,
+        blank=True,
+        default="",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["canonical_name", "id"]
+
+    def __str__(self) -> str:
+        return self.canonical_name
+
+
+class NonPersonEntityAlias(models.Model):
+    """Global lookup name for one NonPersonEntity. Does not replace canonical_name.
+
+    Aliases are not independent identities. Deleting the entity cascades them,
+    matching PersonAlias. Contextual-only surface forms are not stored here.
+    """
+
+    class Kind(models.TextChoices):
+        LANGUAGE_VARIANT = "LANGUAGE_VARIANT", "LANGUAGE_VARIANT"
+        OCR_VARIANT = "OCR_VARIANT", "OCR_VARIANT"
+        SPELLING_VARIANT = "SPELLING_VARIANT", "SPELLING_VARIANT"
+        TRANSLITERATION_VARIANT = "TRANSLITERATION_VARIANT", "TRANSLITERATION_VARIANT"
+        ABBREVIATION = "ABBREVIATION", "ABBREVIATION"
+        CURRENT_NAME = "CURRENT_NAME", "CURRENT_NAME"
+
+    entity = models.ForeignKey(
+        NonPersonEntity,
+        on_delete=models.CASCADE,
+        related_name="aliases",
+    )
+    name = models.CharField(max_length=255)
+    kind = models.CharField(max_length=32, choices=Kind.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["entity", "name"],
+                name="uniq_non_person_entity_alias_entity_name",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class ReviewedNonPersonEntityDecision(models.Model):
+    """One reviewed non-person decision, keyed for a later idempotent apply.
+
+    ``result_entity`` is protected so deleting an entity cannot drop the
+    decision that records it. SKIP and NEEDS_RESEARCH leave ``result_entity``
+    null. This row does not create discovery labels, people, or aliases.
+    """
+
+    class Decision(models.TextChoices):
+        APPROVE = "APPROVE", "APPROVE"
+        MERGE = "MERGE", "MERGE"
+        SPLIT = "SPLIT", "SPLIT"
+        SKIP = "SKIP", "SKIP"
+        NEEDS_RESEARCH = "NEEDS_RESEARCH", "NEEDS_RESEARCH"
+
+    class ReviewStatus(models.TextChoices):
+        CLOSED = "CLOSED", "CLOSED"
+        UNRESOLVED = "UNRESOLVED", "UNRESOLVED"
+
+    source = models.CharField(max_length=255)
+    candidate_id = models.CharField(max_length=255)
+    workbook_sha256 = models.CharField(max_length=64)
+    decision = models.CharField(max_length=32, choices=Decision.choices)
+    review_status = models.CharField(max_length=16, choices=ReviewStatus.choices)
+    final_canonical = models.CharField(max_length=255, blank=True, default="")
+    display_name = models.CharField(max_length=255, blank=True, default="")
+    merge_target_candidate_id = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    result_entity = models.ForeignKey(
+        NonPersonEntity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="review_decisions",
+    )
+    contextual_surfaces = models.TextField(blank=True, default="")
+    note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source", "candidate_id"],
+                name="uniq_reviewed_non_person_entity_decision_source_candidate",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return (
+            "ReviewedNonPersonEntityDecision("
+            f"source={self.source!r}, candidate_id={self.candidate_id!r}, "
+            f"decision={self.decision})"
+        )
+
+
 class VideoContent(models.Model):
     """External video reference for VIDEO archive items (URL metadata only; no media bytes)."""
 
