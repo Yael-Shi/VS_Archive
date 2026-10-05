@@ -8218,4 +8218,12 @@ SKIP and NEEDS_RESEARCH keep `result_entity` null. NEEDS_RESEARCH must stay `UNR
 
 **matched_text:** surface-v1 offsets are not treated as original offsets. The plan stores an original slice only when the source is already NFC and a linear span map round-trips through surface-v1. Source text that is not already NFC does not get a derived slice. If that slice cannot be recovered safely, the SPLIT candidate is `BLOCKED`. Occurrence counting still uses `normalize_surface_v1`.
 
-**Deferred:** creating or updating `NonPersonEntity`, `NonPersonEntityAlias`, `ReviewedNonPersonEntityDecision`, and `ArchiveItemEntityOccurrence`; search-index writes; any confirm/apply flag. Phase 3A has no write transaction because it has no writes.
+**Deferred:** Phase 3A itself does not write. Transactional apply is the following entry. Search-index writes remain out of scope.
+
+## Non-person entity review apply phase 3B (2026-10-05)
+
+**Decision:** Phase 3B applies the validated v6 contract in one database transaction. The dry-run command stays read-only. Apply is a separate command, `non_person_entity_review_apply`, and writes only when `--confirm` is exactly `APPLY_NON_PERSON_FINAL_RECON_2026_10_05`.
+
+**Current behavior:** The only production write entry point is `apply_non_person_entity_review(path)`. It parses the authoritative workbook, classifies, then inside one transaction parses the workbook again and requires the same authoritative SHA before locking. Locks cover this source's candidate decisions, their non-null result entities, aliases of those entities, and SPLIT source rows. Classification runs again after those locks. Every candidate must be `READY_TO_APPLY` or `ALREADY_APPLIED`. Any `STATE_DRIFT` or `BLOCKED` candidate aborts the batch. Inside the transaction the write order is APPROVE entities, APPROVE aliases, APPROVE decisions, SKIP and NEEDS_RESEARCH decisions, MERGE decisions, SPLIT decisions, a fresh SPLIT source-text recheck, then SPLIT occurrence rows. Candidate ids are sorted within each phase. Entities are not resolved by `canonical_name`. MERGE and occurrence targets are loaded by `(source, candidate_id)`. Before commit, classification must show every candidate `ALREADY_APPLIED`, distinct APPROVE decisions must not share `result_entity`, and the planned alias and occurrence counts must be present. A mismatch raises and rolls the transaction back. A second apply is a no-op: zero creates and zero updates. `IntegrityError` during writes, final verification, or transaction commit is an apply failure, not a silent reuse. No Person, Author, Tag, category, event, or search-index rows are written.
+
+**Not done:** this change was not applied to dev and was not deployed.

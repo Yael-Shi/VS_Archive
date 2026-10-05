@@ -2,7 +2,9 @@
 
 Classifies the validated workbook against current database rows and, for SPLIT
 routes, the authoritative displayed source text. This module does not create,
-update, or delete rows. Apply remains deferred.
+update, or delete rows. Transactional apply lives in
+``non_person_entity_review_apply`` and must re-run this classifier before
+writing.
 
 Decision identity is ``(DECISION_SOURCE, candidate_id)``. Entities are never
 resolved by ``canonical_name``.
@@ -916,6 +918,12 @@ def _item_supports_text_kind(item: ArchiveItem, text_kind: str) -> bool:
     if text_kind == kinds.OCR_TRANSCRIPTION:
         return item.item_type == ArchiveItem.ItemType.OCR_DOCUMENT
     return False
+
+
+def authoritative_displayed_text(item: ArchiveItem, text_kind: str) -> str | None:
+    """Displayed source text for one occurrence text kind. Read-only."""
+
+    return _authoritative_text(item, text_kind)
 
 
 def _authoritative_text(item: ArchiveItem, text_kind: str) -> str | None:
