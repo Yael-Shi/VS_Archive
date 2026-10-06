@@ -889,6 +889,319 @@ class ArchiveItemEntityOccurrence(models.Model):
         )
 
 
+class NonPersonEntityOccurrenceProposal(models.Model):
+    """One textual occurrence that may later be reviewed. Not a resolution.
+
+    Identity is the six fields shared with ``ArchiveItemEntityOccurrence``:
+    archive item, text kind, source SHA, normalization version, normalized
+    surface, and occurrence ordinal. Repeated surfaces stay distinct by
+    ordinal. A different source SHA is a different proposal. This row has no
+    candidate entity. Candidates live on
+    ``NonPersonEntityOccurrenceCandidate``.
+
+    This is not ``ArchiveItemEntityOccurrence`` and not
+    ``ReviewedNonPersonEntityDecision``. Approving a proposal later may write
+    a resolved occurrence; this table does not. ``normalization_version`` is
+    stored and not interpreted here. Later review actions must fail closed on
+    a version they do not know.
+    """
+
+    archive_item = models.ForeignKey(
+        ArchiveItem,
+        on_delete=models.CASCADE,
+        related_name="entity_occurrence_proposals",
+    )
+    text_kind = models.CharField(
+        max_length=32,
+        choices=ArchiveItemEntityOccurrence.TextKind.choices,
+    )
+    source_text_sha256 = models.CharField(
+        max_length=64,
+        validators=[RegexValidator(r"^[0-9a-f]{64}$")],
+    )
+    normalization_version = models.CharField(
+        max_length=32,
+        default="surface-v1",
+    )
+    normalized_surface = models.CharField(max_length=255)
+    occurrence_ordinal = models.PositiveIntegerField(
+        validators=[MinValueValidator(1)],
+    )
+    matched_text = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "archive_item",
+                    "text_kind",
+                    "source_text_sha256",
+                    "normalization_version",
+                    "normalized_surface",
+                    "occurrence_ordinal",
+                ],
+                name="uniq_non_person_occ_proposal_identity",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(occurrence_ordinal__gte=1),
+                name="non_person_occ_proposal_ordinal_gte_1",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return (
+            "NonPersonEntityOccurrenceProposal("
+            f"archive_item_id={self.archive_item_id}, "
+            f"normalized_surface={self.normalized_surface!r}, "
+            f"occurrence_ordinal={self.occurrence_ordinal})"
+        )
+
+
+class NonPersonEntityOccurrenceCandidate(models.Model):
+    """One candidate entity for a textual occurrence proposal.
+
+    Unique on ``(proposal, candidate_entity)``. Several match methods for
+    that pair are ``NonPersonEntityOccurrenceCandidateMatch`` rows, not
+    extra candidate rows. A ``REJECTED`` or ``REMOVED`` row keeps the unique
+    slot, so the same occurrence identity and candidate entity cannot be
+    inserted again as a new pending candidate. A new source SHA is a new
+    proposal, so that suppression does not carry over.
+
+    ``resolved_entity`` is the human resolution target. It may differ from
+    ``candidate_entity``. Reassignment is ``APPROVED`` with a changed
+    ``resolved_entity`` plus a review event, not a separate status.
+    ``APPROVED`` requires ``resolved_entity``. ``PENDING``,
+    ``NEEDS_RESEARCH``, and ``REJECTED`` require it to be null. ``REMOVED``
+    may keep it as provenance of an earlier resolution.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "PENDING"
+        NEEDS_RESEARCH = "NEEDS_RESEARCH", "NEEDS_RESEARCH"
+        APPROVED = "APPROVED", "APPROVED"
+        REJECTED = "REJECTED", "REJECTED"
+        REMOVED = "REMOVED", "REMOVED"
+
+    proposal = models.ForeignKey(
+        NonPersonEntityOccurrenceProposal,
+        on_delete=models.CASCADE,
+        related_name="candidates",
+    )
+    candidate_entity = models.ForeignKey(
+        NonPersonEntity,
+        on_delete=models.PROTECT,
+        related_name="occurrence_candidates",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    resolved_entity = models.ForeignKey(
+        NonPersonEntity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="occurrence_candidate_resolutions",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_non_person_occurrence_candidates",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["proposal", "candidate_entity"],
+                name="uniq_non_person_occ_candidate_proposal_entity",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        status="PENDING",
+                        resolved_entity__isnull=True,
+                    )
+                    | models.Q(
+                        status="NEEDS_RESEARCH",
+                        resolved_entity__isnull=True,
+                    )
+                    | models.Q(
+                        status="REJECTED",
+                        resolved_entity__isnull=True,
+                    )
+                    | models.Q(
+                        status="APPROVED",
+                        resolved_entity__isnull=False,
+                    )
+                    | models.Q(status="REMOVED")
+                ),
+                name="non_person_occ_candidate_status_resolution",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        has_resolved = self.resolved_entity_id is not None
+        if self.status == self.Status.APPROVED and not has_resolved:
+            raise ValidationError(
+                {
+                    "resolved_entity": (
+                        "An APPROVED candidate requires a resolved entity."
+                    )
+                }
+            )
+        if (
+            self.status
+            in {
+                self.Status.PENDING,
+                self.Status.NEEDS_RESEARCH,
+                self.Status.REJECTED,
+            }
+            and has_resolved
+        ):
+            raise ValidationError(
+                {
+                    "resolved_entity": (
+                        "PENDING, NEEDS_RESEARCH, and REJECTED candidates "
+                        "cannot reference a resolved entity."
+                    )
+                }
+            )
+
+    def __str__(self) -> str:
+        return (
+            "NonPersonEntityOccurrenceCandidate("
+            f"proposal_id={self.proposal_id}, "
+            f"candidate_entity_id={self.candidate_entity_id}, "
+            f"status={self.status})"
+        )
+
+
+class NonPersonEntityOccurrenceCandidateMatch(models.Model):
+    """One detection reason for a candidate. Not a second candidate.
+
+    ``matched_value`` and ``alias_kind`` are snapshots. There is no foreign
+    key to ``NonPersonEntityAlias``, so alias edits and deletes do not remove
+    this row. Identical ``(candidate, method, matched_value)`` is rejected.
+    """
+
+    class Method(models.TextChoices):
+        CANONICAL_NAME = "CANONICAL_NAME", "CANONICAL_NAME"
+        DISPLAY_NAME = "DISPLAY_NAME", "DISPLAY_NAME"
+        ALIAS = "ALIAS", "ALIAS"
+        MANUAL = "MANUAL", "MANUAL"
+
+    candidate = models.ForeignKey(
+        NonPersonEntityOccurrenceCandidate,
+        on_delete=models.CASCADE,
+        related_name="matches",
+    )
+    method = models.CharField(max_length=32, choices=Method.choices)
+    matched_value = models.CharField(max_length=255)
+    alias_kind = models.CharField(max_length=32, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["candidate", "method", "matched_value"],
+                name="uniq_non_person_occ_candidate_match",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return (
+            "NonPersonEntityOccurrenceCandidateMatch("
+            f"candidate_id={self.candidate_id}, method={self.method})"
+        )
+
+
+class NonPersonEntityOccurrenceReviewEvent(models.Model):
+    """Append-only review history for one occurrence proposal.
+
+    ``save`` rejects an existing row. There is no ``updated_at``. ``candidate``
+    may be null for a proposal-level or system event. When it is set, it uses
+    ``RESTRICT``: a candidate that an event names cannot be deleted on its
+    own, and the event keeps that foreign key. ``PROTECT`` was checked and
+    rejected for this link because Django raises ``ProtectedError`` on
+    archive-item deletion even when the referencing event is in the same
+    cascade. ``RESTRICT`` still cascades the proposal, candidates, matches,
+    and events when the archive item is deleted. ``from_entity`` and
+    ``to_entity`` use ``PROTECT``. ``actor`` may be null for a
+    system-generated event, or after the user row is removed.
+    """
+
+    class Action(models.TextChoices):
+        PROPOSE = "PROPOSE", "PROPOSE"
+        DETECT = "DETECT", "DETECT"
+        APPROVE = "APPROVE", "APPROVE"
+        REJECT = "REJECT", "REJECT"
+        NEEDS_RESEARCH = "NEEDS_RESEARCH", "NEEDS_RESEARCH"
+        REASSIGN = "REASSIGN", "REASSIGN"
+        REMOVE = "REMOVE", "REMOVE"
+
+    proposal = models.ForeignKey(
+        NonPersonEntityOccurrenceProposal,
+        on_delete=models.CASCADE,
+        related_name="review_events",
+    )
+    candidate = models.ForeignKey(
+        NonPersonEntityOccurrenceCandidate,
+        on_delete=models.RESTRICT,
+        null=True,
+        blank=True,
+        related_name="review_events",
+    )
+    action = models.CharField(max_length=16, choices=Action.choices)
+    from_entity = models.ForeignKey(
+        NonPersonEntity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="occurrence_review_events_from",
+    )
+    to_entity = models.ForeignKey(
+        NonPersonEntity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="occurrence_review_events_to",
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="non_person_occurrence_review_events",
+    )
+    note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "pk"]
+
+    def save(self, *args, **kwargs) -> None:
+        if self.pk is not None and self.__class__.objects.filter(pk=self.pk).exists():
+            raise ValidationError(
+                "NonPersonEntityOccurrenceReviewEvent rows are append-only."
+            )
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return (
+            "NonPersonEntityOccurrenceReviewEvent("
+            f"proposal_id={self.proposal_id}, action={self.action})"
+        )
+
+
 class VideoContent(models.Model):
     """External video reference for VIDEO archive items (URL metadata only; no media bytes)."""
 
