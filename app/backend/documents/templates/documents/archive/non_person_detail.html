@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}VSArchive - {{ public_name }}{% endblock %}
+
+{% block content %}
+  <div class="card page-header" id="archive-top">
+    <header class="document-detail-header">
+      <div class="document-detail-header-main">
+        <h1 class="page-title document-detail-title">{{ public_name }}</h1>
+        {% if type_label %}
+          <p class="muted">{{ type_label }}</p>
+        {% endif %}
+        {% if public_aliases %}
+          <section class="archive-person-additional-names" aria-labelledby="additional-names">
+            <h2 id="additional-names" class="archive-person-additional-names__label">{{ additional_names_label }}</h2>
+            <ul class="archive-person-additional-names__list">
+              {% for alias in public_aliases %}
+                <li class="archive-person-name-chip" dir="rtl">
+                  <bdi class="archive-person-name-chip__value" dir="auto">{{ alias }}</bdi>
+                </li>
+              {% endfor %}
+            </ul>
+          </section>
+        {% endif %}
+      </div>
+      <div class="page-toolbar document-detail-toolbar">
+        {% include "documents/partials/detail_back_to_archive.html" %}
+      </div>
+    </header>
+
+    {% if browse_cards %}
+      <h2 class="archive-author-section-title">{{ items_heading }}</h2>
+      <p class="archive-search-results-count" aria-live="polite">
+        נמצאו {{ total_count }} תוצאות
+      </p>
+      <div class="spacer"></div>
+      {% include "documents/archive/partials/item_list_cards.html" with browse_cards=browse_cards is_admin=is_admin %}
+      {% if show_page_nav %}
+        <div class="spacer"></div>
+        {% include "documents/archive/partials/non_person_page_pagination.html" %}
+      {% endif %}
+    {% else %}
+      <p class="muted">{{ empty_items_message }}</p>
+    {% endif %}
+  </div>
+{% endblock %}
