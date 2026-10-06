@@ -136,6 +136,26 @@ urlpatterns = [
         name="archive-manage-person-alias-delete",
     ),
     path(
+        "manage/entities/",
+        views.archive_manage_entities_page,
+        name="archive-manage-entities",
+    ),
+    path(
+        "manage/entities/<int:entity_id>/edit/",
+        views.archive_manage_entity_edit_page,
+        name="archive-manage-entity-edit",
+    ),
+    path(
+        "manage/entities/<int:entity_id>/aliases/<int:alias_id>/edit/",
+        views.archive_manage_entity_alias_edit_page,
+        name="archive-manage-entity-alias-edit",
+    ),
+    path(
+        "manage/entities/<int:entity_id>/aliases/<int:alias_id>/delete/",
+        views.archive_manage_entity_alias_delete_page,
+        name="archive-manage-entity-alias-delete",
+    ),
+    path(
         "<int:item_id>/metadata-suggestions/new/",
         views.archive_metadata_suggestion_form,
         name="archive-metadata-suggestion-new",
