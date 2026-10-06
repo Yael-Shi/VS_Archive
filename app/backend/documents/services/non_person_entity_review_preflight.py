@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-import unicodedata
 import zipfile
 from collections import Counter
 from collections.abc import Sequence
@@ -23,6 +22,10 @@ from documents.models import (
     NonPersonEntity,
     NonPersonEntityAlias,
     ReviewedNonPersonEntityDecision,
+)
+from documents.services.non_person_entity_occurrences import (
+    SURFACE_V1,
+    normalize_surface_v1,
 )
 
 AUTHORITATIVE_WORKBOOK_SHA256 = (
@@ -95,7 +98,6 @@ EXPECTED_DECISION_COUNTS = {
     ReviewedNonPersonEntityDecision.Decision.SPLIT: 2,
     ReviewedNonPersonEntityDecision.Decision.NEEDS_RESEARCH: 1,
 }
-SURFACE_V1 = "surface-v1"
 ALIAS_REVIEW_STATUS_APPROVED = "APPROVED"
 SPLIT_ROUTE_PIN_STATUS = "PINNED"
 SPLIT_ROUTE_REVIEW_STATUS = "APPROVED"
@@ -103,13 +105,6 @@ SPLIT_APPLY_READY_REASON = "structured FINAL_SPLIT_ROUTING is complete"
 
 _POSITIVE_INT_RE = re.compile(r"^[1-9][0-9]*$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-_BIDI_MARKS = dict.fromkeys(
-    map(
-        ord,
-        "\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069",
-    ),
-    None,
-)
 _MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 _OFFICE_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 _PKG_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
@@ -208,19 +203,6 @@ class PreflightResult:
         return tuple(
             row.candidate_id for row in self.rows if row.final_decision == approve
         )
-
-
-def normalize_surface_v1(surface: str) -> str:
-    """Normalize one surface with the occurrence surface-v1 contract.
-
-    NFC, strip bidi marks, casefold, trim, and collapse internal whitespace.
-    Punctuation and Hebrew prefixes are kept. There is no final-letter folding.
-    """
-
-    text = unicodedata.normalize("NFC", surface)
-    text = text.translate(_BIDI_MARKS)
-    text = text.casefold().strip()
-    return re.sub(r"\s+", " ", text)
 
 
 def sha256_path(path: str | Path) -> str:

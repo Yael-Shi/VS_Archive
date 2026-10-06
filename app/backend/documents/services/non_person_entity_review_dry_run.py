@@ -35,14 +35,10 @@ STATE_DRIFT. STATE_DRIFT is never repaired here.
 
 from __future__ import annotations
 
-import hashlib
-import re
-import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q
 
 from documents.models import (
@@ -52,13 +48,19 @@ from documents.models import (
     NonPersonEntityAlias,
     ReviewedNonPersonEntityDecision,
 )
+from documents.services.non_person_entity_occurrences import (
+    SurfaceLocation,
+    authoritative_displayed_text,
+    item_supports_occurrence_text_kind,
+    locate_surface_occurrences,
+    normalize_surface_v1,
+    source_text_sha256,
+)
 from documents.services.non_person_entity_review_preflight import (
     PreflightError,
     PreflightResult,
-    normalize_surface_v1,
     preflight_authoritative_workbook,
 )
-from documents.services.text_presentation import resolve_displayed_transcription_result
 
 DECISION_SOURCE = "vs_archive_non_person_final_recon_2026_10_05"
 
@@ -67,14 +69,6 @@ STATE_ALREADY_APPLIED = "ALREADY_APPLIED"
 STATE_DRIFT = "STATE_DRIFT"
 STATE_BLOCKED = "BLOCKED"
 
-_WS = re.compile(r"\s")
-_BIDI_MARKS = dict.fromkeys(
-    map(
-        ord,
-        "\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069",
-    ),
-    None,
-)
 _DECISION_FIELDS = (
     "decision",
     "review_status",
@@ -199,24 +193,6 @@ class DryRunResult:
         )
 
 
-@dataclass(frozen=True)
-class SurfaceOccurrence:
-    ordinal: int
-    matched_text: str
-
-
-@dataclass(frozen=True)
-class SurfaceLocation:
-    """Occurrences of one normalized surface in authoritative text.
-
-    ``occurrences`` is None when the count is known but a safe original
-    ``matched_text`` slice could not be recovered.
-    """
-
-    count: int
-    occurrences: tuple[SurfaceOccurrence, ...] | None
-
-
 def run_non_person_entity_review_dry_run(path: str | Path) -> DryRunResult:
     """Parse the authoritative workbook, then classify it without writing."""
 
@@ -269,42 +245,6 @@ def format_dry_run_report(result: DryRunResult) -> str:
         for reason in candidate.reasons:
             lines.append(f"reason: {reason}")
     return "\n".join(lines) + "\n"
-
-
-def locate_surface_occurrences(source_text: str, surface: str) -> SurfaceLocation:
-    """Find non-overlapping left-to-right surface-v1 matches.
-
-    The count uses ``normalize_surface_v1``. Original slices are returned
-    only when each slice normalizes back to the same surface.
-    """
-
-    normalized_surface = normalize_surface_v1(surface)
-    normalized_source = normalize_surface_v1(source_text)
-    starts = _find_nonoverlapping(normalized_source, normalized_surface)
-    if not normalized_surface:
-        return SurfaceLocation(count=0, occurrences=())
-    mapped = _normalize_with_spans(source_text)
-    if mapped is None or mapped[0] != normalized_source:
-        return SurfaceLocation(count=len(starts), occurrences=None)
-    normalized, spans = mapped
-    found: list[SurfaceOccurrence] = []
-    for ordinal, start in enumerate(starts, start=1):
-        end = start + len(normalized_surface)
-        original_start = spans[start][0]
-        original_end = spans[end - 1][1]
-        matched = source_text[original_start:original_end]
-        if normalize_surface_v1(matched) != normalized_surface:
-            return SurfaceLocation(count=len(starts), occurrences=None)
-        if normalized[start:end] != normalized_surface:
-            return SurfaceLocation(count=len(starts), occurrences=None)
-        found.append(SurfaceOccurrence(ordinal=ordinal, matched_text=matched))
-    return SurfaceLocation(count=len(starts), occurrences=tuple(found))
-
-
-def source_text_sha256(text: str) -> str:
-    """SHA-256 of the exact UTF-8 text before surface normalization."""
-
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _plans_from_preflight(
@@ -879,9 +819,9 @@ def _verify_surface_group(
     item = items.get(item_id)
     if item is None:
         return [], [f"archive item {item_id} not found"], None
-    if not _item_supports_text_kind(item, text_kind):
+    if not item_supports_occurrence_text_kind(item, text_kind):
         return [], [f"unsupported item type {item.item_type} {label}"], None
-    source_text = _authoritative_text(item, text_kind)
+    source_text = authoritative_displayed_text(item, text_kind)
     if source_text is None:
         return [], [f"authoritative source text unavailable {label}"], None
     if source_text_sha256(source_text) != pinned_sha:
@@ -909,40 +849,6 @@ def _verify_surface_group(
     elif located.occurrences is None:
         blocked.append(f"matched_text not safely derivable {label}")
     return drift, blocked, located
-
-
-def _item_supports_text_kind(item: ArchiveItem, text_kind: str) -> bool:
-    kinds = ArchiveItemEntityOccurrence.TextKind
-    if text_kind == kinds.MANUAL_TEXT:
-        return item.item_type == ArchiveItem.ItemType.MANUAL_TEXT
-    if text_kind == kinds.OCR_TRANSCRIPTION:
-        return item.item_type == ArchiveItem.ItemType.OCR_DOCUMENT
-    return False
-
-
-def authoritative_displayed_text(item: ArchiveItem, text_kind: str) -> str | None:
-    """Displayed source text for one occurrence text kind. Read-only."""
-
-    return _authoritative_text(item, text_kind)
-
-
-def _authoritative_text(item: ArchiveItem, text_kind: str) -> str | None:
-    kinds = ArchiveItemEntityOccurrence.TextKind
-    if text_kind == kinds.MANUAL_TEXT:
-        try:
-            return item.manual_text_content.body
-        except ObjectDoesNotExist:
-            return None
-    if text_kind != kinds.OCR_TRANSCRIPTION:
-        return None
-    try:
-        document = item.ocr_document
-    except ObjectDoesNotExist:
-        return None
-    result = resolve_displayed_transcription_result(document)
-    if result is None or result.text is None:
-        return None
-    return result.text
 
 
 def _group_key(occurrence: OccurrencePlan) -> tuple[object, ...]:
@@ -977,118 +883,6 @@ def _occurrence_identity(
         occurrence.normalized_surface,
         occurrence.occurrence_ordinal,
     )
-
-
-def _find_nonoverlapping(text: str, surface: str) -> list[int]:
-    if surface == "":
-        return []
-    starts: list[int] = []
-    cursor = 0
-    while True:
-        found = text.find(surface, cursor)
-        if found < 0:
-            return starts
-        starts.append(found)
-        cursor = found + len(surface)
-
-
-def _normalize_with_spans(
-    text: str,
-) -> tuple[str, list[tuple[int, int]]] | None:
-    nfc = _nfc_with_spans(text)
-    if nfc is None:
-        return None
-    without_bidi = _drop_bidi(*nfc)
-    folded = _casefold_with_spans(*without_bidi)
-    if folded is None:
-        return None
-    stripped = _strip_spans(*folded)
-    return _collapse_whitespace(*stripped)
-
-
-def _nfc_with_spans(
-    text: str,
-) -> tuple[str, list[tuple[int, int]]] | None:
-    """Map NFC characters only when the source is already NFC.
-
-    One NFC pass decides the fast path. Already-NFC text uses one original
-    span per character. Text that still changes under NFC returns no map, so
-    later code cannot invent offsets. Occurrence counting stays on
-    ``normalize_surface_v1``.
-    """
-
-    normalized = unicodedata.normalize("NFC", text)
-    if normalized != text:
-        return None
-    return normalized, [(index, index + 1) for index in range(len(text))]
-
-
-def _drop_bidi(
-    text: str,
-    spans: list[tuple[int, int]],
-) -> tuple[str, list[tuple[int, int]]]:
-    kept = [
-        (character, span)
-        for character, span in zip(text, spans, strict=True)
-        if ord(character) not in _BIDI_MARKS
-    ]
-    if not kept:
-        return "", []
-    characters, kept_spans = zip(*kept, strict=True)
-    return "".join(characters), list(kept_spans)
-
-
-def _casefold_with_spans(
-    text: str,
-    spans: list[tuple[int, int]],
-) -> tuple[str, list[tuple[int, int]]] | None:
-    characters: list[str] = []
-    folded_spans: list[tuple[int, int]] = []
-    for character, span in zip(text, spans, strict=True):
-        folded = character.casefold()
-        if folded == "":
-            continue
-        characters.extend(folded)
-        folded_spans.extend([span] * len(folded))
-    folded_text = "".join(characters)
-    if folded_text != text.casefold():
-        return None
-    return folded_text, folded_spans
-
-
-def _strip_spans(
-    text: str,
-    spans: list[tuple[int, int]],
-) -> tuple[str, list[tuple[int, int]]]:
-    start = 0
-    end = len(text)
-    while start < end and _WS.fullmatch(text[start]):
-        start += 1
-    while end > start and _WS.fullmatch(text[end - 1]):
-        end -= 1
-    return text[start:end], spans[start:end]
-
-
-def _collapse_whitespace(
-    text: str,
-    spans: list[tuple[int, int]],
-) -> tuple[str, list[tuple[int, int]]]:
-    characters: list[str] = []
-    collapsed: list[tuple[int, int]] = []
-    index = 0
-    while index < len(text):
-        if _WS.fullmatch(text[index]):
-            end = index + 1
-            while end < len(text) and _WS.fullmatch(text[end]):
-                end += 1
-            characters.append(" ")
-            collapsed.append((spans[index][0], spans[end - 1][1]))
-            index = end
-            continue
-        characters.append(text[index])
-        collapsed.append(spans[index])
-        index += 1
-    return "".join(characters), collapsed
 
 
 def _hash_mismatch(
