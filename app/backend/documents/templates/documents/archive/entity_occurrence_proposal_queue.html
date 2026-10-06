@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - {{ page_title }}{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-manage-list' %}">חזרה לניהול</a>
+      <a class="btn" href="{% url 'archive-manage-entities' %}">ניהול מקומות וארגונים</a>
+    </div>
+
+    <h1 class="page-title">{{ page_title }}</h1>
+    <p class="page-subtitle">
+      הצעות לאזכור בטקסט המוצג. אישור נעשה כאן בלבד, אחרי בדיקה שהטקסט לא השתנה.
+    </p>
+
+    <div class="spacer"></div>
+    <form method="get" class="toolbar" action="{% url 'archive-manage-entity-occurrence-proposals' %}">
+      <div class="field field--grow">
+        <label for="occurrence-review-q">חיפוש</label>
+        <input
+          id="occurrence-review-q"
+          type="search"
+          name="q"
+          value="{{ q }}"
+          placeholder="מזהה פריט או כותרת"
+        />
+      </div>
+      <div class="field">
+        <label for="occurrence-review-status">מצב</label>
+        <select id="occurrence-review-status" name="status">
+          {% for value, label in status_choices %}
+            <option value="{{ value }}"{% if status == value %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% if item_id %}
+        <input type="hidden" name="item" value="{{ item_id }}" />
+      {% endif %}
+      <div class="field field--actions">
+        <div class="form-actions">
+          <button type="submit" class="btn">סינון</button>
+          {% if status or q or item_id %}
+            <a class="btn" href="{% url 'archive-manage-entity-occurrence-proposals' %}">ניקוי</a>
+          {% endif %}
+        </div>
+      </div>
+    </form>
+
+    <div class="spacer"></div>
+
+    {% if rows %}
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>פריט</th>
+              <th>מקור</th>
+              <th>טקסט שזוהה</th>
+              <th>הקשר</th>
+              <th>רשומה מוצעת</th>
+              <th>התאמה</th>
+              <th>מצב ההצעה</th>
+              <th>מצב הטקסט</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+              <tr>
+                <td>
+                  <a href="{{ row.item_url }}">{{ row.item_title }}</a>
+                  <div class="muted">{{ row.item_id }}</div>
+                </td>
+                <td>{{ row.text_kind_label }}</td>
+                <td>{{ row.matched_text }}</td>
+                <td>
+                  {% if row.has_current_context %}
+                    {{ row.context_before }}<strong>{{ row.context_match }}</strong>{{ row.context_after }}
+                  {% else %}
+                    <span class="muted">אין הקשר מהטקסט הנוכחי</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {{ row.candidate_name }}
+                  {% if row.type_label %}
+                    <div class="muted">{{ row.type_label }}</div>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if row.match_summary %}
+                    {{ row.match_summary }}
+                  {% else %}
+                    <span class="muted">—</span>
+                  {% endif %}
+                </td>
+                <td>{{ row.status_label }}</td>
+                <td>
+                  {% if row.is_stale %}
+                    <span class="badge badge-warn">{{ row.state_label }}</span>
+                  {% elif row.is_reviewable %}
+                    <span class="badge badge-ok">{{ row.state_label }}</span>
+                  {% else %}
+                    <span class="badge">{{ row.state_label }}</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <a class="btn" href="{{ row.review_url }}">בדיקה</a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">אין הצעות להצגה.</p>
+    {% endif %}
+  </div>
+{% endblock %}

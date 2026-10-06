@@ -156,6 +156,16 @@ urlpatterns = [
         name="archive-manage-entity-alias-delete",
     ),
     path(
+        "manage/entity-occurrence-proposals/",
+        views.archive_manage_entity_occurrence_proposals_page,
+        name="archive-manage-entity-occurrence-proposals",
+    ),
+    path(
+        "manage/entity-occurrence-proposals/<int:candidate_id>/",
+        views.archive_manage_entity_occurrence_proposal_page,
+        name="archive-manage-entity-occurrence-proposal",
+    ),
+    path(
         "<int:item_id>/metadata-suggestions/new/",
         views.archive_metadata_suggestion_form,
         name="archive-metadata-suggestion-new",
