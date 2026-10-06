@@ -12,6 +12,7 @@
       <a class="btn" href="{% url 'archive-manage-people' %}">ניהול אנשים</a>
       <a class="btn" href="{% url 'archive-manage-authors' %}">ניהול מחברים</a>
       <a class="btn" href="{% url 'archive-manage-entities' %}">ניהול מקומות וארגונים</a>
+      <a class="btn" href="{% url 'archive-manage-entity-occurrence-proposals' %}">בדיקת אזכורים</a>
     </div>
 
     {% if messages %}
@@ -76,6 +77,9 @@
                     <a class="btn" href="{% url 'archive-manage-edit' item_id=item.id %}">עריכת מטא־דאטה</a>
                   {% else %}
                     —
+                  {% endif %}
+                  {% if item.item_type == "MANUAL_TEXT" or item.item_type == "OCR_DOCUMENT" %}
+                    <a href="{% url 'archive-manage-entity-occurrence-proposals' %}?item={{ item.id }}">אזכורים</a>
                   {% endif %}
                 </td>
               </tr>

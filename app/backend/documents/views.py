@@ -47,6 +47,7 @@ from .models import (
     DocumentTextResult,
     NonPersonEntity,
     NonPersonEntityAlias,
+    NonPersonEntityOccurrenceCandidate,
     Person,
     PersonAlias,
     PhotoContent,
@@ -334,6 +335,24 @@ from documents.services.non_person_entity_presentation import (
 from documents.services.non_person_entity_search import (
     public_registry_rows,
     registry_index_queryset,
+)
+from documents.services.non_person_entity_occurrence_review import (
+    ALREADY_APPLIED_MESSAGE,
+    APPROVE_APPLIED_MESSAGE,
+    NEEDS_RESEARCH_APPLIED_MESSAGE,
+    REASSIGN_APPLIED_MESSAGE,
+    REJECT_APPLIED_MESSAGE,
+    REMOVE_APPLIED_MESSAGE,
+    TARGET_NOT_FOUND_MESSAGE,
+    NonPersonEntityOccurrenceReviewError,
+    OccurrenceReviewResult,
+    approve_candidate,
+    mark_needs_research,
+    reassign_candidate,
+    reject_candidate,
+    remove_approved_occurrence,
+    staff_occurrence_review_detail,
+    staff_occurrence_review_rows,
 )
 from documents.services.non_person_entity_staff import (
     ALIAS_SHARED_WARNING,
@@ -5440,6 +5459,13 @@ PERSON_ALIAS_UPDATED_MSG = "השם החלופי עודכן."
 PERSON_ALIAS_DELETED_MSG = "השם החלופי נמחק."
 PERSON_MERGED_MSG = "רשומות האדם מוזגו. הרשומה הכפולה נמחקה."
 ENTITY_UPDATED_MSG = "הרשומה עודכנה."
+OCCURRENCE_REVIEW_APPLIED_MESSAGES = {
+    "approve": APPROVE_APPLIED_MESSAGE,
+    "reject": REJECT_APPLIED_MESSAGE,
+    "needs_research": NEEDS_RESEARCH_APPLIED_MESSAGE,
+    "reassign": REASSIGN_APPLIED_MESSAGE,
+    "remove": REMOVE_APPLIED_MESSAGE,
+}
 ENTITY_ALIAS_ADDED_MSG = "השם החלופי נוסף."
 ENTITY_ALIAS_UPDATED_MSG = "השם החלופי עודכן."
 ENTITY_ALIAS_DELETED_MSG = "השם החלופי נמחק."
@@ -7621,6 +7647,111 @@ def archive_manage_entity_alias_delete_page(request, entity_id: int, alias_id: i
             "alias": alias,
             "form_errors": form_errors,
             "page_title": "מחיקת שם חלופי",
+        },
+    )
+
+
+def _occurrence_review_redirect(candidate_id: int):
+    return redirect(
+        "archive-manage-entity-occurrence-proposal",
+        candidate_id=candidate_id,
+    )
+
+
+def _apply_occurrence_review_action(request, candidate_id: int, action: str):
+    note = request.POST.get("note") or ""
+    actor = request.user
+    if action == "approve":
+        return approve_candidate(candidate_id, actor=actor, note=note)
+    if action == "reject":
+        return reject_candidate(candidate_id, actor=actor, note=note)
+    if action == "needs_research":
+        return mark_needs_research(candidate_id, actor=actor, note=note)
+    if action == "remove":
+        return remove_approved_occurrence(candidate_id, actor=actor, note=note)
+    if action == "reassign":
+        raw_target = (request.POST.get("target_entity_id") or "").strip()
+        if not raw_target.isdigit():
+            raise NonPersonEntityOccurrenceReviewError(TARGET_NOT_FOUND_MESSAGE)
+        return reassign_candidate(
+            candidate_id,
+            target_entity_id=int(raw_target),
+            actor=actor,
+            note=note,
+        )
+    return None
+
+
+@login_required
+@require_GET
+def archive_manage_entity_occurrence_proposals_page(request):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    status = (request.GET.get("status") or "").strip()
+    query = (request.GET.get("q") or "").strip()
+    raw_item = (request.GET.get("item") or "").strip()
+    item_id = int(raw_item) if raw_item.isdigit() else None
+    return render(
+        request,
+        "documents/archive/entity_occurrence_proposal_queue.html",
+        context={
+            "rows": staff_occurrence_review_rows(
+                status=status,
+                query=query,
+                item_id=item_id,
+            ),
+            "status": status,
+            "q": query,
+            "item_id": raw_item if item_id is not None else "",
+            "status_choices": [
+                ("", "ממתינים ובירור"),
+                ("PENDING", "ממתין לבדיקה"),
+                ("NEEDS_RESEARCH", "נדרש בירור"),
+                ("APPROVED", "מאושר"),
+                ("REJECTED", "נדחה"),
+                ("REMOVED", "הוסר"),
+                ("all", "הכל"),
+            ],
+            "page_title": "בדיקת אזכורי מקומות וארגונים",
+        },
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def archive_manage_entity_occurrence_proposal_page(request, candidate_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    try:
+        detail = staff_occurrence_review_detail(candidate_id)
+    except NonPersonEntityOccurrenceCandidate.DoesNotExist as exc:
+        raise Http404() from exc
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        try:
+            result = _apply_occurrence_review_action(request, candidate_id, action)
+        except NonPersonEntityOccurrenceReviewError as exc:
+            messages.error(request, exc.message)
+            return _occurrence_review_redirect(candidate_id)
+        if not isinstance(result, OccurrenceReviewResult):
+            return HttpResponseBadRequest("פעולה לא תקינה.")
+        if result.applied:
+            messages.success(request, OCCURRENCE_REVIEW_APPLIED_MESSAGES[action])
+        else:
+            messages.success(request, ALREADY_APPLIED_MESSAGE)
+        return _occurrence_review_redirect(candidate_id)
+
+    return render(
+        request,
+        "documents/archive/entity_occurrence_proposal_review.html",
+        context={
+            "review": detail,
+            "page_title": "בדיקת אזכור",
         },
     )
 

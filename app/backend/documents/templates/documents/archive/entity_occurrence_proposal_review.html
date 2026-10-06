@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - {{ page_title }}{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-manage-entity-occurrence-proposals' %}">חזרה לתור</a>
+      <a class="btn" href="{{ review.item_url }}">פריט הארכיון</a>
+    </div>
+
+    <h1 class="page-title">{{ page_title }}</h1>
+    <p class="page-subtitle">{{ review.item_title }}</p>
+
+    {% if messages %}
+      <div class="spacer"></div>
+      {% for message in messages %}
+        <div class="alert{% if message.tags == 'error' %} alert-danger{% elif message.tags == 'success' %} alert-ok{% endif %}">
+          {{ message }}
+        </div>
+      {% endfor %}
+    {% endif %}
+
+    <div class="spacer"></div>
+    <p>
+      <span class="badge">{{ review.status_label }}</span>
+      {% if review.is_stale %}
+        <span class="badge badge-warn">{{ review.state_label }}</span>
+      {% elif review.is_reviewable %}
+        <span class="badge badge-ok">{{ review.state_label }}</span>
+      {% else %}
+        <span class="badge">{{ review.state_label }}</span>
+      {% endif %}
+    </p>
+
+    {% if review.is_stale %}
+      <div class="alert alert-danger">
+        הטקסט המקורי השתנה, והבדיקה אינה עדכנית. לא ניתן לאשר, לשייך מחדש או להסיר לפי ההצעה הזו.
+      </div>
+    {% elif not review.is_reviewable %}
+      <div class="alert alert-danger">
+        {{ review.state_label }}. לא ניתן לעדכן קישור לפי ההצעה הזו.
+      </div>
+    {% endif %}
+
+    <div class="spacer"></div>
+    <dl>
+      <dt>פריט</dt>
+      <dd><a href="{{ review.item_url }}">{{ review.item_title }}</a> ({{ review.item_id }})</dd>
+      <dt>מקור הטקסט</dt>
+      <dd>{{ review.text_kind_label }}</dd>
+      <dt>מופע</dt>
+      <dd>{{ review.occurrence_ordinal }}</dd>
+      <dt>טקסט שזוהה בהצעה</dt>
+      <dd>{{ review.historical_matched_text }}</dd>
+      <dt>הקשר בטקסט הנוכחי</dt>
+      <dd>
+        {% if review.has_current_context %}
+          {{ review.context_before }}<strong>{{ review.context_match }}</strong>{{ review.context_after }}
+        {% else %}
+          <span class="muted">אין הקשר מהטקסט הנוכחי</span>
+        {% endif %}
+      </dd>
+      <dt>רשומה מוצעת</dt>
+      <dd>
+        {{ review.candidate_name }}
+        {% if review.type_label %}
+          <span class="muted">{{ review.type_label }}</span>
+        {% endif %}
+      </dd>
+      {% if review.resolved_name %}
+        <dt>רשומה שנבחרה</dt>
+        <dd>{{ review.resolved_name }}</dd>
+      {% endif %}
+      <dt>מקור ההתאמה</dt>
+      <dd>
+        {% if review.match_summary %}
+          {{ review.match_summary }}
+        {% else %}
+          <span class="muted">—</span>
+        {% endif %}
+      </dd>
+    </dl>
+
+    {% if review.show_approve or review.show_reject or review.show_needs_research or review.show_reassign or review.show_remove %}
+      <div class="spacer"></div>
+      <h2>פעולות</h2>
+      {% if review.show_approve %}
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="approve" />
+          <div class="field">
+            <label for="approve-note">הערה לאישור</label>
+            <input id="approve-note" name="note" type="text" maxlength="2000" />
+          </div>
+          <button type="submit" class="btn btn-primary">אשר אזכור</button>
+        </form>
+      {% endif %}
+      {% if review.show_reject %}
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="reject" />
+          <div class="field">
+            <label for="reject-note">הערה לדחייה</label>
+            <input id="reject-note" name="note" type="text" maxlength="2000" />
+          </div>
+          <button type="submit" class="btn">דחה</button>
+        </form>
+      {% endif %}
+      {% if review.show_needs_research %}
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="needs_research" />
+          <div class="field">
+            <label for="research-note">הערה לבירור</label>
+            <input id="research-note" name="note" type="text" maxlength="2000" />
+          </div>
+          <button type="submit" class="btn">סמן לבדיקה נוספת</button>
+        </form>
+      {% endif %}
+      {% if review.show_reassign %}
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="reassign" />
+          <div class="field">
+            <label for="target-entity">שיוך לרשומה קיימת</label>
+            <select id="target-entity" name="target_entity_id">
+              {% for target in review.reassign_targets %}
+                <option value="{{ target.entity_id }}">{{ target.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="reassign-note">הערה לשיוך</label>
+            <input id="reassign-note" name="note" type="text" maxlength="2000" />
+          </div>
+          <button type="submit" class="btn">שייך לרשומה אחרת</button>
+        </form>
+      {% endif %}
+      {% if review.show_remove %}
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="remove" />
+          <div class="field">
+            <label for="remove-note">הערה להסרה</label>
+            <input id="remove-note" name="note" type="text" maxlength="2000" />
+          </div>
+          <button type="submit" class="btn">הסר קישור מאושר</button>
+        </form>
+      {% endif %}
+    {% endif %}
+  </div>
+{% endblock %}
