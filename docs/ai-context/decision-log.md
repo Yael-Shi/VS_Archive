@@ -8289,7 +8289,7 @@ Anything else is not currently valid. Stale is computed at read time. It is not 
 
 **Current behavior:** The index `q` is a case-insensitive contains match on `canonical_name`, `display_name`, or any alias, including `OCR_VARIANT`. Optional `entity_type` and `entity_subtype` filters accept a known choice only. Order is public name (nonblank `display_name`, otherwise `canonical_name`) then pk. Each row shows that name, the natural type/subtype, an alias count, and a stored occurrence count. That count is every saved pin, not the currently valid subset. The edit page saves canonical name, display name, type, and subtype, then redirects back to itself. Alias add, edit, and delete are staff actions. A duplicate `(entity, name)` is rejected. The same alias string on another entity is allowed and shown as a warning. `OCR_VARIANT` can be edited and is found by staff and public registry lookup. It stays hidden from public additional names. Linked pins on the edit page are read-only. Valid versus stale comes from `occurrence_is_currently_valid`. Changing the registry name, type, subtype, or aliases does not write occurrence rows. `ArchiveItemSearchIndex` is not updated from these edits.
 
-**Deferred:** Occurrence approve, reject, reassign, and remove stay out of this registry edit page. The review queue is a separate route, specified in the occurrence-review entry. Detection is not implemented. Entity merge is not implemented. Proposal tables arrived in the following occurrence-proposal entry; this staff page still does not review occurrences.
+**Deferred:** Occurrence approve, reject, reassign, and remove stay out of this registry edit page. The review queue is a separate route, specified in the occurrence-review entry. This page does not run detection. Explicit batch detection is the later batch-detector entry. Entity merge is not implemented. Proposal tables arrived in the following occurrence-proposal entry; this staff page still does not review occurrences.
 
 ## Non-person occurrence proposal persistence (2026-10-06)
 
@@ -8307,11 +8307,11 @@ Anything else is not currently valid. Stale is computed at read time. It is not 
 
 **Unchanged:** `ArchiveItemEntityOccurrence` remains approved-resolution storage. Its `decision` foreign key still points at `ReviewedNonPersonEntityDecision` for v6 SPLIT provenance and stays null on a later staff approval. The v6 ledger stays closed. These models do not write occurrence, alias, decision, or search-index rows. Staff review actions, added in the following entry, are the path that writes an occurrence.
 
-**Deferred:** detector, management command, and proposal backfill remain deferred. Review actions are specified in the following entry.
+**Deferred:** Proposal backfill remains deferred. Review actions are the following entry. Explicit batch detection is the batch-detector entry after that. This schema change still does not detect.
 
 ## Non-person occurrence review actions (2026-10-06)
 
-**Decision:** A candidate becomes an approved `ArchiveItemEntityOccurrence` only through an explicit staff action in `documents/services/non_person_entity_occurrence_review.py`. The queue is `/archive/manage/entity-occurrence-proposals/`, with one review page per candidate. Views call the service. They do not mutate these rows themselves. There is still no detector, management command, backfill, alias creation, or entity creation from review.
+**Decision:** A candidate becomes an approved `ArchiveItemEntityOccurrence` only through an explicit staff action in `documents/services/non_person_entity_occurrence_review.py`. The queue is `/archive/manage/entity-occurrence-proposals/`, with one review page per candidate. Views call the service. They do not mutate these rows themselves. This entry does not add a detector or a management command; explicit batch detection is the following entry. This entry does not add a backfill, alias creation, or entity creation from review.
 
 **Current behavior:**
 
@@ -8324,4 +8324,18 @@ Anything else is not currently valid. Stale is computed at read time. It is not 
 - Remove deletes the occurrence only when it points at the candidate's current `resolved_entity` and `decision_id` is null. A workbook pin is refused and is not deleted. Otherwise a different entity conflicts and deletes nothing. The candidate becomes `REMOVED` and keeps `resolved_entity`. Proposal, candidate, match, and event rows stay. A second remove with no occurrence is a no-op.
 - Review does not write `ReviewedNonPersonEntityDecision` or `ArchiveItemSearchIndex`. `ReviewedNonPersonEntityDecision` remains the authoritative provenance for every occurrence with a non-null `decision_id`. Review actions never update or delete those workbook pins.
 
-**Deferred:** detector, corpus scan, proposal backfill, automatic alias creation, and merge UI.
+**Deferred:** corpus-wide scan, proposal backfill, automatic alias creation, and merge UI. Explicit batch detection is the following entry. It is not a save hook and not a scheduler.
+
+## Non-person occurrence batch detector (2026-10-06)
+
+**Decision:** Detection stays a manual batch. `detect_non_person_entities` scans only the archive items named with repeated `--item`. Default mode is dry-run and writes nothing. `--apply` is required before any insert. There is no `--all`, no save signal, and no scheduler.
+
+**Current behavior:** `documents/services/non_person_entity_detector.py` loads `NonPersonEntity` and aliases once, normalizes each canonical name, nonblank display name, and alias with `normalize_surface_v1`, and drops a blank result. Matching is `locate_surface_occurrences` on the current authoritative body. `OCR_VARIANT` aliases are included. There is no fuzzy match, stemming, or token inference. The same normalized surface on several entities stays ambiguous: one proposal, one `PENDING` candidate per entity, no chosen winner, and no approval.
+
+Text is body only: `MANUAL_TEXT` or `OCR_TRANSCRIPTION`, and only when `item_supports_occurrence_text_kind` and `authoritative_displayed_text` return text. Title, metadata, author, and people fields are not scanned. A missing or unsupported source is a skip. `occurrence_ordinal` is the ordinal of that one normalized surface. `source_text_sha256` is the SHA of that exact displayed text. `normalization_version` is `surface-v1`.
+
+Apply uses the six-field proposal identity. An existing proposal is not given a new SHA. Blank `matched_text` may be filled from the located slice. A nonblank `matched_text` is left as stored. Candidates are inserted as `PENDING` with no `resolved_entity` and no review metadata. An existing candidate keeps `PENDING`, `NEEDS_RESEARCH`, `APPROVED`, `REJECTED`, and `REMOVED`, including `resolved_entity`, `reviewed_by`, and `reviewed_at`. `REJECTED` and `REMOVED` are not recreated. Match rows are additive snapshots (`CANONICAL_NAME`, `DISPLAY_NAME`, `ALIAS`, plus `alias_kind` for an alias). They are not deleted when a registry name later changes, and they do not reference `NonPersonEntityAlias`. A new candidate appends one `DETECT` event with `to_entity` set to that candidate entity and `actor` null. Replay, including a new match row on an existing candidate, appends no event.
+
+A changed source SHA creates a new proposal identity. Older proposals stay. This command does not clean them up. It does not write `ArchiveItemEntityOccurrence`, `ReviewedNonPersonEntityDecision`, aliases, entities, or `ArchiveItemSearchIndex`.
+
+**Deferred:** corpus scan, automatic scheduling, fuzzy matching, proposal backfill, and any detector path that approves or creates registry rows.
