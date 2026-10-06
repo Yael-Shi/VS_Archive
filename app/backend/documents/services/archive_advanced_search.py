@@ -35,6 +35,7 @@ ARCHIVE_ADVANCED_FILTER_PARAM_CATEGORY = "category"
 ARCHIVE_ADVANCED_FILTER_PARAM_EVENT = "event"
 ARCHIVE_ADVANCED_FILTER_PARAM_TAG = "tag"
 ARCHIVE_ADVANCED_FILTER_PARAM_PERSON = "person"
+ARCHIVE_ADVANCED_FILTER_PARAM_ENTITY = "entity"
 ARCHIVE_ADVANCED_FILTER_PARAM_YEAR = "year"
 ARCHIVE_ADVANCED_FILTER_PARAM_YEAR_TO = "year_to"
 
@@ -60,6 +61,7 @@ class ArchiveAdvancedFilterChoiceContext(TypedDict):
     advanced_filter_event_choices: tuple[ArchiveEvent, ...]
     advanced_filter_tag_choices: tuple[Tag, ...]
     advanced_filter_person_choices: tuple[Person, ...]
+    advanced_filter_entity_choices: tuple["ArchiveAdvancedEntityChoice", ...]
 
 
 EMPTY_ARCHIVE_ADVANCED_FILTER_CHOICE_CONTEXT: ArchiveAdvancedFilterChoiceContext = {
@@ -68,7 +70,21 @@ EMPTY_ARCHIVE_ADVANCED_FILTER_CHOICE_CONTEXT: ArchiveAdvancedFilterChoiceContext
     "advanced_filter_event_choices": (),
     "advanced_filter_tag_choices": (),
     "advanced_filter_person_choices": (),
+    "advanced_filter_entity_choices": (),
 }
+
+
+@dataclass(frozen=True)
+class ArchiveAdvancedEntityChoice:
+    """One registry row in the advanced-search selector.
+
+    ``label`` is the visible public name and type. ``search_text`` may include
+    aliases, including OCR variants, for the existing list filter only.
+    """
+
+    id: int
+    label: str
+    search_text: str
 
 
 @dataclass(frozen=True)
@@ -80,6 +96,7 @@ class ArchiveAdvancedFilters:
     event_ids: tuple[int, ...] = ()
     tag_ids: tuple[int, ...] = ()
     person_ids: tuple[int, ...] = ()
+    entity_id: int | None = None
     year: int | None = None
     year_to: int | None = None
 
@@ -90,6 +107,7 @@ class ArchiveAdvancedFilters:
             or self.event_ids
             or self.tag_ids
             or self.person_ids
+            or self.entity_id is not None
             or self.year is not None
         )
 
@@ -106,6 +124,8 @@ class ArchiveAdvancedFilters:
             params.append((ARCHIVE_ADVANCED_FILTER_PARAM_TAG, str(tag_id)))
         for person_id in self.person_ids:
             params.append((ARCHIVE_ADVANCED_FILTER_PARAM_PERSON, str(person_id)))
+        if self.entity_id is not None:
+            params.append((ARCHIVE_ADVANCED_FILTER_PARAM_ENTITY, str(self.entity_id)))
         if self.year is not None:
             params.append((ARCHIVE_ADVANCED_FILTER_PARAM_YEAR, str(self.year)))
             if self.year_to is not None and self.year_to != self.year:
@@ -191,6 +211,8 @@ def normalize_archive_advanced_filters(
     - ``category`` / ``event`` / ``tag`` / ``person``: repeatable positive
       integer ids; malformed values skipped; order of first occurrence
       preserved. ``person`` is a Person primary key, never a name or alias.
+    - ``entity``: one positive NonPersonEntity primary key (first value only).
+      Empty or malformed values are inactive. A name or alias is not accepted.
     - ``year`` / ``year_to``: optional inclusive year range. ``year_to`` without
       ``year`` is ignored. Malformed ``year`` drops the date filter. Malformed
       ``year_to`` with a valid ``year`` falls back to a single-year window.
@@ -218,6 +240,10 @@ def normalize_archive_advanced_filters(
     person_ids = _parse_positive_int_ids(
         _raw_values(params, ARCHIVE_ADVANCED_FILTER_PARAM_PERSON)
     )
+    entity_ids = _parse_positive_int_ids(
+        _raw_values(params, ARCHIVE_ADVANCED_FILTER_PARAM_ENTITY)
+    )
+    entity_id = entity_ids[0] if entity_ids else None
 
     year_values = _raw_values(params, ARCHIVE_ADVANCED_FILTER_PARAM_YEAR)
     year_to_values = _raw_values(params, ARCHIVE_ADVANCED_FILTER_PARAM_YEAR_TO)
@@ -241,6 +267,7 @@ def normalize_archive_advanced_filters(
         event_ids=event_ids,
         tag_ids=tag_ids,
         person_ids=person_ids,
+        entity_id=entity_id,
         year=year,
         year_to=year_to,
     )
@@ -263,7 +290,9 @@ def filter_archive_items_by_advanced_filters(
     ``Exists`` so join fan-out cannot duplicate ``ArchiveItem`` rows. Person
     is ArchiveItemPerson OR renderable PhotoPerson.
     Date filtering requires a known archival date (non-``UNKNOWN`` precision
-    with both bounds) and uses interval overlap.
+    with both bounds) and uses interval overlap. ``entity`` keeps items that
+    have a currently valid occurrence for that one registry id. It does not
+    match aliases or item text, and a missing id matches nothing.
     """
     if filters is None or not filters.is_active():
         return queryset
@@ -291,6 +320,15 @@ def filter_archive_items_by_advanced_filters(
     if filters.tag_ids:
         filtered = filtered.filter(
             pk__in=filtered.filter(tags__id__in=filters.tag_ids).values("pk")
+        )
+
+    if filters.entity_id is not None:
+        from documents.services.non_person_entity_presentation import (
+            valid_archive_item_ids_for_entity,
+        )
+
+        filtered = filtered.filter(
+            pk__in=valid_archive_item_ids_for_entity(filters.entity_id)
         )
 
     if filters.person_ids:
@@ -428,6 +466,7 @@ def archive_advanced_filter_choice_context(
         "advanced_filter_event_choices": events,
         "advanced_filter_tag_choices": tags,
         "advanced_filter_person_choices": persons,
+        "advanced_filter_entity_choices": _entity_filter_choices(),
     }
 
 
@@ -442,6 +481,7 @@ def archive_advanced_filter_template_context(
         "advanced_filter_event_ids": filters.event_ids,
         "advanced_filter_tag_ids": filters.tag_ids,
         "advanced_filter_person_ids": filters.person_ids,
+        "advanced_filter_entity": filters.entity_id,
         "advanced_filter_year": filters.year,
         "advanced_filter_year_to": (
             filters.year_to
@@ -608,6 +648,12 @@ def archive_advanced_filters_without_tag(
     )
 
 
+def archive_advanced_filters_without_entity(
+    filters: ArchiveAdvancedFilters,
+) -> ArchiveAdvancedFilters:
+    return replace(filters, entity_id=None)
+
+
 def archive_advanced_filters_without_person(
     filters: ArchiveAdvancedFilters,
     person_id: int,
@@ -622,6 +668,39 @@ def archive_advanced_filters_without_year(
     filters: ArchiveAdvancedFilters,
 ) -> ArchiveAdvancedFilters:
     return replace(filters, year=None, year_to=None)
+
+
+def _entity_filter_choices() -> tuple[ArchiveAdvancedEntityChoice, ...]:
+    """Every registry row, ordered by public name then pk. Not limited to pins."""
+
+    from documents.services.non_person_entity_presentation import (
+        non_person_public_name,
+        non_person_public_type_label,
+    )
+    from documents.services.non_person_entity_search import registry_index_queryset
+
+    choices: list[ArchiveAdvancedEntityChoice] = []
+    entities = registry_index_queryset("").prefetch_related("aliases")
+    for entity in entities:
+        name = non_person_public_name(entity)
+        type_label = non_person_public_type_label(entity)
+        label = f"{name} — {type_label}" if type_label else name
+        alias_names = [alias.name for alias in entity.aliases.all() if alias.name]
+        choices.append(
+            ArchiveAdvancedEntityChoice(
+                id=entity.pk,
+                label=label,
+                search_text=" ".join([name, *alias_names]),
+            )
+        )
+    return tuple(choices)
+
+
+def _entity_choice_label(choices: Sequence[Any], entity_id: int) -> str:
+    for choice in choices:
+        if getattr(choice, "id", None) == entity_id:
+            return str(getattr(choice, "label", "לא נמצא"))
+    return "לא נמצא"
 
 
 def _choice_name_by_id(choices: Sequence[Any], choice_id: int) -> str:
@@ -640,6 +719,7 @@ def build_archive_advanced_filter_summary_items(
     tag_choices: Sequence[Any] = (),
     person_choices: Sequence[Any] = (),
     author_choices: Sequence[Any] = (),
+    entity_choices: Sequence[Any] = (),
 ) -> list[dict[str, object]]:
     """
     Compact active-filter summary descriptors (labels/values only).
@@ -710,6 +790,14 @@ def build_archive_advanced_filter_summary_items(
                 "label": "אדם" if len(names) == 1 else "אנשים",
                 "value": ", ".join(names),
                 "ids": filters.person_ids,
+            }
+        )
+    if filters.entity_id is not None:
+        items.append(
+            {
+                "kind": "entity",
+                "label": "מקום, ארגון או גוף אחר",
+                "value": _entity_choice_label(entity_choices, filters.entity_id),
             }
         )
     if filters.year is not None:

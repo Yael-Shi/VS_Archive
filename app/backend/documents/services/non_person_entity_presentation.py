@@ -185,12 +185,12 @@ def public_mentioned_object_links(
     return tuple(_public_link(entity) for _key, entity in ordered)
 
 
-def authorized_valid_archive_item_ids(user, entity_id: int) -> list[int]:
-    """Authorized browse item ids with a currently valid pin for this registry row.
+def valid_archive_item_ids_for_entity(entity_id: int) -> list[int]:
+    """Item ids with a currently valid pin for this registry row.
 
-    Candidate rows are this entity's resolved ``surface-v1`` occurrences.
-    Validity is computed per item. Authorization is the browse queryset.
-    Private items are absent from the returned ids.
+    Starts from that entity's resolved ``surface-v1`` occurrences. Authoritative
+    text is hashed once per item. Does not apply archive authorization and does
+    not write.
     """
 
     occurrences = list(_candidate_occurrences(entity_id))
@@ -201,11 +201,20 @@ def authorized_valid_archive_item_ids(user, entity_id: int) -> list[int]:
     for occurrence in occurrences:
         by_item.setdefault(occurrence.archive_item_id, []).append(occurrence)
         items[occurrence.archive_item_id] = occurrence.archive_item
-    valid_ids = [
+    return [
         item_id
         for item_id, rows in by_item.items()
         if _item_has_valid_occurrence(items[item_id], rows)
     ]
+
+
+def authorized_valid_archive_item_ids(user, entity_id: int) -> list[int]:
+    """Authorized browse item ids with a currently valid pin for this registry row.
+
+    Validity and authorization stay separate. Private items are absent.
+    """
+
+    valid_ids = valid_archive_item_ids_for_entity(entity_id)
     if not valid_ids:
         return []
     return list(

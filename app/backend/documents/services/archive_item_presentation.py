@@ -33,6 +33,7 @@ from documents.services.archive_advanced_search import (
     EMPTY_ARCHIVE_ADVANCED_FILTERS,
     ArchiveAdvancedFilters,
     archive_advanced_filters_without_author,
+    archive_advanced_filters_without_entity,
     archive_advanced_filters_without_person,
     archive_advanced_filters_without_year,
     build_archive_advanced_filter_summary_items,
@@ -711,6 +712,7 @@ def archive_public_list_active_filter_summary_context(
     tag_choices: Sequence[object] = (),
     person_choices: Sequence[object] = (),
     author_choices: Sequence[object] = (),
+    entity_choices: Sequence[object] = (),
 ) -> dict[str, object]:
     """Compact active-filter chips with canonical remove/edit/clear links."""
     from dataclasses import replace
@@ -724,6 +726,7 @@ def archive_public_list_active_filter_summary_context(
         tag_choices=tag_choices,
         person_choices=person_choices,
         author_choices=author_choices,
+        entity_choices=entity_choices,
     )
     chips: list[dict[str, object]] = []
     person_name_by_id = {
@@ -780,6 +783,8 @@ def archive_public_list_active_filter_summary_context(
             remove_filters = replace(filters, event_ids=())
         elif kind == "tag":
             remove_filters = replace(filters, tag_ids=())
+        elif kind == "entity":
+            remove_filters = archive_advanced_filters_without_entity(filters)
         elif kind == "year":
             remove_filters = archive_advanced_filters_without_year(filters)
         remove_query = build_archive_public_list_query(
