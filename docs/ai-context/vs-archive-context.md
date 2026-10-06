@@ -101,6 +101,14 @@ For Hebrew documents, the worker persists **both** `SOURCE_TEXT` and `HEBREW_TEX
 
 Non-Hebrew documents may remain **`PARTIAL`** when **`HEBREW_TEXT`** is missing or translation failed — **intentional**, not an OCR failure. **`READY`** rollup requires usable **`SOURCE_TEXT`** and **`HEBREW_TEXT`**.
 
+## Non-person entities (current)
+
+`NonPersonEntity` is the registry (places, organizations, communities, publications/works, legal instruments, events). `NonPersonEntityAlias` is a per-entity lookup name, unique on `(entity, name)`, not globally. `ReviewedNonPersonEntityDecision` is the closed v6 workbook ledger, keyed by `(source, candidate_id)`. `ArchiveItemEntityOccurrence` is the only item↔entity link. There is no item many-to-many.
+
+A pin is currently valid only through `occurrence_is_currently_valid` in `documents/services/non_person_entity_occurrences.py`: `RESOLVED`, entity set, `surface-v1`, supported text kind, authoritative displayed text present, and SHA-256 of that exact UTF-8 text equal to `source_text_sha256`. Stale is computed, not stored. The reader does not write. Authoritative text is `ManualTextContent.body` or `resolve_displayed_transcription_result` (Hebrew prefers displayable `HEBREW_TEXT`, then `SOURCE_TEXT`; other languages prefer `SOURCE_TEXT`, then `HEBREW_TEXT`). Surface-v1 normalization, the source SHA, and surface location live in that same module. Workbook preflight, dry-run, and apply call it. They do not keep a second copy. `occurrence_ordinal` orders matches of one surface only.
+
+Public pages, registry search, the advanced-search entity filter, staff UI, proposal storage, and detection are not implemented. Approved rules for public-page eligibility (a registry row may have a page with an empty item list) and for future ambiguous occurrence proposals are in `decision-log.md` (2026-10-06). `ArchiveEvent` is a separate discovery label and is not `NonPersonEntity` type `EVENT`.
+
 ## Where to read more
 
 - `docs/ocr-routing-reference.md` — current OCR/HTR routing, models, and translation behavior.
