@@ -104,6 +104,23 @@ def non_person_public_name(entity: NonPersonEntity) -> str:
     return entity.canonical_name
 
 
+def non_person_entity_type_label(entity_type: str) -> str:
+    """Natural Hebrew for one entity type. Unknown tokens are blank."""
+
+    return _TYPE_LABELS.get(entity_type, "")
+
+
+def non_person_entity_subtype_label(entity_subtype: str) -> str:
+    """Natural Hebrew for one subtype. Blank is blank. ``OTHER`` is ``אחר``."""
+
+    subtype = (entity_subtype or "").strip()
+    if not subtype:
+        return ""
+    if subtype == NonPersonEntity.EntitySubtype.OTHER:
+        return "אחר"
+    return _SUBTYPE_LABELS.get(subtype, "")
+
+
 def non_person_public_type_label(entity: NonPersonEntity) -> str:
     """Natural Hebrew type, plus subtype when it adds a real distinction.
 
@@ -111,11 +128,11 @@ def non_person_public_type_label(entity: NonPersonEntity) -> str:
     rather than shown as enum codes.
     """
 
-    type_label = _TYPE_LABELS.get(entity.entity_type, "")
+    type_label = non_person_entity_type_label(entity.entity_type)
     subtype = (entity.entity_subtype or "").strip()
     if not type_label or not subtype or subtype == NonPersonEntity.EntitySubtype.OTHER:
         return type_label
-    subtype_label = _SUBTYPE_LABELS.get(subtype, "")
+    subtype_label = non_person_entity_subtype_label(subtype)
     if not subtype_label:
         return type_label
     return f"{type_label} · {subtype_label}"

@@ -46,6 +46,7 @@ from .models import (
     DocumentSourceFile,
     DocumentTextResult,
     NonPersonEntity,
+    NonPersonEntityAlias,
     Person,
     PersonAlias,
     PhotoContent,
@@ -333,6 +334,22 @@ from documents.services.non_person_entity_presentation import (
 from documents.services.non_person_entity_search import (
     public_registry_rows,
     registry_index_queryset,
+)
+from documents.services.non_person_entity_staff import (
+    ALIAS_SHARED_WARNING,
+    NonPersonEntityStaffError,
+    alias_name_shared_with_other_entity,
+    create_non_person_alias,
+    delete_non_person_alias,
+    staff_alias_kind_choices,
+    staff_alias_rows,
+    staff_entity_index_queryset,
+    staff_entity_index_rows,
+    staff_entity_subtype_choices,
+    staff_entity_type_choices,
+    staff_linked_occurrences,
+    update_non_person_alias,
+    update_non_person_entity,
 )
 from documents.services.person_display import (
     public_person_additional_name_groups,
@@ -5422,6 +5439,10 @@ PERSON_ALIAS_ADDED_MSG = "השם החלופי נוסף."
 PERSON_ALIAS_UPDATED_MSG = "השם החלופי עודכן."
 PERSON_ALIAS_DELETED_MSG = "השם החלופי נמחק."
 PERSON_MERGED_MSG = "רשומות האדם מוזגו. הרשומה הכפולה נמחקה."
+ENTITY_UPDATED_MSG = "הרשומה עודכנה."
+ENTITY_ALIAS_ADDED_MSG = "השם החלופי נוסף."
+ENTITY_ALIAS_UPDATED_MSG = "השם החלופי עודכן."
+ENTITY_ALIAS_DELETED_MSG = "השם החלופי נמחק."
 AUTHOR_NAME_UPDATED_MSG = "שם המחבר/ת עודכן בכל הפריטים המשויכים."
 AUTHOR_MERGED_MSG = "רשומות המחבר/ת מוזגו. הרשומה הכפולה נמחקה."
 ARCHIVE_ITEM_UPDATED_MSG = "הפריט עודכן."
@@ -7358,6 +7379,245 @@ def archive_manage_person_alias_delete_page(request, person_id: int, alias_id: i
         "documents/archive/person_alias_delete_confirm.html",
         context={
             "person": person,
+            "alias": alias,
+            "form_errors": form_errors,
+            "page_title": "מחיקת שם חלופי",
+        },
+    )
+
+
+def _entity_edit_form_context(
+    *,
+    entity: NonPersonEntity,
+    form_errors: list[str],
+    canonical_name: str,
+    display_name: str,
+    entity_type: str,
+    entity_subtype: str,
+    alias_name: str = "",
+    alias_kind: str = NonPersonEntityAlias.Kind.LANGUAGE_VARIANT,
+) -> dict:
+    return {
+        "entity": entity,
+        "public_name": non_person_public_name(entity),
+        "canonical_name": canonical_name,
+        "display_name": display_name,
+        "entity_type": entity_type,
+        "entity_subtype": entity_subtype,
+        "entity_type_choices": staff_entity_type_choices(),
+        "entity_subtype_choices": staff_entity_subtype_choices(),
+        "aliases": staff_alias_rows(entity),
+        "alias_name": alias_name,
+        "alias_kind": alias_kind,
+        "alias_kind_choices": staff_alias_kind_choices(),
+        "linked_occurrences": staff_linked_occurrences(entity),
+        "shared_alias_warning": ALIAS_SHARED_WARNING,
+        "form_errors": form_errors,
+        "page_title": "עריכת רשומה",
+    }
+
+
+def _get_staff_entity(entity_id: int) -> NonPersonEntity:
+    return get_object_or_404(NonPersonEntity, pk=entity_id)
+
+
+def _get_staff_entity_alias(
+    entity_id: int, alias_id: int
+) -> tuple[NonPersonEntity, NonPersonEntityAlias]:
+    entity = _get_staff_entity(entity_id)
+    alias = get_object_or_404(NonPersonEntityAlias, pk=alias_id, entity_id=entity.pk)
+    return entity, alias
+
+
+@login_required
+@require_GET
+def archive_manage_entities_page(request):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    q = (request.GET.get("q") or "").strip()
+    entity_type = (request.GET.get("entity_type") or "").strip()
+    entity_subtype = (request.GET.get("entity_subtype") or "").strip()
+    if entity_type not in NonPersonEntity.EntityType.values:
+        entity_type = ""
+    if entity_subtype not in NonPersonEntity.EntitySubtype.values:
+        entity_subtype = ""
+    entities = staff_entity_index_queryset(
+        search_query=q,
+        entity_type=entity_type,
+        entity_subtype=entity_subtype,
+    )
+    return render(
+        request,
+        "documents/archive/entity_manage_index.html",
+        context={
+            "entities": staff_entity_index_rows(entities),
+            "q": q,
+            "entity_type": entity_type,
+            "entity_subtype": entity_subtype,
+            "entity_type_choices": staff_entity_type_choices(),
+            "entity_subtype_choices": staff_entity_subtype_choices(),
+            "has_filters": bool(q or entity_type or entity_subtype),
+            "page_title": "ניהול מקומות וארגונים",
+        },
+    )
+
+
+@login_required
+def archive_manage_entity_edit_page(request, entity_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    entity = _get_staff_entity(entity_id)
+    form_errors: list[str] = []
+    canonical_name = entity.canonical_name
+    display_name = entity.display_name
+    entity_type = entity.entity_type
+    entity_subtype = entity.entity_subtype
+    alias_name = ""
+    alias_kind = NonPersonEntityAlias.Kind.LANGUAGE_VARIANT
+
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        if action == "update_entity":
+            canonical_name = request.POST.get("canonical_name") or ""
+            display_name = request.POST.get("display_name") or ""
+            entity_type = request.POST.get("entity_type") or ""
+            entity_subtype = request.POST.get("entity_subtype") or ""
+            try:
+                entity = update_non_person_entity(
+                    entity,
+                    canonical_name=canonical_name,
+                    display_name=display_name,
+                    entity_type=entity_type,
+                    entity_subtype=entity_subtype,
+                )
+            except NonPersonEntityStaffError as exc:
+                form_errors = [exc.message]
+            else:
+                messages.success(request, ENTITY_UPDATED_MSG)
+                return redirect("archive-manage-entity-edit", entity_id=entity.id)
+        elif action == "add_alias":
+            alias_name = request.POST.get("alias_name") or ""
+            alias_kind = request.POST.get("alias_kind") or ""
+            try:
+                alias = create_non_person_alias(
+                    entity,
+                    name=alias_name,
+                    kind=alias_kind,
+                )
+            except NonPersonEntityStaffError as exc:
+                form_errors = [exc.message]
+            else:
+                messages.success(request, ENTITY_ALIAS_ADDED_MSG)
+                if alias_name_shared_with_other_entity(
+                    entity_id=entity.id,
+                    name=alias.name,
+                ):
+                    messages.warning(request, ALIAS_SHARED_WARNING)
+                return redirect("archive-manage-entity-edit", entity_id=entity.id)
+        else:
+            return HttpResponseBadRequest("פעולה לא תקינה.")
+
+        entity = _get_staff_entity(entity.id)
+
+    return render(
+        request,
+        "documents/archive/entity_edit.html",
+        context=_entity_edit_form_context(
+            entity=entity,
+            form_errors=form_errors,
+            canonical_name=canonical_name,
+            display_name=display_name,
+            entity_type=entity_type,
+            entity_subtype=entity_subtype,
+            alias_name=alias_name,
+            alias_kind=alias_kind,
+        ),
+    )
+
+
+@login_required
+def archive_manage_entity_alias_edit_page(request, entity_id: int, alias_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    entity, alias = _get_staff_entity_alias(entity_id, alias_id)
+    form_errors: list[str] = []
+    alias_name = alias.name
+    alias_kind = alias.kind
+
+    if request.method == "POST":
+        alias_name = request.POST.get("name") or ""
+        alias_kind = request.POST.get("kind") or ""
+        try:
+            alias = update_non_person_alias(
+                alias,
+                name=alias_name,
+                kind=alias_kind,
+            )
+        except NonPersonEntityStaffError as exc:
+            form_errors = [exc.message]
+        else:
+            messages.success(request, ENTITY_ALIAS_UPDATED_MSG)
+            if alias_name_shared_with_other_entity(
+                entity_id=entity.id,
+                name=alias.name,
+            ):
+                messages.warning(request, ALIAS_SHARED_WARNING)
+            return redirect("archive-manage-entity-edit", entity_id=entity.id)
+
+    return render(
+        request,
+        "documents/archive/entity_alias_edit.html",
+        context={
+            "entity": entity,
+            "public_name": non_person_public_name(entity),
+            "alias": alias,
+            "alias_name": alias_name,
+            "alias_kind": alias_kind,
+            "alias_kind_choices": staff_alias_kind_choices(),
+            "shared_alias_warning": (
+                ALIAS_SHARED_WARNING
+                if alias_name_shared_with_other_entity(
+                    entity_id=entity.id,
+                    name=alias_name,
+                )
+                else ""
+            ),
+            "form_errors": form_errors,
+            "page_title": "עריכת שם חלופי",
+        },
+    )
+
+
+@login_required
+def archive_manage_entity_alias_delete_page(request, entity_id: int, alias_id: int):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    entity, alias = _get_staff_entity_alias(entity_id, alias_id)
+    form_errors: list[str] = []
+
+    if request.method == "POST":
+        try:
+            delete_non_person_alias(alias)
+        except NonPersonEntityStaffError as exc:
+            form_errors = [exc.message]
+        else:
+            messages.success(request, ENTITY_ALIAS_DELETED_MSG)
+            return redirect("archive-manage-entity-edit", entity_id=entity.id)
+
+    return render(
+        request,
+        "documents/archive/entity_alias_delete_confirm.html",
+        context={
+            "entity": entity,
+            "public_name": non_person_public_name(entity),
             "alias": alias,
             "form_errors": form_errors,
             "page_title": "מחיקת שם חלופי",

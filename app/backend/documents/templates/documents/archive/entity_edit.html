@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - {{ page_title }}{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-manage-entities' %}">חזרה לרשימה</a>
+      <a class="btn" href="{% url 'archive-non-person-detail' entity_id=entity.id %}">עמוד ציבורי</a>
+    </div>
+
+    <h1 class="page-title">{{ page_title }}</h1>
+    <p class="page-subtitle">{{ public_name }}</p>
+    <p class="muted">
+      שינוי שם, סוג או שם חלופי אינו משנה קישורים קיימים.
+      קישור נשאר מחובר לפי מזהה הרשומה ולפי הטקסט שנשמר איתו.
+      שמות חלופיים משתתפים בחיפוש ברשימת המקומות והארגונים.
+      וריאנט זיהוי טקסט אינו מוצג בעמוד הציבורי.
+    </p>
+
+    {% if messages %}
+      <div class="spacer"></div>
+      {% for message in messages %}
+        <div class="alert{% if message.tags == 'error' %} alert-danger{% elif message.tags == 'success' %} alert-ok{% endif %}">
+          {{ message }}
+        </div>
+      {% endfor %}
+    {% endif %}
+
+    {% if form_errors %}
+      <div class="spacer"></div>
+      <div class="alert alert-danger">
+        <div class="alert-title">שגיאה בטופס</div>
+        <ul>
+          {% for error in form_errors %}
+            <li>{{ error }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    <div class="spacer"></div>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="update_entity" />
+      <div class="field">
+        <label for="canonical_name">שם קנוני</label>
+        <input id="canonical_name" name="canonical_name" type="text" value="{{ canonical_name }}" maxlength="255" />
+      </div>
+      <div class="field">
+        <label for="display_name">שם תצוגה</label>
+        <input id="display_name" name="display_name" type="text" value="{{ display_name }}" maxlength="255" />
+        <div class="field-hint">אופציונלי. אם ריק, העמוד הציבורי מציג את השם הקנוני.</div>
+      </div>
+      <div class="field">
+        <label for="entity_type">סוג</label>
+        <select id="entity_type" name="entity_type">
+          {% for value, label in entity_type_choices %}
+            <option value="{{ value }}"{% if entity_type == value %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="entity_subtype">תת-סוג</label>
+        <select id="entity_subtype" name="entity_subtype">
+          {% for value, label in entity_subtype_choices %}
+            <option value="{{ value }}"{% if entity_subtype == value %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary">שמירת רשומה</button>
+    </form>
+
+    <div class="spacer"></div>
+    <h2>שמות חלופיים</h2>
+    {% if aliases %}
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>שם חלופי</th>
+              <th>סוג</th>
+              <th>פעולות</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for alias in aliases %}
+              <tr>
+                <td>
+                  {{ alias.name }}
+                  {% if alias.shared_with_other_entity %}
+                    <div class="muted">{{ shared_alias_warning }}</div>
+                  {% endif %}
+                </td>
+                <td>{{ alias.kind_label }}</td>
+                <td>
+                  <a class="btn" href="{% url 'archive-manage-entity-alias-edit' entity_id=entity.id alias_id=alias.alias_id %}">עריכה</a>
+                  <a class="btn" href="{% url 'archive-manage-entity-alias-delete' entity_id=entity.id alias_id=alias.alias_id %}">מחיקה</a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">אין שמות חלופיים.</p>
+    {% endif %}
+
+    <div class="spacer"></div>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="add_alias" />
+      <div class="field">
+        <label for="alias_name">הוספת שם חלופי</label>
+        <input id="alias_name" name="alias_name" type="text" value="{{ alias_name }}" maxlength="255" />
+      </div>
+      <div class="field">
+        <label for="alias_kind">סוג</label>
+        <select id="alias_kind" name="alias_kind">
+          {% for value, label in alias_kind_choices %}
+            <option value="{{ value }}"{% if alias_kind == value %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary">הוספת שם חלופי</button>
+    </form>
+
+    <div class="spacer"></div>
+    <h2>קישורים לפריטים</h2>
+    <p class="muted">תצוגה בלבד. אין כאן אישור, העברה או הסרה של קישור.</p>
+    {% if linked_occurrences %}
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>פריט</th>
+              <th>כותרת</th>
+              <th>סוג טקסט</th>
+              <th>טקסט שנמצא</th>
+              <th>מצב</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for link in linked_occurrences %}
+              <tr>
+                <td><a href="{{ link.item_url }}">{{ link.item_id }}</a></td>
+                <td>{{ link.item_title }}</td>
+                <td>{{ link.text_kind_label }}</td>
+                <td>{{ link.matched_text }}</td>
+                <td>{{ link.status_label }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">אין קישורים שמורים לרשומה זו.</p>
+    {% endif %}
+  </div>
+{% endblock %}
