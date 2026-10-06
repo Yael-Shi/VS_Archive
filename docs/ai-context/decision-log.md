@@ -8247,7 +8247,7 @@ Anything else is not currently valid. Stale is computed at read time. It is not 
 
 **Future proposal persistence (PR F, not implemented):** One textual occurrence may have zero, one, or many candidate entities. A row whose unique key is the six-field occurrence identity plus a single `candidate_entity` foreign key cannot represent that ambiguity. Multiple match methods for the same occurrence and the same candidate entity must not create duplicate visible candidates. The same normalized surface at ordinal 1 and ordinal 2 is two occurrence identities. Public item display may later dedupe by entity. Persistence and review stay occurrence-level. Do not store proposals on `ArchiveItemEntityOccurrence` or on `ReviewedNonPersonEntityDecision`.
 
-**Deferred:** advanced-search entity filter, staff registry, proposal schema, review queue, and any detector. None of those run on save. The public item section and the single-entity detail page are specified in the following entry. The public registry index is specified after that.
+**Deferred:** staff registry, proposal schema, review queue, and any detector. None of those run on save. The public item section and the single-entity detail page are specified in the following entry. The public registry index is specified after that. The advanced-search filter is specified after the index.
 
 ## Non-person entity public detail (2026-10-06)
 
@@ -8273,4 +8273,12 @@ Anything else is not currently valid. Stale is computed at read time. It is not 
 
 **Pagination:** The index uses `ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE` (48) and keeps `q` on page links. There is no smaller result cap.
 
-**Unchanged:** Archive free-text `q` still searches `ArchiveItemSearchIndex` only. Entity names and aliases are not written there, and registry rows are not mixed into archive-item ranking. The advanced archive filter by entity id is not this index.
+**Unchanged:** Archive free-text `q` still searches `ArchiveItemSearchIndex` only. Entity names and aliases are not written there, and registry rows are not mixed into archive-item ranking. The advanced archive filter by entity id is specified in the following entry.
+
+## Non-person entity advanced archive filter (2026-10-06)
+
+**Decision:** Public advanced search accepts one `entity` parameter, a `NonPersonEntity` id. An archive item matches only when it has at least one currently valid `ArchiveItemEntityOccurrence` for that id. Stale and unresolved pins do not match. The filter ANDs with `q` and the other advanced filters. MVP is one id; repeated values keep the first and do not OR.
+
+**Selector:** The field label is `מקום, ארגון או גוף אחר`. Choices are the whole registry, ordered by public name then pk, including rows with zero valid pins. The visible label is nonblank `display_name` or `canonical_name`, plus the natural type/subtype. The id is the submitted value. Alias text, including `OCR_VARIANT`, can narrow the existing choice list and is not shown as a public name. Selecting a row with no valid pins yields no items.
+
+**Unchanged:** `q` is not expanded with aliases. `ArchiveItemSearchIndex` does not store entity names. There is no mixed archive/registry result list, no multi-entity boolean, and no staff, proposal, or detector work.

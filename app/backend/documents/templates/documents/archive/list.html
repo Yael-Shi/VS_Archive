@@ -30,6 +30,9 @@
           {% for person_id in advanced_filter_person_ids %}
             <input type="hidden" name="person" value="{{ person_id }}">
           {% endfor %}
+          {% if advanced_filter_entity %}
+            <input type="hidden" name="entity" value="{{ advanced_filter_entity }}">
+          {% endif %}
           {% if advanced_filter_year_input %}
             <input type="hidden" name="year" value="{{ advanced_filter_year_input }}">
           {% endif %}
@@ -243,6 +246,40 @@
                 </div>
               </div>
 
+              <div
+                class="archive-advanced-search__field"
+                data-archive-choice-filter-field
+              >
+                <label for="archive-filter-entity">מקום, ארגון או גוף אחר</label>
+                <input
+                  type="search"
+                  class="archive-advanced-search__choice-filter"
+                  data-archive-choice-filter-search
+                  autocomplete="off"
+                  placeholder="סינון לפי שם…"
+                  aria-label="סינון לפי שם"
+                >
+                <select
+                  id="archive-filter-entity"
+                  class="archive-advanced-search__choice-list"
+                  name="entity"
+                  size="5"
+                  data-archive-choice-filter-select
+                >
+                  <option value="" {% if not advanced_filter_entity %}selected{% endif %}>הכל</option>
+                  {% for choice in advanced_filter_entity_choices %}
+                    <option
+                      value="{{ choice.id }}"
+                      data-search="{{ choice.search_text }}"
+                      {% if choice.id == advanced_filter_entity %}selected{% endif %}
+                    >{{ choice.label }}</option>
+                  {% endfor %}
+                </select>
+                <div class="field-hint" data-archive-choice-filter-empty hidden>
+                  לא נמצאו תוצאות תואמות.
+                </div>
+              </div>
+
               <div class="archive-advanced-search__field archive-advanced-search__field--years">
                 <div class="archive-advanced-search__year-row">
                   <div class="archive-advanced-search__year-control">
@@ -368,8 +405,11 @@
             let matchCount = 0;
 
             Array.from(select.options).forEach(function (option) {
+              const extra = (option.dataset.search || "").toLocaleLowerCase();
               const matches =
-                !query || option.textContent.toLocaleLowerCase().includes(query);
+                !query
+                || option.textContent.toLocaleLowerCase().includes(query)
+                || extra.includes(query);
 
               if (matches) {
                 matchCount += 1;
