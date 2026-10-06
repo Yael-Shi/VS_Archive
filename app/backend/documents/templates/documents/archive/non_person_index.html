@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - {{ page_title }}{% endblock %}
+
+{% block content %}
+  <div class="card page-header" id="archive-top">
+    <header class="document-detail-header">
+      <div class="document-detail-header-main">
+        <h1 class="page-title">{{ page_title }}</h1>
+      </div>
+      <div class="page-toolbar document-detail-toolbar">
+        {% include "documents/partials/detail_back_to_archive.html" %}
+      </div>
+    </header>
+
+    <section aria-label="חיפוש לפי שם">
+      <form method="get" class="archive-search-form" action="{% url 'archive-non-person-index' %}">
+        <div class="archive-search-form__row">
+          <label class="visually-hidden" for="archive-registry-q">{{ search_placeholder }}</label>
+          <input
+            id="archive-registry-q"
+            class="archive-search-form__input"
+            type="search"
+            name="q"
+            placeholder="{{ search_placeholder }}"
+            value="{{ q }}"
+            autocomplete="off"
+          >
+          <div class="archive-search-form__actions">
+            <div class="archive-search-form__primary-controls">
+              <button class="btn btn-primary archive-search-form__submit" type="submit">חיפוש</button>
+            </div>
+            {% if q %}
+              <a class="archive-search-form__clear" href="{% url 'archive-non-person-index' %}">ניקוי החיפוש</a>
+            {% endif %}
+          </div>
+        </div>
+      </form>
+    </section>
+
+    {% if registry_rows %}
+      <p class="archive-search-results-count" aria-live="polite">
+        נמצאו {{ total_count }} תוצאות
+      </p>
+      <ul class="archive-mentioned-objects">
+        {% for row in registry_rows %}
+          <li>
+            <a href="{{ row.href }}">{{ row.name }}</a>
+            {% if row.type_label %}<span class="muted">{{ row.type_label }}</span>{% endif %}
+            {% if row.matched_alias %}
+              <span class="muted">{{ matched_alias_label }} {{ row.matched_alias }}</span>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+      {% if show_page_nav %}
+        <div class="spacer"></div>
+        {% include "documents/archive/partials/non_person_index_pagination.html" %}
+      {% endif %}
+    {% elif q %}
+      <p class="muted">{{ empty_search_message }}</p>
+    {% else %}
+      <p class="muted">{{ empty_index_message }}</p>
+    {% endif %}
+  </div>
+{% endblock %}

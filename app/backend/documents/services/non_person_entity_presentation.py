@@ -32,6 +32,11 @@ MENTIONED_OBJECTS_PUBLIC_HEADING = "מקומות, ארגונים ועוד המו
 PUBLIC_ADDITIONAL_NAMES_LABEL = "שמות נוספים"
 PUBLIC_EMPTY_ITEMS_MESSAGE = "אין כרגע פריטים שבהם זה מופיע בטקסט המוצג."
 PUBLIC_ITEMS_HEADING = "פריטים שבהם זה מופיע"
+REGISTRY_INDEX_TITLE = "מקומות, ארגונים, קהילות ופרסומים"
+REGISTRY_SEARCH_PLACEHOLDER = "חיפוש לפי שם או שם נוסף"
+REGISTRY_EMPTY_SEARCH_MESSAGE = "לא נמצאו תוצאות תואמות."
+REGISTRY_EMPTY_INDEX_MESSAGE = "אין כרגע רשומות להצגה."
+REGISTRY_MATCHED_ALIAS_LABEL = "נמצא גם בשם"
 
 _TYPE_LABELS = {
     NonPersonEntity.EntityType.PLACE: "מקום",
