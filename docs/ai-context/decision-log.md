@@ -8247,7 +8247,7 @@ Anything else is not currently valid. Stale is computed at read time. It is not 
 
 **Future proposal persistence (PR F, not implemented):** One textual occurrence may have zero, one, or many candidate entities. A row whose unique key is the six-field occurrence identity plus a single `candidate_entity` foreign key cannot represent that ambiguity. Multiple match methods for the same occurrence and the same candidate entity must not create duplicate visible candidates. The same normalized surface at ordinal 1 and ordinal 2 is two occurrence identities. Public item display may later dedupe by entity. Persistence and review stay occurrence-level. Do not store proposals on `ArchiveItemEntityOccurrence` or on `ReviewedNonPersonEntityDecision`.
 
-**Deferred:** public registry index, registry search, advanced-search entity filter, staff registry, proposal schema, review queue, and any detector. None of those run on save. The public item section and the single-entity detail page are specified in the following entry.
+**Deferred:** advanced-search entity filter, staff registry, proposal schema, review queue, and any detector. None of those run on save. The public item section and the single-entity detail page are specified in the following entry. The public registry index is specified after that.
 
 ## Non-person entity public detail (2026-10-06)
 
@@ -8260,3 +8260,17 @@ Anything else is not currently valid. Stale is computed at read time. It is not 
 **Entity page:** `/archive/entities/<id>/` is id-based. The name is non-blank `display_name`, otherwise `canonical_name`. `שמות נוספים` lists aliases except `OCR_VARIANT` and is omitted when none remain. Linked items are the deduped archive items that have a currently valid pin and pass `archive_browse_queryset_for_user`. Pagination uses the existing public page size. An existing entity with zero valid authorized items returns 200 and an empty state. A missing id is 404. The page does not invent a description. The registry index `/archive/entities/` is not this page.
 
 **Not in this change:** registry search, free-text `q` changes, search-index entity names, advanced-search filtering, staff UI, proposals, review queue, detector, migrations, or data writes.
+
+## Non-person entity public registry index (2026-10-06)
+
+**Decision:** `/archive/entities/` is the public registry index. The path may stay technical. Visible copy does not say Entity, Entities, ישות, or ישויות. The heading is `מקומות, ארגונים, קהילות ופרסומים`.
+
+**Membership:** The index is the registry. A row appears even when it has zero valid occurrences, only stale occurrences, or no linked archive items. That matches the detail page, which stays available with an empty linked-record state.
+
+**Lookup:** `documents/services/non_person_entity_search.py` matches `canonical_name`, nonblank `display_name`, and aliases. Matching is case-insensitive exact, prefix, or contains. There is no fuzzy match, trigram, edit distance, stemming, or dynamic transliteration. Each entity is returned once, at its best rank: exact display, exact canonical, exact alias, prefix on display or canonical, prefix alias, contains on display or canonical, contains alias. Ties use the public name, then pk. A blank query lists every row in that name order. An alias shared by several entities returns each entity. There is no automatic choice and no exact-hit redirect.
+
+**OCR_VARIANT:** Included in lookup. Not shown as a public additional name. A visible alias match may show `נמצא גם בשם`. A direct display or canonical match does not need that note.
+
+**Pagination:** The index uses `ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE` (48) and keeps `q` on page links. There is no smaller result cap.
+
+**Unchanged:** Archive free-text `q` still searches `ArchiveItemSearchIndex` only. Entity names and aliases are not written there, and registry rows are not mixed into archive-item ranking. The advanced archive filter by entity id is not this index.

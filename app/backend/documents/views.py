@@ -320,10 +320,19 @@ from documents.services.non_person_entity_presentation import (
     PUBLIC_ADDITIONAL_NAMES_LABEL,
     PUBLIC_EMPTY_ITEMS_MESSAGE,
     PUBLIC_ITEMS_HEADING,
+    REGISTRY_EMPTY_INDEX_MESSAGE,
+    REGISTRY_EMPTY_SEARCH_MESSAGE,
+    REGISTRY_INDEX_TITLE,
+    REGISTRY_MATCHED_ALIAS_LABEL,
+    REGISTRY_SEARCH_PLACEHOLDER,
     authorized_valid_archive_item_ids,
     non_person_public_name,
     non_person_public_type_label,
     public_non_person_aliases,
+)
+from documents.services.non_person_entity_search import (
+    public_registry_rows,
+    registry_index_queryset,
 )
 from documents.services.person_display import (
     public_person_additional_name_groups,
@@ -5908,6 +5917,44 @@ def archive_person_detail_page(request, person_id: int):
             "authored_pagination": authored_pagination,
             "is_admin": _is_admin(request.user),
             "person_source_return_url": source_return_url,
+        },
+    )
+
+
+def archive_non_person_index_page(request):
+    search_query = (request.GET.get("q") or "").strip()
+    per_page = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE
+    queryset = registry_index_queryset(search_query)
+    total_count = queryset.count()
+    page = normalize_archive_public_list_page(
+        request.GET.get("page"),
+        total_count=total_count,
+        per_page=per_page,
+    )
+    offset = (page - 1) * per_page
+    rows = public_registry_rows(
+        list(queryset[offset : offset + per_page]),
+        search_query,
+    )
+    return render(
+        request,
+        "documents/archive/non_person_index.html",
+        context={
+            "registry_rows": rows,
+            "q": search_query,
+            "page_title": REGISTRY_INDEX_TITLE,
+            "search_placeholder": REGISTRY_SEARCH_PLACEHOLDER,
+            "matched_alias_label": REGISTRY_MATCHED_ALIAS_LABEL,
+            "empty_search_message": REGISTRY_EMPTY_SEARCH_MESSAGE,
+            "empty_index_message": REGISTRY_EMPTY_INDEX_MESSAGE,
+            "total_count": total_count,
+            **archive_public_list_pagination_context(
+                total_count=total_count,
+                page=page,
+                per_page=per_page,
+                q=search_query,
+                item_type_filter="",
+            ),
         },
     )
 
