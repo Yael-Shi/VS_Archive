@@ -45,6 +45,7 @@ from .models import (
     DocumentMetadata,
     DocumentSourceFile,
     DocumentTextResult,
+    NonPersonEntity,
     Person,
     PersonAlias,
     PhotoContent,
@@ -314,6 +315,15 @@ from documents.services.archive_item_presentation import (
 )
 from documents.services.author_public import (
     public_author_archive_items_queryset,
+)
+from documents.services.non_person_entity_presentation import (
+    PUBLIC_ADDITIONAL_NAMES_LABEL,
+    PUBLIC_EMPTY_ITEMS_MESSAGE,
+    PUBLIC_ITEMS_HEADING,
+    authorized_valid_archive_item_ids,
+    non_person_public_name,
+    non_person_public_type_label,
+    public_non_person_aliases,
 )
 from documents.services.person_display import (
     public_person_additional_name_groups,
@@ -5902,6 +5912,54 @@ def archive_person_detail_page(request, person_id: int):
     )
 
 
+def archive_non_person_detail_page(request, entity_id: int):
+    entity = get_object_or_404(NonPersonEntity, pk=entity_id)
+    aliases = public_non_person_aliases(entity)
+    item_ids = authorized_valid_archive_item_ids(request.user, entity.pk)
+    total_count = len(item_ids)
+    per_page = ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE
+    page = normalize_archive_public_list_page(
+        request.GET.get("page"),
+        total_count=total_count,
+        per_page=per_page,
+    )
+    offset = (page - 1) * per_page
+    page_ids = item_ids[offset : offset + per_page]
+    page_items = []
+    if page_ids:
+        loaded = {
+            item.pk: item
+            for item in _archive_browse_select_related(
+                ArchiveItem.objects.filter(pk__in=page_ids)
+            )
+        }
+        page_items = [loaded[item_id] for item_id in page_ids if item_id in loaded]
+    browse_cards = _archive_browse_cards_for_items(page_items)
+    return render(
+        request,
+        "documents/archive/non_person_detail.html",
+        context={
+            "registry_object": entity,
+            "public_name": non_person_public_name(entity),
+            "type_label": non_person_public_type_label(entity),
+            "public_aliases": aliases,
+            "additional_names_label": PUBLIC_ADDITIONAL_NAMES_LABEL,
+            "items_heading": PUBLIC_ITEMS_HEADING,
+            "empty_items_message": PUBLIC_EMPTY_ITEMS_MESSAGE,
+            "browse_cards": browse_cards,
+            "is_admin": _is_admin(request.user),
+            "total_count": total_count,
+            **archive_public_list_pagination_context(
+                total_count=total_count,
+                page=page,
+                per_page=per_page,
+                q="",
+                item_type_filter="",
+            ),
+        },
+    )
+
+
 def archive_author_detail_page(request, author_id: int):
     author = get_object_or_404(Author, pk=author_id)
     items = public_author_archive_items_queryset(request.user, author.pk)
@@ -6125,8 +6183,6 @@ def archive_detail_page(request, item_id: int):
         archive_item_author_links_prefetch(),
     )
     item = get_viewable_archive_item(request.user, item_id, queryset=detail_qs)
-    discovery_context = public_discovery_context(item, from_item_id=item.id)
-
     if item.item_type == ArchiveItem.ItemType.OCR_DOCUMENT:
         doc = Document.objects.filter(archive_item_id=item.id).first()
         if doc is None:
@@ -6137,6 +6193,8 @@ def archive_detail_page(request, item_id: int):
         if search_query:
             detail_url = f"{detail_url}?{urlencode({'q': search_query})}"
         return redirect(detail_url)
+
+    discovery_context = public_discovery_context(item, from_item_id=item.id)
 
     if item.item_type == ArchiveItem.ItemType.MANUAL_TEXT:
         return render(

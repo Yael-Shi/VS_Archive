@@ -1,4 +1,4 @@
-{% if item.categories.all or item.events.all or public_tags or person_links %}
+{% if item.categories.all or item.events.all or public_tags or person_links or mentioned_object_links %}
   <div class="archive-discovery-meta archive-detail-meta-block archive-detail-meta-block--discovery">
     {% if item.categories.all %}
       <div class="archive-detail-meta-row">
@@ -30,6 +30,19 @@
         <span class="archive-detail-meta-value">
           {% for link in person_links %}<a href="{{ link.href }}">{{ link.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
         </span>
+      </div>
+    {% endif %}
+    {% if mentioned_object_links %}
+      <div class="archive-detail-meta-row">
+        <strong class="archive-detail-meta-label">{{ mentioned_object_links_heading }}</strong>
+        <ul class="archive-mentioned-objects">
+          {% for link in mentioned_object_links %}
+            <li>
+              <a href="{{ link.href }}">{{ link.name }}</a>
+              {% if link.type_label %}<span class="muted">{{ link.type_label }}</span>{% endif %}
+            </li>
+          {% endfor %}
+        </ul>
       </div>
     {% endif %}
   </div>

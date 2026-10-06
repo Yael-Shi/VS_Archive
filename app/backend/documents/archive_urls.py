@@ -30,6 +30,11 @@ urlpatterns = [
         name="archive-person-detail",
     ),
     path(
+        "entities/<int:entity_id>/",
+        views.archive_non_person_detail_page,
+        name="archive-non-person-detail",
+    ),
+    path(
         "authors/",
         views.archive_authors_index_page,
         name="archive-authors-index",

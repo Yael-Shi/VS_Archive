@@ -1367,6 +1367,11 @@ def public_discovery_context(
     from_item_id: int | None = None,
 ) -> dict:
     """Template context for public discovery Tags, Person links, and Authors."""
+    from documents.services.non_person_entity_presentation import (
+        MENTIONED_OBJECTS_PUBLIC_HEADING,
+        public_mentioned_object_links,
+    )
+
     if archive_item is None:
         return {
             "public_tags": (),
@@ -1374,6 +1379,8 @@ def public_discovery_context(
             "author_links": (),
             "author_display": "",
             "person_links_heading": ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING,
+            "mentioned_object_links": (),
+            "mentioned_object_links_heading": MENTIONED_OBJECTS_PUBLIC_HEADING,
         }
     author_links, author_display = author_presentation_for_item(
         archive_item,
@@ -1388,6 +1395,8 @@ def public_discovery_context(
         "author_links": author_links,
         "author_display": author_display,
         "person_links_heading": ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING,
+        "mentioned_object_links": public_mentioned_object_links(archive_item),
+        "mentioned_object_links_heading": MENTIONED_OBJECTS_PUBLIC_HEADING,
     }
 
 
