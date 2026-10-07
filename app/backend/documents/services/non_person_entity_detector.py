@@ -357,13 +357,14 @@ def _bounded_surface_slices(text: str, surface: str) -> tuple[tuple[int, str], .
     span in ``normalize_surface_v1`` text is outside a token. A token
     character is a Unicode letter, number, or combining mark. Punctuation and
     whitespace are boundaries. Hebrew prefixes are letters, so they are not
-    stripped. When original slices cannot be recovered, an accepted hit keeps
-    the locator ordinal (``index + 1``) and an empty ``matched_text``. A count
-    that does not match the normalized finds is dropped.
+    stripped. A normalized count without recoverable original slices is not a
+    hit: ``occurrences is None`` emits nothing, so no empty ``matched_text``
+    is stored and no other ordinal is renumbered. A count that does not match
+    the normalized finds is dropped.
     """
 
     located = locate_surface_occurrences(text, surface)
-    if located.count == 0:
+    if located.count == 0 or located.occurrences is None:
         return ()
     normalized_surface = normalize_surface_v1(surface)
     if normalized_surface == "":
@@ -381,8 +382,6 @@ def _bounded_surface_slices(text: str, surface: str) -> tuple[tuple[int, str], .
             start + len(normalized_surface),
         )
     ]
-    if located.occurrences is None:
-        return tuple((index + 1, "") for index in accepted)
     if len(located.occurrences) != located.count:
         return ()
     return tuple(

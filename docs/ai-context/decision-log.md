@@ -8371,3 +8371,13 @@ The detail route resolves one group id from pending keys. It does not build cont
 Risk flags, in stable order: `OCR_VARIANT` (an alias-kind snapshot is `OCR_VARIANT`); `SHORT_SURFACE` (normalized surface length at most 3); `MULTIPLE_MATCH_METHODS`; `MULTIPLE_ALIAS_KINDS` (non-empty alias kinds); `SOURCE_STALE`; `CONTEXT_UNAVAILABLE`; `MATCHED_TEXT_UNAVAILABLE` (stored `matched_text` is blank; a relocated window may still be shown); `PRIOR_REVIEW_HISTORY` (a review event other than `DETECT`); `MANY_ARCHIVE_ITEMS` (at least 5 distinct archive items). These flags are not a confidence score and do not mean a group is safe to approve. An ordinal gap left by boundary filtering is not itself a flag. Empty match provenance is not a flag; those candidates still group together.
 
 **Deferred:** bulk approval, bulk reject, and any write from this grouped view. A reviewer who wants to act uses the existing per-candidate review page.
+
+## Detector requires a recoverable original slice (2026-10-07)
+
+**Decision:** A detector hit requires a safely recovered original-text slice. `locate_surface_occurrences` may return `count > 0` with `occurrences is None` when the authoritative source is not NFC-stable. That count is not enough to create a proposal. The shared locator is unchanged.
+
+**Current behavior:** `_bounded_surface_slices` returns no hits for that surface when `occurrences is None`. Dry-run and apply both report zero textual occurrences for those finds. Apply inserts no proposal, candidate, match, or `DETECT` event, and it does not invent `matched_text`. Recoverable slices still use the locator ordinal, including gaps left by the token-boundary filter. Existing blank proposals are not repaired or deleted by this change. Review still fail-closes when a stored proposal cannot be relocated.
+
+**Supersedes:** the detector fallback that stored the locator ordinal with `matched_text=""` when original slices could not be recovered.
+
+**Deferred:** mapping NFC reordering back to original offsets, and any repair of proposals already stored with a blank `matched_text`.
