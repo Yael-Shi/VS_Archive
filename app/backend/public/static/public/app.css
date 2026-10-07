@@ -1442,6 +1442,12 @@ label.archive-metadata-subsection-title {
   color: var(--ok);
 }
 
+.alert-warn {
+  border-color: rgba(138, 100, 36, 0.35);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
 .msg {
   margin-top: var(--space-3);
   padding: var(--space-3) var(--space-4);

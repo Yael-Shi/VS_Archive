@@ -2,21 +2,33 @@
 
 from __future__ import annotations
 
+import hashlib
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.contrib.messages import get_messages
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
-from documents.models import Document, TranskribusRun
-from documents.services.archive_items import create_ocr_document
+from documents.models import (
+    ArchiveItemEntityOccurrence,
+    Document,
+    NonPersonEntity,
+    NonPersonEntityOccurrenceCandidate,
+    NonPersonEntityOccurrenceProposal,
+    TranskribusRun,
+)
+from documents.services.archive_items import (
+    create_manual_text_archive_item,
+    create_ocr_document,
+)
 from documents.services.transkribus_corrected_current_sync_enqueue import (
     EnqueueResult,
 )
 from documents.views import (
+    _CORRECTED_CURRENT_ACTIVATION_MSG_HUMAN_EDITED,
+    _CORRECTED_CURRENT_ACTIVATION_MSG_VERIFIED,
     _CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_ALREADY_QUEUED,
     _CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_ALREADY_RUNNING,
     _CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_ALREADY_TERMINAL,
@@ -30,6 +42,39 @@ from documents.views import (
 User = get_user_model()
 
 _ENQUEUE_LABEL = "משיכת תעתוק עדכני מ־Transkribus"
+
+
+def _messages_rendering_occurrence_review_url() -> str:
+    """Minimal occurrence-review page that iterates Django messages."""
+
+    body = "קהיר"
+    item = create_manual_text_archive_item(
+        title="unrelated occurrence item",
+        body=body,
+    )
+    entity = NonPersonEntity.objects.create(
+        canonical_name="קהיר",
+        entity_type=NonPersonEntity.EntityType.PLACE,
+        entity_subtype=NonPersonEntity.EntitySubtype.CITY,
+    )
+    proposal = NonPersonEntityOccurrenceProposal.objects.create(
+        archive_item=item,
+        text_kind=ArchiveItemEntityOccurrence.TextKind.MANUAL_TEXT,
+        source_text_sha256=hashlib.sha256(body.encode("utf-8")).hexdigest(),
+        normalization_version="surface-v1",
+        normalized_surface="קהיר",
+        occurrence_ordinal=1,
+        matched_text="קהיר",
+    )
+    candidate = NonPersonEntityOccurrenceCandidate.objects.create(
+        proposal=proposal,
+        candidate_entity=entity,
+        status=NonPersonEntityOccurrenceCandidate.Status.PENDING,
+    )
+    return reverse(
+        "archive-manage-entity-occurrence-proposal",
+        kwargs={"candidate_id": candidate.pk},
+    )
 
 
 def _enqueue_result(*, outcome: str, request_id: int = 99) -> EnqueueResult:
@@ -161,8 +206,8 @@ class CorrectedCurrentSyncStaffEnqueueUITests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.request["PATH_INFO"], self._list_url(doc.id))
         mock_enqueue.assert_not_called()
-        messages = [str(m) for m in get_messages(resp.wsgi_request)]
-        self.assertEqual(messages, [_CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_INELIGIBLE])
+        self.assertContains(resp, _CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_INELIGIBLE)
+        self.assertContains(resp, "alert-danger")
 
     @patch("documents.views.enqueue_transkribus_corrected_current_sync")
     def test_list_page_renders_csrf_enqueue_form(self, mock_enqueue):
@@ -216,11 +261,16 @@ class CorrectedCurrentSyncStaffEnqueueUITests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.request["PATH_INFO"], self._list_url(doc.id))
-        stored = list(get_messages(resp.wsgi_request))
-        self.assertEqual(len(stored), 1)
-        self.assertEqual(str(stored[0]), expected)
-        self.assertEqual(stored[0].level_tag, level)
+        self.assertContains(resp, expected)
+        if level == "success":
+            self.assertContains(resp, "alert-ok")
+        elif level == "error":
+            self.assertContains(resp, "alert-danger")
+        elif level == "warning":
+            self.assertContains(resp, "alert-warn")
+            self.assertNotContains(resp, "alert-ok")
         mock_enqueue.assert_called_once()
+        return resp
 
     def test_created_and_enqueued_success_message(self):
         self._assert_outcome_message(
@@ -244,11 +294,24 @@ class CorrectedCurrentSyncStaffEnqueueUITests(TestCase):
         )
 
     def test_already_running_message(self):
-        self._assert_outcome_message(
+        resp = self._assert_outcome_message(
             outcome="ALREADY_RUNNING",
             expected=_CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_ALREADY_RUNNING,
-            level="success",
+            level="warning",
         )
+        review = self.client.get(_messages_rendering_occurrence_review_url())
+        self.assertEqual(review.status_code, 200)
+        self.assertNotContains(
+            review, _CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_ALREADY_RUNNING
+        )
+        self.assertContains(resp, "alert-warn")
+
+    def test_activation_protection_copy_is_not_the_running_banner(self):
+        running = _CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_ALREADY_RUNNING
+        self.assertNotEqual(running, _CORRECTED_CURRENT_ACTIVATION_MSG_HUMAN_EDITED)
+        self.assertNotEqual(running, _CORRECTED_CURRENT_ACTIVATION_MSG_VERIFIED)
+        self.assertNotIn("כבר מתבצע", _CORRECTED_CURRENT_ACTIVATION_MSG_HUMAN_EDITED)
+        self.assertNotIn("כבר מתבצע", _CORRECTED_CURRENT_ACTIVATION_MSG_VERIFIED)
 
     def test_blocked_recovery_required_message(self):
         self._assert_outcome_message(

@@ -3012,7 +3012,7 @@ def _corrected_current_sync_enqueue_message_level_and_text(
     if outcome == "ALREADY_QUEUED":
         return "success", _CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_ALREADY_QUEUED
     if outcome == "ALREADY_RUNNING":
-        return "success", _CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_ALREADY_RUNNING
+        return "warning", _CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_ALREADY_RUNNING
     if outcome == "BLOCKED_RECOVERY_REQUIRED":
         return "error", _CORRECTED_CURRENT_SYNC_ENQUEUE_MSG_BLOCKED_RECOVERY
     if outcome == "ENQUEUE_FAILED":
