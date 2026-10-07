@@ -1,5 +1,17 @@
 # VS-Archive Decision Log
 
+## Canonical NFC slice recovery for non-person occurrences (2026-10-07)
+
+**Decision:** `locate_surface_occurrences` may map a canonical NFC change back to the original slice when that slice is proved. Match discovery is unchanged: `normalize_surface_v1`, then non-overlapping `str.find`. Ordinals stay in that find order. `surface-v1` is unchanged.
+
+**Mapping:** Already-NFC text still uses one original index per code point. Other text is canonically decomposed, stably reordered by combining class, and composed with the same pair results as `unicodedata.normalize("NFC")`. Compatibility decompositions are not applied. Each output code point keeps the bounding original span of the code points that produced it. The recovered `matched_text` is `source[min start:max end]` for that match. It is kept only when `normalize_surface_v1` of that exact substring equals the normalized surface. A cover that fails the check, including a non-contiguous composition whose bounding slice contains another mark, returns `count > 0` with `occurrences is None`.
+
+**Unchanged:** normalization output, occurrence identity, proposal identity, source SHA, token-boundary filtering, and review actions. The detector still emits no hit when `occurrences is None` and still does not store an empty `matched_text`. Review does not require the stored proposal `matched_text` to be non-blank. It relocates the ordinal in the current text. A blank historical `matched_text` can therefore be approved without rewriting the proposal. Repair of those stored strings is optional display/audit cleanup, not a review prerequisite. Grouped review still flags a blank stored value as `MATCHED_TEXT_UNAVAILABLE`.
+
+**Supersedes:** the statements that the shared locator is unchanged and that NFC reordering cannot be mapped, in "Detector requires a recoverable original slice (2026-10-07)". The detector's refusal to invent a slice remains.
+
+**Tests:** `documents/test_non_person_entity_nfc_span_recovery.py`.
+
 ## Non-person detector token boundary (2026-10-07)
 
 **Decision:** The batch detector accepts a registry surface only when that surface is a whole token in `normalize_surface_v1` text. `locate_surface_occurrences` stays a non-overlapping substring locator.
@@ -8381,3 +8393,15 @@ Risk flags, in stable order: `OCR_VARIANT` (an alias-kind snapshot is `OCR_VARIA
 **Supersedes:** the detector fallback that stored the locator ordinal with `matched_text=""` when original slices could not be recovered.
 
 **Deferred:** mapping NFC reordering back to original offsets, and any repair of proposals already stored with a blank `matched_text`.
+
+## NFC span recovery for non-person occurrences (2026-10-07)
+
+**Decision:** Canonical NFC reordering and composition may be mapped back to the original source slice. `normalize_surface_v1` is unchanged (`surface-v1`). Match discovery stays non-overlapping `str.find` on that normalized text, so occurrence ordinals do not move. The mapper only recovers slices.
+
+**Current behavior:** Already-NFC text still uses one original index per code point. Other text is canonically decomposed, stably reordered by combining class, and composed with the same pair results as `unicodedata.normalize("NFC")`. Compatibility decompositions are not applied. Each NFC code point keeps the bounding original span of the code points that produced it. A match's slice is the minimum start and maximum end of those spans. It is kept only when `normalize_surface_v1` of that exact substring equals the normalized surface. A cover that fails that check, including a non-contiguous composition whose bounding slice contains another mark, returns `count > 0` with `occurrences is None`. The detector still emits no hit in that case and does not store an empty `matched_text`.
+
+**Review:** `_assess_proposal_source` relocates by source SHA, `surface-v1`, normalized surface, and occurrence ordinal. It does not require the stored proposal `matched_text` to be non-blank. Approve writes the relocated slice onto the new `ArchiveItemEntityOccurrence`. A historical proposal with `matched_text=""` becomes reviewable without editing that row when the locator can now recover the ordinal. Repair of the stored proposal text is optional display/audit cleanup. Grouped review still flags a blank stored `matched_text` as `MATCHED_TEXT_UNAVAILABLE`.
+
+**Supersedes:** the statements in "Detector requires a recoverable original slice" that the shared locator is unchanged and that NFC-offset mapping stays deferred, and the Phase 3A sentence that source text which is not already NFC does not get a derived slice. Workbook dry-run and apply call the same locator. A SPLIT route whose only obstacle was canonical NFC elsewhere in the source is no longer `BLOCKED` when the reviewed slice round-trips. The detector rule for `occurrences is None` is unchanged. A cover that still cannot be proved still blocks that route.
+
+**Deferred:** any migration or rewrite of proposals already stored with a blank `matched_text`.

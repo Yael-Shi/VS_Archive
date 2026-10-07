@@ -1,8 +1,9 @@
-"""Detector fail-closed when original slices cannot be recovered.
+"""Detector fail-closed when an original slice cannot be proved.
 
-A Hebrew point sequence that NFC reorders makes span recovery fail for the
-whole source. The locator still reports a count with ``occurrences is None``.
-The detector emits no hits for that surface.
+Canonical NFC reordering elsewhere in the source no longer blocks recovery.
+A match whose contiguous cover does not normalize back to the surface still
+returns a count with ``occurrences is None``. The detector emits no hits for
+that surface and does not store an empty ``matched_text``.
 """
 
 from __future__ import annotations
@@ -38,6 +39,10 @@ PLAIN = "מוסקי. מוסקי. מוסקי. הליופוליס. רחוב פוא
 NON_NFC = f"{PLAIN} {NIQQUD}."
 PREFIXED = "במוסקי מוסקי. בֵּית."
 RECOVERABLE_PREFIX = "במוסקי מוסקי."
+# Acute (class 230) sits between e and dot-below (class 220). NFC reorders
+# the dot next to e and composes them, leaving the acute inside that cover.
+UNSAFE = "e\u0301\u0323"
+COMPOSED_DOT = "\u1eb9"
 
 
 def _entity(name: str) -> NonPersonEntity:
@@ -95,17 +100,16 @@ class EmptyMatchedTextReviewTests(TestCase):
         self.assertTrue(detail.has_current_context)
         self.assertEqual(detail.context_match, "מוסקי")
 
-    def test_unrecoverable_slices_create_no_detector_rows(self):
-        self.assertNotEqual(NON_NFC, unicodedata.normalize("NFC", NON_NFC))
-        self.assertIsNone(_normalize_with_spans(NON_NFC))
-        for surface in ("מוסקי", "הליופוליס", "רחוב פואד הראשון"):
-            located = locate_surface_occurrences(NON_NFC, surface)
-            self.assertGreater(located.count, 0)
-            self.assertIsNone(located.occurrences)
-            self.assertEqual(_bounded_surface_slices(NON_NFC, surface), ())
+    def test_unmappable_slice_creates_no_detector_rows(self):
+        self.assertNotEqual(UNSAFE, unicodedata.normalize("NFC", UNSAFE))
+        self.assertIsNotNone(_normalize_with_spans(UNSAFE))
+        located = locate_surface_occurrences(UNSAFE, COMPOSED_DOT)
+        self.assertGreater(located.count, 0)
+        self.assertIsNone(located.occurrences)
+        self.assertEqual(_bounded_surface_slices(UNSAFE, COMPOSED_DOT), ())
 
-        _names()
-        item = _manual(NON_NFC)
+        _entity(COMPOSED_DOT)
+        item = _manual(UNSAFE)
         dry_run = detect_non_person_entities_for_item(item)
         applied = detect_non_person_entities_for_item(item, apply=True)
 
@@ -132,10 +136,16 @@ class EmptyMatchedTextReviewTests(TestCase):
 
         located = locate_surface_occurrences(PREFIXED, "מוסקי")
         self.assertEqual(located.count, 2)
-        self.assertIsNone(located.occurrences)
-        self.assertEqual(_bounded_surface_slices(PREFIXED, "מוסקי"), ())
-        unrecoverable = _manual(PREFIXED)
-        report = detect_non_person_entities_for_item(unrecoverable, apply=True)
-        self.assertEqual(report.detected_textual_occurrences, 0)
-        self.assertEqual(report.new_proposals, 0)
-        self.assertEqual(NonPersonEntityOccurrenceProposal.objects.count(), 1)
+        assert located.occurrences is not None
+        self.assertEqual(
+            [(item.ordinal, item.matched_text) for item in located.occurrences],
+            [(1, "מוסקי"), (2, "מוסקי")],
+        )
+        self.assertEqual(_bounded_surface_slices(PREFIXED, "מוסקי"), ((2, "מוסקי"),))
+        prefixed = _manual(PREFIXED)
+        report = detect_non_person_entities_for_item(prefixed, apply=True)
+        self.assertEqual(report.detected_textual_occurrences, 1)
+        self.assertEqual(report.new_proposals, 1)
+        rows = list(NonPersonEntityOccurrenceProposal.objects.order_by("id"))
+        self.assertEqual([row.occurrence_ordinal for row in rows], [2, 2])
+        self.assertEqual([row.matched_text for row in rows], ["מוסקי", "מוסקי"])

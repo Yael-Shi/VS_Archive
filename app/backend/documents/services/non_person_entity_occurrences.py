@@ -15,6 +15,7 @@ import re
 import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 from types import MappingProxyType
 
 from django.core.exceptions import ObjectDoesNotExist
@@ -114,9 +115,13 @@ def source_text_sha256(text: str) -> str:
 def locate_surface_occurrences(source_text: str, surface: str) -> SurfaceLocation:
     """Find non-overlapping left-to-right surface-v1 matches.
 
-    The count uses ``normalize_surface_v1``. Original slices and character
-    offsets are returned only when each slice normalizes back to the same
-    surface. Repeated matches stay distinct ordinals. They are not collapsed.
+    The count uses ``normalize_surface_v1`` and non-overlapping ``str.find``.
+    Original slices are recovered from the span map. Canonical NFC reordering
+    and composition may move or merge code points; the recovered slice is the
+    bounding original cover of that match. Offsets are returned only when the
+    slice normalizes back to the same surface. A cover that cannot be proved
+    returns the count with ``occurrences is None``. Repeated matches stay
+    distinct ordinals. They are not collapsed.
     """
 
     normalized_surface = normalize_surface_v1(surface)
@@ -131,8 +136,15 @@ def locate_surface_occurrences(source_text: str, surface: str) -> SurfaceLocatio
     found: list[SurfaceOccurrence] = []
     for ordinal, start in enumerate(starts, start=1):
         end = start + len(normalized_surface)
-        original_start = spans[start][0]
-        original_end = spans[end - 1][1]
+        if end > len(spans):
+            return SurfaceLocation(count=len(starts), occurrences=None)
+        original_start, original_end = _cover_original_span(spans, start, end)
+        if (
+            original_start < 0
+            or original_end > len(source_text)
+            or original_start >= original_end
+        ):
+            return SurfaceLocation(count=len(starts), occurrences=None)
         matched = source_text[original_start:original_end]
         if normalize_surface_v1(matched) != normalized_surface:
             return SurfaceLocation(count=len(starts), occurrences=None)
@@ -308,21 +320,163 @@ def _normalize_with_spans(
     return _collapse_whitespace(*stripped)
 
 
+def _cover_original_span(
+    spans: list[tuple[int, int]],
+    start: int,
+    end: int,
+) -> tuple[int, int]:
+    """Bounding original slice of ``spans[start:end]``.
+
+    Already-NFC spans are monotonic, so this is the first span's start and
+    the last span's end. Canonical reordering can place a later source index
+    earlier in NFC order, so the cover is the minimum start and maximum end.
+    """
+
+    original_start, original_end = spans[start]
+    for span_start, span_end in spans[start + 1 : end]:
+        if span_start < original_start:
+            original_start = span_start
+        if span_end > original_end:
+            original_end = span_end
+    return original_start, original_end
+
+
 def _nfc_with_spans(
     text: str,
 ) -> tuple[str, list[tuple[int, int]]] | None:
-    """Map NFC characters only when the source is already NFC.
+    """Map each NFC code point to the original span that produced it.
 
-    One NFC pass decides the fast path. Already-NFC text uses one original
-    span per character. Text that still changes under NFC returns no map, so
-    later code cannot invent offsets. Occurrence counting stays on
-    ``normalize_surface_v1``.
+    Already-NFC text uses one original index per code point. Other text is
+    canonically decomposed, stably reordered by combining class, and
+    composed. Pair composition uses ``unicodedata.normalize``, so exclusions
+    and Hangul follow Unicode NFC. Each output code point keeps the bounding
+    original span of the code points that produced it.
+
+    The reconstructed string must equal ``unicodedata.normalize("NFC", text)``.
+    Anything else returns no map. This pass is linear in the source length
+    aside from sorting each combining run, which is ``O(k log k)`` in that
+    run's length. It does not search the original string for matches.
     """
 
     normalized = unicodedata.normalize("NFC", text)
-    if normalized != text:
+    if normalized == text:
+        return normalized, [(index, index + 1) for index in range(len(text))]
+    characters: list[str] = []
+    spans: list[tuple[int, int]] = []
+    for index, character in enumerate(text):
+        parts = _canonical_decomposition(character)
+        characters.extend(parts)
+        spans.extend([(index, index + 1)] * len(parts))
+    _reorder_combining_marks(characters, spans)
+    output, output_spans = _compose_decomposed(characters, spans)
+    if output != normalized or len(output_spans) != len(output):
         return None
-    return normalized, [(index, index + 1) for index in range(len(text))]
+    if any(start < 0 or end > len(text) or start >= end for start, end in output_spans):
+        return None
+    return output, output_spans
+
+
+def _hangul_syllable_decomposition(character: str) -> list[str] | None:
+    """Algorithmic canonical decomposition of one Hangul syllable."""
+
+    syllable_index = ord(character) - 0xAC00
+    if syllable_index < 0 or syllable_index >= 11172:
+        return None
+    lead_index, remainder = divmod(syllable_index, 588)
+    vowel_index, trail_index = divmod(remainder, 28)
+    lead = chr(0x1100 + lead_index)
+    vowel = chr(0x1161 + vowel_index)
+    if trail_index == 0:
+        return [lead, vowel]
+    return [lead, vowel, chr(0x11A7 + trail_index)]
+
+
+def _canonical_decomposition(character: str) -> list[str]:
+    """Full canonical decomposition of one code point.
+
+    A compatibility mapping (``<compat>`` and the other tagged mappings) is
+    not applied. Hangul syllables use the algorithmic decomposition.
+    """
+
+    hangul = _hangul_syllable_decomposition(character)
+    if hangul is not None:
+        return hangul
+    mapping = unicodedata.decomposition(character)
+    if mapping == "" or mapping.startswith("<"):
+        return [character]
+    parts: list[str] = []
+    for piece in mapping.split():
+        parts.extend(_canonical_decomposition(chr(int(piece, 16))))
+    return parts
+
+
+@lru_cache(maxsize=4096)
+def _compose_pair(left: str, right: str) -> str | None:
+    """One canonical composition, or None when the pair stays two code points."""
+
+    composed = unicodedata.normalize("NFC", left + right)
+    if len(composed) == 1:
+        return composed
+    return None
+
+
+def _reorder_combining_marks(
+    characters: list[str],
+    spans: list[tuple[int, int]],
+) -> None:
+    """Stable canonical combining-class sort inside each mark run."""
+
+    index = 0
+    size = len(characters)
+    while index < size:
+        if unicodedata.combining(characters[index]) == 0:
+            index += 1
+            continue
+        end = index + 1
+        while end < size and unicodedata.combining(characters[end]) > 0:
+            end += 1
+        order = sorted(
+            range(index, end),
+            key=lambda mark_index: unicodedata.combining(characters[mark_index]),
+        )
+        if order != list(range(index, end)):
+            characters[index:end] = [characters[mark] for mark in order]
+            spans[index:end] = [spans[mark] for mark in order]
+        index = end
+
+
+def _compose_decomposed(
+    characters: list[str],
+    spans: list[tuple[int, int]],
+) -> tuple[str, list[tuple[int, int]]]:
+    """Compose one NFD sequence and union the spans of each composed pair."""
+
+    if not characters:
+        return "", []
+    output = [characters[0]]
+    output_spans = [spans[0]]
+    starter = 0 if unicodedata.combining(characters[0]) == 0 else None
+    last_ccc = unicodedata.combining(characters[0])
+    for character, span in zip(characters[1:], spans[1:], strict=True):
+        combining_class = unicodedata.combining(character)
+        if starter is not None and (last_ccc == 0 or last_ccc < combining_class):
+            composed = _compose_pair(output[starter], character)
+            if composed is not None:
+                output[starter] = composed
+                previous = output_spans[starter]
+                output_spans[starter] = (
+                    min(previous[0], span[0]),
+                    max(previous[1], span[1]),
+                )
+                continue
+        output.append(character)
+        output_spans.append(span)
+        if combining_class == 0:
+            starter = len(output) - 1
+            last_ccc = 0
+        else:
+            last_ccc = combining_class
+    return "".join(output), output_spans
 
 
 def _drop_bidi(
