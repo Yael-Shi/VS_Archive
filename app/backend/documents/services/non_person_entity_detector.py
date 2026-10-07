@@ -17,6 +17,7 @@ name adds another match row.
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
@@ -177,8 +178,9 @@ def detect_non_person_entities_for_items(
     """Detect against an explicit item iterable. Does not scan the corpus.
 
     Registry rows are loaded once. Each supported text body is scanned in
-    memory with ``locate_surface_occurrences``. Dry-run classifies the same
-    identities apply would write and inserts nothing.
+    memory with ``locate_surface_occurrences``, then kept only when the
+    normalized span is a whole token. Dry-run classifies the same identities
+    apply would write and inserts nothing.
     """
 
     item_list = list(items)
@@ -327,16 +329,7 @@ def _detect_item(
         counts.text_sources_scanned += 1
         digest = source_text_sha256(text)
         for surface, reasons_by_entity in surfaces.items():
-            located = locate_surface_occurrences(text, surface)
-            if located.count == 0:
-                continue
-            if located.occurrences is None:
-                slices = tuple((ordinal, "") for ordinal in range(1, located.count + 1))
-            else:
-                slices = tuple(
-                    (found.ordinal, found.matched_text) for found in located.occurrences
-                )
-            for ordinal, matched_text in slices:
+            for ordinal, matched_text in _bounded_surface_slices(text, surface):
                 _record_occurrence(
                     item=item,
                     text_kind=text_kind,
@@ -349,6 +342,76 @@ def _detect_item(
                     counts=counts,
                     apply=apply,
                 )
+
+
+def _bounded_surface_slices(text: str, surface: str) -> tuple[tuple[int, str], ...]:
+    """Accepted detector hits, still addressed by the shared locator ordinal.
+
+    ``locate_surface_occurrences`` stays a non-overlapping substring locator.
+    Review and source revalidation look a proposal up by that same ordinal, so
+    this filter does not renumber accepted hits. A rejected substring can leave
+    a gap. For example, ``לבון ואז בון`` keeps locator ordinal 2 for the
+    standalone ``בון``.
+
+    A hit is kept only when the character immediately before and after its
+    span in ``normalize_surface_v1`` text is outside a token. A token
+    character is a Unicode letter, number, or combining mark. Punctuation and
+    whitespace are boundaries. Hebrew prefixes are letters, so they are not
+    stripped. When original slices cannot be recovered, an accepted hit keeps
+    the locator ordinal (``index + 1``) and an empty ``matched_text``. A count
+    that does not match the normalized finds is dropped.
+    """
+
+    located = locate_surface_occurrences(text, surface)
+    if located.count == 0:
+        return ()
+    normalized_surface = normalize_surface_v1(surface)
+    if normalized_surface == "":
+        return ()
+    normalized_source = normalize_surface_v1(text)
+    starts = _normalized_find_starts(normalized_source, normalized_surface)
+    if len(starts) != located.count:
+        return ()
+    accepted = [
+        index
+        for index, start in enumerate(starts)
+        if _span_is_token_bounded(
+            normalized_source,
+            start,
+            start + len(normalized_surface),
+        )
+    ]
+    if located.occurrences is None:
+        return tuple((index + 1, "") for index in accepted)
+    if len(located.occurrences) != located.count:
+        return ()
+    return tuple(
+        (located.occurrences[index].ordinal, located.occurrences[index].matched_text)
+        for index in accepted
+    )
+
+
+def _normalized_find_starts(text: str, surface: str) -> list[int]:
+    starts: list[int] = []
+    cursor = 0
+    while True:
+        found = text.find(surface, cursor)
+        if found < 0:
+            return starts
+        starts.append(found)
+        cursor = found + len(surface)
+
+
+def _span_is_token_bounded(text: str, start: int, end: int) -> bool:
+    if start > 0 and _is_token_continuation(text[start - 1]):
+        return False
+    if end < len(text) and _is_token_continuation(text[end]):
+        return False
+    return True
+
+
+def _is_token_continuation(character: str) -> bool:
+    return unicodedata.category(character)[:1] in {"L", "N", "M"}
 
 
 def _record_occurrence(

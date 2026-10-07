@@ -1,5 +1,19 @@
 # VS-Archive Decision Log
 
+## Non-person detector token boundary (2026-10-07)
+
+**Decision:** The batch detector accepts a registry surface only when that surface is a whole token in `normalize_surface_v1` text. `locate_surface_occurrences` stays a non-overlapping substring locator.
+
+**Why this layer:** `SurfaceOccurrence` already carries original `start`/`end` when a slice can be recovered, but review, source revalidation, public chip order, and stored Phase 3B pins look hits up by the substring ordinal from `locate_surface_occurrences`. Changing that helper would renumber or drop those pins. The detector therefore filters after the locator.
+
+**Ordinals:** Detector boundary filtering preserves the original ordinal returned by the shared substring locator. Rejected substring hits can therefore leave gaps in detector proposal ordinals. This is intentional because review/source revalidation addresses occurrences in the same locator ordinal coordinate system.
+
+**Boundary:** The characters immediately before and after the normalized span must not be Unicode letters (`L*`), numbers (`N*`), or combining marks (`M*`). Punctuation and whitespace are boundaries. Hebrew prefixes are letters and are not stripped. There is no fuzzy match, stemming, prefix match, or morphological expansion, and no special case for one surface.
+
+**Supersedes:** the batch-detector statement that matching is `locate_surface_occurrences` alone. Apply, suppression, and the rest of that entry are unchanged.
+
+**Tests:** `documents/test_non_person_entity_detector.py` (`DetectorTokenBoundaryTests`).
+
 ## Public Person identity eligibility
 
 **Decision / implemented:** Public Person identity eligibility is separate from public holdings membership. A Person is publicly eligible when they have unified public holdings membership, or when `Person.biography` contains at least one non-whitespace character.
@@ -8330,7 +8344,7 @@ Anything else is not currently valid. Stale is computed at read time. It is not 
 
 **Decision:** Detection stays a manual batch. `detect_non_person_entities` scans only the archive items named with repeated `--item`. Default mode is dry-run and writes nothing. `--apply` is required before any insert. There is no `--all`, no save signal, and no scheduler.
 
-**Current behavior:** `documents/services/non_person_entity_detector.py` loads `NonPersonEntity` and aliases once, normalizes each canonical name, nonblank display name, and alias with `normalize_surface_v1`, and drops a blank result. Matching is `locate_surface_occurrences` on the current authoritative body. `OCR_VARIANT` aliases are included. There is no fuzzy match, stemming, or token inference. The same normalized surface on several entities stays ambiguous: one proposal, one `PENDING` candidate per entity, no chosen winner, and no approval.
+**Current behavior:** `documents/services/non_person_entity_detector.py` loads `NonPersonEntity` and aliases once, normalizes each canonical name, nonblank display name, and alias with `normalize_surface_v1`, and drops a blank result. Matching starts from `locate_surface_occurrences` on the current authoritative body. The 2026-10-07 token-boundary entry adds the whole-token filter on top of that locator; this paragraph's original matching sentence is superseded there. `OCR_VARIANT` aliases are included. There is no fuzzy match, stemming, or token inference. The same normalized surface on several entities stays ambiguous: one proposal, one `PENDING` candidate per entity, no chosen winner, and no approval.
 
 Text is body only: `MANUAL_TEXT` or `OCR_TRANSCRIPTION`, and only when `item_supports_occurrence_text_kind` and `authoritative_displayed_text` return text. Title, metadata, author, and people fields are not scanned. A missing or unsupported source is a skip. `occurrence_ordinal` is the ordinal of that one normalized surface. `source_text_sha256` is the SHA of that exact displayed text. `normalization_version` is `surface-v1`.
 
