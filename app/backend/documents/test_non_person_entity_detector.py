@@ -35,7 +35,9 @@ from documents.services.non_person_entity_detector import (
 )
 from documents.services.non_person_entity_occurrence_review import approve_candidate
 from documents.services.non_person_entity_occurrences import (
+    locate_surface_occurrences,
     normalize_surface_v1,
+    occurrence_is_currently_valid,
     source_text_sha256,
 )
 from documents.services.non_person_entity_presentation import (
@@ -123,7 +125,7 @@ def _alias(entity: NonPersonEntity, name: str, kind: str) -> NonPersonEntityAlia
 
 class DetectorMatchingTests(TestCase):
     def test_canonical_name_match_creates_one_proposal_and_candidate(self):
-        item = _manual("ביקור בקהיר אחר הצהריים")
+        item = _manual("ביקור קהיר אחר הצהריים")
         entity = _entity("קהיר")
 
         report = detect_non_person_entities_for_item(item, apply=True)
@@ -191,7 +193,7 @@ class DetectorMatchingTests(TestCase):
         self.assertEqual(match.matched_value, "קהיר")
 
     def test_blank_display_and_alias_are_ignored(self):
-        item = _manual("ביקור בקהיר")
+        item = _manual("ביקור קהיר")
         entity = _entity("קהיר", display_name="   ")
         _alias(entity, "\u200f", NonPersonEntityAlias.Kind.SPELLING_VARIANT)
 
@@ -221,7 +223,7 @@ class DetectorMatchingTests(TestCase):
         self.assertEqual(proposal.matched_text, "PARIS")
 
     def test_same_entity_canonical_and_alias_are_one_candidate(self):
-        item = _manual("ביקור בקהיר")
+        item = _manual("ביקור קהיר")
         entity = _entity("קהיר")
         _alias(entity, "קהיר\u200f", NonPersonEntityAlias.Kind.SPELLING_VARIANT)
 
@@ -271,6 +273,179 @@ class DetectorMatchingTests(TestCase):
         )
 
 
+class DetectorTokenBoundaryTests(TestCase):
+    def test_bonn_surface_does_not_match_inside_lavon(self):
+        body = (
+            "תוקפניות מצד צהל (ולבון) ודיין\n"
+            "עד ל1/11/54 (3.5 חודשים) לבון\n"
+            "לבון אמר חיקה לסוף המשפט"
+        )
+        item = _manual(body)
+        _entity("בון")
+
+        report = detect_non_person_entities_for_item(item, apply=True)
+
+        self.assertEqual(locate_surface_occurrences(body, "בון").count, 3)
+        self.assertEqual(report.detected_textual_occurrences, 0)
+        self.assertEqual(NonPersonEntityOccurrenceProposal.objects.count(), 0)
+
+    def test_hebrew_surface_inside_a_larger_word_does_not_match(self):
+        item = _manual("ולבון לבון בבון")
+        _entity("בון")
+
+        report = detect_non_person_entities_for_item(item, apply=True)
+
+        self.assertEqual(report.detected_textual_occurrences, 0)
+
+    def test_lavon_sentence_is_not_standalone_bonn(self):
+        item = _manual("נסע לבון.")
+        _entity("בון")
+
+        report = detect_non_person_entities_for_item(item, apply=True)
+
+        self.assertEqual(report.detected_textual_occurrences, 0)
+
+    def test_standalone_hebrew_surface_matches_once(self):
+        item = _manual("הגיע אל בון.")
+        _entity("בון")
+
+        detect_non_person_entities_for_item(item, apply=True)
+
+        proposal = NonPersonEntityOccurrenceProposal.objects.get()
+        self.assertEqual(proposal.normalized_surface, "בון")
+        self.assertEqual(proposal.occurrence_ordinal, 1)
+        self.assertEqual(proposal.matched_text, "בון")
+
+    def test_punctuation_around_hebrew_surface_still_matches(self):
+        item = _manual("(בון), בון.")
+        _entity("בון")
+
+        detect_non_person_entities_for_item(item, apply=True)
+
+        proposals = list(
+            NonPersonEntityOccurrenceProposal.objects.order_by("occurrence_ordinal")
+        )
+        self.assertEqual([row.occurrence_ordinal for row in proposals], [1, 2])
+        self.assertEqual([row.matched_text for row in proposals], ["בון", "בון"])
+
+    def test_bare_hebrew_surface_and_trailing_comma_match(self):
+        item = _manual("בון, בון")
+        _entity("בון")
+
+        detect_non_person_entities_for_item(item, apply=True)
+
+        self.assertEqual(NonPersonEntityOccurrenceProposal.objects.count(), 2)
+
+    def test_multiword_surface_still_matches(self):
+        item = _manual("הכתובת היא רחוב פואד הראשון.")
+        _entity("רחוב פואד הראשון")
+
+        detect_non_person_entities_for_item(item, apply=True)
+
+        proposal = NonPersonEntityOccurrenceProposal.objects.get()
+        self.assertEqual(proposal.normalized_surface, "רחוב פואד הראשון")
+        self.assertEqual(proposal.matched_text, "רחוב פואד הראשון")
+        self.assertEqual(proposal.occurrence_ordinal, 1)
+
+    def test_hebrew_canonical_surface_still_matches_standalone(self):
+        item = _manual("מדינת ישראל.")
+        _entity("ישראל")
+
+        detect_non_person_entities_for_item(item, apply=True)
+
+        proposal = NonPersonEntityOccurrenceProposal.objects.get()
+        self.assertEqual(proposal.normalized_surface, "ישראל")
+        self.assertEqual(proposal.matched_text, "ישראל")
+
+    def test_latin_alias_matches_standalone_not_inside_a_larger_token(self):
+        item = _manual("Visit Israel. Not Israelite or xIsrael.")
+        entity = _entity("מדינת ישראל")
+        _alias(entity, "Israel", NonPersonEntityAlias.Kind.LANGUAGE_VARIANT)
+
+        detect_non_person_entities_for_item(item, apply=True)
+
+        proposals = list(
+            NonPersonEntityOccurrenceProposal.objects.order_by("occurrence_ordinal")
+        )
+        self.assertEqual(len(proposals), 1)
+        self.assertEqual(proposals[0].normalized_surface, "israel")
+        self.assertEqual(proposals[0].occurrence_ordinal, 1)
+        self.assertEqual(proposals[0].matched_text, "Israel")
+
+    def test_repeated_standalone_matches_keep_ordinals(self):
+        item = _manual("בון; בון; בון.")
+        _entity("בון")
+
+        detect_non_person_entities_for_item(item, apply=True)
+
+        proposals = list(
+            NonPersonEntityOccurrenceProposal.objects.order_by("occurrence_ordinal")
+        )
+        self.assertEqual([row.occurrence_ordinal for row in proposals], [1, 2, 3])
+        self.assertEqual([row.matched_text for row in proposals], ["בון", "בון", "בון"])
+
+    def test_mixed_hit_keeps_the_locator_ordinal_of_the_standalone_match(self):
+        body = "לבון ואז בון"
+        item = _manual(body)
+        _entity("בון")
+
+        detect_non_person_entities_for_item(item, apply=True)
+
+        located = locate_surface_occurrences(body, "בון")
+        self.assertEqual([found.ordinal for found in located.occurrences], [1, 2])
+        self.assertEqual(body[located.occurrences[0].start - 1], "ל")
+        proposal = NonPersonEntityOccurrenceProposal.objects.get()
+        self.assertEqual(proposal.occurrence_ordinal, 2)
+        self.assertEqual(proposal.matched_text, "בון")
+        self.assertEqual(proposal.matched_text, located.occurrences[1].matched_text)
+
+    def test_mixed_hits_keep_gaps_in_locator_ordinals(self):
+        body = "בון ואז לבון ואז בון"
+        item = _manual(body)
+        _entity("בון")
+
+        detect_non_person_entities_for_item(item, apply=True)
+
+        proposals = list(
+            NonPersonEntityOccurrenceProposal.objects.order_by("occurrence_ordinal")
+        )
+        self.assertEqual([row.occurrence_ordinal for row in proposals], [1, 3])
+        self.assertEqual([row.matched_text for row in proposals], ["בון", "בון"])
+
+    def test_approve_mixed_hit_revalidates_the_standalone_locator_ordinal(self):
+        body = "לבון ואז בון"
+        item = _manual(body)
+        entity = _entity("בון")
+        actor = User.objects.create_user(
+            username="boundary-reviewer", password="test-pass"
+        )
+        detect_non_person_entities_for_item(item, apply=True)
+        candidate = NonPersonEntityOccurrenceCandidate.objects.get()
+        self.assertEqual(candidate.proposal.occurrence_ordinal, 2)
+
+        result = approve_candidate(candidate.pk, actor=actor)
+
+        self.assertTrue(result.applied)
+        occurrence = ArchiveItemEntityOccurrence.objects.get()
+        self.assertEqual(occurrence.entity_id, entity.pk)
+        self.assertEqual(occurrence.occurrence_ordinal, 2)
+        self.assertEqual(occurrence.matched_text, "בון")
+        self.assertTrue(occurrence_is_currently_valid(occurrence))
+        located = locate_surface_occurrences(body, "בון")
+        standalone = located.occurrences[1]
+        self.assertEqual(standalone.ordinal, 2)
+        self.assertEqual(occurrence.matched_text, standalone.matched_text)
+        self.assertEqual(body[standalone.start - 1], " ")
+
+    def test_number_or_combining_mark_continues_the_token(self):
+        item = _manual("בון1 1בון בון\u0301")
+        _entity("בון")
+
+        report = detect_non_person_entities_for_item(item, apply=True)
+
+        self.assertEqual(report.detected_textual_occurrences, 0)
+
+
 class DetectorOccurrenceIdentityTests(TestCase):
     def test_repeated_surface_uses_separate_ordinals(self):
         body = "קהיר ואז קהיר"
@@ -290,7 +465,7 @@ class DetectorOccurrenceIdentityTests(TestCase):
         self.assertEqual(len({row.pk for row in proposals}), 2)
 
     def test_exact_current_sha_is_stored(self):
-        body = "ביקור בקהיר"
+        body = "ביקור קהיר"
         item = _manual(body)
         _entity("קהיר")
 
@@ -300,14 +475,14 @@ class DetectorOccurrenceIdentityTests(TestCase):
         self.assertEqual(proposal.source_text_sha256, source_text_sha256(body))
 
     def test_changed_source_creates_a_new_identity_and_keeps_the_old(self):
-        body = "ביקור בקהיר"
+        body = "ביקור קהיר"
         item = _manual(body)
         _entity("קהיר")
         detect_non_person_entities_for_item(item, apply=True)
         original = NonPersonEntityOccurrenceProposal.objects.get()
         original_sha = original.source_text_sha256
         content = item.manual_text_content
-        content.body = "ביקור בקהיר סוף"
+        content.body = "ביקור קהיר סוף"
         content.save(update_fields=["body"])
 
         detect_non_person_entities_for_item(item, apply=True)
@@ -320,12 +495,12 @@ class DetectorOccurrenceIdentityTests(TestCase):
         ).get()
         self.assertEqual(
             current.source_text_sha256,
-            source_text_sha256("ביקור בקהיר סוף"),
+            source_text_sha256("ביקור קהיר סוף"),
         )
         self.assertNotEqual(current.source_text_sha256, original_sha)
 
     def test_manual_and_ocr_are_separate_identities(self):
-        body = "ביקור בקהיר"
+        body = "ביקור קהיר"
         manual = _manual(body)
         ocr = _ocr(language="he", source_text="other", hebrew_text=body)
         _entity("קהיר")
@@ -349,7 +524,7 @@ class DetectorOccurrenceIdentityTests(TestCase):
 
 class DetectorDryRunTests(TestCase):
     def test_default_service_dry_run_writes_nothing_and_reports_creates(self):
-        item = _manual("ביקור בקהיר")
+        item = _manual("ביקור קהיר")
         _entity("קהיר")
 
         report = detect_non_person_entities_for_item(item)
@@ -369,12 +544,12 @@ class DetectorDryRunTests(TestCase):
         self.assertEqual(NonPersonEntityOccurrenceReviewEvent.objects.count(), 0)
 
     def test_dry_run_does_not_fill_blank_matched_text(self):
-        item = _manual("ביקור בקהיר")
+        item = _manual("ביקור קהיר")
         entity = _entity("קהיר")
         proposal = NonPersonEntityOccurrenceProposal.objects.create(
             archive_item=item,
             text_kind=MANUAL,
-            source_text_sha256=source_text_sha256("ביקור בקהיר"),
+            source_text_sha256=source_text_sha256("ביקור קהיר"),
             normalization_version="surface-v1",
             normalized_surface="קהיר",
             occurrence_ordinal=1,
@@ -394,7 +569,7 @@ class DetectorDryRunTests(TestCase):
 
 class DetectorCommandTests(TestCase):
     def test_command_without_apply_writes_nothing(self):
-        item = _manual("ביקור בקהיר")
+        item = _manual("ביקור קהיר")
         _entity("קהיר")
         out = StringIO()
 
@@ -412,7 +587,7 @@ class DetectorCommandTests(TestCase):
         self.assertEqual(NonPersonEntityOccurrenceProposal.objects.count(), 0)
 
     def test_command_apply_writes_expected_rows(self):
-        item = _manual("ביקור בקהיר")
+        item = _manual("ביקור קהיר")
         _entity("קהיר")
         out = StringIO()
 
@@ -433,7 +608,7 @@ class DetectorCommandTests(TestCase):
         )
 
     def test_repeated_item_arguments(self):
-        first = _manual("ביקור בקהיר")
+        first = _manual("ביקור קהיר")
         second = _manual("גם בגדאד")
         _entity("קהיר")
         _entity("בגדאד")
@@ -453,7 +628,7 @@ class DetectorCommandTests(TestCase):
         self.assertEqual(NonPersonEntityOccurrenceProposal.objects.count(), 2)
 
     def test_duplicate_item_argument_is_scanned_once(self):
-        item = _manual("ביקור בקהיר")
+        item = _manual("ביקור קהיר")
         _entity("קהיר")
 
         call_command(
@@ -469,7 +644,7 @@ class DetectorCommandTests(TestCase):
         self.assertEqual(NonPersonEntityOccurrenceProposal.objects.count(), 1)
 
     def test_missing_scope_fails_and_does_not_scan(self):
-        _manual("ביקור בקהיר")
+        _manual("ביקור קהיר")
         _entity("קהיר")
 
         with self.assertRaisesMessage(
@@ -481,7 +656,7 @@ class DetectorCommandTests(TestCase):
         self.assertEqual(NonPersonEntityOccurrenceProposal.objects.count(), 0)
 
     def test_invalid_item_id_fails_before_writes(self):
-        item = _manual("ביקור בקהיר")
+        item = _manual("ביקור קהיר")
         _entity("קהיר")
 
         with self.assertRaisesMessage(CommandError, "Unknown archive item id: 999999"):
@@ -507,7 +682,7 @@ class DetectorCommandTests(TestCase):
             )
 
     def test_no_corpus_option(self):
-        item = _manual("ביקור בקהיר")
+        item = _manual("ביקור קהיר")
         _entity("קהיר")
 
         with self.assertRaises(CommandError):
@@ -539,7 +714,7 @@ class DetectorCommandTests(TestCase):
 
 class DetectorIdempotencyTests(TestCase):
     def test_apply_replay_creates_no_duplicates_and_splits_stats(self):
-        item = _manual("ביקור בקהיר")
+        item = _manual("ביקור קהיר")
         entity = _entity("קהיר")
 
         first = detect_non_person_entities_for_item(item, apply=True)
@@ -567,7 +742,7 @@ class DetectorIdempotencyTests(TestCase):
         self.assertEqual(NonPersonEntityOccurrenceReviewEvent.objects.count(), 1)
 
     def test_later_alias_adds_match_without_another_event_or_status_change(self):
-        item = _manual("ביקור בקהיר")
+        item = _manual("ביקור קהיר")
         entity = _entity("קהיר")
         detect_non_person_entities_for_item(item, apply=True)
         candidate = NonPersonEntityOccurrenceCandidate.objects.get()
@@ -585,7 +760,7 @@ class DetectorIdempotencyTests(TestCase):
         self.assertEqual(NonPersonEntityOccurrenceReviewEvent.objects.count(), 1)
 
     def test_apply_fills_blank_matched_text_and_preserves_nonblank(self):
-        body = "ביקור בקהיר"
+        body = "ביקור קהיר"
         item = _manual(body)
         entity = _entity("קהיר")
         blank = NonPersonEntityOccurrenceProposal.objects.create(
@@ -631,7 +806,7 @@ class DetectorSuppressionTests(TestCase):
         *,
         resolved: NonPersonEntity | None = None,
     ):
-        body = "ביקור בקהיר"
+        body = "ביקור קהיר"
         item = _manual(body)
         entity = _entity("קהיר")
         reviewer = User.objects.create_user(username="reviewer", password="test-pass")
@@ -724,7 +899,7 @@ class DetectorSuppressionTests(TestCase):
         self.assertEqual(candidate.reviewed_at, reviewed_at)
 
     def test_detector_does_not_create_occurrences_decisions_aliases_or_entities(self):
-        item = _manual("ביקור בקהיר")
+        item = _manual("ביקור קהיר")
         _entity("קהיר")
         entity_count = NonPersonEntity.objects.count()
         alias_count = NonPersonEntityAlias.objects.count()
@@ -743,11 +918,11 @@ class DetectorSuppressionTests(TestCase):
 
 class DetectorTextSourceTests(TestCase):
     def test_uses_only_authoritative_manual_and_ocr_bodies(self):
-        manual = _manual("ביקור בקהיר", title="פריז")
+        manual = _manual("ביקור קהיר", title="פריז")
         hebrew = _ocr(
             language="he",
             source_text="Paris in the source",
-            hebrew_text="ביקור בקהיר",
+            hebrew_text="ביקור קהיר",
             title="metadata",
         )
         english = _ocr(
@@ -773,7 +948,7 @@ class DetectorTextSourceTests(TestCase):
         self.assertEqual(by_item[hebrew.pk].normalized_surface, "קהיר")
         self.assertEqual(
             by_item[hebrew.pk].source_text_sha256,
-            source_text_sha256("ביקור בקהיר"),
+            source_text_sha256("ביקור קהיר"),
         )
         self.assertEqual(by_item[english.pk].normalized_surface, "קהיר")
         self.assertNotIn(
@@ -824,7 +999,7 @@ class DetectorPublicSearchTests(TestCase):
     def test_detector_does_not_link_public_occurrence_or_change_search(self):
         item = create_manual_text_archive_item(
             title="יומן",
-            body="ביקור בקהיר",
+            body="ביקור קהיר",
             visibility=ArchiveItem.Visibility.PUBLIC,
         )
         _entity("קהיר", display_name="אלקאהרה")
@@ -860,7 +1035,7 @@ class DetectorPublicSearchTests(TestCase):
         )
 
     def test_detector_candidate_remains_reviewable(self):
-        item = _manual("ביקור בקהיר")
+        item = _manual("ביקור קהיר")
         entity = _entity("קהיר")
         actor = User.objects.create_user(username="reviewer", password="test-pass")
         detect_non_person_entities_for_item(item, apply=True)
