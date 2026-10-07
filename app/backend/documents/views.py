@@ -337,8 +337,19 @@ from documents.services.non_person_entity_search import (
     registry_index_queryset,
 )
 from documents.services.non_person_entity_occurrence_grouped_review import (
+    GROUP_APPROVE_SUCCESS_MESSAGE,
+    GROUP_BLOCKED_MESSAGE,
+    GROUP_MEMBERSHIP_CHANGED_MESSAGE,
+    GROUP_WARNINGS_UNCONFIRMED_MESSAGE,
+    GroupBulkApproveBlocked,
+    GroupMembershipChanged,
+    GroupWarningsUnconfirmed,
+    approve_pending_occurrence_group,
+    blocking_flags_in,
+    occurrence_group_id_is_well_formed,
     risk_filter_choices,
     staff_grouped_occurrence_review_page,
+    staff_occurrence_group_approve_preview,
     staff_occurrence_review_group_detail,
     text_kind_filter_choices,
 )
@@ -7817,7 +7828,72 @@ def archive_manage_entity_occurrence_group_page(request, group_id: str):
             "examples": detail.examples,
             "page": detail.page,
             "page_count": detail.page_count,
+            "bulk_approve_blocked": bool(blocking_flags_in(detail.group.risk_flags)),
             "page_title": "קבוצת אזכורים ממתינים",
+        },
+    )
+
+
+def _group_approve_error_redirect(group_id: str, *, confirm: bool = False):
+    if staff_occurrence_group_approve_preview(group_id) is None:
+        return redirect("archive-manage-entity-occurrence-groups")
+    if confirm:
+        return redirect(
+            "archive-manage-entity-occurrence-group-approve",
+            group_id=group_id,
+        )
+    return redirect("archive-manage-entity-occurrence-group", group_id=group_id)
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def archive_manage_entity_occurrence_group_approve_page(request, group_id: str):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+    if not occurrence_group_id_is_well_formed(group_id):
+        raise Http404()
+
+    if request.method == "POST":
+        raw_ids = request.POST.getlist("candidate_id")
+        if any(not part.isdigit() for part in raw_ids):
+            messages.error(request, GROUP_MEMBERSHIP_CHANGED_MESSAGE)
+            return _group_approve_error_redirect(group_id)
+        try:
+            result = approve_pending_occurrence_group(
+                group_id,
+                tuple(int(part) for part in raw_ids),
+                actor=request.user,
+                note=request.POST.get("note") or "",
+                warnings_confirmed=request.POST.get("confirm_warnings") == "1",
+            )
+        except GroupMembershipChanged:
+            messages.error(request, GROUP_MEMBERSHIP_CHANGED_MESSAGE)
+            return _group_approve_error_redirect(group_id)
+        except GroupBulkApproveBlocked:
+            messages.error(request, GROUP_BLOCKED_MESSAGE)
+            return _group_approve_error_redirect(group_id)
+        except GroupWarningsUnconfirmed:
+            messages.error(request, GROUP_WARNINGS_UNCONFIRMED_MESSAGE)
+            return _group_approve_error_redirect(group_id, confirm=True)
+        except NonPersonEntityOccurrenceReviewError as exc:
+            messages.error(request, exc.message)
+            return _group_approve_error_redirect(group_id)
+        messages.success(
+            request,
+            GROUP_APPROVE_SUCCESS_MESSAGE.format(n=result.approved_count),
+        )
+        return redirect("archive-manage-entity-occurrence-groups")
+
+    preview = staff_occurrence_group_approve_preview(group_id)
+    if preview is None:
+        raise Http404()
+    return render(
+        request,
+        "documents/archive/entity_occurrence_group_approve.html",
+        context={
+            "preview": preview,
+            "page_title": "אישור קבוצת אזכורים",
         },
     )
 

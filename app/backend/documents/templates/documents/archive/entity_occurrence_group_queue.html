@@ -10,8 +10,18 @@
 
     <h1 class="page-title">{{ page_title }}</h1>
     <p class="page-subtitle">
-      קבוצות לקריאה בלבד. אישור, דחייה או שיוך נעשים לכל אזכור בנפרד.
+      אישור קבוצה, כשהוא אפשרי, נעשה בעמוד הקבוצה וחל על כל האזכורים בה.
+      דחייה ושיוך נשארים לכל אזכור בנפרד.
     </p>
+
+    {% if messages %}
+      <div class="spacer"></div>
+      {% for message in messages %}
+        <div class="alert{% if message.tags == 'error' %} alert-danger{% elif message.tags == 'success' %} alert-ok{% endif %}">
+          {{ message }}
+        </div>
+      {% endfor %}
+    {% endif %}
 
     <div class="spacer"></div>
     <form method="get" class="toolbar" action="{% url 'archive-manage-entity-occurrence-groups' %}">

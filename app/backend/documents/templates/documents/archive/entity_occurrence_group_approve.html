@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - {{ page_title }}{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <div class="page-toolbar">
+      <a class="btn" href="{{ preview.group.detail_url }}">חזרה לקבוצה</a>
+      <a class="btn" href="{% url 'archive-manage-entity-occurrence-groups' %}">חזרה לקבוצות</a>
+    </div>
+
+    <h1 class="page-title">{{ page_title }}</h1>
+    <p class="page-subtitle">{{ preview.group.entity_label }}</p>
+    {% if messages %}
+      <div class="spacer"></div>
+      {% for message in messages %}
+        <div class="alert{% if message.tags == 'error' %} alert-danger{% elif message.tags == 'success' %} alert-ok{% endif %}">
+          {{ message }}
+        </div>
+      {% endfor %}
+    {% endif %}
+
+    {% if preview.group.type_label %}
+      <p class="muted">{{ preview.group.type_label }}</p>
+    {% endif %}
+    <p>
+      <strong>{{ preview.group.normalized_surface }}</strong>
+      · {{ preview.group.text_kind_label }}
+      · {{ preview.group.candidate_count }} אזכורים
+      · {{ preview.group.archive_item_count }} פריטים
+    </p>
+    <p>
+      {% if preview.group.provenance_summary %}
+        {{ preview.group.provenance_summary }}
+      {% else %}
+        <span class="muted">אין פירוט התאמה</span>
+      {% endif %}
+    </p>
+    <p>
+      {% if preview.group.risk_flag_labels %}
+        {% for label in preview.group.risk_flag_labels %}
+          <span class="badge badge-warn">{{ label }}</span>
+        {% endfor %}
+      {% else %}
+        <span class="badge">בלי סימון סיכון</span>
+      {% endif %}
+    </p>
+    <p>
+      האישור בודק מחדש את הטקסט הנוכחי של כל מופע.
+      כשל באחד מהם מבטל את כל הפעולה, ולא נשמר שום אזכור מהבקשה הזו.
+      האישור חל על כל האזכורים בקבוצה, לא על עמוד אחד.
+    </p>
+
+    <div class="spacer"></div>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>אזכור</th>
+            <th>פריט</th>
+            <th>מופע</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for member in preview.members %}
+            <tr>
+              <td>{{ member.candidate_id }}</td>
+              <td>
+                <a href="{{ member.item_url }}">{{ member.item_title }}</a>
+                <div class="muted">{{ member.item_id }}</div>
+              </td>
+              <td>{{ member.occurrence_ordinal }}</td>
+              <td>
+                <a class="btn" href="{{ member.review_url }}">בדיקה</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if preview.can_submit %}
+      <div class="spacer"></div>
+      <form method="post">
+        {% csrf_token %}
+        {% for member in preview.members %}
+          <input type="hidden" name="candidate_id" value="{{ member.candidate_id }}" />
+        {% endfor %}
+        <div class="field">
+          <label for="group-approve-note">הערה לאישור</label>
+          <input id="group-approve-note" name="note" type="text" maxlength="2000" />
+        </div>
+        {% if preview.warning_flags %}
+          <div class="field">
+            <label for="group-approve-warnings">
+              <input id="group-approve-warnings" type="checkbox" name="confirm_warnings" value="1" />
+              אני מאשר/ת את אזהרות הסיכון של הקבוצה
+            </label>
+          </div>
+        {% endif %}
+        <button type="submit" class="btn btn-primary">אישור כל האזכורים בקבוצה</button>
+      </form>
+    {% else %}
+      <div class="spacer"></div>
+      <div class="alert alert-danger">
+        לא ניתן לאשר את הקבוצה בגלל סימון סיכון. יש לבדוק כל אזכור בנפרד.
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}
