@@ -19,10 +19,10 @@ not treat them as something to delete.
 
 ``matched_text`` is optional on ``ArchiveItemEntityOccurrence``. Normalization
 can change length, so normalized offsets are not used as original offsets.
-When the source is already NFC, a linear span map may store the original
-slice if that slice round-trips through surface-v1. Source text that is not
-already NFC does not get a derived slice. When a safe slice is unavailable,
-the SPLIT candidate is BLOCKED rather than given an invented slice.
+The plan stores the original slice from ``locate_surface_occurrences`` when
+that slice round-trips through surface-v1, including canonical NFC
+reordering and composition. When a safe slice is unavailable, the SPLIT
+candidate is BLOCKED rather than given an invented slice.
 
 Distinct APPROVE decisions for this source must not share ``result_entity``.
 That sharing is STATE_DRIFT. A MERGE decision may point at the same entity

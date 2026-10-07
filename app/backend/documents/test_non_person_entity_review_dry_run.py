@@ -281,14 +281,20 @@ class SurfaceLocationTests(SimpleTestCase):
             normalize_surface_v1(located.occurrences[0].matched_text), "strasse"
         )
 
-    def test_non_nfc_source_has_count_without_an_invented_slice(self):
+    def test_canonical_composition_elsewhere_recovers_the_original_slice(self):
         source = "e\u0301 Palestine"
         self.assertNotEqual(source, unicodedata.normalize("NFC", source))
 
         located = locate_surface_occurrences(source, "Palestine")
 
         self.assertEqual(located.count, 1)
-        self.assertIsNone(located.occurrences)
+        assert located.occurrences is not None
+        self.assertEqual(located.occurrences[0].matched_text, "Palestine")
+        self.assertEqual(located.occurrences[0].start, 3)
+        self.assertEqual(located.occurrences[0].end, 12)
+        unsafe = locate_surface_occurrences("e\u0301\u0323", "\u1eb9")
+        self.assertGreater(unsafe.count, 0)
+        self.assertIsNone(unsafe.occurrences)
 
 
 class NonPersonEntityReviewDryRunTests(TestCase):
@@ -609,7 +615,7 @@ class NonPersonEntityReviewDryRunTests(TestCase):
         self.assertEqual(_candidate(result, "EC0045").state, STATE_READY_TO_APPLY)
         self.assertEqual(result.planned_occurrence_creates, 6)
 
-    def test_non_nfc_source_blocks_split_without_an_unsafe_slice(self):
+    def test_canonical_composition_elsewhere_does_not_block_a_recoverable_split(self):
         bodies = _bodies()
         bodies[285] = "e\u0301 Palestine"
         self.assertNotEqual(bodies[285], unicodedata.normalize("NFC", bodies[285]))
@@ -621,17 +627,14 @@ class NonPersonEntityReviewDryRunTests(TestCase):
             item for item in candidate.plan.occurrences if item.archive_item_id == 285
         )
 
-        self.assertEqual(candidate.state, STATE_BLOCKED)
-        self.assertTrue(
+        self.assertEqual(candidate.state, STATE_READY_TO_APPLY)
+        self.assertFalse(
             any(
                 "matched_text not safely derivable item 285" in reason
                 for reason in candidate.reasons
             )
         )
-        self.assertFalse(
-            any("zero surface occurrences" in reason for reason in candidate.reasons)
-        )
-        self.assertEqual(item_285.matched_text, "")
+        self.assertEqual(item_285.matched_text, "Palestine")
         self.assertEqual(_candidate(result, "EC0045").state, STATE_READY_TO_APPLY)
 
     def test_split_source_hash_drift_is_state_drift(self):
