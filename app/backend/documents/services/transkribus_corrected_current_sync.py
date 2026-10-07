@@ -11,6 +11,7 @@ Does not activate geometry, mutate automatic HTR associations, or update
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from enum import Enum
@@ -58,6 +59,15 @@ from documents.services.transkribus_snapshot_storage import (
 logger = logging.getLogger(__name__)
 
 _MAX_SAFE_MESSAGE_LEN = 512
+
+# Logged PAGE XML diagnostics. Allow-list only: these values cannot carry a
+# URL, bearer token, Authorization header, cookie, or response body.
+# UNCLASSIFIED is used when the engine did not attach a known category.
+_PAGE_XML_SAFE_REASON_RE = re.compile(
+    r"^(TIMEOUT|CONNECTION|HTTP_[1-5]\d{2}|REQUEST_EXCEPTION_[A-Za-z][A-Za-z0-9_]{0,63})$"
+)
+_PAGE_XML_TS_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+_PAGE_XML_UNCLASSIFIED = "UNCLASSIFIED"
 
 
 class CorrectedCurrentSyncFailureCode:
@@ -328,6 +338,16 @@ def _find_raw_transcript_by_ts_id(
     )
 
 
+def _bind_page_xml_fetch_context(
+    exc: BaseException,
+    sel: CorrectedCurrentTranscriptSelection,
+) -> None:
+    """Remember which selected page failed, without the provider URL."""
+    exc.page_xml_page_index = sel.page_index  # type: ignore[attr-defined]
+    exc.page_xml_page_nr = sel.page_nr  # type: ignore[attr-defined]
+    exc.page_xml_transcript_ts_id = sel.transcript_ts_id  # type: ignore[attr-defined]
+
+
 def _fetch_selected_transcript_pages(
     *,
     selections: Sequence[CorrectedCurrentTranscriptSelection],
@@ -337,17 +357,21 @@ def _fetch_selected_transcript_pages(
 ) -> list[SelectedTranscriptPage]:
     selected: list[SelectedTranscriptPage] = []
     for sel in sorted(selections, key=lambda s: s.page_index):
-        raw = _find_raw_transcript_by_ts_id(
-            pages_meta,
-            page_nr=sel.page_nr,
-            transcript_ts_id=sel.transcript_ts_id,
-        )
-        url = raw.get("url")
-        if not url or not isinstance(url, str):
-            raise CorrectedCurrentSyncPageMetadataError(
-                f"Transcript URL missing for pageNr={sel.page_nr}."
+        try:
+            raw = _find_raw_transcript_by_ts_id(
+                pages_meta,
+                page_nr=sel.page_nr,
+                transcript_ts_id=sel.transcript_ts_id,
             )
-        xml_bytes = fetch_transcript_xml(url, bearer_token=bearer_token)
+            url = raw.get("url")
+            if not url or not isinstance(url, str):
+                raise CorrectedCurrentSyncPageMetadataError(
+                    f"Transcript URL missing for pageNr={sel.page_nr}."
+                )
+            xml_bytes = fetch_transcript_xml(url, bearer_token=bearer_token)
+        except Exception as exc:
+            _bind_page_xml_fetch_context(exc, sel)
+            raise
         pm = _page_metadata_by_page_nr(pages_meta, sel.page_nr)
         selected.append(
             SelectedTranscriptPage(
@@ -632,13 +656,71 @@ def _classify_exception(
     return CorrectedCurrentSyncFailureCode.UNEXPECTED
 
 
+def _page_xml_log_int(cause: BaseException, attr: str) -> str:
+    raw = getattr(cause, attr, None)
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 0:
+        return str(raw)
+    return "-"
+
+
+def _page_xml_log_ts_id(cause: BaseException) -> str:
+    raw = getattr(cause, "page_xml_transcript_ts_id", None)
+    if isinstance(raw, str) and _PAGE_XML_TS_ID_RE.fullmatch(raw):
+        return raw
+    return "-"
+
+
+def _page_xml_log_safe_reason(cause: BaseException) -> str:
+    raw = getattr(cause, "safe_reason", None)
+    if isinstance(raw, str) and _PAGE_XML_SAFE_REASON_RE.fullmatch(raw):
+        return raw
+    return _PAGE_XML_UNCLASSIFIED
+
+
+def _log_page_xml_fetch_failure(
+    *,
+    attempt_id: int | None,
+    failure_code: str,
+    cause: BaseException,
+) -> None:
+    """One diagnostic line for a PAGE XML fetch failure.
+
+    Safe to log: failure code, attempt id, page_index, page_nr, transcript
+    ts id, exception class, and the engine's allow-listed safe_reason.
+    Not safe, and not logged: provider URL, bearer token, Authorization
+    header, cookies, session credentials, response body, traceback, or
+    ``str(cause)`` (that text can repeat a URL from the HTTP library).
+    """
+    logger.error(
+        "Corrected/current PAGE XML fetch failed failure_code=%s attempt_id=%s "
+        "page_index=%s page_nr=%s transcript_ts_id=%s exception_class=%s "
+        "safe_reason=%s",
+        failure_code,
+        attempt_id if attempt_id is not None else "-",
+        _page_xml_log_int(cause, "page_xml_page_index"),
+        _page_xml_log_int(cause, "page_xml_page_nr"),
+        _page_xml_log_ts_id(cause),
+        type(cause).__name__,
+        _page_xml_log_safe_reason(cause),
+    )
+
+
 def _handle_failure(
     *,
     attempt_id: int | None,
     failure_code: str,
     cause: BaseException | None = None,
 ) -> None:
-    if cause is None:
+    if (
+        cause is not None
+        and failure_code == CorrectedCurrentSyncFailureCode.HTTP_TRANSCRIPT_XML
+    ):
+        _log_page_xml_fetch_failure(
+            attempt_id=attempt_id,
+            failure_code=failure_code,
+            cause=cause,
+        )
+    elif cause is None:
         logger.error(
             "Corrected/current sync failure code=%s attempt_id=%s",
             failure_code,

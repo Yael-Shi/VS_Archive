@@ -6,7 +6,17 @@ import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from io import BytesIO
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    NoReturn,
+    Optional,
+    Sequence,
+    Tuple,
+)
 from urllib.parse import urlparse
 
 import requests
@@ -29,17 +39,35 @@ POLL_MAX_WAIT_SEC = 900.0
 class TranskribusPermanentError(Exception):
     """Non-retryable Transkribus client failure (mapped to EnginePermanentError in adapter)."""
 
+    def __init__(self, message: str, *, safe_reason: str | None = None) -> None:
+        super().__init__(message)
+        # Structured category only (TIMEOUT, CONNECTION, HTTP_<status>,
+        # REQUEST_EXCEPTION_<class>). Never a URL, header, or response body.
+        self.safe_reason = safe_reason
+
 
 class TranskribusRetryableError(Exception):
     """Retryable Transkribus client failure (mapped to EngineRetryableError in adapter)."""
 
+    def __init__(self, message: str, *, safe_reason: str | None = None) -> None:
+        super().__init__(message)
+        self.safe_reason = safe_reason
 
-def _http_permanent(message: str) -> TranskribusPermanentError:
-    return TranskribusPermanentError(message)
+
+def _http_permanent(
+    message: str, *, safe_reason: str | None = None
+) -> TranskribusPermanentError:
+    return TranskribusPermanentError(message, safe_reason=safe_reason)
 
 
-def _http_retryable(message: str) -> TranskribusRetryableError:
-    return TranskribusRetryableError(message)
+def _http_retryable(
+    message: str, *, safe_reason: str | None = None
+) -> TranskribusRetryableError:
+    return TranskribusRetryableError(message, safe_reason=safe_reason)
+
+
+def _http_status_safe_reason(status_code: int) -> str:
+    return f"HTTP_{int(status_code)}"
 
 
 def _check_response_status(resp: requests.Response, context: str) -> None:
@@ -47,9 +75,35 @@ def _check_response_status(resp: requests.Response, context: str) -> None:
         resp.raise_for_status()
     except requests.HTTPError as exc:
         code = resp.status_code
+        reason = _http_status_safe_reason(code)
         if code in (429, 502, 503, 504):
-            raise _http_retryable(f"{context}: HTTP {code}") from exc
-        raise _http_permanent(f"{context}: HTTP {code}") from exc
+            raise _http_retryable(
+                f"{context}: HTTP {code}", safe_reason=reason
+            ) from exc
+        raise _http_permanent(f"{context}: HTTP {code}", safe_reason=reason) from exc
+
+
+def _raise_classified_transport_error(exc: BaseException, *, context: str) -> NoReturn:
+    """Map a requests transport failure to a retryable error with a safe category.
+
+    ``safe_reason`` is chosen here, before any exception text is logged.
+    Timeout is checked before ConnectionError because ``ConnectTimeout`` is both.
+    The original exception text is not copied into ``safe_reason``.
+    """
+    if isinstance(exc, requests.Timeout):
+        raise _http_retryable(
+            f"{context}: request timed out", safe_reason="TIMEOUT"
+        ) from exc
+    if isinstance(exc, requests.ConnectionError):
+        raise _http_retryable(
+            f"{context}: connection failed", safe_reason="CONNECTION"
+        ) from exc
+    if isinstance(exc, requests.RequestException):
+        raise _http_retryable(
+            f"{context}: request failed ({type(exc).__name__})",
+            safe_reason=f"REQUEST_EXCEPTION_{type(exc).__name__}",
+        ) from exc
+    raise exc
 
 
 def _session_request(
@@ -62,14 +116,8 @@ def _session_request(
 ) -> requests.Response:
     try:
         resp = session.request(method, url, **kwargs)
-    except requests.Timeout as exc:
-        raise _http_retryable(f"{context}: request timed out") from exc
-    except requests.ConnectionError as exc:
-        raise _http_retryable(f"{context}: connection failed") from exc
     except requests.RequestException as exc:
-        raise _http_retryable(
-            f"{context}: request failed ({type(exc).__name__})"
-        ) from exc
+        _raise_classified_transport_error(exc, context=context)
     _check_response_status(resp, context)
     return resp
 
@@ -83,14 +131,8 @@ def _bare_request(
 ) -> requests.Response:
     try:
         resp = requests.request(method, url, **kwargs)
-    except requests.Timeout as exc:
-        raise _http_retryable(f"{context}: request timed out") from exc
-    except requests.ConnectionError as exc:
-        raise _http_retryable(f"{context}: connection failed") from exc
     except requests.RequestException as exc:
-        raise _http_retryable(
-            f"{context}: request failed ({type(exc).__name__})"
-        ) from exc
+        _raise_classified_transport_error(exc, context=context)
     _check_response_status(resp, context)
     return resp
 

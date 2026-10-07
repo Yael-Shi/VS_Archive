@@ -8,6 +8,7 @@ from datetime import timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import requests
 from django.contrib.auth import get_user_model
 from django.db import DatabaseError, connection
 from django.test import TestCase, TransactionTestCase, override_settings
@@ -886,3 +887,131 @@ class CorrectedCurrentSyncRequestFencingTests(TestCase):
         self.assertIsNotNone(result.attempt.pk)
         self.sync_request.refresh_from_db()
         self.assertIsNone(self.sync_request.attempt_id)
+
+
+_SECRET_PAGE_URL = "https://files.example/transcript/secret-path?sig=SUPER-SECRET"
+_LATER_PAGE_URL = "https://files.example/transcript/later-page?sig=ALSO-SECRET"
+_SECRET_BEARER = "super-secret-bearer-token"
+_SECRET_BODY = "provider-body Bearer SUPER-SECRET-BODY"
+
+
+class _XmlHttpResponse:
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+        self.text = _SECRET_BODY
+        self.content = _SECRET_BODY.encode()
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise requests.HTTPError(
+                f"GET {_SECRET_PAGE_URL} failed body={_SECRET_BODY}"
+            )
+
+
+class PageXmlFetchObservabilityTests(TestCase):
+    def setUp(self) -> None:
+        self.doc = _create_he_doc(title="page xml observability")
+        self.transkribus_run = _upload_run(self.doc)
+        self.user = _staff_user()
+
+    def _pages(self) -> list[tr.TrpPageMetadata]:
+        return [
+            _trp_meta(
+                2,
+                ts_id="305728807",
+                status="IN_PROGRESS",
+                url=_LATER_PAGE_URL,
+            ),
+            _trp_meta(
+                1,
+                ts_id="305726466",
+                status="IN_PROGRESS",
+                url=_SECRET_PAGE_URL,
+            ),
+        ]
+
+    def _run(self, request):
+        store = MagicMock()
+        with patch(
+            "documents.services.transkribus_engine.requests.request",
+            side_effect=request,
+        ):
+            with self.assertLogs(_SYNC_LOGGER, level="ERROR") as logs:
+                with self.assertRaises(CorrectedCurrentSyncError) as ctx:
+                    run_corrected_current_transkribus_sync(
+                        document_id=self.doc.pk,
+                        initiated_by=self.user,
+                        username="u",
+                        password="p",
+                        bearer_token=_SECRET_BEARER,
+                        login=lambda *a, **k: None,
+                        session_factory=MagicMock,
+                        fetch_pages_metadata=lambda *a, **k: self._pages(),
+                        store_snapshot=store,
+                    )
+        return ctx.exception, "\n".join(logs.output), store
+
+    def _assert_closed_failure(self, exc, log_blob: str, store, *, safe_reason: str):
+        self.assertEqual(
+            exc.failure_code, CorrectedCurrentSyncFailureCode.HTTP_TRANSCRIPT_XML
+        )
+        self.assertEqual(str(exc), "Transkribus transcript PAGE XML request failed.")
+        self.assertIn("failure_code=HTTP_TRANSCRIPT_XML_FAILED", log_blob)
+        self.assertIn(f"attempt_id={exc.attempt_id}", log_blob)
+        self.assertIn("page_index=1", log_blob)
+        self.assertIn("page_nr=1", log_blob)
+        self.assertIn("transcript_ts_id=305726466", log_blob)
+        self.assertIn("exception_class=TranskribusRetryableError", log_blob)
+        self.assertIn(f"safe_reason={safe_reason}", log_blob)
+        for secret in (
+            _SECRET_PAGE_URL,
+            _LATER_PAGE_URL,
+            _SECRET_BEARER,
+            _SECRET_BODY,
+            "Authorization",
+            "files.example",
+        ):
+            self.assertNotIn(secret, log_blob)
+            self.assertNotIn(secret, str(exc))
+        attempt = TranskribusCorrectedCurrentSyncAttempt.objects.get(pk=exc.attempt_id)
+        self.assertEqual(
+            attempt.status, TranskribusCorrectedCurrentSyncAttempt.Status.FAILED
+        )
+        self.assertEqual(attempt.failure_code, "HTTP_TRANSCRIPT_XML_FAILED")
+        self.assertEqual(
+            attempt.failure_message,
+            "Transkribus transcript PAGE XML request failed.",
+        )
+        self.assertIsNone(attempt.storage_outcome)
+        self.assertIsNone(attempt.resolved_snapshot_id)
+        self.assertEqual(TranskribusTranscriptSnapshot.objects.count(), 0)
+        store.assert_not_called()
+        pages = list(attempt.pages.order_by("page_index"))
+        self.assertEqual([page.page_index for page in pages], [1, 2])
+        self.assertTrue(all(page.outcome == "SELECTED" for page in pages))
+        self.assertTrue(all(page.in_progress_warning for page in pages))
+
+    def test_timeout_logs_page_context_and_aborts_before_later_pages(self):
+        seen: list[str] = []
+
+        def request(method, url, **kwargs):
+            seen.append(url)
+            raise requests.Timeout(f"timed out url={url} auth={_SECRET_BEARER}")
+
+        exc, log_blob, store = self._run(request)
+        self.assertEqual(seen, [_SECRET_PAGE_URL])
+        self._assert_closed_failure(exc, log_blob, store, safe_reason="TIMEOUT")
+
+    def test_http_503_logs_http_status_without_body(self):
+        def request(method, url, **kwargs):
+            return _XmlHttpResponse(503)
+
+        exc, log_blob, store = self._run(request)
+        self._assert_closed_failure(exc, log_blob, store, safe_reason="HTTP_503")
+
+    def test_connection_error_logs_connection_reason(self):
+        def request(method, url, **kwargs):
+            raise requests.ConnectionError(f"connection failed url={url}")
+
+        exc, log_blob, store = self._run(request)
+        self._assert_closed_failure(exc, log_blob, store, safe_reason="CONNECTION")
