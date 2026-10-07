@@ -336,6 +336,12 @@ from documents.services.non_person_entity_search import (
     public_registry_rows,
     registry_index_queryset,
 )
+from documents.services.non_person_entity_occurrence_grouped_review import (
+    risk_filter_choices,
+    staff_grouped_occurrence_review_page,
+    staff_occurrence_review_group_detail,
+    text_kind_filter_choices,
+)
 from documents.services.non_person_entity_occurrence_review import (
     ALREADY_APPLIED_MESSAGE,
     APPROVE_APPLIED_MESSAGE,
@@ -7752,6 +7758,66 @@ def archive_manage_entity_occurrence_proposal_page(request, candidate_id: int):
         context={
             "review": detail,
             "page_title": "בדיקת אזכור",
+        },
+    )
+
+
+@login_required
+@require_GET
+def archive_manage_entity_occurrence_groups_page(request):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    query = (request.GET.get("q") or "").strip()
+    raw_entity = (request.GET.get("entity") or "").strip()
+    entity_id = int(raw_entity) if raw_entity.isdigit() else None
+    text_kind = (request.GET.get("text_kind") or "").strip()
+    risk = (request.GET.get("risk") or "").strip()
+    page = staff_grouped_occurrence_review_page(
+        query=query,
+        entity_id=entity_id,
+        text_kind=text_kind,
+        risk=risk,
+    )
+    return render(
+        request,
+        "documents/archive/entity_occurrence_group_queue.html",
+        context={
+            "groups": page.groups,
+            "q": query,
+            "entity_id": raw_entity if entity_id is not None else "",
+            "text_kind": text_kind,
+            "risk": risk,
+            "entity_options": page.entity_options,
+            "text_kind_choices": text_kind_filter_choices(),
+            "risk_choices": risk_filter_choices(),
+            "page_title": "אזכורים ממתינים לפי קבוצה",
+        },
+    )
+
+
+@login_required
+@require_GET
+def archive_manage_entity_occurrence_group_page(request, group_id: str):
+    deny = _require_admin_page(request)
+    if deny:
+        return deny
+
+    raw_page = (request.GET.get("page") or "").strip()
+    page_number = int(raw_page) if raw_page.isdigit() else 1
+    detail = staff_occurrence_review_group_detail(group_id, page=page_number)
+    if detail is None:
+        raise Http404()
+    return render(
+        request,
+        "documents/archive/entity_occurrence_group_detail.html",
+        context={
+            "group": detail.group,
+            "examples": detail.examples,
+            "page": detail.page,
+            "page_count": detail.page_count,
+            "page_title": "קבוצת אזכורים ממתינים",
         },
     )
 

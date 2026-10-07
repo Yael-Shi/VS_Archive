@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - {{ page_title }}{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-manage-entity-occurrence-proposals' %}">בדיקה לפי אזכור</a>
+      <a class="btn" href="{% url 'archive-manage-list' %}">חזרה לניהול</a>
+    </div>
+
+    <h1 class="page-title">{{ page_title }}</h1>
+    <p class="page-subtitle">
+      קבוצות לקריאה בלבד. אישור, דחייה או שיוך נעשים לכל אזכור בנפרד.
+    </p>
+
+    <div class="spacer"></div>
+    <form method="get" class="toolbar" action="{% url 'archive-manage-entity-occurrence-groups' %}">
+      <div class="field field--grow">
+        <label for="occurrence-group-q">חיפוש</label>
+        <input
+          id="occurrence-group-q"
+          type="search"
+          name="q"
+          value="{{ q }}"
+          placeholder="שם, טקסט שזוהה, כותרת או מזהה פריט"
+        />
+      </div>
+      <div class="field">
+        <label for="occurrence-group-entity">רשומה</label>
+        <select id="occurrence-group-entity" name="entity">
+          <option value=""{% if not entity_id %} selected{% endif %}>הכול</option>
+          {% for value, label in entity_options %}
+            <option value="{{ value }}"{% if entity_id == value|stringformat:"s" %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="occurrence-group-kind">מקור הטקסט</label>
+        <select id="occurrence-group-kind" name="text_kind">
+          {% for value, label in text_kind_choices %}
+            <option value="{{ value }}"{% if text_kind == value %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="occurrence-group-risk">סיכון</label>
+        <select id="occurrence-group-risk" name="risk">
+          {% for value, label in risk_choices %}
+            <option value="{{ value }}"{% if risk == value %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field field--actions">
+        <div class="form-actions">
+          <button type="submit" class="btn">סינון</button>
+          {% if q or entity_id or text_kind or risk %}
+            <a class="btn" href="{% url 'archive-manage-entity-occurrence-groups' %}">ניקוי</a>
+          {% endif %}
+        </div>
+      </div>
+    </form>
+
+    <div class="spacer"></div>
+
+    {% if groups %}
+      {% for group in groups %}
+        <article class="card">
+          <h2 class="page-title">{{ group.entity_label }}</h2>
+          {% if group.type_label %}
+            <p class="muted">{{ group.type_label }}</p>
+          {% endif %}
+          <p>
+            <strong>{{ group.normalized_surface }}</strong>
+            · {{ group.text_kind_label }}
+            · {{ group.candidate_count }} אזכורים
+            · {{ group.archive_item_count }} פריטים
+          </p>
+          <p>
+            {% if group.provenance_summary %}
+              {{ group.provenance_summary }}
+            {% else %}
+              <span class="muted">אין פירוט התאמה</span>
+            {% endif %}
+          </p>
+          <p>
+            {% if group.risk_flag_labels %}
+              {% for label in group.risk_flag_labels %}
+                <span class="badge badge-warn">{{ label }}</span>
+              {% endfor %}
+            {% else %}
+              <span class="badge">בלי סימון סיכון</span>
+            {% endif %}
+          </p>
+          {% for example in group.representative_examples %}
+            <p>
+              <a href="{{ example.item_url }}">{{ example.item_title }}</a>
+              <span class="muted">מופע {{ example.occurrence_ordinal }}</span>
+              {% if example.has_context %}
+                {{ example.context_before }}<strong>{{ example.context_match }}</strong>{{ example.context_after }}
+              {% else %}
+                <span class="muted">אין הקשר מהטקסט הנוכחי</span>
+                {% if example.matched_text %}
+                  <span class="muted">הטקסט שנשמר: {{ example.matched_text }}</span>
+                {% endif %}
+              {% endif %}
+              <a href="{{ example.review_url }}">בדיקה</a>
+            </p>
+          {% endfor %}
+          {% if group.outlier_examples %}
+            <p class="muted">
+              חריגים בקבוצה:
+              {% for example in group.outlier_examples %}
+                <a href="{{ example.review_url }}">אזכור {{ example.candidate_id }}</a>{% if not forloop.last %}, {% endif %}
+              {% endfor %}
+            </p>
+          {% endif %}
+          <p>
+            <a class="btn" href="{{ group.detail_url }}">כל האזכורים בקבוצה</a>
+          </p>
+        </article>
+        <div class="spacer"></div>
+      {% endfor %}
+    {% else %}
+      <p class="muted">אין קבוצות להצגה.</p>
+    {% endif %}
+  </div>
+{% endblock %}
