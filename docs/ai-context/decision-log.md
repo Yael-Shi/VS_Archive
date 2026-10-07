@@ -8353,3 +8353,21 @@ Apply uses the six-field proposal identity. An existing proposal is not given a 
 A changed source SHA creates a new proposal identity. Older proposals stay. This command does not clean them up. It does not write `ArchiveItemEntityOccurrence`, `ReviewedNonPersonEntityDecision`, aliases, entities, or `ArchiveItemSearchIndex`.
 
 **Deferred:** corpus scan, automatic scheduling, fuzzy matching, proposal backfill, and any detector path that approves or creates registry rows.
+
+## Grouped pending occurrence review (2026-10-07)
+
+**Decision:** Pending non-person occurrence candidates can be read as groups before any approval design. Grouping is presentation only. It does not approve, reject, reassign, or remove. It does not write proposals, candidates, matches, events, occurrences, aliases, entities, or the search index. The group id is not stored.
+
+**Current behavior:** `documents/services/non_person_entity_occurrence_grouped_review.py` loads `PENDING` candidates only. One group is `candidate_entity_id`, `normalized_surface`, `text_kind`, and the complete sorted set of `(method, alias_kind)` pairs. `matched_value` and match-row order are not part of the key. Different entities stay in different groups. Proposal rows are not merged. Each candidate id remains the address for the existing individual review page.
+
+The group id is the SHA-256 hex digest of a canonical JSON object of that key (`sort_keys`, compact separators, UTF-8). Staff routes are GET-only: `/archive/manage/entity-occurrence-groups/` and `/archive/manage/entity-occurrence-groups/<group_id>/`. Filters are text query, entity, text kind, and risk presence or a specific flag. There is no approve-group action.
+
+Context uses the same source assessment as individual review (`surface-v1`, authoritative displayed text, SHA, and `locate_surface_occurrences`). A window is the existing 48-character radius around the relocated slice. Title is a label only. If the source is stale, the normalization version is unknown, or the ordinal cannot be relocated, the candidate stays in the group, the window is empty, and the group carries `SOURCE_STALE` and/or `CONTEXT_UNAVAILABLE`. No snippet is guessed from the new text.
+
+The list assesses every pending member before it filters. Authoritative text is loaded once per archive item, and a normalized surface is located once per item, text kind, and surface. Those checks produce the exact counts and risk flags. Context windows are built only afterward, and only for the representative and outlier examples of groups the filter returns. Representative examples stay capped at 4: first member, last member, then members with a risk the others do not all share, then members from archive items not yet shown. Order inside the group is archive item id, occurrence ordinal, candidate id. Outlier examples, capped at 3, are members that carry a member-level flag the rest of the group does not all share. A member left out of that sample still contributes its risk flag. All candidate ids stay on the group. Sampling is deterministic.
+
+The detail route resolves one group id from pending keys. It does not build context for any other group. It assesses that group's members for the same exact flags, then builds context only for the current page of 50 members. `page` is clamped into the valid range. Pages follow the same member order.
+
+Risk flags, in stable order: `OCR_VARIANT` (an alias-kind snapshot is `OCR_VARIANT`); `SHORT_SURFACE` (normalized surface length at most 3); `MULTIPLE_MATCH_METHODS`; `MULTIPLE_ALIAS_KINDS` (non-empty alias kinds); `SOURCE_STALE`; `CONTEXT_UNAVAILABLE`; `MATCHED_TEXT_UNAVAILABLE` (stored `matched_text` is blank; a relocated window may still be shown); `PRIOR_REVIEW_HISTORY` (a review event other than `DETECT`); `MANY_ARCHIVE_ITEMS` (at least 5 distinct archive items). These flags are not a confidence score and do not mean a group is safe to approve. An ordinal gap left by boundary filtering is not itself a flag. Empty match provenance is not a flag; those candidates still group together.
+
+**Deferred:** bulk approval, bulk reject, and any write from this grouped view. A reviewer who wants to act uses the existing per-candidate review page.

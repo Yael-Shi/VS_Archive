@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}VSArchive - {{ page_title }}{% endblock %}
+
+{% block content %}
+  <div class="card page-header">
+    <div class="page-toolbar">
+      <a class="btn" href="{% url 'archive-manage-entity-occurrence-groups' %}">חזרה לקבוצות</a>
+      <a class="btn" href="{% url 'archive-manage-entity-occurrence-proposals' %}">בדיקה לפי אזכור</a>
+    </div>
+
+    <h1 class="page-title">{{ group.entity_label }}</h1>
+    <p class="page-subtitle">
+      {{ group.normalized_surface }} · {{ group.text_kind_label }} ·
+      {{ group.candidate_count }} אזכורים · {{ group.archive_item_count }} פריטים.
+      אין כאן פעולת אישור. כל אזכור נבדק בנפרד.
+    </p>
+    {% if group.type_label %}
+      <p class="muted">{{ group.type_label }}</p>
+    {% endif %}
+    <p>
+      {% if group.provenance_summary %}
+        {{ group.provenance_summary }}
+      {% else %}
+        <span class="muted">אין פירוט התאמה</span>
+      {% endif %}
+    </p>
+    <p>
+      {% if group.risk_flag_labels %}
+        {% for label in group.risk_flag_labels %}
+          <span class="badge badge-warn">{{ label }}</span>
+        {% endfor %}
+      {% else %}
+        <span class="badge">בלי סימון סיכון</span>
+      {% endif %}
+    </p>
+
+    <div class="spacer"></div>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>פריט</th>
+            <th>מופע</th>
+            <th>טקסט שזוהה</th>
+            <th>הקשר</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for example in examples %}
+            <tr>
+              <td>
+                <a href="{{ example.item_url }}">{{ example.item_title }}</a>
+                <div class="muted">{{ example.item_id }}</div>
+              </td>
+              <td>{{ example.occurrence_ordinal }}</td>
+              <td>
+                {% if example.matched_text %}
+                  {{ example.matched_text }}
+                {% else %}
+                  <span class="muted">—</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if example.has_context %}
+                  {{ example.context_before }}<strong>{{ example.context_match }}</strong>{{ example.context_after }}
+                {% else %}
+                  <span class="muted">אין הקשר מהטקסט הנוכחי</span>
+                {% endif %}
+              </td>
+              <td>
+                <a class="btn" href="{{ example.review_url }}">בדיקה</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if page_count > 1 %}
+      <div class="spacer"></div>
+      <p>
+        עמוד {{ page }} מתוך {{ page_count }}
+        {% if page > 1 %}
+          <a class="btn" href="{% url 'archive-manage-entity-occurrence-group' group.group_id %}?page={{ page|add:'-1' }}">הקודם</a>
+        {% endif %}
+        {% if page < page_count %}
+          <a class="btn" href="{% url 'archive-manage-entity-occurrence-group' group.group_id %}?page={{ page|add:'1' }}">הבא</a>
+        {% endif %}
+      </p>
+    {% endif %}
+  </div>
+{% endblock %}
