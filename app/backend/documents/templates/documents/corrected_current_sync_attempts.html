@@ -22,6 +22,15 @@
       זוהי תצוגה מקדימה בלבד. שום דבר עדיין לא השתנה באתר.
     </div>
 
+    {% if messages %}
+      <div class="spacer-sm"></div>
+      {% for message in messages %}
+        <div class="alert{% if message.tags == 'error' %} alert-danger{% elif message.tags == 'warning' %} alert-warn{% elif message.tags == 'success' %} alert-ok{% endif %}">
+          {{ message }}
+        </div>
+      {% endfor %}
+    {% endif %}
+
     {% if show_transkribus_corrected_current_sync_enqueue_action %}
       <div class="spacer-sm"></div>
       <form
