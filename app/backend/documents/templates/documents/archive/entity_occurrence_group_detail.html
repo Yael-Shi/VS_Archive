@@ -12,8 +12,23 @@
     <p class="page-subtitle">
       {{ group.normalized_surface }} · {{ group.text_kind_label }} ·
       {{ group.candidate_count }} אזכורים · {{ group.archive_item_count }} פריטים.
-      אין כאן פעולת אישור. כל אזכור נבדק בנפרד.
     </p>
+    {% if messages %}
+      <div class="spacer"></div>
+      {% for message in messages %}
+        <div class="alert{% if message.tags == 'error' %} alert-danger{% elif message.tags == 'success' %} alert-ok{% endif %}">
+          {{ message }}
+        </div>
+      {% endfor %}
+    {% endif %}
+    {% if bulk_approve_blocked %}
+      <p>לא ניתן לאשר את הקבוצה בגלל סימון סיכון. יש לבדוק כל אזכור בנפרד.</p>
+    {% else %}
+      <p>האישור חל על כל האזכורים בקבוצה, לא רק על העמוד הזה.</p>
+      <p>
+        <a class="btn" href="{% url 'archive-manage-entity-occurrence-group-approve' group.group_id %}">אישור כל הקבוצה</a>
+      </p>
+    {% endif %}
     {% if group.type_label %}
       <p class="muted">{{ group.type_label }}</p>
     {% endif %}

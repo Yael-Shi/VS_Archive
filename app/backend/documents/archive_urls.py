@@ -176,6 +176,11 @@ urlpatterns = [
         name="archive-manage-entity-occurrence-group",
     ),
     path(
+        "manage/entity-occurrence-groups/<str:group_id>/approve/",
+        views.archive_manage_entity_occurrence_group_approve_page,
+        name="archive-manage-entity-occurrence-group-approve",
+    ),
+    path(
         "<int:item_id>/metadata-suggestions/new/",
         views.archive_metadata_suggestion_form,
         name="archive-metadata-suggestion-new",

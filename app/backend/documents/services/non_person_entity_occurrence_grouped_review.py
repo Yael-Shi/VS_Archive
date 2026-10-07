@@ -1,8 +1,11 @@
-"""Read-only groups of pending non-person occurrence candidates.
+"""Groups of pending non-person occurrence candidates.
 
-Detection and approval stay occurrence-level. This module does not approve,
-reject, reassign, or remove. It does not write proposals, candidates,
-matches, events, occurrences, registry rows, or the search index.
+Detection stays occurrence-level. Listing and detail are read-only.
+``approve_pending_occurrence_group`` is the only write here. It approves
+one confirmed pending group by calling ``approve_candidate`` for every
+member inside one transaction. It does not reject, reassign, or remove,
+and it does not write aliases, registry rows, review decisions, or the
+search index.
 
 A group is a presentation of ``PENDING`` candidates that share one entity,
 one normalized surface, one text kind, and one complete match-provenance
@@ -35,8 +38,10 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 
+from django.db import transaction
 from django.db.models import Prefetch
 from django.urls import reverse
 
@@ -54,6 +59,8 @@ from documents.services.non_person_entity_occurrence_review import (
     _SourceState,
     _context_parts,
     _item_title,
+    _lock_review_rows,
+    approve_candidate,
 )
 from documents.services.non_person_entity_occurrences import (
     SURFACE_V1,
@@ -115,6 +122,31 @@ _MEMBER_RISK_FLAGS = (
     MATCHED_TEXT_UNAVAILABLE,
     PRIOR_REVIEW_HISTORY,
 )
+
+BLOCKING_RISK_FLAGS = frozenset(
+    {
+        OCR_VARIANT,
+        SHORT_SURFACE,
+        MULTIPLE_MATCH_METHODS,
+        MULTIPLE_ALIAS_KINDS,
+        SOURCE_STALE,
+        CONTEXT_UNAVAILABLE,
+        PRIOR_REVIEW_HISTORY,
+    }
+)
+WARNING_RISK_FLAGS = frozenset(
+    {
+        MATCHED_TEXT_UNAVAILABLE,
+        MANY_ARCHIVE_ITEMS,
+    }
+)
+
+GROUP_APPROVE_SUCCESS_MESSAGE = "אושרו {n} אזכורים."
+GROUP_MEMBERSHIP_CHANGED_MESSAGE = "הקבוצה השתנתה מאז האישור. לא נשמר שום אזכור."
+GROUP_BLOCKED_MESSAGE = (
+    "לא ניתן לאשר את הקבוצה בגלל סימון סיכון. יש לבדוק כל אזכור בנפרד."
+)
+GROUP_WARNINGS_UNCONFIRMED_MESSAGE = "יש לאשר את אזהרות הסיכון לפני אישור הקבוצה."
 
 _RISK_FILTER_ANY = "any"
 _RISK_FILTER_NONE = "none"
@@ -203,6 +235,59 @@ class GroupedOccurrenceReviewPage:
 
 
 @dataclass(frozen=True)
+class OccurrenceGroupMemberRow:
+    """One pending member on the confirm page. No context window."""
+
+    candidate_id: int
+    item_id: int
+    item_title: str
+    item_url: str
+    review_url: str
+    occurrence_ordinal: int
+
+
+@dataclass(frozen=True)
+class OccurrenceGroupApprovePreview:
+    """Read-only confirmation for one pending group."""
+
+    group: OccurrenceReviewGroup
+    members: tuple[OccurrenceGroupMemberRow, ...]
+    blocking_flags: tuple[str, ...]
+    warning_flags: tuple[str, ...]
+
+    @property
+    def can_submit(self) -> bool:
+        return not self.blocking_flags
+
+
+@dataclass(frozen=True)
+class GroupBulkApproveResult:
+    """How many confirmed candidates this POST approved."""
+
+    approved_count: int
+
+
+class GroupBulkApproveError(Exception):
+    """Group approval refused. No write from this POST is kept."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
+class GroupMembershipChanged(GroupBulkApproveError):
+    """The confirmed pending set is not the current pending set."""
+
+
+class GroupBulkApproveBlocked(GroupBulkApproveError):
+    """A blocking risk flag is present."""
+
+
+class GroupWarningsUnconfirmed(GroupBulkApproveError):
+    """Warning flags require an explicit confirmation."""
+
+
+@dataclass(frozen=True)
 class _MemberSource:
     """Source verdict for one candidate. No context window."""
 
@@ -235,6 +320,41 @@ class _PreparedGroup:
     indexed: _BuiltGroup
     refs: tuple[_MemberRef, ...]
     risk_flags: tuple[str, ...]
+
+
+def occurrence_group_id_is_well_formed(group_id: str) -> bool:
+    """True for the 64-character lowercase hex id used by grouped review."""
+
+    cleaned = (group_id or "").strip()
+    return len(cleaned) == 64 and all(char in "0123456789abcdef" for char in cleaned)
+
+
+def blocking_flags_in(flags: Iterable[str]) -> tuple[str, ...]:
+    """Blocking flags, in display order. An unknown flag blocks too."""
+
+    present = set(flags)
+    known = tuple(
+        flag
+        for flag in RISK_FLAG_ORDER
+        if flag in present and flag in BLOCKING_RISK_FLAGS
+    )
+    unknown = tuple(
+        flag
+        for flag in flags
+        if flag not in BLOCKING_RISK_FLAGS and flag not in WARNING_RISK_FLAGS
+    )
+    return known + unknown
+
+
+def warning_flags_in(flags: Iterable[str]) -> tuple[str, ...]:
+    """Warning flags, in display order."""
+
+    present = set(flags)
+    return tuple(
+        flag
+        for flag in RISK_FLAG_ORDER
+        if flag in present and flag in WARNING_RISK_FLAGS
+    )
 
 
 def occurrence_group_id(key: OccurrenceGroupKey) -> str:
@@ -301,13 +421,7 @@ def staff_occurrence_review_group_detail(
     are limited to ``examples``.
     """
 
-    cleaned = (group_id or "").strip()
-    if len(cleaned) != 64 or any(char not in "0123456789abcdef" for char in cleaned):
-        return None
-    matched = next(
-        (row for row in _index_groups() if occurrence_group_id(row.key) == cleaned),
-        None,
-    )
+    matched = _built_group_for_id(group_id)
     if matched is None:
         return None
     cache = _AuthoritativeSourceCache()
@@ -331,6 +445,79 @@ def staff_occurrence_review_group_detail(
     )
 
 
+def staff_occurrence_group_approve_preview(
+    group_id: str,
+) -> OccurrenceGroupApprovePreview | None:
+    """Confirmation data for one pending group, or None. Reads only.
+
+    Members are the whole group, in the same order as the detail pages.
+    This does not build context windows.
+    """
+
+    matched = _built_group_for_id(group_id)
+    if matched is None:
+        return None
+    cache = _AuthoritativeSourceCache()
+    refs = _assess_members(matched.candidates, cache)
+    prepared = _PreparedGroup(
+        indexed=matched,
+        refs=refs,
+        risk_flags=_group_flags(matched.key, refs),
+    )
+    return _preview_from_prepared(prepared)
+
+
+def approve_pending_occurrence_group(
+    group_id: str,
+    expected_candidate_ids: tuple[int, ...] | list[int],
+    *,
+    actor,
+    note: str = "",
+    warnings_confirmed: bool = False,
+) -> GroupBulkApproveResult:
+    """Approve exactly the confirmed pending members, or keep nothing.
+
+    Membership is recomputed from current ``PENDING`` rows. The submitted
+    ids must be that set, with no duplicates. Those rows are then locked in
+    ascending candidate id through the single-candidate review lock. After
+    the locks, each row must still be pending, unresolved, and on the same
+    group key. Blocking flags refuse the group. Warning flags require
+    ``warnings_confirmed``. Each member is applied with ``approve_candidate``.
+    A review error or an already-applied result rolls back the whole POST.
+    A pending candidate that appears after this membership check is not
+    approved and is not a reason to lock other groups.
+    """
+
+    with transaction.atomic():
+        expected = _submitted_candidate_ids(expected_candidate_ids)
+        matched = _built_group_for_id(group_id)
+        if matched is None:
+            raise GroupMembershipChanged(GROUP_MEMBERSHIP_CHANGED_MESSAGE)
+        current_ids = tuple(sorted(candidate.pk for candidate in matched.candidates))
+        if current_ids != expected:
+            raise GroupMembershipChanged(GROUP_MEMBERSHIP_CHANGED_MESSAGE)
+        locked: list[NonPersonEntityOccurrenceCandidate] = []
+        for candidate_id in current_ids:
+            try:
+                _proposal, candidate, _occurrence = _lock_review_rows(candidate_id)
+            except NonPersonEntityOccurrenceCandidate.DoesNotExist as exc:
+                raise GroupMembershipChanged(GROUP_MEMBERSHIP_CHANGED_MESSAGE) from exc
+            locked.append(candidate)
+        _verify_locked_group(locked, matched.key, current_ids)
+        cache = _AuthoritativeSourceCache()
+        refs = _assess_members(tuple(locked), cache)
+        flags = _group_flags(matched.key, refs)
+        if blocking_flags_in(flags):
+            raise GroupBulkApproveBlocked(GROUP_BLOCKED_MESSAGE)
+        if warning_flags_in(flags) and not warnings_confirmed:
+            raise GroupWarningsUnconfirmed(GROUP_WARNINGS_UNCONFIRMED_MESSAGE)
+        for candidate_id in current_ids:
+            result = approve_candidate(candidate_id, actor=actor, note=note)
+            if not result.applied:
+                raise GroupMembershipChanged(GROUP_MEMBERSHIP_CHANGED_MESSAGE)
+        return GroupBulkApproveResult(approved_count=len(current_ids))
+
+
 def risk_filter_choices() -> tuple[tuple[str, str], ...]:
     choices = [
         ("", "הכול"),
@@ -348,6 +535,83 @@ def text_kind_filter_choices() -> tuple[tuple[str, str], ...]:
         for kind in ArchiveItemEntityOccurrence.TextKind.values
     )
     return tuple(choices)
+
+
+def _cleaned_group_id(group_id: str) -> str | None:
+    cleaned = (group_id or "").strip()
+    if not occurrence_group_id_is_well_formed(cleaned):
+        return None
+    return cleaned
+
+
+def _built_group_for_id(group_id: str) -> _BuiltGroup | None:
+    cleaned = _cleaned_group_id(group_id)
+    if cleaned is None:
+        return None
+    return next(
+        (row for row in _index_groups() if occurrence_group_id(row.key) == cleaned),
+        None,
+    )
+
+
+def _preview_from_prepared(prepared: _PreparedGroup) -> OccurrenceGroupApprovePreview:
+    return OccurrenceGroupApprovePreview(
+        group=_make_group(prepared, representative=(), outliers=()),
+        members=tuple(_member_row(ref) for ref in prepared.refs),
+        blocking_flags=blocking_flags_in(prepared.risk_flags),
+        warning_flags=warning_flags_in(prepared.risk_flags),
+    )
+
+
+def _member_row(ref: _MemberRef) -> OccurrenceGroupMemberRow:
+    candidate = ref.candidate
+    proposal = candidate.proposal
+    item = proposal.archive_item
+    return OccurrenceGroupMemberRow(
+        candidate_id=candidate.pk,
+        item_id=item.pk,
+        item_title=_item_title(item),
+        item_url=reverse("archive-detail", kwargs={"item_id": item.pk}),
+        review_url=reverse(
+            "archive-manage-entity-occurrence-proposal",
+            kwargs={"candidate_id": candidate.pk},
+        ),
+        occurrence_ordinal=proposal.occurrence_ordinal,
+    )
+
+
+def _submitted_candidate_ids(
+    candidate_ids: tuple[int, ...] | list[int],
+) -> tuple[int, ...]:
+    try:
+        values = tuple(candidate_ids)
+    except TypeError as exc:
+        raise GroupMembershipChanged(GROUP_MEMBERSHIP_CHANGED_MESSAGE) from exc
+    normalized: list[int] = []
+    for value in values:
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise GroupMembershipChanged(GROUP_MEMBERSHIP_CHANGED_MESSAGE)
+        normalized.append(value)
+    if len(normalized) != len(set(normalized)):
+        raise GroupMembershipChanged(GROUP_MEMBERSHIP_CHANGED_MESSAGE)
+    return tuple(sorted(normalized))
+
+
+def _verify_locked_group(
+    candidates: list[NonPersonEntityOccurrenceCandidate],
+    key: OccurrenceGroupKey,
+    expected_ids: tuple[int, ...],
+) -> None:
+    locked_ids = tuple(sorted(candidate.pk for candidate in candidates))
+    if locked_ids != expected_ids:
+        raise GroupMembershipChanged(GROUP_MEMBERSHIP_CHANGED_MESSAGE)
+    for candidate in candidates:
+        if candidate.status != NonPersonEntityOccurrenceCandidate.Status.PENDING:
+            raise GroupMembershipChanged(GROUP_MEMBERSHIP_CHANGED_MESSAGE)
+        if candidate.resolved_entity_id is not None:
+            raise GroupMembershipChanged(GROUP_MEMBERSHIP_CHANGED_MESSAGE)
+        if _group_key(candidate) != key:
+            raise GroupMembershipChanged(GROUP_MEMBERSHIP_CHANGED_MESSAGE)
 
 
 def _index_groups() -> list[_BuiltGroup]:

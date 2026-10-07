@@ -8382,7 +8382,7 @@ The detail route resolves one group id from pending keys. It does not build cont
 
 Risk flags, in stable order: `OCR_VARIANT` (an alias-kind snapshot is `OCR_VARIANT`); `SHORT_SURFACE` (normalized surface length at most 3); `MULTIPLE_MATCH_METHODS`; `MULTIPLE_ALIAS_KINDS` (non-empty alias kinds); `SOURCE_STALE`; `CONTEXT_UNAVAILABLE`; `MATCHED_TEXT_UNAVAILABLE` (stored `matched_text` is blank; a relocated window may still be shown); `PRIOR_REVIEW_HISTORY` (a review event other than `DETECT`); `MANY_ARCHIVE_ITEMS` (at least 5 distinct archive items). These flags are not a confidence score and do not mean a group is safe to approve. An ordinal gap left by boundary filtering is not itself a flag. Empty match provenance is not a flag; those candidates still group together.
 
-**Deferred:** bulk approval, bulk reject, and any write from this grouped view. A reviewer who wants to act uses the existing per-candidate review page.
+**Deferred:** bulk reject, bulk needs-research, bulk reassign, and bulk remove. Approve-group was added in the following entry. This entry's list and detail routes stay GET-only.
 
 ## Detector requires a recoverable original slice (2026-10-07)
 
@@ -8405,3 +8405,21 @@ Risk flags, in stable order: `OCR_VARIANT` (an alias-kind snapshot is `OCR_VARIA
 **Supersedes:** the statements in "Detector requires a recoverable original slice" that the shared locator is unchanged and that NFC-offset mapping stays deferred, and the Phase 3A sentence that source text which is not already NFC does not get a derived slice. Workbook dry-run and apply call the same locator. A SPLIT route whose only obstacle was canonical NFC elsewhere in the source is no longer `BLOCKED` when the reviewed slice round-trips. The detector rule for `occurrences is None` is unchanged. A cover that still cannot be proved still blocks that route.
 
 **Deferred:** any migration or rewrite of proposals already stored with a blank `matched_text`.
+
+## Grouped bulk approval of pending occurrence candidates (2026-10-07)
+
+**Decision:** Staff may approve one whole pending occurrence group. The route is `/archive/manage/entity-occurrence-groups/<group_id>/approve/` (`archive-manage-entity-occurrence-group-approve`). GET is the confirmation page and writes nothing. POST approves. The group list and group detail stay GET-only. There is no approve control on the list cards.
+
+**Supersedes:** the deferral of bulk approval in "Grouped pending occurrence review (2026-10-07)". Bulk reject, bulk needs-research, bulk reassign, and bulk remove stay deferred.
+
+**Current behavior:** `approve_pending_occurrence_group` in `documents/services/non_person_entity_occurrence_grouped_review.py` is the only grouped write. It calls `approve_candidate` once per confirmed member, in ascending candidate id, inside one outer `transaction.atomic()`. `approve_candidate` is unchanged. There is no second occurrence writer. A review error, or `applied=False`, rolls back every write from that POST. The POST either approves the whole confirmed set or keeps none of its writes.
+
+The confirmed set is the current `PENDING` membership of that group id at POST time. The submitted `candidate_id` values must be exactly that sorted set: no missing id, no extra id, and no duplicate. Those rows are locked with the existing review lock, proposal then candidate then occurrence, in ascending candidate id. Sibling provenance groups are not locked. After the locks, every row must still be `PENDING`, `resolved_entity` must still be null, and the group key must be unchanged. A candidate inserted after that membership check is not approved and stays `PENDING`. This POST does not take an advisory lock and does not change the detector.
+
+Blocking flags, using the existing flag calculations, refuse the group even when warning confirmation is posted: `OCR_VARIANT`, `SHORT_SURFACE`, `MULTIPLE_MATCH_METHODS`, `MULTIPLE_ALIAS_KINDS`, `SOURCE_STALE`, `CONTEXT_UNAVAILABLE`, and `PRIOR_REVIEW_HISTORY`. An unknown flag blocks too. `MATCHED_TEXT_UNAVAILABLE` and `MANY_ARCHIVE_ITEMS` warn. The confirm page requires `confirm_warnings` when a warning is present. A blocking flag is not overridden by that checkbox. This first version does not relax those rules.
+
+Each approved candidate gets the existing `APPROVE` event from `approve_candidate`, including the optional note passed through unchanged. There is no group event, stored group id, schema change, alias, new entity, `ReviewedNonPersonEntityDecision` write, or search-index write.
+
+The confirm page lists every member of the group, not only the current detail page, without building a context window per member. Detail links to it only when the group has no blocking flag, and the copy says the action covers the whole group. A blocked group explains that each occurrence must be reviewed on its own. Success, membership change, a blocking flag, a missing warning confirmation, and the existing single-review errors use the staff messages for those cases. The list, detail, and confirm pages render Django messages so those flashes are consumed there.
+
+**Deferred:** bulk reject, bulk needs-research, bulk reassign, and bulk remove. No partial group approval.
