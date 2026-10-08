@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from io import StringIO
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from documents.models import (
@@ -29,7 +32,9 @@ from documents.services.archive_item_presentation import (
     filter_archive_items_by_search_query,
 )
 from documents.services.archive_items import create_manual_text_archive_item
+from documents.services import non_person_entity_detector as detector
 from documents.services.non_person_entity_detector import (
+    NonPersonEntityCorpusRun,
     detect_non_person_entities_for_item,
     detect_non_person_entities_for_items,
 )
@@ -649,7 +654,8 @@ class DetectorCommandTests(TestCase):
 
         with self.assertRaisesMessage(
             CommandError,
-            "Pass at least one --item ID. This command does not scan the corpus.",
+            "Pass at least one --item ID, or pass --all. "
+            "This command does not scan the corpus unless --all is set.",
         ):
             call_command("detect_non_person_entities", stdout=StringIO())
 
@@ -681,11 +687,14 @@ class DetectorCommandTests(TestCase):
                 stdout=StringIO(),
             )
 
-    def test_no_corpus_option(self):
+    def test_all_and_item_are_rejected(self):
         item = _manual("ביקור קהיר")
         _entity("קהיר")
 
-        with self.assertRaises(CommandError):
+        with self.assertRaisesMessage(
+            CommandError,
+            "--all and --item cannot be used together.",
+        ):
             call_command(
                 "detect_non_person_entities",
                 "--item",
@@ -1068,3 +1077,647 @@ def _search_ids(term: str) -> list[int]:
         .order_by("id")
         .values_list("id", flat=True)
     )
+
+
+def _manual_pk(pk: int, body: str = "ביקור קהיר") -> ArchiveItem:
+    item = ArchiveItem.objects.create(
+        pk=pk,
+        title=f"item-{pk}",
+        item_type=ArchiveItem.ItemType.MANUAL_TEXT,
+        visibility=ArchiveItem.Visibility.PUBLIC,
+    )
+    ManualTextContent.objects.create(archive_item=item, body=body)
+    return item
+
+
+def _run_detect(*args: str) -> str:
+    out = StringIO()
+    call_command("detect_non_person_entities", *args, stdout=out)
+    return out.getvalue()
+
+
+def _assert_no_sql_writes(queries) -> None:
+    for query in queries:
+        sql = " ".join(query["sql"].split()).lstrip().upper()
+        for verb in ("INSERT", "UPDATE", "DELETE"):
+            if sql.startswith(verb):
+                raise AssertionError(query["sql"])
+
+
+def _boom_after_record(item_id: int):
+    original = detector._record_occurrence
+
+    def wrapped(**kwargs):
+        original(**kwargs)
+        if kwargs["item"].pk == item_id:
+            raise RuntimeError("boom after write")
+
+    return patch.object(detector, "_record_occurrence", wrapped)
+
+
+class DetectorCorpusCommandTests(TestCase):
+    def test_all_dry_run_has_no_write_statements(self):
+        item = _manual("ביקור קהיר")
+        _entity("קהיר")
+        proposal = NonPersonEntityOccurrenceProposal.objects.create(
+            archive_item=item,
+            text_kind=MANUAL,
+            source_text_sha256=source_text_sha256("ביקור קהיר"),
+            normalization_version="surface-v1",
+            normalized_surface="קהיר",
+            occurrence_ordinal=1,
+            matched_text="",
+        )
+        out = StringIO()
+
+        with CaptureQueriesContext(connection) as captured:
+            call_command("detect_non_person_entities", "--all", stdout=out)
+
+        text = out.getvalue()
+        _assert_no_sql_writes(captured.captured_queries)
+        self.assertIn("mode: dry-run", text)
+        self.assertIn("selection: corpus", text)
+        self.assertIn("scope: unbounded", text)
+        self.assertIn("new_proposals: 0", text)
+        self.assertIn("existing_proposals: 1", text)
+        self.assertIn("new_candidates: 1", text)
+        self.assertIn("new_detect_events: 1", text)
+        self.assertEqual(NonPersonEntityOccurrenceProposal.objects.count(), 1)
+        self.assertEqual(NonPersonEntityOccurrenceCandidate.objects.count(), 0)
+        self.assertEqual(NonPersonEntityOccurrenceReviewEvent.objects.count(), 0)
+        proposal.refresh_from_db()
+        self.assertEqual(proposal.matched_text, "")
+
+    def test_corpus_options_without_all_are_rejected_before_detection(self):
+        _manual("ביקור קהיר")
+        cases = (
+            (("--text-kind", "MANUAL_TEXT"), "--text-kind"),
+            (("--min-id", "4"), "--min-id"),
+            (("--max-id", "4"), "--max-id"),
+            (("--start-after", "4"), "--start-after"),
+            (("--limit", "4"), "--limit"),
+        )
+        for args, flag in cases:
+            with self.subTest(args=args):
+                with patch(
+                    "documents.management.commands.detect_non_person_entities."
+                    "NonPersonEntityCorpusRun",
+                    side_effect=AssertionError("detection started"),
+                ):
+                    with self.assertRaisesMessage(CommandError, flag):
+                        call_command(
+                            "detect_non_person_entities",
+                            *args,
+                            stdout=StringIO(),
+                        )
+                self.assertEqual(NonPersonEntityOccurrenceProposal.objects.count(), 0)
+
+    def test_invalid_ids_and_range_are_rejected_before_detection(self):
+        _manual("ביקור קהיר")
+        cases = (
+            (("--all", "--min-id", "0"), "Invalid --min-id: 0"),
+            (("--all", "--max-id", "-1"), "Invalid --max-id: -1"),
+            (("--all", "--start-after", "0"), "Invalid --start-after: 0"),
+            (("--all", "--limit", "0"), "Invalid --limit: 0"),
+            (
+                ("--all", "--min-id", "8", "--max-id", "3"),
+                "Invalid id range: --min-id 8 is greater than --max-id 3.",
+            ),
+            (
+                ("--all", "--start-after", "2", "--min-id", "3"),
+                "--start-after and --min-id cannot be used together.",
+            ),
+        )
+        for args, message in cases:
+            with self.subTest(args=args):
+                with patch(
+                    "documents.management.commands.detect_non_person_entities."
+                    "NonPersonEntityCorpusRun",
+                    side_effect=AssertionError("detection started"),
+                ):
+                    with self.assertRaisesMessage(CommandError, message):
+                        call_command(
+                            "detect_non_person_entities",
+                            *args,
+                            stdout=StringIO(),
+                        )
+                self.assertEqual(NonPersonEntityOccurrenceProposal.objects.count(), 0)
+
+    def test_text_kind_selects_one_source_and_mixed_items_are_scanned_once(self):
+        manual = _manual("ביקור קהיר")
+        ocr = _ocr(
+            language="he",
+            source_text="other",
+            hebrew_text="ביקור קהיר",
+        )
+        _entity("קהיר")
+
+        manual_out = _run_detect("--all", "--text-kind", "MANUAL_TEXT", "--apply")
+        self.assertEqual(
+            list(
+                NonPersonEntityOccurrenceProposal.objects.values_list(
+                    "archive_item_id",
+                    "text_kind",
+                )
+            ),
+            [(manual.pk, MANUAL)],
+        )
+        self.assertIn("manual_sources_scanned: 1", manual_out)
+        self.assertIn("ocr_sources_scanned: 0", manual_out)
+        NonPersonEntityOccurrenceProposal.objects.all().delete()
+
+        ocr_out = _run_detect("--all", "--text-kind", "OCR_TRANSCRIPTION", "--apply")
+        self.assertEqual(
+            list(
+                NonPersonEntityOccurrenceProposal.objects.values_list(
+                    "archive_item_id",
+                    "text_kind",
+                )
+            ),
+            [(ocr.pk, OCR)],
+        )
+        self.assertIn("ocr_sources_scanned: 1", ocr_out)
+        self.assertIn("manual_sources_scanned: 0", ocr_out)
+        NonPersonEntityOccurrenceProposal.objects.all().delete()
+
+        mixed = _run_detect("--all", "--apply")
+        rows = list(
+            NonPersonEntityOccurrenceProposal.objects.order_by("archive_item_id")
+        )
+        self.assertEqual(
+            [(row.archive_item_id, row.text_kind) for row in rows],
+            [(manual.pk, MANUAL), (ocr.pk, OCR)],
+        )
+        self.assertIn("items_examined: 2", mixed)
+        self.assertIn("manual_sources_scanned: 1", mixed)
+        self.assertIn("ocr_sources_scanned: 1", mixed)
+        self.assertEqual(
+            NonPersonEntityOccurrenceCandidate.objects.get(
+                proposal__archive_item=manual
+            ).status,
+            PENDING,
+        )
+
+    def test_unsupported_and_relationless_items_are_excluded(self):
+        ArchiveItem.objects.create(
+            title="קהיר",
+            item_type=ArchiveItem.ItemType.PHOTO,
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        ArchiveItem.objects.create(
+            title="קהיר",
+            item_type=ArchiveItem.ItemType.VIDEO,
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        ArchiveItem.objects.create(
+            title="בלי גוף",
+            item_type=ArchiveItem.ItemType.MANUAL_TEXT,
+            visibility=ArchiveItem.Visibility.PRIVATE,
+        )
+        ArchiveItem.objects.create(
+            title="בלי מסמך",
+            item_type=ArchiveItem.ItemType.OCR_DOCUMENT,
+            visibility=ArchiveItem.Visibility.PRIVATE,
+        )
+        kept = _manual("ביקור קהיר")
+        _entity("קהיר")
+
+        text = _run_detect("--all", "--apply")
+
+        self.assertIn("excluded_photo: 1", text)
+        self.assertIn("excluded_video: 1", text)
+        self.assertIn("excluded_manual_without_body: 1", text)
+        self.assertIn("excluded_ocr_without_document: 1", text)
+        self.assertIn("items_examined: 1", text)
+        self.assertEqual(
+            list(
+                NonPersonEntityOccurrenceProposal.objects.values_list(
+                    "archive_item_id",
+                    flat=True,
+                )
+            ),
+            [kept.pk],
+        )
+
+    def test_missing_displayable_text_counts_toward_limit(self):
+        _ocr(language="en", source_text=None, hebrew_text=None)
+        first = _manual("ביקור קהיר")
+        _manual("ביקור קהיר")
+        _entity("קהיר")
+
+        capped = _run_detect("--all", "--limit", "1", "--apply")
+
+        self.assertIn("scope: bounded", capped)
+        self.assertIn("items_examined: 1", capped)
+        self.assertIn("items_missing_authoritative_text: 1", capped)
+        self.assertIn("ocr_sources_scanned: 0", capped)
+        self.assertEqual(NonPersonEntityOccurrenceProposal.objects.count(), 0)
+
+        wider = _run_detect("--all", "--limit", "2", "--apply")
+        self.assertEqual(
+            list(
+                NonPersonEntityOccurrenceProposal.objects.values_list(
+                    "archive_item_id",
+                    flat=True,
+                )
+            ),
+            [first.pk],
+        )
+        self.assertIn("items_examined: 2", wider)
+        self.assertIn("items_missing_authoritative_text: 1", wider)
+        self.assertIn("manual_sources_scanned: 1", wider)
+
+    def test_pk_order_limit_and_inclusive_exclusive_bounds(self):
+        high = _manual_pk(91003)
+        low = _manual_pk(91001)
+        mid = _manual_pk(91002)
+        _entity("קהיר")
+
+        limited = _run_detect("--all", "--limit", "2", "--apply")
+        self.assertEqual(
+            set(
+                NonPersonEntityOccurrenceProposal.objects.values_list(
+                    "archive_item_id",
+                    flat=True,
+                )
+            ),
+            {low.pk, mid.pk},
+        )
+        self.assertNotIn(str(high.pk), limited)
+        NonPersonEntityOccurrenceProposal.objects.all().delete()
+
+        bounded = _run_detect(
+            "--all", "--min-id", "91002", "--max-id", "91003", "--apply"
+        )
+        self.assertIn("scope: bounded", bounded)
+        self.assertIn("min_id: 91002", bounded)
+        self.assertIn("max_id: 91003", bounded)
+        self.assertEqual(
+            set(
+                NonPersonEntityOccurrenceProposal.objects.values_list(
+                    "archive_item_id",
+                    flat=True,
+                )
+            ),
+            {mid.pk, high.pk},
+        )
+        NonPersonEntityOccurrenceProposal.objects.all().delete()
+
+        resumed = _run_detect("--all", "--start-after", "91002", "--apply")
+        self.assertEqual(
+            list(
+                NonPersonEntityOccurrenceProposal.objects.values_list(
+                    "archive_item_id",
+                    flat=True,
+                )
+            ),
+            [high.pk],
+        )
+        self.assertIn("start_after: 91002", resumed)
+
+    def test_apply_writes_proposal_side_rows_only_and_rerun_is_idempotent(self):
+        item = create_manual_text_archive_item(
+            title="יומן",
+            body="ביקור קהיר",
+            visibility=ArchiveItem.Visibility.PUBLIC,
+        )
+        _entity("קהיר", display_name="אלקאהרה")
+        entity_count = NonPersonEntity.objects.count()
+        alias_count = NonPersonEntityAlias.objects.count()
+        index = ArchiveItemSearchIndex.objects.get(archive_item=item)
+        before_index = (
+            index.title_text,
+            index.metadata_text,
+            index.body_text,
+            index.hebrew_translation_text,
+            index.updated_at,
+        )
+
+        first = _run_detect("--all", "--apply")
+        self.assertIn("mode: apply", first)
+        self.assertIn("new_proposals: 1", first)
+        self.assertIn("new_detect_events: 1", first)
+        self.assertEqual(NonPersonEntityOccurrenceProposal.objects.count(), 1)
+        self.assertEqual(NonPersonEntityOccurrenceCandidate.objects.count(), 1)
+        self.assertEqual(NonPersonEntityOccurrenceCandidateMatch.objects.count(), 1)
+        self.assertEqual(
+            NonPersonEntityOccurrenceReviewEvent.objects.get().action,
+            DETECT,
+        )
+        self.assertEqual(ArchiveItemEntityOccurrence.objects.count(), 0)
+        self.assertEqual(ReviewedNonPersonEntityDecision.objects.count(), 0)
+        self.assertEqual(NonPersonEntity.objects.count(), entity_count)
+        self.assertEqual(NonPersonEntityAlias.objects.count(), alias_count)
+        self.assertEqual(item.entity_occurrences.count(), 0)
+        index.refresh_from_db()
+        self.assertEqual(
+            (
+                index.title_text,
+                index.metadata_text,
+                index.body_text,
+                index.hebrew_translation_text,
+                index.updated_at,
+            ),
+            before_index,
+        )
+
+        second = _run_detect("--all", "--apply")
+        self.assertIn("new_proposals: 0", second)
+        self.assertIn("existing_proposals: 1", second)
+        self.assertIn("new_candidates: 0", second)
+        self.assertIn("existing_candidates: 1", second)
+        self.assertIn("new_match_rows: 0", second)
+        self.assertIn("existing_match_rows: 1", second)
+        self.assertIn("new_detect_events: 0", second)
+        self.assertEqual(NonPersonEntityOccurrenceProposal.objects.count(), 1)
+        self.assertEqual(NonPersonEntityOccurrenceReviewEvent.objects.count(), 1)
+
+    def test_rerun_preserves_rejected_candidate(self):
+        _manual("ביקור קהיר")
+        _entity("קהיר")
+        _run_detect("--all", "--apply")
+        candidate = NonPersonEntityOccurrenceCandidate.objects.get()
+        candidate.status = REJECTED
+        candidate.save(update_fields=["status", "updated_at"])
+
+        text = _run_detect("--all", "--apply")
+
+        candidate.refresh_from_db()
+        self.assertEqual(candidate.status, REJECTED)
+        self.assertIsNone(candidate.resolved_entity_id)
+        self.assertIn("suppressed_candidates: 1", text)
+        self.assertIn("new_candidates: 0", text)
+        self.assertIn("new_detect_events: 0", text)
+        self.assertEqual(NonPersonEntityOccurrenceCandidate.objects.count(), 1)
+        self.assertEqual(NonPersonEntityOccurrenceReviewEvent.objects.count(), 1)
+
+    def test_changed_source_sha_adds_a_proposal_and_keeps_the_old_one(self):
+        item = _manual("ביקור קהיר")
+        _entity("קהיר")
+        _run_detect("--all", "--apply")
+        original = NonPersonEntityOccurrenceProposal.objects.get()
+        item.manual_text_content.body = "ביקור קהיר מאוחר"
+        item.manual_text_content.save(update_fields=["body", "updated_at"])
+
+        _run_detect("--all", "--apply")
+
+        rows = list(NonPersonEntityOccurrenceProposal.objects.order_by("pk"))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0].pk, original.pk)
+        self.assertEqual(rows[0].source_text_sha256, original.source_text_sha256)
+        self.assertNotEqual(rows[1].source_text_sha256, original.source_text_sha256)
+
+    def test_item_failure_isolates_rollback_and_still_fails_the_command(self):
+        first = _manual("ביקור קהיר")
+        failed = _manual("ביקור קהיר")
+        third = _manual("ביקור קהיר")
+        _entity("קהיר")
+
+        out = StringIO()
+        with _boom_after_record(failed.pk):
+            with self.assertRaisesMessage(
+                CommandError,
+                "Corpus detection finished with item failures.",
+            ):
+                call_command(
+                    "detect_non_person_entities",
+                    "--all",
+                    "--apply",
+                    stdout=out,
+                )
+
+        text = out.getvalue()
+        self.assertIn("errors: 1", text)
+        self.assertIn(
+            f"failure: item_id={failed.pk} error=RuntimeError message=boom after write",
+            text,
+        )
+        self.assertEqual(
+            set(
+                NonPersonEntityOccurrenceProposal.objects.values_list(
+                    "archive_item_id",
+                    flat=True,
+                )
+            ),
+            {first.pk, third.pk},
+        )
+        self.assertFalse(
+            NonPersonEntityOccurrenceProposal.objects.filter(
+                archive_item=failed
+            ).exists()
+        )
+
+    def test_resume_cursor_stays_before_the_first_failure(self):
+        first = _manual_pk(92001)
+        failed = _manual_pk(92002)
+        later = _manual_pk(92003)
+        _entity("קהיר")
+        out = StringIO()
+
+        with patch(
+            "documents.management.commands.detect_non_person_entities.CORPUS_CHUNK_SIZE",
+            1,
+        ):
+            with _boom_after_record(failed.pk):
+                with self.assertRaises(CommandError):
+                    call_command(
+                        "detect_non_person_entities",
+                        "--all",
+                        "--apply",
+                        stdout=out,
+                    )
+
+        text = out.getvalue()
+        progress = [line for line in text.splitlines() if line.startswith("progress:")]
+        self.assertEqual(len(progress), 3)
+        for line in progress:
+            self.assertIn(f"last_completed_item_id={first.pk}", line)
+            self.assertNotIn(f"last_completed_item_id={later.pk}", line)
+            self.assertNotIn(f"last_completed_item_id={failed.pk}", line)
+        self.assertIn(f"last_completed_item_id: {first.pk}", text)
+        self.assertNotIn(f"last_completed_item_id: {later.pk}", text)
+        failure = (
+            f"failure: item_id={failed.pk} error=RuntimeError message=boom after write"
+        )
+        lines = text.splitlines()
+        failure_at = [index for index, line in enumerate(lines) if line == failure]
+        summary_at = lines.index("items_scanned: 2")
+        repeated_after = lines.index("items_examined: 3")
+        failed_progress = (
+            f"progress: last_completed_item_id={first.pk} "
+            "examined=2 manual_scanned=1 ocr_scanned=0 "
+            "missing_text=0 failures=1"
+        )
+        self.assertEqual(len(failure_at), 2)
+        self.assertLess(failure_at[0], summary_at)
+        self.assertGreater(failure_at[1], repeated_after)
+        self.assertLess(failure_at[0], lines.index(failed_progress))
+
+        rerun = _run_detect("--all", "--start-after", str(first.pk), "--apply")
+        self.assertEqual(
+            set(
+                NonPersonEntityOccurrenceProposal.objects.values_list(
+                    "archive_item_id",
+                    flat=True,
+                )
+            ),
+            {first.pk, failed.pk, later.pk},
+        )
+        self.assertEqual(
+            NonPersonEntityOccurrenceProposal.objects.filter(
+                archive_item=later
+            ).count(),
+            1,
+        )
+        self.assertIn("existing_proposals: 1", rerun)
+        self.assertIn("new_proposals: 1", rerun)
+
+    def test_dry_run_resume_cursor_matches_apply_and_writes_nothing(self):
+        first = _manual_pk(93001)
+        failed = _manual_pk(93002)
+        later = _manual_pk(93003)
+        _entity("קהיר")
+        out = StringIO()
+
+        with _boom_after_record(failed.pk):
+            with CaptureQueriesContext(connection) as captured:
+                with self.assertRaises(CommandError):
+                    call_command(
+                        "detect_non_person_entities",
+                        "--all",
+                        stdout=out,
+                    )
+
+        _assert_no_sql_writes(captured.captured_queries)
+        self.assertIn(f"last_completed_item_id: {first.pk}", out.getvalue())
+        self.assertNotIn(f"last_completed_item_id: {later.pk}", out.getvalue())
+        self.assertEqual(NonPersonEntityOccurrenceProposal.objects.count(), 0)
+        self.assertEqual(NonPersonEntityOccurrenceReviewEvent.objects.count(), 0)
+
+    def test_first_item_failure_leaves_the_resume_cursor_empty(self):
+        failed = _manual("ביקור קהיר")
+        _manual("ביקור קהיר")
+        _entity("קהיר")
+        out = StringIO()
+
+        with _boom_after_record(failed.pk):
+            with self.assertRaises(CommandError):
+                call_command(
+                    "detect_non_person_entities",
+                    "--all",
+                    "--apply",
+                    stdout=out,
+                )
+
+        self.assertIn("last_completed_item_id: -", out.getvalue())
+        self.assertEqual(NonPersonEntityOccurrenceProposal.objects.count(), 1)
+
+    def test_explicit_multi_item_apply_rolls_back_the_whole_call(self):
+        first = _manual("ביקור קהיר")
+        second = _manual("ביקור קהיר")
+        _entity("קהיר")
+
+        with _boom_after_record(second.pk):
+            with self.assertRaisesMessage(RuntimeError, "boom after write"):
+                call_command(
+                    "detect_non_person_entities",
+                    "--item",
+                    str(first.pk),
+                    "--item",
+                    str(second.pk),
+                    "--apply",
+                    stdout=StringIO(),
+                )
+
+        self.assertEqual(NonPersonEntityOccurrenceProposal.objects.count(), 0)
+        self.assertEqual(NonPersonEntityOccurrenceReviewEvent.objects.count(), 0)
+
+    def test_keyboard_interrupt_and_system_exit_propagate(self):
+        _manual("ביקור קהיר")
+        _entity("קהיר")
+        command_run = (
+            "documents.management.commands.detect_non_person_entities."
+            "NonPersonEntityCorpusRun.process_item"
+        )
+
+        out = StringIO()
+        with patch(command_run, side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                call_command("detect_non_person_entities", "--all", stdout=out)
+        self.assertIn("scope: unbounded", out.getvalue())
+        self.assertIn("last_completed_item_id: -", out.getvalue())
+        self.assertNotIn("failure:", out.getvalue())
+
+        with patch(command_run, side_effect=SystemExit(3)):
+            with self.assertRaises(SystemExit) as raised:
+                call_command(
+                    "detect_non_person_entities",
+                    "--all",
+                    stdout=StringIO(),
+                )
+        self.assertEqual(raised.exception.code, 3)
+
+    def test_service_cursor_name_freezes_after_the_first_failure(self):
+        first = _manual("ביקור קהיר")
+        failed = _manual("ביקור קהיר")
+        later = _manual("ביקור קהיר")
+        _entity("קהיר")
+        run = NonPersonEntityCorpusRun(apply=True)
+
+        with _boom_after_record(failed.pk):
+            run.process_item(first)
+            run.process_item(failed)
+            run.process_item(later)
+
+        self.assertIsNone(run._on_item_failure)
+        self.assertEqual(run.last_contiguous_completed_item_id, first.pk)
+        self.assertEqual(run.failure_count, 1)
+        self.assertEqual(run.stored_failures[0], run.build_report().errors[0])
+        self.assertEqual(
+            set(
+                NonPersonEntityOccurrenceProposal.objects.values_list(
+                    "archive_item_id",
+                    flat=True,
+                )
+            ),
+            {first.pk, later.pk},
+        )
+
+    def test_stored_failure_lines_are_capped_and_messages_are_single_line(self):
+        reported: list[str] = []
+        run = NonPersonEntityCorpusRun(
+            apply=False,
+            on_item_failure=reported.append,
+        )
+        noisy = RuntimeError("line one\nline two " + ("x" * 400))
+
+        for item_id in range(1, 202):
+            run._record_failure(ArchiveItem(pk=item_id), noisy)
+
+        report = run.build_report()
+        message = " ".join(str(noisy).split())[:300]
+        self.assertEqual(report.failure_count, 201)
+        self.assertEqual(report.reported_error_count, 201)
+        self.assertEqual(len(report.errors), 200)
+        self.assertTrue(report.failures_truncated)
+        self.assertEqual(len(reported), 201)
+        self.assertEqual(list(report.errors), reported[:200])
+        self.assertEqual(len(message), 300)
+        self.assertNotIn("\n", report.errors[0])
+        self.assertIn(f"message={message}", report.errors[0])
+        self.assertNotIn(message + "x", report.errors[0])
+        self.assertTrue(reported[200].startswith("failure: item_id=201 "))
+
+    def test_unbounded_scope_is_printed_before_registry_load(self):
+        out = StringIO()
+        with patch(
+            "documents.management.commands.detect_non_person_entities."
+            "NonPersonEntityCorpusRun",
+            side_effect=RuntimeError("stop before scan"),
+        ):
+            with self.assertRaisesMessage(RuntimeError, "stop before scan"):
+                call_command("detect_non_person_entities", "--all", stdout=out)
+
+        text = out.getvalue()
+        self.assertIn("scope: unbounded\n", text)
+        self.assertNotIn("items_examined:", text)
