@@ -1,5 +1,19 @@
 # VS-Archive Decision Log
 
+## Non-person overlap cleanup command (2026-10-08)
+
+**Decision:** Pending contained-occurrence candidates stored before overlap suppression are cleaned up only by `cleanup_non_person_overlap_candidates`. The command is separate from the detector. It does not change detector semantics, the public locator, grouped review, schema, proposal identity, or source SHA.
+
+**Scope:** Repeated `--item` only. There is no `--all`. Dry-run is the default and writes nothing. `--apply` requires `--actor-id` for a user who passes `is_document_admin` (staff or superuser), the same gate as archive management pages. An ordinary user is refused before cleanup runs.
+
+**Eligibility:** A proposal is cleaned up only when every condition holds. The stored SHA matches the current authoritative text. `normalization_version` is `surface-v1`. The stored surface and ordinal are still a current accepted hit. That hit is strictly contained by a longer accepted hit under the current overlap predicate (`_hit_is_strictly_contained` on current accepted hits). There is at least one candidate and every candidate is `PENDING`. No `ArchiveItemEntityOccurrence` uses the same six-field identity. Every candidate has a `DETECT` event on that same proposal. A `DETECT` row for the candidate on a different proposal is not provenance. The first failed condition skips the whole proposal. There is no partial cleanup of a proposal. `APPROVED`, `REJECTED`, `NEEDS_RESEARCH`, and `REMOVED` are left as stored. Stale sources are left as stored. Same-surface ambiguity, partial overlap, equal original endpoints, and a Hebrew prefix without a longer accepted hit are not eligible.
+
+**Apply:** One transaction per proposal. The command locks that proposal and its candidates, re-reads the authoritative text, and revalidates every condition. Drift skips the proposal. Each eligible candidate is rejected through `reject_candidate` with the note `Rejected by overlap-cleanup: occurrence is strictly contained by a longer accepted registry surface.` A second apply finds those candidates no longer `PENDING` and does not append another `REJECT`. Proposal, candidate, match, and event rows are not deleted. The command does not create or delete `ArchiveItemEntityOccurrence` rows.
+
+**Deferred:** Corpus-wide `--all`. Cleanup by review group. Any cleanup of stale-source proposals.
+
+**Tests:** `documents/test_non_person_entity_overlap_cleanup.py`.
+
 ## Non-person cross-surface overlap suppression (2026-10-08)
 
 **Decision:** After a scanned body has been collected, the detector does not propose a shorter accepted hit when its normalized span is strictly inside a longer accepted hit of a different surface. Same-surface ambiguity is unchanged. This does not change the locator.
@@ -8,7 +22,7 @@
 
 **Ordinals:** Survivors keep the locator ordinal. A suppressed middle hit leaves a gap. Token boundaries, including Hebrew prefixes, are unchanged. `נסע לארץ ישראל` still does not accept `ארץ ישראל`, because the attached ל is a letter.
 
-**Already stored rows:** Detection does not delete, reject, or rewrite an existing proposal. A later apply simply does not emit the contained identity. Cleanup of old pending contained hits is a separate dry-run, then `reject_candidate`, and is not part of this change. Grouped review is unchanged.
+**Already stored rows:** Detection does not delete, reject, or rewrite an existing proposal. A later apply simply does not emit the contained identity. Cleanup of old pending contained hits is a separate dry-run, then `reject_candidate`, and is not part of this change. That cleanup is `cleanup_non_person_overlap_candidates`; see "Non-person overlap cleanup command (2026-10-08)". Grouped review is unchanged.
 
 **Unchanged:** `surface-v1`, one span-normalization per scanned body, `locate_surface_occurrences`, source SHA, proposal identity, candidate identity, review, dry-run and apply transactions, CLI, and schema. No migration.
 
