@@ -1,5 +1,23 @@
 # VS-Archive Decision Log
 
+## Non-person corpus detection (2026-10-07)
+
+**Decision:** `detect_non_person_entities --all` scans the supported text corpus. It is explicit, proposal-only, and dry-run unless `--apply` is set. Repeated `--item` stays a separate explicit list and still commits as one transaction. There is no scheduler, save hook, approval, or checkpoint table.
+
+**Selection:** `--all` examines `MANUAL_TEXT` items that have `ManualTextContent` and `OCR_DOCUMENT` items that have a `Document`, in `ArchiveItem.pk` order. `--text-kind` keeps one of those arms. `--min-id` and `--max-id` are inclusive. `--start-after` is exclusive and cannot be combined with `--min-id`. `--limit` caps examined items after those bounds. PHOTO, VIDEO, manual items without a body row, and OCR items without a document are not examined. Each selected item is processed once. The two text kinds stay mutually exclusive per item because `item_type` is a single choice.
+
+**Execution:** The registry surface index loads once. Matching still goes through the existing per-item detector, including whole-token filtering and locator ordinals. Corpus `--apply` commits one archive item per transaction. An ordinary item failure rolls back that item only, then the run continues. The command exits non-zero after the summary when any item failed. `KeyboardInterrupt` and `SystemExit` are not caught as item failures. Corpus dry-run performs no inserts, updates, or deletes, including no `DETECT` event and no `matched_text` fill.
+
+**Resume cursor:** Printed `last_completed_item_id` is the safe contiguous prefix, not the numerically latest success. It advances after each successful selected item until the first failure, then stays there for the rest of the run. `--start-after` that value includes the failed item again. Later items that already succeeded may be seen again; proposal, candidate, and match identities make that idempotent. If the first selected item fails, the printed cursor is `-`. Dry-run uses the same cursor.
+
+**Reporting:** Corpus output adds selection, scope, bounds, excluded type counts, examined items, manual and OCR sources actually scanned, items missing authoritative text, and the resume cursor. Each ordinary item failure is printed once when that item fails, then repeated in the final failure section. That section keeps at most 200 lines. The failure count still includes every failure, and `failures_truncated` is set when lines were dropped from the repeated section. `text_sources_skipped` remains the detector's structural counter and is not the operator source count. Unbounded `--all` (no `--max-id` and no `--limit`) prints `scope: unbounded` before the scan. There is no confirmation prompt.
+
+**Unchanged:** source SHA, `surface-v1`, token boundaries, ordinals, review, grouped review, public pages, occurrences, registry rows, aliases, and the search index. No migration.
+
+**Supersedes:** the batch-detector statement that there is no `--all` and no corpus scan, in "Non-person occurrence batch detector (2026-10-06)". Explicit `--item` behavior from that entry otherwise remains.
+
+**Tests:** `documents/test_non_person_entity_detector.py`.
+
 ## Canonical NFC slice recovery for non-person occurrences (2026-10-07)
 
 **Decision:** `locate_surface_occurrences` may map a canonical NFC change back to the original slice when that slice is proved. Match discovery is unchanged: `normalize_surface_v1`, then non-overlapping `str.find`. Ordinals stay in that find order. `surface-v1` is unchanged.

@@ -13,12 +13,21 @@ proposals are left in place.
 One ``DETECT`` event is appended only when apply mode inserts a candidate.
 Replay of that candidate appends nothing, including when a later registry
 name adds another match row.
+
+``NonPersonEntityCorpusRun`` is the corpus entry point. It loads the
+registry once and reuses ``_detect`` for one archive item at a time.
+Apply mode commits that item alone. ``last_contiguous_completed_item_id``
+is the safe resume cursor: the highest id in the uninterrupted successful
+prefix. The first item failure freezes it, including when later items
+succeed. Callers print that value as ``last_completed_item_id``. An optional
+``on_item_failure`` callback receives each ordinary failure line once.
+The service does not write to stdout.
 """
 
 from __future__ import annotations
 
 import unicodedata
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 
 from django.db import transaction
@@ -87,10 +96,25 @@ class NonPersonEntityDetectionReport:
     ambiguous_occurrences: int
     new_detect_events: int
     errors: tuple[str, ...] = ()
+    # None uses len(errors). Corpus runs set the full failure total when the
+    # stored error lines are capped.
+    failure_count: int | None = None
+    items_examined: int = 0
+    manual_sources_scanned: int = 0
+    ocr_sources_scanned: int = 0
+    items_missing_authoritative_text: int = 0
+    last_contiguous_completed_item_id: int | None = None
+    failures_truncated: bool = False
 
     @property
     def mode(self) -> str:
         return "apply" if self.apply else "dry-run"
+
+    @property
+    def reported_error_count(self) -> int:
+        if self.failure_count is None:
+            return len(self.errors)
+        return self.failure_count
 
 
 @dataclass
@@ -155,7 +179,7 @@ def format_detection_report(report: NonPersonEntityDetectionReport) -> str:
         f"existing_match_rows: {report.existing_match_rows}",
         f"ambiguous_occurrences: {report.ambiguous_occurrences}",
         f"new_detect_events: {report.new_detect_events}",
-        f"errors: {len(report.errors)}",
+        f"errors: {report.reported_error_count}",
     ]
     return "\n".join(lines) + "\n"
 
@@ -526,3 +550,192 @@ def _insert_match(
         alias_kind=reason.alias_kind,
     )
     ledger.matches.add((candidate.pk, reason.method, reason.matched_value))
+
+
+_MAX_STORED_FAILURES = 200
+_MAX_FAILURE_MESSAGE_LENGTH = 300
+
+
+class CorpusItemDetectionError(Exception):
+    """One selected archive item cannot be accepted as a corpus result."""
+
+
+class NonPersonEntityCorpusRun:
+    """Corpus detection with one registry load and per-item apply commits.
+
+    ``last_contiguous_completed_item_id`` advances only through the
+    successful prefix. The first ordinary item failure freezes it. Later
+    successes stay committed, or counted in dry-run, and do not move the
+    cursor. A rerun with ``--start-after`` that id includes the failed item.
+
+    ``on_item_failure``, when set, is called once per ordinary item failure
+    with the same line stored for the final summary. Failures past the
+    stored cap are still reported and are not stored. KeyboardInterrupt
+    and SystemExit do not call it. Omitting the callback leaves the run
+    independent of any output stream.
+    """
+
+    def __init__(
+        self,
+        *,
+        apply: bool,
+        on_item_failure: Callable[[str], None] | None = None,
+    ) -> None:
+        self.apply = apply
+        self._on_item_failure = on_item_failure
+        self.surfaces = _load_surface_index()
+        self.counts = _Counts()
+        self.items_examined = 0
+        self.manual_sources_scanned = 0
+        self.ocr_sources_scanned = 0
+        self.items_missing_authoritative_text = 0
+        self.failure_count = 0
+        self.failures_truncated = False
+        self.stored_failures: list[str] = []
+        self.last_contiguous_completed_item_id: int | None = None
+        self._cursor_frozen = False
+
+    def process_item(self, item: ArchiveItem) -> None:
+        """Detect one item. An ordinary failure does not stop the run."""
+
+        self.items_examined += 1
+        try:
+            if self.apply:
+                with transaction.atomic():
+                    report, bucket = self._detect_checked(item)
+            else:
+                report, bucket = self._detect_checked(item)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            self._record_failure(item, exc)
+            return
+        self._accept(item, report, bucket)
+
+    def progress_line(self) -> str:
+        """One cumulative progress line. The cursor is the frozen prefix."""
+
+        return (
+            "progress: "
+            f"last_completed_item_id={_cursor_text(self.last_contiguous_completed_item_id)} "
+            f"examined={self.items_examined} "
+            f"manual_scanned={self.manual_sources_scanned} "
+            f"ocr_scanned={self.ocr_sources_scanned} "
+            f"missing_text={self.items_missing_authoritative_text} "
+            f"failures={self.failure_count}"
+        )
+
+    def build_report(self) -> NonPersonEntityDetectionReport:
+        base = self.counts.freeze(apply=self.apply)
+        return NonPersonEntityDetectionReport(
+            apply=base.apply,
+            items_scanned=base.items_scanned,
+            text_sources_scanned=base.text_sources_scanned,
+            text_sources_skipped=base.text_sources_skipped,
+            detected_textual_occurrences=base.detected_textual_occurrences,
+            new_proposals=base.new_proposals,
+            existing_proposals=base.existing_proposals,
+            new_candidates=base.new_candidates,
+            existing_candidates=base.existing_candidates,
+            suppressed_candidates=base.suppressed_candidates,
+            new_match_rows=base.new_match_rows,
+            existing_match_rows=base.existing_match_rows,
+            ambiguous_occurrences=base.ambiguous_occurrences,
+            new_detect_events=base.new_detect_events,
+            errors=tuple(self.stored_failures),
+            failure_count=self.failure_count,
+            items_examined=self.items_examined,
+            manual_sources_scanned=self.manual_sources_scanned,
+            ocr_sources_scanned=self.ocr_sources_scanned,
+            items_missing_authoritative_text=self.items_missing_authoritative_text,
+            last_contiguous_completed_item_id=self.last_contiguous_completed_item_id,
+            failures_truncated=self.failures_truncated,
+        )
+
+    def _detect_checked(
+        self,
+        item: ArchiveItem,
+    ) -> tuple[NonPersonEntityDetectionReport, str]:
+        report = _detect([item], self.surfaces, apply=self.apply)
+        return report, _corpus_source_bucket(item, report)
+
+    def _accept(
+        self,
+        item: ArchiveItem,
+        report: NonPersonEntityDetectionReport,
+        bucket: str,
+    ) -> None:
+        _merge_counts(self.counts, report)
+        if bucket == "manual":
+            self.manual_sources_scanned += 1
+        elif bucket == "ocr":
+            self.ocr_sources_scanned += 1
+        else:
+            self.items_missing_authoritative_text += 1
+        if not self._cursor_frozen and item.pk is not None:
+            self.last_contiguous_completed_item_id = item.pk
+
+    def _record_failure(self, item: ArchiveItem, exc: Exception) -> None:
+        self._cursor_frozen = True
+        self.failure_count += 1
+        item_id = item.pk if item.pk is not None else 0
+        line = _failure_line(item_id, exc)
+        if self._on_item_failure is not None:
+            self._on_item_failure(line)
+        if len(self.stored_failures) >= _MAX_STORED_FAILURES:
+            self.failures_truncated = True
+            return
+        self.stored_failures.append(line)
+
+
+def _merge_counts(dst: _Counts, report: NonPersonEntityDetectionReport) -> None:
+    dst.items_scanned += report.items_scanned
+    dst.text_sources_scanned += report.text_sources_scanned
+    dst.text_sources_skipped += report.text_sources_skipped
+    dst.detected_textual_occurrences += report.detected_textual_occurrences
+    dst.new_proposals += report.new_proposals
+    dst.existing_proposals += report.existing_proposals
+    dst.new_candidates += report.new_candidates
+    dst.existing_candidates += report.existing_candidates
+    dst.suppressed_candidates += report.suppressed_candidates
+    dst.new_match_rows += report.new_match_rows
+    dst.existing_match_rows += report.existing_match_rows
+    dst.ambiguous_occurrences += report.ambiguous_occurrences
+    dst.new_detect_events += report.new_detect_events
+
+
+def _corpus_source_bucket(
+    item: ArchiveItem,
+    report: NonPersonEntityDetectionReport,
+) -> str:
+    """Classify the one supported body ``_detect_item`` actually scanned.
+
+    ``_detect_item`` always visits both text kinds, so its skip counter is
+    not an operator source count. More than one scanned body, or an item
+    type outside the corpus selection, fails the item and rolls back when
+    apply mode is inside ``transaction.atomic``.
+    """
+
+    scanned = report.text_sources_scanned
+    if scanned > 1:
+        raise CorpusItemDetectionError("unexpected text source count")
+    if item.item_type == ArchiveItem.ItemType.MANUAL_TEXT:
+        return "manual" if scanned == 1 else "missing"
+    if item.item_type == ArchiveItem.ItemType.OCR_DOCUMENT:
+        return "ocr" if scanned == 1 else "missing"
+    raise CorpusItemDetectionError("unsupported item type")
+
+
+def _failure_line(item_id: int, exc: Exception) -> str:
+    message = " ".join(str(exc).split())
+    if len(message) > _MAX_FAILURE_MESSAGE_LENGTH:
+        message = message[:_MAX_FAILURE_MESSAGE_LENGTH]
+    return (
+        f"failure: item_id={item_id} error={exc.__class__.__name__} message={message}"
+    )
+
+
+def _cursor_text(item_id: int | None) -> str:
+    if item_id is None:
+        return "-"
+    return str(item_id)
