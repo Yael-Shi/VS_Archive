@@ -35,8 +35,11 @@ from documents.services.archive_items import create_manual_text_archive_item
 from documents.services import non_person_entity_detector as detector
 from documents.services.non_person_entity_detector import (
     NonPersonEntityCorpusRun,
+    _AcceptedHit,
     _accepted_surface_slices,
     _bounded_surface_slices,
+    _hit_is_strictly_contained,
+    _surviving_hits,
     detect_non_person_entities_for_item,
     detect_non_person_entities_for_items,
 )
@@ -1825,3 +1828,336 @@ class PreparedSourceCallCountTests(TestCase):
         self.assertEqual(spans.call_count, 0)
         self.assertEqual(report.text_sources_scanned, 1)
         self.assertEqual(report.detected_textual_occurrences, 0)
+
+
+def _proposal_rows() -> list[tuple[str, int, str]]:
+    return list(
+        NonPersonEntityOccurrenceProposal.objects.order_by(
+            "normalized_surface",
+            "occurrence_ordinal",
+        ).values_list("normalized_surface", "occurrence_ordinal", "matched_text")
+    )
+
+
+def _place(name: str, subtype: str) -> NonPersonEntity:
+    return _entity(name, entity_subtype=subtype)
+
+
+class OverlapSuppressionTests(TestCase):
+    def test_contained_short_surface_is_not_proposed_on_manual_text(self):
+        item = _manual("ארץ ישראל")
+        _place("ישראל", NonPersonEntity.EntitySubtype.COUNTRY)
+        _place("ארץ ישראל", NonPersonEntity.EntitySubtype.REGION_OR_HISTORICAL_AREA)
+
+        dry_run = detect_non_person_entities_for_item(item)
+        self.assertFalse(dry_run.apply)
+        self.assertEqual(dry_run.detected_textual_occurrences, 1)
+        self.assertEqual(dry_run.new_proposals, 1)
+        self.assertEqual(dry_run.new_candidates, 1)
+        self.assertEqual(dry_run.ambiguous_occurrences, 0)
+        self.assertEqual(NonPersonEntityOccurrenceProposal.objects.count(), 0)
+
+        applied = detect_non_person_entities_for_item(item, apply=True)
+        self.assertEqual(applied.detected_textual_occurrences, 1)
+        self.assertEqual(applied.new_proposals, 1)
+        self.assertEqual(applied.new_candidates, 1)
+        self.assertEqual(
+            _proposal_rows(),
+            [("ארץ ישראל", 1, "ארץ ישראל")],
+        )
+        located = locate_surface_occurrences("ארץ ישראל", "ישראל")
+        assert located.occurrences is not None
+        self.assertEqual(located.occurrences[0].ordinal, 1)
+
+    def test_contained_short_surface_is_not_proposed_on_ocr_text(self):
+        body = "ארץ ישראל"
+        item = _ocr(language="he", source_text="other", hebrew_text=body)
+        _place("ישראל", NonPersonEntity.EntitySubtype.COUNTRY)
+        _place("ארץ ישראל", NonPersonEntity.EntitySubtype.REGION_OR_HISTORICAL_AREA)
+
+        report = detect_non_person_entities_for_item(item, apply=True)
+
+        self.assertEqual(report.text_sources_scanned, 1)
+        self.assertEqual(report.detected_textual_occurrences, 1)
+        self.assertEqual(_proposal_rows(), [("ארץ ישראל", 1, "ארץ ישראל")])
+        self.assertEqual(
+            NonPersonEntityOccurrenceProposal.objects.get().text_kind,
+            OCR,
+        )
+
+    def test_standalone_short_surface_remains_beside_a_contained_hit(self):
+        body = "ישראל ואז ארץ ישראל"
+        item = _manual(body)
+        _place("ישראל", NonPersonEntity.EntitySubtype.COUNTRY)
+        _place("ארץ ישראל", NonPersonEntity.EntitySubtype.REGION_OR_HISTORICAL_AREA)
+
+        detect_non_person_entities_for_item(item, apply=True)
+
+        self.assertEqual(
+            _proposal_rows(),
+            [("ארץ ישראל", 1, "ארץ ישראל"), ("ישראל", 1, "ישראל")],
+        )
+        located = locate_surface_occurrences(body, "ישראל")
+        assert located.occurrences is not None
+        self.assertEqual([hit.ordinal for hit in located.occurrences], [1, 2])
+        self.assertNotIn(
+            ("ישראל", 2, "ישראל"),
+            _proposal_rows(),
+        )
+
+    def test_suppressed_middle_hit_keeps_locator_ordinals_1_and_3(self):
+        body = "ישראל ואז ארץ ישראל ואז ישראל"
+        item = _manual(body)
+        _place("ישראל", NonPersonEntity.EntitySubtype.COUNTRY)
+        _place("ארץ ישראל", NonPersonEntity.EntitySubtype.REGION_OR_HISTORICAL_AREA)
+
+        detect_non_person_entities_for_item(item, apply=True)
+
+        israel = list(
+            NonPersonEntityOccurrenceProposal.objects.filter(
+                normalized_surface="ישראל"
+            ).order_by("occurrence_ordinal")
+        )
+        self.assertEqual([row.occurrence_ordinal for row in israel], [1, 3])
+        self.assertEqual([row.matched_text for row in israel], ["ישראל", "ישראל"])
+        self.assertEqual(
+            NonPersonEntityOccurrenceProposal.objects.get(
+                normalized_surface="ארץ ישראל"
+            ).occurrence_ordinal,
+            1,
+        )
+        located = locate_surface_occurrences(body, "ישראל")
+        assert located.occurrences is not None
+        self.assertEqual([hit.ordinal for hit in located.occurrences], [1, 2, 3])
+
+    def test_repeated_longer_surface_suppresses_each_contained_hit(self):
+        item = _manual("ארץ ישראל ואז ארץ ישראל")
+        _place("ישראל", NonPersonEntity.EntitySubtype.COUNTRY)
+        _place("ארץ ישראל", NonPersonEntity.EntitySubtype.REGION_OR_HISTORICAL_AREA)
+
+        detect_non_person_entities_for_item(item, apply=True)
+
+        self.assertEqual(
+            _proposal_rows(),
+            [("ארץ ישראל", 1, "ארץ ישראל"), ("ארץ ישראל", 2, "ארץ ישראל")],
+        )
+
+    def test_same_normalized_surface_stays_one_ambiguous_proposal(self):
+        country = _place("ישראל", NonPersonEntity.EntitySubtype.COUNTRY)
+        _alias(
+            country,
+            "Israël",
+            NonPersonEntityAlias.Kind.TRANSLITERATION_VARIANT,
+        )
+        newspaper = _entity(
+            "Israël",
+            entity_type=NonPersonEntity.EntityType.PUBLICATION_WORK,
+            entity_subtype=NonPersonEntity.EntitySubtype.NEWSPAPER,
+        )
+        item = _manual("La Tribune Juive, ISRAËL, L'Aurore")
+
+        report = detect_non_person_entities_for_item(item, apply=True)
+
+        self.assertEqual(report.detected_textual_occurrences, 1)
+        self.assertEqual(report.ambiguous_occurrences, 1)
+        self.assertEqual(report.new_proposals, 1)
+        self.assertEqual(report.new_candidates, 2)
+        proposal = NonPersonEntityOccurrenceProposal.objects.get()
+        self.assertEqual(proposal.normalized_surface, normalize_surface_v1("Israël"))
+        self.assertEqual(proposal.occurrence_ordinal, 1)
+        self.assertEqual(
+            set(proposal.candidates.values_list("candidate_entity_id", flat=True)),
+            {country.pk, newspaper.pk},
+        )
+
+    def test_partial_overlap_keeps_both_surfaces(self):
+        item = _manual("ארץ ישראל הגדולה")
+        _place("ארץ ישראל", NonPersonEntity.EntitySubtype.REGION_OR_HISTORICAL_AREA)
+        _place("ישראל הגדולה", NonPersonEntity.EntitySubtype.REGION_OR_HISTORICAL_AREA)
+
+        detect_non_person_entities_for_item(item, apply=True)
+
+        self.assertEqual(
+            _proposal_rows(),
+            [
+                ("ארץ ישראל", 1, "ארץ ישראל"),
+                ("ישראל הגדולה", 1, "ישראל הגדולה"),
+            ],
+        )
+
+    def test_attached_hebrew_prefix_does_not_invent_the_longer_hit(self):
+        body = "נסע לארץ ישראל"
+        item = _manual(body)
+        _place("ישראל", NonPersonEntity.EntitySubtype.COUNTRY)
+        _place("ארץ ישראל", NonPersonEntity.EntitySubtype.REGION_OR_HISTORICAL_AREA)
+
+        detect_non_person_entities_for_item(item, apply=True)
+
+        self.assertEqual(_proposal_rows(), [("ישראל", 1, "ישראל")])
+        self.assertEqual(_bounded_surface_slices(body, "ארץ ישראל"), ())
+        self.assertEqual(
+            _bounded_surface_slices(body, "ישראל"),
+            ((1, "ישראל"),),
+        )
+
+    def test_unsafe_surface_cannot_suppress_a_proved_hit(self):
+        acute = "\u0301"
+        dot_below = "\u0323"
+        composed_dot = "\u1eb9"
+        body = f"ישראל e{acute}{dot_below}"
+        item = _manual(body)
+        _place("ישראל", NonPersonEntity.EntitySubtype.COUNTRY)
+        _entity(composed_dot)
+        unsafe = locate_surface_occurrences(body, composed_dot)
+        self.assertGreater(unsafe.count, 0)
+        self.assertIsNone(unsafe.occurrences)
+
+        detect_non_person_entities_for_item(item, apply=True)
+
+        self.assertEqual(_proposal_rows(), [("ישראל", 1, "ישראל")])
+
+    def test_apply_rerun_does_not_duplicate_the_survivor(self):
+        item = _manual("ארץ ישראל")
+        _place("ישראל", NonPersonEntity.EntitySubtype.COUNTRY)
+        _place("ארץ ישראל", NonPersonEntity.EntitySubtype.REGION_OR_HISTORICAL_AREA)
+        detect_non_person_entities_for_item(item, apply=True)
+
+        again = detect_non_person_entities_for_item(item, apply=True)
+
+        self.assertEqual(again.new_proposals, 0)
+        self.assertEqual(again.existing_proposals, 1)
+        self.assertEqual(again.new_candidates, 0)
+        self.assertEqual(_proposal_rows(), [("ארץ ישראל", 1, "ארץ ישראל")])
+
+    def test_planted_pending_contained_proposal_stays_untouched(self):
+        body = "ארץ ישראל"
+        item = _manual(body)
+        country = _place("ישראל", NonPersonEntity.EntitySubtype.COUNTRY)
+        _place("ארץ ישראל", NonPersonEntity.EntitySubtype.REGION_OR_HISTORICAL_AREA)
+        planted = NonPersonEntityOccurrenceProposal.objects.create(
+            archive_item=item,
+            text_kind=MANUAL,
+            source_text_sha256=source_text_sha256(body),
+            normalization_version="surface-v1",
+            normalized_surface="ישראל",
+            occurrence_ordinal=1,
+            matched_text="ישראל",
+        )
+        candidate = NonPersonEntityOccurrenceCandidate.objects.create(
+            proposal=planted,
+            candidate_entity=country,
+            status=PENDING,
+        )
+
+        report = detect_non_person_entities_for_item(item, apply=True)
+
+        planted.refresh_from_db()
+        candidate.refresh_from_db()
+        self.assertEqual(planted.matched_text, "ישראל")
+        self.assertEqual(planted.occurrence_ordinal, 1)
+        self.assertEqual(candidate.status, PENDING)
+        self.assertEqual(report.new_proposals, 1)
+        self.assertEqual(report.existing_proposals, 0)
+        self.assertEqual(
+            _proposal_rows(),
+            [("ארץ ישראל", 1, "ארץ ישראל"), ("ישראל", 1, "ישראל")],
+        )
+        self.assertEqual(candidate.proposal_id, planted.pk)
+
+    def test_overlapping_body_normalizes_spans_once(self):
+        item = _manual("ארץ ישראל")
+        _place("ישראל", NonPersonEntity.EntitySubtype.COUNTRY)
+        _place("ארץ ישראל", NonPersonEntity.EntitySubtype.REGION_OR_HISTORICAL_AREA)
+        _entity("קהיר")
+
+        with patch(_SPAN_NORMALIZE, wraps=_normalize_with_spans) as spans:
+            report = detect_non_person_entities_for_item(item)
+
+        self.assertEqual(spans.call_count, 1)
+        self.assertEqual(report.detected_textual_occurrences, 1)
+        self.assertEqual(report.new_proposals, 1)
+
+
+class EqualOriginalSpanTests(SimpleTestCase):
+    def test_equal_original_endpoints_suppress_neither_hit(self):
+        shared = {
+            "matched_text": "a",
+            "original_start": 0,
+            "original_end": 1,
+            "reasons_by_entity": {},
+        }
+        shorter = _AcceptedHit(
+            surface="aa",
+            ordinal=1,
+            normalized_start=0,
+            normalized_end=2,
+            **shared,
+        )
+        longer = _AcceptedHit(
+            surface="aaaa",
+            ordinal=1,
+            normalized_start=0,
+            normalized_end=4,
+            **shared,
+        )
+        self.assertFalse(_hit_is_strictly_contained(shorter, longer))
+        self.assertFalse(_hit_is_strictly_contained(longer, shorter))
+        self.assertEqual(_surviving_hits((shorter, longer)), (shorter, longer))
+        self.assertNotEqual(
+            (shorter.normalized_start, shorter.normalized_end),
+            (longer.normalized_start, longer.normalized_end),
+        )
+
+    def test_recording_loop_records_both_equal_original_span_hits(self):
+        shared = {
+            "matched_text": "a",
+            "original_start": 0,
+            "original_end": 1,
+            "reasons_by_entity": {},
+        }
+        shorter = _AcceptedHit(
+            surface="aa",
+            ordinal=1,
+            normalized_start=0,
+            normalized_end=2,
+            **shared,
+        )
+        longer = _AcceptedHit(
+            surface="aaaa",
+            ordinal=1,
+            normalized_start=0,
+            normalized_end=4,
+            **shared,
+        )
+        item = object()
+        ledger = detector._Ledger(proposals={}, candidates={}, matches=set())
+        counts = detector._Counts()
+        with patch(
+            "documents.services.non_person_entity_detector._record_occurrence"
+        ) as record:
+            for hit in _surviving_hits((shorter, longer)):
+                detector._record_occurrence(
+                    item=item,
+                    text_kind=MANUAL,
+                    digest="a" * 64,
+                    surface=hit.surface,
+                    ordinal=hit.ordinal,
+                    matched_text=hit.matched_text,
+                    reasons_by_entity=hit.reasons_by_entity,
+                    ledger=ledger,
+                    counts=counts,
+                    apply=False,
+                )
+
+        self.assertEqual(record.call_count, 2)
+        self.assertEqual(
+            [
+                (
+                    call.kwargs["surface"],
+                    call.kwargs["ordinal"],
+                    call.kwargs["matched_text"],
+                )
+                for call in record.call_args_list
+            ],
+            [("aa", 1, "a"), ("aaaa", 1, "a")],
+        )

@@ -27,7 +27,7 @@ The service does not write to stdout.
 from __future__ import annotations
 
 import unicodedata
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from django.db import transaction
@@ -206,8 +206,10 @@ def detect_non_person_entities_for_items(
     Registry rows are loaded once. Each scanned authoritative body is
     span-normalized once. Every registry surface is then searched in that
     prepared text and kept only when the normalized span is a whole token.
-    Dry-run classifies the same identities apply would write and inserts
-    nothing.
+    A shorter accepted hit is not recorded when its normalized span is
+    strictly inside a longer accepted hit of a different surface. Same-surface
+    ambiguity is unchanged. Dry-run classifies the same identities apply
+    would write and inserts nothing.
     """
 
     item_list = list(items)
@@ -358,20 +360,41 @@ def _detect_item(
         if not surfaces:
             continue
         prepared = _prepare_normalized_source(text)
+        collected: list[_AcceptedHit] = []
         for surface, reasons_by_entity in surfaces.items():
-            for ordinal, matched_text in _accepted_surface_slices(prepared, surface):
-                _record_occurrence(
-                    item=item,
-                    text_kind=text_kind,
-                    digest=digest,
-                    surface=surface,
-                    ordinal=ordinal,
-                    matched_text=matched_text,
-                    reasons_by_entity=reasons_by_entity,
-                    ledger=ledger,
-                    counts=counts,
-                    apply=apply,
-                )
+            collected.extend(_accepted_hits(prepared, surface, reasons_by_entity))
+        for hit in _surviving_hits(collected):
+            _record_occurrence(
+                item=item,
+                text_kind=text_kind,
+                digest=digest,
+                surface=hit.surface,
+                ordinal=hit.ordinal,
+                matched_text=hit.matched_text,
+                reasons_by_entity=hit.reasons_by_entity,
+                ledger=ledger,
+                counts=counts,
+                apply=apply,
+            )
+
+
+@dataclass(frozen=True)
+class _AcceptedHit:
+    """One token-bounded surface hit, before cross-surface suppression.
+
+    Coordinates are the locator's. ``normalized_start`` and ``normalized_end``
+    index ``prepared.normalized_text``. ``original_start`` and ``original_end``
+    index the authoritative body. This value does not drop or renumber hits.
+    """
+
+    surface: str
+    ordinal: int
+    matched_text: str
+    normalized_start: int
+    normalized_end: int
+    original_start: int
+    original_end: int
+    reasons_by_entity: Mapping[int, tuple[DetectionReason, ...]]
 
 
 def _bounded_surface_slices(text: str, surface: str) -> tuple[tuple[int, str], ...]:
@@ -402,7 +425,27 @@ def _accepted_surface_slices(
     prepared: _PreparedNormalizedSource,
     surface: str,
 ) -> tuple[tuple[int, str], ...]:
-    """Token-bounded hits for one surface, addressed by locator ordinal."""
+    """Token-bounded hits for one surface, addressed by locator ordinal.
+
+    This projection does not apply cross-surface containment. A shorter
+    surface still appears here when it is itself a whole token.
+    """
+
+    return tuple(
+        (hit.ordinal, hit.matched_text) for hit in _accepted_hits(prepared, surface, {})
+    )
+
+
+def _accepted_hits(
+    prepared: _PreparedNormalizedSource,
+    surface: str,
+    reasons_by_entity: Mapping[int, tuple[DetectionReason, ...]],
+) -> tuple[_AcceptedHit, ...]:
+    """Token-bounded hits for one surface, with locator coordinates.
+
+    A missing or unproved span map emits nothing. This scan does not
+    compare the hit with any other registry surface.
+    """
 
     located = _locate_prepared_surface(prepared, surface)
     if located.count == 0 or located.occurrences is None:
@@ -424,10 +467,62 @@ def _accepted_surface_slices(
     ]
     if len(located.occurrences) != located.count:
         return ()
-    return tuple(
-        (located.occurrences[index].ordinal, located.occurrences[index].matched_text)
-        for index in accepted
+    hits: list[_AcceptedHit] = []
+    for index in accepted:
+        start = starts[index]
+        occurrence = located.occurrences[index]
+        hits.append(
+            _AcceptedHit(
+                surface=surface,
+                ordinal=occurrence.ordinal,
+                matched_text=occurrence.matched_text,
+                normalized_start=start,
+                normalized_end=start + len(normalized_surface),
+                original_start=occurrence.start,
+                original_end=occurrence.end,
+                reasons_by_entity=reasons_by_entity,
+            )
+        )
+    return tuple(hits)
+
+
+def _hit_is_strictly_contained(inner: _AcceptedHit, outer: _AcceptedHit) -> bool:
+    """True when ``inner`` is strictly inside a different surface's hit.
+
+    Equal normalized intervals are not containment. Equal original endpoints
+    do not choose a winner. Same-surface hits are never contained by each other.
+    """
+
+    if inner.surface == outer.surface:
+        return False
+    if (
+        inner.original_start == outer.original_start
+        and inner.original_end == outer.original_end
+    ):
+        return False
+    return (
+        outer.normalized_start <= inner.normalized_start
+        and inner.normalized_end <= outer.normalized_end
+        and (
+            outer.normalized_start < inner.normalized_start
+            or inner.normalized_end < outer.normalized_end
+        )
     )
+
+
+def _surviving_hits(hits: Sequence[_AcceptedHit]) -> tuple[_AcceptedHit, ...]:
+    """Hits that are not strictly inside a different accepted hit.
+
+    Order is the collection order: registry surface order, then locator
+    ordinal. Suppressed hits are omitted. Survivors keep their ordinals.
+    """
+
+    suppressed = {
+        (hit.surface, hit.ordinal)
+        for hit in hits
+        if any(_hit_is_strictly_contained(hit, other) for other in hits)
+    }
+    return tuple(hit for hit in hits if (hit.surface, hit.ordinal) not in suppressed)
 
 
 def _normalized_find_starts(text: str, surface: str) -> list[int]:

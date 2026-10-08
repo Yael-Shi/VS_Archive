@@ -1,5 +1,19 @@
 # VS-Archive Decision Log
 
+## Non-person cross-surface overlap suppression (2026-10-08)
+
+**Decision:** After a scanned body has been collected, the detector does not propose a shorter accepted hit when its normalized span is strictly inside a longer accepted hit of a different surface. Same-surface ambiguity is unchanged. This does not change the locator.
+
+**Containment:** Suppress hit S because of hit L only when the surfaces differ, L's normalized interval contains S's, at least one normalized boundary is strict, and the original `[start, end)` endpoints are not identical. Partial overlap keeps both hits. Equal original endpoints keep both hits. A surface with no proved span emits nothing and cannot suppress another surface. Longer means normalized interval length. Entity type, subtype, and name are not used.
+
+**Ordinals:** Survivors keep the locator ordinal. A suppressed middle hit leaves a gap. Token boundaries, including Hebrew prefixes, are unchanged. `נסע לארץ ישראל` still does not accept `ארץ ישראל`, because the attached ל is a letter.
+
+**Already stored rows:** Detection does not delete, reject, or rewrite an existing proposal. A later apply simply does not emit the contained identity. Cleanup of old pending contained hits is a separate dry-run, then `reject_candidate`, and is not part of this change. Grouped review is unchanged.
+
+**Unchanged:** `surface-v1`, one span-normalization per scanned body, `locate_surface_occurrences`, source SHA, proposal identity, candidate identity, review, dry-run and apply transactions, CLI, and schema. No migration.
+
+**Tests:** `documents/test_non_person_entity_detector.py`.
+
 ## Non-person detector source normalization cache (2026-10-08)
 
 **Decision:** Corpus and batch detection prepare each scanned authoritative body once. That prepared surface-v1 text and its span map are reused for every registry surface on that body. This is a performance-only refactor. Match results stay the same.
