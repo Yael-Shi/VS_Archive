@@ -9,7 +9,7 @@ from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connection
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
@@ -35,11 +35,16 @@ from documents.services.archive_items import create_manual_text_archive_item
 from documents.services import non_person_entity_detector as detector
 from documents.services.non_person_entity_detector import (
     NonPersonEntityCorpusRun,
+    _accepted_surface_slices,
+    _bounded_surface_slices,
     detect_non_person_entities_for_item,
     detect_non_person_entities_for_items,
 )
 from documents.services.non_person_entity_occurrence_review import approve_candidate
 from documents.services.non_person_entity_occurrences import (
+    _locate_prepared_surface,
+    _normalize_with_spans,
+    _prepare_normalized_source,
     locate_surface_occurrences,
     normalize_surface_v1,
     occurrence_is_currently_valid,
@@ -1721,3 +1726,102 @@ class DetectorCorpusCommandTests(TestCase):
         text = out.getvalue()
         self.assertIn("scope: unbounded\n", text)
         self.assertNotIn("items_examined:", text)
+
+
+class PreparedTokenOrdinalTests(SimpleTestCase):
+    def test_rejected_middle_find_keeps_locator_ordinals_1_and_3(self):
+        text = "בון ואז לבון ואז בון"
+        prepared = _prepare_normalized_source(text)
+        located = _locate_prepared_surface(prepared, "בון")
+        assert located.occurrences is not None
+        self.assertEqual([item.ordinal for item in located.occurrences], [1, 2, 3])
+        self.assertEqual(
+            _accepted_surface_slices(prepared, "בון"),
+            ((1, "בון"), (3, "בון")),
+        )
+        self.assertEqual(
+            _bounded_surface_slices(text, "בון"),
+            ((1, "בון"), (3, "בון")),
+        )
+
+
+_SPAN_NORMALIZE = (
+    "documents.services.non_person_entity_occurrences._normalize_with_spans"
+)
+
+
+class PreparedSourceCallCountTests(TestCase):
+    def test_manual_item_normalizes_spans_once_for_several_surfaces(self):
+        item = _manual("Paris. קהיר. Lyon.")
+        _entity("Paris")
+        _entity("קהיר")
+        _entity("Lyon")
+
+        with patch(_SPAN_NORMALIZE, wraps=_normalize_with_spans) as spans:
+            report = detect_non_person_entities_for_item(item)
+
+        self.assertEqual(spans.call_count, 1)
+        self.assertEqual(report.detected_textual_occurrences, 3)
+        self.assertEqual(report.text_sources_scanned, 1)
+
+    def test_ocr_item_normalizes_spans_once_for_several_surfaces(self):
+        item = _ocr(
+            language="en",
+            source_text="Paris. קהיר. Lyon.",
+            hebrew_text=None,
+        )
+        _entity("Paris")
+        _entity("קהיר")
+        _entity("Lyon")
+
+        with patch(_SPAN_NORMALIZE, wraps=_normalize_with_spans) as spans:
+            report = detect_non_person_entities_for_item(item)
+
+        self.assertEqual(spans.call_count, 1)
+        self.assertEqual(report.detected_textual_occurrences, 3)
+        self.assertEqual(report.text_sources_scanned, 1)
+
+    def test_missing_authoritative_text_does_not_normalize_spans(self):
+        item = ArchiveItem.objects.create(
+            title="בלי גוף",
+            item_type=ArchiveItem.ItemType.MANUAL_TEXT,
+            visibility=ArchiveItem.Visibility.PRIVATE,
+        )
+        _entity("Paris")
+        _entity("קהיר")
+        _entity("Lyon")
+
+        with patch(_SPAN_NORMALIZE, wraps=_normalize_with_spans) as spans:
+            report = detect_non_person_entities_for_item(item)
+
+        self.assertEqual(spans.call_count, 0)
+        self.assertEqual(report.text_sources_scanned, 0)
+        self.assertEqual(report.detected_textual_occurrences, 0)
+
+    def test_two_scanned_items_normalize_spans_once_each(self):
+        manual = _manual("Paris. קהיר. Lyon.")
+        ocr = _ocr(
+            language="en",
+            source_text="Paris. קהיר. Lyon.",
+            hebrew_text=None,
+        )
+        _entity("Paris")
+        _entity("קהיר")
+        _entity("Lyon")
+
+        with patch(_SPAN_NORMALIZE, wraps=_normalize_with_spans) as spans:
+            report = detect_non_person_entities_for_items([manual, ocr])
+
+        self.assertEqual(spans.call_count, 2)
+        self.assertEqual(report.text_sources_scanned, 2)
+        self.assertEqual(report.detected_textual_occurrences, 6)
+
+    def test_empty_registry_does_not_prepare_a_scanned_body(self):
+        item = _manual("Paris. קהיר. Lyon.")
+
+        with patch(_SPAN_NORMALIZE, wraps=_normalize_with_spans) as spans:
+            report = detect_non_person_entities_for_item(item)
+
+        self.assertEqual(spans.call_count, 0)
+        self.assertEqual(report.text_sources_scanned, 1)
+        self.assertEqual(report.detected_textual_occurrences, 0)

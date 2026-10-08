@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import unicodedata
 from random import Random
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.test import SimpleTestCase, TestCase
@@ -30,7 +31,11 @@ from documents.services.non_person_entity_occurrence_review import (
     staff_occurrence_review_detail,
 )
 from documents.services.non_person_entity_occurrences import (
+    SurfaceLocation,
+    _locate_prepared_surface,
     _nfc_with_spans,
+    _normalize_with_spans,
+    _prepare_normalized_source,
     locate_surface_occurrences,
     normalize_surface_v1,
     occurrence_is_currently_valid,
@@ -498,3 +503,132 @@ class NonNfcReviewEndToEndTests(TestCase):
         self.assertEqual(occurrence.occurrence_ordinal, 2)
         self.assertEqual(occurrence.matched_text, "מוסקי")
         self.assertTrue(occurrence_is_currently_valid(occurrence))
+
+
+class PreparedSourceEquivalenceTests(SimpleTestCase):
+    def test_prepared_locator_matches_pinned_slices_and_public_locator(self):
+        decomposed = "e" + ACUTE
+        see_decomposed = f"See {decomposed} now"
+        bayit = f"ראה {ORIGINAL_BAYIT} כאן"
+        beside = f"מוסקי e{ACUTE}{DOT_BELOW}"
+        cases = [
+            (
+                "Palestine then Palestine",
+                "Palestine",
+                [(1, 0, 9, "Palestine"), (2, 15, 24, "Palestine")],
+            ),
+            ("aaa", "aa", [(1, 0, 2, "aa")]),
+            (
+                "במוסקי מוסקי",
+                "מוסקי",
+                [(1, 1, 6, "מוסקי"), (2, 7, 12, "מוסקי")],
+            ),
+            (
+                "(בון), בון.",
+                "בון",
+                [(1, 1, 4, "בון"), (2, 7, 10, "בון")],
+            ),
+            (
+                "Pal\u200festine",
+                "Palestine",
+                [(1, 0, 10, "Pal\u200festine")],
+            ),
+            (
+                "hello   world",
+                "hello world",
+                [(1, 0, 13, "hello   world")],
+            ),
+            ("See Straße.", "strasse", [(1, 4, 10, "Straße")]),
+            (see_decomposed, COMPOSED_E, [(1, 4, 6, decomposed)]),
+            (bayit, NFC_BAYIT, [(1, 4, 9, ORIGINAL_BAYIT)]),
+            (beside, "מוסקי", [(1, 0, 5, "מוסקי")]),
+        ]
+        self.assertEqual("See Straße."[4:10], "Straße")
+        self.assertEqual(see_decomposed[4:6], decomposed)
+        self.assertEqual(bayit[4:9], ORIGINAL_BAYIT)
+        for text, surface, expected in cases:
+            with self.subTest(text=text, surface=surface):
+                prepared = _prepare_normalized_source(text)
+                located = _locate_prepared_surface(prepared, surface)
+                self.assertEqual(locate_surface_occurrences(text, surface), located)
+                assert located.occurrences is not None
+                self.assertEqual(located.count, len(expected))
+                self.assertEqual(
+                    [
+                        (item.ordinal, item.start, item.end, item.matched_text)
+                        for item in located.occurrences
+                    ],
+                    expected,
+                )
+                self.assertEqual(
+                    normalize_surface_v1(located.occurrences[0].matched_text),
+                    normalize_surface_v1(surface),
+                )
+
+    def test_nonoverlapping_find_does_not_restart_inside_aaa(self):
+        located = _locate_prepared_surface(_prepare_normalized_source("aaa"), "aa")
+        assert located.occurrences is not None
+        self.assertEqual(located.count, 1)
+        self.assertEqual(located.occurrences[0].start, 0)
+        self.assertNotEqual(located.occurrences[0].start, 1)
+
+    def test_unsafe_cover_fails_the_whole_surface(self):
+        source = "e" + ACUTE + DOT_BELOW
+        prepared = _prepare_normalized_source(source)
+        located = _locate_prepared_surface(prepared, COMPOSED_DOT)
+        self.assertGreater(located.count, 0)
+        self.assertIsNone(located.occurrences)
+        self.assertEqual(locate_surface_occurrences(source, COMPOSED_DOT), located)
+
+    def test_safe_surface_beside_unsafe_cluster_uses_one_prepared_source(self):
+        source = f"מוסקי e{ACUTE}{DOT_BELOW}"
+        prepared = _prepare_normalized_source(source)
+        safe = _locate_prepared_surface(prepared, "מוסקי")
+        unsafe = _locate_prepared_surface(prepared, COMPOSED_DOT)
+        assert safe.occurrences is not None
+        self.assertEqual(safe.occurrences[0].matched_text, "מוסקי")
+        self.assertGreater(unsafe.count, 0)
+        self.assertIsNone(unsafe.occurrences)
+        self.assertEqual(locate_surface_occurrences(source, "מוסקי"), safe)
+        self.assertEqual(locate_surface_occurrences(source, COMPOSED_DOT), unsafe)
+
+    def test_several_needles_normalize_the_source_once(self):
+        text = (
+            "Palestine then Palestine. aaa. במוסקי מוסקי. "
+            "Pal\u200festine. hello   world. See Straße. "
+            f"See {'e' + ACUTE} now. ראה {ORIGINAL_BAYIT} כאן. "
+            f"e{ACUTE}{DOT_BELOW}"
+        )
+        needles = (
+            "Palestine",
+            "aa",
+            "מוסקי",
+            "hello world",
+            "strasse",
+            COMPOSED_E,
+            NFC_BAYIT,
+            COMPOSED_DOT,
+        )
+        with patch(
+            "documents.services.non_person_entity_occurrences._normalize_with_spans",
+            wraps=_normalize_with_spans,
+        ) as spans:
+            prepared = _prepare_normalized_source(text)
+            located = [_locate_prepared_surface(prepared, needle) for needle in needles]
+        self.assertEqual(spans.call_count, 1)
+        self.assertGreater(len(located), 3)
+        self.assertIsNotNone(located[0].occurrences)
+        self.assertIsNone(located[-1].occurrences)
+
+    def test_empty_normalized_needle_skips_span_preparation(self):
+        for surface in ("", "   ", "\u200f"):
+            with self.subTest(surface=surface):
+                self.assertEqual(normalize_surface_v1(surface), "")
+                with patch(
+                    "documents.services.non_person_entity_occurrences."
+                    "_normalize_with_spans",
+                    wraps=_normalize_with_spans,
+                ) as spans:
+                    located = locate_surface_occurrences("Palestine", surface)
+                self.assertEqual(located, SurfaceLocation(count=0, occurrences=()))
+                self.assertEqual(spans.call_count, 0)

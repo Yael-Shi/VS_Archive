@@ -45,9 +45,11 @@ from documents.models import (
 )
 from documents.services.non_person_entity_occurrences import (
     SURFACE_V1,
+    _PreparedNormalizedSource,
+    _locate_prepared_surface,
+    _prepare_normalized_source,
     authoritative_displayed_text,
     item_supports_occurrence_text_kind,
-    locate_surface_occurrences,
     normalize_surface_v1,
     source_text_sha256,
 )
@@ -201,10 +203,11 @@ def detect_non_person_entities_for_items(
 ) -> NonPersonEntityDetectionReport:
     """Detect against an explicit item iterable. Does not scan the corpus.
 
-    Registry rows are loaded once. Each supported text body is scanned in
-    memory with ``locate_surface_occurrences``, then kept only when the
-    normalized span is a whole token. Dry-run classifies the same identities
-    apply would write and inserts nothing.
+    Registry rows are loaded once. Each scanned authoritative body is
+    span-normalized once. Every registry surface is then searched in that
+    prepared text and kept only when the normalized span is a whole token.
+    Dry-run classifies the same identities apply would write and inserts
+    nothing.
     """
 
     item_list = list(items)
@@ -352,8 +355,11 @@ def _detect_item(
             continue
         counts.text_sources_scanned += 1
         digest = source_text_sha256(text)
+        if not surfaces:
+            continue
+        prepared = _prepare_normalized_source(text)
         for surface, reasons_by_entity in surfaces.items():
-            for ordinal, matched_text in _bounded_surface_slices(text, surface):
+            for ordinal, matched_text in _accepted_surface_slices(prepared, surface):
                 _record_occurrence(
                     item=item,
                     text_kind=text_kind,
@@ -371,6 +377,8 @@ def _detect_item(
 def _bounded_surface_slices(text: str, surface: str) -> tuple[tuple[int, str], ...]:
     """Accepted detector hits, still addressed by the shared locator ordinal.
 
+    One call prepares this text, then ``_accepted_surface_slices`` filters it.
+    The corpus detector prepares a scanned body once and reuses that value.
     ``locate_surface_occurrences`` stays a non-overlapping substring locator.
     Review and source revalidation look a proposal up by that same ordinal, so
     this filter does not renumber accepted hits. A rejected substring can leave
@@ -387,21 +395,29 @@ def _bounded_surface_slices(text: str, surface: str) -> tuple[tuple[int, str], .
     the normalized finds is dropped.
     """
 
-    located = locate_surface_occurrences(text, surface)
+    return _accepted_surface_slices(_prepare_normalized_source(text), surface)
+
+
+def _accepted_surface_slices(
+    prepared: _PreparedNormalizedSource,
+    surface: str,
+) -> tuple[tuple[int, str], ...]:
+    """Token-bounded hits for one surface, addressed by locator ordinal."""
+
+    located = _locate_prepared_surface(prepared, surface)
     if located.count == 0 or located.occurrences is None:
         return ()
     normalized_surface = normalize_surface_v1(surface)
     if normalized_surface == "":
         return ()
-    normalized_source = normalize_surface_v1(text)
-    starts = _normalized_find_starts(normalized_source, normalized_surface)
+    starts = _normalized_find_starts(prepared.normalized_text, normalized_surface)
     if len(starts) != located.count:
         return ()
     accepted = [
         index
         for index, start in enumerate(starts)
         if _span_is_token_bounded(
-            normalized_source,
+            prepared.normalized_text,
             start,
             start + len(normalized_surface),
         )

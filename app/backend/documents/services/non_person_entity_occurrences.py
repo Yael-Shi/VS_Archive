@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from types import MappingProxyType
@@ -33,6 +33,23 @@ _BIDI_MARKS = dict.fromkeys(
     ),
     None,
 )
+
+
+@dataclass(frozen=True)
+class _PreparedNormalizedSource:
+    """One authoritative body after a single surface-v1 span normalization.
+
+    ``normalized_text`` is ``normalize_surface_v1(original_text)``.
+    ``character_spans`` is the per-code-point original cover from
+    ``_normalize_with_spans`` when that map's text equals ``normalized_text``.
+    ``None`` means the span map is missing or disagrees, which is the same
+    fail-closed state as a per-call locate: counts may still be computed,
+    and original slices are not.
+    """
+
+    original_text: str
+    normalized_text: str
+    character_spans: tuple[tuple[int, int], ...] | None
 
 
 @dataclass(frozen=True)
@@ -122,17 +139,51 @@ def locate_surface_occurrences(source_text: str, surface: str) -> SurfaceLocatio
     slice normalizes back to the same surface. A cover that cannot be proved
     returns the count with ``occurrences is None``. Repeated matches stay
     distinct ordinals. They are not collapsed.
+
+    An empty normalized surface returns no occurrences and does not build the
+    source span map. Any other call prepares that source once, then searches.
+    """
+
+    if normalize_surface_v1(surface) == "":
+        return SurfaceLocation(count=0, occurrences=())
+    return _locate_prepared_surface(_prepare_normalized_source(source_text), surface)
+
+
+def _prepare_normalized_source(source_text: str) -> _PreparedNormalizedSource:
+    """Normalize one source body and keep its span map when the map agrees."""
+
+    normalized_text = normalize_surface_v1(source_text)
+    mapped = _normalize_with_spans(source_text)
+    if mapped is None or mapped[0] != normalized_text:
+        spans = None
+    else:
+        spans = tuple(mapped[1])
+    return _PreparedNormalizedSource(
+        original_text=source_text,
+        normalized_text=normalized_text,
+        character_spans=spans,
+    )
+
+
+def _locate_prepared_surface(
+    prepared: _PreparedNormalizedSource,
+    surface: str,
+) -> SurfaceLocation:
+    """Locate one surface in an already prepared source.
+
+    Ordinals follow non-overlapping ``str.find`` order. A failed original
+    cover drops every slice for this surface and keeps the count.
     """
 
     normalized_surface = normalize_surface_v1(surface)
-    normalized_source = normalize_surface_v1(source_text)
-    starts = _find_nonoverlapping(normalized_source, normalized_surface)
+    starts = _find_nonoverlapping(prepared.normalized_text, normalized_surface)
     if not normalized_surface:
         return SurfaceLocation(count=0, occurrences=())
-    mapped = _normalize_with_spans(source_text)
-    if mapped is None or mapped[0] != normalized_source:
+    spans = prepared.character_spans
+    if spans is None:
         return SurfaceLocation(count=len(starts), occurrences=None)
-    normalized, spans = mapped
+    source_text = prepared.original_text
+    normalized = prepared.normalized_text
     found: list[SurfaceOccurrence] = []
     for ordinal, start in enumerate(starts, start=1):
         end = start + len(normalized_surface)
@@ -321,7 +372,7 @@ def _normalize_with_spans(
 
 
 def _cover_original_span(
-    spans: list[tuple[int, int]],
+    spans: Sequence[tuple[int, int]],
     start: int,
     end: int,
 ) -> tuple[int, int]:
