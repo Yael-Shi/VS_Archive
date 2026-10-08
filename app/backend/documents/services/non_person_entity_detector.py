@@ -525,6 +525,54 @@ def _surviving_hits(hits: Sequence[_AcceptedHit]) -> tuple[_AcceptedHit, ...]:
     return tuple(hit for hit in hits if (hit.surface, hit.ordinal) not in suppressed)
 
 
+def _overlap_containment_index(
+    text: str,
+    surfaces: Mapping[str, Mapping[int, tuple[DetectionReason, ...]]],
+) -> tuple[frozenset[tuple[str, int]], dict[tuple[str, int], tuple[str, int]]]:
+    """Accepted hits, and one covering hit for each strictly contained hit.
+
+    Read-only view of ``_accepted_hits`` and ``_hit_is_strictly_contained``.
+    ``_detect_item`` does not call this. ``accepted`` is ``(surface, ordinal)``
+    before suppression. ``covering`` maps a contained hit to one covering
+    hit. When several accepted hits contain it, the reported cover is the
+    longest normalized span, then the earliest normalized start, then
+    surface, then ordinal. That choice does not decide suppression.
+    """
+
+    if not surfaces:
+        return frozenset(), {}
+    prepared = _prepare_normalized_source(text)
+    collected: list[_AcceptedHit] = []
+    for surface, reasons_by_entity in surfaces.items():
+        collected.extend(_accepted_hits(prepared, surface, reasons_by_entity))
+    accepted = frozenset((hit.surface, hit.ordinal) for hit in collected)
+    covering: dict[tuple[str, int], tuple[str, int]] = {}
+    for hit in collected:
+        cover = _reported_covering_hit(hit, collected)
+        if cover is None:
+            continue
+        covering[(hit.surface, hit.ordinal)] = (cover.surface, cover.ordinal)
+    return accepted, covering
+
+
+def _reported_covering_hit(
+    hit: _AcceptedHit,
+    hits: Sequence[_AcceptedHit],
+) -> _AcceptedHit | None:
+    covers = [other for other in hits if _hit_is_strictly_contained(hit, other)]
+    if not covers:
+        return None
+    return min(
+        covers,
+        key=lambda other: (
+            -(other.normalized_end - other.normalized_start),
+            other.normalized_start,
+            other.surface,
+            other.ordinal,
+        ),
+    )
+
+
 def _normalized_find_starts(text: str, surface: str) -> list[int]:
     starts: list[int] = []
     cursor = 0
