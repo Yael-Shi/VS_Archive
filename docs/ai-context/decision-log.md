@@ -1,5 +1,17 @@
 # VS-Archive Decision Log
 
+## Non-person detector source normalization cache (2026-10-08)
+
+**Decision:** Corpus and batch detection prepare each scanned authoritative body once. That prepared surface-v1 text and its span map are reused for every registry surface on that body. This is a performance-only refactor. Match results stay the same.
+
+**Preparation:** `normalize_surface_v1` and `_normalize_with_spans` still run on the source. The span map is kept only when its text equals `normalize_surface_v1`. A missing or disagreeing map still returns the find count with `occurrences is None`. An empty normalized needle still returns count 0 and an empty occurrence tuple, and the public locator does not build a span map for that needle. There is no process-wide or `lru` cache of document bodies. An empty registry does not prepare a body.
+
+**Locator:** `locate_surface_occurrences(text, surface)` remains the public API for review, apply, grouped review, and public chip order. It prepares that one source, then uses the same non-overlapping `str.find`, original-cover recovery, round-trip proof, and whole-surface fail-closed rule. The detector does not call it inside the registry-surface loop. Whole-token filtering still reads the prepared normalized text and still emits the locator ordinal, including gaps.
+
+**Unchanged:** `surface-v1`, NFC composition and reordering, bidi removal, casefold, strip, whitespace collapse, token boundaries, Hebrew prefixes, `matched_text` slices, `source_text_sha256`, proposal identity, candidate identity, match provenance, ambiguity, suppression, dry-run and apply, and corpus transaction boundaries. No new matcher. No migration, model, CLI, review, or public UI change.
+
+**Tests:** `documents/test_non_person_entity_detector.py`, `documents/test_non_person_entity_nfc_span_recovery.py`.
+
 ## Non-person corpus detection (2026-10-07)
 
 **Decision:** `detect_non_person_entities --all` scans the supported text corpus. It is explicit, proposal-only, and dry-run unless `--apply` is set. Repeated `--item` stays a separate explicit list and still commits as one transaction. There is no scheduler, save hook, approval, or checkpoint table.
