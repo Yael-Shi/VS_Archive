@@ -11,10 +11,8 @@ from documents.services.non_person_entity_review_preflight import (
 
 class Command(BaseCommand):
     help = (
-        "Read-only preflight of the v6 non-person entity review workbook. "
-        "Verifies the fixed SHA-256, parses FINAL_RECON_2026-10-04, "
-        "FINAL_ALIASES, ALIAS_REVIEW_REQUIRED, and FINAL_SPLIT_ROUTING, "
-        "and prints parser counts. This command performs no database writes."
+        "Read-only preflight of a recognized non-person review workbook. "
+        "An unknown SHA-256 fails closed. This command performs no database writes."
     )
 
     def add_arguments(self, parser):

@@ -13,8 +13,8 @@ from documents.services.non_person_entity_review_preflight import PreflightError
 
 class Command(BaseCommand):
     help = (
-        "Apply the reviewed v6 non-person entity workbook in one transaction. "
-        "Requires --confirm APPLY_NON_PERSON_FINAL_RECON_2026_10_05. "
+        "Apply one recognized non-person review workbook in one transaction. "
+        "The confirmation token must match that workbook's contract. "
         "Refuses the batch when any candidate is STATE_DRIFT or BLOCKED. "
         "Does not write Person, Author, Tag, category, event, or search rows."
     )

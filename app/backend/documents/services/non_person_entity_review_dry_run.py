@@ -59,10 +59,11 @@ from documents.services.non_person_entity_occurrences import (
 from documents.services.non_person_entity_review_preflight import (
     PreflightError,
     PreflightResult,
+    V6_DECISION_SOURCE,
     preflight_authoritative_workbook,
 )
 
-DECISION_SOURCE = "vs_archive_non_person_final_recon_2026_10_05"
+DECISION_SOURCE = V6_DECISION_SOURCE
 
 STATE_READY_TO_APPLY = "READY_TO_APPLY"
 STATE_ALREADY_APPLIED = "ALREADY_APPLIED"
@@ -133,6 +134,9 @@ class CandidatePlan:
     aliases: tuple[AliasPlan, ...]
     occurrences: tuple[OccurrencePlan, ...]
     result_entity_required: bool
+    decision_source: str = ""
+    existing_decision_required: bool = False
+    contract_source: str = ""
 
 
 @dataclass(frozen=True)
@@ -272,6 +276,8 @@ def _plans_from_preflight(
         )
     plans: list[CandidatePlan] = []
     decisions = ReviewedNonPersonEntityDecision.Decision
+    contract_source = preflight.decision_source or DECISION_SOURCE
+    carried = set(preflight.carried_candidate_ids)
     for row in preflight.rows:
         entity = None
         if row.final_decision == decisions.APPROVE:
@@ -281,6 +287,7 @@ def _plans_from_preflight(
                 entity_type=row.entity_type,
                 entity_subtype=row.entity_subtype,
             )
+        is_carried = row.candidate_id in carried
         plans.append(
             CandidatePlan(
                 candidate_id=row.candidate_id,
@@ -291,12 +298,21 @@ def _plans_from_preflight(
                 merge_target_candidate_id=row.merge_target,
                 contextual_surfaces=row.surface,
                 note=row.final_notes,
-                workbook_sha256=preflight.workbook_sha256,
+                workbook_sha256=(
+                    preflight.carried_workbook_sha256
+                    if is_carried
+                    else preflight.workbook_sha256
+                ),
                 entity=entity,
                 aliases=tuple(aliases_by_target.get(row.candidate_id, ())),
                 occurrences=tuple(occurrences_by_split.get(row.candidate_id, ())),
                 result_entity_required=row.final_decision
                 in {decisions.APPROVE, decisions.MERGE},
+                decision_source=(
+                    preflight.carried_decision_source if is_carried else contract_source
+                ),
+                existing_decision_required=is_carried,
+                contract_source=contract_source,
             )
         )
     return tuple(plans)
@@ -348,16 +364,47 @@ class _LoadedState:
     occurrences_by_decision: dict[int, tuple[ArchiveItemEntityOccurrence, ...]]
     items: dict[int, ArchiveItem]
     shared_approve_entities: dict[int, tuple[str, ...]]
+    duplicate_contract_source_ids: frozenset[str] = frozenset()
 
 
 def _load_state(plans: tuple[CandidatePlan, ...]) -> _LoadedState:
-    candidate_ids = [plan.candidate_id for plan in plans]
-    decisions = {
-        row.candidate_id: row
-        for row in ReviewedNonPersonEntityDecision.objects.filter(
-            source=DECISION_SOURCE,
-            candidate_id__in=candidate_ids,
-        ).select_related("result_entity")
+    identity = Q()
+    for plan in plans:
+        expected_source = plan.decision_source or DECISION_SOURCE
+        identity |= Q(source=expected_source, candidate_id=plan.candidate_id)
+        active_source = _active_contract_source(plan)
+        if plan.existing_decision_required and active_source != expected_source:
+            identity |= Q(source=active_source, candidate_id=plan.candidate_id)
+    stored = (
+        []
+        if not plans
+        else list(
+            ReviewedNonPersonEntityDecision.objects.filter(identity).select_related(
+                "result_entity"
+            )
+        )
+    )
+    grouped: dict[str, list[ReviewedNonPersonEntityDecision]] = defaultdict(list)
+    for row in stored:
+        grouped[row.candidate_id].append(row)
+    decisions: dict[str, ReviewedNonPersonEntityDecision] = {}
+    for plan in plans:
+        source = plan.decision_source or DECISION_SOURCE
+        match = next(
+            (row for row in grouped[plan.candidate_id] if row.source == source),
+            None,
+        )
+        if match is not None:
+            decisions[plan.candidate_id] = match
+    duplicate_contract_source_ids = {
+        plan.candidate_id
+        for plan in plans
+        if plan.existing_decision_required
+        and _active_contract_source(plan) != (plan.decision_source or DECISION_SOURCE)
+        and any(
+            row.source == _active_contract_source(plan)
+            for row in grouped[plan.candidate_id]
+        )
     }
     entity_ids = [
         row.result_entity_id
@@ -406,7 +453,12 @@ def _load_state(plans: tuple[CandidatePlan, ...]) -> _LoadedState:
         },
         items=items,
         shared_approve_entities=_shared_approve_entities(decisions),
+        duplicate_contract_source_ids=frozenset(duplicate_contract_source_ids),
     )
+
+
+def _active_contract_source(plan: CandidatePlan) -> str:
+    return plan.contract_source or DECISION_SOURCE
 
 
 def _classify_independent(
@@ -417,6 +469,10 @@ def _classify_independent(
     blocked: list[str] = []
     blocked.extend(_plan_shape_blockers(plan))
     decision = loaded.decisions.get(plan.candidate_id)
+    if plan.candidate_id in loaded.duplicate_contract_source_ids:
+        drift.append("carried decision exists on contract source")
+    if plan.existing_decision_required and decision is None:
+        blocked.append("carried target is not already applied")
     if decision is not None:
         drift.extend(_decision_field_drifts(decision, plan))
         drift.extend(_result_entity_drifts(decision, plan, loaded))

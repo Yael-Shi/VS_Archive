@@ -1,5 +1,13 @@
 # VS-Archive Decision Log
 
+## Second non-person review contract (2026-10-11)
+
+**Decision:** Preflight, dry-run, and apply recognize two workbooks by exact SHA-256. An unknown SHA fails closed. The workbook does not choose its own expected counts. The closed v6 contract stays on `APPLY_NON_PERSON_FINAL_RECON_2026_10_05` and source `vs_archive_non_person_final_recon_2026_10_05`, with 109 rows, 63 aliases, and the EC0009/EC0045 routes.
+
+**Second contract:** SHA `f2e70a380b3fcd2995b17a558cd6a754f3638706a8501e9efc1e77974eddd2d1`. Confirmation token `APPLY_NON_PERSON_SECOND_CONTRACT_2026_10_11`. New decisions use source `vs_archive_non_person_second_contract_2026_10_11`. Physical rows are 123: APPROVE 83, MERGE 27, SKIP 13, SPLIT 0, NEEDS_RESEARCH 0, aliases 0, split routes 0. Seven APPROVE rows (EC0006, EC0013, EC0066, EC0223, EC0389, EC0443, EC0465) are carried v6 targets. Dry-run classifies those as already applied from the v6 decision. Apply does not recreate their entities, decisions, aliases, source, or workbook SHA. A SPLIT row in this contract still fails because it has no pinned routes. A future contract that contains SPLIT rows still requires routes.
+
+**Unchanged:** MERGE still targets an APPROVE candidate in the same contract. No schema change and no migration.
+
 ## Non-person entity subtype expansion (2026-10-11)
 
 **Decision:** `NonPersonEntity.entity_subtype` gains eight choices. No top-level `entity_type` is added. Existing choice values are unchanged. The column stays `max_length=40`. This migration does not rewrite existing rows, reviewed decisions, aliases, or occurrences.

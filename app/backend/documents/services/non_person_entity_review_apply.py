@@ -42,13 +42,15 @@ from documents.services.non_person_entity_review_dry_run import (
     locate_surface_occurrences,
     source_text_sha256,
 )
-from documents.services import non_person_entity_review_preflight as preflight_module
 from documents.services.non_person_entity_review_preflight import (
     PreflightResult,
+    SECOND_APPLY_CONFIRM_TOKEN,
+    V6_APPLY_CONFIRM_TOKEN,
+    contract_spec_for_sha,
     preflight_authoritative_workbook,
 )
 
-APPLY_CONFIRM_TOKEN = "APPLY_NON_PERSON_FINAL_RECON_2026_10_05"
+APPLY_CONFIRM_TOKEN = V6_APPLY_CONFIRM_TOKEN
 
 _APPLYABLE = {STATE_READY_TO_APPLY, STATE_ALREADY_APPLIED}
 
@@ -76,9 +78,10 @@ def apply_non_person_entity_review(path: str | Path, *, confirm: str) -> ApplyRe
     before any write.
     """
 
-    _require_confirm(confirm)
+    _require_known_confirm(confirm)
     workbook_path = Path(path)
     preflight = _read_authoritative_workbook(workbook_path)
+    _require_confirm(confirm, preflight.workbook_sha256)
     before = classify_preflight(preflight)
     _require_applyable(before, stage="pre-apply")
     try:
@@ -140,16 +143,20 @@ def _read_authoritative_workbook(path: Path) -> PreflightResult:
 
 
 def _require_reparsed_workbook(first: PreflightResult, second: PreflightResult) -> None:
-    expected = preflight_module.AUTHORITATIVE_WORKBOOK_SHA256
-    if (
-        second.workbook_sha256 != first.workbook_sha256
-        or second.workbook_sha256 != expected
-    ):
+    if second.workbook_sha256 != first.workbook_sha256:
+        raise ApplyError("workbook sha256 changed before write")
+    if contract_spec_for_sha(second.workbook_sha256) is None:
         raise ApplyError("workbook sha256 changed before write")
 
 
-def _require_confirm(confirm: str) -> None:
-    if confirm != APPLY_CONFIRM_TOKEN:
+def _require_known_confirm(confirm: str) -> None:
+    if confirm not in {V6_APPLY_CONFIRM_TOKEN, SECOND_APPLY_CONFIRM_TOKEN}:
+        raise ApplyError("confirmation token rejected")
+
+
+def _require_confirm(confirm: str, workbook_sha256: str) -> None:
+    spec = contract_spec_for_sha(workbook_sha256)
+    if spec is None or confirm != spec.confirm_token:
         raise ApplyError("confirmation token rejected")
 
 
@@ -189,9 +196,12 @@ def _require_fully_applied(result: DryRunResult) -> None:
 
 def _lock_apply_rows(preflight: PreflightResult) -> None:
     candidate_ids = sorted({row.candidate_id for row in preflight.rows})
+    sources = {preflight.decision_source or DECISION_SOURCE}
+    if preflight.carried_decision_source:
+        sources.add(preflight.carried_decision_source)
     decisions = list(
         ReviewedNonPersonEntityDecision.objects.select_for_update()
-        .filter(source=DECISION_SOURCE, candidate_id__in=candidate_ids)
+        .filter(source__in=sources, candidate_id__in=candidate_ids)
         .order_by("candidate_id")
     )
     entity_ids = sorted(
@@ -325,6 +335,8 @@ def _create_approve_entities(
         ready,
         ReviewedNonPersonEntityDecision.Decision.APPROVE,
     ):
+        if plan.existing_decision_required:
+            raise ApplyError(f"carried target cannot be created: {plan.candidate_id}")
         if plan.entity is None:
             raise ApplyError(f"approve entity plan missing: {plan.candidate_id}")
         entity = NonPersonEntity.objects.create(
@@ -379,12 +391,21 @@ def _create_merge_decisions(
     ready: dict[str, CandidateDryRunResult],
 ) -> int:
     created = 0
+    plans_by_id = {
+        candidate.candidate_id: candidate.plan for candidate in locked.candidates
+    }
     for plan in _ready_plans(
         locked,
         ready,
         ReviewedNonPersonEntityDecision.Decision.MERGE,
     ):
-        target = _locked_target_decision(plan.merge_target_candidate_id)
+        if plan.existing_decision_required:
+            raise ApplyError(f"carried target cannot be created: {plan.candidate_id}")
+        target_plan = plans_by_id[plan.merge_target_candidate_id]
+        target = _locked_target_decision(
+            plan.merge_target_candidate_id,
+            target_plan.decision_source or DECISION_SOURCE,
+        )
         if target.decision != ReviewedNonPersonEntityDecision.Decision.APPROVE:
             raise ApplyError(f"merge target is not approve: {plan.candidate_id}")
         if target.result_entity_id is None:
@@ -419,7 +440,10 @@ def _create_split_occurrences(
         ready,
         ReviewedNonPersonEntityDecision.Decision.SPLIT,
     ):
-        decision = _decision_for(plan.candidate_id)
+        decision = _decision_for(
+            plan.candidate_id,
+            plan.decision_source or DECISION_SOURCE,
+        )
         if decision.result_entity_id is not None:
             raise ApplyError(f"split result_entity must be null: {plan.candidate_id}")
         for occurrence in sorted(
@@ -432,7 +456,14 @@ def _create_split_occurrences(
                     f"item {occurrence.archive_item_id} "
                     f"ordinal {occurrence.occurrence_ordinal}"
                 )
-            target = _locked_target_decision(occurrence.target_candidate_id)
+            target_plan = {
+                candidate.candidate_id: candidate.plan
+                for candidate in locked.candidates
+            }[occurrence.target_candidate_id]
+            target = _locked_target_decision(
+                occurrence.target_candidate_id,
+                target_plan.decision_source or DECISION_SOURCE,
+            )
             if target.result_entity_id is None:
                 raise ApplyError(
                     f"route target missing entity: {occurrence.target_candidate_id}"
@@ -465,7 +496,7 @@ def _create_decision(plan: CandidatePlan, *, result_entity_id: int | None) -> No
             f"needs_research review_status must be UNRESOLVED: {plan.candidate_id}"
         )
     ReviewedNonPersonEntityDecision.objects.create(
-        source=DECISION_SOURCE,
+        source=plan.decision_source or DECISION_SOURCE,
         candidate_id=plan.candidate_id,
         workbook_sha256=plan.workbook_sha256,
         decision=plan.decision,
@@ -479,19 +510,25 @@ def _create_decision(plan: CandidatePlan, *, result_entity_id: int | None) -> No
     )
 
 
-def _locked_target_decision(candidate_id: str) -> ReviewedNonPersonEntityDecision:
+def _locked_target_decision(
+    candidate_id: str,
+    decision_source: str,
+) -> ReviewedNonPersonEntityDecision:
     try:
         return ReviewedNonPersonEntityDecision.objects.select_for_update().get(
-            source=DECISION_SOURCE, candidate_id=candidate_id
+            source=decision_source, candidate_id=candidate_id
         )
     except ReviewedNonPersonEntityDecision.DoesNotExist as exc:
         raise ApplyError(f"target missing: {candidate_id}") from exc
 
 
-def _decision_for(candidate_id: str) -> ReviewedNonPersonEntityDecision:
+def _decision_for(
+    candidate_id: str,
+    decision_source: str = DECISION_SOURCE,
+) -> ReviewedNonPersonEntityDecision:
     try:
         return ReviewedNonPersonEntityDecision.objects.select_for_update().get(
-            source=DECISION_SOURCE,
+            source=decision_source,
             candidate_id=candidate_id,
         )
     except ReviewedNonPersonEntityDecision.DoesNotExist as exc:
@@ -567,33 +604,37 @@ def _occurrence_group(occurrence: OccurrencePlan) -> tuple[object, ...]:
 
 
 def _verify_persisted_totals(locked: DryRunResult) -> None:
-    candidate_ids = [candidate.candidate_id for candidate in locked.candidates]
-    decisions = ReviewedNonPersonEntityDecision.objects.filter(
-        source=DECISION_SOURCE,
-        candidate_id__in=candidate_ids,
-    )
-    if decisions.count() != len(candidate_ids):
+    plans = [candidate.plan for candidate in locked.candidates]
+    stored: dict[str, ReviewedNonPersonEntityDecision] = {}
+    for plan in plans:
+        try:
+            stored[plan.candidate_id] = ReviewedNonPersonEntityDecision.objects.get(
+                source=plan.decision_source or DECISION_SOURCE,
+                candidate_id=plan.candidate_id,
+            )
+        except ReviewedNonPersonEntityDecision.DoesNotExist:
+            pass
+    if len(stored) != len(plans):
         raise ApplyError(
-            f"final decision count mismatch: {decisions.count()} != {len(candidate_ids)}"
+            f"final decision count mismatch: {len(stored)} != {len(plans)}"
         )
-    approve = decisions.filter(
-        decision=ReviewedNonPersonEntityDecision.Decision.APPROVE
-    )
-    approve_entity_ids = list(approve.values_list("result_entity_id", flat=True))
+    planned_approves = [
+        plan
+        for plan in plans
+        if plan.decision == ReviewedNonPersonEntityDecision.Decision.APPROVE
+    ]
+    approve_entity_ids = [
+        stored[plan.candidate_id].result_entity_id for plan in planned_approves
+    ]
     if any(entity_id is None for entity_id in approve_entity_ids):
         raise ApplyError("approve decision missing result_entity")
     if len(set(approve_entity_ids)) != len(approve_entity_ids):
         raise ApplyError("distinct approve candidates share result_entity")
-    planned_approves = [
-        candidate.plan
-        for candidate in locked.candidates
-        if candidate.plan.decision == ReviewedNonPersonEntityDecision.Decision.APPROVE
-    ]
     if len(approve_entity_ids) != len(planned_approves):
         raise ApplyError("approve result entity count mismatch")
     alias_matches = 0
     for plan in planned_approves:
-        decision = decisions.get(candidate_id=plan.candidate_id)
+        decision = stored[plan.candidate_id]
         for alias in plan.aliases:
             if NonPersonEntityAlias.objects.filter(
                 entity_id=decision.result_entity_id,
@@ -606,15 +647,17 @@ def _verify_persisted_totals(locked: DryRunResult) -> None:
         raise ApplyError(
             f"planned alias count mismatch: {alias_matches} != {planned_aliases}"
         )
-    split_ids = [
-        candidate.candidate_id
-        for candidate in locked.candidates
-        if candidate.plan.decision == ReviewedNonPersonEntityDecision.Decision.SPLIT
+    split_plans = [
+        plan
+        for plan in plans
+        if plan.decision == ReviewedNonPersonEntityDecision.Decision.SPLIT
     ]
-    occurrence_count = ArchiveItemEntityOccurrence.objects.filter(
-        decision__source=DECISION_SOURCE,
-        decision__candidate_id__in=split_ids,
-    ).count()
+    occurrence_count = 0
+    for plan in split_plans:
+        occurrence_count += ArchiveItemEntityOccurrence.objects.filter(
+            decision__source=plan.decision_source or DECISION_SOURCE,
+            decision__candidate_id=plan.candidate_id,
+        ).count()
     planned_occurrences = sum(
         len(candidate.plan.occurrences)
         for candidate in locked.candidates

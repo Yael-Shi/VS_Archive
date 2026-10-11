@@ -11,7 +11,7 @@ import hashlib
 import re
 import zipfile
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
@@ -98,6 +98,37 @@ EXPECTED_DECISION_COUNTS = {
     ReviewedNonPersonEntityDecision.Decision.SPLIT: 2,
     ReviewedNonPersonEntityDecision.Decision.NEEDS_RESEARCH: 1,
 }
+V6_DECISION_SOURCE = "vs_archive_non_person_final_recon_2026_10_05"
+V6_APPLY_CONFIRM_TOKEN = "APPLY_NON_PERSON_FINAL_RECON_2026_10_05"
+SECOND_CONTRACT_SHA256 = (
+    "f2e70a380b3fcd2995b17a558cd6a754f3638706a8501e9efc1e77974eddd2d1"
+)
+SECOND_CONTRACT_FINAL_SHEET_NAME = "FINAL_RECON_2026-10-11"
+SECOND_CONTRACT_ROW_COUNT = 123
+SECOND_CONTRACT_DECISION_COUNTS = MappingProxyType(
+    {
+        ReviewedNonPersonEntityDecision.Decision.APPROVE: 83,
+        ReviewedNonPersonEntityDecision.Decision.MERGE: 27,
+        ReviewedNonPersonEntityDecision.Decision.SKIP: 13,
+        ReviewedNonPersonEntityDecision.Decision.SPLIT: 0,
+        ReviewedNonPersonEntityDecision.Decision.NEEDS_RESEARCH: 0,
+    }
+)
+SECOND_CONTRACT_ALIAS_COUNT = 0
+SECOND_CONTRACT_SPLIT_ROUTE_COUNTS: Mapping[str, int] = MappingProxyType({})
+SECOND_DECISION_SOURCE = "vs_archive_non_person_second_contract_2026_10_11"
+SECOND_APPLY_CONFIRM_TOKEN = "APPLY_NON_PERSON_SECOND_CONTRACT_2026_10_11"
+SECOND_CARRIED_CANDIDATE_IDS = frozenset(
+    {
+        "EC0006",
+        "EC0013",
+        "EC0066",
+        "EC0223",
+        "EC0389",
+        "EC0443",
+        "EC0465",
+    }
+)
 ALIAS_REVIEW_STATUS_APPROVED = "APPROVED"
 SPLIT_ROUTE_PIN_STATUS = "PINNED"
 SPLIT_ROUTE_REVIEW_STATUS = "APPROVED"
@@ -108,6 +139,25 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 _OFFICE_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 _PKG_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+
+
+@dataclass(frozen=True)
+class ReviewContractSpec:
+    """Fixed identity for one recognized workbook. The file does not set these."""
+
+    sha256: str
+    final_sheet_name: str
+    row_count: int
+    decision_counts: Mapping[str, int]
+    alias_count: int
+    split_route_counts: Mapping[str, int]
+    read_split_routes: bool
+    read_alias_review: bool
+    confirm_token: str
+    decision_source: str
+    carried_candidate_ids: frozenset[str] = frozenset()
+    carried_decision_source: str = ""
+    carried_workbook_sha256: str = ""
 
 
 class PreflightError(ValueError):
@@ -188,6 +238,12 @@ class PreflightResult:
     unresolved_alias_reviews: int
     apply_blockers: tuple[ApplyBlocker, ...]
     split_apply_readiness: tuple[SplitApplyReadiness, ...]
+    decision_source: str = ""
+    carried_candidate_ids: tuple[str, ...] = ()
+    carried_decision_source: str = ""
+    carried_workbook_sha256: str = ""
+    final_sheet_name: str = ""
+    expected_decisions: tuple[str, ...] = ()
 
     @property
     def parser_valid(self) -> bool:
@@ -195,7 +251,8 @@ class PreflightResult:
 
     def decision_counts(self) -> dict[str, int]:
         counts = Counter(row.final_decision for row in self.rows)
-        return {decision: counts[decision] for decision in EXPECTED_DECISION_COUNTS}
+        keys = self.expected_decisions or tuple(EXPECTED_DECISION_COUNTS)
+        return {decision: counts[decision] for decision in keys}
 
     @property
     def entity_creation_candidate_ids(self) -> tuple[str, ...]:
@@ -213,13 +270,64 @@ def sha256_path(path: str | Path) -> str:
     return digest.hexdigest()
 
 
-def preflight_authoritative_workbook(path: str | Path) -> PreflightResult:
-    """Parse the v6 workbook and require its fixed SHA-256."""
+def v6_contract_spec() -> ReviewContractSpec:
+    """Closed v6 contract. Counts are the live module constants."""
 
-    return preflight_workbook(
-        path,
-        expected_sha256=AUTHORITATIVE_WORKBOOK_SHA256,
+    return ReviewContractSpec(
+        sha256=AUTHORITATIVE_WORKBOOK_SHA256,
+        final_sheet_name=FINAL_SHEET_NAME,
+        row_count=EXPECTED_ROW_COUNT,
+        decision_counts=EXPECTED_DECISION_COUNTS,
+        alias_count=EXPECTED_ALIAS_COUNT,
+        split_route_counts=EXPECTED_SPLIT_ROUTE_COUNTS,
+        read_split_routes=True,
+        read_alias_review=True,
+        confirm_token=V6_APPLY_CONFIRM_TOKEN,
+        decision_source=V6_DECISION_SOURCE,
     )
+
+
+def second_contract_spec() -> ReviewContractSpec:
+    """2026-10-11 contract. Split routes stay required only when splits exist."""
+
+    return ReviewContractSpec(
+        sha256=SECOND_CONTRACT_SHA256,
+        final_sheet_name=SECOND_CONTRACT_FINAL_SHEET_NAME,
+        row_count=SECOND_CONTRACT_ROW_COUNT,
+        decision_counts=SECOND_CONTRACT_DECISION_COUNTS,
+        alias_count=SECOND_CONTRACT_ALIAS_COUNT,
+        split_route_counts=SECOND_CONTRACT_SPLIT_ROUTE_COUNTS,
+        read_split_routes=False,
+        read_alias_review=False,
+        confirm_token=SECOND_APPLY_CONFIRM_TOKEN,
+        decision_source=SECOND_DECISION_SOURCE,
+        carried_candidate_ids=SECOND_CARRIED_CANDIDATE_IDS,
+        carried_decision_source=V6_DECISION_SOURCE,
+        carried_workbook_sha256=AUTHORITATIVE_WORKBOOK_SHA256,
+    )
+
+
+def contract_spec_for_sha(workbook_sha256: str) -> ReviewContractSpec | None:
+    """Return the spec for an exact SHA. Unknown hashes are not a spec."""
+
+    if workbook_sha256 == SECOND_CONTRACT_SHA256:
+        return second_contract_spec()
+    if workbook_sha256 == AUTHORITATIVE_WORKBOOK_SHA256:
+        return v6_contract_spec()
+    return None
+
+
+def preflight_authoritative_workbook(path: str | Path) -> PreflightResult:
+    """Parse one recognized contract workbook. An unknown SHA fails closed."""
+
+    workbook_path = Path(path)
+    if not workbook_path.is_file():
+        raise PreflightError((f"WORKBOOK_NOT_FOUND: {workbook_path}",))
+    actual = sha256_path(workbook_path)
+    spec = contract_spec_for_sha(actual)
+    if spec is None:
+        raise PreflightError((f"SHA256_UNRECOGNIZED: {actual}",))
+    return _preflight_contract(workbook_path, spec, actual)
 
 
 def preflight_workbook(path: str | Path, *, expected_sha256: str) -> PreflightResult:
@@ -244,17 +352,41 @@ def preflight_workbook(path: str | Path, *, expected_sha256: str) -> PreflightRe
     return replace(result, workbook_sha256=actual)
 
 
+def _preflight_contract(
+    workbook_path: Path,
+    spec: ReviewContractSpec,
+    actual_sha256: str,
+) -> PreflightResult:
+    unresolved_ids = (
+        read_unresolved_alias_review_ids(workbook_path)
+        if spec.read_alias_review
+        else ()
+    )
+    split_routes = (
+        read_split_route_rows(workbook_path) if spec.read_split_routes else ()
+    )
+    result = validate_review_contract(
+        read_final_sheet_rows(workbook_path, sheet_name=spec.final_sheet_name),
+        read_alias_rows(workbook_path),
+        split_routes,
+        unresolved_alias_review_ids=unresolved_ids,
+        spec=spec,
+    )
+    return replace(result, workbook_sha256=actual_sha256)
+
+
 def validate_review_contract(
     rows: Sequence[ReviewedNonPersonEntityRow],
     aliases: Sequence[ReviewedAliasRow],
     split_routes: Sequence[ReviewedSplitRoute],
     *,
     unresolved_alias_review_ids: Sequence[str] = (),
+    spec: ReviewContractSpec | None = None,
 ) -> PreflightResult:
     errors = [
-        *_validation_errors(rows),
-        *_alias_errors(rows, aliases),
-        *_split_route_errors(rows, split_routes),
+        *_validation_errors(rows, spec),
+        *_alias_errors(rows, aliases, spec),
+        *_split_route_errors(rows, split_routes, spec),
     ]
     if unresolved_alias_review_ids:
         joined = ", ".join(unresolved_alias_review_ids)
@@ -272,7 +404,15 @@ def validate_review_contract(
         split_routes=tuple(split_routes),
         unresolved_alias_reviews=0,
         apply_blockers=(),
-        split_apply_readiness=_split_apply_readiness(stored_rows, split_routes),
+        split_apply_readiness=_split_apply_readiness(stored_rows, split_routes, spec),
+        decision_source="" if spec is None else spec.decision_source,
+        carried_candidate_ids=(
+            () if spec is None else tuple(sorted(spec.carried_candidate_ids))
+        ),
+        carried_decision_source="" if spec is None else spec.carried_decision_source,
+        carried_workbook_sha256="" if spec is None else spec.carried_workbook_sha256,
+        final_sheet_name="" if spec is None else spec.final_sheet_name,
+        expected_decisions=(() if spec is None else tuple(spec.decision_counts)),
     )
 
 
@@ -282,7 +422,7 @@ def format_preflight_report(result: PreflightResult) -> str:
         "non_person_entity_review_preflight",
         "parser_valid: yes",
         f"workbook_sha256: {result.workbook_sha256}",
-        f"sheet: {FINAL_SHEET_NAME}",
+        f"sheet: {result.final_sheet_name or FINAL_SHEET_NAME}",
         f"rows: {len(result.rows)}",
     ]
     for decision in EXPECTED_DECISION_COUNTS:
@@ -306,10 +446,14 @@ def format_preflight_report(result: PreflightResult) -> str:
     return "\n".join(lines) + "\n"
 
 
-def read_final_sheet_rows(path: str | Path) -> tuple[ReviewedNonPersonEntityRow, ...]:
+def read_final_sheet_rows(
+    path: str | Path,
+    *,
+    sheet_name: str = FINAL_SHEET_NAME,
+) -> tuple[ReviewedNonPersonEntityRow, ...]:
     rows: list[ReviewedNonPersonEntityRow] = []
     for row_number, values in _rows_after_header(
-        _read_sheet_table(Path(path), FINAL_SHEET_NAME),
+        _read_sheet_table(Path(path), sheet_name),
         REQUIRED_COLUMNS,
     ):
         if values[0] == "":
@@ -399,17 +543,24 @@ def _is_closed_alias_review_status(values: Sequence[str]) -> bool:
     return values[0] == ALIAS_REVIEW_CLOSED_STATUS and not any(values[1:])
 
 
-def _validation_errors(rows: Sequence[ReviewedNonPersonEntityRow]) -> list[str]:
+def _validation_errors(
+    rows: Sequence[ReviewedNonPersonEntityRow],
+    spec: ReviewContractSpec | None = None,
+) -> list[str]:
     errors: list[str] = []
-    if len(rows) != EXPECTED_ROW_COUNT:
-        errors.append(f"ROW_COUNT: expected {EXPECTED_ROW_COUNT} got {len(rows)}")
+    expected_rows = EXPECTED_ROW_COUNT if spec is None else spec.row_count
+    expected_decisions = (
+        EXPECTED_DECISION_COUNTS if spec is None else spec.decision_counts
+    )
+    if len(rows) != expected_rows:
+        errors.append(f"ROW_COUNT: expected {expected_rows} got {len(rows)}")
 
     decisions = ReviewedNonPersonEntityDecision.Decision
     statuses = ReviewedNonPersonEntityDecision.ReviewStatus
     entity_types = set(NonPersonEntity.EntityType.values)
     entity_subtypes = set(NonPersonEntity.EntitySubtype.values)
     counts: Counter[str] = Counter(row.final_decision for row in rows)
-    for decision, expected in EXPECTED_DECISION_COUNTS.items():
+    for decision, expected in expected_decisions.items():
         got = counts[decision]
         if got != expected:
             errors.append(f"DECISION_COUNT: {decision} expected {expected} got {got}")
@@ -429,6 +580,12 @@ def _validation_errors(rows: Sequence[ReviewedNonPersonEntityRow]) -> list[str]:
         f"DUPLICATE_CANDIDATE_ID: {candidate_id}" for candidate_id in sorted(duplicated)
     )
     errors.extend(_merge_errors(rows))
+    if spec is not None and spec.carried_candidate_ids:
+        by_id = {row.candidate_id: row for row in rows}
+        for candidate_id in sorted(spec.carried_candidate_ids):
+            row = by_id.get(candidate_id)
+            if row is None or row.final_decision != decisions.APPROVE:
+                errors.append(f"CARRIED_TARGET_ABSENT: {candidate_id}")
     return errors
 
 
@@ -535,12 +692,12 @@ def _merge_cycle_errors(rows: Sequence[ReviewedNonPersonEntityRow]) -> list[str]
 def _alias_errors(
     rows: Sequence[ReviewedNonPersonEntityRow],
     aliases: Sequence[ReviewedAliasRow],
+    spec: ReviewContractSpec | None = None,
 ) -> list[str]:
     errors: list[str] = []
-    if len(aliases) != EXPECTED_ALIAS_COUNT:
-        errors.append(
-            f"ALIAS_COUNT: expected {EXPECTED_ALIAS_COUNT} got {len(aliases)}"
-        )
+    expected_aliases = EXPECTED_ALIAS_COUNT if spec is None else spec.alias_count
+    if len(aliases) != expected_aliases:
+        errors.append(f"ALIAS_COUNT: expected {expected_aliases} got {len(aliases)}")
 
     decisions = ReviewedNonPersonEntityDecision.Decision
     kinds = set(NonPersonEntityAlias.Kind.values)
@@ -586,12 +743,17 @@ def _alias_errors(
 def _split_route_errors(
     rows: Sequence[ReviewedNonPersonEntityRow],
     split_routes: Sequence[ReviewedSplitRoute],
+    spec: ReviewContractSpec | None = None,
 ) -> list[str]:
     errors: list[str] = []
-    if len(split_routes) != EXPECTED_SPLIT_ROUTE_COUNT:
+    expected_route_counts = (
+        EXPECTED_SPLIT_ROUTE_COUNTS if spec is None else spec.split_route_counts
+    )
+    expected_route_count = sum(expected_route_counts.values())
+    if len(split_routes) != expected_route_count:
         errors.append(
             "SPLIT_ROUTE_COUNT: "
-            f"expected {EXPECTED_SPLIT_ROUTE_COUNT} got {len(split_routes)}"
+            f"expected {expected_route_count} got {len(split_routes)}"
         )
 
     decisions = ReviewedNonPersonEntityDecision.Decision
@@ -667,7 +829,7 @@ def _split_route_errors(
             duplicated.add(identity)
         identities.add(identity)
 
-    for candidate_id, expected in EXPECTED_SPLIT_ROUTE_COUNTS.items():
+    for candidate_id, expected in expected_route_counts.items():
         got = route_counts[candidate_id]
         if got != expected:
             errors.append(
@@ -679,7 +841,7 @@ def _split_route_errors(
             continue
         if row.candidate_id not in routed_split_ids:
             errors.append(f"SPLIT_ROUTES_MISSING: {row.candidate_id}")
-        if row.candidate_id not in EXPECTED_SPLIT_ROUTE_COUNTS:
+        if row.candidate_id not in expected_route_counts:
             errors.append(f"UNEXPECTED_SPLIT_CANDIDATE: {row.candidate_id}")
     errors.extend(
         "DUPLICATE_OCCURRENCE_IDENTITY: " + " ".join(str(part) for part in identity)
@@ -718,14 +880,18 @@ def _occurrence_identity(
 def _split_apply_readiness(
     rows: Sequence[ReviewedNonPersonEntityRow],
     split_routes: Sequence[ReviewedSplitRoute],
+    spec: ReviewContractSpec | None = None,
 ) -> tuple[SplitApplyReadiness, ...]:
     split = ReviewedNonPersonEntityDecision.Decision.SPLIT
+    expected_route_counts = (
+        EXPECTED_SPLIT_ROUTE_COUNTS if spec is None else spec.split_route_counts
+    )
     route_counts = Counter(route.split_candidate_id for route in split_routes)
     readiness: list[SplitApplyReadiness] = []
     for row in rows:
         if row.final_decision != split:
             continue
-        expected = EXPECTED_SPLIT_ROUTE_COUNTS.get(row.candidate_id)
+        expected = expected_route_counts.get(row.candidate_id)
         actual = route_counts[row.candidate_id]
         apply_ready = expected is not None and actual == expected
         if apply_ready:
