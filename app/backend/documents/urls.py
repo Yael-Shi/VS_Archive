@@ -1,7 +1,18 @@
 from django.urls import path
+from . import agent_transcription_review_api
 from . import views
 
 urlpatterns = [
+    path(
+        "agent/v1/transcription-review/documents/scan",
+        agent_transcription_review_api.transcription_review_documents_scan,
+        name="agent-transcription-review-documents-scan",
+    ),
+    path(
+        "agent/v1/transcription-review/documents/<int:document_id>/review-bundle",
+        agent_transcription_review_api.transcription_review_document_review_bundle,
+        name="agent-transcription-review-document-review-bundle",
+    ),
     path("uploads/create/", views.create_upload, name="uploads-create"),
     path(
         "uploads/<int:doc_id>/parts/add/",

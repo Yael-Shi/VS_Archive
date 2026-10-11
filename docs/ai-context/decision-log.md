@@ -1,5 +1,37 @@
 # VS-Archive Decision Log
 
+## Transcription-review agent Pilot 01 read-only API (2026-10-11)
+
+**Decision / implemented:** Add two anonymous-capable, GET-only JSON endpoints for the future external `vs-archive-transcription-review-agent`. No writes, migrations, scraping, PDF rasterization, tokens, or suggestion/apply APIs.
+
+**Routes**
+
+- `GET /api/agent/v1/transcription-review/documents/scan`
+- `GET /api/agent/v1/transcription-review/documents/<document_id>/review-bundle`
+
+**Scan:** DISCOVERY candidates only. Hard-filter `Document.language in {en,fr}` and `archive_item__item_type=OCR_DOCUMENT`, ascending `Document.id`, exclusive `after_id` (default 0), `limit` default 50 (min 1, max 200). Does not resolve transcription or validate/presign sources. `next_after_id` is the max returned id; empty page ⇒ `exhausted=true`. Invalid query ⇒ 400.
+
+**Review bundle:** Load via existing viewability helpers (`get_viewable_document` / `document_queryset_for_user`). Missing or not viewable ⇒ 404. Displayed transcription is exactly `resolve_displayed_transcription_result`. Outcomes: `REVIEWABLE`, `NON_ELIGIBLE`, `BLOCKING_INTEGRITY_ERROR`. Bundle keeps a fail-closed `NOT_OCR_DOCUMENT` guard for race/invariant drift even though scan already requires OCR_DOCUMENT.
+
+**Readiness / integrity**
+
+1. Language outside en/fr ⇒ `NON_ELIGIBLE` (`LANGUAGE_NOT_IN_SCOPE`)
+2. Non-OCR archive item ⇒ `NON_ELIGIBLE` (`NOT_OCR_DOCUMENT`)
+3. Upload not `UPLOADED` ⇒ `NON_ELIGIBLE` (`NOT_READY_UPLOAD`)
+4. `PROCESSING` / `RECOVERY_REQUIRED` with no displayed transcription ⇒ `NON_ELIGIBLE` (`NOT_READY_PROCESSING`)
+5. Displayed transcription `verification_status=VERIFIED` ⇒ `NON_ELIGIBLE` (`VERIFIED_TRANSCRIPTION_OUT_OF_SCOPE`); no source presign
+6. After readiness, missing displayed transcription ⇒ `BLOCKING_INTEGRITY_ERROR` (`MISSING_DISPLAYED_TRANSCRIPTION`) — includes `FAILED` with no text
+7. Missing / incomplete / unsupported source, or presign/bucket failure ⇒ `BLOCKING_INTEGRITY_ERROR`
+8. Otherwise ⇒ `REVIEWABLE`
+
+**Sources:** Multi-image validates every expected `order_index` (UPLOADED + non-empty key), then includes additional uploaded display-only rows after the expected range, stable `order_index`. An UPLOADED display-only extra with an empty `file_s3_key` is `BLOCKING_INTEGRITY_ERROR` (`UPLOADED_DISPLAY_ONLY_SOURCE_MISSING_KEY`); PENDING/FAILED extras remain outside the display set. Single-file uses authoritative `Document.file_s3_key` as one `PRIMARY_FILE` (IMAGE or original PDF). Local agent hashes of exact transcription text and downloaded source bytes are authoritative for immutable bundles; server may return optional transcription SHA-256 and stable ids/revisions only.
+
+**Auth:** The Pilot 01 external consumer will use anonymous/public access. The endpoints themselves preserve existing caller visibility through the normal access helpers, so an authenticated caller may see whatever that caller is already authorized to view. No new auth system in this change. Full-corpus agent use later still needs a principal that can view private/restricted items when those are in scope.
+
+**External controller (not implemented here):** On `BLOCKING_INTEGRITY_ERROR`, stop and do **not** advance `last_scanned_document_id` past the blocked document. 404 and `NON_ELIGIBLE` may advance the cursor. Discovery exhaustion with fewer than five REVIEWABLE documents yields a short batch. Keep `last_scanned_document_id` separate from batch/document completion state.
+
+**Code:** `documents/services/transcription_review_agent_read.py`, `documents/agent_transcription_review_api.py`, routes in `documents/urls.py`. Tests: `documents/test_transcription_review_agent_api.py`.
+
 ## Second non-person review contract (2026-10-11)
 
 **Decision:** Preflight, dry-run, and apply recognize two workbooks by exact SHA-256. An unknown SHA fails closed. The workbook does not choose its own expected counts. The closed v6 contract stays on `APPLY_NON_PERSON_FINAL_RECON_2026_10_05` and source `vs_archive_non_person_final_recon_2026_10_05`, with 109 rows, 63 aliases, and the EC0009/EC0045 routes.
