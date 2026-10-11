@@ -78,6 +78,56 @@ class NonPersonEntityModelTests(TestCase):
 
         self.assertEqual(entity.entity_subtype, "")
 
+    def test_approved_subtype_expansion_is_valid_and_existing_values_remain(self):
+        added = {
+            NonPersonEntity.EntitySubtype.MILITARY_ORGANIZATION,
+            NonPersonEntity.EntitySubtype.INTERNATIONAL_ORGANIZATION,
+            NonPersonEntity.EntitySubtype.POLITICAL_PARTY_OR_MOVEMENT,
+            NonPersonEntity.EntitySubtype.COMMITTEE_OR_INTERNAL_BODY,
+            NonPersonEntity.EntitySubtype.PORT,
+            NonPersonEntity.EntitySubtype.DIPLOMATIC_SITE,
+            NonPersonEntity.EntitySubtype.TRIAL_OR_LEGAL_PROCEEDING,
+            NonPersonEntity.EntitySubtype.POLITICAL_AFFAIR_OR_CRISIS,
+        }
+        preserved = {
+            NonPersonEntity.EntitySubtype.GOVERNMENT_BODY,
+            NonPersonEntity.EntitySubtype.CITY,
+            NonPersonEntity.EntitySubtype.WAR_OR_CAMPAIGN,
+            NonPersonEntity.EntitySubtype.COVERT_OPERATION,
+            NonPersonEntity.EntitySubtype.MILITARY_OR_SECURITY_SITE,
+            NonPersonEntity.EntitySubtype.OTHER,
+        }
+        self.assertTrue(added <= set(NonPersonEntity.EntitySubtype.values))
+        self.assertTrue(preserved <= set(NonPersonEntity.EntitySubtype.values))
+        self.assertNotIn("NAMED_GROUP", NonPersonEntity.EntityType.values)
+        self.assertNotIn("HISTORICAL_COHORT", NonPersonEntity.EntitySubtype.values)
+        self.assertNotIn("RELIEF_ORGANIZATION", NonPersonEntity.EntitySubtype.values)
+        self.assertEqual(
+            NonPersonEntity._meta.get_field("entity_subtype").max_length,
+            40,
+        )
+
+        for subtype in sorted(added | preserved):
+            entity = _entity(
+                canonical_name=f"subtype-{subtype}",
+                entity_subtype=subtype,
+            )
+            entity.full_clean()
+            entity.refresh_from_db()
+            self.assertEqual(entity.entity_subtype, subtype)
+
+    def test_entity_subtype_rejects_unsupported_values(self):
+        entity = NonPersonEntity(
+            canonical_name="עולי הגרדום בקהיר",
+            entity_type=NonPersonEntity.EntityType.COMMUNITY,
+            entity_subtype="HISTORICAL_COHORT",
+        )
+
+        with self.assertRaises(ValidationError) as caught:
+            entity.full_clean()
+
+        self.assertIn("entity_subtype", caught.exception.message_dict)
+
     def test_display_name_may_differ_from_canonical_name(self):
         entity = _entity(
             canonical_name="ההסתדרות הכללית של העובדים בארץ ישראל",

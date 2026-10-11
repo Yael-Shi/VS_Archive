@@ -1,5 +1,17 @@
 # VS-Archive Decision Log
 
+## Non-person entity subtype expansion (2026-10-11)
+
+**Decision:** `NonPersonEntity.entity_subtype` gains eight choices. No top-level `entity_type` is added. Existing choice values are unchanged. The column stays `max_length=40`. This migration does not rewrite existing rows, reviewed decisions, aliases, or occurrences.
+
+**New subtypes:** `ORGANIZATION` may use `MILITARY_ORGANIZATION`, `INTERNATIONAL_ORGANIZATION`, `POLITICAL_PARTY_OR_MOVEMENT`, or `COMMITTEE_OR_INTERNAL_BODY`. `PLACE` may use `PORT` or `DIPLOMATIC_SITE`. `EVENT` may use `TRIAL_OR_LEGAL_PROCEEDING` or `POLITICAL_AFFAIR_OR_CRISIS`. The subtype list stays flat. The database still does not pair a subtype with one type. Pairing is the review convention above.
+
+**Not added:** `NAMED_GROUP`, `HISTORICAL_COHORT`, `RELIEF_ORGANIZATION`, and any other type or subtype. `INTERNATIONAL_OR_RELIEF` is not a stored code. A relief body is not given a subtype until a reviewed candidate needs one.
+
+**Known limitation:** EC0065 עולי הגרדום בקהיר stays unresolved. It is a named historical cohort, not a community, organization, or event. Do not force it into the six existing types. EC0175 and EC0673 stay `SKIP` and are not stored by this change.
+
+**Deferred:** creating entities for the reviewed candidates that needed these subtypes, and any split routing that uses them.
+
 ## Non-person overlap cleanup command (2026-10-08)
 
 **Decision:** Pending contained-occurrence candidates stored before overlap suppression are cleaned up only by `cleanup_non_person_overlap_candidates`. The command is separate from the detector. It does not change detector semantics, the public locator, grouped review, schema, proposal identity, or source SHA.

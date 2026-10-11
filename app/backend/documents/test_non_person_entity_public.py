@@ -25,6 +25,7 @@ from documents.services.archive_item_presentation import (
 from documents.services.archive_items import create_manual_text_archive_item
 from documents.services.non_person_entity_occurrences import source_text_sha256
 from documents.services.non_person_entity_presentation import (
+    non_person_public_type_label,
     public_mention_sort_key,
     public_mentioned_object_links,
 )
@@ -80,6 +81,80 @@ def _pin(
 
 def _detail(client, item: ArchiveItem):
     return client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
+
+
+class PublicSubtypeLabelTests(TestCase):
+    def test_new_subtypes_have_distinct_public_labels(self):
+        cases = (
+            (
+                NonPersonEntity.EntityType.ORGANIZATION,
+                NonPersonEntity.EntitySubtype.MILITARY_ORGANIZATION,
+                "ארגון · ארגון צבאי",
+            ),
+            (
+                NonPersonEntity.EntityType.ORGANIZATION,
+                NonPersonEntity.EntitySubtype.INTERNATIONAL_ORGANIZATION,
+                "ארגון · ארגון בין-לאומי",
+            ),
+            (
+                NonPersonEntity.EntityType.ORGANIZATION,
+                NonPersonEntity.EntitySubtype.POLITICAL_PARTY_OR_MOVEMENT,
+                "ארגון · מפלגה או תנועה פוליטית",
+            ),
+            (
+                NonPersonEntity.EntityType.ORGANIZATION,
+                NonPersonEntity.EntitySubtype.COMMITTEE_OR_INTERNAL_BODY,
+                "ארגון · ועדה או גוף פנימי",
+            ),
+            (
+                NonPersonEntity.EntityType.PLACE,
+                NonPersonEntity.EntitySubtype.PORT,
+                "מקום · נמל",
+            ),
+            (
+                NonPersonEntity.EntityType.PLACE,
+                NonPersonEntity.EntitySubtype.DIPLOMATIC_SITE,
+                "מקום · אתר דיפלומטי",
+            ),
+            (
+                NonPersonEntity.EntityType.EVENT,
+                NonPersonEntity.EntitySubtype.TRIAL_OR_LEGAL_PROCEEDING,
+                "אירוע · משפט או הליך משפטי",
+            ),
+            (
+                NonPersonEntity.EntityType.EVENT,
+                NonPersonEntity.EntitySubtype.POLITICAL_AFFAIR_OR_CRISIS,
+                "אירוע · פרשה או משבר מדיני",
+            ),
+        )
+        for entity_type, subtype, label in cases:
+            entity = NonPersonEntity(
+                canonical_name=subtype,
+                entity_type=entity_type,
+                entity_subtype=subtype,
+            )
+            self.assertEqual(non_person_public_type_label(entity), label)
+
+        city = NonPersonEntity(
+            canonical_name="קהיר",
+            entity_type=NonPersonEntity.EntityType.PLACE,
+            entity_subtype=NonPersonEntity.EntitySubtype.CITY,
+        )
+        self.assertEqual(non_person_public_type_label(city), "מקום · עיר")
+
+    def test_port_subtype_is_shown_on_the_public_detail_page(self):
+        entity = _entity(
+            canonical_name="נמל חיפה",
+            entity_subtype=NonPersonEntity.EntitySubtype.PORT,
+        )
+
+        resp = self.client.get(
+            reverse("archive-non-person-detail", kwargs={"entity_id": entity.id})
+        )
+
+        self.assertContains(resp, "נמל חיפה")
+        self.assertContains(resp, "מקום · נמל")
+        self.assertNotContains(resp, "PORT")
 
 
 class MentionedObjectSectionTests(TestCase):

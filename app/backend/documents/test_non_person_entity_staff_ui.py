@@ -27,6 +27,7 @@ from documents.services.non_person_entity_staff import (
     ALIAS_DUPLICATE_ERROR,
     ALIAS_SHARED_WARNING,
     ENTITY_CANONICAL_NAME_REQUIRED_ERROR,
+    ENTITY_SUBTYPE_INVALID_ERROR,
     ENTITY_TYPE_INVALID_ERROR,
     STALE_OCCURRENCE_STATUS,
     VALID_OCCURRENCE_STATUS,
@@ -224,6 +225,29 @@ class EntityStaffEditTests(TestCase):
         self.assertEqual(
             self.entity.entity_subtype, NonPersonEntity.EntitySubtype.SCHOOL
         )
+
+    def test_new_subtype_is_offered_and_saved(self):
+        opened = self.client.get(self.url)
+        self.assertContains(opened, "נמל")
+        self.assertContains(opened, "ארגון צבאי")
+
+        resp = self._post_entity(
+            entity_type=NonPersonEntity.EntityType.PLACE,
+            entity_subtype=NonPersonEntity.EntitySubtype.PORT,
+        )
+        self.assertEqual(resp.redirect_chain, [(self.url, 302)])
+        self.entity.refresh_from_db()
+        self.assertEqual(self.entity.entity_subtype, NonPersonEntity.EntitySubtype.PORT)
+        self.assertEqual(self.entity.entity_type, NonPersonEntity.EntityType.PLACE)
+
+    def test_unsupported_subtype_is_rejected(self):
+        resp = self._post_entity(entity_subtype="HISTORICAL_COHORT")
+        self.entity.refresh_from_db()
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, ENTITY_SUBTYPE_INVALID_ERROR)
+        self.assertEqual(self.entity.entity_subtype, NonPersonEntity.EntitySubtype.CITY)
+        self.assertEqual(resp.redirect_chain, [])
 
     def test_invalid_type_and_blank_canonical_name_are_rejected(self):
         invalid_type = self._post_entity(entity_type="NOT_A_TYPE")
