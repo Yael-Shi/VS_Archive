@@ -320,6 +320,7 @@ def _write_workbook(
     path: Path,
     final_rows: list[list[tuple[str, str]]],
     *,
+    final_sheet_name: str = FINAL_SHEET_NAME,
     extra_sheets: list[tuple[str, list[list[tuple[str, str]]]]] | None = None,
     include_decoy: bool = False,
     shared_string_rows: list[list[tuple[str, str]]] | None = None,
@@ -327,7 +328,7 @@ def _write_workbook(
 ) -> None:
     sheets = [
         (
-            FINAL_SHEET_NAME,
+            final_sheet_name,
             _worksheet_xml(final_rows, shared_rows=shared_string_rows),
         )
     ]
@@ -793,7 +794,7 @@ class NonPersonEntityReviewPreflightTests(SimpleTestCase):
         with self.assertRaises(PreflightError) as caught:
             preflight_authoritative_workbook(path)
 
-        self.assertIn("SHA256_MISMATCH", str(caught.exception))
+        self.assertIn("SHA256_UNRECOGNIZED", str(caught.exception))
 
     def test_command_rejects_sha_mismatch(self):
         path = self._workbook_path("command.xlsx")
@@ -802,7 +803,7 @@ class NonPersonEntityReviewPreflightTests(SimpleTestCase):
         with self.assertRaises(CommandError) as caught:
             call_command("non_person_entity_review_preflight", workbook=str(path))
 
-        self.assertIn("SHA256_MISMATCH", str(caught.exception))
+        self.assertIn("SHA256_UNRECOGNIZED", str(caught.exception))
 
     def test_inline_final_does_not_read_shared_strings(self):
         path = self._workbook_path("inline.xlsx")

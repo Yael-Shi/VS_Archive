@@ -12,7 +12,7 @@ from documents.services.non_person_entity_review_preflight import PreflightError
 
 class Command(BaseCommand):
     help = (
-        "Read-only dry-run of the v6 non-person entity review workbook against "
+        "Read-only dry-run of a recognized non-person review workbook against "
         "the current database and authoritative source text. Prints "
         "READY_TO_APPLY, ALREADY_APPLIED, STATE_DRIFT, and BLOCKED. "
         "This command has no apply mode and performs no database writes."
