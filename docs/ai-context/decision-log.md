@@ -1,5 +1,11 @@
 # VS-Archive Decision Log
 
+## Fourth non-person review contract v2 (2026-10-12)
+
+**Decision:** Preflight, dry-run, and apply recognize the fourth workbook by exact SHA-256 `278f7b8c5bbd5d0530c9a1bb8d742d2d650c28652bf649db539ec17bb33f7350`. An unknown SHA still fails closed. The superseded v1 workbook SHA is not registered. Confirmation token `APPLY_NON_PERSON_FOURTH_CONTRACT_2026_10_12`. New decisions use source `vs_archive_non_person_fourth_contract_2026_10_12`. Physical rows are 100: APPROVE 99, MERGE 1, SKIP 0, SPLIT 0, NEEDS_RESEARCH 0. That is 100 new decisions and 99 new entities. Aliases 0, occurrences 0, split routes 0. No carried applied decisions. Sheet `FINAL_RECON_2026-10-12_v4`. Alias review and split routes are not read.
+
+**Unchanged:** v6, second, and third contract tokens, sources, counts, carried ownership, aliases, and split routes. No schema change and no migration. This registration does not apply the contract.
+
 ## Non-person taxonomy extension (2026-10-12)
 
 **Decision:** `NonPersonEntity` gains one type, `NAMED_GROUP`, and seventeen subtypes. Existing choice values are unchanged. `entity_type` stays `max_length=32`. `entity_subtype` stays `max_length=40` and may be blank. The migration alters choices only. It does not rewrite existing entities, applied review decisions, aliases, or occurrences. The database still does not pair a subtype with one type and still has no `CHECK` constraint on the choice lists.
