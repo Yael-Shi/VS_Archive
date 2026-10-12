@@ -136,6 +136,24 @@ THIRD_CONTRACT_ALIAS_COUNT = 0
 THIRD_CONTRACT_SPLIT_ROUTE_COUNTS: Mapping[str, int] = MappingProxyType({})
 THIRD_DECISION_SOURCE = "vs_archive_non_person_third_contract_2026_10_12"
 THIRD_APPLY_CONFIRM_TOKEN = "APPLY_NON_PERSON_THIRD_CONTRACT_2026_10_12"
+FOURTH_CONTRACT_SHA256 = (
+    "278f7b8c5bbd5d0530c9a1bb8d742d2d650c28652bf649db539ec17bb33f7350"
+)
+FOURTH_CONTRACT_FINAL_SHEET_NAME = "FINAL_RECON_2026-10-12_v4"
+FOURTH_CONTRACT_ROW_COUNT = 100
+FOURTH_CONTRACT_DECISION_COUNTS = MappingProxyType(
+    {
+        ReviewedNonPersonEntityDecision.Decision.APPROVE: 99,
+        ReviewedNonPersonEntityDecision.Decision.MERGE: 1,
+        ReviewedNonPersonEntityDecision.Decision.SKIP: 0,
+        ReviewedNonPersonEntityDecision.Decision.SPLIT: 0,
+        ReviewedNonPersonEntityDecision.Decision.NEEDS_RESEARCH: 0,
+    }
+)
+FOURTH_CONTRACT_ALIAS_COUNT = 0
+FOURTH_CONTRACT_SPLIT_ROUTE_COUNTS: Mapping[str, int] = MappingProxyType({})
+FOURTH_DECISION_SOURCE = "vs_archive_non_person_fourth_contract_2026_10_12"
+FOURTH_APPLY_CONFIRM_TOKEN = "APPLY_NON_PERSON_FOURTH_CONTRACT_2026_10_12"
 SECOND_CARRIED_CANDIDATE_IDS = frozenset(
     {
         "EC0006",
@@ -424,9 +442,28 @@ def third_contract_spec() -> ReviewContractSpec:
     )
 
 
+def fourth_contract_spec() -> ReviewContractSpec:
+    """2026-10-12 v2 contract. No carried rows, aliases, or split routes."""
+
+    return ReviewContractSpec(
+        sha256=FOURTH_CONTRACT_SHA256,
+        final_sheet_name=FOURTH_CONTRACT_FINAL_SHEET_NAME,
+        row_count=FOURTH_CONTRACT_ROW_COUNT,
+        decision_counts=FOURTH_CONTRACT_DECISION_COUNTS,
+        alias_count=FOURTH_CONTRACT_ALIAS_COUNT,
+        split_route_counts=FOURTH_CONTRACT_SPLIT_ROUTE_COUNTS,
+        read_split_routes=False,
+        read_alias_review=False,
+        confirm_token=FOURTH_APPLY_CONFIRM_TOKEN,
+        decision_source=FOURTH_DECISION_SOURCE,
+    )
+
+
 def contract_spec_for_sha(workbook_sha256: str) -> ReviewContractSpec | None:
     """Return the spec for an exact SHA. Unknown hashes are not a spec."""
 
+    if workbook_sha256 == FOURTH_CONTRACT_SHA256:
+        return fourth_contract_spec()
     if workbook_sha256 == THIRD_CONTRACT_SHA256:
         return third_contract_spec()
     if workbook_sha256 == SECOND_CONTRACT_SHA256:
