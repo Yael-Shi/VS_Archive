@@ -1,5 +1,19 @@
 # VS-Archive Decision Log
 
+## Non-person taxonomy extension (2026-10-12)
+
+**Decision:** `NonPersonEntity` gains one type, `NAMED_GROUP`, and seventeen subtypes. Existing choice values are unchanged. `entity_type` stays `max_length=32`. `entity_subtype` stays `max_length=40` and may be blank. The migration alters choices only. It does not rewrite existing entities, applied review decisions, aliases, or occurrences. The database still does not pair a subtype with one type and still has no `CHECK` constraint on the choice lists.
+
+**New type:** `NAMED_GROUP` (קבוצה בשם). EC0065 stays a named historical cohort. It is not forced into the six older types.
+
+**New subtypes:** `ARTICLE_OR_SERIES`, `BROADCAST_OR_RADIO_TV`, `CULTURAL_ORGANIZATION`, `EXECUTION_OR_HANGING`, `FILM_OR_VIDEO`, `HISTORICAL_COHORT`, `IMMIGRANT_COHORT`, `IMMIGRATION_WAVE_OR_ALIYAH_ACTION`, `JEWISH_COMMUNAL_BODY`, `MEDICAL_INSTITUTION`, `PRISONER_OR_DEFENDANT_GROUP`, `RELIEF_ORGANIZATION`, `RELIGIOUS_INSTITUTION`, `RIOT_OR_POGROM`, `SETTLEMENT_OR_KIBBUTZ`, `TREATY_OR_AGREEMENT`, `TREATY_OR_DIPLOMATIC_EVENT`.
+
+**Supersedes, for these codes only:** the 2026-10-11 sentence that did not add `NAMED_GROUP`, `HISTORICAL_COHORT`, or `RELIEF_ORGANIZATION`. That entry remains the record of what was true on 2026-10-11. `INTERNATIONAL_OR_RELIEF` is still not a stored code.
+
+**Approved storage corrections, not new identities:** EC0209 is `ORGANIZATION` / `CULTURAL_ORGANIZATION`. EC0637 is `ORGANIZATION` / `ASSOCIATION_OR_NGO` because the reviewed `INTERNATIONAL_OR_RELIEF` bucket cannot be stored and the archive use is a research grant. EC0667 is `NAMED_GROUP` with a blank subtype. EC0678 stays `ORGANIZATION` / `RELIGIOUS_INSTITUTION`. The user corrected EC0678's canonical from `ישיבת אהוה ואחוה` to `ישיבת אהבה ואחוה` on 2026-10-12. The source review workbook is unchanged. No alias is created from the old spelling. Applied contracts are unchanged. No import contract is created by this change.
+
+**Unchanged:** public index title. Staff dropdowns and filters follow the model choices. Unknown subtype labels stay omitted on public pages.
+
 ## Third non-person review contract (2026-10-12)
 
 **Decision:** Preflight, dry-run, and apply recognize a third workbook by exact SHA-256 `c3765a54c7400f76c02f3e63393d9817edc649dd8257f0acab0bcd465f7fa696`. An unknown SHA still fails closed. Confirmation token `APPLY_NON_PERSON_THIRD_CONTRACT_2026_10_12`. New decisions use source `vs_archive_non_person_third_contract_2026_10_12`. Physical rows are 443: APPROVE 404, MERGE 28, SKIP 11, SPLIT 0, NEEDS_RESEARCH 0, aliases 0, split routes 0. That is 434 new decisions (APPROVE 395, MERGE 28, SKIP 11) plus 9 carried APPROVE rows.
@@ -54,9 +68,9 @@
 
 **New subtypes:** `ORGANIZATION` may use `MILITARY_ORGANIZATION`, `INTERNATIONAL_ORGANIZATION`, `POLITICAL_PARTY_OR_MOVEMENT`, or `COMMITTEE_OR_INTERNAL_BODY`. `PLACE` may use `PORT` or `DIPLOMATIC_SITE`. `EVENT` may use `TRIAL_OR_LEGAL_PROCEEDING` or `POLITICAL_AFFAIR_OR_CRISIS`. The subtype list stays flat. The database still does not pair a subtype with one type. Pairing is the review convention above.
 
-**Not added:** `NAMED_GROUP`, `HISTORICAL_COHORT`, `RELIEF_ORGANIZATION`, and any other type or subtype. `INTERNATIONAL_OR_RELIEF` is not a stored code. A relief body is not given a subtype until a reviewed candidate needs one.
+**Not added in this change:** `NAMED_GROUP`, `HISTORICAL_COHORT`, `RELIEF_ORGANIZATION`, and any other type or subtype. `INTERNATIONAL_OR_RELIEF` is not a stored code. A relief body is not given a subtype until a reviewed candidate needs one. The 2026-10-12 taxonomy extension later added `NAMED_GROUP`, `HISTORICAL_COHORT`, `RELIEF_ORGANIZATION`, and the other codes listed there. `INTERNATIONAL_OR_RELIEF` remains unstored.
 
-**Known limitation:** EC0065 עולי הגרדום בקהיר stays unresolved. It is a named historical cohort, not a community, organization, or event. Do not force it into the six existing types. EC0175 and EC0673 stay `SKIP` and are not stored by this change.
+**Known limitation at 2026-10-11:** EC0065 עולי הגרדום בקהיר stayed unresolved. It is a named historical cohort, not a community, organization, or event. Do not force it into the six types that existed then. The 2026-10-12 taxonomy extension stores that cohort as `NAMED_GROUP` / `HISTORICAL_COHORT`. EC0175 and EC0673 stay `SKIP` and were not stored by the 2026-10-11 change.
 
 **Deferred:** creating entities for the reviewed candidates that needed these subtypes, and any split routing that uses them.
 

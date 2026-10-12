@@ -176,6 +176,40 @@ class EntityStaffIndexTests(TestCase):
             [alpha.id, beta.id, gamma.id, same_first.id, same_second.id],
         )
 
+    def test_new_type_and_subtype_are_filter_choices(self):
+        named = _entity(
+            canonical_name="הפורשים",
+            entity_type=NonPersonEntity.EntityType.NAMED_GROUP,
+            entity_subtype="",
+        )
+        cultural = _entity(
+            canonical_name="המרכז לתרבות יהודית",
+            entity_type=NonPersonEntity.EntityType.ORGANIZATION,
+            entity_subtype=NonPersonEntity.EntitySubtype.CULTURAL_ORGANIZATION,
+        )
+        _entity(canonical_name="קהיר")
+
+        opened = self.client.get(reverse(INDEX))
+        self.assertContains(opened, "קבוצה בשם")
+        self.assertContains(opened, "ארגון תרבות")
+
+        by_type = self.client.get(
+            reverse(INDEX),
+            {"entity_type": NonPersonEntity.EntityType.NAMED_GROUP},
+        )
+        self.assertEqual(
+            [row.entity_id for row in by_type.context["entities"]],
+            [named.id],
+        )
+        by_subtype = self.client.get(
+            reverse(INDEX),
+            {"entity_subtype": NonPersonEntity.EntitySubtype.CULTURAL_ORGANIZATION},
+        )
+        self.assertEqual(
+            [row.entity_id for row in by_subtype.context["entities"]],
+            [cultural.id],
+        )
+
 
 class EntityStaffEditTests(TestCase):
     def setUp(self):
@@ -230,6 +264,8 @@ class EntityStaffEditTests(TestCase):
         opened = self.client.get(self.url)
         self.assertContains(opened, "נמל")
         self.assertContains(opened, "ארגון צבאי")
+        self.assertContains(opened, "קבוצה בשם")
+        self.assertContains(opened, "ארגון תרבות")
 
         resp = self._post_entity(
             entity_type=NonPersonEntity.EntityType.PLACE,
@@ -240,8 +276,19 @@ class EntityStaffEditTests(TestCase):
         self.assertEqual(self.entity.entity_subtype, NonPersonEntity.EntitySubtype.PORT)
         self.assertEqual(self.entity.entity_type, NonPersonEntity.EntityType.PLACE)
 
+        named = self._post_entity(
+            entity_type=NonPersonEntity.EntityType.NAMED_GROUP,
+            entity_subtype="",
+        )
+        self.assertEqual(named.redirect_chain, [(self.url, 302)])
+        self.entity.refresh_from_db()
+        self.assertEqual(
+            self.entity.entity_type, NonPersonEntity.EntityType.NAMED_GROUP
+        )
+        self.assertEqual(self.entity.entity_subtype, "")
+
     def test_unsupported_subtype_is_rejected(self):
-        resp = self._post_entity(entity_subtype="HISTORICAL_COHORT")
+        resp = self._post_entity(entity_subtype="NOT_A_SUBTYPE")
         self.entity.refresh_from_db()
 
         self.assertEqual(resp.status_code, 200)

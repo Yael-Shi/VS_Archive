@@ -99,9 +99,6 @@ class NonPersonEntityModelTests(TestCase):
         }
         self.assertTrue(added <= set(NonPersonEntity.EntitySubtype.values))
         self.assertTrue(preserved <= set(NonPersonEntity.EntitySubtype.values))
-        self.assertNotIn("NAMED_GROUP", NonPersonEntity.EntityType.values)
-        self.assertNotIn("HISTORICAL_COHORT", NonPersonEntity.EntitySubtype.values)
-        self.assertNotIn("RELIEF_ORGANIZATION", NonPersonEntity.EntitySubtype.values)
         self.assertEqual(
             NonPersonEntity._meta.get_field("entity_subtype").max_length,
             40,
@@ -116,11 +113,67 @@ class NonPersonEntityModelTests(TestCase):
             entity.refresh_from_db()
             self.assertEqual(entity.entity_subtype, subtype)
 
+    def test_named_group_taxonomy_extension_is_valid(self):
+        added_subtypes = {
+            NonPersonEntity.EntitySubtype.ARTICLE_OR_SERIES,
+            NonPersonEntity.EntitySubtype.BROADCAST_OR_RADIO_TV,
+            NonPersonEntity.EntitySubtype.CULTURAL_ORGANIZATION,
+            NonPersonEntity.EntitySubtype.EXECUTION_OR_HANGING,
+            NonPersonEntity.EntitySubtype.FILM_OR_VIDEO,
+            NonPersonEntity.EntitySubtype.HISTORICAL_COHORT,
+            NonPersonEntity.EntitySubtype.IMMIGRANT_COHORT,
+            NonPersonEntity.EntitySubtype.IMMIGRATION_WAVE_OR_ALIYAH_ACTION,
+            NonPersonEntity.EntitySubtype.JEWISH_COMMUNAL_BODY,
+            NonPersonEntity.EntitySubtype.MEDICAL_INSTITUTION,
+            NonPersonEntity.EntitySubtype.PRISONER_OR_DEFENDANT_GROUP,
+            NonPersonEntity.EntitySubtype.RELIEF_ORGANIZATION,
+            NonPersonEntity.EntitySubtype.RELIGIOUS_INSTITUTION,
+            NonPersonEntity.EntitySubtype.RIOT_OR_POGROM,
+            NonPersonEntity.EntitySubtype.SETTLEMENT_OR_KIBBUTZ,
+            NonPersonEntity.EntitySubtype.TREATY_OR_AGREEMENT,
+            NonPersonEntity.EntitySubtype.TREATY_OR_DIPLOMATIC_EVENT,
+        }
+        self.assertEqual(len(added_subtypes), 17)
+        self.assertIn(
+            NonPersonEntity.EntityType.NAMED_GROUP,
+            NonPersonEntity.EntityType.values,
+        )
+        self.assertTrue(added_subtypes <= set(NonPersonEntity.EntitySubtype.values))
+        self.assertLessEqual(
+            max(len(value) for value in added_subtypes),
+            NonPersonEntity._meta.get_field("entity_subtype").max_length,
+        )
+        self.assertLessEqual(
+            len(NonPersonEntity.EntityType.NAMED_GROUP),
+            NonPersonEntity._meta.get_field("entity_type").max_length,
+        )
+
+        named_group = _entity(
+            canonical_name="הפורשים",
+            entity_type=NonPersonEntity.EntityType.NAMED_GROUP,
+            entity_subtype="",
+        )
+        named_group.full_clean()
+        named_group.refresh_from_db()
+        self.assertEqual(named_group.entity_subtype, "")
+
+        cohort = _entity(
+            canonical_name="עולי הגרדום בקהיר",
+            entity_type=NonPersonEntity.EntityType.NAMED_GROUP,
+            entity_subtype=NonPersonEntity.EntitySubtype.HISTORICAL_COHORT,
+        )
+        cohort.full_clean()
+        cohort.refresh_from_db()
+        self.assertEqual(
+            cohort.entity_subtype,
+            NonPersonEntity.EntitySubtype.HISTORICAL_COHORT,
+        )
+
     def test_entity_subtype_rejects_unsupported_values(self):
         entity = NonPersonEntity(
             canonical_name="עולי הגרדום בקהיר",
             entity_type=NonPersonEntity.EntityType.COMMUNITY,
-            entity_subtype="HISTORICAL_COHORT",
+            entity_subtype="NOT_A_SUBTYPE",
         )
 
         with self.assertRaises(ValidationError) as caught:
