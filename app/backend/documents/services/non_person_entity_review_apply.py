@@ -45,6 +45,7 @@ from documents.services.non_person_entity_review_dry_run import (
 from documents.services.non_person_entity_review_preflight import (
     PreflightResult,
     SECOND_APPLY_CONFIRM_TOKEN,
+    THIRD_APPLY_CONFIRM_TOKEN,
     V6_APPLY_CONFIRM_TOKEN,
     contract_spec_for_sha,
     preflight_authoritative_workbook,
@@ -150,7 +151,11 @@ def _require_reparsed_workbook(first: PreflightResult, second: PreflightResult) 
 
 
 def _require_known_confirm(confirm: str) -> None:
-    if confirm not in {V6_APPLY_CONFIRM_TOKEN, SECOND_APPLY_CONFIRM_TOKEN}:
+    if confirm not in {
+        V6_APPLY_CONFIRM_TOKEN,
+        SECOND_APPLY_CONFIRM_TOKEN,
+        THIRD_APPLY_CONFIRM_TOKEN,
+    }:
         raise ApplyError("confirmation token rejected")
 
 
@@ -199,6 +204,11 @@ def _lock_apply_rows(preflight: PreflightResult) -> None:
     sources = {preflight.decision_source or DECISION_SOURCE}
     if preflight.carried_decision_source:
         sources.add(preflight.carried_decision_source)
+    sources.update(
+        target.decision_source
+        for target in preflight.carried_targets
+        if target.decision_source
+    )
     decisions = list(
         ReviewedNonPersonEntityDecision.objects.select_for_update()
         .filter(source__in=sources, candidate_id__in=candidate_ids)

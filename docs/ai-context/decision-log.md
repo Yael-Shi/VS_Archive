@@ -1,5 +1,13 @@
 # VS-Archive Decision Log
 
+## Third non-person review contract (2026-10-12)
+
+**Decision:** Preflight, dry-run, and apply recognize a third workbook by exact SHA-256 `c3765a54c7400f76c02f3e63393d9817edc649dd8257f0acab0bcd465f7fa696`. An unknown SHA still fails closed. Confirmation token `APPLY_NON_PERSON_THIRD_CONTRACT_2026_10_12`. New decisions use source `vs_archive_non_person_third_contract_2026_10_12`. Physical rows are 443: APPROVE 404, MERGE 28, SKIP 11, SPLIT 0, NEEDS_RESEARCH 0, aliases 0, split routes 0. That is 434 new decisions (APPROVE 395, MERGE 28, SKIP 11) plus 9 carried APPROVE rows.
+
+**Carried ownership is per target.** v6 still owns EC0013, EC0257, and EC0465, including v6 source and v6 workbook SHA. The second contract still owns EC0313, EC0324, EC0414, EC0464, EC0539, and EC0544, including the second-contract source and SHA. Apply does not recreate those entities or decisions and does not change their source or workbook SHA. A missing carried decision is BLOCKED. A stored field that differs, including workbook SHA, is STATE_DRIFT. Either one refuses the batch. The second contract's single carried source is unchanged: its seven targets remain v6.
+
+**Unchanged:** v6 token, source, counts, aliases, and split routes. No schema change and no migration. The third contract creates no aliases and no occurrences.
+
 ## Transcription-review agent Pilot 01 read-only API (2026-10-11)
 
 **Decision / implemented:** Add two anonymous-capable, GET-only JSON endpoints for the future external `vs-archive-transcription-review-agent`. No writes, migrations, scraping, PDF rasterization, tokens, or suggestion/apply APIs.

@@ -118,6 +118,24 @@ SECOND_CONTRACT_ALIAS_COUNT = 0
 SECOND_CONTRACT_SPLIT_ROUTE_COUNTS: Mapping[str, int] = MappingProxyType({})
 SECOND_DECISION_SOURCE = "vs_archive_non_person_second_contract_2026_10_11"
 SECOND_APPLY_CONFIRM_TOKEN = "APPLY_NON_PERSON_SECOND_CONTRACT_2026_10_11"
+THIRD_CONTRACT_SHA256 = (
+    "c3765a54c7400f76c02f3e63393d9817edc649dd8257f0acab0bcd465f7fa696"
+)
+THIRD_CONTRACT_FINAL_SHEET_NAME = "FINAL_RECON_2026-10-12"
+THIRD_CONTRACT_ROW_COUNT = 443
+THIRD_CONTRACT_DECISION_COUNTS = MappingProxyType(
+    {
+        ReviewedNonPersonEntityDecision.Decision.APPROVE: 404,
+        ReviewedNonPersonEntityDecision.Decision.MERGE: 28,
+        ReviewedNonPersonEntityDecision.Decision.SKIP: 11,
+        ReviewedNonPersonEntityDecision.Decision.SPLIT: 0,
+        ReviewedNonPersonEntityDecision.Decision.NEEDS_RESEARCH: 0,
+    }
+)
+THIRD_CONTRACT_ALIAS_COUNT = 0
+THIRD_CONTRACT_SPLIT_ROUTE_COUNTS: Mapping[str, int] = MappingProxyType({})
+THIRD_DECISION_SOURCE = "vs_archive_non_person_third_contract_2026_10_12"
+THIRD_APPLY_CONFIRM_TOKEN = "APPLY_NON_PERSON_THIRD_CONTRACT_2026_10_12"
 SECOND_CARRIED_CANDIDATE_IDS = frozenset(
     {
         "EC0006",
@@ -142,6 +160,84 @@ _PKG_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 
 
 @dataclass(frozen=True)
+class CarriedTargetOwnership:
+    """Already-applied decision that a later contract may name but must not rewrite.
+
+    ``decision_source`` and ``workbook_sha256`` are the contract that created
+    the decision. A later workbook does not become the owner.
+    """
+
+    candidate_id: str
+    decision_source: str
+    workbook_sha256: str
+
+
+def _third_carried_target(
+    candidate_id: str,
+    *,
+    decision_source: str,
+    workbook_sha256: str,
+) -> CarriedTargetOwnership:
+    return CarriedTargetOwnership(
+        candidate_id=candidate_id,
+        decision_source=decision_source,
+        workbook_sha256=workbook_sha256,
+    )
+
+
+THIRD_CARRIED_TARGETS: tuple[CarriedTargetOwnership, ...] = (
+    _third_carried_target(
+        "EC0013",
+        decision_source=V6_DECISION_SOURCE,
+        workbook_sha256=AUTHORITATIVE_WORKBOOK_SHA256,
+    ),
+    _third_carried_target(
+        "EC0257",
+        decision_source=V6_DECISION_SOURCE,
+        workbook_sha256=AUTHORITATIVE_WORKBOOK_SHA256,
+    ),
+    _third_carried_target(
+        "EC0313",
+        decision_source=SECOND_DECISION_SOURCE,
+        workbook_sha256=SECOND_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0324",
+        decision_source=SECOND_DECISION_SOURCE,
+        workbook_sha256=SECOND_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0414",
+        decision_source=SECOND_DECISION_SOURCE,
+        workbook_sha256=SECOND_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0464",
+        decision_source=SECOND_DECISION_SOURCE,
+        workbook_sha256=SECOND_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0465",
+        decision_source=V6_DECISION_SOURCE,
+        workbook_sha256=AUTHORITATIVE_WORKBOOK_SHA256,
+    ),
+    _third_carried_target(
+        "EC0539",
+        decision_source=SECOND_DECISION_SOURCE,
+        workbook_sha256=SECOND_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0544",
+        decision_source=SECOND_DECISION_SOURCE,
+        workbook_sha256=SECOND_CONTRACT_SHA256,
+    ),
+)
+THIRD_CARRIED_CANDIDATE_IDS = frozenset(
+    target.candidate_id for target in THIRD_CARRIED_TARGETS
+)
+
+
+@dataclass(frozen=True)
 class ReviewContractSpec:
     """Fixed identity for one recognized workbook. The file does not set these."""
 
@@ -158,6 +254,7 @@ class ReviewContractSpec:
     carried_candidate_ids: frozenset[str] = frozenset()
     carried_decision_source: str = ""
     carried_workbook_sha256: str = ""
+    carried_targets: tuple[CarriedTargetOwnership, ...] = ()
 
 
 class PreflightError(ValueError):
@@ -242,6 +339,7 @@ class PreflightResult:
     carried_candidate_ids: tuple[str, ...] = ()
     carried_decision_source: str = ""
     carried_workbook_sha256: str = ""
+    carried_targets: tuple[CarriedTargetOwnership, ...] = ()
     final_sheet_name: str = ""
     expected_decisions: tuple[str, ...] = ()
 
@@ -307,13 +405,59 @@ def second_contract_spec() -> ReviewContractSpec:
     )
 
 
+def third_contract_spec() -> ReviewContractSpec:
+    """2026-10-12 contract. Carried targets keep their original owners."""
+
+    return ReviewContractSpec(
+        sha256=THIRD_CONTRACT_SHA256,
+        final_sheet_name=THIRD_CONTRACT_FINAL_SHEET_NAME,
+        row_count=THIRD_CONTRACT_ROW_COUNT,
+        decision_counts=THIRD_CONTRACT_DECISION_COUNTS,
+        alias_count=THIRD_CONTRACT_ALIAS_COUNT,
+        split_route_counts=THIRD_CONTRACT_SPLIT_ROUTE_COUNTS,
+        read_split_routes=False,
+        read_alias_review=False,
+        confirm_token=THIRD_APPLY_CONFIRM_TOKEN,
+        decision_source=THIRD_DECISION_SOURCE,
+        carried_candidate_ids=THIRD_CARRIED_CANDIDATE_IDS,
+        carried_targets=THIRD_CARRIED_TARGETS,
+    )
+
+
 def contract_spec_for_sha(workbook_sha256: str) -> ReviewContractSpec | None:
     """Return the spec for an exact SHA. Unknown hashes are not a spec."""
 
+    if workbook_sha256 == THIRD_CONTRACT_SHA256:
+        return third_contract_spec()
     if workbook_sha256 == SECOND_CONTRACT_SHA256:
         return second_contract_spec()
     if workbook_sha256 == AUTHORITATIVE_WORKBOOK_SHA256:
         return v6_contract_spec()
+    return None
+
+
+def carried_ownership_for(
+    preflight: PreflightResult,
+    candidate_id: str,
+) -> tuple[str, str] | None:
+    """Return the owning source and workbook SHA for one carried id.
+
+    Per-target ownership wins. A contract that still names one source for
+    every carried id uses that single pair. An incomplete pair is not an
+    owner.
+    """
+
+    for target in preflight.carried_targets:
+        if target.candidate_id == candidate_id:
+            if _complete_carried_owner(target.decision_source, target.workbook_sha256):
+                return target.decision_source, target.workbook_sha256
+            return None
+    if candidate_id not in preflight.carried_candidate_ids:
+        return None
+    source = preflight.carried_decision_source
+    workbook_sha256 = preflight.carried_workbook_sha256
+    if _complete_carried_owner(source, workbook_sha256):
+        return source, workbook_sha256
     return None
 
 
@@ -411,6 +555,7 @@ def validate_review_contract(
         ),
         carried_decision_source="" if spec is None else spec.carried_decision_source,
         carried_workbook_sha256="" if spec is None else spec.carried_workbook_sha256,
+        carried_targets=() if spec is None else spec.carried_targets,
         final_sheet_name="" if spec is None else spec.final_sheet_name,
         expected_decisions=(() if spec is None else tuple(spec.decision_counts)),
     )
@@ -586,6 +731,41 @@ def _validation_errors(
             row = by_id.get(candidate_id)
             if row is None or row.final_decision != decisions.APPROVE:
                 errors.append(f"CARRIED_TARGET_ABSENT: {candidate_id}")
+        errors.extend(_carried_ownership_errors(spec))
+    return errors
+
+
+def _complete_carried_owner(decision_source: str, workbook_sha256: str) -> bool:
+    return decision_source != "" and _SHA256_RE.fullmatch(workbook_sha256) is not None
+
+
+def _carried_ownership_errors(spec: ReviewContractSpec) -> list[str]:
+    errors: list[str] = []
+    owned_ids = [target.candidate_id for target in spec.carried_targets]
+    if len(owned_ids) != len(set(owned_ids)):
+        errors.append("CARRIED_TARGET_DUPLICATE")
+    if spec.carried_targets and spec.carried_decision_source != "":
+        errors.append("CARRIED_OWNERSHIP_AMBIGUOUS")
+    if spec.carried_targets and set(owned_ids) != set(spec.carried_candidate_ids):
+        errors.append("CARRIED_TARGET_OWNERSHIP_MISMATCH")
+    by_id = {target.candidate_id: target for target in spec.carried_targets}
+    for candidate_id in sorted(spec.carried_candidate_ids):
+        target = by_id.get(candidate_id)
+        if target is not None:
+            source = target.decision_source
+            workbook_sha256 = target.workbook_sha256
+        elif spec.carried_targets:
+            errors.append(f"CARRIED_SOURCE_MISSING: {candidate_id}")
+            continue
+        else:
+            source = spec.carried_decision_source
+            workbook_sha256 = spec.carried_workbook_sha256
+        if source == "":
+            errors.append(f"CARRIED_SOURCE_MISSING: {candidate_id}")
+        elif source == spec.decision_source:
+            errors.append(f"CARRIED_SOURCE_IS_CONTRACT_SOURCE: {candidate_id}")
+        if _SHA256_RE.fullmatch(workbook_sha256) is None:
+            errors.append(f"CARRIED_SHA_INVALID: {candidate_id}")
     return errors
 
 

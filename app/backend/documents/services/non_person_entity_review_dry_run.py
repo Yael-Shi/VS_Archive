@@ -60,6 +60,7 @@ from documents.services.non_person_entity_review_preflight import (
     PreflightError,
     PreflightResult,
     V6_DECISION_SOURCE,
+    carried_ownership_for,
     preflight_authoritative_workbook,
 )
 
@@ -288,6 +289,16 @@ def _plans_from_preflight(
                 entity_subtype=row.entity_subtype,
             )
         is_carried = row.candidate_id in carried
+        if is_carried:
+            ownership = carried_ownership_for(preflight, row.candidate_id)
+            if ownership is None:
+                raise DryRunError(
+                    f"carried target ownership is incomplete: {row.candidate_id}"
+                )
+            decision_source, workbook_sha256 = ownership
+        else:
+            decision_source = contract_source
+            workbook_sha256 = preflight.workbook_sha256
         plans.append(
             CandidatePlan(
                 candidate_id=row.candidate_id,
@@ -298,19 +309,13 @@ def _plans_from_preflight(
                 merge_target_candidate_id=row.merge_target,
                 contextual_surfaces=row.surface,
                 note=row.final_notes,
-                workbook_sha256=(
-                    preflight.carried_workbook_sha256
-                    if is_carried
-                    else preflight.workbook_sha256
-                ),
+                workbook_sha256=workbook_sha256,
                 entity=entity,
                 aliases=tuple(aliases_by_target.get(row.candidate_id, ())),
                 occurrences=tuple(occurrences_by_split.get(row.candidate_id, ())),
                 result_entity_required=row.final_decision
                 in {decisions.APPROVE, decisions.MERGE},
-                decision_source=(
-                    preflight.carried_decision_source if is_carried else contract_source
-                ),
+                decision_source=decision_source,
                 existing_decision_required=is_carried,
                 contract_source=contract_source,
             )

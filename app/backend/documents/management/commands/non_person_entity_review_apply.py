@@ -28,9 +28,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--confirm",
             required=True,
-            help=(
-                "Required confirmation token APPLY_NON_PERSON_FINAL_RECON_2026_10_05."
-            ),
+            help="Required confirmation token for this workbook's registered contract.",
         )
 
     def handle(self, *args, **options):
