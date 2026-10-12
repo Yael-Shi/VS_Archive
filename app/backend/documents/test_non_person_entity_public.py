@@ -25,6 +25,7 @@ from documents.services.archive_item_presentation import (
 from documents.services.archive_items import create_manual_text_archive_item
 from documents.services.non_person_entity_occurrences import source_text_sha256
 from documents.services.non_person_entity_presentation import (
+    non_person_entity_subtype_label,
     non_person_public_type_label,
     public_mention_sort_key,
     public_mentioned_object_links,
@@ -126,6 +127,31 @@ class PublicSubtypeLabelTests(TestCase):
                 NonPersonEntity.EntitySubtype.POLITICAL_AFFAIR_OR_CRISIS,
                 "אירוע · פרשה או משבר מדיני",
             ),
+            (
+                NonPersonEntity.EntityType.NAMED_GROUP,
+                NonPersonEntity.EntitySubtype.HISTORICAL_COHORT,
+                "קבוצה בשם · קבוצה היסטורית",
+            ),
+            (
+                NonPersonEntity.EntityType.ORGANIZATION,
+                NonPersonEntity.EntitySubtype.CULTURAL_ORGANIZATION,
+                "ארגון · ארגון תרבות",
+            ),
+            (
+                NonPersonEntity.EntityType.ORGANIZATION,
+                NonPersonEntity.EntitySubtype.RELIGIOUS_INSTITUTION,
+                "ארגון · מוסד דתי",
+            ),
+            (
+                NonPersonEntity.EntityType.EVENT,
+                NonPersonEntity.EntitySubtype.TREATY_OR_DIPLOMATIC_EVENT,
+                "אירוע · אירוע דיפלומטי",
+            ),
+            (
+                NonPersonEntity.EntityType.PLACE,
+                NonPersonEntity.EntitySubtype.SETTLEMENT_OR_KIBBUTZ,
+                "מקום · יישוב או קיבוץ",
+            ),
         )
         for entity_type, subtype, label in cases:
             entity = NonPersonEntity(
@@ -141,6 +167,17 @@ class PublicSubtypeLabelTests(TestCase):
             entity_subtype=NonPersonEntity.EntitySubtype.CITY,
         )
         self.assertEqual(non_person_public_type_label(city), "מקום · עיר")
+
+        blank_group = NonPersonEntity(
+            canonical_name="הפורשים",
+            entity_type=NonPersonEntity.EntityType.NAMED_GROUP,
+            entity_subtype="",
+        )
+        self.assertEqual(non_person_public_type_label(blank_group), "קבוצה בשם")
+        for subtype in NonPersonEntity.EntitySubtype.values:
+            label = non_person_entity_subtype_label(subtype)
+            self.assertTrue(label, subtype)
+            self.assertNotIn("_", label)
 
     def test_port_subtype_is_shown_on_the_public_detail_page(self):
         entity = _entity(
