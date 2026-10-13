@@ -139,8 +139,12 @@ _POLL_HTTP_BODY_SENTINEL = "504_RESPONSE_BODY_MUST_NOT_LOG"
 _DOCUMENT_320_GREETING = "Hello! How can I help you today?"
 _NO_IMAGE_FILES_PROSE = "No image files were found to transcribe."
 _ARABIC_TRUNCATION_SENTINEL = "نص-عربي-مقطوع-يجب-ألا-يظهر"
+# 2026-08-26 live probe. This pair is not the current request.
+_LIVE_VALIDATED_AGENT_ID = "antigravity-preview-05-2026"
 _LIVE_VALIDATED_REQUESTED_MODEL = "gemini-3.7-flash"
 _LIVE_VALIDATED_ENVIRONMENT = {"type": "remote", "network": "disabled"}
+_CURRENT_REQUESTED_AGENT_ID = "antigravity-preview-09-2026"
+_CURRENT_REQUESTED_MODEL = "gemini-3.8-flash"
 _EXPECTED_CREATE_PAYLOAD_KEYS = frozenset(
     {"agent", "input", "environment", "background", "tools", "agent_config"}
 )
@@ -162,7 +166,13 @@ def _assert_supported_create_payload(
     agent_id: str,
     background: bool,
 ) -> None:
-    test_case.assertEqual(ANTIGRAVITY_REQUESTED_MODEL, _LIVE_VALIDATED_REQUESTED_MODEL)
+    test_case.assertEqual(DEFAULT_ANTIGRAVITY_AGENT_ID, _CURRENT_REQUESTED_AGENT_ID)
+    test_case.assertEqual(ANTIGRAVITY_REQUESTED_MODEL, _CURRENT_REQUESTED_MODEL)
+    test_case.assertNotEqual(DEFAULT_ANTIGRAVITY_AGENT_ID, _LIVE_VALIDATED_AGENT_ID)
+    test_case.assertNotEqual(
+        ANTIGRAVITY_REQUESTED_MODEL,
+        _LIVE_VALIDATED_REQUESTED_MODEL,
+    )
     test_case.assertEqual(ANTIGRAVITY_REMOTE_ENVIRONMENT, _LIVE_VALIDATED_ENVIRONMENT)
     test_case.assertEqual(set(payload.keys()), _EXPECTED_CREATE_PAYLOAD_KEYS)
     test_case.assertEqual(payload["agent"], agent_id)
@@ -172,7 +182,7 @@ def _assert_supported_create_payload(
     test_case.assertEqual(payload["environment"], _LIVE_VALIDATED_ENVIRONMENT)
     test_case.assertEqual(
         payload["agent_config"],
-        {"type": "antigravity", "model": _LIVE_VALIDATED_REQUESTED_MODEL},
+        {"type": "antigravity", "model": ANTIGRAVITY_REQUESTED_MODEL},
     )
     for forbidden in _FORBIDDEN_CREATE_PAYLOAD_KEYS:
         test_case.assertNotIn(forbidden, payload)
@@ -2102,7 +2112,14 @@ class AntigravityLifecycleObservabilityTests(SimpleTestCase):
             if "create_timeout_seconds=120.0" in message
         ]
         self.assertEqual(len(request_logs), 1)
-        self.assertIn("requested_model=gemini-3.7-flash", request_logs[0])
+        self.assertIn(
+            f"requested_model={_CURRENT_REQUESTED_MODEL}",
+            request_logs[0],
+        )
+        self.assertNotIn(
+            f"requested_model={_LIVE_VALIDATED_REQUESTED_MODEL}",
+            request_logs[0],
+        )
         self.assertIn("tools_config_empty=True", request_logs[0])
         self.assertIn("requested_network_disabled=True", request_logs[0])
 

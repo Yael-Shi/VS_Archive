@@ -231,8 +231,6 @@ class AntigravityBandOcrTests(SimpleTestCase):
         self.assertEqual(DEFAULT_TIMEOUT_SECONDS, 1200.0)
         self.assertEqual(DEFAULT_POLL_SECONDS, 5.0)
         self.assertEqual(DEFAULT_POLL_GET_TIMEOUT_SECONDS, 120.0)
-        self.assertEqual(DEFAULT_ANTIGRAVITY_AGENT_ID, "antigravity-preview-05-2026")
-        self.assertEqual(ANTIGRAVITY_REQUESTED_MODEL, "gemini-3.7-flash")
         self.assertEqual(
             INTERACTIONS_BASE_URL,
             "https://generativelanguage.googleapis.com/v1beta/interactions",
@@ -242,6 +240,15 @@ class AntigravityBandOcrTests(SimpleTestCase):
         self.assertEqual(ANTIGRAVITY_CANCEL_HTTP_TIMEOUT_SECONDS, 30.0)
         self.assertEqual(ARABIC_PRINTED_PAGE_BUDGET_CAP_SECONDS, 480.0)
         self.assertEqual(ARABIC_PRINTED_DOCUMENT_SAFETY_MARGIN_SECONDS, 60.0)
+
+    def test_current_requested_agent_and_model_are_not_live_validated(self):
+        self.assertEqual(DEFAULT_ANTIGRAVITY_AGENT_ID, "antigravity-preview-09-2026")
+        self.assertEqual(ANTIGRAVITY_REQUESTED_MODEL, "gemini-3.8-flash")
+        self.assertNotEqual(
+            DEFAULT_ANTIGRAVITY_AGENT_ID,
+            "antigravity-preview-05-2026",
+        )
+        self.assertNotEqual(ANTIGRAVITY_REQUESTED_MODEL, "gemini-3.7-flash")
 
     @patch("documents.services.antigravity_engine.requests.get")
     @patch("documents.services.antigravity_engine.requests.post")

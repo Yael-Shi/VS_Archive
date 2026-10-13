@@ -235,11 +235,14 @@ def build_antigravity_create_payload(
     multimodal_input: list[dict[str, Any]],
     background: bool,
 ) -> dict[str, Any]:
-    """Return the live-validated Antigravity Interactions create payload.
+    """Return the Antigravity Interactions create payload.
 
-    Exact top-level keys: agent, input, environment, background, tools,
-    agent_config. Does not send tool_choice, system_instruction,
-    response_format, generation_config, or store.
+    The envelope shape was live-validated on 2026-08-26 with
+    antigravity-preview-05-2026 and gemini-3.7-flash. The current request
+    uses antigravity-preview-09-2026 and gemini-3.8-flash and has not been
+    live-validated. Exact top-level keys: agent, input, environment,
+    background, tools, agent_config. Does not send tool_choice,
+    system_instruction, response_format, generation_config, or store.
     """
     return {
         "agent": agent_id,

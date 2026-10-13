@@ -58,8 +58,8 @@ The worker CDK column is `app_stack.py` desired configuration, not a live ECS in
 **Antigravity Arabic printed rollout**
 
 - **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED=false`** is the routing-code default when the variable is absent. Current `app_stack.py` worker environment sets **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED=true`** (live-preserving). This flag is route activation only; it is not an Interactions request-contract field.
-- **`ANTIGRAVITY_AGENT_ID`** defaults to `antigravity-preview-05-2026` when unset.
-- The requested Antigravity model pin is the code constant **`ANTIGRAVITY_REQUESTED_MODEL`** (`gemini-3.7-flash`) in `antigravity_defaults.py`. There is no ECS/environment-variable override for that model.
+- **`ANTIGRAVITY_AGENT_ID`** defaults to `antigravity-preview-09-2026` when unset. Worker CDK does not set this variable, so a deployed worker uses the code default unless an out-of-repo runtime override is present. `antigravity-preview-05-2026` shut down on 2026-10-05.
+- The requested Antigravity model pin is the code constant **`ANTIGRAVITY_REQUESTED_MODEL`** (`gemini-3.8-flash`) in `antigravity_defaults.py`. There is no ECS/environment-variable override for that model.
 - **Phase 1 — deploy with flag off:** historical safe-rollout step. The earlier statement that `app_stack.py` does not define Antigravity env vars is **no longer current**.
 - **Phase 2 — worker CDK desired state:** worker routing uses **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED=true`** (and optionally `ANTIGRAVITY_AGENT_ID` if overriding the default). Uses existing `GEMINI_API_KEY`. Web still omits this flag (intentional: `select_ocr_route` for execution is worker-side; staff reprocess does not require it on web). A follow-up CDK/SSM wiring change (mirroring Transkribus) is optional.
 - **`ar` + `HANDWRITTEN`** is not routed to Antigravity regardless of the flag.
