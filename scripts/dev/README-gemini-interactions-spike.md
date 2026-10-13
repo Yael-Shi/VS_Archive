@@ -18,7 +18,7 @@ This spike uses **`requests`** + the REST schema so it works **without bumping `
 | Check | API surface | Purpose |
 |-------|-------------|---------|
 | `model` | `POST /v1beta/interactions` with `model` | Fastest key + Interactions API smoke test |
-| `antigravity` | Same endpoint with `agent=antigravity-preview-05-2026` | Managed Antigravity agent (remote sandbox) |
+| `antigravity` | Same endpoint with `agent=antigravity-preview-09-2026` | Managed Antigravity agent (remote sandbox) |
 | `antigravity-image` | Antigravity + one image | Single-image OCR spike |
 | `antigravity-images` | Antigravity + multiple images in one interaction | Multi-image OCR spike |
 
@@ -87,9 +87,12 @@ or persisted. The smoke script requires non-empty OCR output; compare the
 saved transcription with `printed_arabic_smoke_expected.txt` to validate the
 printed-Arabic result.
 
-The repository fixture was live-validated on 2026-08-27: the interaction
+The repository fixture was live-validated on 2026-08-27 against
+`antigravity-preview-05-2026` and `gemini-3.7-flash`: the interaction
 completed and all three ground-truth lines matched after whitespace
-normalization (`missing_lines=[]`, `fixture_match=True`).
+normalization (`missing_lines=[]`, `fixture_match=True`). The script now
+requests `antigravity-preview-09-2026` and `gemini-3.8-flash`. That pair
+has not been live-validated.
 
 ### Two images (one interaction)
 

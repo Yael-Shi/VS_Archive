@@ -48,6 +48,7 @@ from documents.services.gemini_models import (
     DEFAULT_GEMINI_MODEL_CANDIDATES,
     FRENCH_HANDWRITTEN_GEMINI_MODEL_CANDIDATES,
     GEMINI_36_FLASH_MODEL,
+    ENGLISH_PRINTED_GEMINI_MODEL_CANDIDATES,
     LATIN_HANDWRITTEN_GEMINI_MODEL_CANDIDATES,
     LATIN_PRINTED_GEMINI_MODEL,
 )
@@ -496,7 +497,7 @@ class HtrDispatcherTests(SimpleTestCase):
 
     @patch("documents.services.htr_engine.get_htr_adapter")
     @patch("documents.services.htr_engine.select_ocr_route")
-    def test_english_printed_with_worker_env_uses_latin_printed_model_candidate(
+    def test_english_printed_with_worker_env_uses_25_then_36(
         self, mock_select_route, mock_get_adapter
     ):
         from documents.services.env_validation import WorkerEnvConfig
@@ -553,7 +554,7 @@ class HtrDispatcherTests(SimpleTestCase):
             language_hint="en",
             prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
             worker_env=worker_env,
-            model_candidates=[LATIN_PRINTED_GEMINI_MODEL],
+            model_candidates=list(ENGLISH_PRINTED_GEMINI_MODEL_CANDIDATES),
             text_input_type=Document.TextInputType.PRINTED,
             handwriting_type=None,
             engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
@@ -9157,7 +9158,7 @@ class GeminiModelCandidatesTests(SimpleTestCase):
             FRENCH_HANDWRITTEN_GEMINI_MODEL_CANDIDATES,
         )
 
-    def test_english_printed_gemini_route_uses_latin_printed_model(self):
+    def test_english_printed_gemini_route_uses_25_then_36(self):
         route = OcrRouteConfig(
             engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
             prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
@@ -9168,7 +9169,11 @@ class GeminiModelCandidatesTests(SimpleTestCase):
             text_input_type=Document.TextInputType.PRINTED,
             gemini_hebrew_printed_model="gemini-3.1-flash-lite",
         )
-        self.assertEqual(candidates, (LATIN_PRINTED_GEMINI_MODEL,))
+        self.assertEqual(candidates, ENGLISH_PRINTED_GEMINI_MODEL_CANDIDATES)
+        self.assertEqual(
+            candidates,
+            (LATIN_PRINTED_GEMINI_MODEL, GEMINI_36_FLASH_MODEL),
+        )
 
     def test_french_printed_gemini_route_uses_latin_printed_model(self):
         route = OcrRouteConfig(

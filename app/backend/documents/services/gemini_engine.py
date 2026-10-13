@@ -47,8 +47,11 @@ GEMINI_MIXED_PROMPT_CONTRACT_VERSION = "gemini-mixed-content-prompt-v1"
 
 # Bounded per-page OCR recovery. Version v2 adds RECITATION-only model
 # fallback for Latin handwriting while preserving one global three-call budget.
+# English printed reserves one of those calls for Gemini 3.6 without changing
+# this version: the candidate list itself changes attempt identity.
 GEMINI_OCR_PAGE_RETRY_POLICY_VERSION = "gemini-ocr-page-retry-v2"
 GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS = 3
+ENGLISH_PRINTED_FALLBACK_RESERVED_PROVIDER_CALLS = 1
 _GEMINI_OCR_EMPTY_RESPONSE_BACKOFF_SECONDS = (1.0, 2.0)
 _GEMINI_OCR_MIN_ESCALATED_OUTPUT_TOKENS = 8192
 
@@ -1208,6 +1211,7 @@ def transcribe_pages_with_gemini(
     max_output_tokens_hard_cap: int = DEFAULT_GEMINI_MAX_OUTPUT_TOKENS_HARD_CAP,
     max_provider_calls: int = GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS,
     provider_call_offset: int = 0,
+    reserve_final_provider_calls: int = 0,
 ) -> GeminiResult:
     if type(max_provider_calls) is not int or max_provider_calls < 1:
         raise ValueError("max_provider_calls must be a positive integer")
@@ -1215,6 +1219,15 @@ def transcribe_pages_with_gemini(
         raise ValueError("provider_call_offset must be a non-negative integer")
     if provider_call_offset + max_provider_calls > GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS:
         raise ValueError("provider call window exceeds the per-page global call budget")
+    if (
+        type(reserve_final_provider_calls) is not int
+        or reserve_final_provider_calls < 0
+        or reserve_final_provider_calls >= max_provider_calls
+    ):
+        raise ValueError(
+            "reserve_final_provider_calls must be a non-negative integer "
+            "smaller than max_provider_calls"
+        )
 
     contract = gemini_transcription_contract(
         prompt_variant=prompt_variant,
@@ -1308,7 +1321,8 @@ def transcribe_pages_with_gemini(
                 failure_code = _classify_response_failure(response_metadata)
                 if failure_code is not None:
                     if failure_code == GeminiResponseFailureCode.MAX_TOKENS:
-                        if attempt < max_provider_calls:
+                        calls_remaining_after_this = max_provider_calls - attempt
+                        if calls_remaining_after_this > reserve_final_provider_calls:
                             retry_max_output_tokens = _next_max_output_tokens_cap(
                                 attempt_max_output_tokens,
                                 hard_cap=max_output_tokens_hard_cap,

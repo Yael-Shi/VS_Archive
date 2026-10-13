@@ -1,5 +1,33 @@
 # VS-Archive Decision Log
 
+## Antigravity preview 09-2026 and Gemini 3.8 Flash
+
+**Status:** Implemented locally. Not deployed. No live Antigravity call was made for this change. `antigravity-preview-09-2026` with `gemini-3.8-flash` is the current requested configuration, not a live-validated pair. The live-validated pair remains the 2026-08-26 probe: `antigravity-preview-05-2026` and `gemini-3.7-flash`.
+
+**Decision:** The default Interactions agent is `antigravity-preview-09-2026`. The requested model pin is `gemini-3.8-flash`. `ANTIGRAVITY_AGENT_ID` remains the optional override. There is still no model environment variable.
+
+**Why:** Google deprecated `antigravity-preview-05-2026` and shut it down on 2026-10-05. Google also deprecated `gemini-3.7-flash` and redirects those requests to `gemini-3.8-flash`. The current Antigravity guide and changelog say that a remote-sandbox caller which reads only `output_text` or `model_output` updates the agent string and leaves the rest of the call unchanged.
+
+**Envelope, unchanged:** Create keys stay `agent`, `input`, `environment`, `background`, `tools`, and `agent_config`. `environment` stays `{"type": "remote", "network": "disabled"}`, which the current Environments guide still documents for `antigravity-preview-09-2026`. `tools` stays `[]`. `background` stays the production default. Create still omits `tool_choice`, `system_instruction`, `response_format`, `generation_config`, and `store`. `store=True` remains the provider default required for background execution; this code does not send `store`. Image input stays inline base64 `type: image`. Polling, the 1200s deadline, cancellation, and the strict JSON OCR contract are unchanged. Only the last `model_output` step is parsed. Unexpected tool steps still fail closed. No `thinking_level` or other Gemini 3.8 sampling parameter is added: Antigravity still rejects `temperature`, `top_p`, `top_k`, `stop_sequences`, and `max_output_tokens`, and `agent_config` does not document a thinking override for this call.
+
+**Runtime config:** Worker CDK sets the Arabic Antigravity flags and does not set `ANTIGRAVITY_AGENT_ID`. After a worker deploy, the code default applies unless an override exists outside this repository. A local or deployed `ANTIGRAVITY_AGENT_ID=antigravity-preview-05-2026` would keep calling the shut-down agent.
+
+**Historical rows:** Existing `DocumentTextResult.engine` values of `antigravity-preview-05-2026` stay as recorded. This change does not rewrite them. The 2026-08-26 live-probe notes in **Antigravity supported request contract** stay as evidence of that envelope.
+
+## English printed Gemini 3.6 fallback for MAX_TOKENS and RECITATION
+
+**Status:** Implemented locally. Not deployed. No live OCR, database writes, or S3 changes were made for document 386.
+
+**Failure evidence:** Document 386 (ArchiveItem 378) is English printed and has 12 uploaded JPEG pages. Process request 123 ended `PARTIAL` with `GEMINI_PAGES_INCOMPLETE`. GeminiOcrAttempt 56 recorded page 1 `SUCCEEDED`, page 2 `FAILED` / `MAX_TOKENS` after three `gemini-2.5-flash` calls ending at 16,384 output tokens, and pages 3–12 unprocessed. Isolated read-only probes of the original page 2 image returned a usable `gemini-3.6-flash` transcription (`STOP`, 2,521 characters, 711 output tokens). Cloud Vision `DOCUMENT_TEXT_DETECTION` returned 2,473 characters and was less accurate on names, dates, and historical terms. Those probes did not change checkpoints.
+
+**Root cause:** English printed model candidates were only `gemini-2.5-flash`. The page budget is three provider calls. `MAX_TOKENS` spends that budget on the same model's output-cap ladder (default OCR cap 4096, then 8192, then 16384). The adapter starts the next candidate only after the current model returns, so adding Gemini 3.6 without reserving a call would never run after `MAX_TOKENS`.
+
+**Decision:** Checkpoint-backed English printed OCR uses `gemini-2.5-flash`, then `gemini-3.6-flash`. A successful 2.5 page is persisted and 3.6 is not called. `MAX_TOKENS` may escalate once on 2.5; the third call stays available for 3.6 at the cap that just failed. `RECITATION` does not retry 2.5 and advances immediately with the unused calls. Empty response, quota, `SAFETY`, API errors, and other classifications do not advance. Empty-response and quota retries on 2.5 still use the existing three-call budget, so they leave no call for 3.6. French printed stays on `gemini-2.5-flash` only. Hebrew, Arabic, French handwritten, English handwritten, mixed, translation, and the Hebrew printed mixed-script Latin probe stay unchanged. No schema change, no prompt change, no global token-cap change, and no cross-provider fallback. Gemini 3.6 calls keep the existing minimal-thinking profile.
+
+**Checkpoint identity:** `model_candidates` is part of the configuration and attempt fingerprints. The new chain is a new attempt identity. Attempt 56 and its page 1 success stay immutable and are not copied onto the new attempt. A later reprocess of document 386 OCRs all 12 pages under the new identity, including page 1.
+
+**Reprocess:** Eligibility is unchanged. A `PARTIAL` Gemini document with a failed page checkpoint, no usable source text, and no `VERIFIED` text result remains eligible for a new enqueue. That enqueue does not resume attempt 56.
+
 ## Fourth non-person review contract v2 (2026-10-12)
 
 **Decision:** Preflight, dry-run, and apply recognize the fourth workbook by exact SHA-256 `278f7b8c5bbd5d0530c9a1bb8d742d2d650c28652bf649db539ec17bb33f7350`. An unknown SHA still fails closed. The superseded v1 workbook SHA is not registered. Confirmation token `APPLY_NON_PERSON_FOURTH_CONTRACT_2026_10_12`. New decisions use source `vs_archive_non_person_fourth_contract_2026_10_12`. Physical rows are 100: APPROVE 99, MERGE 1, SKIP 0, SPLIT 0, NEEDS_RESEARCH 0. That is 100 new decisions and 99 new entities. Aliases 0, occurrences 0, split routes 0. No carried applied decisions. Sheet `FINAL_RECON_2026-10-12_v4`. Alias review and split routes are not read.
@@ -2846,6 +2874,8 @@ new-Person duplicate prevention**).
 
 ## Antigravity supported request contract
 
+**Superseded for agent id and requested model (2026-10-13):** see **Antigravity preview 09-2026 and Gemini 3.8 Flash**. The envelope shape and the 2026-08-26 probe evidence below stay as recorded. The model string in this entry is the pin from that probe, not the current pin.
+
 **Decision / implemented:** Antigravity Interactions create requests use the
 live-validated request envelope. The general Gemini Interactions schema is
 not the same as Antigravity-specific compatibility: fields that exist in
@@ -2866,9 +2896,11 @@ the broader schema can still be unknown parameters for this agent.
   configuration, not a universal provider guarantee that the agent
   cannot use tools. Unexpected-tool fail-closed validation remains
   defense in depth.
-- `agent_config` is `{"type": "antigravity", "model": "gemini-3.7-flash"}`.
-  The model is the requested/pinned code constant
+- `agent_config` in this recorded envelope was
+  `{"type": "antigravity", "model": "gemini-3.7-flash"}`.
+  The requested model remains the code constant
   `ANTIGRAVITY_REQUESTED_MODEL`. There is no environment-variable override.
+  The current constant is `gemini-3.8-flash`.
 - The provider response does **not** echo an effective underlying model.
   Logs may record the requested/pinned model; they must not treat it as
   provider-confirmed.

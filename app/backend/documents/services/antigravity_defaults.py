@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-DEFAULT_ANTIGRAVITY_AGENT_ID = "antigravity-preview-05-2026"
+DEFAULT_ANTIGRAVITY_AGENT_ID = "antigravity-preview-09-2026"
 INTERACTIONS_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/interactions"
 INTERACTIONS_API_REVISION = "2026-05-20"
 # Requested/pinned Interactions model. Not provider-confirmed: the response
 # does not echo an effective model. Changing this is an explicit code change.
-ANTIGRAVITY_REQUESTED_MODEL = "gemini-3.7-flash"
+# gemini-3.7-flash is deprecated and redirected; do not send it.
+ANTIGRAVITY_REQUESTED_MODEL = "gemini-3.8-flash"
 ANTIGRAVITY_REMOTE_ENVIRONMENT = {"type": "remote", "network": "disabled"}
 
 # Unary create timeout remains computed in antigravity_engine from page count.

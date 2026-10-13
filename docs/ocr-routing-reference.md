@@ -45,8 +45,8 @@ Antigravity is a **real** Gemini Interactions managed-agent adapter (`Antigravit
 
 Route activation is env-gated in `select_ocr_route` via `_env_bool` (same pattern as Hebrew handwritten → Transkribus). `AntigravityAdapter` also checks `worker_env.enable_antigravity_arabic_printed` as a **second safety gate** before calling the Interactions API.
 
-- `ANTIGRAVITY_AGENT_ID` defaults to `antigravity-preview-05-2026` (override via env / `WorkerEnvConfig`).
-- The requested Interactions model is the code constant `ANTIGRAVITY_REQUESTED_MODEL` (`gemini-3.7-flash`). There is no model environment-variable override.
+- `ANTIGRAVITY_AGENT_ID` defaults to `antigravity-preview-09-2026` (override via env / `WorkerEnvConfig`).
+- The requested Interactions model is the code constant `ANTIGRAVITY_REQUESTED_MODEL` (`gemini-3.8-flash`). There is no model environment-variable override.
 - Auth uses the existing **`GEMINI_API_KEY`** (Interactions API).
 
 **Production rollout (current):**
@@ -81,7 +81,8 @@ Resolved in `gemini_model_candidates()` (called from `htr_engine.transcribe_page
 | Hebrew general handwritten | Cost-aware chain: `gemini-2.5-flash` → `gemini-3.6-flash` |
 | English handwritten | Ordered chain: `gemini-2.5-flash` → `gemini-3.1-flash-lite` |
 | French handwritten | Single full-page model: `gemini-3.6-flash` |
-| English/French printed | `gemini-2.5-flash` |
+| English printed | Ordered chain: `gemini-2.5-flash` → `gemini-3.6-flash` for scoped `MAX_TOKENS` or `RECITATION` only |
+| French printed | `gemini-2.5-flash` |
 | Arabic (handwritten/printed) | Default chain: `gemini-2.5-flash` → `gemini-3.1-flash-lite` |
 | Mixed (all languages) | Default chain: `gemini-2.5-flash` → `gemini-3.1-flash-lite` |
 | Non-Gemini routes | Default chain (unused at runtime for Transkribus) |
@@ -115,7 +116,13 @@ persisting partial crop text. French handwriting uses one direct full-page `gemi
 general handwriting uses one 4096-token `gemini-2.5-flash` call first; success
 ends processing, while `MAX_TOKENS` or `RECITATION` advances to
 `gemini-3.6-flash` with at most two calls left in the shared three-call budget.
-Other permanent response classifications do not advance. Exhaustion is
+Other permanent response classifications do not advance. English printed keeps
+`gemini-2.5-flash` for a successful page. `MAX_TOKENS` may escalate that primary
+once (4096 → 8192 at the default OCR cap), then the third call is reserved for
+`gemini-3.6-flash`. `RECITATION` does not retry 2.5 and advances immediately
+with the unused calls. Empty response, quota, `SAFETY`, and other
+classifications stay on 2.5 and do not start 3.6. French printed remains a
+single `gemini-2.5-flash` candidate. Exhaustion is
 persisted as a failed page checkpoint and produces an explicit partial outcome. Legacy direct adapter calls without
 document identity retain the prior `EngineRetryableError` behavior and do not
 gain the scoped `RECITATION` fallback.
@@ -128,7 +135,8 @@ Other Gemini execution knobs (from `worker_env`, not routing):
 default 32768, max 65536, must be ≥ `GEMINI_OCR_MAX_OUTPUT_TOKENS`),
 `GEMINI_DOUBLE_PASS`, `GEMINI_CONSISTENCY_MIN_RATIO`, and `MIN_TEXT_LENGTH`.
 
-French handwritten and Hebrew general handwritten `gemini-3.6-flash` routes
+French handwritten and Hebrew general handwritten `gemini-3.6-flash` routes,
+and any English printed fallback call that reaches `gemini-3.6-flash`,
 are explicit exceptions to the legacy decoding knobs: OCR requests use
 `thinking_level=MINIMAL` and omit temperature, top-k, and top-p so the provider
 model defaults apply. Other Gemini OCR and Hebrew translation profiles are
@@ -143,8 +151,9 @@ configuration identity reuses that success instead of restarting it.
 
 - If every page used the same model, `DocumentTextResult.engine` remains that
   concrete model id.
-- If quota or scoped English handwritten / Hebrew printed `RECITATION`
-  fallback caused different pages to use different Gemini models,
+- If quota, scoped English handwritten / Hebrew printed `RECITATION`
+  fallback, or English printed `MAX_TOKENS` / `RECITATION` fallback caused
+  different pages to use different Gemini models,
   `DocumentTextResult.engine` is the deterministic runtime marker
   `gemini-mixed:<fingerprint>`. Full page-to-model provenance remains on the
   checkpoints.
@@ -164,10 +173,13 @@ configuration identity reuses that success instead of restarting it.
 - French handwritten successes record `gemini-3.6-flash` directly.
 - Hebrew general handwritten pages record whichever model succeeded:
   `gemini-2.5-flash` or fallback `gemini-3.6-flash`.
+- English printed pages record whichever model succeeded: `gemini-2.5-flash`
+  or fallback `gemini-3.6-flash`.
 
 This provenance behavior does not alter route selection. It records quota
 fallback, the scoped English handwritten and Hebrew printed `RECITATION`
-fallbacks, the direct French model, and the cost-aware Hebrew general
+fallbacks, the English printed `MAX_TOKENS` / `RECITATION` fallback, the
+direct French model, and the cost-aware Hebrew general
 fallback truthfully without discarding successful pages.
 
 ## Gemini prompt resolution
@@ -221,7 +233,7 @@ If neither is enabled, the adapter fails before HTTP. Additional execution contr
 
 After routing to Antigravity, the adapter requires `worker_env` and `worker_env.enable_antigravity_arabic_printed=true`.
 
-**JSON path (when flag false):** when `ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED` is false (unset/code default), the adapter calls the Gemini Interactions API with `agent_id` from `ANTIGRAVITY_AGENT_ID` (default `antigravity-preview-05-2026`). Antigravity ignores Gemini OCR prompt variants; `prompt_variant=printed` on Antigravity routes is observability metadata only.
+**JSON path (when flag false):** when `ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED` is false (unset/code default), the adapter calls the Gemini Interactions API with `agent_id` from `ANTIGRAVITY_AGENT_ID` (default `antigravity-preview-09-2026`). Antigravity ignores Gemini OCR prompt variants; `prompt_variant=printed` on Antigravity routes is observability metadata only.
 
 **Banded path (when flag true):** when Arabic printed is already routed to Antigravity **and** `worker_env.enable_antigravity_arabic_printed_banded=true`, `AntigravityAdapter.execute` calls `process_arabic_printed_banded_document`. `run_worker.py` derives one generic `absolute_deadline_monotonic` from remaining `ProcessDocumentRequest.lease_expires_at` wall-clock time (`time.monotonic() + max(0, remaining_seconds)`) immediately before `transcribe_pages` and passes it through the existing kwargs seam. It does not invent a 1200-second budget or extend the lease. The banded adapter requires that deadline and forwards it unchanged; the coordinator’s 60-second terminalization reserve, 150-second page-start minimum, and 480-second per-page cap are unchanged. JSON Antigravity ignores the generic deadline and keeps its internal 1200-second poll timeout. Auth still uses **`GEMINI_API_KEY`**. **`GOOGLE_CLOUD_VISION_API_KEY`** is required in worker env validation only when the banded flag is true. Worker CDK injects that key from Secrets Manager **`vs-archive/google-vision-key`**. The credential is injected into the worker container only; the web container does not receive it. Worker CDK config sets **`ENABLE_ANTIGRAVITY_ARABIC_PRINTED_BANDED=true`** (web remains unset). That desired value is effective in runtime after deployment; verify deployed runtime separately. Oriented SHA/dimensions are prepared eagerly for identity (Phase 5B). EXECUTE crops use Phase 3 `prepare_arabic_printed_working_image`, not JSON-path `antigravity_outbound_image`. `PageImage.page_index` is mapped from 1-based to contiguous 0-based coordinator indexes. Busy and retryable checkpoint errors map to `EnginePageCheckpointBusyError` / `EnginePageCheckpointPersistenceRetryableError`. Identity mismatch and stale-lease errors fail closed as `EnginePermanentError`. Coordinator **PARTIAL** raises `EnginePageIncompleteError`. Completed `HtrResult.engine_name` is the banded runtime marker, never the agent id. `ocr_routing.py` and the adapter registry are unchanged.
 
@@ -229,7 +241,7 @@ After routing to Antigravity, the adapter requires `worker_env` and `worker_env.
 
 **Polling (unary background create + GET):** overall in_progress deadline **1200s**, per-GET timeout **120s**, poll interval **5s**. Create timeout is unchanged (`max(120, 30 * page_count)`). Transport timeouts and transient polling GET HTTP statuses (`408`, `429`, `500`, `502`, `503`, `504`) retry the same interaction ID inside that 1200s deadline. Create POST is not retried. Non-retryable GET statuses such as `400` and `403` fail immediately. These defaults stay below the worker 45-minute lease.
 
-**Output contract:** Provider status `completed` is necessary but not sufficient. Create requests use the live-validated envelope (`agent`, multimodal `input`, `environment: {"type": "remote", "network": "disabled"}`, `background`, `tools: []`, `agent_config: {"type": "antigravity", "model": "gemini-3.7-flash"}`). They do **not** send `tool_choice`, `system_instruction`, `response_format`, `generation_config`, or `store`. Antigravity structured output is currently unsupported, so application-level JSON validation remains required. Prompt construction, parsing, contract validation, and rendering live in `antigravity_ocr_contract.py`. The model must return exactly one plain JSON object (`schema_version: 1`, one `pages` entry per inline image, outcomes `transcribed` / `blank` / `unavailable`). Only the last `model_output` step is parsed. Unexpected tool steps, malformed JSON, extra prose/code fences, wrong page count/order, `unavailable` pages, empty transcriptions, and all-blank results fail closed via `AntigravityOutputValidationError` and the existing worker `OCR_FAILED` path (no translation, no successful source persistence, no `READY`). There is no greeting denylist or language heuristic. Historical invalid stored rows are not rewritten; they need an explicit operational retry or separate cleanup. The provider response does not echo an effective model; `ANTIGRAVITY_REQUESTED_MODEL` is requested/pinned, not provider-confirmed.
+**Output contract:** Provider status `completed` is necessary but not sufficient. Create requests use the envelope shape live-validated on 2026-08-26 (`agent`, multimodal `input`, `environment: {"type": "remote", "network": "disabled"}`, `background`, `tools: []`, `agent_config` with `type: antigravity`). That probe used `antigravity-preview-05-2026` and `gemini-3.7-flash`. The current request uses `antigravity-preview-09-2026` and `gemini-3.8-flash` and has not been live-validated. They do **not** send `tool_choice`, `system_instruction`, `response_format`, `generation_config`, or `store`. Antigravity structured output is currently unsupported, so application-level JSON validation remains required. Prompt construction, parsing, contract validation, and rendering live in `antigravity_ocr_contract.py`. The model must return exactly one plain JSON object (`schema_version: 1`, one `pages` entry per inline image, outcomes `transcribed` / `blank` / `unavailable`). Only the last `model_output` step is parsed. Unexpected tool steps, malformed JSON, extra prose/code fences, wrong page count/order, `unavailable` pages, empty transcriptions, and all-blank results fail closed via `AntigravityOutputValidationError` and the existing worker `OCR_FAILED` path (no translation, no successful source persistence, no `READY`). There is no greeting denylist or language heuristic. Historical invalid stored rows are not rewritten; they need an explicit operational retry or separate cleanup. The provider response does not echo an effective model; `ANTIGRAVITY_REQUESTED_MODEL` is requested/pinned, not provider-confirmed.
 
 **Still unary.** Streaming, durable recovery, cancellation, per-page interactions, and `include_input=false` are deferred.
 

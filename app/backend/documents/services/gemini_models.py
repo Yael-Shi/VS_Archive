@@ -41,3 +41,10 @@ HEBREW_GENERAL_HANDWRITTEN_GEMINI_MODEL_CANDIDATES = (
 )
 
 LATIN_PRINTED_GEMINI_MODEL = "gemini-2.5-flash"
+# English printed keeps 2.5 Flash for a normal page. MAX_TOKENS or RECITATION
+# on that primary may advance to 3.6 Flash inside the shared three-call page
+# budget. French printed stays on the single 2.5 model.
+ENGLISH_PRINTED_GEMINI_MODEL_CANDIDATES = (
+    LATIN_PRINTED_GEMINI_MODEL,
+    GEMINI_36_FLASH_MODEL,
+)

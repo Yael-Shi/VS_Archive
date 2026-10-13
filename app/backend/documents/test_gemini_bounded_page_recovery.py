@@ -72,11 +72,15 @@ class _GeminiBoundedRunKwargs(TypedDict, total=False):
     model_name: str
     max_output_tokens: int | None
     max_output_tokens_hard_cap: int
+    max_provider_calls: int
+    reserve_final_provider_calls: int
 
 
 class _GeminiBoundedCapKwargs(TypedDict, total=False):
     max_output_tokens: int | None
     max_output_tokens_hard_cap: int
+    max_provider_calls: int
+    reserve_final_provider_calls: int
 
 
 class GeminiRetryHelperTests(SimpleTestCase):
@@ -130,6 +134,12 @@ class GeminiBoundedPageRecoveryTests(SimpleTestCase):
         if "max_output_tokens_hard_cap" in overrides:
             extra["max_output_tokens_hard_cap"] = overrides[
                 "max_output_tokens_hard_cap"
+            ]
+        if "max_provider_calls" in overrides:
+            extra["max_provider_calls"] = overrides["max_provider_calls"]
+        if "reserve_final_provider_calls" in overrides:
+            extra["reserve_final_provider_calls"] = overrides[
+                "reserve_final_provider_calls"
             ]
         with (
             patch(
@@ -234,6 +244,44 @@ class GeminiBoundedPageRecoveryTests(SimpleTestCase):
         # No identical repeated call and no sleep.
         self.assertEqual(run.calls, 1)
         self.assertEqual(run.sleeps, [])
+
+    def test_max_tokens_reserves_the_final_call_for_a_later_model(self):
+        run = self._run(
+            [_truncated(), _truncated(), _success()],
+            max_output_tokens=4096,
+            max_output_tokens_hard_cap=32768,
+            reserve_final_provider_calls=1,
+        )
+
+        assert isinstance(run.error, GeminiResponseError)
+        self.assertEqual(run.error.failure_code, GeminiResponseFailureCode.MAX_TOKENS)
+        # 4096 then 8192. The third escalation to 16384 stays unused.
+        self.assertEqual(run.calls, 2)
+        self.assertEqual(run.caps, [4096, 8192])
+        self.assertEqual(run.sleeps, [])
+
+    def test_empty_response_still_uses_three_calls_when_one_is_reserved(self):
+        run = self._run(
+            [_empty(), _empty(), _empty()],
+            reserve_final_provider_calls=1,
+        )
+
+        assert isinstance(run.error, GeminiResponseError)
+        self.assertEqual(
+            run.error.failure_code,
+            GeminiResponseFailureCode.EMPTY_RESPONSE,
+        )
+        self.assertEqual(run.calls, GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS)
+
+    def test_reserve_must_leave_one_provider_call(self):
+        with self.assertRaises(ValueError):
+            transcribe_pages_with_gemini(
+                _PAGES,
+                "en",
+                prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+                max_provider_calls=1,
+                reserve_final_provider_calls=1,
+            )
 
     # ---------------------------------------------- permanent classifications
 
