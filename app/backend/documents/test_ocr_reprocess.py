@@ -1287,6 +1287,51 @@ class GeminiPartialOcrReprocessTests(TransactionTestCase):
         self.assertEqual(assessment.retry_mode, OcrRetryMode.NORMAL_REENQUEUE)
         self.assertFalse(DocumentTextResult.objects.filter(document=doc).exists())
 
+    def test_french_printed_partial_with_failed_checkpoint_stays_eligible(self):
+        doc = create_ocr_document(
+            title="French printed checkpoint failure",
+            doc_type=Document.DocType.IMAGE,
+            language=Document.Language.FRENCH,
+            text_input_type=Document.TextInputType.PRINTED,
+            upload_status=Document.UploadStatus.UPLOADED,
+            processing_state_user=Document.ProcessingState.PARTIAL,
+            file_s3_key="documents/fr-printed-partial/source/0.jpeg",
+            mime_type="image/jpeg",
+        )
+        attempt = GeminiOcrAttempt.objects.create(
+            document=doc,
+            identity_fingerprint="a" * 64,
+            source_fingerprint="b" * 64,
+            route_fingerprint="c" * 64,
+            prompt_fingerprint="d" * 64,
+            config_fingerprint="e" * 64,
+            prompt_contract_version="gemini-ocr-prompt-v1",
+            model_candidates=["gemini-2.5-flash"],
+            expected_page_count=1,
+            status=GeminiOcrAttempt.Status.PARTIAL,
+            missing_page_indices=[1],
+        )
+        GeminiOcrPageCheckpoint.objects.create(
+            attempt=attempt,
+            page_index=1,
+            page_fingerprint="f" * 64,
+            source_content_fingerprint="1" * 64,
+            status=GeminiOcrPageCheckpoint.Status.FAILED,
+            failure_code="MAX_TOKENS",
+            failure_message="bounded provider failure",
+            started_at=timezone.now(),
+            completed_at=timezone.now(),
+        )
+
+        self.assertTrue(is_ocr_reprocess_ui_eligible(doc))
+        assessment = assess_ocr_reprocess(
+            doc.id,
+            collection_id=COLLECTION_ID,
+            model_id=MODEL_ID,
+        )
+        self.assertEqual(assessment.retry_mode, OcrRetryMode.NORMAL_REENQUEUE)
+        self.assertFalse(DocumentTextResult.objects.filter(document=doc).exists())
+
     @patch.dict(
         "os.environ",
         {"ENABLE_TRANSKRIBUS_HEBREW_HANDWRITTEN": "false"},

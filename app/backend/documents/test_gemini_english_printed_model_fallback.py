@@ -1,4 +1,9 @@
-"""English printed Gemini 2.5 primary with bounded Gemini 3.6 fallback."""
+"""Latin printed Gemini 2.5 primary with bounded Gemini 3.6 fallback.
+
+English and French printed share one candidate chain and one fallback
+predicate. Handwriting, mixed, Hebrew, and Arabic routes stay on their
+existing candidates.
+"""
 
 from __future__ import annotations
 
@@ -27,6 +32,7 @@ from documents.services.gemini_models import (
     HEBREW_GENERAL_HANDWRITTEN_GEMINI_MODEL_CANDIDATES,
     LATIN_HANDWRITTEN_GEMINI_MODEL_CANDIDATES,
     LATIN_PRINTED_GEMINI_MODEL,
+    LATIN_PRINTED_GEMINI_MODEL_CANDIDATES,
 )
 from documents.services.gemini_page_checkpoints import (
     GeminiPageClaim,
@@ -73,7 +79,18 @@ class _ExpectedIncomplete(Exception):
     pass
 
 
-def _run_claimed_page(adapter: GeminiAdapter, responses):
+_LATIN_PRINTED_LANGUAGES = (
+    Document.Language.ENGLISH,
+    Document.Language.FRENCH,
+)
+
+
+def _run_claimed_page(
+    adapter: GeminiAdapter,
+    responses,
+    *,
+    language: str = Document.Language.ENGLISH,
+):
     with (
         patch(
             "documents.services.gemini_engine._get_api_key",
@@ -99,12 +116,12 @@ def _run_claimed_page(adapter: GeminiAdapter, responses):
         try:
             adapter._execute_claimed_page(
                 page=_PAGE,
-                language_hint=Document.Language.ENGLISH,
+                language_hint=language,
                 prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
-                model_candidates=list(ENGLISH_PRINTED_GEMINI_MODEL_CANDIDATES),
+                model_candidates=list(LATIN_PRINTED_GEMINI_MODEL_CANDIDATES),
                 recitation_model_fallback_enabled=False,
                 hebrew_general_model_fallback_enabled=False,
-                english_printed_model_fallback_enabled=True,
+                latin_printed_model_fallback_enabled=True,
                 kwargs={
                     "max_output_tokens": 4096,
                     "max_output_tokens_hard_cap": 32768,
@@ -130,13 +147,13 @@ class EnglishPrintedModelCandidateTests(SimpleTestCase):
                 Document.Language.ENGLISH,
                 Document.TextInputType.PRINTED,
                 None,
-                ENGLISH_PRINTED_GEMINI_MODEL_CANDIDATES,
+                LATIN_PRINTED_GEMINI_MODEL_CANDIDATES,
             ),
             (
                 Document.Language.FRENCH,
                 Document.TextInputType.PRINTED,
                 None,
-                (LATIN_PRINTED_GEMINI_MODEL,),
+                LATIN_PRINTED_GEMINI_MODEL_CANDIDATES,
             ),
             (
                 Document.Language.ENGLISH,
@@ -152,6 +169,12 @@ class EnglishPrintedModelCandidateTests(SimpleTestCase):
             ),
             (
                 Document.Language.ENGLISH,
+                Document.TextInputType.MIXED,
+                None,
+                DEFAULT_GEMINI_MODEL_CANDIDATES,
+            ),
+            (
+                Document.Language.FRENCH,
                 Document.TextInputType.MIXED,
                 None,
                 DEFAULT_GEMINI_MODEL_CANDIDATES,
@@ -183,6 +206,10 @@ class EnglishPrintedModelCandidateTests(SimpleTestCase):
                     gemini_hebrew_printed_model=hebrew_printed_model,
                 )
                 self.assertEqual(candidates, expected)
+        self.assertEqual(
+            ENGLISH_PRINTED_GEMINI_MODEL_CANDIDATES,
+            LATIN_PRINTED_GEMINI_MODEL_CANDIDATES,
+        )
 
     def test_hebrew_general_handwritten_chain_is_unchanged(self):
         with patch.dict(
@@ -209,9 +236,15 @@ class EnglishPrintedModelCandidateTests(SimpleTestCase):
 
 class EnglishPrintedFallbackExecutionTests(SimpleTestCase):
     def test_primary_success_does_not_call_gemini_36(self):
+        for language in _LATIN_PRINTED_LANGUAGES:
+            with self.subTest(language=language):
+                self._assert_primary_success(language)
+
+    def _assert_primary_success(self, language: str) -> None:
         run = _run_claimed_page(
             GeminiAdapter(),
             [_provider_response(text=_PAGE_TEXT, finish_reason="STOP")],
+            language=language,
         )
 
         self.assertEqual(run.client.models.generate_content.call_count, 1)
@@ -226,6 +259,11 @@ class EnglishPrintedFallbackExecutionTests(SimpleTestCase):
         run.persist_failure.assert_not_called()
 
     def test_max_tokens_advances_to_gemini_36_inside_three_calls(self):
+        for language in _LATIN_PRINTED_LANGUAGES:
+            with self.subTest(language=language):
+                self._assert_max_tokens_advances(language)
+
+    def _assert_max_tokens_advances(self, language: str) -> None:
         run = _run_claimed_page(
             GeminiAdapter(),
             [
@@ -233,6 +271,7 @@ class EnglishPrintedFallbackExecutionTests(SimpleTestCase):
                 _provider_response(text="partial", finish_reason="MAX_TOKENS"),
                 _provider_response(text=_PAGE_TEXT, finish_reason="STOP"),
             ],
+            language=language,
         )
 
         calls = run.client.models.generate_content.call_args_list
@@ -260,12 +299,18 @@ class EnglishPrintedFallbackExecutionTests(SimpleTestCase):
         run.persist_failure.assert_not_called()
 
     def test_recitation_advances_without_another_primary_call(self):
+        for language in _LATIN_PRINTED_LANGUAGES:
+            with self.subTest(language=language):
+                self._assert_recitation_advances(language)
+
+    def _assert_recitation_advances(self, language: str) -> None:
         run = _run_claimed_page(
             GeminiAdapter(),
             [
                 _provider_response(text="blocked", finish_reason="RECITATION"),
                 _provider_response(text=_PAGE_TEXT, finish_reason="STOP"),
             ],
+            language=language,
         )
 
         calls = run.client.models.generate_content.call_args_list
@@ -284,9 +329,15 @@ class EnglishPrintedFallbackExecutionTests(SimpleTestCase):
         run.persist_failure.assert_not_called()
 
     def test_safety_does_not_advance(self):
+        for language in _LATIN_PRINTED_LANGUAGES:
+            with self.subTest(language=language):
+                self._assert_safety_does_not_advance(language)
+
+    def _assert_safety_does_not_advance(self, language: str) -> None:
         run = _run_claimed_page(
             GeminiAdapter(),
             [_provider_response(text="blocked", finish_reason="SAFETY")],
+            language=language,
         )
 
         self.assertEqual(run.client.models.generate_content.call_count, 1)
@@ -298,9 +349,15 @@ class EnglishPrintedFallbackExecutionTests(SimpleTestCase):
         self.assertEqual(run.persist_failure.call_args.kwargs["failure_code"], "SAFETY")
 
     def test_empty_response_does_not_advance(self):
+        for language in _LATIN_PRINTED_LANGUAGES:
+            with self.subTest(language=language):
+                self._assert_empty_response_does_not_advance(language)
+
+    def _assert_empty_response_does_not_advance(self, language: str) -> None:
         run = _run_claimed_page(
             GeminiAdapter(),
             [_provider_response(text="", finish_reason="STOP")] * 3,
+            language=language,
         )
 
         calls = run.client.models.generate_content.call_args_list
@@ -316,9 +373,15 @@ class EnglishPrintedFallbackExecutionTests(SimpleTestCase):
         )
 
     def test_quota_does_not_advance(self):
+        for language in _LATIN_PRINTED_LANGUAGES:
+            with self.subTest(language=language):
+                self._assert_quota_does_not_advance(language)
+
+    def _assert_quota_does_not_advance(self, language: str) -> None:
         run = _run_claimed_page(
             GeminiAdapter(),
             [RuntimeError("429 RESOURCE_EXHAUSTED")] * 3,
+            language=language,
         )
 
         calls = run.client.models.generate_content.call_args_list
@@ -337,12 +400,12 @@ class EnglishPrintedFallbackExecutionTests(SimpleTestCase):
             run.persist_failure.call_args.kwargs["failure_message"],
         )
 
-    def test_execute_enables_fallback_only_for_english_printed(self):
+    def test_execute_enables_fallback_for_english_and_french_printed(self):
         adapter = GeminiAdapter()
         pages = [_PAGE]
         cases = (
             (Document.Language.ENGLISH, Document.TextInputType.PRINTED, None, True),
-            (Document.Language.FRENCH, Document.TextInputType.PRINTED, None, False),
+            (Document.Language.FRENCH, Document.TextInputType.PRINTED, None, True),
             (
                 Document.Language.ENGLISH,
                 Document.TextInputType.HANDWRITTEN,
@@ -350,6 +413,7 @@ class EnglishPrintedFallbackExecutionTests(SimpleTestCase):
                 False,
             ),
             (Document.Language.ENGLISH, Document.TextInputType.MIXED, None, False),
+            (Document.Language.FRENCH, Document.TextInputType.MIXED, None, False),
             (Document.Language.HEBREW, Document.TextInputType.PRINTED, None, False),
             (
                 Document.Language.HEBREW,
@@ -410,23 +474,48 @@ class EnglishPrintedFallbackExecutionTests(SimpleTestCase):
                     )
                 self.assertIsInstance(result, HtrResult)
                 self.assertEqual(
-                    mock_page.call_args.kwargs[
-                        "english_printed_model_fallback_enabled"
-                    ],
+                    mock_page.call_args.kwargs["latin_printed_model_fallback_enabled"],
                     enabled,
                 )
 
 
 class EnglishPrintedCheckpointIdentityTests(TestCase):
     def test_new_candidate_chain_does_not_reuse_the_old_page_success(self):
+        cases = (
+            (
+                Document.Language.ENGLISH,
+                "English printed identity",
+                "documents/en-printed-identity/source/0.jpeg",
+            ),
+            (
+                Document.Language.FRENCH,
+                "French printed identity",
+                "documents/fr-printed-identity/source/0.jpeg",
+            ),
+        )
+        for language, title, s3_key in cases:
+            with self.subTest(language=language):
+                self._assert_new_chain_does_not_reuse_one_model_attempt(
+                    language=language,
+                    title=title,
+                    s3_key=s3_key,
+                )
+
+    def _assert_new_chain_does_not_reuse_one_model_attempt(
+        self,
+        *,
+        language: str,
+        title: str,
+        s3_key: str,
+    ) -> None:
         document = create_ocr_document(
-            title="English printed identity",
+            title=title,
             doc_type=Document.DocType.IMAGE,
-            language=Document.Language.ENGLISH,
+            language=language,
             text_input_type=Document.TextInputType.PRINTED,
             upload_status=Document.UploadStatus.UPLOADED,
             processing_state_user=Document.ProcessingState.PARTIAL,
-            file_s3_key="documents/en-printed-identity/source/0.jpeg",
+            file_s3_key=s3_key,
             mime_type="image/jpeg",
         )
         pages = [
@@ -447,12 +536,12 @@ class EnglishPrintedCheckpointIdentityTests(TestCase):
         ]
         contract = gemini_transcription_contract(
             prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
-            language_hint=Document.Language.ENGLISH,
+            language_hint=language,
             temperature=0.2,
         )
         shared = {
             "pages": pages,
-            "language_hint": Document.Language.ENGLISH,
+            "language_hint": language,
             "text_input_type": Document.TextInputType.PRINTED,
             "handwriting_type": None,
             "engine_key": DocumentTextResult.OcrEngineKey.GEMINI,
@@ -472,7 +561,7 @@ class EnglishPrintedCheckpointIdentityTests(TestCase):
             **shared,
         )
         current = build_gemini_attempt_identity(
-            model_candidates=ENGLISH_PRINTED_GEMINI_MODEL_CANDIDATES,
+            model_candidates=LATIN_PRINTED_GEMINI_MODEL_CANDIDATES,
             **shared,
         )
 
@@ -535,5 +624,5 @@ class EnglishPrintedCheckpointIdentityTests(TestCase):
         new_attempt.refresh_from_db()
         self.assertEqual(
             new_attempt.model_candidates,
-            list(ENGLISH_PRINTED_GEMINI_MODEL_CANDIDATES),
+            list(LATIN_PRINTED_GEMINI_MODEL_CANDIDATES),
         )

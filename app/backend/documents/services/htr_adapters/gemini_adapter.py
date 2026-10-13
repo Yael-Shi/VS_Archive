@@ -14,8 +14,8 @@ from documents.services.gemini_defaults import (
     DEFAULT_GEMINI_TOP_P,
 )
 from documents.services.gemini_engine import (
-    ENGLISH_PRINTED_FALLBACK_RESERVED_PROVIDER_CALLS,
     GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS,
+    LATIN_PRINTED_FALLBACK_RESERVED_PROVIDER_CALLS,
     GeminiApiError,
     GeminiError,
     GeminiQuotaError,
@@ -29,6 +29,7 @@ from documents.services.gemini_engine import (
 from documents.services.gemini_models import (
     DEFAULT_GEMINI_MODEL_CANDIDATES,
     LATIN_PRINTED_GEMINI_MODEL,
+    latin_printed_model_fallback_eligible,
 )
 from documents.services.gemini_hebrew_printed_crop_recovery import (
     REVIEW_REASON_HEBREW_PRINTED_RECITATION_CROP_RECOVERY,
@@ -169,9 +170,9 @@ class GeminiAdapter:
             and text_input_type == Document.TextInputType.HANDWRITTEN
             and handwriting_type == Document.HandwritingType.GENERAL
         )
-        english_printed_model_fallback_enabled = (
-            language_hint == Document.Language.ENGLISH
-            and text_input_type == Document.TextInputType.PRINTED
+        latin_printed_model_fallback_enabled = latin_printed_model_fallback_eligible(
+            language_hint,
+            text_input_type,
         )
 
         model_candidates = kwargs.pop(
@@ -283,8 +284,8 @@ class GeminiAdapter:
                 hebrew_general_model_fallback_enabled=(
                     hebrew_general_model_fallback_enabled
                 ),
-                english_printed_model_fallback_enabled=(
-                    english_printed_model_fallback_enabled
+                latin_printed_model_fallback_enabled=(
+                    latin_printed_model_fallback_enabled
                 ),
                 hebrew_printed_crop_recovery_enabled=(
                     hebrew_printed_crop_recovery_enabled
@@ -340,7 +341,7 @@ class GeminiAdapter:
         checkpoint_id: int,
         lease_token: uuid.UUID,
         attempt_id: int,
-        english_printed_model_fallback_enabled: bool = False,
+        latin_printed_model_fallback_enabled: bool = False,
         hebrew_printed_crop_recovery_enabled: bool = False,
         hebrew_printed_mixed_script_enabled: bool = False,
         hebrew_printed_openai_fallback_enabled: bool = False,
@@ -366,18 +367,18 @@ class GeminiAdapter:
                 # 4096 -> 8192 -> 16384 ladder. Preserve two calls for 3.6.
                 model_kwargs["max_provider_calls"] = 1
             elif (
-                english_printed_model_fallback_enabled
+                latin_printed_model_fallback_enabled
                 and model_index == 0
                 and model_index + 1 < len(model_candidates)
                 and remaining_provider_calls
-                > ENGLISH_PRINTED_FALLBACK_RESERVED_PROVIDER_CALLS
+                > LATIN_PRINTED_FALLBACK_RESERVED_PROVIDER_CALLS
             ):
                 # Empty-response and other same-model retries keep the full
                 # remaining budget. MAX_TOKENS escalation stops one call early
                 # so Gemini 3.6 can still run.
                 model_kwargs["max_provider_calls"] = remaining_provider_calls
                 model_kwargs["reserve_final_provider_calls"] = (
-                    ENGLISH_PRINTED_FALLBACK_RESERVED_PROVIDER_CALLS
+                    LATIN_PRINTED_FALLBACK_RESERVED_PROVIDER_CALLS
                 )
             else:
                 model_kwargs["max_provider_calls"] = remaining_provider_calls
@@ -420,7 +421,7 @@ class GeminiAdapter:
                         has_next_model
                         and not recitation_model_fallback_enabled
                         and not hebrew_general_model_fallback_enabled
-                        and not english_printed_model_fallback_enabled
+                        and not latin_printed_model_fallback_enabled
                     ):
                         remaining_provider_calls = GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS
                         next_max_output_tokens = kwargs.get(
@@ -430,12 +431,12 @@ class GeminiAdapter:
                     if (
                         has_next_model
                         and remaining_provider_calls > 0
-                        and not english_printed_model_fallback_enabled
+                        and not latin_printed_model_fallback_enabled
                     ):
                         continue
-                    if not english_printed_model_fallback_enabled:
+                    if not latin_printed_model_fallback_enabled:
                         break
-                    # English printed quota stays on this error. It does not
+                    # Latin printed quota stays on this error. It does not
                     # start Gemini 3.6.
 
                 response_failure_code = (
@@ -453,8 +454,8 @@ class GeminiAdapter:
                         GeminiResponseFailureCode.RECITATION,
                     )
                 )
-                use_english_printed_fallback = (
-                    english_printed_model_fallback_enabled
+                use_latin_printed_fallback = (
+                    latin_printed_model_fallback_enabled
                     and response_failure_code
                     in (
                         GeminiResponseFailureCode.MAX_TOKENS,
@@ -466,7 +467,7 @@ class GeminiAdapter:
                     (
                         use_recitation_fallback
                         or use_hebrew_general_fallback
-                        or use_english_printed_fallback
+                        or use_latin_printed_fallback
                     )
                     and has_next_model
                     and remaining_provider_calls > 0

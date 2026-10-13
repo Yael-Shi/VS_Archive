@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from documents.models import Document
+
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 FALLBACK_GEMINI_MODEL = "gemini-3.1-flash-lite"
 GEMINI_36_FLASH_MODEL = "gemini-3.6-flash"
@@ -41,10 +43,32 @@ HEBREW_GENERAL_HANDWRITTEN_GEMINI_MODEL_CANDIDATES = (
 )
 
 LATIN_PRINTED_GEMINI_MODEL = "gemini-2.5-flash"
-# English printed keeps 2.5 Flash for a normal page. MAX_TOKENS or RECITATION
-# on that primary may advance to 3.6 Flash inside the shared three-call page
-# budget. French printed stays on the single 2.5 model.
-ENGLISH_PRINTED_GEMINI_MODEL_CANDIDATES = (
+# English and French printed keep 2.5 Flash for a normal page. MAX_TOKENS or
+# RECITATION on that primary may advance to 3.6 Flash inside the shared
+# three-call page budget.
+LATIN_PRINTED_GEMINI_MODEL_CANDIDATES = (
     LATIN_PRINTED_GEMINI_MODEL,
     GEMINI_36_FLASH_MODEL,
 )
+# Kept for callers that imported the English-printed name.
+ENGLISH_PRINTED_GEMINI_MODEL_CANDIDATES = LATIN_PRINTED_GEMINI_MODEL_CANDIDATES
+
+_LATIN_PRINTED_FALLBACK_LANGUAGES = frozenset(
+    {
+        Document.Language.ENGLISH,
+        Document.Language.FRENCH,
+    }
+)
+
+
+def latin_printed_model_fallback_eligible(
+    language: str | None,
+    text_input_type: str | None,
+) -> bool:
+    """English and French printed share the 2.5 then 3.6 fallback chain."""
+    lang = (language or "").strip().lower()
+    text_type = (text_input_type or "").strip().upper()
+    return (
+        lang in _LATIN_PRINTED_FALLBACK_LANGUAGES
+        and text_type == Document.TextInputType.PRINTED
+    )
