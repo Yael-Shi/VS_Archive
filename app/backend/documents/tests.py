@@ -51,6 +51,7 @@ from documents.services.gemini_models import (
     ENGLISH_PRINTED_GEMINI_MODEL_CANDIDATES,
     LATIN_HANDWRITTEN_GEMINI_MODEL_CANDIDATES,
     LATIN_PRINTED_GEMINI_MODEL,
+    LATIN_PRINTED_GEMINI_MODEL_CANDIDATES,
 )
 from documents.services.htr_adapters.base import (
     EnginePermanentError,
@@ -497,7 +498,7 @@ class HtrDispatcherTests(SimpleTestCase):
 
     @patch("documents.services.htr_engine.get_htr_adapter")
     @patch("documents.services.htr_engine.select_ocr_route")
-    def test_english_printed_with_worker_env_uses_25_then_36(
+    def test_english_and_french_printed_with_worker_env_use_25_then_36(
         self, mock_select_route, mock_get_adapter
     ):
         from documents.services.env_validation import WorkerEnvConfig
@@ -542,23 +543,30 @@ class HtrDispatcherTests(SimpleTestCase):
             gemini_consistency_min_ratio=0.7,
         )
 
-        transcribe_pages(
-            pages=[],
-            language_hint="en",
-            text_input_type=Document.TextInputType.PRINTED,
-            worker_env=worker_env,
-        )
+        for language in ("en", "fr"):
+            with self.subTest(language=language):
+                adapter.execute.reset_mock()
+                transcribe_pages(
+                    pages=[],
+                    language_hint=language,
+                    text_input_type=Document.TextInputType.PRINTED,
+                    worker_env=worker_env,
+                )
 
-        adapter.execute.assert_called_once_with(
-            pages=[],
-            language_hint="en",
-            prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
-            worker_env=worker_env,
-            model_candidates=list(ENGLISH_PRINTED_GEMINI_MODEL_CANDIDATES),
-            text_input_type=Document.TextInputType.PRINTED,
-            handwriting_type=None,
-            engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
-        )
+                adapter.execute.assert_called_once_with(
+                    pages=[],
+                    language_hint=language,
+                    prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+                    worker_env=worker_env,
+                    model_candidates=list(LATIN_PRINTED_GEMINI_MODEL_CANDIDATES),
+                    text_input_type=Document.TextInputType.PRINTED,
+                    handwriting_type=None,
+                    engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
+                )
+                self.assertEqual(
+                    LATIN_PRINTED_GEMINI_MODEL_CANDIDATES,
+                    ENGLISH_PRINTED_GEMINI_MODEL_CANDIDATES,
+                )
 
     @patch("documents.services.htr_engine.get_htr_adapter")
     @patch("documents.services.htr_engine.select_ocr_route")
@@ -9169,13 +9177,13 @@ class GeminiModelCandidatesTests(SimpleTestCase):
             text_input_type=Document.TextInputType.PRINTED,
             gemini_hebrew_printed_model="gemini-3.1-flash-lite",
         )
-        self.assertEqual(candidates, ENGLISH_PRINTED_GEMINI_MODEL_CANDIDATES)
+        self.assertEqual(candidates, LATIN_PRINTED_GEMINI_MODEL_CANDIDATES)
         self.assertEqual(
             candidates,
             (LATIN_PRINTED_GEMINI_MODEL, GEMINI_36_FLASH_MODEL),
         )
 
-    def test_french_printed_gemini_route_uses_latin_printed_model(self):
+    def test_french_printed_gemini_route_uses_latin_printed_chain(self):
         route = OcrRouteConfig(
             engine_key=DocumentTextResult.OcrEngineKey.GEMINI,
             prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
@@ -9186,7 +9194,11 @@ class GeminiModelCandidatesTests(SimpleTestCase):
             text_input_type=Document.TextInputType.PRINTED,
             gemini_hebrew_printed_model="gemini-3.1-flash-lite",
         )
-        self.assertEqual(candidates, (LATIN_PRINTED_GEMINI_MODEL,))
+        self.assertEqual(candidates, LATIN_PRINTED_GEMINI_MODEL_CANDIDATES)
+        self.assertEqual(
+            candidates,
+            (LATIN_PRINTED_GEMINI_MODEL, GEMINI_36_FLASH_MODEL),
+        )
 
     def test_default_gemini_candidates_for_non_latin_routes(self):
         route = OcrRouteConfig(

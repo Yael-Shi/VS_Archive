@@ -82,7 +82,7 @@ Resolved in `gemini_model_candidates()` (called from `htr_engine.transcribe_page
 | English handwritten | Ordered chain: `gemini-2.5-flash` → `gemini-3.1-flash-lite` |
 | French handwritten | Single full-page model: `gemini-3.6-flash` |
 | English printed | Ordered chain: `gemini-2.5-flash` → `gemini-3.6-flash` for scoped `MAX_TOKENS` or `RECITATION` only |
-| French printed | `gemini-2.5-flash` |
+| French printed | Same Latin printed chain: `gemini-2.5-flash` → `gemini-3.6-flash` for scoped `MAX_TOKENS` or `RECITATION` only |
 | Arabic (handwritten/printed) | Default chain: `gemini-2.5-flash` → `gemini-3.1-flash-lite` |
 | Mixed (all languages) | Default chain: `gemini-2.5-flash` → `gemini-3.1-flash-lite` |
 | Non-Gemini routes | Default chain (unused at runtime for Transkribus) |
@@ -116,16 +116,16 @@ persisting partial crop text. French handwriting uses one direct full-page `gemi
 general handwriting uses one 4096-token `gemini-2.5-flash` call first; success
 ends processing, while `MAX_TOKENS` or `RECITATION` advances to
 `gemini-3.6-flash` with at most two calls left in the shared three-call budget.
-Other permanent response classifications do not advance. English printed keeps
-`gemini-2.5-flash` for a successful page. `MAX_TOKENS` may escalate that primary
-once (4096 → 8192 at the default OCR cap), then the third call is reserved for
-`gemini-3.6-flash`. `RECITATION` does not retry 2.5 and advances immediately
-with the unused calls. Empty response, quota, `SAFETY`, and other
-classifications stay on 2.5 and do not start 3.6. French printed remains a
-single `gemini-2.5-flash` candidate. Exhaustion is
-persisted as a failed page checkpoint and produces an explicit partial outcome. Legacy direct adapter calls without
-document identity retain the prior `EngineRetryableError` behavior and do not
-gain the scoped `RECITATION` fallback.
+Other permanent response classifications do not advance. English and French
+printed keep `gemini-2.5-flash` for a successful page. `MAX_TOKENS` may
+escalate that primary once (4096 → 8192 at the default OCR cap), then the
+third call is reserved for `gemini-3.6-flash`. `RECITATION` does not retry 2.5
+and advances immediately with the unused calls. Empty response, quota,
+`SAFETY`, and other classifications stay on 2.5 and do not start 3.6.
+Exhaustion is persisted as a failed page checkpoint and produces an explicit
+partial outcome. Legacy direct adapter calls without document identity retain
+the prior `EngineRetryableError` behavior and do not gain the scoped
+`RECITATION` fallback.
 
 Other Gemini execution knobs (from `worker_env`, not routing):
 `GEMINI_TEMPERATURE`, `GEMINI_TOP_K`, `GEMINI_TOP_P`,
@@ -136,7 +136,7 @@ default 32768, max 65536, must be ≥ `GEMINI_OCR_MAX_OUTPUT_TOKENS`),
 `GEMINI_DOUBLE_PASS`, `GEMINI_CONSISTENCY_MIN_RATIO`, and `MIN_TEXT_LENGTH`.
 
 French handwritten and Hebrew general handwritten `gemini-3.6-flash` routes,
-and any English printed fallback call that reaches `gemini-3.6-flash`,
+and any English or French printed fallback call that reaches `gemini-3.6-flash`,
 are explicit exceptions to the legacy decoding knobs: OCR requests use
 `thinking_level=MINIMAL` and omit temperature, top-k, and top-p so the provider
 model defaults apply. Other Gemini OCR and Hebrew translation profiles are
@@ -152,8 +152,8 @@ configuration identity reuses that success instead of restarting it.
 - If every page used the same model, `DocumentTextResult.engine` remains that
   concrete model id.
 - If quota, scoped English handwritten / Hebrew printed `RECITATION`
-  fallback, or English printed `MAX_TOKENS` / `RECITATION` fallback caused
-  different pages to use different Gemini models,
+  fallback, or English or French printed `MAX_TOKENS` / `RECITATION` fallback
+  caused different pages to use different Gemini models,
   `DocumentTextResult.engine` is the deterministic runtime marker
   `gemini-mixed:<fingerprint>`. Full page-to-model provenance remains on the
   checkpoints.
@@ -173,14 +173,14 @@ configuration identity reuses that success instead of restarting it.
 - French handwritten successes record `gemini-3.6-flash` directly.
 - Hebrew general handwritten pages record whichever model succeeded:
   `gemini-2.5-flash` or fallback `gemini-3.6-flash`.
-- English printed pages record whichever model succeeded: `gemini-2.5-flash`
-  or fallback `gemini-3.6-flash`.
+- English and French printed pages record whichever model succeeded:
+  `gemini-2.5-flash` or fallback `gemini-3.6-flash`.
 
 This provenance behavior does not alter route selection. It records quota
 fallback, the scoped English handwritten and Hebrew printed `RECITATION`
-fallbacks, the English printed `MAX_TOKENS` / `RECITATION` fallback, the
-direct French model, and the cost-aware Hebrew general
-fallback truthfully without discarding successful pages.
+fallbacks, the English and French printed `MAX_TOKENS` / `RECITATION`
+fallback, the direct French handwritten model, and the cost-aware Hebrew
+general fallback truthfully without discarding successful pages.
 
 ## Gemini prompt resolution
 

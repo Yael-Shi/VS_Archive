@@ -108,15 +108,14 @@ def gemini_model_candidates(
             gemini_hebrew_printed_model,
         )
 
+    if gemini_models.latin_printed_model_fallback_eligible(lang, text_type):
+        return gemini_models.LATIN_PRINTED_GEMINI_MODEL_CANDIDATES
+
     if lang in (Document.Language.ENGLISH, Document.Language.FRENCH):
         if text_type == Document.TextInputType.HANDWRITTEN:
             if lang == Document.Language.FRENCH:
                 return gemini_models.FRENCH_HANDWRITTEN_GEMINI_MODEL_CANDIDATES
             return gemini_models.LATIN_HANDWRITTEN_GEMINI_MODEL_CANDIDATES
-        elif text_type == Document.TextInputType.PRINTED:
-            if lang == Document.Language.ENGLISH:
-                return gemini_models.ENGLISH_PRINTED_GEMINI_MODEL_CANDIDATES
-            return (gemini_models.LATIN_PRINTED_GEMINI_MODEL,)
 
     return DEFAULT_GEMINI_MODEL_CANDIDATES
 

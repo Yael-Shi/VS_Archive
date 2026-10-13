@@ -47,11 +47,16 @@ GEMINI_MIXED_PROMPT_CONTRACT_VERSION = "gemini-mixed-content-prompt-v1"
 
 # Bounded per-page OCR recovery. Version v2 adds RECITATION-only model
 # fallback for Latin handwriting while preserving one global three-call budget.
-# English printed reserves one of those calls for Gemini 3.6 without changing
-# this version: the candidate list itself changes attempt identity.
+# Latin printed (English and French) reserves one of those calls for Gemini
+# 3.6 without changing this version: the candidate list itself changes
+# attempt identity.
 GEMINI_OCR_PAGE_RETRY_POLICY_VERSION = "gemini-ocr-page-retry-v2"
 GEMINI_OCR_PAGE_MAX_PROVIDER_CALLS = 3
-ENGLISH_PRINTED_FALLBACK_RESERVED_PROVIDER_CALLS = 1
+LATIN_PRINTED_FALLBACK_RESERVED_PROVIDER_CALLS = 1
+# Kept for callers that imported the English-printed name.
+ENGLISH_PRINTED_FALLBACK_RESERVED_PROVIDER_CALLS = (
+    LATIN_PRINTED_FALLBACK_RESERVED_PROVIDER_CALLS
+)
 _GEMINI_OCR_EMPTY_RESPONSE_BACKOFF_SECONDS = (1.0, 2.0)
 _GEMINI_OCR_MIN_ESCALATED_OUTPUT_TOKENS = 8192
 
