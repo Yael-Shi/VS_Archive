@@ -50,6 +50,14 @@ LATIN_PRINTED_GEMINI_MODEL_CANDIDATES = (
     LATIN_PRINTED_GEMINI_MODEL,
     GEMINI_36_FLASH_MODEL,
 )
+# French and Hebrew MIXED keep the same primary and the same bounded 3.6
+# recovery. Live probes succeeded on 3.6 after 2.5 returned RECITATION
+# (French document 436) or exhausted MAX_TOKENS (Hebrew document 438).
+# English and Arabic MIXED stay on the default chain.
+MIXED_GEMINI_36_MODEL_CANDIDATES = (
+    DEFAULT_GEMINI_MODEL,
+    GEMINI_36_FLASH_MODEL,
+)
 # Kept for callers that imported the English-printed name.
 ENGLISH_PRINTED_GEMINI_MODEL_CANDIDATES = LATIN_PRINTED_GEMINI_MODEL_CANDIDATES
 
@@ -72,3 +80,41 @@ def latin_printed_model_fallback_eligible(
         lang in _LATIN_PRINTED_FALLBACK_LANGUAGES
         and text_type == Document.TextInputType.PRINTED
     )
+
+
+_MIXED_GEMINI_36_FALLBACK_LANGUAGES = frozenset(
+    {
+        Document.Language.FRENCH,
+        Document.Language.HEBREW,
+    }
+)
+
+
+def mixed_gemini_36_fallback_eligible(
+    language: str | None,
+    text_input_type: str | None,
+) -> bool:
+    """French and Hebrew MIXED fall back from 2.5 Flash to Gemini 3.6."""
+    lang = (language or "").strip().lower()
+    text_type = (text_input_type or "").strip().upper()
+    return (
+        lang in _MIXED_GEMINI_36_FALLBACK_LANGUAGES
+        and text_type == Document.TextInputType.MIXED
+    )
+
+
+def primary_then_gemini_36_fallback_eligible(
+    language: str | None,
+    text_input_type: str | None,
+) -> bool:
+    """Routes that keep 2.5 Flash first and may advance to 3.6 Flash.
+
+    Advancement stays inside the existing checkpoint page budget and is limited
+    to MAX_TOKENS or RECITATION. English and French printed share one chain.
+    French and Hebrew MIXED use the same recovery rule. Hebrew printed crop
+    recovery and mixed-script region fallback stay on printed documents.
+    """
+    return latin_printed_model_fallback_eligible(
+        language,
+        text_input_type,
+    ) or mixed_gemini_36_fallback_eligible(language, text_input_type)

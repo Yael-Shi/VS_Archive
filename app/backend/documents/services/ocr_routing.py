@@ -111,6 +111,9 @@ def gemini_model_candidates(
     if gemini_models.latin_printed_model_fallback_eligible(lang, text_type):
         return gemini_models.LATIN_PRINTED_GEMINI_MODEL_CANDIDATES
 
+    if gemini_models.mixed_gemini_36_fallback_eligible(lang, text_type):
+        return gemini_models.MIXED_GEMINI_36_MODEL_CANDIDATES
+
     if lang in (Document.Language.ENGLISH, Document.Language.FRENCH):
         if text_type == Document.TextInputType.HANDWRITTEN:
             if lang == Document.Language.FRENCH:

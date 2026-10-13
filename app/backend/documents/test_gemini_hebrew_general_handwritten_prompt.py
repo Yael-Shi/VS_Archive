@@ -404,6 +404,12 @@ class HebrewGeneralHandwrittenCheckpointIdentityRollbackTests(SimpleTestCase):
         )
 
     def test_pr_d_config_fingerprint_is_unchanged_across_current_contracts(self):
+        # PR D hashes the shared retry budget, token ladder, and hard cap into
+        # the config fingerprint independently of prompt-contract version.
+        # Hebrew printed later adds recitation_crop_recovery_policy and
+        # mixed_script_region_fallback_policy to that payload only. General
+        # handwriting and MIXED omit both keys, so they keep the shared
+        # fingerprint when candidates and generation settings match.
         general = self._general_identity(
             _contract(
                 DocumentTextResult.OcrPromptVariant.HEBREW_GENERAL_HANDWRITTEN,
@@ -423,12 +429,10 @@ class HebrewGeneralHandwrittenCheckpointIdentityRollbackTests(SimpleTestCase):
             handwriting_type=None,
         )
 
-        config_fingerprints = {
-            general.config_fingerprint,
-            printed.config_fingerprint,
-            mixed.config_fingerprint,
-        }
-        self.assertEqual(config_fingerprints, {general.config_fingerprint})
+        self.assertEqual(general.config_fingerprint, mixed.config_fingerprint)
+        self.assertNotEqual(printed.config_fingerprint, general.config_fingerprint)
+        self.assertEqual(general.model_candidates, printed.model_candidates)
+        self.assertEqual(general.model_candidates, mixed.model_candidates)
         self.assertEqual(
             printed.prompt_contract_version,
             GEMINI_HEBREW_PRINTED_PROMPT_CONTRACT_VERSION,
@@ -436,4 +440,47 @@ class HebrewGeneralHandwrittenCheckpointIdentityRollbackTests(SimpleTestCase):
         self.assertEqual(
             mixed.prompt_contract_version,
             GEMINI_MIXED_PROMPT_CONTRACT_VERSION,
+        )
+        self.assertEqual(
+            general.prompt_contract_version,
+            GEMINI_OCR_PROMPT_CONTRACT_VERSION,
+        )
+        self.assertNotEqual(general.prompt_fingerprint, printed.prompt_fingerprint)
+        self.assertNotEqual(general.prompt_fingerprint, mixed.prompt_fingerprint)
+        self.assertEqual(
+            len(
+                {
+                    general.identity_fingerprint,
+                    printed.identity_fingerprint,
+                    mixed.identity_fingerprint,
+                }
+            ),
+            3,
+        )
+
+        with (
+            patch(
+                "documents.services.gemini_page_checkpoints."
+                "hebrew_printed_recitation_crop_recovery_policy",
+                return_value="",
+            ),
+            patch(
+                "documents.services.gemini_page_checkpoints."
+                "hebrew_printed_mixed_script_region_fallback_policy",
+                return_value="",
+            ),
+        ):
+            printed_without_route_policies = self._identity(
+                _contract(DocumentTextResult.OcrPromptVariant.PRINTED, "he"),
+                prompt_variant=DocumentTextResult.OcrPromptVariant.PRINTED,
+                text_input_type=Document.TextInputType.PRINTED,
+                handwriting_type=None,
+            )
+        self.assertEqual(
+            printed_without_route_policies.config_fingerprint,
+            general.config_fingerprint,
+        )
+        self.assertNotEqual(
+            printed_without_route_policies.identity_fingerprint,
+            general.identity_fingerprint,
         )
