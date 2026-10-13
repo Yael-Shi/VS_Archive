@@ -1,8 +1,9 @@
 """Latin printed Gemini 2.5 primary with bounded Gemini 3.6 fallback.
 
 English and French printed share one candidate chain and one fallback
-predicate. Handwriting, mixed, Hebrew, and Arabic routes stay on their
-existing candidates.
+predicate. French MIXED uses the same recovery rule with its own candidate
+constant. Handwriting, other mixed languages, Hebrew, and Arabic routes stay
+on their existing candidates.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from documents.services.gemini_models import (
     ENGLISH_PRINTED_GEMINI_MODEL_CANDIDATES,
     FRENCH_HANDWRITTEN_GEMINI_MODEL_CANDIDATES,
     GEMINI_36_FLASH_MODEL,
+    MIXED_GEMINI_36_MODEL_CANDIDATES,
     HEBREW_GENERAL_HANDWRITTEN_GEMINI_MODEL_CANDIDATES,
     LATIN_HANDWRITTEN_GEMINI_MODEL_CANDIDATES,
     LATIN_PRINTED_GEMINI_MODEL,
@@ -177,7 +179,13 @@ class EnglishPrintedModelCandidateTests(SimpleTestCase):
                 Document.Language.FRENCH,
                 Document.TextInputType.MIXED,
                 None,
-                DEFAULT_GEMINI_MODEL_CANDIDATES,
+                MIXED_GEMINI_36_MODEL_CANDIDATES,
+            ),
+            (
+                Document.Language.HEBREW,
+                Document.TextInputType.MIXED,
+                Document.HandwritingType.VS,
+                MIXED_GEMINI_36_MODEL_CANDIDATES,
             ),
             (
                 Document.Language.HEBREW,
@@ -414,6 +422,12 @@ class EnglishPrintedFallbackExecutionTests(SimpleTestCase):
             ),
             (Document.Language.ENGLISH, Document.TextInputType.MIXED, None, False),
             (Document.Language.FRENCH, Document.TextInputType.MIXED, None, False),
+            (
+                Document.Language.HEBREW,
+                Document.TextInputType.MIXED,
+                Document.HandwritingType.VS,
+                False,
+            ),
             (Document.Language.HEBREW, Document.TextInputType.PRINTED, None, False),
             (
                 Document.Language.HEBREW,
@@ -477,6 +491,29 @@ class EnglishPrintedFallbackExecutionTests(SimpleTestCase):
                     mock_page.call_args.kwargs["latin_printed_model_fallback_enabled"],
                     enabled,
                 )
+                self.assertEqual(
+                    mock_page.call_args.kwargs["mixed_gemini_36_fallback_enabled"],
+                    text_type == Document.TextInputType.MIXED
+                    and language
+                    in {Document.Language.FRENCH, Document.Language.HEBREW},
+                )
+                if (
+                    language == Document.Language.HEBREW
+                    and text_type == Document.TextInputType.MIXED
+                ):
+                    self.assertFalse(
+                        mock_page.call_args.kwargs[
+                            "hebrew_printed_crop_recovery_enabled"
+                        ]
+                    )
+                    self.assertFalse(
+                        mock_page.call_args.kwargs[
+                            "hebrew_printed_mixed_script_enabled"
+                        ]
+                    )
+                    self.assertFalse(
+                        mock_page.call_args.kwargs["recitation_model_fallback_enabled"]
+                    )
 
 
 class EnglishPrintedCheckpointIdentityTests(TestCase):

@@ -28,7 +28,10 @@ from documents.services.gemini_engine import (
     gemini_transcription_contract,
     transcribe_pages_with_gemini,
 )
-from documents.services.gemini_models import DEFAULT_GEMINI_MODEL_CANDIDATES
+from documents.services.gemini_models import (
+    DEFAULT_GEMINI_MODEL_CANDIDATES,
+    MIXED_GEMINI_36_MODEL_CANDIDATES,
+)
 from documents.services.gemini_page_checkpoints import build_gemini_attempt_identity
 from documents.services.ocr_routing import (
     OCR_ROUTES,
@@ -189,7 +192,12 @@ class MixedOcrRoutingTests(SimpleTestCase):
                     text_input_type=Document.TextInputType.MIXED,
                     gemini_hebrew_printed_model="hebrew-printed-model",
                 )
-                self.assertEqual(candidates, DEFAULT_GEMINI_MODEL_CANDIDATES)
+                expected = (
+                    MIXED_GEMINI_36_MODEL_CANDIDATES
+                    if language in {"fr", "he"}
+                    else DEFAULT_GEMINI_MODEL_CANDIDATES
+                )
+                self.assertEqual(candidates, expected)
 
 
 class MixedPromptContractTests(SimpleTestCase):
