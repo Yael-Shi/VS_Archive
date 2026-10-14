@@ -154,6 +154,24 @@ FOURTH_CONTRACT_ALIAS_COUNT = 0
 FOURTH_CONTRACT_SPLIT_ROUTE_COUNTS: Mapping[str, int] = MappingProxyType({})
 FOURTH_DECISION_SOURCE = "vs_archive_non_person_fourth_contract_2026_10_12"
 FOURTH_APPLY_CONFIRM_TOKEN = "APPLY_NON_PERSON_FOURTH_CONTRACT_2026_10_12"
+FIFTH_CONTRACT_SHA256 = (
+    "968614527bd29095cc371c00515f21d758ce9b7375be1611db1101ac02a6f01a"
+)
+FIFTH_CONTRACT_FINAL_SHEET_NAME = "FINAL_RECON_2026-10-14"
+FIFTH_CONTRACT_ROW_COUNT = 67
+FIFTH_CONTRACT_DECISION_COUNTS = MappingProxyType(
+    {
+        ReviewedNonPersonEntityDecision.Decision.APPROVE: 30,
+        ReviewedNonPersonEntityDecision.Decision.MERGE: 35,
+        ReviewedNonPersonEntityDecision.Decision.SKIP: 0,
+        ReviewedNonPersonEntityDecision.Decision.SPLIT: 0,
+        ReviewedNonPersonEntityDecision.Decision.NEEDS_RESEARCH: 2,
+    }
+)
+FIFTH_CONTRACT_ALIAS_COUNT = 0
+FIFTH_CONTRACT_SPLIT_ROUTE_COUNTS: Mapping[str, int] = MappingProxyType({})
+FIFTH_DECISION_SOURCE = "vs_archive_non_person_fifth_contract_2026_10_14"
+FIFTH_APPLY_CONFIRM_TOKEN = "APPLY_NON_PERSON_FIFTH_CONTRACT_2026_10_14"
 SECOND_CARRIED_CANDIDATE_IDS = frozenset(
     {
         "EC0006",
@@ -459,9 +477,167 @@ def fourth_contract_spec() -> ReviewContractSpec:
     )
 
 
+FIFTH_CARRIED_TARGETS: tuple[CarriedTargetOwnership, ...] = (
+    _third_carried_target(
+        "EC0001",
+        decision_source=THIRD_DECISION_SOURCE,
+        workbook_sha256=THIRD_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0002",
+        decision_source=THIRD_DECISION_SOURCE,
+        workbook_sha256=THIRD_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0003",
+        decision_source=THIRD_DECISION_SOURCE,
+        workbook_sha256=THIRD_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0004",
+        decision_source=V6_DECISION_SOURCE,
+        workbook_sha256=AUTHORITATIVE_WORKBOOK_SHA256,
+    ),
+    _third_carried_target(
+        "EC0006",
+        decision_source=V6_DECISION_SOURCE,
+        workbook_sha256=AUTHORITATIVE_WORKBOOK_SHA256,
+    ),
+    _third_carried_target(
+        "EC0014",
+        decision_source=THIRD_DECISION_SOURCE,
+        workbook_sha256=THIRD_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0059",
+        decision_source=SECOND_DECISION_SOURCE,
+        workbook_sha256=SECOND_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0063",
+        decision_source=SECOND_DECISION_SOURCE,
+        workbook_sha256=SECOND_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0110",
+        decision_source=THIRD_DECISION_SOURCE,
+        workbook_sha256=THIRD_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0162",
+        decision_source=THIRD_DECISION_SOURCE,
+        workbook_sha256=THIRD_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0178",
+        decision_source=V6_DECISION_SOURCE,
+        workbook_sha256=AUTHORITATIVE_WORKBOOK_SHA256,
+    ),
+    _third_carried_target(
+        "EC0223",
+        decision_source=V6_DECISION_SOURCE,
+        workbook_sha256=AUTHORITATIVE_WORKBOOK_SHA256,
+    ),
+    _third_carried_target(
+        "EC0231",
+        decision_source=V6_DECISION_SOURCE,
+        workbook_sha256=AUTHORITATIVE_WORKBOOK_SHA256,
+    ),
+    _third_carried_target(
+        "EC0234",
+        decision_source=SECOND_DECISION_SOURCE,
+        workbook_sha256=SECOND_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0278",
+        decision_source=FOURTH_DECISION_SOURCE,
+        workbook_sha256=FOURTH_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0301",
+        decision_source=SECOND_DECISION_SOURCE,
+        workbook_sha256=SECOND_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0426",
+        decision_source=THIRD_DECISION_SOURCE,
+        workbook_sha256=THIRD_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0433",
+        decision_source=THIRD_DECISION_SOURCE,
+        workbook_sha256=THIRD_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0476",
+        decision_source=SECOND_DECISION_SOURCE,
+        workbook_sha256=SECOND_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0479",
+        decision_source=SECOND_DECISION_SOURCE,
+        workbook_sha256=SECOND_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0488",
+        decision_source=SECOND_DECISION_SOURCE,
+        workbook_sha256=SECOND_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0528",
+        decision_source=SECOND_DECISION_SOURCE,
+        workbook_sha256=SECOND_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0574",
+        decision_source=THIRD_DECISION_SOURCE,
+        workbook_sha256=THIRD_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0606",
+        decision_source=THIRD_DECISION_SOURCE,
+        workbook_sha256=THIRD_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0750",
+        decision_source=THIRD_DECISION_SOURCE,
+        workbook_sha256=THIRD_CONTRACT_SHA256,
+    ),
+)
+FIFTH_CARRIED_CANDIDATE_IDS = frozenset(
+    target.candidate_id for target in FIFTH_CARRIED_TARGETS
+)
+
+
+def fifth_contract_spec() -> ReviewContractSpec:
+    """2026-10-14 contract for the representable remainder of the 53.
+
+    Eleven candidates stay out of this workbook: nine unpinned splits, plus
+    EC0633 and EC0743, whose targets do not exist until those splits can
+    create them. Carried rows keep the contract that already applied them.
+    """
+
+    return ReviewContractSpec(
+        sha256=FIFTH_CONTRACT_SHA256,
+        final_sheet_name=FIFTH_CONTRACT_FINAL_SHEET_NAME,
+        row_count=FIFTH_CONTRACT_ROW_COUNT,
+        decision_counts=FIFTH_CONTRACT_DECISION_COUNTS,
+        alias_count=FIFTH_CONTRACT_ALIAS_COUNT,
+        split_route_counts=FIFTH_CONTRACT_SPLIT_ROUTE_COUNTS,
+        read_split_routes=False,
+        read_alias_review=False,
+        confirm_token=FIFTH_APPLY_CONFIRM_TOKEN,
+        decision_source=FIFTH_DECISION_SOURCE,
+        carried_candidate_ids=FIFTH_CARRIED_CANDIDATE_IDS,
+        carried_targets=FIFTH_CARRIED_TARGETS,
+    )
+
+
 def contract_spec_for_sha(workbook_sha256: str) -> ReviewContractSpec | None:
     """Return the spec for an exact SHA. Unknown hashes are not a spec."""
 
+    if workbook_sha256 == FIFTH_CONTRACT_SHA256:
+        return fifth_contract_spec()
     if workbook_sha256 == FOURTH_CONTRACT_SHA256:
         return fourth_contract_spec()
     if workbook_sha256 == THIRD_CONTRACT_SHA256:

@@ -43,6 +43,7 @@ from documents.services.non_person_entity_review_dry_run import (
     source_text_sha256,
 )
 from documents.services.non_person_entity_review_preflight import (
+    FIFTH_APPLY_CONFIRM_TOKEN,
     FOURTH_APPLY_CONFIRM_TOKEN,
     PreflightResult,
     SECOND_APPLY_CONFIRM_TOKEN,
@@ -157,6 +158,7 @@ def _require_known_confirm(confirm: str) -> None:
         SECOND_APPLY_CONFIRM_TOKEN,
         THIRD_APPLY_CONFIRM_TOKEN,
         FOURTH_APPLY_CONFIRM_TOKEN,
+        FIFTH_APPLY_CONFIRM_TOKEN,
     }:
         raise ApplyError("confirmation token rejected")
 
