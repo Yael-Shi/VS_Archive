@@ -2787,6 +2787,10 @@ class TranskribusTranscriptSnapshot(models.Model):
         AUTOMATIC_HTR = "AUTOMATIC_HTR", "Automatic HTR"
         CORRECTED_CURRENT_SYNC = "CORRECTED_CURRENT_SYNC", "Corrected-current sync"
         LEGACY_IMPORT = "LEGACY_IMPORT", "Legacy Transkribus import"
+        HOVER_GEOMETRY_REPAIR = (
+            "HOVER_GEOMETRY_REPAIR",
+            "Hover geometry repair",
+        )
 
     class StorageStatus(models.TextChoices):
         PENDING_UPLOAD = "PENDING_UPLOAD", "Pending upload"

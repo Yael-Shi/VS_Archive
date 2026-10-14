@@ -742,6 +742,24 @@ def store_transkribus_transcript_snapshot(
     except TranskribusSnapshotParseError as exc:
         raise TranskribusSnapshotStorageValidationError(str(exc)) from exc
 
+    normalized_pages = [
+        page.page_index
+        for page in parsed.pages
+        if page.polygons_normalized_into_bounds
+    ]
+    if normalized_pages:
+        logger.info(
+            "transkribus polygon normalization applied",
+            extra={
+                "document_id": document.pk,
+                "parser_version": parsed.parser_version,
+                "page_indexes": normalized_pages,
+                "normalized_polygon_count": sum(
+                    page.polygons_normalized_into_bounds for page in parsed.pages
+                ),
+            },
+        )
+
     existing = _find_ready_snapshot(
         document_id=document.pk,
         parser_version=parsed.parser_version,

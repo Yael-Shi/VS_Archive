@@ -190,14 +190,24 @@ class Command(BaseCommand):
         self.stdout.write(f"  Degenerate polygons: {page.degenerate_polygons}")
         if page.bounds_validation_available:
             self.stdout.write(
-                f"  Out-of-bounds polygons: {page.polygons_outside_page_bounds}"
+                "  Out-of-bounds polygons (raw PAGE XML): "
+                f"{page.polygons_outside_page_bounds}"
             )
         else:
             self.stdout.write(
                 "  Bounds validation: unavailable (missing page dimensions)"
             )
         self.stdout.write(
-            f"  Negative/outside coordinates: {page.negative_or_outside_coordinates}"
+            "  Negative/outside coordinates (raw PAGE XML): "
+            f"{page.negative_or_outside_coordinates}"
+        )
+        self.stdout.write(
+            "  Polygons normalized into bounds: "
+            f"{page.polygons_normalized_into_bounds}"
+        )
+        self.stdout.write(
+            "  Polygons rejected for coordinate excursion: "
+            f"{page.polygons_rejected_coordinate_excursion}"
         )
         self.stdout.write(f"  Duplicate line ids: {page.duplicate_line_ids}")
         self.stdout.write(f"  Page capability: {page.page_capability}")

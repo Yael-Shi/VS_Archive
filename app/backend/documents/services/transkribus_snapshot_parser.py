@@ -1,9 +1,15 @@
 """Pure PAGE XML parser for immutable Transkribus transcript snapshots.
 
-No database or S3 I/O. Parser v1 preserves the same TextLine / page ordering and
-text-joining behavior as ``transkribus_engine.parse_page_xml_to_text`` /
+No database or S3 I/O. Text joining matches
+``transkribus_engine.parse_page_xml_to_text`` /
 ``complete_pylaia_transcription_after_job`` (lines joined with ``\\n``, pages
-with ``\\n\\n``). ReadingOrder may be reported but never reorders v1 output.
+with ``\\n\\n``). ReadingOrder may be reported but never reorders output.
+
+``page_xml_snapshot_v1`` stores polygon points exactly as parsed.
+``page_xml_snapshot_v2`` may clamp a structurally valid polygon into declared
+image bounds when every out-of-bounds coordinate is at most 5 pixels outside,
+inclusive. PAGE XML bytes, canonical text, line order, and character offsets
+stay those of v1. New stores use v2. Existing READY rows are not rewritten.
 """
 
 from __future__ import annotations
@@ -26,17 +32,22 @@ from documents.services.transkribus_page_xml_geometry import (
     _find_page_element,
     _local_tag,
     _ns_map,
-    _overlay_polygon_coords_in_bounds,
+    PolygonNormalizationRejection,
+    normalize_polygon_points_for_snapshot,
+    unresolved_out_of_bounds_count,
     _parse_baseline_points,
     _parse_int_attr,
     _parse_polygon_points,
     _reading_order_line_ids,
 )
 
-# Stable identity for this normalization contract. Future parser versions must
-# use a new constant so the same raw PAGE XML can be reparsed without mutating
-# older snapshots.
-PARSER_VERSION = "page_xml_snapshot_v1"
+# Stable identity for a normalization contract. A new contract uses a new
+# constant so the same raw PAGE XML can be reparsed without mutating older
+# READY snapshots. Reuse is ``(document, parser_version, raw_xml_fingerprint)``.
+PARSER_VERSION_V1 = "page_xml_snapshot_v1"
+PARSER_VERSION_V2 = "page_xml_snapshot_v2"
+PARSER_VERSION = PARSER_VERSION_V2
+_SUPPORTED_PARSER_VERSIONS = frozenset({PARSER_VERSION_V1, PARSER_VERSION_V2})
 
 PAGE_SEPARATOR = "\n\n"
 LINE_SEPARATOR = "\n"
@@ -87,6 +98,10 @@ class ParsedSnapshotPage:
     canonical_text: str
     lines: tuple[ParsedSnapshotLine, ...]
     warnings: tuple[str, ...] = field(default_factory=tuple)
+    polygons_outside_page_bounds: int = 0
+    negative_or_outside_coordinates: int = 0
+    polygons_normalized_into_bounds: int = 0
+    polygons_rejected_coordinate_excursion: int = 0
 
 
 @dataclass(frozen=True)
@@ -222,6 +237,21 @@ def _document_geometry_capability(
     return "INDETERMINATE"
 
 
+def _resolve_parser_version(parser_version: str | None) -> str:
+    version = PARSER_VERSION if parser_version is None else str(parser_version)
+    if version not in _SUPPORTED_PARSER_VERSIONS:
+        raise TranskribusSnapshotParseError(
+            f"Unsupported snapshot parser_version={version!r}."
+        )
+    return version
+
+
+def _format_excursion_px(value: float) -> str:
+    if value == int(value):
+        return str(int(value))
+    return f"{value:.6f}".rstrip("0").rstrip(".")
+
+
 def parse_page_xml_for_snapshot(
     page_xml: bytes,
     *,
@@ -230,6 +260,7 @@ def parse_page_xml_for_snapshot(
     transcript_ts_id: str,
     provider_page_id: int | None = None,
     remote_transcript_status: str | None = None,
+    parser_version: str | None = None,
 ) -> ParsedSnapshotPage:
     """Parse one PAGE XML page into structured snapshot fields (no I/O)."""
     if page_index < 1:
@@ -241,6 +272,8 @@ def parse_page_xml_for_snapshot(
     ts_id = str(transcript_ts_id).strip()
     if not ts_id:
         raise TranskribusSnapshotParseError("transcript_ts_id must be non-empty.")
+    resolved_parser_version = _resolve_parser_version(parser_version)
+    apply_minor_clamp = resolved_parser_version == PARSER_VERSION_V2
 
     try:
         root = ET.fromstring(page_xml)
@@ -277,6 +310,8 @@ def parse_page_xml_for_snapshot(
 
     polygons_outside_page_bounds = 0
     negative_or_outside_coordinates = 0
+    polygons_normalized_into_bounds = 0
+    polygons_rejected_coordinate_excursion = 0
     warnings: list[str] = []
 
     # Track offsets into this page's canonical text (production join of contributing lines).
@@ -324,18 +359,39 @@ def parse_page_xml_for_snapshot(
             and not parsed_baseline.degenerate
         )
 
+        stored_polygon = (
+            parsed_coords.points if not parsed_coords.malformed else ()
+        )
         coords_in_bounds = True
         if coords_structurally_valid and parsed_coords.points:
-            in_bounds, neg, outside = _overlay_polygon_coords_in_bounds(
+            normalization = normalize_polygon_points_for_snapshot(
                 parsed_coords.points,
                 width=image_width,
                 height=image_height,
+                apply_minor_clamp=apply_minor_clamp,
             )
-            coords_in_bounds = in_bounds
-            if neg:
+            coords_in_bounds = normalization.accepted
+            if normalization.raw_negative_or_outside:
                 negative_or_outside_coordinates += 1
-            if outside:
+            if normalization.raw_outside_declared_bounds:
                 polygons_outside_page_bounds += 1
+            if normalization.normalized:
+                polygons_normalized_into_bounds += 1
+                stored_polygon = normalization.points
+                line_label = line_id or "-"
+                warnings.append(
+                    "normalized_polygon "
+                    f"page_index={page_index} "
+                    f"provider_line_id={line_label} "
+                    f"order_index={len(parsed_lines)} "
+                    f"clamped_points={normalization.clamped_point_count} "
+                    f"max_excursion_px="
+                    f"{_format_excursion_px(normalization.max_excursion_px)}"
+                )
+            elif (
+                normalization.rejection == PolygonNormalizationRejection.EXCURSION
+            ):
+                polygons_rejected_coordinate_excursion += 1
 
         coords_valid = coords_structurally_valid and coords_in_bounds
         has_meaningful_geometry = coords_valid or baseline_valid
@@ -357,8 +413,8 @@ def parse_page_xml_for_snapshot(
             char_end = canonical_cursor
 
         bbox = (
-            _bounding_box(parsed_coords.points)
-            if coords_valid and parsed_coords.points
+            _bounding_box(stored_polygon)
+            if coords_valid and stored_polygon
             else None
         )
 
@@ -371,9 +427,7 @@ def parse_page_xml_for_snapshot(
                 contributes_to_canonical=contributes,
                 char_start=char_start,
                 char_end=char_end,
-                polygon_points=parsed_coords.points
-                if not parsed_coords.malformed
-                else (),
+                polygon_points=stored_polygon,
                 baseline_points=(
                     parsed_baseline.points if not parsed_baseline.malformed else ()
                 ),
@@ -414,8 +468,14 @@ def parse_page_xml_for_snapshot(
         image_width=image_width,
         image_height=image_height,
         lines=parsed_lines,
-        polygons_outside_page_bounds=polygons_outside_page_bounds,
-        negative_or_outside_coordinates=negative_or_outside_coordinates,
+        polygons_outside_page_bounds=unresolved_out_of_bounds_count(
+            raw=polygons_outside_page_bounds,
+            normalized=polygons_normalized_into_bounds,
+        ),
+        negative_or_outside_coordinates=unresolved_out_of_bounds_count(
+            raw=negative_or_outside_coordinates,
+            normalized=polygons_normalized_into_bounds,
+        ),
     )
 
     # Prefer geometry-audit TextLine count when ns fallback finds more elements;
@@ -453,15 +513,24 @@ def parse_page_xml_for_snapshot(
         canonical_text=canonical_text,
         lines=tuple(parsed_lines),
         warnings=tuple(warnings),
+        polygons_outside_page_bounds=polygons_outside_page_bounds,
+        negative_or_outside_coordinates=negative_or_outside_coordinates,
+        polygons_normalized_into_bounds=polygons_normalized_into_bounds,
+        polygons_rejected_coordinate_excursion=(
+            polygons_rejected_coordinate_excursion
+        ),
     )
 
 
 def parse_document_pages_for_snapshot(
     pages: Sequence[SnapshotPageInput],
+    *,
+    parser_version: str | None = None,
 ) -> ParsedSnapshotDocument:
     """Parse ordered pages into a document-level snapshot parse result (no I/O)."""
     if not pages:
         raise TranskribusSnapshotParseError("At least one PAGE XML page is required.")
+    resolved_parser_version = _resolve_parser_version(parser_version)
 
     seen_indexes: set[int] = set()
     parsed_pages: list[ParsedSnapshotPage] = []
@@ -480,6 +549,7 @@ def parse_document_pages_for_snapshot(
             transcript_ts_id=page_input.transcript_ts_id,
             provider_page_id=page_input.provider_page_id,
             remote_transcript_status=page_input.remote_transcript_status,
+            parser_version=resolved_parser_version,
         )
         parsed_pages.append(parsed)
         all_warnings.extend(parsed.warnings)
@@ -539,6 +609,12 @@ def parse_document_pages_for_snapshot(
                 canonical_text=page.canonical_text,
                 lines=remapped_lines,
                 warnings=page.warnings,
+                polygons_outside_page_bounds=page.polygons_outside_page_bounds,
+                negative_or_outside_coordinates=page.negative_or_outside_coordinates,
+                polygons_normalized_into_bounds=page.polygons_normalized_into_bounds,
+                polygons_rejected_coordinate_excursion=(
+                    page.polygons_rejected_coordinate_excursion
+                ),
             )
         )
         cursor += len(page.canonical_text)
@@ -566,7 +642,7 @@ def parse_document_pages_for_snapshot(
     )
 
     return ParsedSnapshotDocument(
-        parser_version=PARSER_VERSION,
+        parser_version=resolved_parser_version,
         canonical_text=document_canonical,
         canonical_text_sha256=compute_sha256_hex(document_canonical),
         provider_identity_fingerprint=provider_fp,
@@ -581,6 +657,8 @@ def parse_document_pages_for_snapshot(
 # Re-export geometry error for callers that validate page maps alongside parse.
 __all__ = [
     "PARSER_VERSION",
+    "PARSER_VERSION_V1",
+    "PARSER_VERSION_V2",
     "PAGE_SEPARATOR",
     "LINE_SEPARATOR",
     "TranskribusSnapshotParseError",
