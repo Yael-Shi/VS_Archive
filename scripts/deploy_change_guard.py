@@ -89,6 +89,9 @@ SERVICE_TASK_ROLE = {
     WEB_SERVICE: WEB_TASK,
     WORKER_SERVICE: WORKER_TASK,
 }
+# CloudFormation reports the same TaskDefinition reference as Static in the
+# observed ECS service change set and as Dynamic in other reference updates.
+SERVICE_REFERENCE_EVALUATIONS = {"Static", "Dynamic"}
 
 
 class GuardRejection(Exception):
@@ -603,14 +606,17 @@ def _validate_service_change(
                 raise GuardRejection(
                     f"{role} task-definition reference includes ambiguous {key}"
                 )
+        evaluation = detail.get("Evaluation")
         if (
-            detail.get("Evaluation") != "Dynamic"
+            evaluation not in SERVICE_REFERENCE_EVALUATIONS
             or detail.get("ChangeSource") != "ResourceReference"
             or detail.get("CausingEntity") != task_logical_id
         ):
             raise GuardRejection(
-                f"{role} change is not a dynamic task-definition reference "
-                f"caused by {task_logical_id}"
+                f"{role} change is not a task-definition reference caused by "
+                f"{task_logical_id} (Evaluation={evaluation!r}, "
+                f"ChangeSource={detail.get('ChangeSource')!r}, "
+                f"CausingEntity={detail.get('CausingEntity')!r})"
             )
 
 
