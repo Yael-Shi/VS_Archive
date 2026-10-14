@@ -80,6 +80,8 @@ class PageGeometryAudit:
     polygons_outside_page_bounds: int
     negative_or_outside_coordinates: int
     bounds_validation_available: bool
+    polygons_normalized_into_bounds: int = 0
+    polygons_rejected_coordinate_excursion: int = 0
     sample_line: LineSample | None = None
 
     @property
@@ -108,8 +110,16 @@ class DocumentGeometryAudit:
         if self.line_geometry_capability != "VERIFIED":
             return False
         return all(
-            page.polygons_outside_page_bounds == 0
-            and page.negative_or_outside_coordinates == 0
+            unresolved_out_of_bounds_count(
+                raw=page.polygons_outside_page_bounds,
+                normalized=page.polygons_normalized_into_bounds,
+            )
+            == 0
+            and unresolved_out_of_bounds_count(
+                raw=page.negative_or_outside_coordinates,
+                normalized=page.polygons_normalized_into_bounds,
+            )
+            == 0
             for page in self.pages
         )
 
@@ -306,6 +316,227 @@ def _overlay_polygon_coords_in_bounds(
     return coords_in_bounds, negative_or_outside, reported_outside
 
 
+# Inclusive per-coordinate limit for parser v2. A point at exactly this distance
+# outside a declared edge may be clamped onto that edge. Larger distances are
+# left unchanged and stay invalid.
+MAX_POLYGON_COORDINATE_EXCURSION_PX = 5
+
+
+class PolygonNormalizationRejection:
+    MISSING_DIMENSIONS = "missing_dimensions"
+    EXCURSION = "excursion"
+    DEGENERATE_AFTER_CLAMP = "degenerate_after_clamp"
+    REMAINS_INVALID = "remains_invalid"
+
+
+@dataclass(frozen=True)
+class PolygonNormalization:
+    """Derived polygon for one structurally parsed Coords element.
+
+    ``points`` are the coordinates to store. Successful normalization replaces
+    out-of-bounds points with clamped points. Rejections keep the original
+    points and leave ``accepted`` false.
+    """
+
+    points: tuple[tuple[float, float], ...]
+    accepted: bool
+    normalized: bool
+    clamped_point_count: int
+    max_excursion_px: float
+    raw_negative_or_outside: bool
+    raw_outside_declared_bounds: bool
+    rejection: str | None = None
+
+
+def _declared_page_dimensions(
+    width: int | None,
+    height: int | None,
+) -> tuple[int, int] | None:
+    if isinstance(width, bool) or isinstance(height, bool):
+        return None
+    if not isinstance(width, int) or not isinstance(height, int):
+        return None
+    if width < 1 or height < 1:
+        return None
+    return width, height
+
+
+def _coordinate_excursion(value: float, *, upper: float) -> float:
+    if value < 0:
+        return -value
+    if value > upper:
+        return value - upper
+    return 0.0
+
+
+def _distinct_polygon_points(points: Sequence[tuple[float, float]]) -> int:
+    return len({(round(x, 6), round(y, 6)) for x, y in points})
+
+
+def _micro_coordinate(value: float) -> int:
+    """Integer form of the same 6-decimal identity used for distinct points."""
+    text = f"{value:.6f}"
+    sign = -1 if text.startswith("-") else 1
+    whole, frac = text.lstrip("-").split(".", 1)
+    return sign * (int(whole) * 1_000_000 + int(frac))
+
+
+def _clamped_polygon_is_degenerate(points: Sequence[tuple[float, float]]) -> bool:
+    """True when clamped points are not a polygon under the existing rules.
+
+    Fewer than three distinct points matches ``_parse_polygon_points``. Three
+    or more distinct points with zero area are collinear and stay invalid.
+    The area test uses the same 6-decimal coordinate identity, so a thin
+    triangle with nonzero area remains valid.
+    """
+    rounded = [(round(x, 6), round(y, 6)) for x, y in points]
+    if _distinct_polygon_points(points) < 3:
+        return True
+    micros = [(_micro_coordinate(x), _micro_coordinate(y)) for x, y in rounded]
+    area2 = 0
+    count = len(micros)
+    for index, (x_pos, y_pos) in enumerate(micros):
+        next_x, next_y = micros[(index + 1) % count]
+        area2 += x_pos * next_y - next_x * y_pos
+    return area2 == 0
+
+
+def unresolved_out_of_bounds_count(*, raw: int, normalized: int) -> int:
+    """Out-of-bounds polygons that v2 did not clamp into the page.
+
+    A count that cannot be explained by the raw total fails closed by staying
+    unresolved.
+    """
+    if normalized < 0 or normalized > raw:
+        return raw + 1
+    return raw - normalized
+
+
+def normalize_polygon_points_for_snapshot(
+    points: Sequence[tuple[float, float]],
+    *,
+    width: int | None,
+    height: int | None,
+    apply_minor_clamp: bool,
+) -> PolygonNormalization:
+    """Return stored polygon points for one structurally valid polygon.
+
+    ``apply_minor_clamp`` is true only for parser v2 (and the geometry audit,
+    which reports the same eligibility). v1 returns the parsed points unchanged.
+    Clamping requires positive declared image dimensions. Each x/y excursion
+    must be at most ``MAX_POLYGON_COORDINATE_EXCURSION_PX`` pixels, inclusive.
+    The returned points are clamped onto ``[0, width]`` x ``[0, height]``.
+    """
+    original = tuple((float(x), float(y)) for x, y in points)
+    in_bounds, raw_negative, raw_outside = _overlay_polygon_coords_in_bounds(
+        original,
+        width=width,
+        height=height,
+    )
+    unchanged = PolygonNormalization(
+        points=original,
+        accepted=in_bounds,
+        normalized=False,
+        clamped_point_count=0,
+        max_excursion_px=0.0,
+        raw_negative_or_outside=raw_negative,
+        raw_outside_declared_bounds=raw_outside,
+        rejection=None if in_bounds else PolygonNormalizationRejection.EXCURSION,
+    )
+    if in_bounds or not apply_minor_clamp:
+        if in_bounds:
+            return PolygonNormalization(
+                points=original,
+                accepted=True,
+                normalized=False,
+                clamped_point_count=0,
+                max_excursion_px=0.0,
+                raw_negative_or_outside=False,
+                raw_outside_declared_bounds=False,
+                rejection=None,
+            )
+        return unchanged
+
+    dimensions = _declared_page_dimensions(width, height)
+    if dimensions is None:
+        return PolygonNormalization(
+            points=original,
+            accepted=False,
+            normalized=False,
+            clamped_point_count=0,
+            max_excursion_px=0.0,
+            raw_negative_or_outside=raw_negative,
+            raw_outside_declared_bounds=raw_outside,
+            rejection=PolygonNormalizationRejection.MISSING_DIMENSIONS,
+        )
+
+    page_width, page_height = dimensions
+    max_excursion = 0.0
+    clamped_point_count = 0
+    clamped: list[tuple[float, float]] = []
+    for x, y in original:
+        x_excursion = _coordinate_excursion(x, upper=float(page_width))
+        y_excursion = _coordinate_excursion(y, upper=float(page_height))
+        max_excursion = max(max_excursion, x_excursion, y_excursion)
+        if max_excursion > MAX_POLYGON_COORDINATE_EXCURSION_PX:
+            return PolygonNormalization(
+                points=original,
+                accepted=False,
+                normalized=False,
+                clamped_point_count=0,
+                max_excursion_px=max_excursion,
+                raw_negative_or_outside=raw_negative,
+                raw_outside_declared_bounds=raw_outside,
+                rejection=PolygonNormalizationRejection.EXCURSION,
+            )
+        next_x = min(max(x, 0.0), float(page_width))
+        next_y = min(max(y, 0.0), float(page_height))
+        if next_x != x or next_y != y:
+            clamped_point_count += 1
+        clamped.append((next_x, next_y))
+
+    clamped_points = tuple(clamped)
+    if _clamped_polygon_is_degenerate(clamped_points):
+        return PolygonNormalization(
+            points=original,
+            accepted=False,
+            normalized=False,
+            clamped_point_count=0,
+            max_excursion_px=max_excursion,
+            raw_negative_or_outside=raw_negative,
+            raw_outside_declared_bounds=raw_outside,
+            rejection=PolygonNormalizationRejection.DEGENERATE_AFTER_CLAMP,
+        )
+
+    clamped_in_bounds, _, _ = _overlay_polygon_coords_in_bounds(
+        clamped_points,
+        width=page_width,
+        height=page_height,
+    )
+    if not clamped_in_bounds:
+        return PolygonNormalization(
+            points=original,
+            accepted=False,
+            normalized=False,
+            clamped_point_count=0,
+            max_excursion_px=max_excursion,
+            raw_negative_or_outside=raw_negative,
+            raw_outside_declared_bounds=raw_outside,
+            rejection=PolygonNormalizationRejection.REMAINS_INVALID,
+        )
+
+    return PolygonNormalization(
+        points=clamped_points,
+        accepted=True,
+        normalized=clamped_point_count > 0,
+        clamped_point_count=clamped_point_count,
+        max_excursion_px=max_excursion,
+        raw_negative_or_outside=raw_negative,
+        raw_outside_declared_bounds=raw_outside,
+        rejection=None,
+    )
+
+
 def _collect_text_lines(page_el: ET.Element, ns: dict[str, str]) -> list[ET.Element]:
     lines = page_el.findall(".//pc:TextLine", ns)
     if lines:
@@ -427,6 +658,8 @@ def analyze_page_xml_geometry(
     degenerate_polygons = 0
     polygons_outside_page_bounds = 0
     negative_or_outside_coordinates = 0
+    polygons_normalized_into_bounds = 0
+    polygons_rejected_coordinate_excursion = 0
 
     sample_line: LineSample | None = None
 
@@ -492,16 +725,21 @@ def analyze_page_xml_geometry(
 
         coords_in_bounds = True
         if coords_structurally_valid and parsed_coords.points:
-            in_bounds, neg, outside = _overlay_polygon_coords_in_bounds(
+            normalization = normalize_polygon_points_for_snapshot(
                 parsed_coords.points,
                 width=image_width,
                 height=image_height,
+                apply_minor_clamp=True,
             )
-            coords_in_bounds = in_bounds
-            if neg:
+            coords_in_bounds = normalization.accepted
+            if normalization.raw_negative_or_outside:
                 negative_or_outside_coordinates += 1
-            if outside:
+            if normalization.raw_outside_declared_bounds:
                 polygons_outside_page_bounds += 1
+            if normalization.normalized:
+                polygons_normalized_into_bounds += 1
+            elif normalization.rejection == PolygonNormalizationRejection.EXCURSION:
+                polygons_rejected_coordinate_excursion += 1
 
         coords_valid = coords_structurally_valid and coords_in_bounds
 
@@ -561,6 +799,10 @@ def analyze_page_xml_geometry(
         polygons_outside_page_bounds=polygons_outside_page_bounds,
         negative_or_outside_coordinates=negative_or_outside_coordinates,
         bounds_validation_available=bounds_validation_available,
+        polygons_normalized_into_bounds=polygons_normalized_into_bounds,
+        polygons_rejected_coordinate_excursion=(
+            polygons_rejected_coordinate_excursion
+        ),
         sample_line=sample_line,
     )
 
@@ -570,12 +812,20 @@ def _page_line_geometry_capability(page: PageGeometryAudit) -> LineGeometryCapab
         return "INDETERMINATE"
     if page.lines_with_non_empty_text == 0:
         return "INDETERMINATE"
+    unresolved_outside = unresolved_out_of_bounds_count(
+        raw=page.polygons_outside_page_bounds,
+        normalized=page.polygons_normalized_into_bounds,
+    )
+    unresolved_negative = unresolved_out_of_bounds_count(
+        raw=page.negative_or_outside_coordinates,
+        normalized=page.polygons_normalized_into_bounds,
+    )
     if (
         page.bounds_validation_available
         and page.lines_with_text_and_valid_coords == page.lines_with_non_empty_text
         and page.lines_with_non_empty_text > 0
-        and page.polygons_outside_page_bounds == 0
-        and page.negative_or_outside_coordinates == 0
+        and unresolved_outside == 0
+        and unresolved_negative == 0
     ):
         return "VERIFIED"
     if (
@@ -882,6 +1132,10 @@ def _page_audit_to_dict(page: PageGeometryAudit) -> dict[str, Any]:
         "degenerate_polygons": page.degenerate_polygons,
         "polygons_outside_page_bounds": page.polygons_outside_page_bounds,
         "negative_or_outside_coordinates": page.negative_or_outside_coordinates,
+        "polygons_normalized_into_bounds": page.polygons_normalized_into_bounds,
+        "polygons_rejected_coordinate_excursion": (
+            page.polygons_rejected_coordinate_excursion
+        ),
         "bounds_validation_available": page.bounds_validation_available,
         "page_capability": page.page_capability,
     }

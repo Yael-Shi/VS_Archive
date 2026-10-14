@@ -270,8 +270,10 @@ class TranskribusSnapshotParserGeometryTests(SimpleTestCase):
         parsed = parse_page_xml_for_snapshot(
             xml, page_index=1, page_nr=1, transcript_ts_id="1"
         )
-        self.assertFalse(parsed.lines[0].coords_valid)
+        self.assertTrue(parsed.lines[0].coords_valid)
+        self.assertEqual(parsed.lines[0].polygon_points[0], (0.0, 10.0))
         self.assertFalse(parsed.lines[1].coords_valid)
+        self.assertEqual(parsed.lines[1].polygon_points[1][0], 200.0)
         self.assertEqual(parsed.page_geometry_capability, "PARTIAL")
 
     def test_negative_coords_invalid_without_page_dimensions(self):
@@ -547,7 +549,7 @@ class TranskribusSnapshotModelTests(TestCase):
             doc,
             raw_xml_fingerprint=raw_fp,
             canonical_text="X",
-            parser_version="page_xml_snapshot_v2",
+            parser_version="page_xml_snapshot_future",
         )
         self.assertEqual(
             TranskribusTranscriptSnapshot.objects.filter(document=doc).count(), 2

@@ -185,8 +185,10 @@ class TranskribusPageXmlGeometryAnalyzerTests(SimpleTestCase):
         audit = analyze_page_xml_geometry(_page_xml(body), page_index=1, page_nr=1)
         self.assertGreater(audit.negative_or_outside_coordinates, 0)
         self.assertEqual(audit.polygons_outside_page_bounds, 2)
+        self.assertEqual(audit.polygons_normalized_into_bounds, 1)
+        self.assertEqual(audit.polygons_rejected_coordinate_excursion, 1)
         self.assertEqual(audit.page_capability, "PARTIAL")
-        self.assertEqual(audit.lines_with_text_and_valid_coords, 0)
+        self.assertEqual(audit.lines_with_text_and_valid_coords, 1)
 
     def test_out_of_page_coordinates_document_not_overlay_ready(self):
         body = """
