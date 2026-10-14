@@ -142,7 +142,12 @@ def _task_change(logical_id: str) -> dict:
     }
 
 
-def _service_change(logical_id: str, task_id: str) -> dict:
+def _service_change(
+    logical_id: str,
+    task_id: str,
+    *,
+    evaluation: str = "Dynamic",
+) -> dict:
     return {
         "Type": "Resource",
         "ResourceChange": {
@@ -156,12 +161,27 @@ def _service_change(logical_id: str, task_id: str) -> dict:
                 _detail(
                     "TaskDefinition",
                     recreation="Never",
-                    evaluation="Dynamic",
+                    evaluation=evaluation,
                     source="ResourceReference",
                     causing=task_id,
                 )
             ],
         },
+    }
+
+
+def _observed_static_service_change_set() -> dict:
+    """The ECS service shape from the first production guard rejection."""
+    return {
+        "Status": "CREATE_COMPLETE",
+        "ExecutionStatus": "AVAILABLE",
+        "StatusReason": "The change set is ready.",
+        "Changes": [
+            _task_change(WEB_TASK_ID),
+            _task_change(WORKER_TASK_ID),
+            _service_change(WEB_SERVICE_ID, WEB_TASK_ID, evaluation="Static"),
+            _service_change(WORKER_SERVICE_ID, WORKER_TASK_ID, evaluation="Static"),
+        ],
     }
 
 
@@ -333,6 +353,79 @@ class DeployChangeGuardTests(unittest.TestCase):
         with self.assertRaises(guard.GuardRejection) as raised:
             _validate(_deploy_change_set(), _template(OLD_TAG), proposed)
         self.assertIn("worker-task", raised.exception.reason)
+
+    def test_observed_static_service_reference_is_allowed(self) -> None:
+        change_set = _observed_static_service_change_set()
+        for logical_id, task_id in (
+            (WEB_SERVICE_ID, WEB_TASK_ID),
+            (WORKER_SERVICE_ID, WORKER_TASK_ID),
+        ):
+            detail = next(
+                change["ResourceChange"]["Details"][0]
+                for change in change_set["Changes"]
+                if change["ResourceChange"]["LogicalResourceId"] == logical_id
+            )
+            self.assertEqual(detail["Evaluation"], "Static")
+            self.assertEqual(detail["ChangeSource"], "ResourceReference")
+            self.assertEqual(detail["CausingEntity"], task_id)
+            self.assertEqual(detail["Target"]["Name"], "TaskDefinition")
+            self.assertEqual(detail["Target"]["RequiresRecreation"], "Never")
+            resource_change = next(
+                change["ResourceChange"]
+                for change in change_set["Changes"]
+                if change["ResourceChange"]["LogicalResourceId"] == logical_id
+            )
+            self.assertEqual(resource_change["Replacement"], "False")
+        self.assertEqual(
+            _validate(change_set, _template(OLD_TAG), _template(NEW_TAG)),
+            "deploy",
+        )
+
+    def test_dynamic_service_reference_remains_allowed(self) -> None:
+        self.assertEqual(
+            _validate(_deploy_change_set(), _template(OLD_TAG), _template(NEW_TAG)),
+            "deploy",
+        )
+
+    def test_unrelated_static_service_property_is_rejected(self) -> None:
+        change_set = _observed_static_service_change_set()
+        change_set["Changes"][2]["ResourceChange"]["Details"].append(
+            _detail(
+                "DesiredCount",
+                recreation="Never",
+                evaluation="Static",
+                source="DirectModification",
+            )
+        )
+        with self.assertRaises(guard.GuardRejection) as raised:
+            _validate(change_set, _template(OLD_TAG), _template(NEW_TAG))
+        self.assertIn("DesiredCount", raised.exception.reason)
+
+    def test_static_service_reference_with_wrong_cause_is_rejected(self) -> None:
+        change_set = _observed_static_service_change_set()
+        change_set["Changes"][2]["ResourceChange"]["Details"][0]["CausingEntity"] = WORKER_TASK_ID
+        with self.assertRaises(guard.GuardRejection) as raised:
+            _validate(change_set, _template(OLD_TAG), _template(NEW_TAG))
+        self.assertIn(WEB_TASK_ID, raised.exception.reason)
+        self.assertIn(WORKER_TASK_ID, raised.exception.reason)
+
+    def test_static_service_reference_with_wrong_source_is_rejected(self) -> None:
+        change_set = _observed_static_service_change_set()
+        change_set["Changes"][3]["ResourceChange"]["Details"][0]["ChangeSource"] = "DirectModification"
+        with self.assertRaises(guard.GuardRejection) as raised:
+            _validate(change_set, _template(OLD_TAG), _template(NEW_TAG))
+        self.assertIn("DirectModification", raised.exception.reason)
+
+    def test_static_service_reference_with_template_drift_is_rejected(self) -> None:
+        proposed = _template(NEW_TAG)
+        proposed["Resources"][WEB_SERVICE_ID]["Properties"]["DesiredCount"] = 2
+        with self.assertRaises(guard.GuardRejection) as raised:
+            _validate(
+                _observed_static_service_change_set(),
+                _template(OLD_TAG),
+                proposed,
+            )
+        self.assertIn("DesiredCount", raised.exception.reason)
 
     def test_service_replacement_is_rejected(self) -> None:
         change_set = _deploy_change_set()
