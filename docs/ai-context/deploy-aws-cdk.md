@@ -111,6 +111,14 @@ poetry run cdk diff vs-archive-dev-app-v2 -c image_tag=<CURRENT_OR_INTENDED_ECR_
 
 ## Deploy
 
+The supported production path is:
+
+```bash
+bash scripts/deploy-app-v2.sh
+```
+
+That script is non-interactive when its preflight checks and the CloudFormation change-set guard pass. `--confirm` requires typing `DEPLOY`. `--yes` remains accepted and cannot be combined with `--confirm`. The guard allows only the web and worker ECS image update described in the decision log entry **Non-interactive app deployment is image-only**. A direct `cdk deploy` does not apply that guard.
+
 ```bash
 cd infra
 poetry run cdk deploy vs-archive-dev-app-v2 -c image_tag=<CURRENT_OR_INTENDED_ECR_TAG>

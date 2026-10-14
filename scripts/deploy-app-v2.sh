@@ -4,6 +4,7 @@
 #
 # Purpose:
 #   Deploy the current remote-aligned main branch to the dev app-v2 ECS stack.
+#   The CDK stack named dev is the live production environment.
 #
 # Safety checks performed:
 #   - verifies this script is RUN, not sourced
@@ -22,7 +23,14 @@
 #       web_image_tag
 #       worker_image_tag
 #   - aborts if the CDK diff unexpectedly contains the default :dev image
-#   - requires explicit DEPLOY confirmation unless --yes is supplied
+#   - creates CloudFormation change sets without executing them
+#   - allows a normal deployment only when the app change set is exactly
+#     the web and worker task-definition image updates and the ECS service
+#     task-definition references those updates cause
+#   - requires the network and data stacks to be change-set no-ops
+#   - proceeds without a prompt when those checks pass
+#   - with --confirm, requires explicit DEPLOY confirmation
+#   - executes the reviewed app change set
 #   - waits for ECS services to stabilize after deployment
 #   - verifies web and worker task definitions use the expected image
 #   - verifies desired/running/pending/rollout state
@@ -32,7 +40,11 @@
 #   cd ~/vs-archive/vs-archive
 #   bash scripts/deploy-app-v2.sh
 #
-# Non-interactive confirmation:
+# Interactive confirmation:
+#
+#   bash scripts/deploy-app-v2.sh --confirm
+#
+# Backward-compatible non-interactive confirmation:
 #
 #   bash scripts/deploy-app-v2.sh --yes
 #
@@ -75,82 +87,33 @@ REPO_ROOT="$(
   pwd
 )"
 
+# shellcheck source=deploy_app_v2_lib.sh
+source "$SCRIPT_DIR/deploy_app_v2_lib.sh"
+DEPLOY_CHANGE_GUARD_PY="$SCRIPT_DIR/deploy_change_guard.py"
+
 AWS_PROFILE="${AWS_PROFILE:-default}"
 AWS_REGION="${AWS_REGION:-eu-central-1}"
 AWS_ACCOUNT_ID="${AWS_ACCOUNT_ID:-185990503355}"
 ECR_REPO="${ECR_REPO:-vs-archive-web}"
 CDK_STACK="${CDK_STACK:-vs-archive-dev-app-v2}"
 
-YES=0
-SKIP_BUILD=0
-EXPLICIT_TAG=""
-
 usage() {
-  cat <<'EOF'
-Usage:
-  bash scripts/deploy-app-v2.sh [options]
-
-Options:
-  --yes
-      Deploy without the final interactive confirmation.
-
-  --skip-build
-      Reuse an existing ECR image instead of building and pushing a new one.
-      Requires --tag.
-
-  --tag TAG
-      Use the specified image tag.
-      Required with --skip-build.
-
-  -h, --help
-      Show this help.
-EOF
+  deploy_app_usage
 }
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --yes)
-      YES=1
-      shift
-      ;;
-    --skip-build)
-      SKIP_BUILD=1
-      shift
-      ;;
-    --tag)
-      [[ $# -ge 2 ]] || {
-        echo "ERROR: --tag requires a value"
-        exit 2
-      }
-      EXPLICIT_TAG="$2"
-      shift 2
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "ERROR: Unknown option: $1"
-      usage
-      exit 2
-      ;;
-  esac
-done
-
-if [[ "$SKIP_BUILD" -eq 1 && -z "$EXPLICIT_TAG" ]]; then
-  echo "ERROR: --skip-build requires --tag TAG"
-  exit 2
-fi
-
-if [[ "$SKIP_BUILD" -eq 0 && -n "$EXPLICIT_TAG" ]]; then
-  echo "ERROR: --tag may only be used together with --skip-build"
-  exit 2
-fi
+parse_deploy_args "$@"
 
 TIMESTAMP="$(date -u +%Y%m%d%H%M%S)"
 LOG="/tmp/vs_archive_deploy_${TIMESTAMP}.log"
 TAG_FILE="/tmp/vs_archive_deploy_${TIMESTAMP}_image_tag.sh"
 DIFF_FILE="/tmp/vs_archive_deploy_${TIMESTAMP}_cdk_diff.txt"
+SYNTH_DIR="/tmp/vs_archive_deploy_${TIMESTAMP}_cdk.out"
+APP_CHANGE_SET_FILE="/tmp/vs_archive_deploy_${TIMESTAMP}_app_change_set.json"
+CURRENT_TEMPLATE_FILE="/tmp/vs_archive_deploy_${TIMESTAMP}_current_template.json"
+PROPOSED_TEMPLATE_FILE="/tmp/vs_archive_deploy_${TIMESTAMP}_proposed_template.json"
+CHANGE_SET_NAME="vsarchiveguard${TIMESTAMP}"
+CHANGE_SET_STACKS=()
+KEEP_PREPARED_CHANGE_SETS=0
 
 exec > >(tee -a "$LOG") 2>&1
 
@@ -168,13 +131,15 @@ section() {
   echo "================================================================"
 }
 
+trap discard_prepared_change_sets EXIT
+
 section "PREFLIGHT"
 
 [[ -d "$REPO_ROOT/.git" ]] || fail "Repository not found at: $REPO_ROOT"
 
 cd "$REPO_ROOT"
 
-for command_name in git aws docker node npm cdk poetry; do
+for command_name in git aws docker node npm cdk poetry python3; do
   command -v "$command_name" >/dev/null || fail "$command_name not found"
 done
 
@@ -184,9 +149,19 @@ echo "AWS_REGION=$AWS_REGION"
 echo "AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID"
 echo "ECR_REPO=$ECR_REPO"
 echo "CDK_STACK=$CDK_STACK"
+echo "confirmation=$(deployment_confirmation_mode)"
 echo "node=$(node --version)"
 echo "npm=$(npm --version)"
 echo "cdk=$(cdk --version)"
+
+if ! RELATED_STACK_OUTPUT="$(related_stack_names "$CDK_STACK")"; then
+  fail "Could not identify the network and data stacks for $CDK_STACK."
+fi
+mapfile -t RELATED_STACKS <<< "$RELATED_STACK_OUTPUT"
+NETWORK_STACK="${RELATED_STACKS[0]}"
+DATA_STACK="${RELATED_STACKS[1]}"
+echo "NETWORK_STACK=$NETWORK_STACK"
+echo "DATA_STACK=$DATA_STACK"
 
 section "GIT STATE"
 
@@ -309,26 +284,36 @@ aws ecr describe-images \
   --query 'imageDetails[0].{tags:imageTags,pushedAt:imagePushedAt,digest:imageDigest}' \
   --output table
 
-section "CDK DIFF"
+section "CDK SYNTH"
 
 cd "$REPO_ROOT/infra"
 
-poetry run cdk diff \
-  "$CDK_STACK" \
+poetry run cdk synth \
+  --quiet \
+  --output "$SYNTH_DIR" \
   --profile "$AWS_PROFILE" \
   -c image_tag="$IMAGE_TAG" \
   -c web_image_tag="$IMAGE_TAG" \
-  -c worker_image_tag="$IMAGE_TAG" \
+  -c worker_image_tag="$IMAGE_TAG"
+
+section "CDK DIFF"
+
+poetry run cdk diff \
+  --app "$SYNTH_DIR" \
+  --profile "$AWS_PROFILE" \
+  "$CDK_STACK" \
+  "$NETWORK_STACK" \
+  "$DATA_STACK" \
   2>&1 | tee "$DIFF_FILE"
 
 echo
 echo "CDK diff saved to: $DIFF_FILE"
 
-if grep -q "/${ECR_REPO}:dev" "$DIFF_FILE"; then
+if grep -F -q "/${ECR_REPO}:dev" "$DIFF_FILE"; then
   fail "CDK diff contains ':dev'. Image-tag context was not applied correctly."
 fi
 
-if ! grep -q "/${ECR_REPO}:${IMAGE_TAG}" "$DIFF_FILE"; then
+if ! grep -F -q "/${ECR_REPO}:${IMAGE_TAG}" "$DIFF_FILE"; then
   echo
   echo "Expected tag is not present in the diff."
   echo "Checking whether the environment already runs this exact tag."
@@ -368,37 +353,41 @@ if ! grep -q "/${ECR_REPO}:${IMAGE_TAG}" "$DIFF_FILE"; then
     fail "Expected image tag is neither in CDK diff nor current web runtime."
 fi
 
+prepare_and_validate_deployment_plan
+
 section "DEPLOY CONFIRMATION"
 
 echo "Ready to deploy:"
-echo "  stack:   $CDK_STACK"
-echo "  image:   $IMAGE_URI"
-echo "  account: $AWS_ACCOUNT_ID"
-echo "  region:  $AWS_REGION"
-echo "  profile: $AWS_PROFILE"
+echo "  stack:     $CDK_STACK"
+echo "  image:     $IMAGE_URI"
+echo "  account:   $AWS_ACCOUNT_ID"
+echo "  region:    $AWS_REGION"
+echo "  profile:   $AWS_PROFILE"
+echo "  changeset: $CHANGE_SET_NAME"
+echo "  decision:  $DECISION"
 echo
 
-if [[ "$YES" -ne 1 ]]; then
-  read -r -p "Type DEPLOY to continue: " CONFIRM
-
-  if [[ "$CONFIRM" != "DEPLOY" ]]; then
-    echo "Deployment cancelled."
-    echo "Nothing was deployed by this script."
-    echo "Image remains available in ECR:"
-    echo "  $IMAGE_URI"
-    exit 0
-  fi
-fi
+case "$(deployment_confirmation_mode)" in
+  interactive)
+    if ! confirm_deployment; then
+      cancel_deployment
+    fi
+    ;;
+  yes)
+    echo "Confirmation flag --yes supplied; continuing."
+    ;;
+  automatic)
+    echo "Preflight and infrastructure checks passed; continuing without an interactive prompt."
+    echo "Re-run with --confirm to require typing DEPLOY."
+    ;;
+  *)
+    fail "Unrecognized confirmation mode."
+    ;;
+esac
 
 section "CDK DEPLOY"
 
-poetry run cdk deploy \
-  "$CDK_STACK" \
-  --profile "$AWS_PROFILE" \
-  --require-approval never \
-  -c image_tag="$IMAGE_TAG" \
-  -c web_image_tag="$IMAGE_TAG" \
-  -c worker_image_tag="$IMAGE_TAG"
+apply_reviewed_change_set
 
 section "POST-DEPLOY ECS VERIFICATION"
 
@@ -529,4 +518,5 @@ echo "WEB_IMAGE=$WEB_IMAGE"
 echo "WORKER_IMAGE=$WORKER_IMAGE"
 echo "Log: $LOG"
 echo "CDK diff: $DIFF_FILE"
+echo "App change set: $APP_CHANGE_SET_FILE"
 echo "Tag vars: $TAG_FILE"
