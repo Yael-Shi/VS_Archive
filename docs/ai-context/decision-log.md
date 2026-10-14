@@ -1,5 +1,17 @@
 # VS-Archive Decision Log
 
+## Non-interactive app deployment is image-only
+
+**Status:** Implemented locally. Not deployed. The deployment script was not run, and no AWS or CDK change was executed for this change.
+
+**Decision:** `scripts/deploy-app-v2.sh` proceeds without typing `DEPLOY` when the existing preflight checks pass and the prepared CloudFormation change set is safe. `--confirm` restores the interactive `DEPLOY` prompt. Cancelling that prompt exits nonzero. `--yes` remains a non-interactive alias and cannot be combined with `--confirm`.
+
+A normal deployment is allowed only when the app-stack change set is exactly the web and worker ECS task-definition image replacements and the ECS service task-definition references those replacements cause. The script creates that change set with `cdk deploy --method prepare-change-set`, reads `describe-change-set`, and compares the current and proposed `get-template --template-stage Original` bodies. The executed command is `cdk deploy --method execute-change-set` for that same change set. A human-readable `cdk diff` is saved and still rejects an unexpected `:dev` image, but it is not the approval source. The network and data stacks must each be a CloudFormation no-op. A recognized no-op app change set skips execution and still runs the ECS image and health verification.
+
+Task-definition `Replacement=True` is the expected CloudFormation result of a container-image change. Service replacement, resource additions and deletions, IAM or policy changes, and any other property change are refused. Missing, paginated, or unrecognized change-set details are refused.
+
+**Known limitation:** CloudFormation does not provide separate old and new values for every nested container field. The image proof is the structured template comparison for the change set being executed, not a text diff. If a future CDK or CloudFormation response adds a detail field this guard does not already recognize, the deployment is refused until that field is reviewed.
+
 ## Hebrew MIXED joins the French MIXED Gemini 3.6 fallback
 
 **Status:** Implemented locally. Not deployed. No live OCR, database writes, or S3 changes were made for document 438.
