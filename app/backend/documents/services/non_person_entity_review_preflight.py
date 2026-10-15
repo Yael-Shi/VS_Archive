@@ -172,6 +172,34 @@ FIFTH_CONTRACT_ALIAS_COUNT = 0
 FIFTH_CONTRACT_SPLIT_ROUTE_COUNTS: Mapping[str, int] = MappingProxyType({})
 FIFTH_DECISION_SOURCE = "vs_archive_non_person_fifth_contract_2026_10_14"
 FIFTH_APPLY_CONFIRM_TOKEN = "APPLY_NON_PERSON_FIFTH_CONTRACT_2026_10_14"
+SIXTH_CONTRACT_SHA256 = (
+    "d9136600842784f5fe5b09a1d35ce252150c0028cbc21ddee602139652f3231e"
+)
+SIXTH_CONTRACT_FINAL_SHEET_NAME = "FINAL_RECON_2026-10-15"
+SIXTH_CONTRACT_ROW_COUNT = 25
+SIXTH_CONTRACT_DECISION_COUNTS = MappingProxyType(
+    {
+        ReviewedNonPersonEntityDecision.Decision.APPROVE: 16,
+        ReviewedNonPersonEntityDecision.Decision.MERGE: 2,
+        ReviewedNonPersonEntityDecision.Decision.SKIP: 0,
+        ReviewedNonPersonEntityDecision.Decision.SPLIT: 7,
+        ReviewedNonPersonEntityDecision.Decision.NEEDS_RESEARCH: 0,
+    }
+)
+SIXTH_CONTRACT_ALIAS_COUNT = 0
+SIXTH_CONTRACT_SPLIT_ROUTE_COUNTS = MappingProxyType(
+    {
+        "EC0033": 48,
+        "EC0036": 182,
+        "EC0050": 8,
+        "EC0062": 16,
+        "EC0084": 28,
+        "EC0432": 18,
+        "EC0600": 3,
+    }
+)
+SIXTH_DECISION_SOURCE = "vs_archive_non_person_sixth_contract_2026_10_15"
+SIXTH_APPLY_CONFIRM_TOKEN = "APPLY_NON_PERSON_SIXTH_CONTRACT_2026_10_15"
 SECOND_CARRIED_CANDIDATE_IDS = frozenset(
     {
         "EC0006",
@@ -609,6 +637,48 @@ FIFTH_CARRIED_CANDIDATE_IDS = frozenset(
 )
 
 
+SIXTH_CARRIED_TARGETS: tuple[CarriedTargetOwnership, ...] = (
+    _third_carried_target(
+        "EC0004",
+        decision_source=V6_DECISION_SOURCE,
+        workbook_sha256=AUTHORITATIVE_WORKBOOK_SHA256,
+    ),
+    _third_carried_target(
+        "EC0006",
+        decision_source=V6_DECISION_SOURCE,
+        workbook_sha256=AUTHORITATIVE_WORKBOOK_SHA256,
+    ),
+    _third_carried_target(
+        "EC0059",
+        decision_source=SECOND_DECISION_SOURCE,
+        workbook_sha256=SECOND_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0063",
+        decision_source=SECOND_DECISION_SOURCE,
+        workbook_sha256=SECOND_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0219",
+        decision_source=V6_DECISION_SOURCE,
+        workbook_sha256=AUTHORITATIVE_WORKBOOK_SHA256,
+    ),
+    _third_carried_target(
+        "EC0301",
+        decision_source=SECOND_DECISION_SOURCE,
+        workbook_sha256=SECOND_CONTRACT_SHA256,
+    ),
+    _third_carried_target(
+        "EC0405",
+        decision_source=V6_DECISION_SOURCE,
+        workbook_sha256=AUTHORITATIVE_WORKBOOK_SHA256,
+    ),
+)
+SIXTH_CARRIED_CANDIDATE_IDS = frozenset(
+    target.candidate_id for target in SIXTH_CARRIED_TARGETS
+)
+
+
 def fifth_contract_spec() -> ReviewContractSpec:
     """2026-10-14 contract for the representable remainder of the 53.
 
@@ -633,9 +703,38 @@ def fifth_contract_spec() -> ReviewContractSpec:
     )
 
 
+def sixth_contract_spec() -> ReviewContractSpec:
+    """2026-10-15 contract for ten of the last eleven pending candidates.
+
+    EC0026 and EC0499 stay out. EC0026's verified pins name the Egyptian
+    parliament and the parliamentary police, not the parliament building.
+    EC0499 still cannot pin one occurrence to two embassies. Item 108 has
+    two occurrences of procès du Caire. Ordinal 2 is the 1963 book title,
+    and a surface group must include every ordinal, so both stay unlinked.
+    Carried rows keep the contract that already applied them.
+    """
+
+    return ReviewContractSpec(
+        sha256=SIXTH_CONTRACT_SHA256,
+        final_sheet_name=SIXTH_CONTRACT_FINAL_SHEET_NAME,
+        row_count=SIXTH_CONTRACT_ROW_COUNT,
+        decision_counts=SIXTH_CONTRACT_DECISION_COUNTS,
+        alias_count=SIXTH_CONTRACT_ALIAS_COUNT,
+        split_route_counts=SIXTH_CONTRACT_SPLIT_ROUTE_COUNTS,
+        read_split_routes=True,
+        read_alias_review=False,
+        confirm_token=SIXTH_APPLY_CONFIRM_TOKEN,
+        decision_source=SIXTH_DECISION_SOURCE,
+        carried_candidate_ids=SIXTH_CARRIED_CANDIDATE_IDS,
+        carried_targets=SIXTH_CARRIED_TARGETS,
+    )
+
+
 def contract_spec_for_sha(workbook_sha256: str) -> ReviewContractSpec | None:
     """Return the spec for an exact SHA. Unknown hashes are not a spec."""
 
+    if workbook_sha256 == SIXTH_CONTRACT_SHA256:
+        return sixth_contract_spec()
     if workbook_sha256 == FIFTH_CONTRACT_SHA256:
         return fifth_contract_spec()
     if workbook_sha256 == FOURTH_CONTRACT_SHA256:
