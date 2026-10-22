@@ -1012,7 +1012,11 @@ def _item_title(item: ArchiveItem) -> str:
 
 def _reassign_target_options() -> list[ReassignTargetOption]:
     options: list[ReassignTargetOption] = []
-    for entity in NonPersonEntity.objects.order_by("canonical_name", "id"):
+    from documents.services.non_person_entity_correction import exclude_retired_entities
+
+    for entity in exclude_retired_entities(NonPersonEntity.objects).order_by(
+        "canonical_name", "id"
+    ):
         type_label = non_person_public_type_label(entity)
         name = non_person_public_name(entity)
         label = f"{name} — {type_label}" if type_label else name

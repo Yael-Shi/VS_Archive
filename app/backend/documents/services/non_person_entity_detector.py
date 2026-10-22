@@ -229,7 +229,9 @@ def _load_surface_index() -> dict[str, dict[int, tuple[DetectionReason, ...]]]:
     """
 
     grouped: dict[str, dict[int, list[DetectionReason]]] = {}
-    entities = NonPersonEntity.objects.prefetch_related(
+    from documents.services.non_person_entity_correction import exclude_retired_entities
+
+    entities = exclude_retired_entities(NonPersonEntity.objects).prefetch_related(
         Prefetch(
             "aliases",
             queryset=NonPersonEntityAlias.objects.order_by("id"),
