@@ -23,6 +23,7 @@ from django.db.models import (
 from django.db.models.functions import Coalesce, Lower, NullIf, Trim
 
 from documents.models import NonPersonEntity, NonPersonEntityAlias
+from documents.services.non_person_entity_correction import exclude_retired_entities
 from documents.services.non_person_entity_presentation import (
     non_person_public_name,
     non_person_public_page_url,
@@ -62,7 +63,9 @@ def registry_index_queryset(query: str) -> QuerySet[NonPersonEntity]:
     """
 
     cleaned = (query or "").strip()
-    queryset = NonPersonEntity.objects.annotate(public_sort_name=_public_sort_name())
+    queryset = exclude_retired_entities(
+        NonPersonEntity.objects.annotate(public_sort_name=_public_sort_name())
+    )
     if not cleaned:
         return queryset.order_by("public_sort_name", "pk")
     return (

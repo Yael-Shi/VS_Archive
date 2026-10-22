@@ -18,6 +18,7 @@ from documents.models import (
     NonPersonEntity,
     NonPersonEntityAlias,
 )
+from documents.services.non_person_entity_correction import exclude_retired_entities
 from documents.services.non_person_entity_occurrences import (
     AuthoritativeTextContext,
     authoritative_text_context_for_item,
@@ -146,7 +147,7 @@ def staff_entity_index_queryset(
     only when the value is a known choice.
     """
 
-    entities = NonPersonEntity.objects.annotate(
+    entities = exclude_retired_entities(NonPersonEntity.objects).annotate(
         public_sort_name=_public_sort_name(),
         alias_count=Count("aliases", distinct=True),
         stored_occurrence_count=Count("archive_item_occurrences", distinct=True),

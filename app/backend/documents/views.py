@@ -6024,6 +6024,13 @@ def archive_non_person_index_page(request):
 
 
 def archive_non_person_detail_page(request, entity_id: int):
+    from documents.services.non_person_entity_correction import (
+        redirect_target_for_retired_entity,
+    )
+
+    successor_id = redirect_target_for_retired_entity(entity_id)
+    if successor_id is not None:
+        return redirect("archive-non-person-detail", entity_id=successor_id)
     entity = get_object_or_404(NonPersonEntity, pk=entity_id)
     aliases = public_non_person_aliases(entity)
     item_ids = authorized_valid_archive_item_ids(request.user, entity.pk)
@@ -7513,6 +7520,13 @@ def archive_manage_entity_edit_page(request, entity_id: int):
     if deny:
         return deny
 
+    from documents.services.non_person_entity_correction import (
+        redirect_target_for_retired_entity,
+    )
+
+    successor_id = redirect_target_for_retired_entity(entity_id)
+    if successor_id is not None:
+        return redirect("archive-manage-entity-edit", entity_id=successor_id)
     entity = _get_staff_entity(entity_id)
     form_errors: list[str] = []
     canonical_name = entity.canonical_name

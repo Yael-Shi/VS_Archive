@@ -830,6 +830,90 @@ class ReviewedNonPersonEntityDecision(models.Model):
         )
 
 
+class NonPersonEntityCorrectionQuerySet(models.QuerySet):
+    """Reject ORM updates and deletes. Direct SQL is not intercepted."""
+
+    def update(self, **kwargs):
+        raise ValidationError("NonPersonEntityCorrection rows are append-only.")
+
+    def delete(self):
+        raise ValidationError("NonPersonEntityCorrection rows are append-only.")
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ValidationError("NonPersonEntityCorrection rows are append-only.")
+
+
+class NonPersonEntityCorrection(models.Model):
+    """Current entity for one historical decision. The decision row stays as applied.
+
+    ``effective_entity`` is the entity resolution uses now. ``retired_entity``
+    is a duplicate kept for the historical ``result_entity`` pointer and hidden
+    from name indexes. ``canonical_name``, ``display_name``, and
+    ``entity_subtype`` are the approved values of the effective entity, not a
+    second copy of the workbook.
+
+    ``save``, ``delete``, ``QuerySet.update``, ``QuerySet.delete``, and
+    ``QuerySet.bulk_update`` reject changes. Those model and queryset checks
+    do not intercept direct SQL.
+    """
+
+    decision = models.OneToOneField(
+        ReviewedNonPersonEntityDecision,
+        on_delete=models.PROTECT,
+        related_name="correction",
+    )
+    effective_entity = models.ForeignKey(
+        NonPersonEntity,
+        on_delete=models.PROTECT,
+        related_name="effective_corrections",
+    )
+    retired_entity = models.ForeignKey(
+        NonPersonEntity,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="retirement_corrections",
+    )
+    canonical_name = models.CharField(max_length=255)
+    display_name = models.CharField(max_length=255, blank=True, default="")
+    entity_subtype = models.CharField(max_length=40, blank=True, default="")
+    approval_reference = models.CharField(max_length=255)
+    manifest_sha256 = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = NonPersonEntityCorrectionQuerySet.as_manager()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["retired_entity"],
+                condition=models.Q(retired_entity__isnull=False),
+                name="uniq_non_person_correction_retired_entity",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(retired_entity__isnull=True)
+                    | ~models.Q(retired_entity=models.F("effective_entity"))
+                ),
+                name="non_person_correction_retired_is_distinct",
+            ),
+        ]
+
+    def save(self, *args, **kwargs) -> None:
+        if self.pk is not None and self.__class__.objects.filter(pk=self.pk).exists():
+            raise ValidationError("NonPersonEntityCorrection rows are append-only.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("NonPersonEntityCorrection rows are append-only.")
+
+    def __str__(self) -> str:
+        return (
+            "NonPersonEntityCorrection("
+            f"decision_id={self.decision_id}, effective_entity_id={self.effective_entity_id})"
+        )
+
+
 class ArchiveItemEntityOccurrence(models.Model):
     """One reviewed mention of a normalized surface in an item's displayed text.
 

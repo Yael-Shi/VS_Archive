@@ -36,7 +36,7 @@ STATE_DRIFT. STATE_DRIFT is never repaired here.
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from django.db.models import Q
@@ -46,6 +46,7 @@ from documents.models import (
     ArchiveItemEntityOccurrence,
     NonPersonEntity,
     NonPersonEntityAlias,
+    NonPersonEntityCorrection,
     ReviewedNonPersonEntityDecision,
 )
 from documents.services.non_person_entity_occurrences import (
@@ -85,6 +86,11 @@ _ENTITY_FIELDS = (
     "canonical_name",
     "display_name",
     "entity_type",
+    "entity_subtype",
+)
+_RECORDED_CORRECTION_FIELDS = (
+    "canonical_name",
+    "display_name",
     "entity_subtype",
 )
 
@@ -370,6 +376,9 @@ class _LoadedState:
     items: dict[int, ArchiveItem]
     shared_approve_entities: dict[int, tuple[str, ...]]
     duplicate_contract_source_ids: frozenset[str] = frozenset()
+    corrections_by_decision_id: dict[int, NonPersonEntityCorrection] = field(
+        default_factory=dict
+    )
 
 
 def _load_state(plans: tuple[CandidatePlan, ...]) -> _LoadedState:
@@ -447,6 +456,10 @@ def _load_state(plans: tuple[CandidatePlan, ...]) -> _LoadedState:
             "ocr_document",
         )
     }
+    corrections = {
+        row.decision_id: row
+        for row in NonPersonEntityCorrection.objects.filter(decision_id__in=decision_ids)
+    }
     return _LoadedState(
         decisions=decisions,
         aliases_by_entity={
@@ -459,6 +472,7 @@ def _load_state(plans: tuple[CandidatePlan, ...]) -> _LoadedState:
         items=items,
         shared_approve_entities=_shared_approve_entities(decisions),
         duplicate_contract_source_ids=frozenset(duplicate_contract_source_ids),
+        corrections_by_decision_id=corrections,
     )
 
 
@@ -738,7 +752,11 @@ def _result_entity_drifts(
         if decision.result_entity_id is None or decision.result_entity is None:
             return ["result_entity required"]
         return (
-            _entity_field_drifts(decision.result_entity, plan)
+            _entity_field_drifts(
+                decision.result_entity,
+                plan,
+                loaded.corrections_by_decision_id.get(decision.pk),
+            )
             + _alias_drifts(decision.result_entity_id, plan, loaded)
             + _shared_approve_drifts(decision, plan, loaded)
         )
@@ -783,17 +801,42 @@ def _shared_approve_drifts(
     return ["approve result_entity shared with " + ", ".join(others)]
 
 
-def _entity_field_drifts(entity: NonPersonEntity, plan: CandidatePlan) -> list[str]:
+def _entity_field_drifts(
+    entity: NonPersonEntity,
+    plan: CandidatePlan,
+    correction: NonPersonEntityCorrection | None = None,
+) -> list[str]:
     if plan.entity is None:
         return ["result_entity must be null"]
     mismatched = [
-        field
-        for field in _ENTITY_FIELDS
-        if getattr(entity, field) != getattr(plan.entity, field)
+        name
+        for name in _ENTITY_FIELDS
+        if getattr(entity, name) != getattr(plan.entity, name)
     ]
     if not mismatched:
         return []
+    if _recorded_correction_matches(entity, correction):
+        mismatched = [
+            name for name in mismatched if name not in _RECORDED_CORRECTION_FIELDS
+        ]
+        if not mismatched:
+            return []
     return ["result_entity field mismatch: " + ", ".join(mismatched)]
+
+
+def _recorded_correction_matches(
+    entity: NonPersonEntity,
+    correction: NonPersonEntityCorrection | None,
+) -> bool:
+    """True only when this entity is the correction target and matches it exactly."""
+
+    if correction is None or correction.effective_entity_id != entity.pk:
+        return False
+    return (
+        entity.canonical_name == correction.canonical_name
+        and entity.display_name == correction.display_name
+        and entity.entity_subtype == correction.entity_subtype
+    )
 
 
 def _alias_drifts(
