@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import io
 import json
 from collections import Counter
 from collections.abc import Mapping
@@ -240,7 +241,9 @@ def preflight_stage2_occurrence_links(
         text = payload.decode("utf-8-sig")
     except UnicodeError as exc:
         raise Stage2OccurrencePreflightError("candidate is not utf-8") from exc
-    reader = csv.DictReader(text.splitlines())
+    # Keep quoted newlines. splitlines() drops them, so "ארץ\nישראל" becomes
+    # "ארץישראל" and no longer matches surface-v1 or the recorded span.
+    reader = csv.DictReader(io.StringIO(text))
     fieldnames = tuple(reader.fieldnames or ())
     missing = [name for name in _REQUIRED_COLUMNS if name not in fieldnames]
     parsed = [_parse_row(raw) for raw in reader]
@@ -270,25 +273,28 @@ def _parse_row(raw: dict[str, str]) -> _Row:
     def text(name: str) -> str:
         return (raw.get(name) or "").strip()
 
-    def integer(name: str) -> int | None:
+    def integer(name: str, *, minimum: int) -> int | None:
         value = text(name)
-        if not value.isdigit() or int(value) < 1:
-            findings.append(
-                _Finding("invalid_row", f"{name} must be a positive integer")
-            )
+        if not value.isdigit() or int(value) < minimum:
+            kind = "non-negative" if minimum == 0 else "positive"
+            findings.append(_Finding("invalid_row", f"{name} must be a {kind} integer"))
             return None
         return int(value)
 
-    start = integer("reconstructed_start") if text("reconstructed_start") else None
+    start = (
+        integer("reconstructed_start", minimum=0)
+        if text("reconstructed_start")
+        else None
+    )
     if text("reconstructed_start") and start is None:
         pass
     elif text("reconstructed_start") == "":
         findings.append(_Finding("invalid_row", "reconstructed_start is required"))
-    end = integer("reconstructed_end") if text("reconstructed_end") else None
+    end = integer("reconstructed_end", minimum=1) if text("reconstructed_end") else None
     if text("reconstructed_end") == "":
         findings.append(_Finding("invalid_row", "reconstructed_end is required"))
     ordinal = (
-        integer("computed_occurrence_ordinal")
+        integer("computed_occurrence_ordinal", minimum=1)
         if text("computed_occurrence_ordinal")
         else None
     )
@@ -299,14 +305,18 @@ def _parse_row(raw: dict[str, str]) -> _Row:
     mention = text("mention_index")
     if not mention:
         findings.append(_Finding("invalid_row", "mention_index is required"))
-    item_id = integer("archive_item_id") if text("archive_item_id") else None
+    item_id = integer("archive_item_id", minimum=1) if text("archive_item_id") else None
     if text("archive_item_id") == "":
         findings.append(_Finding("invalid_row", "archive_item_id is required"))
-    decision_id = integer("dev_decision_ids") if text("dev_decision_ids") else None
+    decision_id = (
+        integer("dev_decision_ids", minimum=1) if text("dev_decision_ids") else None
+    )
     if text("dev_decision_ids") == "":
         findings.append(_Finding("invalid_row", "dev_decision_ids is required"))
     csv_entity = (
-        integer("dev_effective_entity_id") if text("dev_effective_entity_id") else None
+        integer("dev_effective_entity_id", minimum=1)
+        if text("dev_effective_entity_id")
+        else None
     )
     if text("dev_effective_entity_id") == "":
         findings.append(_Finding("invalid_row", "dev_effective_entity_id is required"))

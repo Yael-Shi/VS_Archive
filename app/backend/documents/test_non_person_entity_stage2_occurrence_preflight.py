@@ -31,6 +31,8 @@ from documents.services.non_person_entity_bnei_akiva_shadow_correction import (
 )
 from documents.services.non_person_entity_occurrences import (
     SURFACE_V1,
+    locate_surface_occurrences,
+    normalize_surface_v1,
     source_text_sha256,
 )
 from documents.services.non_person_entity_review_preflight import (
@@ -500,6 +502,133 @@ class Stage2OccurrencePreflightTests(TestCase):
         self.assertFalse(result.occurrence_98_ok)
         self.assertIn("occurrence 98 identity drifted", result.file_errors)
         self.assertEqual(result.status_counts["excluded_occurrence_98"], 1)
+        self.assertEqual(_snapshot(), before)
+
+    def test_embedded_newlines_keep_the_recorded_span_and_surface(self):
+        _occurrence_98()
+        cases = (
+            ("lf", "note ארץ\nישראל end", "ארץ ישראל", "EC0101"),
+            ("crlf", "note ארץ\r\nישראל end", "ארץ ישראל", "EC0102"),
+        )
+        for name, body, surface, candidate_id in cases:
+            with self.subTest(name=name):
+                item = _ocr_item(body)
+                entity = _entity("ארץ ישראל")
+                decision = _decision(entity, candidate_id=candidate_id)
+                located = locate_surface_occurrences(body, surface)
+                self.assertIsNotNone(located.occurrences)
+                assert located.occurrences is not None
+                match = located.occurrences[0]
+                self.assertIn("\n", body[match.start : match.end])
+                directory = Path(self._dir())
+                source, digest = _write_csv(
+                    directory,
+                    [
+                        _candidate_row(
+                            item,
+                            decision,
+                            entity,
+                            reconstructed_start=str(match.start),
+                            reconstructed_end=str(match.end),
+                            reconstructed_text=body[match.start : match.end],
+                            computed_normalized_surface=normalize_surface_v1(
+                                body[match.start : match.end]
+                            ),
+                            computed_occurrence_ordinal=str(match.ordinal),
+                            computed_source_sha256=source_text_sha256(body),
+                        )
+                    ],
+                )
+                before_bytes = source.read_bytes()
+                before = _snapshot()
+
+                result = preflight_stage2_occurrence_links(
+                    source,
+                    expected_sha256=digest,
+                    output_dir=directory / "out",
+                )
+
+                self.assertTrue(result.clean, result.summary)
+                self.assertEqual(result.status_counts["eligible"], 1)
+                self.assertEqual(source.read_bytes(), before_bytes)
+                self.assertEqual(_snapshot(), before)
+
+    def test_zero_offset_is_valid_when_the_mention_starts_the_text(self):
+        _occurrence_98()
+        body = "Cairo at the start"
+        item = _ocr_item(body)
+        entity = _entity("קהיר")
+        decision = _decision(entity)
+        directory = Path(self._dir())
+        source, digest = _write_csv(
+            directory,
+            [
+                _candidate_row(
+                    item,
+                    decision,
+                    entity,
+                    reconstructed_start="0",
+                    reconstructed_end="5",
+                    reconstructed_text="Cairo",
+                    computed_normalized_surface="cairo",
+                    computed_source_sha256=source_text_sha256(body),
+                )
+            ],
+        )
+        before = _snapshot()
+
+        result = preflight_stage2_occurrence_links(
+            source, expected_sha256=digest, output_dir=directory / "out"
+        )
+
+        self.assertTrue(result.clean, result.summary)
+        self.assertEqual(result.eligible_count, 1)
+        self.assertEqual(_snapshot(), before)
+
+    def test_incorrect_span_and_mismatched_surface_stay_rejected(self):
+        _occurrence_98()
+        item = _ocr_item(_BODY)
+        entity = _entity("קהיר")
+        decision = _decision(entity)
+        directory = Path(self._dir())
+        wrong_span, span_digest = _write_csv(
+            directory,
+            [
+                _candidate_row(
+                    item,
+                    decision,
+                    entity,
+                    reconstructed_start="0",
+                    reconstructed_end="5",
+                    reconstructed_text="Cairo",
+                )
+            ],
+        )
+        span_result = preflight_stage2_occurrence_links(
+            wrong_span,
+            expected_sha256=span_digest,
+            output_dir=directory / "span",
+        )
+        self.assertEqual(span_result.status_counts["boundary_drift"], 1)
+
+        wrong_surface, surface_digest = _write_csv(
+            directory,
+            [
+                _candidate_row(
+                    item,
+                    decision,
+                    entity,
+                    computed_normalized_surface="egypt",
+                )
+            ],
+        )
+        before = _snapshot()
+        surface_result = preflight_stage2_occurrence_links(
+            wrong_surface,
+            expected_sha256=surface_digest,
+            output_dir=directory / "surface",
+        )
+        self.assertEqual(surface_result.status_counts["surface_drift"], 1)
         self.assertEqual(_snapshot(), before)
 
     def test_true_approved_for_apply_is_not_accepted_or_written_back(self):
