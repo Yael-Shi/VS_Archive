@@ -1,10 +1,14 @@
-"""Read-only preflight for one reconstructed stage-2 occurrence import.
+"""Preflight and guarded apply for one reconstructed stage-2 occurrence import.
 
-Compares the candidate CSV with current authoritative text, reviewed
-decisions, and effective corrections. It does not insert occurrences, approve
-candidates, or update ``approved_for_apply``. Pending proposals, including the
-Israel occurrence proposals, are only reported when a six-field identity
-overlaps. They are not resolved.
+The default path compares the candidate CSV with current authoritative text,
+reviewed decisions, and effective corrections. It does not insert occurrences,
+approve candidates, or update ``approved_for_apply``. Pending proposals,
+including the Israel occurrence proposals, are only reported when a six-field
+identity overlaps. They are not resolved.
+
+``apply_stage2_occurrence_links`` inserts ``ArchiveItemEntityOccurrence`` rows
+only after the confirmation token and a repeated validation inside one
+transaction. A validation or insert failure rolls the transaction back.
 """
 
 from __future__ import annotations
@@ -18,14 +22,22 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from django.db import transaction
 from django.db.models import Prefetch, Q
 
 from documents.models import (
     ArchiveItem,
     ArchiveItemEntityOccurrence,
     Document,
+    DocumentTextResult,
+    ManualTextContent,
+    NonPersonEntity,
+    NonPersonEntityAlias,
     NonPersonEntityCorrection,
+    NonPersonEntityOccurrenceCandidate,
+    NonPersonEntityOccurrenceCandidateMatch,
     NonPersonEntityOccurrenceProposal,
+    NonPersonEntityOccurrenceReviewEvent,
     ReviewedNonPersonEntityDecision,
 )
 from documents.services.non_person_entity_bnei_akiva_shadow_correction import (
@@ -56,6 +68,7 @@ from documents.services.text_presentation import text_presentation_results_prefe
 RECORDED_CANDIDATE_SHA256 = (
     "c7d7a4770487db457ca915c9286692451bfb4628f8f1235bb199e1ce4545fb4f"
 )
+APPLY_CONFIRM_TOKEN = "APPLY_STAGE2_OCCURRENCE_LINKS_2026_10_25"
 TECHNICAL_CANDIDATE = "TECHNICAL_CANDIDATE"
 OCCURRENCE_98_ID = 98
 
@@ -144,6 +157,24 @@ class Stage2OccurrencePreflightError(Exception):
     """The candidate file could not be read."""
 
 
+class Stage2OccurrenceApplyError(Exception):
+    """Apply refused. Any inserts in the open transaction are rolled back."""
+
+    def __init__(self, reasons: tuple[str, ...] | list[str]):
+        self.reasons = tuple(reasons)
+        super().__init__("; ".join(self.reasons))
+
+
+@dataclass(frozen=True)
+class Stage2OccurrenceApplyResult:
+    applied: bool
+    file_sha256: str
+    inserted_count: int
+    already_applied_count: int
+    inserted_ids: tuple[int, ...]
+    summary: str
+
+
 @dataclass(frozen=True)
 class Stage2OccurrencePreflight:
     clean: bool
@@ -186,6 +217,7 @@ class _Row:
     findings: list[_Finding] = field(default_factory=list)
     live_entity_id: int | None = None
     live_decision_id: int | None = None
+    live_matched_text: str | None = None
     existing_occurrence_id: int | None = None
     proposal_id: int | None = None
 
@@ -265,6 +297,184 @@ def preflight_stage2_occurrence_links(
         occurrence_98_ok=bool(occurrence_98["ok"]),
         occurrence_98=occurrence_98,
     )
+
+
+def apply_stage2_occurrence_links(
+    csv_path: str | Path,
+    *,
+    expected_sha256: str,
+    output_dir: str | Path,
+    confirm: str,
+) -> Stage2OccurrenceApplyResult:
+    """Insert validated occurrence pins, or leave the database unchanged.
+
+    The confirmation token authorizes this hashed file only. Dry-run stays a
+    separate call. Pending proposals are never updated. A second call inserts
+    nothing when every row is already the same pin.
+    """
+
+    destination = Path(output_dir)
+    destination.mkdir(parents=True, exist_ok=True)
+    expected = expected_sha256.strip().lower()
+    if confirm != APPLY_CONFIRM_TOKEN:
+        _write_apply_failure(
+            destination,
+            file_sha256="",
+            expected_sha256=expected,
+            reasons=("confirmation token rejected",),
+            confirmation="rejected",
+        )
+        raise Stage2OccurrenceApplyError(("confirmation token rejected",))
+    try:
+        payload = Path(csv_path).read_bytes()
+    except OSError as exc:
+        raise Stage2OccurrencePreflightError(
+            f"could not read candidate: {exc}"
+        ) from exc
+    file_sha = hashlib.sha256(payload).hexdigest()
+    if file_sha != expected:
+        reason = f"candidate sha256 {file_sha} does not match expected {expected}"
+        _write_apply_failure(
+            destination,
+            file_sha256=file_sha,
+            expected_sha256=expected,
+            reasons=(reason,),
+            confirmation="accepted",
+        )
+        raise Stage2OccurrenceApplyError((reason,))
+    try:
+        text = payload.decode("utf-8-sig")
+    except UnicodeError as exc:
+        raise Stage2OccurrencePreflightError("candidate is not utf-8") from exc
+    reader = csv.DictReader(io.StringIO(text))
+    fieldnames = tuple(reader.fieldnames or ())
+    missing = [name for name in _REQUIRED_COLUMNS if name not in fieldnames]
+    parsed = [_parse_row(raw) for raw in reader]
+    if missing:
+        reason = "missing columns: " + ", ".join(missing)
+        _write_apply_failure(
+            destination,
+            file_sha256=file_sha,
+            expected_sha256=expected,
+            reasons=(reason,),
+            confirmation="accepted",
+        )
+        raise Stage2OccurrenceApplyError((reason,))
+    _mark_duplicates(parsed)
+    try:
+        with transaction.atomic():
+            _lock_apply_rows(parsed)
+            _classify_against_database(parsed)
+            occurrence_98 = _occurrence_98_report(parsed)
+            reasons = _apply_blockers(parsed, occurrence_98)
+            if reasons:
+                raise Stage2OccurrenceApplyError(reasons)
+            protected = _protected_rows()
+            existing_occurrences = _stored_occurrence_rows(
+                ArchiveItemEntityOccurrence.objects.all()
+            )
+            occurrence_before = len(existing_occurrences)
+            inserted = _insert_new_occurrences(parsed)
+            if _protected_rows() != protected:
+                raise Stage2OccurrenceApplyError(
+                    ("protected rows changed during apply",)
+                )
+            kept = _stored_occurrence_rows(
+                ArchiveItemEntityOccurrence.objects.filter(
+                    pk__in=[row[0] for row in existing_occurrences]
+                )
+            )
+            if kept != existing_occurrences:
+                raise Stage2OccurrenceApplyError(
+                    ("existing occurrence rows changed during apply",)
+                )
+            _require_occurrence_98_unchanged()
+            occurrence_after = ArchiveItemEntityOccurrence.objects.count()
+            if occurrence_after != occurrence_before + len(inserted):
+                raise Stage2OccurrenceApplyError(("occurrence count drifted",))
+            already = _already_applied_occurrences(parsed)
+            outcome = _ApplyOutcome(
+                file_sha256=file_sha,
+                expected_sha256=expected,
+                occurrence_before=occurrence_before,
+                occurrence_after=occurrence_after,
+                inserted=tuple(inserted),
+                already_applied=tuple(already),
+            )
+    except Stage2OccurrenceApplyError as exc:
+        _write_apply_failure(
+            destination,
+            file_sha256=file_sha,
+            expected_sha256=expected,
+            reasons=exc.reasons,
+            confirmation="accepted",
+        )
+        raise
+    except Exception as exc:
+        _write_apply_failure(
+            destination,
+            file_sha256=file_sha,
+            expected_sha256=expected,
+            reasons=(f"apply stopped: {exc}",),
+            confirmation="accepted",
+        )
+        raise
+    _write_apply_manifest(destination, outcome)
+    inserted_ids = tuple(row.occurrence_id for row in outcome.inserted)
+    summary = "\n".join(
+        [
+            "Stage 2 occurrence import apply",
+            "confirmation: accepted",
+            f"file_sha256: {file_sha}",
+            "result: succeeded",
+            f"idempotent_replay: {str(outcome.idempotent_replay).lower()}",
+            f"inserted: {len(inserted_ids)}",
+            f"already_applied: {outcome.already_applied_count}",
+            f"occurrence_count_before: {outcome.occurrence_before}",
+            f"occurrence_count_after: {outcome.occurrence_after}",
+            "database_tables_modified: "
+            + ("ArchiveItemEntityOccurrence" if inserted_ids else "none"),
+        ]
+    )
+    return Stage2OccurrenceApplyResult(
+        applied=bool(inserted_ids),
+        file_sha256=file_sha,
+        inserted_count=len(inserted_ids),
+        already_applied_count=outcome.already_applied_count,
+        inserted_ids=inserted_ids,
+        summary=summary,
+    )
+
+
+@dataclass(frozen=True)
+class _InsertedOccurrence:
+    occurrence_id: int
+    mention_index: str
+    archive_item_id: int
+    text_kind: str
+    source_text_sha256: str
+    normalization_version: str
+    normalized_surface: str
+    occurrence_ordinal: int
+    entity_id: int
+
+
+@dataclass(frozen=True)
+class _ApplyOutcome:
+    file_sha256: str
+    expected_sha256: str
+    occurrence_before: int
+    occurrence_after: int
+    inserted: tuple[_InsertedOccurrence, ...]
+    already_applied: tuple[_InsertedOccurrence, ...]
+
+    @property
+    def already_applied_count(self) -> int:
+        return len(self.already_applied)
+
+    @property
+    def idempotent_replay(self) -> bool:
+        return not self.inserted and bool(self.already_applied)
 
 
 def _parse_row(raw: dict[str, str]) -> _Row:
@@ -480,6 +690,24 @@ def _blocked_before_database(row: _Row) -> bool:
     )
 
 
+def _existing_occurrence_matches_import(
+    existing: ArchiveItemEntityOccurrence,
+    row: _Row,
+) -> bool:
+    """True when the stored pin is already the row this import would insert."""
+
+    return (
+        row.live_entity_id is not None
+        and row.live_matched_text is not None
+        and existing.entity_id == row.live_entity_id
+        and existing.decision_id is None
+        and existing.matched_text == row.live_matched_text
+        and existing.normalization_version == SURFACE_V1
+        and existing.resolution_status
+        == ArchiveItemEntityOccurrence.ResolutionStatus.RESOLVED
+    )
+
+
 def _classify_row(
     row: _Row,
     *,
@@ -520,12 +748,7 @@ def _classify_row(
     if row.identity in occurrences:
         existing = occurrences[row.identity]
         row.existing_occurrence_id = existing.pk
-        if (
-            row.live_entity_id is not None
-            and existing.entity_id == row.live_entity_id
-            and existing.resolution_status
-            == ArchiveItemEntityOccurrence.ResolutionStatus.RESOLVED
-        ):
+        if _existing_occurrence_matches_import(existing, row):
             row.findings.append(
                 _Finding(
                     "already_linked",
@@ -619,6 +842,8 @@ def _classify_text(row: _Row, text: str) -> None:
         row.findings.append(
             _Finding("surface_drift", "live slice does not normalize to the surface")
         )
+        return
+    row.live_matched_text = match.matched_text
 
 
 def _classify_decision(
@@ -929,3 +1154,433 @@ def _markdown(rows: list[_Row], summary: dict) -> str:
         "## Rows that are not eligible\n\n"
         f"{problem_lines or '- none'}\n"
     )
+
+
+def _apply_blockers(
+    rows: list[_Row],
+    occurrence_98: dict[str, object],
+) -> list[str]:
+    reasons: list[str] = []
+    if not rows:
+        reasons.append("no candidate rows")
+    errors = occurrence_98.get("errors", ())
+    if isinstance(errors, (list, tuple)):
+        reasons.extend(str(error) for error in errors)
+    for row in rows:
+        blocking = [
+            finding for finding in row.findings if finding.status not in _APPLY_OK
+        ]
+        if row.status not in _APPLY_OK or blocking:
+            reasons.append(
+                f"mention {row.mention_index or '?'}: {row.explanation or row.status}"
+            )
+            continue
+        if row.status == "eligible" and (
+            row.identity is None
+            or row.live_entity_id is None
+            or row.live_matched_text is None
+        ):
+            reasons.append(f"mention {row.mention_index}: insert payload incomplete")
+    return reasons
+
+
+def _lock_apply_rows(rows: list[_Row]) -> None:
+    """Lock the rows apply will read, in a fixed order. Does not update them.
+
+    ``FOR UPDATE`` on each archive item blocks a concurrent occurrence insert:
+    that insert's foreign-key check needs ``FOR KEY SHARE`` on the item.
+    Two imports of the same file therefore run one after the other, and the
+    later one sees committed pins. The six-field unique constraint remains
+    the backstop if another writer inserts before this lock is acquired.
+    """
+
+    item_ids = sorted({row.archive_item_id for row in rows if row.archive_item_id})
+    list(
+        ArchiveItem.objects.select_for_update(of=("self",))
+        .filter(pk__in=item_ids)
+        .order_by("pk")
+    )
+    list(
+        ManualTextContent.objects.select_for_update(of=("self",))
+        .filter(archive_item_id__in=item_ids)
+        .order_by("pk")
+    )
+    document_ids = list(
+        Document.objects.filter(archive_item_id__in=item_ids)
+        .order_by("pk")
+        .values_list("pk", flat=True)
+    )
+    list(
+        Document.objects.select_for_update(of=("self",))
+        .filter(pk__in=document_ids)
+        .order_by("pk")
+    )
+    list(
+        DocumentTextResult.objects.select_for_update(of=("self",))
+        .filter(document_id__in=document_ids)
+        .order_by("pk")
+    )
+    candidate_ids = {
+        row.proposed_candidate_id for row in rows if row.proposed_candidate_id
+    }
+    decisions = list(
+        ReviewedNonPersonEntityDecision.objects.select_for_update(of=("self",))
+        .filter(
+            source__in=_CONTRACT_SOURCES.values(),
+            candidate_id__in=candidate_ids,
+        )
+        .order_by("pk")
+    )
+    decision_ids = [row.pk for row in decisions]
+    list(
+        NonPersonEntityCorrection.objects.select_for_update(of=("self",))
+        .filter(decision_id__in=decision_ids)
+        .order_by("pk")
+    )
+    entity_ids = {
+        row.result_entity_id for row in decisions if row.result_entity_id is not None
+    }
+    entity_ids.update(
+        NonPersonEntityCorrection.objects.filter(
+            decision_id__in=decision_ids
+        ).values_list("effective_entity_id", flat=True)
+    )
+    entity_ids.add(SURVIVOR_ENTITY_ID)
+    list(
+        NonPersonEntity.objects.select_for_update(of=("self",))
+        .filter(pk__in=entity_ids)
+        .order_by("pk")
+    )
+    list(
+        NonPersonEntityOccurrenceProposal.objects.select_for_update(of=("self",))
+        .filter(archive_item_id__in=item_ids)
+        .order_by("pk")
+    )
+    list(
+        ArchiveItemEntityOccurrence.objects.select_for_update(of=("self",))
+        .filter(Q(archive_item_id__in=item_ids) | Q(pk=OCCURRENCE_98_ID))
+        .order_by("pk")
+    )
+
+
+def _insert_new_occurrences(rows: list[_Row]) -> list[_InsertedOccurrence]:
+    inserted: list[_InsertedOccurrence] = []
+    eligible = [row for row in rows if row.status == "eligible"]
+    eligible.sort(
+        key=lambda row: int(row.mention_index)
+        if row.mention_index.isdigit()
+        else row.mention_index
+    )
+    for row in eligible:
+        if (
+            row.identity is None
+            or row.live_entity_id is None
+            or row.live_matched_text is None
+        ):
+            raise Stage2OccurrenceApplyError(
+                (f"mention {row.mention_index}: insert payload incomplete",)
+            )
+        item_id, kind, digest, version, surface, ordinal = row.identity
+        created = ArchiveItemEntityOccurrence.objects.create(
+            archive_item_id=item_id,
+            text_kind=kind,
+            source_text_sha256=digest,
+            normalization_version=version,
+            normalized_surface=surface,
+            occurrence_ordinal=ordinal,
+            resolution_status=(ArchiveItemEntityOccurrence.ResolutionStatus.RESOLVED),
+            entity_id=row.live_entity_id,
+            decision_id=None,
+            matched_text=row.live_matched_text,
+        )
+        inserted.append(
+            _InsertedOccurrence(
+                occurrence_id=created.pk,
+                mention_index=row.mention_index,
+                archive_item_id=item_id,
+                text_kind=kind,
+                source_text_sha256=digest,
+                normalization_version=version,
+                normalized_surface=surface,
+                occurrence_ordinal=ordinal,
+                entity_id=row.live_entity_id,
+            )
+        )
+    return inserted
+
+
+def _already_applied_occurrences(rows: list[_Row]) -> list[_InsertedOccurrence]:
+    found: list[_InsertedOccurrence] = []
+    for row in rows:
+        if row.status != "already_linked":
+            continue
+        if (
+            row.identity is None
+            or row.existing_occurrence_id is None
+            or row.live_entity_id is None
+        ):
+            raise Stage2OccurrenceApplyError(
+                (f"mention {row.mention_index}: already-linked pin is incomplete",)
+            )
+        item_id, kind, digest, version, surface, ordinal = row.identity
+        found.append(
+            _InsertedOccurrence(
+                occurrence_id=row.existing_occurrence_id,
+                mention_index=row.mention_index,
+                archive_item_id=item_id,
+                text_kind=kind,
+                source_text_sha256=digest,
+                normalization_version=version,
+                normalized_surface=surface,
+                occurrence_ordinal=ordinal,
+                entity_id=row.live_entity_id,
+            )
+        )
+    found.sort(
+        key=lambda row: int(row.mention_index)
+        if row.mention_index.isdigit()
+        else row.mention_index
+    )
+    return found
+
+
+def _protected_rows() -> tuple:
+    return (
+        tuple(
+            NonPersonEntity.objects.order_by("pk").values_list(
+                "id",
+                "canonical_name",
+                "display_name",
+                "entity_type",
+                "entity_subtype",
+            )
+        ),
+        tuple(
+            NonPersonEntityAlias.objects.order_by("pk").values_list(
+                "id", "entity_id", "name", "kind"
+            )
+        ),
+        tuple(
+            ReviewedNonPersonEntityDecision.objects.order_by("pk").values_list(
+                "id",
+                "source",
+                "candidate_id",
+                "decision",
+                "result_entity_id",
+                "final_canonical",
+                "review_status",
+            )
+        ),
+        tuple(
+            NonPersonEntityCorrection.objects.order_by("pk").values_list(
+                "id",
+                "decision_id",
+                "effective_entity_id",
+                "retired_entity_id",
+            )
+        ),
+        tuple(
+            NonPersonEntityOccurrenceProposal.objects.order_by("pk").values_list(
+                "id",
+                "archive_item_id",
+                "text_kind",
+                "source_text_sha256",
+                "normalization_version",
+                "normalized_surface",
+                "occurrence_ordinal",
+                "matched_text",
+            )
+        ),
+        tuple(
+            NonPersonEntityOccurrenceCandidate.objects.order_by("pk").values_list(
+                "id",
+                "proposal_id",
+                "candidate_entity_id",
+                "status",
+                "resolved_entity_id",
+            )
+        ),
+        tuple(
+            NonPersonEntityOccurrenceCandidateMatch.objects.order_by("pk").values_list(
+                "id", "candidate_id", "method", "matched_value"
+            )
+        ),
+        tuple(
+            NonPersonEntityOccurrenceReviewEvent.objects.order_by("pk").values_list(
+                "id", "proposal_id", "candidate_id", "action"
+            )
+        ),
+        _stored_occurrence_rows(
+            ArchiveItemEntityOccurrence.objects.filter(pk=OCCURRENCE_98_ID)
+        ),
+    )
+
+
+def _stored_occurrence_rows(queryset) -> tuple:
+    return tuple(
+        queryset.order_by("pk").values_list(
+            "id",
+            "archive_item_id",
+            "text_kind",
+            "source_text_sha256",
+            "normalization_version",
+            "normalized_surface",
+            "occurrence_ordinal",
+            "resolution_status",
+            "entity_id",
+            "decision_id",
+            "matched_text",
+        )
+    )
+
+
+def _require_occurrence_98_unchanged() -> None:
+    report = _occurrence_98_report([])
+    if not report["ok"]:
+        errors = report.get("errors", ())
+        if not isinstance(errors, (list, tuple)):
+            errors = ("occurrence 98 check failed",)
+        raise Stage2OccurrenceApplyError(tuple(str(error) for error in errors))
+
+
+def _clear_opposite_apply_report(destination: Path, *, success: bool) -> None:
+    """Keep one apply outcome in the directory. Dry-run reports stay."""
+
+    names = (
+        (
+            "stage2_occurrence_import_apply_failure.json",
+            "stage2_occurrence_import_apply_failure.md",
+        )
+        if success
+        else (
+            "stage2_occurrence_import_apply.json",
+            "stage2_occurrence_import_apply.md",
+        )
+    )
+    for name in names:
+        (destination / name).unlink(missing_ok=True)
+
+
+def _occurrence_identity(row: _InsertedOccurrence) -> dict[str, object]:
+    return {
+        "occurrence_id": row.occurrence_id,
+        "mention_index": row.mention_index,
+        "archive_item_id": row.archive_item_id,
+        "text_kind": row.text_kind,
+        "source_text_sha256": row.source_text_sha256,
+        "normalization_version": row.normalization_version,
+        "normalized_surface": row.normalized_surface,
+        "occurrence_ordinal": row.occurrence_ordinal,
+        "entity_id": row.entity_id,
+    }
+
+
+def _identity_lines(
+    rows: tuple[_InsertedOccurrence, ...] | list[_InsertedOccurrence],
+) -> str:
+    return "\n".join(
+        (
+            f"- occurrence {row.occurrence_id}: mention {row.mention_index}, "
+            f"item {row.archive_item_id}, entity {row.entity_id}, "
+            f"ordinal {row.occurrence_ordinal}, surface {row.normalized_surface}"
+        )
+        for row in rows
+    )
+
+
+def _write_apply_failure(
+    destination: Path,
+    *,
+    file_sha256: str,
+    expected_sha256: str,
+    reasons: tuple[str, ...],
+    confirmation: str,
+) -> None:
+    _clear_opposite_apply_report(destination, success=False)
+    payload = {
+        "mode": "apply",
+        "result": "refused",
+        "applied": False,
+        "database_writes": 0,
+        "confirmation": confirmation,
+        "file_sha256": file_sha256,
+        "expected_sha256": expected_sha256,
+        "recorded_candidate_sha256": RECORDED_CANDIDATE_SHA256,
+        "reasons": list(reasons),
+        "pending_proposals_modified": False,
+    }
+    (destination / "stage2_occurrence_import_apply_failure.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    lines = "\n".join(f"- {reason}" for reason in reasons)
+    (destination / "stage2_occurrence_import_apply_failure.md").write_text(
+        "# Stage 2 occurrence import apply failure\n\n"
+        "Result: refused. No occurrence rows were committed. "
+        "An already-linked pin is not a failure; this file is written only "
+        "when apply stops. Pending proposals, decisions, corrections, "
+        "aliases, and entities were not modified.\n\n"
+        "- result: refused\n"
+        f"- confirmation: {confirmation}\n"
+        f"- file sha256: `{file_sha256}`\n"
+        f"- database writes: 0\n\n"
+        f"{lines}\n",
+        encoding="utf-8",
+    )
+
+
+def _write_apply_manifest(destination: Path, outcome: _ApplyOutcome) -> None:
+    _clear_opposite_apply_report(destination, success=True)
+    inserted = [_occurrence_identity(row) for row in outcome.inserted]
+    already_applied = [_occurrence_identity(row) for row in outcome.already_applied]
+    payload = {
+        "mode": "apply",
+        "result": "succeeded",
+        "applied": bool(inserted),
+        "idempotent_replay": outcome.idempotent_replay,
+        "confirmation": "accepted",
+        "confirmation_token": APPLY_CONFIRM_TOKEN,
+        "file_sha256": outcome.file_sha256,
+        "expected_sha256": outcome.expected_sha256,
+        "recorded_candidate_sha256": RECORDED_CANDIDATE_SHA256,
+        "inserted_count": len(inserted),
+        "already_applied_count": len(already_applied),
+        "occurrence_count_before": outcome.occurrence_before,
+        "occurrence_count_after": outcome.occurrence_after,
+        "occurrence_98_unchanged": True,
+        "pending_proposals_modified": False,
+        "tables_modified": ["ArchiveItemEntityOccurrence"] if inserted else [],
+        "inserted": inserted,
+        "already_applied": already_applied,
+    }
+    (destination / "stage2_occurrence_import_apply.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (destination / "stage2_occurrence_import_apply.md").write_text(
+        "# Stage 2 occurrence import apply\n\n"
+        "Result: succeeded. Confirmation accepted for this file hash. "
+        "`applied` means at least one new row was inserted. "
+        "Already-linked rows are a successful idempotent no-op, including "
+        "when `applied` is false. They are not listed as failures. "
+        "Only `ArchiveItemEntityOccurrence` rows are inserted. "
+        "`decision_id` is null. Source text is not copied into this report. "
+        "A dry run still reports `already_linked` as not eligible.\n\n"
+        "- result: succeeded\n"
+        f"- idempotent replay: {str(outcome.idempotent_replay).lower()}\n"
+        f"- file sha256: `{outcome.file_sha256}`\n"
+        f"- inserted: {len(inserted)}\n"
+        f"- already applied: {len(already_applied)}\n"
+        f"- occurrences before: {outcome.occurrence_before}\n"
+        f"- occurrences after: {outcome.occurrence_after}\n"
+        "- occurrence 98 unchanged: true\n"
+        "- pending proposals modified: false\n\n"
+        "## Inserted\n\n"
+        f"{_identity_lines(outcome.inserted) or '- no new rows'}\n\n"
+        "## Already applied\n\n"
+        f"{_identity_lines(outcome.already_applied) or '- none'}\n",
+        encoding="utf-8",
+    )
+
+
+_APPLY_OK = frozenset({"eligible", "already_linked"})
