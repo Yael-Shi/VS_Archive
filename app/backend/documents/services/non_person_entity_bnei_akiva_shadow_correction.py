@@ -3,7 +3,9 @@
 Historical decision rows stay as the contracts stored them. Two correction
 rows make EC0414 and EC0181 resolve to the survivor. Only the EC0414 row
 retires entity 103. This module does not read or write the 2026-10-21
-eleven-operation manifest.
+eleven-operation manifest. Pre-apply requires occurrences 96, 98, and 100
+to be entity 655's whole pin set. Replay keeps those three unchanged and
+allows later pins on 655. Pins on entity 103 still fail both checks.
 """
 
 from __future__ import annotations
@@ -420,7 +422,7 @@ def _both_corrections_present(state: _Loaded) -> bool:
 def _preimage_reasons(state: _Loaded) -> list[str]:
     reasons = _identity_reasons(state)
     reasons.extend(_alias_inventory_reasons(state, expected_empty=True))
-    reasons.extend(_occurrence_reasons(state))
+    reasons.extend(_occurrence_reasons(state, allow_additional_survivor_pins=False))
     reasons.extend(_pointer_reasons(state))
     if state.retirement_decision_ids:
         reasons.append("entity 103 is already retired")
@@ -429,7 +431,7 @@ def _preimage_reasons(state: _Loaded) -> list[str]:
 
 def _replay_reasons(state: _Loaded) -> list[str]:
     reasons = _identity_reasons(state)
-    reasons.extend(_occurrence_reasons(state))
+    reasons.extend(_occurrence_reasons(state, allow_additional_survivor_pins=True))
     reasons.extend(_pointer_reasons(state))
     survivor_aliases = state.aliases.get(SURVIVOR_ENTITY_ID, ())
     if (SHORT_NAME, ALIAS_KIND) not in survivor_aliases:
@@ -502,13 +504,28 @@ def _alias_inventory_reasons(state: _Loaded, *, expected_empty: bool) -> list[st
     return reasons
 
 
-def _occurrence_reasons(state: _Loaded) -> list[str]:
+def _occurrence_reasons(
+    state: _Loaded,
+    *,
+    allow_additional_survivor_pins: bool,
+) -> list[str]:
+    """Check the original 655 pins.
+
+    Before apply, entity 655 must have exactly occurrences 96, 98, and 100.
+    After apply, those three pins must still be present and unchanged, and
+    further pins on 655 are allowed. Pins on retired entity 103 fail either
+    check. This does not write.
+    """
+
     reasons: list[str] = []
     retired_ids = state.occurrence_ids_by_entity.get(RETIRED_ENTITY_ID, ())
     survivor_ids = state.occurrence_ids_by_entity.get(SURVIVOR_ENTITY_ID, ())
     if retired_ids:
         reasons.append("entity 103 has occurrence pins")
-    if survivor_ids != OCCURRENCE_IDS:
+    if allow_additional_survivor_pins:
+        if not set(OCCURRENCE_IDS).issubset(survivor_ids):
+            reasons.append("entity 655 occurrence pins drifted")
+    elif survivor_ids != OCCURRENCE_IDS:
         reasons.append("entity 655 occurrence pins drifted")
     pinned = ArchiveItemEntityOccurrence.objects.filter(pk__in=OCCURRENCE_IDS)
     by_id = {row.pk: row for row in pinned}

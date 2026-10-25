@@ -297,6 +297,60 @@ class ApplyTests(TestCase):
             {(manifest_sha256(), APPROVAL_REFERENCE)},
         )
 
+    def test_replay_allows_an_additional_resolved_pin_on_entity_655(self):
+        created = _approved_snapshot()
+        apply_bnei_akiva_shadow_merge(confirm=CONFIRM_TOKEN)
+        ArchiveItemEntityOccurrence.objects.create(
+            archive_item_id=112,
+            text_kind=ArchiveItemEntityOccurrence.TextKind.OCR_TRANSCRIPTION,
+            source_text_sha256="cd" * 32,
+            normalization_version="surface-v1",
+            normalized_surface="extra shadow",
+            occurrence_ordinal=1,
+            resolution_status=ArchiveItemEntityOccurrence.ResolutionStatus.RESOLVED,
+            entity=created["survivor"],
+            matched_text="extra shadow",
+        )
+        before = _database_rows()
+
+        assessment = dry_run_bnei_akiva_shadow_merge()
+        again = apply_bnei_akiva_shadow_merge(confirm=CONFIRM_TOKEN)
+
+        self.assertEqual(assessment.status, "already_applied")
+        self.assertFalse(again.applied)
+        self.assertEqual(again.assessment.status, "already_applied")
+        self.assertEqual(_database_rows(), before)
+        self.assertEqual(
+            ReviewedNonPersonEntityDecision.objects.get(
+                pk=APPROVE_DECISION_ID
+            ).result_entity_id,
+            RETIRED_ENTITY_ID,
+        )
+
+    def test_replay_rejects_a_new_pin_on_retired_entity_103(self):
+        created = _approved_snapshot()
+        apply_bnei_akiva_shadow_merge(confirm=CONFIRM_TOKEN)
+        ArchiveItemEntityOccurrence.objects.create(
+            archive_item_id=112,
+            text_kind=ArchiveItemEntityOccurrence.TextKind.OCR_TRANSCRIPTION,
+            source_text_sha256="ef" * 32,
+            normalization_version="surface-v1",
+            normalized_surface="retired pin",
+            occurrence_ordinal=1,
+            resolution_status=ArchiveItemEntityOccurrence.ResolutionStatus.RESOLVED,
+            entity=created["retired"],
+            matched_text="retired pin",
+        )
+        before = _database_rows()
+
+        assessment = dry_run_bnei_akiva_shadow_merge()
+
+        self.assertEqual(assessment.status, "blocked")
+        self.assertIn("entity 103 has occurrence pins", assessment.reasons)
+        with self.assertRaises(ShadowMergeApplyError):
+            apply_bnei_akiva_shadow_merge(confirm=CONFIRM_TOKEN)
+        self.assertEqual(_database_rows(), before)
+
     def test_replay_writes_nothing(self):
         _approved_snapshot()
         apply_bnei_akiva_shadow_merge(confirm=CONFIRM_TOKEN)
@@ -390,6 +444,52 @@ class DriftTests(TestCase):
         with self.assertRaises(ShadowMergeApplyError):
             apply_bnei_akiva_shadow_merge(confirm=CONFIRM_TOKEN)
         self.assertEqual(NonPersonEntityAlias.objects.count(), 0)
+
+    def test_preapply_still_rejects_an_additional_pin_on_entity_655(self):
+        created = _approved_snapshot()
+        ArchiveItemEntityOccurrence.objects.create(
+            archive_item_id=112,
+            text_kind=ArchiveItemEntityOccurrence.TextKind.OCR_TRANSCRIPTION,
+            source_text_sha256="cd" * 32,
+            normalization_version="surface-v1",
+            normalized_surface="extra shadow",
+            occurrence_ordinal=1,
+            resolution_status=ArchiveItemEntityOccurrence.ResolutionStatus.RESOLVED,
+            entity=created["survivor"],
+            matched_text="extra shadow",
+        )
+        before = _database_rows()
+
+        assessment = dry_run_bnei_akiva_shadow_merge()
+
+        self.assertEqual(assessment.status, "blocked")
+        self.assertIn("entity 655 occurrence pins drifted", assessment.reasons)
+        with self.assertRaises(ShadowMergeApplyError):
+            apply_bnei_akiva_shadow_merge(confirm=CONFIRM_TOKEN)
+        self.assertEqual(_database_rows(), before)
+
+    def test_replay_blocks_when_an_original_occurrence_identity_drifts(self):
+        _approved_snapshot()
+        apply_bnei_akiva_shadow_merge(confirm=CONFIRM_TOKEN)
+        pin = ArchiveItemEntityOccurrence.objects.get(pk=98)
+        pin.occurrence_ordinal = 9
+        pin.save(update_fields=["occurrence_ordinal", "updated_at"])
+        before = _database_rows()
+
+        assessment = dry_run_bnei_akiva_shadow_merge()
+
+        self.assertEqual(assessment.status, "blocked")
+        self.assertIn("occurrence 98 identity drifted", assessment.reasons)
+        self.assertNotIn("entity 655 occurrence pins drifted", assessment.reasons)
+        with self.assertRaises(ShadowMergeApplyError):
+            apply_bnei_akiva_shadow_merge(confirm=CONFIRM_TOKEN)
+        self.assertEqual(_database_rows(), before)
+        self.assertEqual(
+            NonPersonEntityCorrection.objects.filter(
+                decision_id__in=(APPROVE_DECISION_ID, MERGE_DECISION_ID)
+            ).count(),
+            2,
+        )
 
     def test_occurrence_identity_drift_blocks_and_writes_nothing(self):
         _approved_snapshot()
