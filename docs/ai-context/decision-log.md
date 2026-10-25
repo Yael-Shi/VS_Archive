@@ -1,5 +1,17 @@
 # VS-Archive Decision Log
 
+## Bnei Akiva shadow-leadership merge, entity 103 into 655 (2026-10-25)
+
+**Status:** Implemented locally. Not applied to DEV. Not deployed.
+
+**Decision:** Entity 103, canonical `הנהלת הצללים של בני עקיבא`, is retired in favor of entity 655, canonical `הנהלת הצללים של בני עקיבא במצרים`. Entity 655 stays `ORGANIZATION` / `COMMITTEE_OR_INTERNAL_BODY`. Entity 103 stays stored as `ORGANIZATION` / `YOUTH_MOVEMENT` with its original canonical name. Historical decisions stay on their original `result_entity` values: decision 141 / EC0414 / APPROVE and decision 633 / EC0181 / MERGE keep entity 103; decision 810 / EC0852 / APPROVE keeps entity 655.
+
+The correction is a separate workflow from the applied 2026-10-21 eleven-operation manifest. That manifest is not rerun and is not edited. EC0414 receives the only correction row that sets `retired_entity` to 103. EC0181 receives a correction whose `effective_entity` is 655 and whose `retired_entity` is null. EC0852 gets no correction row. Active registry queries and the public and staff detail redirects already hide a retired entity and follow the single retirement row.
+
+Occurrences 96, 98, and 100 stay on entity 655. Preflight requires those three resolved pins, their verified six-field identity from `dev_verification/occurrences.json` (archive item 112, `OCR_TRANSCRIPTION`, source SHA `1c3ff8dfcddd483987c28170b53fbe50539878a021423857aad1048920b8a808`, normalization `surface-v1`; 96 is `shadow hanhala` ordinal 1, 98 is `shadow hanhala` ordinal 2, 100 is `hanhala` ordinal 4), no pins on entity 103, and no aliases on either entity. When the short name has no exact canonical, display, or alias collision outside entity 103, apply adds it as a `SPELLING_VARIANT` alias on entity 655. A collision blocks the merge and does not add the alias. The command defaults to dry-run. Apply requires `--confirm APPLY_NON_PERSON_BNEI_AKIVA_SHADOW_MERGE_2026_10_25` and writes inside one transaction.
+
+**Known limitation:** A later decision whose `result_entity` is 103 or 655, or another resolved pin on 655, makes a replay report blocked. The command then writes nothing.
+
 ## Non-interactive app deployment is image-only
 
 **Status:** Implemented locally. Not deployed. The deployment script was not run, and no AWS or CDK change was executed for this change.
