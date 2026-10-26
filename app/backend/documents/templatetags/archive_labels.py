@@ -11,6 +11,12 @@ register = template.Library()
 
 
 @register.filter
+def subtract(value, arg) -> int:
+    """Return ``int(value) - int(arg)`` for template counts."""
+    return int(value) - int(arg)
+
+
+@register.filter
 def person_display_name(person) -> str:
     """Public/staff Person identity label: ``name`` or ``name, honorific``."""
     return person_public_display_name(person)

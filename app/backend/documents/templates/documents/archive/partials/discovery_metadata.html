@@ -1,3 +1,4 @@
+{% load static %}
 {% if item.categories.all or item.events.all or public_tags or person_links or mentioned_object_links %}
   <div class="archive-discovery-meta archive-detail-meta-block archive-detail-meta-block--discovery">
     {% if item.categories.all %}
@@ -28,7 +29,7 @@
       <div class="archive-detail-meta-row">
         <strong class="archive-detail-meta-label">{{ person_links_heading|default:"אנשים קשורים:" }}</strong>
         <span class="archive-detail-meta-value">
-          {% for link in person_links %}<a href="{{ link.href }}">{{ link.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
+          {% include "documents/archive/partials/expandable_name_list.html" with links=person_links list_key="people" %}
         </span>
       </div>
     {% endif %}
@@ -36,9 +37,12 @@
       <div class="archive-detail-meta-row">
         <strong class="archive-detail-meta-label">{{ mentioned_object_links_heading }}</strong>
         <span class="archive-detail-meta-value">
-          {% for link in mentioned_object_links %}<a href="{{ link.href }}">{{ link.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
+          {% include "documents/archive/partials/expandable_name_list.html" with links=mentioned_object_links list_key="entities" %}
         </span>
       </div>
     {% endif %}
   </div>
+  {% if person_links|length > name_list_preview_limit or mentioned_object_links|length > name_list_preview_limit %}
+    <script src="{% static 'public/expandable_name_list.js' %}"></script>
+  {% endif %}
 {% endif %}

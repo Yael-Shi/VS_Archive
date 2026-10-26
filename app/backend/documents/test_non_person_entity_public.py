@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -264,9 +265,15 @@ class MentionedObjectSectionTests(TestCase):
         self.assertEqual(html.count(first_href), 1)
         self.assertEqual(html.count(second_href), 1)
         self.assertLess(html.index(first_href), html.index(second_href))
+        compact = re.sub(r"\s+", " ", html)
         self.assertIn(
-            f'<a href="{first_href}">שם זהה</a>, <a href="{second_href}">שם זהה</a>',
-            html,
+            (
+                f'<a href="{first_href}">שם זהה</a></span> '
+                f'<span role="listitem">'
+                f'<span class="expandable-name-list__sep">, </span>'
+                f'<a href="{second_href}">שם זהה</a>'
+            ),
+            compact,
         )
 
     def test_names_sort_alphabetically_not_by_occurrence(self):

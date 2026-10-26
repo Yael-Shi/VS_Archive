@@ -1,0 +1,13 @@
+{% load archive_labels %}
+{% with preview=name_list_preview_limit|default:12 %}
+<span class="expandable-name-list">
+  <span class="expandable-name-list__items" id="detail-name-list-{{ list_key }}-{{ item.id }}" role="list">
+    {% for link in links %}
+      <span role="listitem"{% if forloop.counter > preview %} class="expandable-name-list__extra"{% endif %}>{% if not forloop.first %}<span class="expandable-name-list__sep">, </span>{% endif %}<a href="{{ link.href }}">{{ link.name }}</a></span>
+    {% endfor %}
+  </span>
+  {% if links|length > preview %}
+    <button type="button" class="expandable-name-list__toggle" hidden aria-expanded="false" aria-controls="detail-name-list-{{ list_key }}-{{ item.id }}" data-name-list-toggle data-hidden-count="{{ links|length|subtract:preview }}">ראו עוד ({{ links|length|subtract:preview }})</button>
+  {% endif %}
+</span>
+{% endwith %}
