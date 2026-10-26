@@ -26,7 +26,13 @@ from django.db.models.functions import Coalesce
 from django.urls import reverse
 
 from documents.historical_person_tag_map import historical_person_name_tag_ids
-from documents.models import ArchiveItem, ArchiveItemAuthor, Document
+from documents.models import (
+    ArchiveItem,
+    ArchiveItemAuthor,
+    ArchiveItemEntityOccurrence,
+    Document,
+    NonPersonEntity,
+)
 from documents.services.archive_advanced_search import (
     ARCHIVE_ADVANCED_PANEL_PARAM,
     ARCHIVE_ADVANCED_PANEL_VALUE,
@@ -42,6 +48,20 @@ from documents.services.archive_search_index import SEARCH_VECTOR_CONFIG
 from documents.services.author_public import author_public_page_url
 from documents.services.document_date import format_document_date
 from documents.services.hebrew_display_order import hebrew_public_sort_key
+from documents.services.non_person_entity_correction import (
+    public_entity_id_after_retirement,
+    retirement_redirect_targets,
+)
+from documents.services.non_person_entity_occurrences import (
+    SURFACE_V1,
+    authoritative_text_context_for_item,
+    occurrence_is_currently_valid,
+)
+from documents.services.non_person_entity_presentation import (
+    non_person_public_name,
+    non_person_public_page_url,
+    non_person_reader_display_name,
+)
 from documents.services.person_display import person_public_display_name
 from documents.services.text_presentation import (
     archive_item_displayable_text_results_prefetch,
@@ -1011,6 +1031,8 @@ class ArchiveBrowseCard:
     category_links: tuple[ArchiveBrowseLink, ...]
     related_links: tuple[ArchiveBrowseLink, ...]
     person_links: tuple[ArchiveBrowseLink, ...] = ()
+    person_more_count: int = 0
+    entity_more_count: int = 0
     author_links: tuple[ArchiveBrowseLink, ...] = ()
     thumbnail_url: str | None = None
     # Local 160px visual when no image thumbnail: "pdf" | "manual" | "video" | "".
@@ -1312,6 +1334,8 @@ def person_public_page_url(
 ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING = "אנשים קשורים:"
 PHOTO_ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING = "אנשים קשורים לפריט:"
 PUBLIC_DETAIL_NAME_LIST_PREVIEW_LIMIT = 12
+PUBLIC_CARD_NAME_PREVIEW_LIMIT = 3
+_CARD_ENTITY_OCCURRENCES = "_card_entity_occurrences"
 
 
 def person_links_for_item(
@@ -1329,15 +1353,13 @@ def person_links_for_item(
     dedup only; browse cards omit it. Detail pages pass
     ``hebrew_display_order=True`` so order is ``Person.name`` through
     ``hebrew_public_sort_key``, then id. Honorific stays on the visible
-    label and does not change order. The default order is ``(name, id)``
-    and remains what archive cards use.
+    label and does not change order. Archive cards pass that flag. The
+    default order remains ``(name, id)`` for callers that do not.
     """
     excluded = set(exclude_person_ids)
     people = list(_prefetched_relation(archive_item, "people"))
     if hebrew_display_order:
-        people.sort(
-            key=lambda person: (hebrew_public_sort_key(person.name), person.id)
-        )
+        people.sort(key=lambda person: (hebrew_public_sort_key(person.name), person.id))
     else:
         people.sort(key=lambda person: (person.name, person.id))
     return tuple(
@@ -1420,6 +1442,122 @@ def public_discovery_context(
     }
 
 
+@dataclass(frozen=True)
+class _CardEntityResolution:
+    """Pinned entity id to the public entity id, or None when a cycle has none."""
+
+    public_id_by_pinned_id: dict[int, int | None]
+    successors: dict[int, NonPersonEntity]
+
+
+def _preview_name_links(
+    links: tuple[ArchiveBrowseLink, ...],
+) -> tuple[tuple[ArchiveBrowseLink, ...], int]:
+    visible = tuple(links[:PUBLIC_CARD_NAME_PREVIEW_LIMIT])
+    return visible, len(links) - len(visible)
+
+
+def _prefetch_card_entity_occurrences(items: Sequence[ArchiveItem]) -> None:
+    """One occurrence query for the cards on this page."""
+
+    missing = [item for item in items if not hasattr(item, _CARD_ENTITY_OCCURRENCES)]
+    if not missing:
+        return
+    grouped: dict[int, list[ArchiveItemEntityOccurrence]] = {
+        item.pk: [] for item in missing
+    }
+    items_by_id = {item.pk: item for item in missing}
+    rows = (
+        ArchiveItemEntityOccurrence.objects.filter(
+            archive_item_id__in=grouped,
+            resolution_status=ArchiveItemEntityOccurrence.ResolutionStatus.RESOLVED,
+            normalization_version=SURFACE_V1,
+        )
+        .select_related("entity")
+        .order_by("id")
+    )
+    for row in rows:
+        item = items_by_id.get(row.archive_item_id)
+        if item is None:
+            continue
+        row.archive_item = item
+        grouped[row.archive_item_id].append(row)
+    for item in missing:
+        setattr(item, _CARD_ENTITY_OCCURRENCES, tuple(grouped[item.pk]))
+
+
+def _load_card_entity_resolution(entity_ids: set[int]) -> _CardEntityResolution:
+    """Resolve this page's pins through the shared retirement redirect."""
+
+    if not entity_ids:
+        return _CardEntityResolution({}, {})
+    targets = retirement_redirect_targets()
+    public_ids = {
+        entity_id: public_entity_id_after_retirement(entity_id, targets)
+        for entity_id in entity_ids
+    }
+    successor_ids = {
+        public_id
+        for public_id in public_ids.values()
+        if public_id is not None and public_id not in entity_ids
+    }
+    successors = {}
+    if successor_ids:
+        successors = {
+            entity.pk: entity
+            for entity in NonPersonEntity.objects.filter(pk__in=successor_ids)
+        }
+    return _CardEntityResolution(public_ids, successors)
+
+
+def _public_entity_for_card(
+    entity: NonPersonEntity | None,
+    resolution: _CardEntityResolution,
+) -> NonPersonEntity | None:
+    if entity is None:
+        return None
+    if entity.pk not in resolution.public_id_by_pinned_id:
+        return entity
+    public_id = resolution.public_id_by_pinned_id[entity.pk]
+    if public_id is None:
+        return None
+    if public_id == entity.pk:
+        return entity
+    return resolution.successors.get(public_id)
+
+
+def _card_entity_links(
+    archive_item: ArchiveItem,
+    resolution: _CardEntityResolution,
+) -> tuple[ArchiveBrowseLink, ...]:
+    rows = getattr(archive_item, _CARD_ENTITY_OCCURRENCES, ())
+    if not rows:
+        return ()
+    context = authoritative_text_context_for_item(archive_item)
+    chosen: dict[int, NonPersonEntity] = {}
+    for occurrence in rows:
+        if not occurrence_is_currently_valid(occurrence, context=context):
+            continue
+        entity = _public_entity_for_card(occurrence.entity, resolution)
+        if entity is None or entity.pk in chosen:
+            continue
+        chosen[entity.pk] = entity
+    ordered = sorted(
+        chosen.values(),
+        key=lambda entity: (
+            hebrew_public_sort_key(non_person_public_name(entity)),
+            entity.pk,
+        ),
+    )
+    return tuple(
+        ArchiveBrowseLink(
+            name=non_person_reader_display_name(entity),
+            href=non_person_public_page_url(entity.pk),
+        )
+        for entity in ordered
+    )
+
+
 def _related_links_for_item(archive_item: ArchiveItem) -> tuple[ArchiveBrowseLink, ...]:
     event_links = _browse_links_for_relation(
         archive_item,
@@ -1446,11 +1584,27 @@ def build_archive_browse_card(
     archive_item: ArchiveItem,
     *,
     search_query: str = "",
+    entity_resolution: _CardEntityResolution | None = None,
 ) -> ArchiveBrowseCard:
     detail_url = reverse("archive-detail", kwargs={"item_id": archive_item.id})
     if search_query and archive_item.item_type == ArchiveItem.ItemType.OCR_DOCUMENT:
         detail_url = f"{detail_url}?{urlencode({'q': search_query})}"
 
+    if not hasattr(archive_item, _CARD_ENTITY_OCCURRENCES):
+        _prefetch_card_entity_occurrences([archive_item])
+    if entity_resolution is None:
+        entity_ids = {
+            row.entity_id
+            for row in getattr(archive_item, _CARD_ENTITY_OCCURRENCES, ())
+            if row.entity_id is not None
+        }
+        entity_resolution = _load_card_entity_resolution(entity_ids)
+    person_links, person_more_count = _preview_name_links(
+        person_links_for_item(archive_item, hebrew_display_order=True)
+    )
+    entity_links, entity_more_count = _preview_name_links(
+        _card_entity_links(archive_item, entity_resolution)
+    )
     author_links, author_display = author_presentation_for_item(archive_item)
     return ArchiveBrowseCard(
         item=archive_item,
@@ -1462,8 +1616,10 @@ def build_archive_browse_card(
         detail_url=detail_url,
         preview_text=_preview_text_for_archive_item(archive_item),
         category_links=_category_links_for_item(archive_item),
-        related_links=_related_links_for_item(archive_item),
-        person_links=person_links_for_item(archive_item),
+        related_links=_related_links_for_item(archive_item) + entity_links,
+        person_links=person_links,
+        person_more_count=person_more_count,
+        entity_more_count=entity_more_count,
         author_links=author_links,
         fallback_preview=_fallback_preview_for_item(archive_item),
     )
@@ -1479,8 +1635,23 @@ def build_archive_browse_cards(
     Callers should pass items from ``_archive_browse_select_related`` (or
     equivalent) so ``categories``, ``events``, ``tags``, ``people``,
     ``author_links``, and displayable OCR ``DocumentTextResult`` rows are
-    prefetched.
+    prefetched. Valid non-person pins for the page are loaded in one query.
+    Each item's displayed text is hashed once.
     """
+    item_list = list(items)
+    _prefetch_card_entity_occurrences(item_list)
+    entity_ids = {
+        row.entity_id
+        for item in item_list
+        for row in getattr(item, _CARD_ENTITY_OCCURRENCES, ())
+        if row.entity_id is not None
+    }
+    resolution = _load_card_entity_resolution(entity_ids)
     return [
-        build_archive_browse_card(item, search_query=search_query) for item in items
+        build_archive_browse_card(
+            item,
+            search_query=search_query,
+            entity_resolution=resolution,
+        )
+        for item in item_list
     ]

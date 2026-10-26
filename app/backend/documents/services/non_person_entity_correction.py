@@ -313,6 +313,60 @@ def redirect_target_for_retired_entity(entity_id: int) -> int | None:
         NonPersonEntityCorrection.objects.filter(retired_entity_id=entity_id)
         .values_list("effective_entity_id", flat=True)[:2]
     )
+    return _redirect_target_from_targets(entity_id, targets)
+
+
+def retirement_redirect_targets() -> dict[int, tuple[int | None, ...]]:
+    """One map of retired entity id to its correction targets."""
+
+    grouped: dict[int, list[int | None]] = {}
+    rows = NonPersonEntityCorrection.objects.exclude(
+        retired_entity_id=None
+    ).values_list("retired_entity_id", "effective_entity_id")
+    for retired_id, effective_id in rows:
+        grouped.setdefault(retired_id, []).append(effective_id)
+    return {
+        retired_id: tuple(targets) for retired_id, targets in grouped.items()
+    }
+
+
+def redirect_target_from_targets(
+    entity_id: int,
+    targets_by_retired_id: dict[int, tuple[int | None, ...]],
+) -> int | None:
+    """Same redirect decision as ``redirect_target_for_retired_entity``."""
+
+    return _redirect_target_from_targets(
+        entity_id,
+        targets_by_retired_id.get(entity_id, ()),
+    )
+
+
+def public_entity_id_after_retirement(
+    entity_id: int,
+    targets_by_retired_id: dict[int, tuple[int | None, ...]],
+) -> int | None:
+    """Entity reached by following ``redirect_target_for_retired_entity``.
+
+    The walk stops on the entity whose redirect is absent. A cycle has no
+    stable public entity.
+    """
+
+    seen: set[int] = set()
+    current = entity_id
+    while current not in seen:
+        seen.add(current)
+        nxt = redirect_target_from_targets(current, targets_by_retired_id)
+        if nxt is None:
+            return current
+        current = nxt
+    return None
+
+
+def _redirect_target_from_targets(
+    entity_id: int,
+    targets: tuple[int | None, ...] | list[int | None],
+) -> int | None:
     if len(targets) != 1 or targets[0] is None or targets[0] == entity_id:
         return None
     return targets[0]

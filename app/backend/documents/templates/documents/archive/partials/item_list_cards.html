@@ -123,6 +123,10 @@
                       {% if not forloop.first %}<span class="archive-browse-card__discovery-sep archive-browse-card__discovery-sep--dot"> · </span>{% endif %}
                       <a class="archive-browse-card__discovery-link" href="{{ link.href }}">{{ link.name }}</a>
                     {% endfor %}
+                    {% if card.entity_more_count %}
+                      <span class="archive-browse-card__discovery-sep archive-browse-card__discovery-sep--dot"> · </span>
+                      <span class="archive-browse-card__more">ועוד {{ card.entity_more_count }}</span>
+                    {% endif %}
                   </p>
                 {% endif %}
                 {% if card.person_links %}
@@ -132,6 +136,10 @@
                       {% if not forloop.first %}<span class="archive-browse-card__discovery-sep archive-browse-card__discovery-sep--dot"> · </span>{% endif %}
                       <a class="archive-browse-card__discovery-link" href="{{ link.href }}">{{ link.name }}</a>
                     {% endfor %}
+                    {% if card.person_more_count %}
+                      <span class="archive-browse-card__discovery-sep archive-browse-card__discovery-sep--dot"> · </span>
+                      <span class="archive-browse-card__more">ועוד {{ card.person_more_count }}</span>
+                    {% endif %}
                   </p>
                 {% endif %}
               </div>

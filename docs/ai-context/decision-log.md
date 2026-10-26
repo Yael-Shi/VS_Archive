@@ -1,5 +1,13 @@
 # VS-Archive Decision Log
 
+## Public archive card entity links (2026-10-26)
+
+**Decision:** Public archive cards keep `קטגוריה:`, `קשור ל־`, and `אנשים קשורים`. People stay in `אנשים קשורים`. Currently valid non-person entities are added to the existing `קשור ל־` line after events and tags. Cards do not gain `אירועים:` or `תגיות:` headings, and they do not use the detail-page `ראו עוד` control.
+
+**Current behavior:** Each card shows at most 3 people and at most 3 non-person entities. Further names are a non-interactive `ועוד N`. People sort by `hebrew_public_sort_key(Person.name)`, then id. Entities sort by `hebrew_public_sort_key` of the public name, then id, and dedupe by the public entity id. A retired pin follows ``redirect_target_for_retired_entity`` until the public page stops redirecting. A cycle is omitted. A retired row with no redirect stays visible, matching that public page. Events and tags keep their own links. A shared display name does not merge a tag or event with an entity. Card building loads the page's resolved `surface-v1` pins in one query and hashes each item's displayed text once. Detail lists are unchanged.
+
+**Supersedes:** the archive-card deferral in **Public item people and non-person names (2026-10-26)** and the “archive cards are unchanged” sentence in **Public detail name-list disclosure (2026-10-26)**. The people-style entity directory remains deferred.
+
 ## Public detail name-list disclosure (2026-10-26)
 
 **Decision:** Public archive item detail lists for `אנשים קשורים:` and `מקומות, ארגונים ועוד:` show the first 12 names. The threshold is `PUBLIC_DETAIL_NAME_LIST_PREVIEW_LIMIT`. Photo item-level people use the same list under `אנשים קשורים לפריט:`.
