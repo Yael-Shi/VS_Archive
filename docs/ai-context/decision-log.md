@@ -1,8 +1,28 @@
 # VS-Archive Decision Log
 
+## Stage2 non-person occurrence import (2026-10-26)
+
+**Status:** Completed on DEV. The 1,878-row import is closed. The 535 unresolved-position mentions and the 91 unresolved entity-resolution mentions are not completed. Independent row-level verification is still open.
+
+**Decision:** The one-off command `import_stage2_occurrence_links` inserted 1,878 `ArchiveItemEntityOccurrence` rows into DEV on 2026-10-26. It is not a detector run, a proposal approval, or a workbook apply. Historical entity decisions were not reopened. Do not run `--apply` again as a closeout step.
+
+**Deployed code:** commit `f8657b8afbc176e30382015a9fd059adfa80709f`, image `main-f8657b8afbc1-20261025142923`. Candidate file `stage2_post_merge_technical_candidates.csv`. Candidate SHA-256 `c7d7a4770487db457ca915c9286692451bfb4628f8f1235bb199e1ce4545fb4f`. Confirmation token `APPLY_STAGE2_OCCURRENCE_LINKS_2026_10_25`. The manifest-copy SHA `7ede2e81a3c01eb5fdf8f27d1cbc8eb496b87440c921d97366c6b19b83362d0f` identifies a local copy of the apply report. It is not the candidate hash.
+
+**Apply report:** `result: succeeded`, `applied: true`, `idempotent_replay: false`, `inserted_count: 1878`, `already_applied_count: 0`, `occurrence_count_before: 396`, `occurrence_count_after: 2274`. New occurrence ids are 398–2275, across 25 archive items and 631 target entities. The report names `ArchiveItemEntityOccurrence` as the only modified table. It sets `occurrence_98_unchanged: true` and `pending_proposals_modified: false`. The final dry-run, `stage2_occurrence_import_preflight_final.json`, recorded 1,878 eligible rows, 0 exceptions, `clean: true`, and `database_writes: 0`.
+
+**Independently confirmed against DEV** in `stage2_occurrence_import_post_apply_verification.log`: `TOTAL_OCCURRENCES=2274`, `IMPORTED_IDS_PRESENT=1878`, `OCCURRENCE_98_PRESENT=True`, `ENTITY_103_OCCURRENCES=0`, `ENTITY_655_OCCURRENCES=4`. That read confirmed counts and presence only.
+
+**Supported by the apply report, not by that DEV read:** occurrence 98's six-field identity and resolved status were unchanged; the 25 pending proposals containing `ישראל` were not modified; each inserted row matches the candidate identity; `decision_id` is null; no other table changed. A local inspection of the manifest found 1,878 distinct occurrence ids and 1,878 distinct six-field keys in the report. That inspection did not compare those fields with DEV.
+
+**Out of scope:** Of the original 2,505 mentions, 1,878 were inserted, 1 was already linked (mention 1385 / occurrence 98), 535 still have no recovered position, and 91 still have unresolved entity resolution. Those remainder groups are not permission to insert pins or change historical decisions. The 25 pending proposals that contain `ישראל` stay protected. Do not update, approve, reject, or resolve them without a new explicit decision.
+
+**Future work:** The next task is read-only. Compare the imported occurrence identities with DEV, and compare the protected pending proposals with their prior state. Record gaps. Do not correct them automatically. After that verification, the recorded order is UI and entity-index work, then the 535 and 91 remainders. A new entity-detection mechanism starts only after people-agent is finished. This repository has no separate Open Tasks document. This entry is the open-work record for this import.
+
+**Evidence:** `/mnt/c/Users/User/vs-archive-people-agent/outputs/non_person_registry_reconciliation/entity_linking_audit_01/`.
+
 ## Bnei Akiva shadow-leadership merge, entity 103 into 655 (2026-10-25)
 
-**Status:** Implemented locally. Not applied to DEV. Not deployed.
+**Status:** Implemented locally. Not applied to DEV is the status recorded for the merge command itself. Not deployed as part of that entry. The 2026-10-26 occurrence import does not re-prove the correction rows or the alias. After that import, an independent DEV read showed 0 occurrences on entity 103 and 4 on entity 655. See **Stage2 non-person occurrence import (2026-10-26)**.
 
 **Decision:** Entity 103, canonical `הנהלת הצללים של בני עקיבא`, is retired in favor of entity 655, canonical `הנהלת הצללים של בני עקיבא במצרים`. Entity 655 stays `ORGANIZATION` / `COMMITTEE_OR_INTERNAL_BODY`. Entity 103 stays stored as `ORGANIZATION` / `YOUTH_MOVEMENT` with its original canonical name. Historical decisions stay on their original `result_entity` values: decision 141 / EC0414 / APPROVE and decision 633 / EC0181 / MERGE keep entity 103; decision 810 / EC0852 / APPROVE keeps entity 655.
 
@@ -10,7 +30,7 @@ The correction is a separate workflow from the applied 2026-10-21 eleven-operati
 
 Occurrences 96, 98, and 100 stay on entity 655. Preflight requires those three resolved pins, their verified six-field identity from `dev_verification/occurrences.json` (archive item 112, `OCR_TRANSCRIPTION`, source SHA `1c3ff8dfcddd483987c28170b53fbe50539878a021423857aad1048920b8a808`, normalization `surface-v1`; 96 is `shadow hanhala` ordinal 1, 98 is `shadow hanhala` ordinal 2, 100 is `hanhala` ordinal 4), no pins on entity 103, and no aliases on either entity. When the short name has no exact canonical, display, or alias collision outside entity 103, apply adds it as a `SPELLING_VARIANT` alias on entity 655. A collision blocks the merge and does not add the alias. The command defaults to dry-run. Apply requires `--confirm APPLY_NON_PERSON_BNEI_AKIVA_SHADOW_MERGE_2026_10_25` and writes inside one transaction.
 
-**Known limitation:** A later decision whose `result_entity` is 103 or 655, or another resolved pin on 655, makes a replay report blocked. The command then writes nothing.
+**Known limitation:** Pre-apply still requires entity 655 to have exactly occurrences 96, 98, and 100. Replay requires those three pins to stay present and unchanged, and it allows further pins on 655. A pin on entity 103 blocks both checks. A later decision whose `result_entity` is 103 or 655 still blocks replay. The command then writes nothing. The earlier statement that any additional pin on 655 blocks replay is superseded.
 
 ## Non-interactive app deployment is image-only
 
