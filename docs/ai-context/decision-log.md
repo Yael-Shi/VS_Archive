@@ -1,5 +1,15 @@
 # VS-Archive Decision Log
 
+## Public non-person entity directory (2026-10-26)
+
+**Decision:** `/archive/entities/` keeps the whole non-retired registry, including rows with no currently valid pin. It uses the people-directory layout: Hebrew א–ת jumps, letter sections, search, and 48 rows per page. The heading stays `מקומות, ארגונים, קהילות ופרסומים`. Public nav adds `מקומות וארגונים` beside `אנשים`.
+
+**Current behavior:** With no search query, order is `hebrew_public_sort_key` of the displayed public name, then entity id. A search query keeps the existing exact/prefix/contains rank and is not regrouped into one section per letter. Consecutive rows of one letter form a section. If that letter returns later on the same page, the first section id stays `entity-letter-<letter>` and each later section is `entity-letter-<letter>-2`, then `-3`, and so on. Jump links are only for letters present in that full filtered result, they keep `q` and `entity_type`, and they target the first section id. The type filter uses the existing entity-type labels. An unknown `entity_type` is ignored. There is no subtype filter. Each row on the current page shows a distinct count of authorized archive items with a currently valid pin on that entity id. Zero is shown as `0`. A nonzero count uses the people-directory holdings summary. Retired rows stay out of the index. Detail retirement redirects are unchanged.
+
+**Retired pins:** This difference is intentional. An archive card follows `redirect_target_for_retired_entity` until the public page stops redirecting, so a valid pin stored on a retired id is shown as the successor. The directory count and `/archive/entities/<id>/` do not follow that chain. Both count currently valid pins whose `entity_id` is the entity being shown. A pin left on a retired predecessor is absent from the successor's directory count and from the successor's detail item list.
+
+**Supersedes:** the people-style entity directory deferral in **Public archive card entity links (2026-10-26)**.
+
 ## Public archive card entity links (2026-10-26)
 
 **Decision:** Public archive cards keep `קטגוריה:`, `קשור ל־`, and `אנשים קשורים`. People stay in `אנשים קשורים`. Currently valid non-person entities are added to the existing `קשור ל־` line after events and tags. Cards do not gain `אירועים:` or `תגיות:` headings, and they do not use the detail-page `ראו עוד` control.
