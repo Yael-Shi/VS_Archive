@@ -1,5 +1,13 @@
 # VS-Archive Decision Log
 
+## Public detail name-list disclosure (2026-10-26)
+
+**Decision:** Public archive item detail lists for `אנשים קשורים:` and `מקומות, ארגונים ועוד:` show the first 12 names. The threshold is `PUBLIC_DETAIL_NAME_LIST_PREVIEW_LIMIT`. Photo item-level people use the same list under `אנשים קשורים לפריט:`.
+
+**Current behavior:** More than 12 names adds a text-style `<button type="button">` labeled `ראו עוד (N)`, where N is the hidden count. Activating it reveals the rest inline and switches the label to `הצג פחות`. The control uses `aria-expanded` and `aria-controls`. Both lists use `expandable_name_list.html` and `expandable_name_list.js`. The button is hidden without JavaScript, and every name stays in the page. Hebrew order, links, and separators stay as in the 2026-10-26 presentation decision. Selected-photo `מופיעים:` and archive cards are unchanged.
+
+**Supersedes:** the `ראו עוד` deferral in **Public item people and non-person names (2026-10-26)**. Archive-card entity names and the people-style entity directory remain deferred.
+
 ## Public item people and non-person names (2026-10-26)
 
 **Decision:** Public archive-item discovery metadata uses `אנשים קשורים:` and `מקומות, ארגונים ועוד:`, including the colon. Photo item-level people stay a separate list, `אנשים קשורים לפריט:`. People in the selected photo stay `מופיעים:`. Those two photo lists are not merged.

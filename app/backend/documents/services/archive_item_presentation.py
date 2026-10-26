@@ -1311,6 +1311,7 @@ def person_public_page_url(
 
 ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING = "אנשים קשורים:"
 PHOTO_ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING = "אנשים קשורים לפריט:"
+PUBLIC_DETAIL_NAME_LIST_PREVIEW_LIMIT = 12
 
 
 def person_links_for_item(
@@ -1397,6 +1398,7 @@ def public_discovery_context(
             "person_links_heading": ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING,
             "mentioned_object_links": (),
             "mentioned_object_links_heading": MENTIONED_OBJECTS_PUBLIC_HEADING,
+            "name_list_preview_limit": PUBLIC_DETAIL_NAME_LIST_PREVIEW_LIMIT,
         }
     author_links, author_display = author_presentation_for_item(
         archive_item,
@@ -1414,6 +1416,7 @@ def public_discovery_context(
         "person_links_heading": ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING,
         "mentioned_object_links": public_mentioned_object_links(archive_item),
         "mentioned_object_links_heading": MENTIONED_OBJECTS_PUBLIC_HEADING,
+        "name_list_preview_limit": PUBLIC_DETAIL_NAME_LIST_PREVIEW_LIMIT,
     }
 
 

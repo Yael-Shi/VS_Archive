@@ -4313,6 +4313,45 @@ pre {
   overflow-wrap: anywhere;
 }
 
+.expandable-name-list {
+  display: inline;
+}
+
+.expandable-name-list.is-collapsed .expandable-name-list__extra {
+  display: none;
+}
+
+.expandable-name-list__toggle {
+  display: inline;
+  margin: 0;
+  margin-inline-start: 0.35em;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  font: inherit;
+  line-height: inherit;
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.expandable-name-list__toggle[hidden] {
+  display: none;
+}
+
+.expandable-name-list__toggle:hover,
+.expandable-name-list__toggle:focus-visible {
+  color: var(--text-soft);
+}
+
+.expandable-name-list__toggle:focus-visible {
+  outline: 2px solid var(--accent-muted);
+  outline-offset: 2px;
+}
+
 /* Staff PHOTO technical details — anchored popover, never in normal flow */
 
 .archive-detail-photo-technical {
