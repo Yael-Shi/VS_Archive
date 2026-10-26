@@ -13,7 +13,7 @@ from documents.models import ArchiveItem, PhotoContent, PhotoPerson
 from documents.services.archive_item_presentation import (
     ArchiveBrowseCard,
     archive_item_author_links_prefetch,
-    build_archive_browse_card,
+    build_archive_browse_cards,
     person_public_page_url,
 )
 from documents.services.archive_metadata_validation import meaningful_metadata_value
@@ -363,19 +363,30 @@ def build_photo_person_appearance_cards(
     Reuses ArchiveItem card title/meta. Thumbnail comes from the appearance
     PhotoContent when a thumbnail key exists, not from the item primary photo.
     """
+    if not appearances:
+        return []
+    unique_items: list[ArchiveItem] = []
+    seen_item_ids: set[int] = set()
+    for appearance in appearances:
+        item = appearance.photo_content.archive_item
+        if item.pk in seen_item_ids:
+            continue
+        seen_item_ids.add(item.pk)
+        unique_items.append(item)
+    built = {card.item.pk: card for card in build_archive_browse_cards(unique_items)}
     cards: list[ArchiveBrowseCard] = []
     for appearance in appearances:
         photo = appearance.photo_content
         item = photo.archive_item
-        card = build_archive_browse_card(item)
-        card = replace(
-            card,
-            detail_url=public_photo_detail_url(item.pk, photo.pk),
-            thumbnail_url=presign_photo_thumbnail_url(
-                photo,
-                bucket=bucket,
-                expires_in=expires_in,
-            ),
+        cards.append(
+            replace(
+                built[item.pk],
+                detail_url=public_photo_detail_url(item.pk, photo.pk),
+                thumbnail_url=presign_photo_thumbnail_url(
+                    photo,
+                    bucket=bucket,
+                    expires_in=expires_in,
+                ),
+            )
         )
-        cards.append(card)
     return cards
