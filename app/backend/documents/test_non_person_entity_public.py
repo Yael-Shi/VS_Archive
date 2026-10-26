@@ -21,21 +21,22 @@ from documents.models import (
 )
 from documents.services.archive_item_presentation import (
     ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
+    person_links_for_item,
 )
 from documents.services.archive_items import create_manual_text_archive_item
 from documents.services.non_person_entity_occurrences import source_text_sha256
 from documents.services.non_person_entity_presentation import (
     non_person_entity_subtype_label,
     non_person_public_type_label,
-    public_mention_sort_key,
     public_mentioned_object_links,
+    public_non_person_aliases,
 )
 from documents.test_archive_item import create_viewable_ocr_document
 
 MANUAL = ArchiveItemEntityOccurrence.TextKind.MANUAL_TEXT
 OCR = ArchiveItemEntityOccurrence.TextKind.OCR_TRANSCRIPTION
 RESOLVED = ArchiveItemEntityOccurrence.ResolutionStatus.RESOLVED
-HEADING = "מקומות, ארגונים ועוד המופיעים ברשומה"
+HEADING = "מקומות, ארגונים ועוד:"
 
 
 def _entity(**overrides) -> NonPersonEntity:
@@ -206,8 +207,13 @@ class MentionedObjectSectionTests(TestCase):
 
         self.assertContains(resp, HEADING)
         self.assertContains(resp, "קהיר")
-        self.assertContains(resp, "מקום · עיר")
-        self.assertContains(resp, f"/archive/entities/{entity.id}/")
+        self.assertNotContains(resp, "מקום · עיר")
+        self.assertNotContains(resp, "archive-mentioned-objects")
+        self.assertContains(resp, f'href="/archive/entities/{entity.id}/"')
+        entity_page = self.client.get(
+            reverse("archive-non-person-detail", kwargs={"entity_id": entity.id})
+        )
+        self.assertContains(entity_page, "מקום · עיר")
         self.assertNotIn("SECRET_SLICE", html)
         self.assertNotIn(source_text_sha256(body), html)
         self.assertNotIn("ישות", html)
@@ -240,24 +246,56 @@ class MentionedObjectSectionTests(TestCase):
         self.assertEqual(item.entity_occurrences.count(), 2)
         self.assertEqual(html.count(f"/archive/entities/{entity.id}/"), 1)
 
-    def test_two_entities_sort_by_character_position_not_ordinal(self):
-        body = "aaaa aaaa bbbb"
-        item = _manual("positions", body)
-        later = _entity(canonical_name="אחר-כך", entity_subtype="")
-        earlier = _entity(canonical_name="קודם", entity_subtype="")
-        _pin(item, later, body, ordinal=2, surface="aaaa")
-        _pin(item, earlier, body, ordinal=1, surface="bbbb")
+    def test_same_display_name_stays_two_links_in_id_order(self):
+        body = "אלפא ואז ביתא"
+        item = _manual("same label", body)
+        first = _entity(canonical_name="קאנוני א", display_name="שם זהה", entity_subtype="")
+        second = _entity(
+            canonical_name="קאנוני ב", display_name="שם זהה", entity_subtype=""
+        )
+        _pin(item, first, body, ordinal=1, surface="אלפא", matched_text="אלפא")
+        _pin(item, second, body, ordinal=1, surface="ביתא", matched_text="ביתא")
 
         resp = _detail(self.client, item)
         html = resp.content.decode()
+        first_href = f"/archive/entities/{first.id}/"
+        second_href = f"/archive/entities/{second.id}/"
 
-        self.assertLess(html.index("אחר-כך"), html.index("קודם"))
-
-    def test_manual_source_sorts_before_ocr_source(self):
-        self.assertLess(
-            public_mention_sort_key(MANUAL, 500),
-            public_mention_sort_key(OCR, 0),
+        self.assertEqual(html.count(first_href), 1)
+        self.assertEqual(html.count(second_href), 1)
+        self.assertLess(html.index(first_href), html.index(second_href))
+        self.assertIn(
+            f'<a href="{first_href}">שם זהה</a>, <a href="{second_href}">שם זהה</a>',
+            html,
         )
+
+    def test_names_sort_alphabetically_not_by_occurrence(self):
+        body = "aaaa aaaa bbbb"
+        item = _manual("positions", body)
+        later_in_text = _entity(canonical_name="אבן", entity_subtype="")
+        earlier_in_text = _entity(canonical_name="תמר", entity_subtype="")
+        _pin(
+            item,
+            later_in_text,
+            body,
+            ordinal=2,
+            surface="aaaa",
+            matched_text="aaaa",
+        )
+        _pin(
+            item,
+            earlier_in_text,
+            body,
+            ordinal=1,
+            surface="bbbb",
+            matched_text="bbbb",
+        )
+
+        names = [link.name for link in public_mentioned_object_links(item)]
+
+        self.assertEqual(names, ["אבן", "תמר"])
+
+    def test_manual_and_ocr_sources_sort_by_displayed_name(self):
         doc = create_viewable_ocr_document(
             title="both sources",
             doc_type=Document.DocType.PDF,
@@ -277,8 +315,8 @@ class MentionedObjectSectionTests(TestCase):
             text=ocr_body,
         )
         ManualTextContent.objects.create(archive_item=item, body=manual_body)
-        manual_entity = _entity(canonical_name="ידני", entity_subtype="")
-        ocr_entity = _entity(canonical_name="מסמך", entity_subtype="")
+        manual_entity = _entity(canonical_name="תמר", entity_subtype="")
+        ocr_entity = _entity(canonical_name="אבן", entity_subtype="")
         _pin(item, manual_entity, manual_body, text_kind=MANUAL, surface="manualplace")
         _pin(item, ocr_entity, ocr_body, text_kind=OCR, surface="ocrplace")
 
@@ -288,7 +326,7 @@ class MentionedObjectSectionTests(TestCase):
         ):
             names = [link.name for link in public_mentioned_object_links(item)]
 
-        self.assertEqual(names, ["ידני", "מסמך"])
+        self.assertEqual(names, ["אבן", "תמר"])
 
     def test_people_and_categories_still_render(self):
         body = "ביקור בקהיר"
@@ -302,12 +340,100 @@ class MentionedObjectSectionTests(TestCase):
 
         resp = _detail(self.client, item)
 
-        self.assertContains(resp, "אנשים קשורים")
+        self.assertContains(resp, "אנשים קשורים:")
+        self.assertNotContains(resp, "אנשים קשורים לפריט:")
         self.assertContains(resp, "אדם קשור")
         self.assertContains(resp, "קטגוריות:")
         self.assertContains(resp, "משפחה")
         self.assertContains(resp, HEADING)
         self.assertContains(resp, "קהיר")
+
+    def test_people_sort_by_name_with_hebrew_before_latin(self):
+        item = _manual("people order", "טקסט")
+        Person.objects.create(name="Zebra")
+        Person.objects.create(name="תמר", honorific="ד״ר")
+        final_letter = Person.objects.create(name="ץפת")
+        regular = Person.objects.create(name="צפת")
+        Person.objects.create(name="(אבא)")
+        for person in Person.objects.all():
+            ArchiveItemPerson.objects.create(archive_item=item, person=person)
+
+        self.assertEqual(
+            [link.name for link in person_links_for_item(item, hebrew_display_order=True)],
+            ["(אבא)", final_letter.name, regular.name, "תמר, ד״ר", "Zebra"],
+        )
+        self.assertLess(final_letter.id, regular.id)
+
+    def test_long_dashes_change_display_only(self):
+        stored = "הסוכנות\u2014היהודית"
+        body = "אזכור"
+        item = _manual("dash", body)
+        entity = _entity(canonical_name=stored, display_name="", entity_subtype="")
+        _pin(item, entity, body, surface="אזכור", matched_text="אזכור")
+        NonPersonEntityAlias.objects.create(
+            entity=entity,
+            name="שם\u2013נוסף",
+            kind=NonPersonEntityAlias.Kind.LANGUAGE_VARIANT,
+        )
+        NonPersonEntityAlias.objects.create(
+            entity=entity,
+            name="בית־ספר",
+            kind=NonPersonEntityAlias.Kind.SPELLING_VARIANT,
+        )
+
+        resp = _detail(self.client, item)
+        detail = self.client.get(
+            reverse("archive-non-person-detail", kwargs={"entity_id": entity.id})
+        )
+        entity.refresh_from_db()
+
+        self.assertContains(resp, "הסוכנות-היהודית")
+        self.assertNotContains(resp, stored)
+        self.assertContains(detail, "הסוכנות-היהודית")
+        self.assertContains(detail, "שם-נוסף")
+        self.assertContains(detail, "בית־ספר")
+        self.assertNotContains(detail, "שם\u2013נוסף")
+        self.assertEqual(entity.canonical_name, stored)
+        self.assertEqual(entity.aliases.get(kind="LANGUAGE_VARIANT").name, "שם\u2013נוסף")
+        self.assertEqual(public_non_person_aliases(entity), ("בית־ספר", "שם-נוסף"))
+
+    def test_aliases_that_differ_only_by_dash_show_once(self):
+        entity = _entity(canonical_name="גוף", display_name="גוף", entity_subtype="")
+        hyphen = NonPersonEntityAlias.objects.create(
+            entity=entity,
+            name="ועד-הצירים",
+            kind=NonPersonEntityAlias.Kind.SPELLING_VARIANT,
+        )
+        en_dash = NonPersonEntityAlias.objects.create(
+            entity=entity,
+            name="ועד\u2013הצירים",
+            kind=NonPersonEntityAlias.Kind.LANGUAGE_VARIANT,
+        )
+        kept = NonPersonEntityAlias.objects.create(
+            entity=entity,
+            name="שם אחר",
+            kind=NonPersonEntityAlias.Kind.CURRENT_NAME,
+        )
+        NonPersonEntityAlias.objects.create(
+            entity=entity,
+            name="ועד\u2014הצירים",
+            kind=NonPersonEntityAlias.Kind.OCR_VARIANT,
+        )
+
+        resp = self.client.get(
+            reverse("archive-non-person-detail", kwargs={"entity_id": entity.id})
+        )
+        html = resp.content.decode()
+
+        self.assertEqual(public_non_person_aliases(entity), ("ועד-הצירים", "שם אחר"))
+        self.assertEqual(html.count("ועד-הצירים"), 1)
+        self.assertContains(resp, "שם אחר")
+        self.assertNotContains(resp, "ועד\u2013הצירים")
+        self.assertNotContains(resp, "ועד\u2014הצירים")
+        self.assertEqual(entity.aliases.count(), 4)
+        self.assertEqual(hyphen.name, "ועד-הצירים")
+        self.assertEqual(en_dash.name, "ועד\u2013הצירים")
+        self.assertEqual(kept.name, "שם אחר")
 
     def test_ocr_document_detail_shows_the_section(self):
         doc = create_viewable_ocr_document(

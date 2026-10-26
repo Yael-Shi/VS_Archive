@@ -673,6 +673,7 @@ def archive_advanced_filters_without_year(
 def _entity_filter_choices() -> tuple[ArchiveAdvancedEntityChoice, ...]:
     """Every registry row, ordered by public name then pk. Not limited to pins."""
 
+    from documents.services.hebrew_display_order import fold_long_dashes
     from documents.services.non_person_entity_presentation import (
         non_person_public_name,
         non_person_public_type_label,
@@ -682,15 +683,17 @@ def _entity_filter_choices() -> tuple[ArchiveAdvancedEntityChoice, ...]:
     choices: list[ArchiveAdvancedEntityChoice] = []
     entities = registry_index_queryset("").prefetch_related("aliases")
     for entity in entities:
-        name = non_person_public_name(entity)
+        raw_name = non_person_public_name(entity)
+        name = fold_long_dashes(raw_name)
         type_label = non_person_public_type_label(entity)
         label = f"{name} — {type_label}" if type_label else name
         alias_names = [alias.name for alias in entity.aliases.all() if alias.name]
+        folded_aliases = [fold_long_dashes(alias_name) for alias_name in alias_names]
         choices.append(
             ArchiveAdvancedEntityChoice(
                 id=entity.pk,
                 label=label,
-                search_text=" ".join([name, *alias_names]),
+                search_text=" ".join([raw_name, name, *alias_names, *folded_aliases]),
             )
         )
     return tuple(choices)

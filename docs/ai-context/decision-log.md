@@ -1,5 +1,15 @@
 # VS-Archive Decision Log
 
+## Public item people and non-person names (2026-10-26)
+
+**Decision:** Public archive-item discovery metadata uses `אנשים קשורים:` and `מקומות, ארגונים ועוד:`, including the colon. Photo item-level people stay a separate list, `אנשים קשורים לפריט:`. People in the selected photo stay `מופיעים:`. Those two photo lists are not merged.
+
+**Current behavior:** Non-person names on the item page are one inline comma-separated list of links to `/archive/entities/<id>/`. The type and subtype are not repeated beside those names. They remain on the entity detail page. Dedup is by entity id, after the existing validity check. Two entities with the same display name stay two links. Order for item people and item entities is `hebrew_public_sort_key` in `documents/services/hebrew_display_order.py`, then id. The people key is `Person.name` only. Honorific is still shown and still does not affect order. Hebrew sorts before Latin. Final letters sort with their regular letters. Leading punctuation does not decide the script. Long dashes in a non-person public name or public alias render as ASCII `-`. Hebrew maqaf is unchanged. Stored canonical names, display names, aliases, decisions, and occurrences are not rewritten. Public registry lookup folds the same dashes on the query and on canonical name, display name, and aliases. Staff registry search does not. Archive free-text `q` does not.
+
+**Supersedes:** the public item heading and first-occurrence order in **Non-person entity public detail (2026-10-06)**. Validity, authorization, and occurrence identity are unchanged.
+
+**Deferred:** `ראו עוד`, archive-card entity names, and the people-style entity directory. Archive cards still use `אנשים קשורים` and `קשור ל־` for events and tags. Do not move people into `קשור ל־`.
+
 ## Stage2 non-person occurrence import (2026-10-26)
 
 **Status:** Completed on DEV. The 1,878-row import is closed. The 535 unresolved-position mentions and the 91 unresolved entity-resolution mentions are not completed. Independent row-level verification is still open.

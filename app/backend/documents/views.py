@@ -330,6 +330,7 @@ from documents.services.non_person_entity_presentation import (
     authorized_valid_archive_item_ids,
     non_person_public_name,
     non_person_public_type_label,
+    non_person_reader_display_name,
     public_non_person_aliases,
 )
 from documents.services.non_person_entity_search import (
@@ -6058,7 +6059,7 @@ def archive_non_person_detail_page(request, entity_id: int):
         "documents/archive/non_person_detail.html",
         context={
             "registry_object": entity,
-            "public_name": non_person_public_name(entity),
+            "public_name": non_person_reader_display_name(entity),
             "type_label": non_person_public_type_label(entity),
             "public_aliases": aliases,
             "additional_names_label": PUBLIC_ADDITIONAL_NAMES_LABEL,

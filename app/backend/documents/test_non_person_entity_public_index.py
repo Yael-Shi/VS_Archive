@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from documents.models import (
@@ -14,6 +16,7 @@ from documents.models import (
 from documents.services.archive_item_presentation import (
     ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
 )
+from documents.services.non_person_entity_staff import staff_entity_index_queryset
 from documents.services.archive_items import create_manual_text_archive_item
 
 INDEX = "archive-non-person-index"
@@ -284,6 +287,96 @@ class RegistrySearchTests(TestCase):
         self.assertNotIn(token, index.metadata_text)
         self.assertNotIn(token, index.body_text)
         self.assertNotIn(token, index.hebrew_translation_text)
+
+
+class RegistryDashSearchTests(TestCase):
+    def test_hyphen_query_matches_stored_long_dash_and_staff_search_does_not(self):
+        stored = "עיתון\u2013היום"
+        entity = _entity(canonical_name=stored, display_name="", entity_subtype="")
+        _alias(entity, "כינוי\u2014ישן", NonPersonEntityAlias.Kind.SPELLING_VARIANT)
+
+        hyphen = _index(self.client, q="עיתון-היום")
+        long_dash = _index(self.client, q="עיתון\u2013היום")
+        alias_hit = _index(self.client, q="כינוי-ישן")
+        entity.refresh_from_db()
+
+        self.assertEqual([row.entity_id for row in hyphen.context["registry_rows"]], [entity.id])
+        self.assertEqual(hyphen.context["registry_rows"][0].name, "עיתון-היום")
+        self.assertEqual(
+            [row.entity_id for row in long_dash.context["registry_rows"]],
+            [entity.id],
+        )
+        self.assertEqual(
+            [row.entity_id for row in alias_hit.context["registry_rows"]],
+            [entity.id],
+        )
+        self.assertEqual(alias_hit.context["registry_rows"][0].matched_alias, "כינוי-ישן")
+        self.assertEqual(entity.canonical_name, stored)
+        self.assertEqual(
+            list(staff_entity_index_queryset(search_query="עיתון-היום")),
+            [],
+        )
+        self.assertEqual(
+            list(staff_entity_index_queryset(search_query=stored)),
+            [entity],
+        )
+
+    def test_folded_alias_ranks_stay_exact_then_prefix_then_contains(self):
+        exact = _entity(
+            canonical_name="מדויק", display_name="מדויק", entity_subtype=""
+        )
+        _alias(exact, "לא קשור בכלל", NonPersonEntityAlias.Kind.LANGUAGE_VARIANT)
+        _alias(exact, "אות\u2013חיפוש", NonPersonEntityAlias.Kind.SPELLING_VARIANT)
+        _alias(
+            exact,
+            "יש אות\u2014חיפוש באמצע",
+            NonPersonEntityAlias.Kind.CURRENT_NAME,
+        )
+        prefix = _entity(
+            canonical_name="קידומת", display_name="קידומת", entity_subtype=""
+        )
+        _alias(prefix, "אות-חיפוש-עוד", NonPersonEntityAlias.Kind.ABBREVIATION)
+        contains = _entity(
+            canonical_name="מכיל", display_name="מכיל", entity_subtype=""
+        )
+        _alias(
+            contains,
+            "טקסט אות\u2015חיפוש כאן",
+            NonPersonEntityAlias.Kind.LANGUAGE_VARIANT,
+        )
+        ocr_only = _entity(
+            canonical_name="רק תעתוק", display_name="רק תעתוק", entity_subtype=""
+        )
+        _alias(ocr_only, "אות\u2010חיפוש", NonPersonEntityAlias.Kind.OCR_VARIANT)
+        _alias(ocr_only, "שם גלוי אחר", NonPersonEntityAlias.Kind.LANGUAGE_VARIANT)
+
+        with CaptureQueriesContext(connection) as captured:
+            resp = _index(self.client, q="אות-חיפוש")
+        rows = list(resp.context["registry_rows"])
+
+        self.assertEqual(
+            [row.entity_id for row in rows],
+            [exact.id, ocr_only.id, prefix.id, contains.id],
+        )
+        self.assertEqual(rows[0].matched_alias, "אות-חיפוש")
+        self.assertEqual(rows[1].matched_alias, "")
+        self.assertEqual(rows[2].matched_alias, "אות-חיפוש-עוד")
+        self.assertEqual(rows[3].matched_alias, "טקסט אות-חיפוש כאן")
+        self.assertNotContains(resp, "לא קשור בכלל")
+        self.assertNotContains(resp, "אות\u2010חיפוש")
+        self.assertNotContains(resp, "שם גלוי אחר")
+        alias_sql = " ".join(
+            query["sql"]
+            for query in captured.captured_queries
+            if "nonpersonentityalias" in query["sql"].lower()
+        )
+        self.assertIn("TRANSLATE", alias_sql)
+        self.assertNotIn("REPLACE", alias_sql.upper())
+        self.assertEqual(exact.aliases.count(), 3)
+        self.assertEqual(
+            exact.aliases.get(kind=NonPersonEntityAlias.Kind.SPELLING_VARIANT).name,
+            "אות\u2013חיפוש",
+        )
 
 
 class RegistryPaginationTests(TestCase):
