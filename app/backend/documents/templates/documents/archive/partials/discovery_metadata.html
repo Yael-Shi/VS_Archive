@@ -26,7 +26,7 @@
     {% endif %}
     {% if person_links %}
       <div class="archive-detail-meta-row">
-        <strong class="archive-detail-meta-label">{{ person_links_heading|default:"אנשים קשורים" }}</strong>
+        <strong class="archive-detail-meta-label">{{ person_links_heading|default:"אנשים קשורים:" }}</strong>
         <span class="archive-detail-meta-value">
           {% for link in person_links %}<a href="{{ link.href }}">{{ link.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
         </span>
@@ -35,14 +35,9 @@
     {% if mentioned_object_links %}
       <div class="archive-detail-meta-row">
         <strong class="archive-detail-meta-label">{{ mentioned_object_links_heading }}</strong>
-        <ul class="archive-mentioned-objects">
-          {% for link in mentioned_object_links %}
-            <li>
-              <a href="{{ link.href }}">{{ link.name }}</a>
-              {% if link.type_label %}<span class="muted">{{ link.type_label }}</span>{% endif %}
-            </li>
-          {% endfor %}
-        </ul>
+        <span class="archive-detail-meta-value">
+          {% for link in mentioned_object_links %}<a href="{{ link.href }}">{{ link.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}
+        </span>
       </div>
     {% endif %}
   </div>

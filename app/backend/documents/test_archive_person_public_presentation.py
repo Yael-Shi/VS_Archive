@@ -312,7 +312,8 @@ class ArchivePersonPublicDetailTests(TestCase):
         resp = self.client.get(reverse("archive-detail", kwargs={"item_id": item.id}))
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
-        self.assertContains(resp, "אנשים קשורים")
+        self.assertContains(resp, "אנשים קשורים לפריט:")
+        self.assertNotContains(resp, "אנשים קשורים:")
         self.assertContains(resp, "Item Related Person")
         self.assertContains(
             resp,

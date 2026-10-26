@@ -41,6 +41,7 @@ from documents.services.archive_advanced_search import (
 from documents.services.archive_search_index import SEARCH_VECTOR_CONFIG
 from documents.services.author_public import author_public_page_url
 from documents.services.document_date import format_document_date
+from documents.services.hebrew_display_order import hebrew_public_sort_key
 from documents.services.person_display import person_public_display_name
 from documents.services.text_presentation import (
     archive_item_displayable_text_results_prefetch,
@@ -1308,8 +1309,8 @@ def person_public_page_url(
     return f"{path}?{urlencode(query)}"
 
 
-ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING = "אנשים קשורים"
-PHOTO_ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING = "אנשים קשורים לפריט"
+ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING = "אנשים קשורים:"
+PHOTO_ARCHIVE_ITEM_PEOPLE_PUBLIC_HEADING = "אנשים קשורים לפריט:"
 
 
 def person_links_for_item(
@@ -1318,18 +1319,26 @@ def person_links_for_item(
     exclude_person_ids: Collection[int] = (),
     from_item_id: int | None = None,
     from_photo_id: int | None = None,
+    hebrew_display_order: bool = False,
 ) -> tuple[ArchiveBrowseLink, ...]:
-    """Item-level ArchiveItemPerson links, ordered by ``(name, id)``.
+    """Item-level ArchiveItemPerson links.
 
     Identity is ``Person.id``. Duplicate names stay distinct. PhotoPerson is
     not read. ``exclude_person_ids`` is for public PHOTO selected-photo
-    dedup only; browse cards omit it.
+    dedup only; browse cards omit it. Detail pages pass
+    ``hebrew_display_order=True`` so order is ``Person.name`` through
+    ``hebrew_public_sort_key``, then id. Honorific stays on the visible
+    label and does not change order. The default order is ``(name, id)``
+    and remains what archive cards use.
     """
     excluded = set(exclude_person_ids)
-    people = sorted(
-        _prefetched_relation(archive_item, "people"),
-        key=lambda person: (person.name, person.id),
-    )
+    people = list(_prefetched_relation(archive_item, "people"))
+    if hebrew_display_order:
+        people.sort(
+            key=lambda person: (hebrew_public_sort_key(person.name), person.id)
+        )
+    else:
+        people.sort(key=lambda person: (person.name, person.id))
     return tuple(
         ArchiveBrowseLink(
             name=person_public_display_name(person),
@@ -1357,12 +1366,14 @@ def photo_detail_item_person_links(
         return person_links_for_item(
             archive_item,
             from_item_id=from_item_id,
+            hebrew_display_order=True,
         )
     return person_links_for_item(
         archive_item,
         exclude_person_ids=identified_person_ids,
         from_item_id=from_item_id,
         from_photo_id=from_photo_id,
+        hebrew_display_order=True,
     )
 
 
@@ -1396,6 +1407,7 @@ def public_discovery_context(
         "person_links": person_links_for_item(
             archive_item,
             from_item_id=from_item_id,
+            hebrew_display_order=True,
         ),
         "author_links": author_links,
         "author_display": author_display,
