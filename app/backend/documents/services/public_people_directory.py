@@ -10,8 +10,9 @@ Name equality is not identity. Directory order uses raw identity names
 from __future__ import annotations
 
 import unicodedata
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from urllib.parse import urlencode
 
 from documents.services.archive_item_presentation import (
     ARCHIVE_PUBLIC_LIST_DEFAULT_PER_PAGE,
@@ -169,13 +170,16 @@ def hebrew_alphabet_nav_items(
     per_page: int,
     search_query: str = "",
     index_path: str,
+    extra_query: tuple[tuple[str, str], ...] = (),
+    letter_anchor_id: Callable[[str], str] = people_letter_anchor_id,
 ) -> list[tuple[str, str]]:
     """``(letter, href_or_empty)`` for the Hebrew jump row.
 
     ``letter_first_pages`` comes from the full filtered ordered result set
     before pagination. Present letters link to that first page plus the
     existing section anchor. Same-page letters keep the in-page hash.
-    Empty letters stay inactive.
+    Empty letters stay inactive. ``extra_query`` is appended to cross-page
+    links and does not change the people directory when omitted.
     """
     items: list[tuple[str, str]] = []
     for letter in HEBREW_INDEX_LETTERS:
@@ -183,7 +187,7 @@ def hebrew_alphabet_nav_items(
         if target_page is None:
             items.append((letter, ""))
             continue
-        anchor = f"#{people_letter_anchor_id(letter)}"
+        anchor = f"#{letter_anchor_id(letter)}"
         if target_page == page:
             items.append((letter, anchor))
             continue
@@ -192,6 +196,9 @@ def hebrew_alphabet_nav_items(
             page=target_page,
             per_page=per_page,
         )
+        if extra_query:
+            extra = urlencode(list(extra_query))
+            query = f"{query}&{extra}" if query else extra
         suffix = f"?{query}" if query else ""
         items.append((letter, f"{index_path}{suffix}{anchor}"))
     return items

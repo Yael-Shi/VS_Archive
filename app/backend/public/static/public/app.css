@@ -3650,6 +3650,31 @@ pre {
   font-weight: 400;
 }
 
+.archive-entity-index-type-filter {
+  flex: 1 1 12rem;
+  max-width: 100%;
+  min-height: 2.5rem;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card-input);
+  font: inherit;
+  font-size: var(--font-base);
+}
+
+.archive-entity-index-name {
+  flex-wrap: wrap;
+}
+
+.archive-entity-index-meta {
+  flex: 1 1 100%;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--font-xs);
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 768px) {
   .archive-people-index-page {
     padding-inline: var(--space-5);
@@ -4173,7 +4198,8 @@ pre {
     align-items: center;
   }
 
-  .archive-search-form__input {
+  .archive-search-form__input,
+  .archive-entity-index-type-filter {
     min-height: 2.125rem;
     padding: 6px var(--space-2);
     font-size: var(--font-sm);

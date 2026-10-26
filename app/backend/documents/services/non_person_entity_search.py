@@ -50,13 +50,20 @@ _ALIAS_MATCH_RANKS = frozenset(
 
 @dataclass(frozen=True)
 class PublicRegistryRow:
-    """One registry index result. No occurrence or review fields."""
+    """One registry index result. No occurrence or review fields.
+
+    Association fields are filled by the public directory for the current
+    page. Search lookup leaves them empty.
+    """
 
     entity_id: int
     name: str
     href: str
     type_label: str
     matched_alias: str
+    sort_name: str = ""
+    association_count: int = 0
+    association_summary: str = ""
 
 
 def registry_index_queryset(query: str) -> QuerySet[NonPersonEntity]:
