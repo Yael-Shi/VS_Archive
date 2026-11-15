@@ -1,5 +1,13 @@
 # VS-Archive Decision Log
 
+## Academic index read layer (2026-11-15)
+
+**Decision:** Stage 3A reads the controlled topic vocabulary through `documents/services/academic_index_read.py`. Stage 1 graph helpers stay unchanged. A stored row is readable when its status is APPROVED and its decision event action is IMPORT, APPROVE, or SUPERSEDE. `AcademicIndexAudience.STAFF` requires `is_document_admin`; otherwise the call raises `PermissionDenied` before any query. Public and staff path types are separate, and public and staff navigation types are separate. A public path names only a publicly eligible topic and carries neither depth nor an omitted-path field. `cycle_detected` and `graph_truncated` stay on the internal closure and on staff navigation. Reachability is unweighted breadth-first search, and cycles are found by a separate iterative active-path coloring pass. This stage adds no setting and no route.
+
+**Current behavior:** Public calls return no data when `ACADEMIC_INDEX_PUBLIC_ENABLED` is absent or false, and they do not query. Item membership uses `archive_browse_queryset_for_user`. BROADER is the only hierarchy. RELATED does not inherit items. Inherited membership is computed for the response and is not stored. `item_provenance` derives its descendant set from that approved closure and does not accept a caller-supplied set. A public direct record has empty paths. A staff direct record keeps every readable descendant path, with the queried topic's own relevance.
+
+**Deferred:** Public topic pages, the feature-flag setting, and any staff audit that shows evidence notes or items the caller cannot browse.
+
 ## Public non-person entity directory (2026-10-26)
 
 **Decision:** `/archive/entities/` keeps the whole non-retired registry, including rows with no currently valid pin. It uses the people-directory layout: Hebrew א–ת jumps, letter sections, search, and 48 rows per page. The heading stays `מקומות, ארגונים, קהילות ופרסומים`. Public nav adds `מקומות וארגונים` beside `אנשים`.
