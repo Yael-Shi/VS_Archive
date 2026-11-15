@@ -4370,3 +4370,14 @@ class TranskribusCorrectedCurrentSyncPage(models.Model):
             f"TranskribusCorrectedCurrentSyncPage(attempt={self.attempt_id}, "
             f"page_index={self.page_index}, outcome={self.outcome})"
         )
+
+
+# Academic index models live in a sibling module so this file does not import
+# their transition service. Importing them here registers them on the app.
+from documents.academic_index_models import (  # noqa: E402, F401
+    AcademicIndexDecisionEvent,
+    AcademicTopic,
+    AcademicTopicLabel,
+    AcademicTopicRelation,
+    ArchiveItemTopicAssociation,
+)
