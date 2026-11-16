@@ -398,7 +398,7 @@ WEB_SERVICE="$(
     --profile "$AWS_PROFILE" \
     --query 'serviceArns[?contains(@, `websvc`)] | [0]' \
     --output text
-)"
+)" || fail "Failed to discover web ECS service."
 
 WORKER_SERVICE="$(
   aws ecs list-services \
@@ -407,115 +407,159 @@ WORKER_SERVICE="$(
     --profile "$AWS_PROFILE" \
     --query 'serviceArns[?contains(@, `workersvc`)] | [0]' \
     --output text
-)"
+)" || fail "Failed to discover worker ECS service."
 
-[[ "$WEB_SERVICE" != "None" && -n "$WEB_SERVICE" ]] || \
-  fail "Web service not found."
+[[ -n "$WEB_SERVICE" && "$WEB_SERVICE" != "None" ]] || fail "Web service not found."
+[[ -n "$WORKER_SERVICE" && "$WORKER_SERVICE" != "None" ]] || fail "Worker service not found."
+[[ "$WEB_SERVICE" != "$WORKER_SERVICE" ]] || fail "Web and worker service discovery returned the same service."
 
-[[ "$WORKER_SERVICE" != "None" && -n "$WORKER_SERVICE" ]] || \
-  fail "Worker service not found."
+echo "Waiting for both ECS rollouts to COMPLETED and verifying the intended image..."
+# ECS 'services-stable' alone is not sufficient: ECS may momentarily report
+# desired=running, pending=0 while PRIMARY rolloutState is still IN_PROGRESS.
+# Poll both signals together, then validate the task definitions and running tasks.
+if ! python3 - "$CLUSTER_ARN" "$WEB_SERVICE" "$WORKER_SERVICE" "$IMAGE_URI" "$AWS_PROFILE" "$AWS_REGION" <<'PY_ECS_VERIFY'
+import json
+import subprocess
+import sys
+import time
 
-echo "Waiting for ECS services to become stable..."
+cluster, web_arn, worker_arn, expected_image, profile, region = sys.argv[1:]
+services = {"web": web_arn, "worker": worker_arn}
+MAX_ATTEMPTS = 60
+POLL_INTERVAL_SECONDS = 10
 
-aws ecs wait services-stable \
-  --cluster "$CLUSTER_ARN" \
-  --services "$WEB_SERVICE" "$WORKER_SERVICE" \
-  --region "$AWS_REGION" \
-  --profile "$AWS_PROFILE"
 
-aws ecs describe-services \
-  --cluster "$CLUSTER_ARN" \
-  --services "$WEB_SERVICE" "$WORKER_SERVICE" \
-  --region "$AWS_REGION" \
-  --profile "$AWS_PROFILE" \
-  --query 'services[].{service:serviceName,desired:desiredCount,running:runningCount,pending:pendingCount,rollout:deployments[0].rolloutState,taskDefinition:taskDefinition}' \
-  --output table
+def aws(*args):
+    command = ["aws", *args, "--profile", profile, "--region", region, "--output", "json"]
+    try:
+        result = subprocess.run(command, text=True, capture_output=True, timeout=30, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(f"AWS CLI invocation failed: {exc}") from exc
+    if result.returncode:
+        raise RuntimeError(f"AWS CLI command failed ({result.returncode}): "
+                           f"{' '.join(args[:2])}: {result.stderr.strip()}")
+    try:
+        return json.loads(result.stdout)
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError(f"Invalid JSON from AWS CLI {' '.join(args[:2])}") from exc
 
-WEB_TD="$(
-  aws ecs describe-services \
-    --cluster "$CLUSTER_ARN" \
-    --services "$WEB_SERVICE" \
-    --region "$AWS_REGION" \
-    --profile "$AWS_PROFILE" \
-    --query 'services[0].taskDefinition' \
-    --output text
-)"
 
-WORKER_TD="$(
-  aws ecs describe-services \
-    --cluster "$CLUSTER_ARN" \
-    --services "$WORKER_SERVICE" \
-    --region "$AWS_REGION" \
-    --profile "$AWS_PROFILE" \
-    --query 'services[0].taskDefinition' \
-    --output text
-)"
+def diagnostics(label, service):
+    primary = [d for d in service.get("deployments", []) if d.get("status") == "PRIMARY"]
+    state = primary[0].get("rolloutState") if len(primary) == 1 else "MISSING_PRIMARY"
+    print(f"{label}: status={service.get('status')} rollout={state} "
+          f"running={service.get('runningCount')} desired={service.get('desiredCount')} "
+          f"pending={service.get('pendingCount')} "
+          f"deployments={len(service.get('deployments', []))} "
+          f"taskDefinition={service.get('taskDefinition')}", flush=True)
+    for event in service.get("events", [])[:3]:
+        print(f"  event {event.get('createdAt')}: {event.get('message')}", flush=True)
 
-WEB_IMAGE="$(
-  aws ecs describe-task-definition \
-    --task-definition "$WEB_TD" \
-    --region "$AWS_REGION" \
-    --profile "$AWS_PROFILE" \
-    --query 'taskDefinition.containerDefinitions[0].image' \
-    --output text
-)"
 
-WORKER_IMAGE="$(
-  aws ecs describe-task-definition \
-    --task-definition "$WORKER_TD" \
-    --region "$AWS_REGION" \
-    --profile "$AWS_PROFILE" \
-    --query 'taskDefinition.containerDefinitions[0].image' \
-    --output text
-)"
+def require(condition, message):
+    if not condition:
+        raise RuntimeError(message)
 
-echo
-echo "web_image=$WEB_IMAGE"
-echo "worker_image=$WORKER_IMAGE"
 
-[[ "$WEB_IMAGE" == *":${IMAGE_TAG}" ]] || \
-  fail "Web task definition does not use expected tag '$IMAGE_TAG'."
+try:
+    stable = None
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        result = aws("ecs", "describe-services", "--cluster", cluster,
+                     "--services", web_arn, worker_arn)
+        require(not result.get("failures"), f"ECS describe-services failures: {result.get('failures')}")
+        returned = {s.get("serviceArn"): s for s in result.get("services", [])}
+        require(len(returned) == 2 and all(arn in returned for arn in services.values()),
+                "ECS did not return exactly the expected web and worker services")
+        all_complete = True
+        for label, arn in services.items():
+            service = returned[arn]
+            primary = [d for d in service.get("deployments", []) if d.get("status") == "PRIMARY"]
+            require(len(primary) == 1, f"{label}: expected exactly one PRIMARY deployment")
+            state = primary[0].get("rolloutState")
+            if state == "FAILED":
+                diagnostics(label, service)
+                raise RuntimeError(f"{label}: ECS PRIMARY deployment FAILED")
+            require(state in ("IN_PROGRESS", "COMPLETED"),
+                    f"{label}: unexpected or missing PRIMARY rollout state {state!r}")
+            desired = service.get("desiredCount")
+            running = service.get("runningCount")
+            pending = service.get("pendingCount")
+            require(isinstance(desired, int) and desired > 0,
+                    f"{label}: invalid desiredCount {desired!r}")
+            require(isinstance(running, int) and isinstance(pending, int),
+                    f"{label}: missing runningCount/pendingCount")
+            ready = (service.get("status") == "ACTIVE" and state == "COMPLETED"
+                     and running == desired and pending == 0
+                     and len(service.get("deployments", [])) == 1
+                     and primary[0].get("taskDefinition") == service.get("taskDefinition"))
+            if not ready:
+                all_complete = False
+        if all_complete:
+            stable = returned
+            print(f"Both ECS services completed rollout (poll {attempt}/{MAX_ATTEMPTS}).", flush=True)
+            break
+        if attempt == 1 or attempt % 6 == 0:
+            print(f"ECS deployment still settling (poll {attempt}/{MAX_ATTEMPTS}):", flush=True)
+            for label, arn in services.items():
+                diagnostics(label, returned[arn])
+        if attempt < MAX_ATTEMPTS:
+            time.sleep(POLL_INTERVAL_SECONDS)
 
-[[ "$WORKER_IMAGE" == *":${IMAGE_TAG}" ]] || \
-  fail "Worker task definition does not use expected tag '$IMAGE_TAG'."
+    if stable is None:
+        for label, arn in services.items():
+            diagnostics(label, returned[arn])
+        raise RuntimeError("Timed out waiting for both ECS services to complete rollout")
 
-read -r WEB_DESIRED WEB_RUNNING WEB_PENDING WEB_ROLLOUT < <(
-  aws ecs describe-services \
-    --cluster "$CLUSTER_ARN" \
-    --services "$WEB_SERVICE" \
-    --region "$AWS_REGION" \
-    --profile "$AWS_PROFILE" \
-    --query 'services[0].[desiredCount,runningCount,pendingCount,deployments[0].rolloutState]' \
-    --output text
-)
+    for label, arn in services.items():
+        service = stable[arn]
+        task_definition = service["taskDefinition"]
+        definition = aws("ecs", "describe-task-definition", "--task-definition", task_definition)
+        container_definitions = definition.get("taskDefinition", {}).get("containerDefinitions", [])
+        # Confirm the intended application's ECR repository, not an unrelated sidecar.
+        expected_repository = expected_image.rsplit(":", 1)[0]
+        matching = [c for c in container_definitions
+                    if isinstance(c.get("image"), str)
+                    and c["image"].rsplit(":", 1)[0] == expected_repository]
+        require(len(matching) == 1,
+                f"{label}: expected one application container in repository {expected_repository}, got {len(matching)}")
+        actual_image = matching[0]["image"]
+        print(f"{label}: taskDefinition={task_definition} container={matching[0].get('name')} "
+              f"image={actual_image}", flush=True)
+        require(actual_image == expected_image,
+                f"{label}: image mismatch: expected {expected_image}, got {actual_image}")
 
-read -r WORKER_DESIRED WORKER_RUNNING WORKER_PENDING WORKER_ROLLOUT < <(
-  aws ecs describe-services \
-    --cluster "$CLUSTER_ARN" \
-    --services "$WORKER_SERVICE" \
-    --region "$AWS_REGION" \
-    --profile "$AWS_PROFILE" \
-    --query 'services[0].[desiredCount,runningCount,pendingCount,deployments[0].rolloutState]' \
-    --output text
-)
+        running = aws("ecs", "list-tasks", "--cluster", cluster,
+                      "--service-name", arn, "--desired-status", "RUNNING")
+        task_arns = running.get("taskArns", [])
+        require(len(task_arns) == service["desiredCount"],
+                f"{label}: expected {service['desiredCount']} running tasks, got {len(task_arns)}")
+        tasks_response = aws("ecs", "describe-tasks", "--cluster", cluster, "--tasks", *task_arns)
+        require(not tasks_response.get("failures"),
+                f"{label}: describe-tasks failures: {tasks_response.get('failures')}")
+        tasks = tasks_response.get("tasks", [])
+        require(len(tasks) == len(task_arns), f"{label}: describe-tasks count mismatch")
+        for task in tasks:
+            require(task.get("lastStatus") == "RUNNING"
+                    and task.get("taskDefinitionArn") == task_definition,
+                    f"{label}: task {task.get('taskArn')} is not RUNNING on {task_definition}")
+        print(f"{label}: verified {len(tasks)} running task(s) on intended revision", flush=True)
 
-[[ "$WEB_RUNNING" == "$WEB_DESIRED" \
-   && "$WEB_PENDING" == "0" \
-   && "$WEB_ROLLOUT" == "COMPLETED" ]] \
-  || fail "Web service is not healthy after deployment."
+except RuntimeError as exc:
+    print(f"ERROR: post-deploy ECS verification failed: {exc}", file=sys.stderr, flush=True)
+    sys.exit(1)
 
-[[ "$WORKER_RUNNING" == "$WORKER_DESIRED" \
-   && "$WORKER_PENDING" == "0" \
-   && "$WORKER_ROLLOUT" == "COMPLETED" ]] \
-  || fail "Worker service is not healthy after deployment."
+print("ECS web and worker verified successfully.", flush=True)
+PY_ECS_VERIFY
+then
+  fail "Post-deploy ECS verification failed; see diagnostics above."
+fi
 
 section "SUCCESS"
-
 echo "Deployment verified successfully."
 echo "HEAD=$HEAD_SHA"
 echo "IMAGE_TAG=$IMAGE_TAG"
-echo "WEB_IMAGE=$WEB_IMAGE"
-echo "WORKER_IMAGE=$WORKER_IMAGE"
+echo "WEB_IMAGE=$IMAGE_URI"
+echo "WORKER_IMAGE=$IMAGE_URI"
 echo "Log: $LOG"
 echo "CDK diff: $DIFF_FILE"
 echo "App change set: $APP_CHANGE_SET_FILE"
