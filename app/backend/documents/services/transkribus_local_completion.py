@@ -46,6 +46,7 @@ from documents.services.ocr_verified_write_fence import (
 from documents.services.process_document_request_persist import (
     ProcessDocumentExecutionIdentity,
     automated_process_document_persist_is_allowed,
+    staff_resume_only_persist_is_allowed,
 )
 from documents.services.processing_state import (
     apply_verified_fence_processing_state_restore,
@@ -598,12 +599,18 @@ def store_automatic_snapshot_from_selected_pages(
     page_inputs,
     mapping_trusted: bool,
     review_reasons: Sequence[str] | None = None,
+    create_association: bool = True,
 ) -> TranskribusTranscriptSnapshot:
-    """Persist AUTOMATIC_HTR snapshot and associate it with ``run``.
+    """Persist AUTOMATIC_HTR snapshot; optionally associate it with ``run``.
+
+    S3/network work stays outside any caller DB lock. Association is a separate
+    short DB write (default on). Staff resume-only recovery stores with
+    ``create_association=False`` and associates only after re-locking the
+    parked Request/run so abandon cannot race an unprotected association.
 
     On REUSED_EXISTING, snapshot origin FK may point at an earlier run; this run
-    still gets its own ``TranskribusRunAutomaticSnapshot`` row. Never mutates
-    READY snapshot fields (including hover_eligible).
+    still gets its own ``TranskribusRunAutomaticSnapshot`` row when associating.
+    Never mutates READY snapshot fields (including hover_eligible).
     """
     try:
         result = store_transkribus_transcript_snapshot(
@@ -629,6 +636,9 @@ def store_automatic_snapshot_from_selected_pages(
             f"Snapshot id={snapshot.pk} is not READY after store "
             f"(status={snapshot.storage_status})."
         )
+
+    if not create_association:
+        return snapshot
 
     reasons = list(review_reasons or [])
     if not reasons:
@@ -665,6 +675,8 @@ def complete_transkribus_local_success(
     min_text_length: int,
     pre_run_processing_state: Optional[str] = None,
     execution_identity: ProcessDocumentExecutionIdentity | None = None,
+    staff_resume_request_id: int | None = None,
+    staff_resume_recognition_job_id: str | None = None,
 ) -> HtrResult | None:
     """Atomically persist DTR + bindings + association check + mark SUCCEEDED.
 
@@ -672,24 +684,53 @@ def complete_transkribus_local_success(
     before Phase 1 wrote PROCESSING. A VERIFIED write-fence restores it instead
     of rolling up from the unused runtime engine.
 
+    Pass either a worker ``execution_identity`` (default legacy) or both
+    ``staff_resume_request_id`` and ``staff_resume_recognition_job_id`` for
+    staff resume-only recovery. Staff authorization never uses lease_token
+    matching and binds the parked Request to this exact run/job under lock.
+
     Returns ``None`` when the PROCESS_DOCUMENT lease no longer holds (stale
-    worker). Caller must not persist, roll up, or index from that result.
+    worker). Staff resume denial raises ``TranskribusLocalCompletionError``.
     """
+    staff_job_id = (staff_resume_recognition_job_id or "").strip() or None
+    if staff_resume_request_id is not None and execution_identity is not None:
+        raise TranskribusLocalCompletionError(
+            "Pass staff_resume_request_id or execution_identity, not both."
+        )
+    if (staff_resume_request_id is None) != (staff_job_id is None):
+        raise TranskribusLocalCompletionError(
+            "staff_resume_request_id and staff_resume_recognition_job_id "
+            "must be provided together."
+        )
+
     with transaction.atomic():
         doc = Document.objects.select_for_update().get(pk=document_id)
-        identity = execution_identity or ProcessDocumentExecutionIdentity.legacy()
-        if not automated_process_document_persist_is_allowed(
-            document=doc,
-            identity=identity,
-        ):
-            logger.info(
-                "Skipping automated Transkribus OCR persistence; request lease "
-                "no longer holds document_id=%s request_id=%s run_id=%s",
-                document_id,
-                identity.request_id,
-                run_id,
-            )
-            return None
+        if staff_resume_request_id is not None:
+            assert staff_job_id is not None
+            if not staff_resume_only_persist_is_allowed(
+                document=doc,
+                request_id=staff_resume_request_id,
+                run_id=run_id,
+                recognition_job_id=staff_job_id,
+            ):
+                raise TranskribusLocalCompletionError(
+                    "Staff resume-only persist refused; request/run/job is no "
+                    "longer a valid parked RECOVERY_REQUIRED recovery target."
+                )
+        else:
+            identity = execution_identity or ProcessDocumentExecutionIdentity.legacy()
+            if not automated_process_document_persist_is_allowed(
+                document=doc,
+                identity=identity,
+            ):
+                logger.info(
+                    "Skipping automated Transkribus OCR persistence; request lease "
+                    "no longer holds document_id=%s request_id=%s run_id=%s",
+                    document_id,
+                    identity.request_id,
+                    run_id,
+                )
+                return None
         run = TranskribusRun.objects.select_for_update().get(pk=run_id)
         if run.document_id != doc.pk:
             raise TranskribusLocalCompletionError(
@@ -727,6 +768,12 @@ def complete_transkribus_local_success(
         is_hebrew = _is_hebrew_language(doc.language)
         fence = inspect_automated_ocr_verified_write_fence(doc.pk)
         if fence.blocked:
+            if staff_resume_request_id is not None:
+                # Staff resume must not mark the run SUCCEEDED or terminalize
+                # after a VERIFIED fence; leave the parked Request for operators.
+                raise TranskribusLocalCompletionError(
+                    "VERIFIED write fence blocked staff resume-only persistence."
+                )
             logger.info(
                 "skipping automated Transkribus OCR persistence; "
                 "document has VERIFIED text result",

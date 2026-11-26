@@ -13,7 +13,7 @@ from django.db import close_old_connections, transaction
 from django.db.utils import InterfaceError, OperationalError
 from django.utils import timezone
 
-from documents.models import Document, ProcessDocumentRequest
+from documents.models import Document, ProcessDocumentRequest, TranskribusRun
 from documents.services.hebrew_translation_retry import (
     PROCESS_DOCUMENT_OPERATION_KEY,
     RETRY_HEBREW_TRANSLATION_OPERATION,
@@ -37,8 +37,13 @@ from documents.services.process_document_request_persist import (
     automated_process_document_persist_is_allowed,
     parse_process_document_lease_token,
     parse_process_document_request_id,
+    staff_resume_request_run_provenance_error,
 )
 from documents.services.processing_state import ORDINARY_RESULT_PROCESSING_STATES
+from documents.services.transkribus_local_completion import (
+    TranskribusLocalCompletionError,
+    local_completion_is_structurally_done,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -359,6 +364,156 @@ def terminalize_process_document_request(
         return True
 
 
+def terminalize_parked_process_document_after_staff_resume(
+    *,
+    request_id: int,
+    document_id: int,
+    run_id: int,
+    recognition_job_id: str,
+) -> bool:
+    """Terminalize a parked Request only after the named run is locally complete.
+
+    Does not match or adopt the retained worker lease_token. Requires Document
+    ordinary state plus ``local_completion_is_structurally_done`` for the exact
+    run/job. Already-terminal COMPLETED/PARTIAL is idempotent success only when
+    that same local completion proof still holds; FAILED is not treated as
+    successful completion.
+    """
+    if type(request_id) is not int or request_id < 1:
+        return False
+    if type(document_id) is not int or document_id < 1:
+        return False
+    if type(run_id) is not int or run_id < 1:
+        return False
+    job_id = (recognition_job_id or "").strip()
+    if not job_id:
+        return False
+
+    now = timezone.now()
+    with transaction.atomic():
+        try:
+            document, sync_request = lock_document_then_request(request_id)
+        except (ProcessDocumentRequest.DoesNotExist, Document.DoesNotExist):
+            return False
+
+        if sync_request.document_id != document_id:
+            return False
+
+        try:
+            run = TranskribusRun.objects.select_for_update().get(pk=run_id)
+        except TranskribusRun.DoesNotExist:
+            return False
+        if run.document_id != document.pk:
+            return False
+        if str(run.recognition_job_id or "").strip() != job_id:
+            return False
+        provenance_error = staff_resume_request_run_provenance_error(
+            request=sync_request, run=run
+        )
+        if provenance_error is not None:
+            logger.info(
+                "Refusing staff resume terminalize; provenance refused "
+                "request_id=%s run_id=%s detail=%s",
+                request_id,
+                run_id,
+                provenance_error,
+            )
+            return False
+
+        engine = f"transkribus-pylaia:{str(run.model_id).strip()}"
+        is_hebrew = (document.language or "").strip().lower() in (
+            "he",
+            "heb",
+            "hebrew",
+        )
+        try:
+            local_done = local_completion_is_structurally_done(
+                run=run,
+                engine=engine,
+                is_hebrew=is_hebrew,
+            )
+        except TranskribusLocalCompletionError:
+            return False
+        if not local_done:
+            logger.info(
+                "Refusing staff resume terminalize; run id=%s is not structurally "
+                "complete request_id=%s",
+                run_id,
+                request_id,
+            )
+            return False
+
+        if sync_request.status in {
+            ProcessDocumentRequest.Status.COMPLETED,
+            ProcessDocumentRequest.Status.PARTIAL,
+        }:
+            return True
+        if sync_request.status in _TERMINAL_REQUEST_STATUSES:
+            return False
+
+        if sync_request.status != ProcessDocumentRequest.Status.RECOVERY_REQUIRED:
+            return False
+        if not (
+            sync_request.lease_token is not None
+            and sync_request.lease_expires_at is None
+            and sync_request.started_at is not None
+            and sync_request.completed_at is None
+        ):
+            return False
+        if document.processing_state_user not in ORDINARY_RESULT_PROCESSING_STATES:
+            logger.info(
+                "Refusing staff resume terminalize for ProcessDocumentRequest "
+                "id=%s while Document id=%s processing_state_user=%s",
+                request_id,
+                document.pk,
+                document.processing_state_user,
+            )
+            return False
+
+        if document.processing_state_user == Document.ProcessingState.READY:
+            target_status = ProcessDocumentRequest.Status.COMPLETED
+            failure_code = ""
+            failure_message = ""
+        elif document.processing_state_user == Document.ProcessingState.PARTIAL:
+            target_status = ProcessDocumentRequest.Status.PARTIAL
+            failure_code = "PROCESS_DOCUMENT_PARTIAL"
+            failure_message = ""
+        else:
+            target_status = ProcessDocumentRequest.Status.FAILED
+            failure_code = "PROCESS_DOCUMENT_INCOMPLETE"
+            failure_message = (
+                f"Unexpected final processing_state_user="
+                f"{document.processing_state_user!r}."
+            )
+
+        sync_request.status = target_status
+        sync_request.completed_at = now
+        sync_request.lease_token = None
+        sync_request.lease_expires_at = None
+        sync_request.failure_code = failure_code
+        sync_request.failure_message = failure_message
+        sync_request.save(
+            update_fields=[
+                "status",
+                "completed_at",
+                "lease_token",
+                "lease_expires_at",
+                "failure_code",
+                "failure_message",
+                "updated_at",
+            ]
+        )
+        logger.info(
+            "event=staff_resume_only_terminalize document_id=%s request_id=%s "
+            "run_id=%s new_status=%s",
+            document_id,
+            request_id,
+            run_id,
+            target_status,
+        )
+        return True
+
+
 def handle_process_document_request(
     payload: Mapping[str, Any],
     *,
@@ -509,5 +664,6 @@ __all__ = [
     "ProcessDocumentRequestClaim",
     "claim_process_document_request",
     "handle_process_document_request",
+    "terminalize_parked_process_document_after_staff_resume",
     "terminalize_process_document_request",
 ]

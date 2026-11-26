@@ -8755,3 +8755,31 @@ The confirm page lists every member of the group, not only the current detail pa
 **Repair:** `repair_transkribus_hover_geometry` is limited to document 358 / snapshot 297 and document 393 / snapshot 307. Dry-run reads the stored PAGE XML and checks both fresh bindings, exact canonical SHA parity, unchanged revisions, verification, and text-result ids. `--apply` is a separate document-admin action. It stores a new `HOVER_GEOMETRY_REPAIR` snapshot and rebinds only. Before either binding changes, the same transaction locks the document, the original snapshot, the replacement snapshot, the two text rows, and the two bindings, and fails closed unless both bindings still point at the original snapshot with roles `SNAPSHOT_SOURCE` and `HEBREW_MIRROR`, the planned binding ids, text-result ids, `bound_source_revision`, and `bound_text_sha256`, both bindings are still structurally fresh, both rows still belong to the document with those result types, the displayed transcription is still that Hebrew row, and neither snapshot has a paragraph mapping. It does not fetch Transkribus, rerun OCR, edit transcription text, or copy paragraph mappings. Document 106 is out of scope. This change does not itself run the repair.
 
 **Deferred:** repairing any document outside that pair, and adopting v1 paragraph mappings onto the v2 snapshot.
+
+## Transkribus resume-only recovery preflight (2026-11-26)
+
+**Context:** DEV Document 521 / ProcessDocumentRequest 268 reached `RECOVERY_REQUIRED` after TranskribusRun 262 was left at `RECOGNITION_STARTED` with durable `recognition_job_id=32239972`. The remote recognition job was already `FINISHED` / `success=true` / `nrOfErrors=0`, but no `TranskribusRunAutomaticSnapshot` association and no `DocumentTextResult` were persisted. Generic `recover_process_document_requests` correctly returns `STATUS_NOT_RECOVERABLE` for parked `RECOVERY_REQUIRED`.
+
+**Root cause (most likely):** The PROCESS_DOCUMENT execution lease and SQS visibility are a fixed **45 minutes** with **no heartbeat**. Transkribus upload+recognition polling worst-case is documented at ~46 minutes dominant (ingest poll ≤900s + recognition poll ≤900s × retries), and `TranskribusAdapter` drops `absolute_deadline_monotonic`. After lease expiry, redelivery fences the Request to `RECOVERY_REQUIRED` (token retained, `lease_expires_at=null`) and **ACKs**. Claim never re-executes provider/local-completion work for `RECOVERY_REQUIRED`. The existing adapter resume path (`complete_pylaia_transcription_after_job`, no `start_pylaia_recognition`) therefore never runs automatically after the fence.
+
+**Decision / implemented (updated):** Staff-authorized resume-only apply for a parked `RECOVERY_REQUIRED` OCR Request:
+
+- Service: `documents/services/transkribus_resume_only_recovery.py` (phases: `FETCH_AND_COMPLETE`, `COMPLETE_FROM_SNAPSHOT`, `TERMINALIZE_ONLY`, `ALREADY_DONE`)
+- Command: `resume_transkribus_local_completion` (dry-run default; `--apply` mutates)
+- Persist gate: `staff_resume_only_persist_is_allowed(document, request_id, run_id, recognition_job_id)` under Document→Request→Run locks + `complete_transkribus_local_success(..., staff_resume_request_id=..., staff_resume_recognition_job_id=...)` — shared DTR body; binds the exact parked OCR Request to the exact run/job; **never** lease_token adoption; **never** `LEGACY` bypass for this path
+- Terminalize: `terminalize_parked_process_document_after_staff_resume(request_id, document_id, run_id, recognition_job_id)` requires `local_completion_is_structurally_done` for that run/job plus Document ordinary state; COMPLETED/PARTIAL are idempotent only with that proof; FAILED is not success
+- Atomic apply boundary: `_persist_and_terminalize` wraps complete + terminalize in one outer `transaction.atomic()` (nested atomics / Document→Request→Run locks). Search-index sync inside complete is DB-only and rolls back with that TX. Abandon cannot observe SUCCEEDED DTR/run with a non-terminalized parked Request between the two steps.
+- Snapshot association: PAGE XML/S3 store with `create_association=False`; association only under the staff-resume lock. An unassociated READY snapshot after refuse is a recoverable intermediate. Pre-S3 lock validation is not claimed as protection for S3.
+- Provenance: there is **no** durable Request→attempt-Run FK. `source_transkribus_run` is the prior upload row for `transkribus_recognition_only`. Shared `staff_resume_request_run_provenance_error` runs at load time and again under the locked persist/terminalize gates. Operator `run_id`+`recognition_job_id` remains the attempt selector.
+- Ambiguous snapshot refusal counts **usable** same-engine `SOURCE_TEXT` only (`SUCCEEDED`/`NEEDS_REVIEW` + non-empty text); historical `FAILED` rows do not block
+- Remote job success reuses engine `_job_terminal_success`; payload `jobId` must match when present
+- Staff VERIFIED fence raises (does not mark run SUCCEEDED); worker VERIFIED path unchanged
+- Never `start_pylaia_recognition`; never new runs/uploads/SQS; preserves `NEEDS_REVIEW` + `UNVERIFIED`
+
+**Deferred — smallest automatic-path fixes (separate from the operator command):**
+
+1. Honor remaining lease / stop before fence during Trp poll + PAGE XML (existing `absolute_deadline_monotonic` plumbing)
+2. Safe local-completion-only re-entry after fence when durable `RECOGNITION_STARTED` + `recognition_job_id` exist
+3. Heartbeat remains deferred per earlier SQS/lease decisions
+
+**Unchanged:** lease duration; claim ACK of `RECOVERY_REQUIRED`; staff abandon/retry semantics; no hybrid OCR fallback; no migrations.
