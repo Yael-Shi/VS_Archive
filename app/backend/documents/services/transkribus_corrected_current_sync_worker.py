@@ -13,7 +13,8 @@ import uuid
 from datetime import timedelta
 from typing import Any, Mapping
 
-from django.db import transaction
+from django.db import close_old_connections, transaction
+from django.db.utils import InterfaceError, OperationalError
 from django.utils import timezone
 
 from documents.models import (
@@ -492,7 +493,26 @@ def handle_sync_transkribus_corrected_current(
         )
         return True
 
-    action, lease_token = _claim_or_reconcile(request_id=request_id)
+    try:
+        action, lease_token = _claim_or_reconcile(request_id=request_id)
+    except (OperationalError, InterfaceError):
+        # Retry-eligible claim-phase classes only. Do not assume rollback;
+        # lease fencing on the next delivery remains the at-most-once control.
+        logger.exception(
+            "Corrected/current sync claim DB failure "
+            "reason=claim_db_failure request_id=%s approximate_receive_count=%s",
+            request_id,
+            approximate_receive_count,
+        )
+        close_old_connections()
+        return _defer_in_progress(
+            sqs,
+            queue_url=queue_url,
+            receipt_handle=receipt_handle,
+            reason="claim_db_failure",
+            request_id=request_id,
+            approximate_receive_count=approximate_receive_count,
+        )
 
     if action == "ack":
         return True

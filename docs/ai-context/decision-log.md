@@ -8730,6 +8730,20 @@ The confirm page lists every member of the group, not only the current detail pa
 
 **Deferred:** bulk reject, bulk needs-research, bulk reassign, and bulk remove. No partial group approval.
 
+## Worker claim-phase DB failure — short SQS visibility release (2026-11-26)
+
+**Decision / implemented:** When request-aware claim (`_claim_or_reconcile` / `claim_process_document_request`) raises **`OperationalError` or `InterfaceError`**, the corrected/current and PROCESS_DOCUMENT handlers treat those as **retry-eligible claim-phase failure classes** (connection drops, admin shutdown, and similar). They must not ack, must not start provider work, and must not mutate leases. They log with **`logger.exception`**, call `close_old_connections()`, best-effort set visibility to the existing competing-lease defer window (**120 seconds**), and return. These classes are not assumed always transient or always rolled back. Other `DatabaseError` subclasses (`IntegrityError`, `ProgrammingError`, `DataError`, …) propagate, stay unacked, and do **not** get the 120-second release. Receive visibility and post-successful-claim visibility remain **2700 seconds**. `VisibilityTimeout=0` and immediate in-process claim retries are forbidden.
+
+**Why:** An `AdminShutdown` during claim (observed 2026-11-26 on corrected/current Request 122) previously escaped the worker loop, ECS replaced the task, and the message stayed invisible for the full 45-minute receive timeout while the Request remained `QUEUED`.
+
+**Ambiguous commit:** An `OperationalError` does **not** prove rollback. Handlers do not inspect or repair Request rows after claim failure. A committed-but-unobserved `RUNNING` lease is reconciled on the next delivery by existing fencing (fresh lease → defer; corrected/current expired null-Attempt → reclaim; PROCESS_DOCUMENT expired → `RECOVERY_REQUIRED`). Linked corrected/current `STARTED` Attempts still never re-run provider work while under the 60-minute threshold.
+
+**Generic worker boundary:** `run_worker.handle` catches uncaught `_process_message` exceptions so the process can continue, logs with **`logger.exception`** (traceback preserved; no message body/credentials), resets DB connections, and leaves the message unacked. It does **not** shorten SQS visibility for unexpected or non-retry-eligible exceptions, because provider execution may already have started. Claim-phase short release remains handler-local and limited to `OperationalError` / `InterfaceError`.
+
+**Unchanged:** lease duration; STARTED recovery; `RECOVERY_REQUIRED`; DLQ / heartbeat / automatic redrive (still deferred); global receive timeout.
+
+**Tests:** `test_transkribus_corrected_current_sync_worker.py`, `test_process_document_request_worker.py`.
+
 ## Transkribus hover geometry normalization v2 (2026-10-14)
 
 **Decision:** New Transkribus snapshot stores use parser contract `page_xml_snapshot_v2`. v1 (`page_xml_snapshot_v1`) remains the identity of snapshots already stored. READY rows stay immutable. The same raw PAGE XML may therefore exist twice, once per parser version, under the existing `(document, parser_version, raw_xml_fingerprint)` reuse key.
