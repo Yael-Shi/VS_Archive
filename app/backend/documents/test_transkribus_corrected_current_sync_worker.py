@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import uuid
+from contextlib import nullcontext
 from datetime import timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.db.utils import IntegrityError, OperationalError
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from documents.management.commands.run_worker import Command as RunWorkerCommand
@@ -29,6 +31,7 @@ from documents.services.transkribus_corrected_current_sync_worker import (
     FRESH_IN_PROGRESS_DEFER_SECONDS,
     SQS_VISIBILITY_AFTER_CLAIM_SECONDS,
     STARTED_RECOVERY_REQUIRED,
+    _claim_or_reconcile,
     _terminalize_request_with_lease,
     handle_sync_transkribus_corrected_current,
 )
@@ -757,3 +760,156 @@ class CorrectedCurrentSyncWorkerDispatchTests(TestCase):
             "https://sqs.example/q",
             {"ReceiptHandle": "gone"},
         )
+
+
+class CorrectedCurrentSyncClaimDbFailureTests(SimpleTestCase):
+    """Isolated claim-phase failure coverage (no Django DB)."""
+
+    def setUp(self) -> None:
+        self.sqs = MagicMock()
+        self.worker_env = _worker_env()
+
+    def _handle(self, *, run_sync):
+        return handle_sync_transkribus_corrected_current(
+            {"type": SYNC_TRANSKRIBUS_CORRECTED_CURRENT, "request_id": 122},
+            sqs=self.sqs,
+            queue_url="https://sqs.example/test",
+            receipt_handle="receipt-1",
+            worker_env=self.worker_env,
+            run_sync=run_sync,
+            approximate_receive_count=2,
+        )
+
+    def test_claim_operational_error_defers_without_provider_or_ack(self):
+        run_sync = MagicMock()
+        with (
+            patch(
+                "documents.services.transkribus_corrected_current_sync_worker."
+                "_claim_or_reconcile",
+                side_effect=OperationalError(
+                    "terminating connection due to administrator command"
+                ),
+            ),
+            patch(
+                "documents.services.transkribus_corrected_current_sync_worker."
+                "close_old_connections"
+            ) as close_conn,
+        ):
+            ack = self._handle(run_sync=run_sync)
+
+        self.assertFalse(ack)
+        run_sync.assert_not_called()
+        close_conn.assert_called_once()
+        self.assertEqual(
+            self.sqs.change_message_visibility.call_args.kwargs["VisibilityTimeout"],
+            FRESH_IN_PROGRESS_DEFER_SECONDS,
+        )
+        self.assertEqual(FRESH_IN_PROGRESS_DEFER_SECONDS, 120)
+
+    def test_claim_db_failure_visibility_error_still_does_not_ack(self):
+        run_sync = MagicMock()
+        self.sqs.change_message_visibility.side_effect = Exception(
+            "InvalidReceiptHandle"
+        )
+        with (
+            patch(
+                "documents.services.transkribus_corrected_current_sync_worker."
+                "_claim_or_reconcile",
+                side_effect=OperationalError("admin shutdown"),
+            ),
+            patch(
+                "documents.services.transkribus_corrected_current_sync_worker."
+                "close_old_connections"
+            ),
+        ):
+            ack = self._handle(run_sync=run_sync)
+
+        self.assertFalse(ack)
+        run_sync.assert_not_called()
+
+    def test_integrity_error_propagates_without_short_visibility(self):
+        run_sync = MagicMock()
+        with patch(
+            "documents.services.transkribus_corrected_current_sync_worker."
+            "_claim_or_reconcile",
+            side_effect=IntegrityError("duplicate key value"),
+        ):
+            with self.assertRaises(IntegrityError):
+                self._handle(run_sync=run_sync)
+
+        run_sync.assert_not_called()
+        self.sqs.change_message_visibility.assert_not_called()
+
+
+class CorrectedCurrentSyncClaimFencingIsolatedTests(SimpleTestCase):
+    """Post-ambiguous-commit fencing via real `_claim_or_reconcile` (no Django DB)."""
+
+    def test_fresh_running_null_attempt_defers_without_rotating_lease(self):
+        now = timezone.now()
+        locked = MagicMock()
+        locked.status = TranskribusCorrectedCurrentSyncRequest.Status.RUNNING
+        locked.attempt_id = None
+        locked.lease_token = uuid.uuid4()
+        locked.lease_expires_at = now + timedelta(minutes=40)
+
+        with (
+            patch(
+                "documents.services.transkribus_corrected_current_sync_worker."
+                "transaction.atomic",
+                return_value=nullcontext(),
+            ),
+            patch(
+                "documents.services.transkribus_corrected_current_sync_worker."
+                "_lock_sync_request",
+                return_value=locked,
+            ),
+            patch(
+                "documents.services.transkribus_corrected_current_sync_worker."
+                "timezone.now",
+                return_value=now,
+            ),
+        ):
+            action, token = _claim_or_reconcile(request_id=122)
+
+        self.assertEqual(action, "defer")
+        self.assertIsNone(token)
+        locked.save.assert_not_called()
+
+    def test_fresh_started_attempt_defers_without_recovery_or_rerun(self):
+        now = timezone.now()
+        locked = MagicMock()
+        locked.status = TranskribusCorrectedCurrentSyncRequest.Status.RUNNING
+        locked.attempt_id = 9
+        locked.lease_token = uuid.uuid4()
+        attempt = MagicMock()
+        attempt.pk = 9
+        attempt.status = TranskribusCorrectedCurrentSyncAttempt.Status.STARTED
+        attempt.created_at = now - timedelta(minutes=10)
+
+        with (
+            patch(
+                "documents.services.transkribus_corrected_current_sync_worker."
+                "transaction.atomic",
+                return_value=nullcontext(),
+            ),
+            patch(
+                "documents.services.transkribus_corrected_current_sync_worker."
+                "_lock_sync_request",
+                return_value=locked,
+            ),
+            patch(
+                "documents.services.transkribus_corrected_current_sync_worker."
+                "_load_linked_attempt",
+                return_value=attempt,
+            ),
+            patch(
+                "documents.services.transkribus_corrected_current_sync_worker."
+                "timezone.now",
+                return_value=now,
+            ),
+        ):
+            action, token = _claim_or_reconcile(request_id=122)
+
+        self.assertEqual(action, "defer")
+        self.assertIsNone(token)
+        locked.save.assert_not_called()

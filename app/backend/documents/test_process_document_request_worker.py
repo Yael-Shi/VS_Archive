@@ -4,11 +4,13 @@ import json
 import threading
 import uuid
 from collections.abc import Mapping
+from contextlib import nullcontext
 from datetime import timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 from django.db import connection, connections
+from django.db.utils import IntegrityError, OperationalError
 from django.test import SimpleTestCase, TestCase, TransactionTestCase
 from django.utils import timezone
 
@@ -1320,6 +1322,49 @@ class RunWorkerReceiveVisibilityTests(SimpleTestCase):
         )
 
 
+class RunWorkerUnhandledExceptionBoundaryTests(SimpleTestCase):
+    @patch("documents.management.commands.run_worker.logger.exception")
+    @patch("documents.management.commands.run_worker.close_old_connections")
+    @patch("documents.management.commands.run_worker.validate_required_env")
+    @patch(
+        "documents.management.commands.run_worker._env",
+        return_value="https://sqs.example/q",
+    )
+    @patch("documents.management.commands.run_worker.boto3.client")
+    def test_uncaught_handler_exception_does_not_ack_or_shorten_visibility(
+        self,
+        mock_boto,
+        _mock_env,
+        mock_validate,
+        mock_close,
+        mock_log_exception,
+    ):
+        mock_validate.return_value = MagicMock()
+        sqs = MagicMock()
+        mock_boto.return_value = sqs
+        command = Command()
+        message = {
+            "Body": "{}",
+            "ReceiptHandle": "rh-crash",
+            "Attributes": {"ApproximateReceiveCount": "1"},
+        }
+        command._receive_one = MagicMock(return_value=message)
+        command._process_message = MagicMock(side_effect=RuntimeError("boom"))
+        command._delete_message = MagicMock()
+
+        command.handle(
+            once=True,
+            sleep_seconds=2,
+            max_messages=1,
+            wait_seconds=20,
+        )
+
+        command._delete_message.assert_not_called()
+        sqs.change_message_visibility.assert_not_called()
+        mock_close.assert_called_once()
+        mock_log_exception.assert_called_once()
+
+
 class ApproximateReceiveCountParsingTests(SimpleTestCase):
     def test_parse_approximate_receive_count_accepts_sqs_string_and_int(self):
         self.assertEqual(
@@ -1425,3 +1470,151 @@ class RunWorkerReceiveCountDispatchTests(SimpleTestCase):
             mock_handle.call_args.kwargs["approximate_receive_count"],
             4,
         )
+
+
+class ProcessDocumentClaimDbFailureTests(SimpleTestCase):
+    """Isolated claim-phase failure coverage (no Django DB)."""
+
+    def setUp(self) -> None:
+        self.sqs = MagicMock()
+
+    def _handle(self, *, execute_payload):
+        return handle_process_document_request(
+            {"type": "PROCESS_DOCUMENT", "request_id": 122},
+            sqs=self.sqs,
+            queue_url="https://sqs.example/queue",
+            receipt_handle="receipt-handle",
+            execute_payload=execute_payload,
+            approximate_receive_count=3,
+        )
+
+    def test_claim_operational_error_defers_without_provider_or_ack(self):
+        execute_payload = MagicMock()
+        with (
+            patch(
+                "documents.services.process_document_request_worker."
+                "claim_process_document_request",
+                side_effect=OperationalError(
+                    "terminating connection due to administrator command"
+                ),
+            ),
+            patch(
+                "documents.services.process_document_request_worker."
+                "close_old_connections"
+            ) as close_conn,
+        ):
+            ack = self._handle(execute_payload=execute_payload)
+
+        self.assertFalse(ack)
+        execute_payload.assert_not_called()
+        close_conn.assert_called_once()
+        self.assertEqual(
+            self.sqs.change_message_visibility.call_args.kwargs["VisibilityTimeout"],
+            FRESH_IN_PROGRESS_DEFER_SECONDS,
+        )
+        self.assertEqual(FRESH_IN_PROGRESS_DEFER_SECONDS, 120)
+
+    def test_claim_db_failure_visibility_error_still_does_not_ack(self):
+        execute_payload = MagicMock()
+        self.sqs.change_message_visibility.side_effect = Exception(
+            "InvalidReceiptHandle"
+        )
+        with (
+            patch(
+                "documents.services.process_document_request_worker."
+                "claim_process_document_request",
+                side_effect=OperationalError("admin shutdown"),
+            ),
+            patch(
+                "documents.services.process_document_request_worker."
+                "close_old_connections"
+            ),
+        ):
+            ack = self._handle(execute_payload=execute_payload)
+
+        self.assertFalse(ack)
+        execute_payload.assert_not_called()
+
+    def test_integrity_error_propagates_without_short_visibility(self):
+        execute_payload = MagicMock()
+        with patch(
+            "documents.services.process_document_request_worker."
+            "claim_process_document_request",
+            side_effect=IntegrityError("duplicate key value"),
+        ):
+            with self.assertRaises(IntegrityError):
+                self._handle(execute_payload=execute_payload)
+
+        execute_payload.assert_not_called()
+        self.sqs.change_message_visibility.assert_not_called()
+
+
+class ProcessDocumentClaimFencingIsolatedTests(SimpleTestCase):
+    """Post-ambiguous-commit fencing via real claim (no Django DB)."""
+
+    def test_fresh_running_lease_defers_without_rotating_token(self):
+        now = timezone.now()
+        document = MagicMock()
+        locked = MagicMock()
+        locked.status = ProcessDocumentRequest.Status.RUNNING
+        locked.lease_token = uuid.uuid4()
+        locked.lease_expires_at = now + timedelta(minutes=40)
+
+        with (
+            patch(
+                "documents.services.process_document_request_worker.transaction.atomic",
+                return_value=nullcontext(),
+            ),
+            patch(
+                "documents.services.process_document_request_worker."
+                "lock_document_then_request",
+                return_value=(document, locked),
+            ),
+            patch(
+                "documents.services.process_document_request_worker."
+                "fence_locked_expired_running_process_document_request",
+                return_value=False,
+            ),
+            patch(
+                "documents.services.process_document_request_worker.timezone.now",
+                return_value=now,
+            ),
+        ):
+            claim = claim_process_document_request(request_id=122)
+
+        self.assertEqual(claim.action, ProcessDocumentRequestAction.DEFER)
+        self.assertIsNone(claim.lease_token)
+        locked.save.assert_not_called()
+
+    def test_expired_running_lease_acks_when_fence_applies(self):
+        now = timezone.now()
+        document = MagicMock()
+        locked = MagicMock()
+        locked.status = ProcessDocumentRequest.Status.RUNNING
+        locked.lease_token = uuid.uuid4()
+        locked.lease_expires_at = now - timedelta(seconds=1)
+
+        with (
+            patch(
+                "documents.services.process_document_request_worker.transaction.atomic",
+                return_value=nullcontext(),
+            ),
+            patch(
+                "documents.services.process_document_request_worker."
+                "lock_document_then_request",
+                return_value=(document, locked),
+            ),
+            patch(
+                "documents.services.process_document_request_worker."
+                "fence_locked_expired_running_process_document_request",
+                return_value=True,
+            ),
+            patch(
+                "documents.services.process_document_request_worker.timezone.now",
+                return_value=now,
+            ),
+        ):
+            claim = claim_process_document_request(request_id=122)
+
+        self.assertEqual(claim.action, ProcessDocumentRequestAction.ACK)
+        self.assertIsNone(claim.lease_token)

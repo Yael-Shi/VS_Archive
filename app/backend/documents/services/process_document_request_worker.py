@@ -9,7 +9,8 @@ from datetime import timedelta
 from enum import StrEnum
 from typing import Any, Callable, Mapping
 
-from django.db import transaction
+from django.db import close_old_connections, transaction
+from django.db.utils import InterfaceError, OperationalError
 from django.utils import timezone
 
 from documents.models import Document, ProcessDocumentRequest
@@ -378,7 +379,26 @@ def handle_process_document_request(
         )
         return True
 
-    claim = claim_process_document_request(request_id=request_id)
+    try:
+        claim = claim_process_document_request(request_id=request_id)
+    except (OperationalError, InterfaceError):
+        # Retry-eligible claim-phase classes only. Do not assume rollback;
+        # lease fencing on the next delivery remains the at-most-once control.
+        logger.exception(
+            "Process document claim DB failure "
+            "reason=claim_db_failure request_id=%s approximate_receive_count=%s",
+            request_id,
+            approximate_receive_count,
+        )
+        close_old_connections()
+        return _defer_in_progress(
+            sqs,
+            queue_url=queue_url,
+            receipt_handle=receipt_handle,
+            reason="claim_db_failure",
+            request_id=request_id,
+            approximate_receive_count=approximate_receive_count,
+        )
 
     if claim.action == ProcessDocumentRequestAction.ACK:
         return True

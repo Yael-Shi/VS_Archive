@@ -13,7 +13,7 @@ from datetime import datetime
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
-from django.db import transaction
+from django.db import close_old_connections, transaction
 from django.utils import timezone
 
 from documents.models import Document, DocumentTextResult
@@ -197,7 +197,17 @@ class Command(BaseCommand):
                 time.sleep(options["sleep_seconds"])
                 continue
 
-            ok = self._process_message(msg, sqs=sqs, queue_url=queue_url)
+            # Keep the process alive; do not shorten visibility (provider may
+            # already have started). Claim-phase 120s release is handler-local.
+            try:
+                ok = self._process_message(msg, sqs=sqs, queue_url=queue_url)
+            except Exception:
+                logger.exception(
+                    "Worker message handler crashed approximate_receive_count=%s",
+                    parse_approximate_receive_count(msg),
+                )
+                close_old_connections()
+                ok = False
 
             if ok:
                 self._delete_message(sqs, queue_url, msg)
